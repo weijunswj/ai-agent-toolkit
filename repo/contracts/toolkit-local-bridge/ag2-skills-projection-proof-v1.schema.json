@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.ag2-skills-projection-proof.v1",
+  "title": "AG2 skills-only projection proof",
+  "description": "Evidence for a host-supported skills projection. It is not proof of a Toolkit plugin installation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "status", "destination_kind", "skills_only", "plugin_authority", "discovery_authority", "reason_code"],
+  "properties": {
+    "contract_version": { "const": "toolkit.local-bridge.ag2-skills-projection-proof.v1" },
+    "status": { "enum": ["PROVEN", "AG2_PROOF_UNAVAILABLE", "CONTRADICTORY"] },
+    "destination_kind": { "enum": ["supported-skills-directory", "unknown"] },
+    "skills_only": { "type": "boolean", "const": true },
+    "plugin_authority": { "type": "boolean", "const": false },
+    "discovery_authority": { "enum": ["supported-read-only-evidence", "unavailable"] },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" }
+  }
+}

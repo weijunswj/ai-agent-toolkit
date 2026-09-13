@@ -21,15 +21,18 @@
     "lifecycle",
     "migration",
     "safety",
+    "programme_hierarchy",
+    "current_execution_summary",
     "phase_projection",
-    "executable_proof"
+    "executable_proof",
+    "governance"
   ],
   "properties": {
     "schema": { "const": "toolkit.github-program.human-surface.v2" },
     "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "version": { "const": "human-v2" },
-    "package_version": { "const": "2.10.9" },
+    "package_version": { "const": "2.11.0" },
     "facade_export": { "const": "humanSurfaceV2" },
     "operations": {
       "const": ["readComplete", "render", "extendHistory", "planMigration"]
@@ -55,6 +58,20 @@
     "reserved_stems": {
       "const": ["AI-AGENT-TOOLKIT:GITHUB-PROGRAM-", "MANAGED-PROGRAM-"]
     },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_schema", "consent_field", "identity_admission", "managed_binding", "authorised_operation", "install_refresh_mutation"],
+      "properties": {
+        "binding_schema": { "const": "toolkit.github-program.governance-binding.v1" },
+        "consent_field": { "const": "repository.governance" },
+        "identity_admission": { "const": "exact repository identity" },
+        "managed_binding": { "const": "existing or newly authorised managed programme binding" },
+        "authorised_operation": { "const": "bootstrap/reconcile/Programme Apply/migration" },
+        "install_refresh_mutation": { "const": false },
+        "disabled_or_unresolved": { "const": "no initialise/migrate/reconcile/rewrite" }
+      }
+    },
     "inputs": {
       "type": "object",
       "additionalProperties": false,
@@ -74,10 +91,20 @@
           "required": ["parent_child_source", "pr_source", "targets"],
           "properties": {
             "parent_child_source": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["type", "parent_read"],
-              "properties": { "type": { "const": "PARENT_READ" }, "parent_read": { "$ref": "#/$defs/completeRead" } }
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "parent_read"],
+                  "properties": { "type": { "const": "PARENT_READ" }, "parent_read": { "$ref": "#/$defs/completeRead" } }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "state"],
+                  "properties": { "type": { "const": "CANONICAL_STATE" }, "state": { "type": "object" } }
+                }
+              ]
             },
             "pr_source": {
               "type": "object",
@@ -94,15 +121,31 @@
         "history": { "$ref": "#/$defs/historyDecision" },
         "provider_observation": { "type": "array", "items": { "$ref": "#/$defs/providerObservation" } },
         "migration": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["parent_read", "child_read", "history_decision", "provider_observations"],
-          "properties": {
-            "parent_read": { "$ref": "#/$defs/completeRead" },
-            "child_read": { "$ref": "#/$defs/completeRead" },
-            "history_decision": { "anyOf": [{ "$ref": "#/$defs/historyDecision" }, { "type": "null" }] },
-            "provider_observations": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/providerObservation" } }, { "type": "null" }] }
-          }
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["parent_read", "child_read", "history_decision", "provider_observations"],
+              "properties": {
+                "parent_read": { "$ref": "#/$defs/completeRead" },
+                "child_read": { "$ref": "#/$defs/completeRead" },
+                "history_decision": { "anyOf": [{ "$ref": "#/$defs/historyDecision" }, { "type": "null" }] },
+                "provider_observations": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/providerObservation" } }, { "type": "null" }] }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["parent_read", "managed_child_reads", "governance", "history_decision", "provider_observations"],
+              "properties": {
+                "parent_read": { "$ref": "#/$defs/completeRead" },
+                "managed_child_reads": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/managedChildRead" } },
+                "governance": { "$ref": "#/$defs/governanceBinding" },
+                "history_decision": { "type": "null" },
+                "provider_observations": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/providerObservation" } }, { "type": "null" }] }
+              }
+            }
+          ]
         }
       }
     },
@@ -169,7 +212,7 @@
     "migration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null"],
+      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null", "programme_wide_scope", "programme_wide_action", "programme_wide_requires_governance", "unknown_or_mixed_fails_closed", "format_migration_distinct_from_state_mutation", "idempotent_readback_recovery"],
       "properties": {
         "max_write_plans": { "const": 1 },
         "legacy_legacy": { "const": "WRITE_PARENT" },
@@ -177,7 +220,13 @@
         "human_human": { "const": "RECONCILED" },
         "human_drift": { "const": "MIGRATION_CHILD_DRIFT" },
         "legacy_human": { "const": "MIGRATION_ORDER_INVALID" },
-        "human_parent_history_null": { "const": true }
+        "human_parent_history_null": { "const": true },
+        "programme_wide_scope": { "const": "parent plus all managed direct children" },
+        "programme_wide_action": { "const": "WRITE_PROGRAMME" },
+        "programme_wide_requires_governance": { "const": true },
+        "unknown_or_mixed_fails_closed": { "const": true },
+        "format_migration_distinct_from_state_mutation": { "const": true },
+        "idempotent_readback_recovery": { "const": "fresh complete reads and replan" }
       }
     },
     "safety": {
@@ -190,6 +239,51 @@
         "inferred_authority": { "const": false },
         "caller_state_control": { "const": false },
         "source_adapter_selection": { "const": false }
+      }
+    },
+    "programme_hierarchy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "child_contains_epochs",
+        "epoch_contains_gates",
+        "gate_contains_epoch",
+        "pre_epoch_blocker_is_separate"
+      ],
+      "properties": {
+        "model": { "const": "Programme -> Child -> Epoch -> Gates" },
+        "child_contains_epochs": { "const": true },
+        "epoch_contains_gates": { "const": true },
+        "gate_contains_epoch": { "const": false },
+        "pre_epoch_blocker_is_separate": { "const": true }
+      }
+    },
+    "current_execution_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields",
+        "source",
+        "parent_rendering",
+        "child_rendering",
+        "parked_backlog_heading"
+      ],
+      "properties": {
+        "fields": {
+          "const": [
+            "Current epoch",
+            "Epoch state",
+            "Current work item",
+            "Current gate",
+            "Repair",
+            "Next transition"
+          ]
+        },
+        "source": { "const": "canonical/durable state" },
+        "parent_rendering": { "const": "compact" },
+        "child_rendering": { "const": "detailed" },
+        "parked_backlog_heading": { "const": "Parked backlog / not on current path" }
       }
     },
     "executable_proof": {
@@ -244,6 +338,8 @@
             "authority_presence",
             "number_state",
             "pr_number",
+            "current_root",
+            "current_lock",
             "next_action"
           ]
         },
@@ -388,8 +484,8 @@
       "properties": {
         "schema": { "const": "github.program.bind-pr-number.v1" },
         "decision": { "const": "BIND_PR_NUMBER" },
-        "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
-        "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
+        "root": { "$ref": "#/$defs/safeId" },
+        "lock": { "$ref": "#/$defs/safeId" },
         "source": { "$ref": "#/$defs/sourceAuthority" },
         "repository": { "$ref": "#/$defs/repository" },
         "pr_number": { "$ref": "#/$defs/issue" },
@@ -409,6 +505,46 @@
         "body_sha256": { "$ref": "#/$defs/digest" },
         "revision": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
       }
+    },
+    "governanceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "repository", "repository_identity", "governance", "managed_programme", "operation", "authority"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.governance-binding.v1" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "repository_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "admitted"],
+          "properties": { "repository": { "$ref": "#/$defs/repository" }, "admitted": { "const": true } }
+        },
+        "governance": { "const": "enabled" },
+        "managed_programme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binding", "parent_issue", "status", "surface_version"],
+          "properties": {
+            "binding": { "enum": ["EXISTING", "NEW"] },
+            "parent_issue": { "$ref": "#/$defs/issue" },
+            "status": { "const": "BOUND" },
+            "surface_version": { "const": "human-v2" }
+          }
+        },
+        "operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authorised", "kind"],
+          "properties": { "authorised": { "const": true }, "kind": { "const": "PROGRAMME_SURFACE_MIGRATION" } }
+        },
+        "authority": { "$ref": "#/$defs/sourceAuthority" }
+      }
+    },
+    "managedChildRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "read"],
+      "properties": { "issue": { "$ref": "#/$defs/issue" }, "read": { "$ref": "#/$defs/completeRead" } }
     },
     "renderArtifact": {
       "type": "object",
@@ -585,11 +721,13 @@
         "current_derived": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["authority_presence", "number_state", "pr_number", "next_action"],
+          "required": ["authority_presence", "number_state", "pr_number", "current_root", "current_lock", "next_action"],
           "properties": {
             "authority_presence": { "enum": ["ABSENT", "BOUND_VALIDATED"] },
             "number_state": { "enum": ["PRE_NUMBER", "BOUND"] },
             "pr_number": { "anyOf": [{ "$ref": "#/$defs/issue" }, { "type": "null" }] },
+            "current_root": { "$ref": "#/$defs/safeId" },
+            "current_lock": { "$ref": "#/$defs/safeId" },
             "next_action": { "$ref": "#/$defs/safeLine" }
           }
         },

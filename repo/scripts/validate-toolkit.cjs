@@ -76,7 +76,7 @@ const skillProductMigrationEntryKeys = Object.freeze([
 const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
   '.git', '.github', '.gitattributes', '.gitignore', '.codex-plugin', '.claude-plugin', '.claude', '.agents',
-  'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'
+  'AGENTS.md', 'CLAUDE.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'
 ]);
 const secretPatterns = [
   /sk-[A-Za-z0-9_-]{20,}/,
@@ -87,6 +87,7 @@ const secretPatterns = [
 ];
 const executablePrefixes = [
   'repo/scripts/', 'repo/tests/', '.github/workflows/',
+  'repo/contracts/toolkit-local-bridge/opencode-plugin/',
   'skills/frontend-art-direction/tools/design-system-generator/scripts/',
   'skills/frontend-art-direction/tools/design-system-generator/tests/',
   'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/',
@@ -644,15 +645,14 @@ function validatePluginVersions(errors) {
   const constants = [
     ['repo/scripts/toolkit-local-bridge.cjs', 'BRIDGE_VERSION'],
     ['repo/scripts/setup-codex-toolkit-plugin.cjs', 'EXPECTED_TOOLKIT_VERSION'],
-    ['repo/scripts/codex-delegation-config.cjs', 'TOOLKIT_CLIENT_VERSION'],
-    ['repo/scripts/toolkit-agent-control.cjs', 'CONTROL_VERSION']
+    ['repo/scripts/codex-delegation-config.cjs', 'TOOLKIT_CLIENT_VERSION']
   ];
   for (const [rel, name] of constants) {
     const match = readText(rel).match(new RegExp(`const\\s+${name}\\s*=\\s*['\"]([^'\"]+)['\"]`));
     if (!match) fail(errors, `${rel} is missing ${name}`);
     else if (match[1] !== version) fail(errors, `${rel} ${name} does not match ${version}`);
   }
-  if (!/version:\s*BRIDGE_VERSION/.test(readText('repo/scripts/toolkit-local-bridge.cjs'))) fail(errors, 'AG2 bridge metadata must use BRIDGE_VERSION');
+  if (!/version:\s*BRIDGE_VERSION/.test(readText('repo/scripts/toolkit-local-bridge.cjs'))) fail(errors, 'Bridge metadata must use BRIDGE_VERSION');
 }
 
 function validateManagedSurfaces(errors) {
@@ -665,7 +665,7 @@ function validateManagedSurfaces(errors) {
 function validateSourceWatch(errors) {
   const result = sourceLockAudit.auditSourceLocks();
   for (const error of result.errors) fail(errors, error);
-  for (const rel of ['repo/source-watch/advisory-targets.json', 'repo/source-watch/review-state.json']) {
+  for (const rel of ['repo/source-watch/review-state.json']) {
     if (!existsRel(rel)) fail(errors, `Missing source-watch state: ${rel}`);
     else {
       try { readJson(rel); } catch (error) { fail(errors, `${rel} is invalid JSON: ${error.message}`); }
@@ -673,6 +673,7 @@ function validateSourceWatch(errors) {
   }
   const workflow = existsRel('.github/workflows/source-watch-pr.yml') ? readText('.github/workflows/source-watch-pr.yml') : '';
   if (!workflow.includes('This PR is a review notification only.')) fail(errors, 'Source-watch PR workflow must remain notification-only');
+  if (workflow.includes('advisory-targets.json') || workflow.includes('Host Harness Capability Drift')) fail(errors, 'Source-watch workflow references retired advisory ownership');
   if (workflow.includes('sync-toolkit-projects.cjs') || workflow.includes('package-packs.cjs')) fail(errors, 'Source-watch workflow references retired publisher machinery');
 }
 

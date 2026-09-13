@@ -44,9 +44,11 @@ test('n8n local setup retains the required local and production templates', () =
     'templates/mcp-configs/README.md',
     'templates/mcp-configs/codex-mcp-config.md',
     'templates/mcp-configs/claude-mcp-config.md',
-    'templates/mcp-configs/opencode-mcp-config.md',
-    'templates/mcp-configs/antigravity-mcp-config.md'
+    'templates/mcp-configs/opencode-mcp-config.md'
   ]) assert.equal(exists(relPath), true, relPath);
+  for (const relPath of [
+    'templates/mcp-configs/antigravity-mcp-config.md'
+  ]) assert.equal(exists(relPath), false, relPath);
 });
 
 test('n8n local setup retains its canonical runtime references and safety boundary', () => {
@@ -59,7 +61,6 @@ test('n8n local setup retains its canonical runtime references and safety bounda
     'references/ai-agent-platforms/codex.md',
     'references/ai-agent-platforms/claude-code.md',
     'references/ai-agent-platforms/opencode.md',
-    'references/ai-agent-platforms/antigravity.md',
     'references/ai-agent-platforms/chatgpt-web.md',
     'references/ai-agent-platforms/claude-web.md'
   ]) {
@@ -67,6 +68,9 @@ test('n8n local setup retains its canonical runtime references and safety bounda
     assert.doesNotMatch(text, legacyTopologyPattern);
     assert.doesNotMatch(text, /(?:sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})/);
   }
+  for (const relPath of [
+    'references/ai-agent-platforms/antigravity.md'
+  ]) assert.equal(exists(relPath), false, relPath);
   const skill = read('SKILL.md');
   const rulesAdapter = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-safety-router', 'adapters', 'AGENTS.n8n-brief.template.md'), 'utf8');
   assert.match(rulesAdapter, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, or production actions without explicit current-turn approval/i);

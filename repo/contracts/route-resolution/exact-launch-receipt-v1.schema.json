@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.route-resolution.exact-launch-receipt.v1",
+  "title": "Toolkit exact launch receipt",
+  "description": "Privacy-minimized evidence that a capability-proven adapter accepted the exact resolved launch record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "receipt_id", "launch_record_digest", "capability_proof_digest", "host", "adapter_id", "status", "started", "completed"],
+  "properties": {
+    "contract_version": { "const": "toolkit.route-resolution.exact-launch-receipt.v1" },
+    "receipt_id": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$" },
+    "launch_record_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "capability_proof_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "host": { "enum": ["codex", "claude-code", "opencode"] },
+    "adapter_id": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$" },
+    "status": { "enum": ["accepted", "rejected", "unsupported", "contradictory"] },
+    "started": { "type": "boolean" },
+    "completed": { "type": "boolean" }
+  }
+}

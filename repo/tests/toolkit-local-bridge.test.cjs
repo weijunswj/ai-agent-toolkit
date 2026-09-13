@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.10.9';
+const expectedBridgeVersion = '2.11.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -222,7 +222,7 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     '--hub', hub,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--repo-path', sourceRepo,
     '--sync-source', initialSource
   ], { env });
@@ -449,6 +449,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
+    'repo/scripts/setup-opencode-toolkit-plugin.cjs',
+    'repo/scripts/toolkit-host-route-adapters.cjs',
+    'repo/scripts/toolkit-public-exposure.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs'
   ]) {
     const target = path.join(repoPath, ...relPath.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -803,7 +807,7 @@ function createLegacyDelegatedSyncFixture() {
     last_repo_update_from_commit: fromCommit,
     last_repo_update_to_commit: toCommit,
     targets: {
-      ag2: {
+      opencode: {
         enabled: true,
         explicitly_disabled: false,
         synced_version: '1.0.0',
@@ -879,7 +883,7 @@ test('explicit OpenCode setup infers the user OpenCode skill location', () => {
   assert.equal(audit.targets.opencode.synced, true);
 });
 
-test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini config without package installs', () => {
+test('explicit AG2 setup remains blocked until a supported skills-only destination is proven', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
@@ -889,26 +893,19 @@ test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini con
 
   const state = readJson(path.join(hub, 'state.json'));
   const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  const pluginJson = readJson(path.join(pluginRoot, 'plugin.json'));
-  const versionMarker = readJson(path.join(pluginRoot, 'installed_version.json'));
-  const targetSkill = path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md');
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
 
   assert.equal(state.targets.ag2.enabled, true);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
-  assert.equal(pluginJson.name, 'ai-agent-toolkit');
-  assert.equal(versionMarker.version, expectedBridgeVersion);
-  assert.ok(fs.existsSync(targetSkill), 'Antigravity target skill should be installed into the plugin-scoped skills folder');
-  assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.deepEqual(targetSkillDirs(path.join(pluginRoot, 'skills')), expectedManagedSkillNames());
-  assert.deepEqual(
-    readJson(path.join(pluginRoot, '.ai-agent-toolkit-managed.json')).managed_skill_names,
-    expectedManagedSkillNames()
-  );
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(pluginRoot));
-  assert.equal(audit.targets.ag2.target_exists, true);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.ok(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), 'hub should keep internal AG2 adapter metadata');
+  assert.equal(state.targets.ag2.synced_version, '');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(fs.existsSync(pluginRoot), false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.target_path, '');
+  assert.equal(audit.targets.ag2.target_exists, false);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), false, 'AG2 adapter metadata must not become plugin authority');
 });
 
 test('detected but not enabled OpenCode target receives no writes', () => {
@@ -957,7 +954,7 @@ test('OpenCode audit detects persisted bridge target state without enabling writ
   assert.equal(audit.targets.opencode.signals.migrated_target_path, true);
 });
 
-test('AG2 Python command can be persisted and reused without installing packages', () => {
+test('AG2 Python command can be persisted without installing packages or bypassing the proof gate', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const fakePython = writeFakePython(root);
@@ -974,7 +971,8 @@ test('AG2 Python command can be persisted and reused without installing packages
   assert.equal(state.targets.ag2.enabled, true);
   assert.equal(state.targets.ag2.detected, true);
   assert.equal(state.targets.ag2.python_command, fakePython.command);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
 
   let invocations = fs.readFileSync(fakePython.logPath, 'utf8');
   assert.match(invocations, /--version/);
@@ -985,16 +983,18 @@ test('AG2 Python command can be persisted and reused without installing packages
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'enabled');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.python_command, fakePython.command);
   assert.equal(audit.targets.ag2.ag2_package_detected, true);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(audit.targets.ag2.would_write, false);
   assert.equal(audit.targets.ag2.signals.selected_python_command, fakePython.command);
 
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.ag2.python_command, fakePython.command);
 });
 
-test('AG2 audit detects Antigravity config without requiring the Python ag2 package', () => {
+test('AG2 audit records Antigravity config without treating it as skills-only proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const antigravityConfig = path.join(root, '.antigravity');
@@ -1017,17 +1017,18 @@ test('AG2 audit detects Antigravity config without requiring the Python ag2 pack
 
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.ag2_package_detected, false);
   assert.equal(audit.targets.ag2.python_command, '');
   assert.equal(audit.targets.ag2.would_write, false);
-  assert.equal(path.resolve(audit.targets.ag2.signals.antigravity_config_dir), path.resolve(antigravityConfig));
-  assert.equal(audit.targets.ag2.signals.antigravity_config_exists, true);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(path.resolve(audit.targets.ag2.signals.ag2_config_dir), path.resolve(antigravityConfig));
+  assert.equal(audit.targets.ag2.signals.ag2_config_exists, true);
   assert.equal(audit.targets.ag2.signals.selected_python_command, '');
   assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
 });
 
-test('AG2 audit detects Gemini plugin config without requiring the Python ag2 package', () => {
+test('AG2 audit records Gemini config without treating it as skills-only proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const geminiConfig = path.join(root, '.gemini', 'config');
@@ -1051,14 +1052,13 @@ test('AG2 audit detects Gemini plugin config without requiring the Python ag2 pa
 
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.ag2_package_detected, false);
   assert.equal(audit.targets.ag2.python_command, '');
   assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(path.resolve(audit.targets.ag2.signals.gemini_config_dir), path.resolve(geminiConfig));
   assert.equal(audit.targets.ag2.signals.gemini_config_exists, true);
-  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_plugins_dir), path.resolve(geminiPlugins));
-  assert.equal(audit.targets.ag2.signals.gemini_plugins_dir_exists, true);
   assert.equal(audit.targets.ag2.signals.selected_python_command, '');
   assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
 });
@@ -1092,7 +1092,8 @@ test('AG2 audit records exactly which Python commands were tried when not detect
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, false);
-  assert.equal(audit.targets.ag2.status, 'not detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.ag2.python_command, '');
   const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => entry.command);
   assert.deepEqual(tried.slice(0, 2), ['missing-saved-python', 'missing-explicit-python']);
@@ -1177,7 +1178,7 @@ test('sync-enabled command does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
-test('sync-enabled updates enabled OpenCode and Antigravity app outputs after Toolkit changes', () => {
+test('sync-enabled updates enabled OpenCode while AG2 remains migration-safe without proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
@@ -1195,22 +1196,24 @@ test('sync-enabled updates enabled OpenCode and Antigravity app outputs after To
   state.targets.opencode.synced_version = '1.0.0';
   state.targets.opencode.synced_checksum = 'old';
   state.targets.ag2.synced_version = '1.0.0';
-  state.targets.ag2.synced_checksum = 'old';
+  state.targets.opencode.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   assert.match(fs.readFileSync(opencodeSkill, 'utf8'), /AI Agent Toolkit Bridge/);
-  assert.match(fs.readFileSync(ag2Skill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.equal(fs.readFileSync(ag2Skill, 'utf8'), 'stale ag2 skill\n');
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
   assert.equal(audit.targets.opencode.synced, true);
-  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.opencode.would_write, false);
   assert.equal(audit.targets.ag2.would_write, false);
 });
 
-test('skill payload checksum includes Toolkit repo skill files and marks enabled targets stale', () => {
+test('skill payload checksum includes Toolkit repo skill files and marks enabled OpenCode stale', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root);
   const hub = path.join(root, 'hub', 'current');
@@ -1218,15 +1221,15 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   let audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
   const beforeChecksum = audit.checksum;
 
   writeFile(path.join(sourceRepo, 'skills', 'alpha', 'README.md'), 'alpha changed\n');
@@ -1234,8 +1237,8 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
   assert.notEqual(audit.checksum, beforeChecksum);
-  assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(audit.targets.opencode.synced, false);
+  assert.equal(audit.targets.opencode.would_write, true);
 });
 
 test('sync-enabled updates changed Toolkit skill contents from the configured repo source', () => {
@@ -1246,8 +1249,7 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
@@ -1270,10 +1272,6 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
     /alpha v2 from source repo/
   );
-  assert.match(
-    fs.readFileSync(path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
-    /alpha v2 from source repo/
-  );
 });
 
 test('removed managed Toolkit skills are cleaned up without deleting unrelated user skills or files', () => {
@@ -1284,16 +1282,12 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   const opencodeSkillsRoot = path.join(root, '.config', 'opencode', 'skills');
-  const ag2PluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   writeFile(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md'), 'user opencode skill\n');
-  writeFile(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md'), 'user ag2 skill\n');
-  writeFile(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'keep this note\n');
 
   fs.rmSync(path.join(sourceRepo, 'skills', 'beta'), { recursive: true, force: true });
   git(sourceRepo, ['add', '.']);
@@ -1305,13 +1299,10 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
   assert.equal(result.status, 0, result.stderr);
 
   assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'beta')), false);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'beta')), false);
   assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.readFileSync(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'utf8'), 'keep this note\n');
 });
 
-test('old single-adapter AG2 target migrates to the full managed Toolkit skill set', () => {
+test('old single-adapter AG2 target remains untouched until skills-only proof is available', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -1337,13 +1328,15 @@ test('old single-adapter AG2 target migrates to the full managed Toolkit skill s
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md'), 'utf8'), /alpha v1/);
+  assert.equal(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), 'old adapter only\n');
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md')), false);
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.ag2.would_write, false);
 });
 
@@ -1373,37 +1366,34 @@ test('audit separates hub adapter metadata from app-facing target sync', () => {
   assert.equal(audit.targets.ag2.internal_adapter_exists, true);
   assert.equal(audit.targets.ag2.target_exists, false);
   assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(path.resolve(audit.targets.ag2.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'ag2')));
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(ag2Target));
+  assert.equal(audit.targets.ag2.target_path, '');
 });
 
-test('disabled target is not overwritten during later sync', () => {
+test('disabled OpenCode target is not overwritten during later sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
 
   const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills');
-  const ag2TargetDir = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   const opencodeMarker = path.join(opencodeTargetDir, 'USER-MARKER.txt');
-  const ag2Marker = path.join(ag2TargetDir, 'USER-MARKER.txt');
   fs.writeFileSync(opencodeMarker, 'keep opencode\n', 'utf8');
-  fs.writeFileSync(ag2Marker, 'keep ag2\n', 'utf8');
 
-  result = run(['--hub', hub, '--write', '--disable-target', 'opencode', '--disable-target', 'ag2'], {
+  result = run(['--hub', hub, '--write', '--disable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n');
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n', 'disabled OpenCode target must not be overwritten');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n', 'disabled Antigravity target must not be overwritten');
 });
 
 test('cross-source versions do not block native hosts or repo target sync', () => {
@@ -1421,7 +1411,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1431,7 +1421,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     'codex-plugin': '9.8.0',
     'claude-plugin': expectedBridgeVersion
   });
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(state.hub_version, '9.9.9');
 
   state.bridge_versions_by_source['claude-plugin'] = '9.7.0';
@@ -2159,7 +2149,7 @@ test('isolated reconciliation bypasses reports, state, targets, repo update, and
   assert.equal(rerun.status, 0, rerun.stderr);
   const rerunOutput = parseLastJson(rerun.stdout);
   assert.equal(rerunOutput.staging_reconciliation.status, 'already-absent');
-  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 3);
+  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 2);
   assert.deepEqual(snapshotTree(reportDir), reportBefore);
 });
 
@@ -3446,7 +3436,8 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.hub_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '1.0.0');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(state.last_sync_source, 'claude-plugin');
 });
 
@@ -3778,7 +3769,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
-test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets and does not reuse stale repo status', () => {
+test('startup hook mode syncs stale enabled OpenCode and preserves AG2 without proof', () => {
   const root = tmpRoot();
   createMinimalToolkitSource(root, { alpha: 'alpha startup source\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -3813,13 +3804,14 @@ test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets a
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
   assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.doesNotMatch(report.text, /Antigravity 2|AG2/);
   assert.match(report.text, /repo update status: `not run`/);
   assert.match(report.text, /hook-light validation: `not run`/);
   assert.match(report.text, /target sync status: `synced`/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '1.0.0');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
@@ -3939,7 +3931,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   assert.match(report.text, /target sync status: `not needed`/);
 });
 
-test('hook report includes both external repo advance and Antigravity 2 target sync', () => {
+test('hook report includes external repo advance and OpenCode target sync', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   writeRealBridgeDelegator(fixture.repo);
@@ -3956,7 +3948,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -3967,7 +3959,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
 
-  pushRepoToolkitUpdate(fixture, 'already-advanced-ag2-sync');
+  pushRepoToolkitUpdate(fixture, 'already-advanced-opencode-sync');
   writeRealBridgeDelegator(fixture.upstream);
   const updatedCommit = commitAll(fixture.upstream, 'delegate updated bridge target sync');
   git(fixture.upstream, ['push', 'origin', 'main']);
@@ -3981,7 +3973,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `up-to-date`/);
   assert.match(report.text, /target sync status: `synced`/);
@@ -4040,7 +4032,7 @@ test('final report relock uses final target enablement for skipped targets and s
 
   const report = readLatestReport(hub);
   assert.doesNotMatch(report.text, /Skipped OpenCode because target is disabled/);
-  assert.match(report.text, /Skipped Antigravity 2 because target is disabled/);
+  assert.match(report.text, /Skipped AG2 skills projection because target is disabled/);
   const persisted = readJson(path.join(hub, 'state.json'));
   const signatureContext = {
     cleanup: capturedReport.reportSnapshot.state.last_update_report_cleanup || {},
@@ -4107,7 +4099,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4126,7 +4118,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.text, /Action needed: enable Codex plugin auto-refresh in setup, or run `setup toolkit`\./);
   assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
-  assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(report.state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
@@ -4157,7 +4149,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4190,13 +4182,13 @@ test('Claude hook reports host-local manual native cache action and never runs C
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'claude-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   const statePath = path.join(hub, 'state.json');
   const state = readJson(statePath);
-  state.targets.ag2.synced_checksum = 'old';
+  state.targets.opencode.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
@@ -4548,16 +4540,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
-  const targetSkill = path.join(
-    fixture.root,
-    '.gemini',
-    'config',
-    'plugins',
-    'ai-agent-toolkit',
-    'skills',
-    'alpha',
-    'SKILL.md'
-  );
+  const targetSkill = path.join(fixture.root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md');
   assert.match(fs.readFileSync(targetSkill, 'utf8'), /alpha legacy v2/);
 
   const report = readLatestReport(fixture.hub);
@@ -4569,10 +4552,10 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /Time \(SGT\): `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} SGT`/);
   assert.doesNotMatch(report.text, /Timestamp: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`/);
   assert.match(report.text, /Repo: updated from [0-9a-f]{8} to [0-9a-f]{8}\./);
-  assert.match(report.text, /Targets: synced Antigravity 2 \(2 skills\)\./);
+  assert.match(report.text, /Targets: synced OpenCode \(2 skills\)\./);
   assert.match(report.text, /Action needed: none\./);
   assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /target sync status: `synced`/);
@@ -4596,16 +4579,7 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
   assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
   assert.match(
-    fs.readFileSync(path.join(
-      fixture.root,
-      '.gemini',
-      'config',
-      'plugins',
-      'ai-agent-toolkit',
-      'skills',
-      'alpha',
-      'SKILL.md'
-    ), 'utf8'),
+    fs.readFileSync(path.join(fixture.root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
     /alpha legacy v2/
   );
 });
@@ -5308,7 +5282,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
-    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
+    assert.match(text, /AG2.*omit|Omit OpenCode or AG2/i, relPath);
     assert.match(text, /Allowed later blockers include dirty managed checkout, unexpected remote, fetch\/auth failure, non-fast-forward update, validation failure/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
     const setupValidationBlock = text.match(/For bridge or setup-surface changes, prefer targeted checks first:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
@@ -5325,26 +5299,26 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /fail with the repair error/i, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2/i, relPath);
+    assert.match(text, /OpenCode.*AG2/i, relPath);
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
     assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
-    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
+    assert.match(text, /AG2.*omit|Omit OpenCode or AG2/i, relPath);
+    assert.match(text, /OpenCode uses the required native Toolkit plugin migration path.*AG2 is skills-only and opt-in only/is, relPath);
     assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
     assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
-    assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /does not prove worker\/checker launch capability/i, relPath);
-    assert.match(text, /root-only is the conservative recommendation while strict capability is unverified/i, relPath);
-    assert.match(text, /direct.*(?:visible|displayed).*request/i, relPath);
-    assert.match(text, /selecting it does not mean it is (?:already )?(?:active|enabled)/i, relPath);
-    assert.match(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
-    assert.match(text, /verified-current no-maintenance SessionStart identity/i, relPath);
-    assert.match(text, /stale installed Toolkit code is never trusted/i, relPath);
-    assert.match(text, /Restart-pending, stale, or failed verification leaves root-only active/i, relPath);
+    assert.match(text, /Pre-approval setup and plan discovery do not launch a native child/i, relPath);
+    assert.match(text, /does not select .*worker\/checker mapping|No native child controller/i, relPath);
+    assert.match(text, /Root-only is the safe unapplied result when an exact route or host proof is unavailable/i, relPath);
+    assert.match(text, /exact route records and capability proofs fail closed/i, relPath);
+    assert.match(text, /capability evidence never becomes scheduling authority/i, relPath);
+    assert.doesNotMatch(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
+    assert.match(text, /native plugin metadata|native Toolkit plugin flow/i, relPath);
+    assert.match(text, /stale.*plugin|plugin cache.*refresh/i, relPath);
+    assert.match(text, /plugin cache verification failure|Root-only is the safe unapplied result/i, relPath);
     assert.doesNotMatch(text, /offers .* only when the detected CLI supports their real effects/i, relPath);
   }
 });

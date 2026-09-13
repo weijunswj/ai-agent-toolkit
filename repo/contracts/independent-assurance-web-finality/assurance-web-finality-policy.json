@@ -58,10 +58,14 @@
     "material_blocker_disposition": "FAIL_MATERIAL_CURRENT_LOCK_BLOCKER"
   },
   "g4_admission": {
-    "provider": "OpenAI",
-    "model_class": "GPT-5.6 Sol High",
-    "reasoning": "high",
-    "mode": "standard",
+    "role": "g4",
+    "route_source": "versioned-role-registry",
+    "exact_launch_record": true,
+    "capability_proof": true,
+    "provider": "role-registry-selected",
+    "model_class": "route-record-selected",
+    "reasoning": "route-record-selected",
+    "mode": "service-tier-standard",
     "fresh": true,
     "isolated": true,
     "read_only": true,
@@ -108,7 +112,8 @@
       "deterministic evidence cannot settle the question",
       "Web records the exact question"
     ],
-    "model_class": "GPT-5.6 Sol Max",
+    "model_class": "route-record-selected",
+    "role": "final-audit",
     "fresh": true,
     "isolated": true,
     "read_only": true,

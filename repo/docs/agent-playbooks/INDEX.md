@@ -39,7 +39,7 @@ Read: `repo/docs/agent-playbooks/repo-local-backup-and-ignore-hygiene.md`.
 
 ## Match: Repo-Local Agent Instruction Work
 
-Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or `repository-agent-rules`.
+Triggers: `AGENTS.md`, `CLAUDE.md`, `.agents/rules`, managed markers, repo-local templates, instruction shims, or `repository-agent-rules`.
 
 Read: `repo/docs/agent-playbooks/repo-local-agent-instructions.md`.
 

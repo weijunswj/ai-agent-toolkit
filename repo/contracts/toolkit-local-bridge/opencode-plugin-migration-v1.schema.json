@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.opencode-plugin-migration.v1",
+  "title": "OpenCode native plugin migration",
+  "description": "Migration state for the native OpenCode plugin. The local bridge remains active until every acceptance gate is complete.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "state", "package_version", "bridge_removal_allowed", "live_install_attempted", "native_uat_accepted"],
+  "properties": {
+    "contract_version": { "const": "toolkit.local-bridge.opencode-plugin-migration.v1" },
+    "state": { "enum": ["LEGACY_BRIDGE", "PLUGIN_PACKAGE_READY", "INSTALLED_VERIFIED", "NATIVE_UAT_ACCEPTED", "BRIDGE_REMOVAL_AUTHORISED"] },
+    "package_version": { "const": "2.11.0" },
+    "bridge_removal_allowed": { "type": "boolean" },
+    "live_install_attempted": { "type": "boolean", "const": false },
+    "native_uat_accepted": { "type": "boolean" }
+  }
+}

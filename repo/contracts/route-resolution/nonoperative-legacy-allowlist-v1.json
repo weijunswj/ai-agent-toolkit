@@ -1,0 +1,17 @@
+{
+  "contract_version": "toolkit.route-resolution.nonoperative-legacy-allowlist.v1",
+  "schema_version": 1,
+  "purpose": "Names retained only for bounded migration detection and historical evidence; none are route or scheduling authority.",
+  "legacy_identifiers": [
+    "toolkit-agent-control",
+    "checker-admission",
+    "helper-capacity",
+    "reservation",
+    "worker-route",
+    "g4-model-binding",
+    "g4a-model-binding"
+  ],
+  "allowed_contexts": ["migration-detection", "historical-evidence", "repair-diagnostic"],
+  "active_policy": false,
+  "fallback": false
+}
