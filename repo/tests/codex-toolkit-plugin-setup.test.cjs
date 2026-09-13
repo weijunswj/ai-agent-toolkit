@@ -794,7 +794,8 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
 
 test('Codex cache fingerprints include every new installed setup dependency and reject missing or stale bytes', () => {
   const dependencies = [
-    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs',
+    'repo/scripts/toolkit-host-route-adapters.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
@@ -839,7 +840,7 @@ test('Codex Toolkit --write human output reports the changed hook with JSON-alig
 test('Codex Toolkit --write refreshes same-version stale cache by removing before reinstall', () => {
   const codexHome = tmpRoot();
   const staleRoot = writeInstalledCache(codexHome, { staleBridgeScript: true });
-  fs.appendFileSync(path.join(staleRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n// stale controller\n');
+  fs.appendFileSync(path.join(staleRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '\n// stale route resolver\n');
   const sentinel = path.join(codexHome, 'user-owned-sentinel.txt');
   fs.writeFileSync(sentinel, 'unchanged\n');
   const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true });

@@ -1,318 +1,107 @@
 'use strict';
 
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
-const control = require('../scripts/toolkit-agent-control.cjs');
-const {
-  assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, run,
-  createGitBackedSetupRepo, codexConfig,
-} = require('./toolkit-setup-test-support.cjs');
+const core = require('../scripts/setup-toolkit-core.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
+const adapters = require('../scripts/toolkit-host-route-adapters.cjs');
 
-function recordingClaude(root, behavior = 'success') {
-  const command = path.join(root, 'Claude CLI With Spaces', 'claude.cjs');
-  const log = path.join(root, 'claude-sessions.jsonl');
-  writeFile(command, [
-    "'use strict';", "const fs = require('node:fs');", "const args = process.argv.slice(2);",
-    `fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, capabilityProbe: process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE || '' }) + '\\n');`,
-    "if (args.includes('--version')) { console.log('2.1.999 fixture'); process.exit(0); }",
-    ...(behavior === 'fail-checker' ? ["if (args.includes('--print') && args.includes('opus-4.8')) { console.error('unknown model opus-4.8'); process.exit(2); }"] : []),
-    "if (args.includes('--print')) { console.log('{}'); process.exit(0); }",
-    "process.exit(4);",
-  ].join('\n'));
-  return { command, log };
+function current({ supported = true, topology = 'exact-launch-record' } = {}) {
+  return {
+    agentProfile: { topology, supported, capacity_mode: 'not-managed', manual_maximum: 0 },
+    agentCapability: { supported, launch_supported: supported },
+    nativePlugin: { status: 'fresh' },
+    delegation: { status: 'unsupported' },
+  };
 }
 
-function runInteractive(root, args, options = {}) {
-  const launcher = path.join(root, 'interactive-setup-launcher.cjs');
-  writeFile(launcher, [
-    "'use strict';",
-    "Object.defineProperty(process.stdin, 'isTTY', { value: true });",
-    `const setup = require(${JSON.stringify(script)});`,
-    `setup.main(${JSON.stringify(args)}).then((code) => { process.exitCode = code; }).catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });`,
-    '',
-  ].join('\n'));
-  return spawnSync(process.execPath, [launcher], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    env: { ...process.env, ...(options.env || {}) },
-    input: options.input,
-    timeout: options.timeout || 300000,
-    windowsHide: true,
-  });
-}
-test('ordinary interactive topology selection keeps visible direct and derives automatic capacity', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = runInteractive(root, [
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command, '--enable-repo-auto-update', '--enable-update-reports',
-    '--default-update-report-retention-days', '--claude-plugin-behavior', 'instructions',
-  ], { env: isolatedHomeEnv(root), input: 'toolkit-direct\n' });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Direct Toolkit-managed subagents only/);
-  assert.match(result.stdout, /2\.1 How should Claude Code use agents\?: A - Direct Toolkit-managed subagents only/);
-  assert.doesNotMatch(result.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
-  assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
-  assert.match(result.stdout, /Capacity mode: automatic/);
-  const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
-  const profile = control.readProfile('claude-code', { root: profileRoot });
-  assert.equal(profile.topology, control.TOPOLOGIES.CLAUDE_DIRECT);
-  assert.equal(profile.capacity_mode, control.CAPACITY_MODES.AUTO);
-  const sessions = fs.readFileSync(fake.log, 'utf8').trim().split(/\r?\n/).map(JSON.parse);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).length, 2);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
+test('setup resolves direct and host-native choices to the route contract without capacity policy', async () => {
+  const directArgs = core.parseArgs([
+    '--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct',
+    '--claude-agent-capacity', 'manual', '--claude-agent-maximum', '2'
+  ]);
+  const direct = core.resolveClaudeTopologyCapacity(directArgs, current());
+  assert.equal(direct.topology, 'exact-launch-record');
+  assert.equal(direct.capacity_mode, 'not-managed');
+  assert.equal(direct.manual_maximum, 0);
+  assert.equal(direct.route_contract, route.CONTRACT_VERSION);
+  const applied = await core.applyHostDelegationControl(directArgs, current(), { status: 'fresh' });
+  assert.equal(applied.status, 'route-registry-active');
+  assert.equal(applied.scheduler_policy, false);
+  assert.equal(applied.resource_admission, false);
+  assert.equal(applied.reservation_queue_policy, false);
+  assert.equal(applied.mandatory_pre_pr_checker, false);
+
+  const nativeArgs = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'broader-native']);
+  assert.equal(core.resolveClaudeTopologyCapacity(nativeArgs, current()).topology, 'host-native');
 });
 
-test('ordinary complete piped answers keep visible direct and derive automatic capacity', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command,
-  ], {
-    env: isolatedHomeEnv(root),
-    timeout: 300000,
-    input: ['enable', 'enable', 'default', 'toolkit-direct', 'instructions', ''].join('\n'),
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /2\.1 How should Claude Code use agents\?: A - Direct Toolkit-managed subagents only/);
-  assert.doesNotMatch(result.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
-  assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
-  assert.match(result.stdout, /Capacity mode: automatic/);
-  const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
-  const profile = control.readProfile('claude-code', { root: profileRoot });
-  assert.equal(profile.topology, control.TOPOLOGIES.CLAUDE_DIRECT);
-  assert.equal(profile.capacity_mode, control.CAPACITY_MODES.AUTO);
-  const sessions = fs.readFileSync(fake.log, 'utf8').trim().split(/\r?\n/).map(JSON.parse);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).length, 2);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
+test('missing Claude capability fails closed to root-only without a worker or checker route', async () => {
+  const args = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'toolkit-direct']);
+  const result = await core.applyHostDelegationControl(args, current({ supported: false }), { status: 'unverified' });
+  assert.equal(result.status, 'capability-lost-root-only');
+  assert.equal(result.fallback, 'root-only');
+  assert.equal(result.resource_admission, false);
+  assert.equal(result.reservation_queue_policy, false);
+  assert.equal(result.mandatory_pre_pr_checker, false);
 });
 
-test('Claude recommended execution writes only the enforceable direct automatic profile', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fakeClaude = path.join(root, 'fake-claude.cjs');
-  writeFile(fakeClaude, [
-    "'use strict';",
-    "if (process.argv.includes('--version')) { console.log('2.1.198 (fake)'); process.exit(0); }",
-    "if (process.argv.includes('--print')) { console.log('{}'); process.exit(0); }",
-    "process.exit(1);",
-    '',
-  ].join('\n'));
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fakeClaude, '--claude-topology', 'toolkit-direct', '--claude-plugin-behavior', 'instructions',
-  ], { env: isolatedHomeEnv(root), timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Recommended:\*\* B - Root agent only/);
-  assert.match(result.stdout, /\*\*Recommended outcome:\*\* Use the root agent only until every strict launch control is verifiable\./);
-  assert.match(result.stdout, /\*\*Selected:\*\* A - Direct Toolkit-managed subagents only/);
-  assert.doesNotMatch(result.stdout, /How should Toolkit manage agent capacity|Claude Code agent capacity choice/);
-  assert.match(result.stdout, /Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children/);
-  assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
-  assert.match(result.stdout, /Capacity mode: automatic/);
-  const profile = JSON.parse(fs.readFileSync(control.profilePath('claude-code', { root: path.join(root, '.ai-agent-toolkit', 'agent-control') }), 'utf8'));
-  assert.equal(profile.topology, control.TOPOLOGIES.CLAUDE_DIRECT);
-  assert.equal(profile.capacity_mode, control.CAPACITY_MODES.AUTO);
-  assert.equal(profile.claude_cli, fakeClaude);
-  assert.equal(fs.existsSync(codexConfig(root)), false);
-});
-
-test('keep current preserves compatible direct automatic and manual capacity without a hidden flag', () => {
-  for (const expectedMode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
-    const root = tmpRoot();
-    const { origin, setupRepo } = createGitBackedSetupRepo(root);
-    const fake = recordingClaude(root);
-    const env = isolatedHomeEnv(root);
-    const initialArgs = [
-      '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-      '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'toolkit-direct',
-      '--claude-plugin-behavior', 'instructions',
-    ];
-    if (expectedMode === control.CAPACITY_MODES.MANUAL) {
-      initialArgs.push('--claude-agent-capacity', 'manual', '--claude-agent-maximum', '2');
-    }
-    const initial = run(initialArgs, { env, timeout: 300000 });
-    assert.equal(initial.status, 0, initial.stderr || initial.stdout);
-    if (fs.existsSync(fake.log)) fs.unlinkSync(fake.log);
-    for (const logName of ['BRIDGE_ARGS.log', 'CLAUDE_PLUGIN_SETUP.log']) {
-      const logPath = path.join(setupRepo, logName);
-      if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
-    }
-
-    const kept = run([
-      '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-      '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'keep',
-      '--claude-plugin-behavior', 'instructions',
-    ], { env, timeout: 300000 });
-    assert.equal(kept.status, 0, kept.stderr || kept.stdout);
-    assert.match(kept.stdout, /\*\*Selected:\*\* D - Keep current/);
-    assert.doesNotMatch(kept.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
-    assert.match(kept.stdout, /Selected topology: claude-toolkit-direct/);
-    assert.match(kept.stdout, new RegExp(`Capacity mode: ${expectedMode}`));
-    const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
-    const profile = control.readProfile('claude-code', { root: profileRoot });
-    assert.equal(profile.topology, control.TOPOLOGIES.CLAUDE_DIRECT);
-    assert.equal(profile.capacity_mode, expectedMode);
-    if (expectedMode === control.CAPACITY_MODES.MANUAL) {
-      assert.equal(profile.manual_maximum, 2);
-      assert.match(kept.stdout, /Manual Claude worker maximum: 2/);
-    }
-    const sessions = fs.readFileSync(fake.log, 'utf8').trim().split(/\r?\n/).map(JSON.parse);
-    assert.equal(sessions.filter((entry) => entry.args.includes('--print')).length, 2);
-    assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
+test('pre-approval Claude inspection is observational and defers exact launch proof', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-claude-profile-'));
+  const sentinel = path.join(root, 'session-started');
+  const cli = path.join(root, 'claude.cjs');
+  fs.writeFileSync(cli, `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'started');\n`, 'utf8');
+  try {
+    const capability = core.inspectClaudeAgentCapability({ claudeCli: cli });
+    assert.equal(capability.executable_available, true);
+    assert.equal(capability.launch_supported, false);
+    assert.equal(capability.launch_probe_status, 'deferred');
+    assert.equal(capability.capability_proof, false);
+    assert.equal(fs.existsSync(sentinel), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('kept strict profile is invalidated after current enforcement capability disappears', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fakeClaude = path.join(root, 'fake-claude.cjs');
-  writeFile(fakeClaude, [
-    "'use strict';",
-    "if (process.argv.includes('--version')) { console.log('2.1.198 (fake)'); process.exit(0); }",
-    "if (process.argv.includes('--print')) { console.log('{}'); process.exit(0); }",
-    "process.exit(1);",
-    '',
-  ].join('\n'));
-  const env = isolatedHomeEnv(root);
-  const initial = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fakeClaude, '--claude-topology', 'toolkit-direct', '--claude-plugin-behavior', 'instructions',
-  ], { env, timeout: 300000 });
-  for (const logName of ['BRIDGE_ARGS.log', 'CLAUDE_PLUGIN_SETUP.log']) {
-    const logPath = path.join(setupRepo, logName);
-    if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
-  }
-  assert.equal(initial.status, 0, initial.stderr || initial.stdout);
-
-  const downgraded = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fakeClaude, '--claude-topology', 'keep',
-    '--claude-plugin-behavior', 'instructions',
-  ], { env: { ...env, SETUP_FAKE_CLAUDE_TRUST: '0' }, timeout: 300000 });
-  assert.equal(downgraded.status, 0, downgraded.stderr || downgraded.stdout);
-  assert.match(downgraded.stdout, /capability-lost-root-only/i);
-  const read = control.readProfile('claude-code', { root: path.join(root, '.ai-agent-toolkit', 'agent-control') });
-  assert.equal(read.supported, false);
-  assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);
+test('active setup source no longer imports the retired agent-control authority', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'setup-toolkit-core.cjs'), 'utf8');
+  assert.doesNotMatch(source, /require\(['"]\.\/toolkit-agent-control\.cjs['"]\)/);
+  assert.match(source, /toolkit-route-resolution\.cjs/);
+  assert.match(source, /capability-only/);
 });
 
-test('approved root-only setup completes without worker or checker capability probes', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'root-only',
-    '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions',
-  ], { env: isolatedHomeEnv(root), timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(fs.existsSync(fake.log), false);
-  assert.match(result.stdout, /Selected topology: root-only/);
+test('depth-one launch resolution keeps omitted child speed Standard under a Priority root', () => {
+  const root = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'profile-root' });
+  const child = route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, launch_id: 'profile-child' });
+  assert.equal(root.speed, 'priority');
+  assert.equal(child.speed, 'standard');
+  assert.equal(child.speed_source, 'child-default');
+  assert.equal(child.parent_speed, 'priority');
+  assert.equal(child.child_priority_authorized, false);
+  assert.throws(
+    () => route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, speed: 'priority' }),
+    (error) => error.code === 'PRIORITY_CHILD_AUTHORITY_REQUIRED'
+  );
 });
 
-
-test('yes-recommended keeps conservative root-only without unnecessary direct probes', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions',
-  ], { env: isolatedHomeEnv(root), timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Selected:\*\* B - Root agent only/);
-  assert.match(result.stdout, /Selected topology: root-only/);
-  assert.equal(fs.existsSync(fake.log), false);
-  const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
-  assert.equal(control.readProfile('claude-code', { root: profileRoot }).topology, control.TOPOLOGIES.ROOT_ONLY);
-});
-test('direct topology with stale enforcement never probes through the stale plugin', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'toolkit-direct',
-    '--claude-plugin-behavior', 'instructions',
-  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CLAUDE_ENFORCEMENT: '0' }, timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(fs.existsSync(fake.log), false);
-  assert.match(result.stdout, /capability-lost-root-only/i);
-});
-
-test('direct topology refresh requiring restart remains root-only without a stale-process probe', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'toolkit-direct',
-    '--claude-plugin-behavior', 'install',
-  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CLAUDE_REFRESH_REQUIRED: '1' }, timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const sessions = fs.existsSync(fake.log) ? fs.readFileSync(fake.log, 'utf8').trim().split(/\\r?\\n/).filter(Boolean).map(JSON.parse) : [];
-  assert.equal(sessions.some((entry) => entry.args.includes('--print')), false);
-  assert.match(result.stdout, /restart-pending-root-only/i);
-  assert.match(result.stdout, /restart required: yes/i);
-});
-
-test('post-approval checker capability failure fails closed after exact isolated probes', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root, 'fail-checker');
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'toolkit-direct',
-    '--claude-plugin-behavior', 'instructions',
-  ], { env: isolatedHomeEnv(root), timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /capability-lost-root-only/i);
-  const sessions = fs.readFileSync(fake.log, 'utf8').trim().split(/\r?\n/).map(JSON.parse);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).length, 2);
-  assert.equal(sessions.filter((entry) => entry.args.includes('opus-4.8')).length, 1);
-  assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
-});
-test('kept broader-native survives root-only capacity across flag and piped execution', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
-  const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
-  control.configureProfile('claude-code', {
-    topology: control.TOPOLOGIES.BROADER_NATIVE,
-    capacity_mode: control.CAPACITY_MODES.ROOT_ONLY,
-  }, { root: profileRoot });
-
-  const flagged = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
-    '--claude-plugin-behavior', 'instructions', '--yes-recommended',
-  ], { env, timeout: 300000 });
-  assert.equal(flagged.status, 0, flagged.stderr || flagged.stdout);
-  assert.match(flagged.stdout, /Selected topology: broader-native/);
-  assert.equal(control.readProfile('claude-code', { root: profileRoot }).topology, control.TOPOLOGIES.BROADER_NATIVE);
-  assert.equal(fs.existsSync(fake.log), false);
-  for (const logName of ['BRIDGE_ARGS.log', 'CLAUDE_PLUGIN_SETUP.log']) {
-    const logPath = path.join(setupRepo, logName);
-    if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
-  }
-
-  const piped = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command,
-    '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions',
-  ], {
-    env,
-    timeout: 300000,
-    input: Array(16).fill('').join('\n'),
+test('host adapter execution consumes only an exact resolved record and capability proof', () => {
+  const launch = route.resolveRoleRoute({ role: 'g1', host: 'claude-code', launch_id: 'profile-g1' });
+  const capability = adapters.proveHostCapability({
+    launch_record: launch,
+    capability: { available: true, trusted: true, metadata_verified: true }
   });
-  assert.equal(piped.status, 0, piped.stderr || piped.stdout);
-  assert.match(piped.stdout, /Selected topology: broader-native/);
-  const preserved = control.readProfile('claude-code', { root: profileRoot });
-  assert.equal(preserved.topology, control.TOPOLOGIES.BROADER_NATIVE);
-  assert.equal(preserved.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);
-  assert.equal(fs.existsSync(fake.log), false);
+  const receipt = adapters.executeExactLaunch({
+    launch_record: launch,
+    capability_proof: capability.proof,
+    executor: ({ launch_record, capability_proof }) => ({
+      accepted: launch_record.route_digest === capability_proof.launch_record_digest,
+      completed: true,
+    })
+  });
+  assert.equal(receipt.status, 'accepted');
+  assert.equal(receipt.started, true);
+  assert.equal(receipt.completed, true);
 });

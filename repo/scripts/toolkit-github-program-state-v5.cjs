@@ -3559,7 +3559,7 @@ function previewPostMergeEpochFinalisation(input = {}) {
 }
 
 function validateControllerBootstrap(value) {
-  const keys = ['schema', 'profile', 'repository', 'parent_issue', 'programme_state_schema', 'surface_contract_schema', 'toolkit_package_version', 'toolkit_contract', 'conformance', 'compatibility'];
+  const keys = ['schema', 'profile', 'repository', 'parent_issue', 'programme_state_schema', 'surface_contract_schema', 'toolkit_package_version', 'toolkit_contract', 'governance', 'conformance', 'compatibility'];
   if (!isRecord(value) || !exactKeys(value, keys)
     || value.schema !== BOOTSTRAP_SCHEMA
     || value.profile !== 'github-managed-programme'
@@ -3567,13 +3567,25 @@ function validateControllerBootstrap(value) {
     || value.parent_issue !== PARENT_ISSUE
     || value.programme_state_schema !== STATE_SCHEMA
     || value.surface_contract_schema !== SURFACE_SCHEMA
-    || value.toolkit_package_version !== '2.10.9'
+    || value.toolkit_package_version !== '2.11.0'
     || !isRecord(value.toolkit_contract)
     || !exactKeys(value.toolkit_contract, ['repository', 'revision', 'path', 'sha256'])
     || value.toolkit_contract.repository !== REPOSITORY
     || !isSha(value.toolkit_contract.revision)
     || value.toolkit_contract.path !== 'repo/contracts/github-program-reconciler/programme-surface-contract-v5.json'
     || !isDigest(value.toolkit_contract.sha256)
+    || !isRecord(value.governance)
+    || !exactKeys(value.governance, ['state', 'repository_identity', 'managed_programme'])
+    || !['enabled', 'disabled', 'unresolved'].includes(value.governance.state)
+    || !isRecord(value.governance.repository_identity)
+    || !exactKeys(value.governance.repository_identity, ['repository', 'admitted'])
+    || value.governance.repository_identity.repository !== REPOSITORY
+    || typeof value.governance.repository_identity.admitted !== 'boolean'
+    || !isRecord(value.governance.managed_programme)
+    || !exactKeys(value.governance.managed_programme, ['status', 'parent_issue', 'surface_version'])
+    || !['BOUND', 'UNBOUND'].includes(value.governance.managed_programme.status)
+    || value.governance.managed_programme.parent_issue !== PARENT_ISSUE
+    || value.governance.managed_programme.surface_version !== 'human-v2'
     || !isRecord(value.conformance)
     || !exactKeys(value.conformance, ['actual_workspace_bytes', 'canonical_json', 'historical_git_object_required', 'resolver', 'source_revision_pinned'])
     || value.conformance.actual_workspace_bytes !== true
@@ -3612,7 +3624,7 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.10.9';
+const H2_PACKAGE_VERSION = '2.11.0';
 const H2_VERSION = 'human-v2';
 const H2_CANONICAL_CLASS = 'canonical-programme-state';
 const H2_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';
@@ -3626,6 +3638,9 @@ const H2_PR_CARRIER_SCHEMA = 'github.program.human-pr-carrier.v2';
 const H2_PARENT_PROJECTION_SCHEMA = 'github.program.parent-projection.v2';
 const H2_CHILD_PROJECTION_SCHEMA = 'github.program.child-projection.v2';
 const H2_PR_PHASE_PROJECTION_SCHEMA = 'github.program.pr-phase-projection.v1';
+const H2_CURRENT_EXECUTION_SCHEMA = 'toolkit.github-program.current-execution.v1';
+const H2_GOVERNANCE_SCHEMA = 'toolkit.github-program.governance-binding.v1';
+const H2_PROGRAMME_HIERARCHY = 'Programme -> Child -> Epoch -> Gates';
 const H2_HISTORY_KEY = 'human_surface_v2_history';
 const H2_STAGES = Object.freeze([
   'INPUT', 'COMPLETE_READ', 'CLASSIFY', 'PARSE', 'AUTHORITY', 'CANONICAL',
@@ -3721,6 +3736,12 @@ function h2Exact(value, keys) {
   const expected = [...keys].sort();
   const actual = Object.keys(value).sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+function h2ExactWithOptional(value, required, optional) {
+  if (!h2IsPlain(value)) return false;
+  const allowed = new Set([...required, ...optional]);
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    && Object.keys(value).every((key) => allowed.has(key));
 }
 function h2NoMalformedUnicode(value) {
   if (typeof value !== 'string') return false;
@@ -3956,7 +3977,8 @@ function h2MarkerStyleForState(state) {
   return state?.schema === STATE_SCHEMA ? H2_MARKERS.toolkit : H2_MARKERS.generic;
 }
 function h2MarkerStyleForRepository(repository) {
-  return repository === REPOSITORY ? H2_MARKERS.toolkit : H2_MARKERS.generic;
+  void repository;
+  return H2_MARKERS.generic;
 }
 function h2Classifier(body) {
   h2Require(typeof body === 'string', true, 'BODY_NOT_STRING', 'CLASSIFY');
@@ -4041,7 +4063,7 @@ const H2_LEGACY_CHILD_DIGESTS = new Set([
 function h2ValidateEpoch(value) {
   const required = ['evidence_ref', 'id', 'name', 'purpose', 'terminal_disposition'];
   const optional = ['gates', 'lock', 'state', 'status'];
-  return h2IsPlain(value) && h2Exact(value, [...required, ...optional])
+  return h2ExactWithOptional(value, required, optional)
     && (value.evidence_ref === null || h2SafeId(value.evidence_ref))
     && h2SafeId(value.id) && h2SafeLine(value.name) && h2SafeLine(value.purpose)
     && (value.terminal_disposition === null || ['ACCEPTED', 'REJECTED', 'NON_CONVERGENT', 'AMEND'].includes(value.terminal_disposition))
@@ -4058,7 +4080,7 @@ function h2ValidateEvidence(value) {
 function h2ValidateLegacyDescriptor(value) {
   const required = ['changed_surfaces', 'child_issue', 'design_constraints', 'eli5', 'evidence_refs', 'number', 'out_of_scope', 'purpose', 'scope', 'summary', 'validation_requirements'];
   const optional = ['candidate', 'schema', 'repository'];
-  return h2IsPlain(value) && h2Exact(value, [...required, ...optional])
+  return h2ExactWithOptional(value, required, optional)
     && h2StringArray(value.changed_surfaces) && h2Issue(value.child_issue)
     && h2StringArray(value.design_constraints) && h2SafeLine(value.eli5)
     && h2StringArray(value.evidence_refs) && h2Issue(value.number)
@@ -4072,7 +4094,7 @@ function h2ValidateLegacyDescriptor(value) {
 function h2ValidateRegistry(value, legacy = false) {
   const required = ['accepted_evidence_ref', 'completes_child', 'epoch_id', 'pr', 'retirement_evidence_ref', 'role', 'status'];
   const optional = ['candidate', 'draft', 'github_state', 'merged', 'retention_evidence_ref'];
-  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional]) || !h2Issue(value.pr)
+  if (!h2ExactWithOptional(value, required, optional) || !h2Issue(value.pr)
     || !h2SafeId(value.epoch_id) || typeof value.completes_child !== 'boolean'
     || value.role !== 'INTERMEDIATE' || !['ACTIVE', 'ACCEPTED', 'RETIRED', 'RETAINED'].includes(value.status)) return false;
   for (const key of ['accepted_evidence_ref', 'retirement_evidence_ref', 'retention_evidence_ref']) {
@@ -4094,7 +4116,7 @@ function h2ValidateFinality(value) {
 function h2ValidateChild(value, legacy = false) {
   const required = ['boundaries', 'done_when', 'eli5', 'epochs', 'finality', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
   const optional = ['dependencies', 'holds', 'deliverables'];
-  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional])
+  if (!h2ExactWithOptional(value, required, optional)
     || !h2Issue(value.issue) || !Number.isSafeInteger(value.order) || value.order < 1
     || !['COMPLETED', 'CURRENT', 'QUEUED'].includes(value.lifecycle)
     || !h2SafeLine(value.title) || !h2SafeLine(value.summary) || !h2SafeLine(value.objective) || !h2SafeLine(value.eli5)
@@ -4110,7 +4132,7 @@ function h2ValidateChild(value, legacy = false) {
 function h2ValidateGenericState(value) {
   const required = ['active_lanes', 'children', 'evidence_refs', 'historical_transitions', 'parent', 'prs', 'repository', 'schema'];
   const optional = ['design_lock', 'extensions', 'dependencies', H2_HISTORY_KEY];
-  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional]) || !h2Repository(value.repository)
+  if (!h2ExactWithOptional(value, required, optional) || !h2Repository(value.repository)
     || !h2SafeLine(value.schema) || !h2IsPlain(value.parent) || !h2Exact(value.parent, ['goal', 'issue', 'title'])
     || !h2Issue(value.parent.issue) || !h2SafeLine(value.parent.title) || !h2SafeLine(value.parent.goal)
     || !Array.isArray(value.children) || value.children.length === 0
@@ -4367,6 +4389,77 @@ function h2ProgrammeAction(state, history) {
   }
   return { action: 'AWAIT_PROGRAMME_FINALITY', current_child: null, child_action: null, ref: null, text: 'No current child is selected; source-backed programme finality is still pending.' };
 }
+function h2CurrentExecutionSummary(state, child, childAction) {
+  const extensions = Array.isArray(state.extensions) ? state.extensions : [];
+  const records = extensions.filter((item) => h2IsPlain(item) && item.schema === H2_CURRENT_EXECUTION_SCHEMA);
+  h2Require(records.length <= 1, true, 'CURRENT_EXECUTION_AMBIGUOUS', 'CANONICAL');
+  const record = records[0] || null;
+  const epoch = record
+    ? child.epochs.find((item) => item.id === record.current_epoch)
+    : child.epochs.find((item) => item.terminal_disposition === null) || child.epochs[child.epochs.length - 1];
+  h2Require(epoch, true, 'CURRENT_EXECUTION_EPOCH_MISSING', 'CANONICAL');
+  if (record) {
+    h2Require(h2Exact(record, [
+      'schema', 'child_issue', 'current_epoch', 'epoch_state', 'current_work_item',
+      'current_gate', 'repair', 'next_transition', 'parked_backlog',
+    ]) && record.child_issue === child.issue
+      && h2SafeId(record.current_epoch)
+      && h2SafeLine(record.epoch_state, 128)
+      && h2IsPlain(record.current_work_item)
+      && h2Exact(record.current_work_item, ['issue', 'title', 'state'])
+      && h2Issue(record.current_work_item.issue)
+      && record.current_work_item.issue !== child.issue
+      && h2SafeLine(record.current_work_item.title)
+      && h2SafeLine(record.current_work_item.state, 128)
+      && /^G[1-4](?:\s|$)/.test(record.current_gate)
+      && h2SafeLine(record.current_gate, 256)
+      && (record.repair === null || /^\d+\/\d+$/.test(record.repair))
+      && (record.repair === null || h2SafeLine(record.repair, 32))
+      && h2SafeLine(record.next_transition, 1024)
+      && Array.isArray(record.parked_backlog)
+      && record.parked_backlog.every((item) => h2IsPlain(item)
+        && h2Exact(item, ['issue', 'title', 'status', 'blocking'])
+        && h2Issue(item.issue)
+        && h2SafeLine(item.title)
+        && item.status === 'PARKED / NON-BLOCKING'
+        && item.blocking === false), true, 'CURRENT_EXECUTION_INVALID', 'CANONICAL');
+    h2Require(record.current_epoch === epoch.id
+      && (epoch.terminal_disposition === null || record.epoch_state === epoch.terminal_disposition), true,
+    'CURRENT_EXECUTION_EPOCH_MISMATCH', 'CANONICAL');
+    const parkedIssues = new Set(record.parked_backlog.map((item) => item.issue));
+    h2Require(!parkedIssues.has(record.current_work_item.issue), true, 'CURRENT_EXECUTION_PARKED_CURRENT', 'CANONICAL');
+    return {
+      current_epoch: { id: epoch.id, name: epoch.name, gates: h2Own(epoch, 'gates') ? h2Clone(epoch.gates) : [] },
+      epoch_state: record.epoch_state,
+      current_work_item: h2Clone(record.current_work_item),
+      current_gate: record.current_gate,
+      repair: record.repair,
+      next_transition: record.next_transition,
+      parked_backlog: h2Clone(record.parked_backlog),
+    };
+  }
+  const active = (state.active_lanes || []).find((lane) => (lane.child_issue ?? lane.child) === child.issue && (lane.epoch_id ?? lane.epoch) === epoch.id);
+  const epochState = epoch.terminal_disposition || (active ? 'ACTIVE' : 'PENDING') + (h2ActiveHold(child) ? ' / BLOCKED' : '');
+  const nextTransition = childAction.action === 'AWAIT_EPOCH_AUTHORITY'
+    ? 'Web authority is required before ' + epoch.id + ' may start.'
+    : childAction.text;
+  return {
+    current_epoch: { id: epoch.id, name: epoch.name, gates: h2Own(epoch, 'gates') ? h2Clone(epoch.gates) : [] },
+    epoch_state: epochState,
+    current_work_item: { issue: child.issue, title: child.title, state: child.lifecycle },
+    current_gate: active?.gate || 'NOT_ACTIVE',
+    repair: null,
+    next_transition: nextTransition,
+    parked_backlog: [],
+  };
+}
+function h2CurrentExecutionRelation(summary) {
+  const repair = summary.repair === null ? '' : ' Repair ' + summary.repair;
+  return summary.current_epoch.id + ' ' + summary.epoch_state
+    + ' by #' + summary.current_work_item.issue
+    + ' -> #' + summary.current_work_item.issue + ' currently ' + summary.current_work_item.state
+    + repair + ' -> next: ' + summary.next_transition;
+}
 function h2ProjectionState(state, history) {
   const evidence = h2EvidenceMap(state, history);
   const children = state.children.map((child) => ({
@@ -4385,6 +4478,7 @@ function h2ProjectionState(state, history) {
   const current = state.children.find((child) => child.lifecycle === 'CURRENT') || null;
   const programme = h2ProgrammeAction(state, history);
   const childAction = current ? h2ChildAction(state, current, history) : null;
+  const currentExecution = current ? h2CurrentExecutionSummary(state, current, childAction) : null;
   const historyRows = history.pr_history.map((item) => ({
     pr: item.authority.pr_number,
     child_issue: item.descriptor.child_issue,
@@ -4409,6 +4503,9 @@ function h2ProjectionState(state, history) {
     finality: programme.action === 'PROGRAMME_COMPLETE' ? 'MERGED' : (current?.finality.state || 'HELD'),
     programme_action: programme.action,
     current_child: current ? { issue: current.issue, title: current.title, lifecycle: current.lifecycle, finality: current.finality.state, summary: current.summary, action: childAction.action } : null,
+    hierarchy: { model: H2_PROGRAMME_HIERARCHY, child_contains_epochs: true, epoch_contains_gates: true, gate_contains_epoch: false, pre_epoch_blocker_is_separate: true },
+    current_execution_summary: currentExecution,
+    parked_backlog: currentExecution ? currentExecution.parked_backlog : [],
     children,
     completed_work: children.filter((child) => child.lifecycle === 'COMPLETED'),
     boundaries: boundaryList,
@@ -4423,10 +4520,11 @@ function h2ProjectionChild(state, history, childIssue) {
   h2Require(child, true, 'CHILD_NOT_FOUND', 'CANONICAL');
   const evidence = h2EvidenceMap(state, history);
   const action = h2ChildAction(state, child, history);
+  const currentExecution = child.lifecycle === 'CURRENT' ? h2CurrentExecutionSummary(state, child, action) : null;
   const epochs = child.epochs.map((epoch) => {
     const evidenceItem = epoch.evidence_ref ? evidence.get(epoch.evidence_ref) : null;
     const active = (state.active_lanes || []).find((lane) => (lane.child_issue ?? lane.child) === child.issue && (lane.epoch_id ?? lane.epoch) === epoch.id);
-    return { id: epoch.id, name: epoch.name, purpose: epoch.purpose, state: epoch.terminal_disposition || (active ? 'ACTIVE' : 'PENDING'), outcome: epoch.terminal_disposition || evidenceItem?.summary || (active ? 'Active gate admitted.' : 'Awaiting authority or completion.'), evidence_ref: epoch.evidence_ref || null };
+    return { id: epoch.id, name: epoch.name, gates: h2Own(epoch, 'gates') ? h2Clone(epoch.gates) : [], purpose: epoch.purpose, state: epoch.terminal_disposition || (active ? 'ACTIVE' : 'PENDING'), outcome: epoch.terminal_disposition || evidenceItem?.summary || (active ? 'Active gate admitted.' : 'Awaiting authority or completion.'), evidence_ref: epoch.evidence_ref || null };
   });
   const rows = [];
   for (const descriptor of state.prs || []) if (h2Own(descriptor, 'number') && descriptor.child_issue === child.issue) {
@@ -4446,6 +4544,9 @@ function h2ProjectionChild(state, history, childIssue) {
     lifecycle: child.lifecycle,
     summary: child.summary,
     objective: child.objective,
+    hierarchy: { model: H2_PROGRAMME_HIERARCHY, child_contains_epochs: true, epoch_contains_gates: true, gate_contains_epoch: false, pre_epoch_blocker_is_separate: true },
+    current_execution_summary: currentExecution,
+    parked_backlog: currentExecution ? currentExecution.parked_backlog : [],
     scope: child.scope,
     boundaries: [...(child.boundaries || []), ...(child.out_of_scope || []).map((item) => 'Out of scope: ' + item)].map((text) => ({ category: h2BoundaryCategory(text), text })),
     done_when: child.done_when,
@@ -4594,7 +4695,7 @@ function h2ManagedDocument(style, kind, prose, carrier) {
 }
 function h2ParentProse(state, projection) {
   const lines = [
-    '# AI Agent Toolkit Programme',
+    '# ' + h2Heading(projection.title),
     '',
     '## Programme status',
     '| Field | Value |',
@@ -4610,9 +4711,23 @@ function h2ParentProse(state, projection) {
     '| --- | --- | --- | --- | --- |',
   ];
   for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
+  if (projection.current_execution_summary) {
+    const execution = projection.current_execution_summary;
+    lines.push('', '## Current child execution', '| Field | Value |', '| --- | --- |',
+      '| Current epoch | ' + h2Cell(execution.current_epoch.id + ' - ' + execution.current_epoch.name) + ' |',
+      '| Epoch state | ' + h2Cell(execution.epoch_state) + ' |',
+      '| Current work item | #' + h2Identifier(execution.current_work_item.issue) + ' - ' + h2Cell(execution.current_work_item.title) + ' |',
+      '| Current gate | ' + h2Cell(execution.current_gate) + ' |',
+      '| Repair | ' + h2Cell(execution.repair === null ? 'Not applicable' : execution.repair) + ' |',
+      '| Next transition | ' + h2Cell(execution.next_transition) + ' |',
+      '', '### Current execution relationship', h2Paragraph(h2CurrentExecutionRelation(execution)));
+  }
   lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
   lines.push('## Completed work', ...h2LinesForArray(projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary)), '');
   lines.push('## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)), '');
+  lines.push('## Parked backlog / not on current path', '| Issue | Title | Status | Blocking |', '| --- | --- | --- | --- |');
+  if (projection.parked_backlog.length) for (const item of projection.parked_backlog) lines.push('| #' + h2Identifier(item.issue) + ' | ' + h2Cell(item.title) + ' | ' + h2Cell(item.status) + ' | ' + h2Cell(String(item.blocking)) + ' |');
+  else lines.push('| None | - | None recorded | false |');
   lines.push('## PR history', '| PR | Child | Epoch | Outcome | Summary |', '| --- | --- | --- | --- | --- |');
   if (projection.pr_history.length) for (const item of projection.pr_history) lines.push('| #' + h2Identifier(item.pr) + ' | #' + h2Identifier(item.child_issue) + ' | ' + h2Cell(item.epoch_id || '-') + ' | ' + h2Cell(item.outcome) + ' | ' + h2Cell(item.summary) + ' |');
   else lines.push('| None | - | - | None recorded | - |');
@@ -4634,7 +4749,19 @@ function h2ChildProse(projection) {
     '| Finality | ' + h2Cell(projection.finality) + ' |',
     '',
     h2Paragraph(projection.summary),
-    '',
+  ];
+  if (projection.current_execution_summary) {
+    const execution = projection.current_execution_summary;
+    lines.push('', '## Current execution', '| Field | Value |', '| --- | --- |',
+      '| Current epoch | ' + h2Cell(execution.current_epoch.id + ' - ' + execution.current_epoch.name) + ' |',
+      '| Epoch state | ' + h2Cell(execution.epoch_state) + ' |',
+      '| Current work item | #' + h2Identifier(execution.current_work_item.issue) + ' - ' + h2Cell(execution.current_work_item.title) + ' |',
+      '| Current gate | ' + h2Cell(execution.current_gate) + ' |',
+      '| Repair | ' + h2Cell(execution.repair === null ? 'Not applicable' : execution.repair) + ' |',
+      '| Next transition | ' + h2Cell(execution.next_transition) + ' |',
+      '', '### Current execution relationship', h2Paragraph(h2CurrentExecutionRelation(execution)), '');
+  }
+  lines.push(
     '## Objective', h2Paragraph(projection.objective),
     '',
     '## Scope', ...h2LinesForArray(projection.scope),
@@ -4645,11 +4772,14 @@ function h2ChildProse(projection) {
     '',
     '## Out of scope', ...h2LinesForArray(projection.out_of_scope),
     '',
-    '## Epochs / phases',
-    '| Epoch | Name | State | Purpose | Outcome |',
-    '| --- | --- | --- | --- | --- |',
-  ];
-  for (const epoch of projection.epochs) lines.push('| ' + h2Cell(epoch.id) + ' | ' + h2Cell(epoch.name) + ' | ' + h2Cell(epoch.state) + ' | ' + h2Cell(epoch.purpose) + ' | ' + h2Cell(epoch.outcome) + ' |');
+    '## Epochs / gates',
+    '| Epoch | Name | Gates | State | Purpose | Outcome |',
+    '| --- | --- | --- | --- | --- | --- |',
+  );
+  for (const epoch of projection.epochs) lines.push('| ' + h2Cell(epoch.id) + ' | ' + h2Cell(epoch.name) + ' | ' + h2Cell(epoch.gates.join(', ') || 'None recorded') + ' | ' + h2Cell(epoch.state) + ' | ' + h2Cell(epoch.purpose) + ' | ' + h2Cell(epoch.outcome) + ' |');
+  lines.push('', '## Parked backlog / not on current path', '| Issue | Title | Status | Blocking |', '| --- | --- | --- | --- |');
+  if (projection.parked_backlog.length) for (const item of projection.parked_backlog) lines.push('| #' + h2Identifier(item.issue) + ' | ' + h2Cell(item.title) + ' | ' + h2Cell(item.status) + ' | ' + h2Cell(String(item.blocking)) + ' |');
+  else lines.push('| None | - | None recorded | false |');
   lines.push('', '## PR history', '| PR | Epoch | Outcome | Summary |', '| --- | --- | --- | --- |');
   if (projection.pr_history.length) for (const row of projection.pr_history) lines.push('| #' + h2Identifier(row.pr) + ' | ' + h2Cell(row.epoch_id || '-') + ' | ' + h2Cell(row.outcome) + ' | ' + h2Cell(row.summary) + ' |');
   else lines.push('| None | - | None recorded | - |');
@@ -5408,6 +5538,11 @@ function h2RenderPublic(input) {
       h2Require(h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind']) || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       const parent = h2ReadParentUnbound(source.parent_read);
       document = target.kind === 'parent' ? h2BuildParentDoc(parent.state) : h2BuildChildDoc(parent.state, target.issue);
+    } else if (source.type === 'CANONICAL_STATE') {
+      h2Require(h2Exact(source, ['type', 'state']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      h2Require(h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind']) || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      const canonical = h2ValidateState(source.state);
+      document = target.kind === 'parent' ? h2BuildParentDoc(canonical.state) : h2BuildChildDoc(canonical.state, target.issue);
     } else if (source.type === 'PR_DESCRIPTOR') {
       h2Require(h2Exact(source, ['type', 'descriptor', 'bound_authority']) && h2IsPlain(target) && h2Exact(target, ['kind']) && target.kind === 'pr', true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       h2Descriptor(source.descriptor, 'AUTHORITY');
@@ -5455,17 +5590,159 @@ function h2ExtendHistoryPublic(input) {
 function h2WritePlan(kind, issue, document) {
   return { kind, issue, body: document.body, read: h2CompleteRead(document.body), body_sha256: sha256Text(document.body), canonical_sha256: document.canonical_sha256 };
 }
+function h2ValidateGovernanceBinding(value, state) {
+  const keys = ['schema', 'repository', 'repository_identity', 'governance', 'managed_programme', 'operation', 'authority'];
+  const identityKeys = ['repository', 'admitted'];
+  const managedKeys = ['binding', 'parent_issue', 'status', 'surface_version'];
+  const operationKeys = ['authorised', 'kind'];
+  const authorityKeys = ['kind', 'reference', 'body_sha256'];
+  h2Require(h2Exact(value, keys)
+    && value.schema === H2_GOVERNANCE_SCHEMA
+    && value.repository === state.repository
+    && h2Exact(value.repository_identity, identityKeys)
+    && value.repository_identity.repository === state.repository
+    && value.repository_identity.admitted === true
+    && value.governance === 'enabled'
+    && h2Exact(value.managed_programme, managedKeys)
+    && ['EXISTING', 'NEW'].includes(value.managed_programme.binding)
+    && value.managed_programme.parent_issue === state.parent.issue
+    && value.managed_programme.status === 'BOUND'
+    && value.managed_programme.surface_version === H2_VERSION
+    && h2Exact(value.operation, operationKeys)
+    && value.operation.kind === 'PROGRAMME_SURFACE_MIGRATION'
+    && value.operation.authorised === true
+    && h2Exact(value.authority, authorityKeys)
+    && value.authority.kind === 'USER_WEB_CONTROLLER'
+    && h2SafeLine(value.authority.reference, 2048)
+    && h2Hash(value.authority.body_sha256), true, 'GOVERNANCE_BINDING_INVALID', 'AUTHORITY');
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2Clone(value);
+}
+function h2ValidateManagedChildReads(parent, value) {
+  h2Require(Array.isArray(value) && value.length === parent.state.children.length, true, 'MIGRATION_INVENTORY_INVALID', 'MIGRATION');
+  const orderedChildren = parent.state.children.slice().sort((left, right) => left.order - right.order);
+  const seen = new Set();
+  return value.map((item, index) => {
+    h2Require(h2IsPlain(item) && h2Exact(item, ['issue', 'read'])
+      && h2Issue(item.issue) && orderedChildren[index] && item.issue === orderedChildren[index].issue
+      && !seen.has(item.issue), true, 'MIGRATION_INVENTORY_INVALID', 'MIGRATION');
+    seen.add(item.issue);
+    const envelope = h2ReadEnvelope(item.read);
+    h2Require(envelope.classification.kind === 'child'
+      && ['legacy-v5', 'human-v2'].includes(envelope.classification.format), true, 'MIGRATION_SURFACE_UNKNOWN', 'MIGRATION');
+    const parsed = h2ParseChildEnvelope(envelope, {
+      repository: parent.state.repository,
+      parent_issue: parent.state.parent.issue,
+      issue: item.issue,
+    }, parent);
+    return { issue: item.issue, envelope, parsed };
+  });
+}
+function h2WholeProgrammeRecovery(parent, children, writes) {
+  return {
+    schema: 'toolkit.github-program.migration-plan.v1',
+    scope: 'WHOLE_PROGRAMME',
+    source: {
+      parent: {
+        format: parent.format,
+        body_sha256: parent.read.body_sha256,
+        canonical_sha256: parent.canonical_sha256,
+      },
+      children: children.map((item) => ({
+        issue: item.issue,
+        format: item.parsed.format,
+        body_sha256: item.parsed.read.body_sha256,
+        canonical_sha256: item.parsed.canonical_sha256,
+      })),
+    },
+    expected_write_order: writes.map((item) => item.kind + ':' + item.issue),
+    readback_required: true,
+    interruption_recovery: 'FRESH_COMPLETE_READS_AND_REPLAN',
+    semantic_state_mutation: false,
+  };
+}
+function h2PlanWholeProgrammeMigration(parent, input) {
+  h2Require(input.history_decision === null, true, 'MIGRATION_SEMANTIC_STATE_CHANGE_FORBIDDEN', 'MIGRATION');
+  const governance = h2ValidateGovernanceBinding(input.governance, parent.state);
+  const children = h2ValidateManagedChildReads(parent, input.managed_child_reads);
+  const formats = new Set(children.map((item) => item.parsed.format));
+  h2Require(formats.size === 1, true, 'MIGRATION_MIXED_SURFACE_STATE', 'MIGRATION');
+  const sourceChildFormat = children[0].parsed.format;
+  const writes = [];
+  let action;
+  let code;
+  if (parent.format === 'human-v2') {
+    if (sourceChildFormat === 'legacy-v5') {
+      for (const item of children) writes.push(h2WritePlan('child', item.issue, h2BuildChildDoc(parent.state, item.issue)));
+      action = 'WRITE_PROGRAMME';
+      code = 'MIGRATION_PROGRAMME_WRITE_READY';
+    } else {
+      for (const item of children) {
+        const expected = h2BuildChildDoc(parent.state, item.issue);
+        h2Require(expected.body === item.parsed.read.body && h2Comparable(expected.carrier, item.parsed.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+      }
+      action = 'RECONCILED';
+      code = 'MIGRATION_RECONCILED';
+    }
+  } else {
+    h2Require(sourceChildFormat === 'legacy-v5', true, 'MIGRATION_ORDER_INVALID', 'MIGRATION');
+    const parentDocument = h2BuildParentDoc(parent.state);
+    writes.push(h2WritePlan('parent', parent.state.parent.issue, parentDocument));
+    for (const item of children) writes.push(h2WritePlan('child', item.issue, h2BuildChildDoc(parent.state, item.issue)));
+    action = 'WRITE_PROGRAMME';
+    code = 'MIGRATION_PROGRAMME_WRITE_READY';
+  }
+  const history = h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository);
+  const observations = h2ValidateProviderAssertions(input.provider_observations, parent.state, history);
+  return h2Success('planMigration', code, 'MIGRATION', {
+    action,
+    scope: 'WHOLE_PROGRAMME',
+    writes,
+    write_count: writes.length,
+    source_parent_format: parent.format,
+    source_child_format: sourceChildFormat,
+    managed_child_issues: children.map((item) => item.issue),
+    governance: {
+      repository: governance.repository,
+      state: governance.governance,
+      managed_programme: governance.managed_programme.status,
+      binding: governance.managed_programme.binding,
+      parent_issue: governance.managed_programme.parent_issue,
+    },
+    recovery: h2WholeProgrammeRecovery(parent, children, writes),
+    provider_observations: observations,
+  });
+}
 function h2PlanMigrationPublic(input) {
   return h2Call('planMigration', () => {
     h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
-    h2Require(h2IsPlain(input) && h2Exact(input, ['parent_read', 'child_read', 'history_decision', 'provider_observations'])
-      && h2IsPlain(input.parent_read) && h2IsPlain(input.child_read)
+    const baseKeys = ['parent_read', 'history_decision', 'provider_observations'];
+    const acceptedShapes = [
+      [...baseKeys, 'child_read'],
+      [...baseKeys, 'child_read', 'governance'],
+      [...baseKeys, 'child_read', 'managed_child_reads'],
+      [...baseKeys, 'child_read', 'governance', 'managed_child_reads'],
+      [...baseKeys, 'managed_child_reads'],
+      [...baseKeys, 'governance', 'managed_child_reads'],
+      [...baseKeys, 'governance'],
+    ];
+    h2Require(h2IsPlain(input) && acceptedShapes.some((keys) => h2Exact(input, keys))
+      && h2IsPlain(input.parent_read)
       && (input.history_decision === null || h2IsPlain(input.history_decision))
-      && (input.provider_observations === null || Array.isArray(input.provider_observations)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      && (input.provider_observations === null || Array.isArray(input.provider_observations))
+      && (!h2Own(input, 'governance') || h2IsPlain(input.governance))
+      && (!h2Own(input, 'managed_child_reads') || Array.isArray(input.managed_child_reads)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
     const parent = h2ReadParentUnbound(input.parent_read);
+    if (h2Own(input, 'managed_child_reads') || h2Own(input, 'governance')) {
+      h2Require(h2Own(input, 'governance'), true, 'GOVERNANCE_OPT_IN_REQUIRED', 'AUTHORITY');
+      h2Require(h2Own(input, 'managed_child_reads'), true, 'MIGRATION_INVENTORY_REQUIRED', 'MIGRATION');
+      return h2PlanWholeProgrammeMigration(parent, input);
+    }
+    h2Require(h2Own(input, 'child_read') && h2IsPlain(input.child_read), true, 'MIGRATION_INPUT_INVALID', 'MIGRATION');
     const childEnvelope = h2ReadEnvelope(input.child_read);
     h2Require(childEnvelope.classification.kind === 'child', true, 'MIGRATION_INPUT_INVALID', 'MIGRATION');
-    const childIssue = parent.state.children.find((item) => item.lifecycle === 'CURRENT')?.issue || CHILD_ISSUE;
+    const childIssue = parent.state.children.find((item) => item.lifecycle === 'CURRENT')?.issue;
+    h2Require(h2Issue(childIssue), true, 'MIGRATION_INPUT_INVALID', 'MIGRATION');
     let child = null;
     let observations;
     if (parent.format === 'human-v2') {

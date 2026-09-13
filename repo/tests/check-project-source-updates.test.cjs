@@ -148,8 +148,8 @@ test('upstream drift produces a review-only notification without changing the lo
   assert.match(report, /This PR is a review notification only\./);
   assert.match(report, /No SOURCE-LOCK pins were changed\./);
   assert.match(report, /No upstream code was executed\./);
-  assert.match(report, new RegExp('Adopted commit: `' + lockedSha + '`'));
-  assert.match(report, new RegExp('Latest observed commit: `' + latestSha + '`'));
+   assert.match(report, new RegExp('Adopted commit:.*' + lockedSha));
+   assert.match(report, new RegExp('Latest observed commit:.*' + latestSha));
   assert.equal(fs.readFileSync(lockPath, 'utf8'), before);
 });
 

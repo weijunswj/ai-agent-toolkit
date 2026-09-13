@@ -28,26 +28,6 @@ const repoLocalShimTemplates = [
     blockName: 'CLAUDE.SHIM',
     begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v1 -->`,
     end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:END CLAUDE.SHIM -->`
-  },
-  {
-    label: 'Antigravity Gemini shim',
-    sourcePath: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    publishedPath: `${repoLocalPublishedRoot}/GEMINI.shim.template.md`,
-    activePath: 'GEMINI.md',
-    sourceIdentity: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    blockName: 'GEMINI.SHIM',
-    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:END GEMINI.SHIM -->`
-  },
-  {
-    label: 'Antigravity bootstrap',
-    sourcePath: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    publishedPath: `${repoLocalPublishedRoot}/antigravity-bootstrap.template.md`,
-    activePath: '.agents/rules/00-agent-toolkit-bootstrap.md',
-    sourceIdentity: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    blockName: 'ANTIGRAVITY.BOOTSTRAP',
-    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->`
   }
 ];
 const expectedN8nBlock = `${n8nBegin}
@@ -231,8 +211,7 @@ test('manual global source templates exist and are generated from execution prom
   assert.match(prompt, /opening or updating a pull request/i);
   for (const relPath of [
     'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md'
+    'repo/contracts/agent-rules/CLAUDE.template.md'
   ]) {
     const text = readText(relPath);
     assert.equal(generatedNoticeCount(text), 1, relPath);
@@ -262,7 +241,6 @@ test('execution prompt requires full-bold user-action questions and generated su
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
@@ -294,7 +272,6 @@ test('portable rules require the compact host-neutral depth-1 topology contract'
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md'
@@ -328,7 +305,6 @@ test('portable rules define the deployment branch convention without granting li
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md'
@@ -363,7 +339,6 @@ test('portable rules activate GitHub issue tracking only for the applicable work
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md',
@@ -382,14 +357,6 @@ test('repo-local source and published skill templates are local bootstrap templa
     [
       `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
       'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    ],
-    [
-      `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-      'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
-    ],
-    [
-      `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-      'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
     ],
   ];
 
@@ -494,7 +461,7 @@ test('n8n adapter is compact and fail-closed', () => {
   }
 });
 
-test('root Claude, Gemini, and Antigravity shims stay tiny', () => {
+test('root Claude shim stays tiny', () => {
   const claude = readText('CLAUDE.md');
   assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:BEGIN CLAUDE\.SHIM v1/);
   assert.match(claude, /^# Claude Code Instructions$/m);
@@ -503,42 +470,20 @@ test('root Claude, Gemini, and Antigravity shims stay tiny', () => {
   assertImportCount(claude, '@AGENTS.md', 'root CLAUDE.md import count');
   assert.ok(Buffer.byteLength(claude, 'utf8') < 1024, 'root CLAUDE.md under 1KB');
 
-  const gemini = readText('GEMINI.md');
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:BEGIN GEMINI\.SHIM v1/);
-  assert.match(gemini, /^# Gemini Instructions$/m);
-  assert.match(gemini, /Root `AGENTS\.md` is canonical\./);
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:END GEMINI\.SHIM/);
-  assertImportCount(gemini, '@./AGENTS.md', 'root GEMINI.md import count');
-  assert.ok(Buffer.byteLength(gemini, 'utf8') < 1024, 'root GEMINI.md under 1KB');
-
-  const antigravity = readText('.agents/rules/00-agent-toolkit-bootstrap.md');
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:BEGIN ANTIGRAVITY\.BOOTSTRAP v1/);
-  assert.match(antigravity, /^# Agent Toolkit Antigravity Bootstrap$/m);
-  assert.match(antigravity, /Root `AGENTS\.md` is the canonical repo instruction file\./);
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:END ANTIGRAVITY\.BOOTSTRAP/);
-  assert.doesNotMatch(antigravity, /@\.\.\/\.\.\/AGENTS\.md/);
-  assert.ok(Buffer.byteLength(antigravity, 'utf8') < 1024, 'Antigravity bootstrap under 1KB');
 });
 
 test('active and generated default instruction surfaces exclude PR/VCS workflow prompt rules', () => {
   for (const relPath of [
     'AGENTS.md',
     'CLAUDE.md',
-    'GEMINI.md',
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
     executionPromptPath,
     n8nAdapterPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-    `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
     'skills/repository-agent-rules/SKILL.md'
   ]) {
     assert.equal(exists(relPath), true, relPath);
@@ -598,7 +543,7 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /\| Claude Code \|[^\n]*`<repo>\/\.claude\/skills\/<skill-name>\/`[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
   assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
   assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
-  assert.match(section, /\| Antigravity 2 \|[^\n]*`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity 2 bootstrap \|/);
+  assert.doesNotMatch(section, /\| Antigravity 2 \|/);
   assert.doesNotMatch(section, /Native plugin package via/);
   assert.doesNotMatch(section, /Opt-in bridge target/);
   assert.doesNotMatch(section, /\[Official n8n Skills\]/);

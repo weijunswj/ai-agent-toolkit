@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
 
 const common = {
   task: { id: 'task-run162-red', digest: 'a'.repeat(64) },
@@ -15,6 +16,16 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
 };
 const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+
+function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']]) {
+  return {
+    delegated: true,
+    launches: entries.map(([launchId, role]) => {
+      const launch = route.resolveRoleRoute({ role, host: 'codex', launch_id: launchId });
+      return { ...launch, capability: { available: true, trusted: true, metadata_verified: true } };
+    })
+  };
+}
 
 function enabledConsent() {
   return { status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } };
@@ -315,11 +326,7 @@ function delegatedAdmissionWithConsent(runId, consentProvider) {
     ...common,
     run_id: runId,
     consentProvider,
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority(),
   });
   const workspace = runtime.admitWorkspace({
     run: admitted.run,
@@ -355,13 +362,14 @@ function startOptions(admission, consentProvider, counters) {
     run: admission.workspace.run,
     workspace_receipt: admission.workspace.workspace_receipt,
     liveRefProvider: { read: () => live },
-    prepareLaunch(lane) {
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
       counters.prepared += 1;
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+      return { lane_id: lane.lane_id || lane.launch_id, launch_lease: 'lease-' + (lane.lane_id || lane.launch_id), inert: true };
     },
-    commitLaunchBatch({ reservations }) {
+    commitLaunchBatch({ launch_leases }) {
       counters.committed += 1;
-      return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) };
+      return { atomic: true, started_lane_ids: launch_leases.map((item) => item.lane_id) };
     },
   };
 }

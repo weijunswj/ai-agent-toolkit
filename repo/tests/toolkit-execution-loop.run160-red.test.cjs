@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
 
 const common = {
   task: { id: 'task-run160-red', digest: 'a'.repeat(64) },
@@ -15,6 +16,16 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
 };
+
+function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']]) {
+  return {
+    delegated: true,
+    launches: entries.map(([launchId, role]) => {
+      const launch = route.resolveRoleRoute({ role, host: 'codex', launch_id: launchId });
+      return { ...launch, capability: { available: true, trusted: true, metadata_verified: true } };
+    })
+  };
+}
 
 function expectCode(fn, code) {
   assert.throws(fn, (error) => error && error.code === code);
@@ -71,11 +82,7 @@ function delegatedAdmission(runId) {
   return runtime.admitRun({
     ...common,
     run_id: runId,
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority(),
   });
 }
 
@@ -117,12 +124,8 @@ test('RUN160 RED: delegated substantive start cannot occur from admitted without
   const result = runtime.admitRun({
     ...common,
     run_id: 'run-red-admitted',
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
-    prepareLaunch: (lane) => ({ lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }),
+    authority: exactAuthority(),
+    prepareLaunch: (input) => ({ lane_id: input.lane.lane_id, launch_lease: 'lease-' + input.lane.lane_id, inert: true }),
     commitLaunchBatch: () => {
       substantiveStarts += 1;
       return { atomic: true, started_lane_ids: ['worker-a', 'worker-b'] };
@@ -156,8 +159,8 @@ test('RUN160 RED: exact verified workspace evidence permits a complete delegated
     run: workspace.run,
     workspace_receipt: workspace.workspace_receipt,
     liveRefProvider: { read: () => live },
-    prepareLaunch: (lane) => ({ lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }),
-    commitLaunchBatch: ({ reservations }) => ({ atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) }),
+    prepareLaunch: (input) => ({ lane_id: input.lane.lane_id, launch_lease: 'lease-' + input.lane.lane_id, inert: true }),
+    commitLaunchBatch: ({ launch_leases }) => ({ atomic: true, started_lane_ids: launch_leases.map((item) => item.lane_id) }),
   });
   assert.equal(started.run.execution_state, 'running');
   assert.deepEqual(started.launches, ['worker-a', 'worker-b']);
@@ -271,10 +274,10 @@ test('RUN160 RED: delegated start rejects wrong or missing run, route, repositor
     run: workspace.run,
     workspace_receipt: workspace.workspace_receipt,
     liveRefProvider: { read: () => live },
-    prepareLaunch: (lane) => ({ lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }),
-    commitLaunchBatch: ({ reservations }) => ({ atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) }),
+    prepareLaunch: (input) => ({ lane_id: input.lane.lane_id, launch_lease: 'lease-' + input.lane.lane_id, inert: true }),
+    commitLaunchBatch: ({ launch_leases }) => ({ atomic: true, started_lane_ids: launch_leases.map((item) => item.lane_id) }),
   };
-  const otherRoute = runtime.admitRun({ ...common, run_id: 'run-red-other-route', authority: { delegated: true, lanes: ['worker-a'] }, adapters: { 'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' } } }).route_plan;
+  const otherRoute = runtime.admitRun({ ...common, run_id: 'run-red-other-route', authority: exactAuthority([['worker-a', 'g1']]) }).route_plan;
   const wrongSnapshotReceipt = { ...workspace.workspace_receipt, snapshot_commit_digest: 'f'.repeat(64) };
   const wrongSnapshotRun = { ...workspace.run, workspace_receipt_digest: runtime.digestValue(wrongSnapshotReceipt) };
   const cases = [

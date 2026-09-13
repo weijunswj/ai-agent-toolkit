@@ -1,6 +1,6 @@
 # Repo-Local Agent Instructions Playbook
 
-Use this for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, repo-local templates, shims, or `repository-agent-rules`.
+Use this for `AGENTS.md`, `CLAUDE.md`, `.agents/rules`, managed markers, repo-local templates, shims, or `repository-agent-rules`.
 
 ## Source Model
 

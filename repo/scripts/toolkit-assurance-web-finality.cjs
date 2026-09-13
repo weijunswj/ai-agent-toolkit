@@ -3,8 +3,8 @@
 const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
 const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
-const G4_MODEL = 'GPT-5.6 Sol High';
-const G4A_MODEL = 'GPT-5.6 Sol Max';
+const G4_ROLE = 'g4';
+const G4A_ROLE = 'final-audit';
 
 const MATERIAL_PREDICATES = Object.freeze([
   'applies_to_current_candidate',
@@ -187,7 +187,8 @@ function g4AdmissionFailures(input) {
   const { candidate, lock, scope, g4 } = input;
   if (!isRecord(g4)) return ['g4-admission-missing'];
   if (g4.status !== 'PASS') failures.push('g4-status-not-pass');
-  if (g4.provider !== 'OpenAI' || g4.model_class !== G4_MODEL || g4.reasoning !== 'high' || g4.mode !== 'standard') failures.push('g4-model-binding-invalid');
+  if (g4.role !== G4_ROLE || g4.provider !== 'openai' || typeof g4.model !== 'string' || !g4.model || typeof g4.reasoning !== 'string' || !g4.reasoning || g4.service_tier !== 'standard') failures.push('g4-route-evidence-missing');
+  if (!isDigest(g4.route_digest) || !isDigest(g4.capability_proof_digest)) failures.push('g4-route-evidence-unverified');
   for (const key of ['fresh', 'isolated', 'read_only', 'complete_candidate', 'current', 'complete', 'server_authoritative', 'verifiable']) {
     if (!hasTrue(g4, key)) failures.push('g4-' + key + '-failed');
   }
@@ -219,7 +220,8 @@ function admitG4(input) {
     admitted: true,
     contract_version: CONTRACT_VERSION,
     authority: G4_AUTHORITY,
-    model_class: G4_MODEL,
+    role: G4_ROLE,
+    route_digest: input.g4.route_digest,
     fresh: true,
     isolated: true,
     read_only: true,
@@ -481,9 +483,14 @@ function evaluateG4A(input = {}) {
       next_action: 'CONTROLLER_REQUIRED',
     });
   }
+  if (input.route_evidence?.role && input.route_evidence.role !== G4A_ROLE) return fail('G4A_NOT_PERMITTED', { allowed: false });
+  if (input.route_evidence && (!isDigest(input.route_evidence.route_digest) || !isDigest(input.route_evidence.capability_proof_digest))) {
+    return fail('G4A_NOT_PERMITTED', { allowed: false });
+  }
   return valid('G4A_ELIGIBLE', {
     allowed: true,
-    model_class: G4A_MODEL,
+    role: G4A_ROLE,
+    route_digest: input.route_evidence?.route_digest || null,
     fresh: true,
     isolated: true,
     read_only: true,
@@ -703,8 +710,8 @@ module.exports = Object.freeze({
   DESIGN_LOCK_ID,
   CONTRACT_VERSION,
   G4_AUTHORITY,
-  G4_MODEL,
-  G4A_MODEL,
+  G4_ROLE,
+  G4A_ROLE,
   MATERIAL_PREDICATES,
   EXCLUSION_FLAGS,
   admitG4,

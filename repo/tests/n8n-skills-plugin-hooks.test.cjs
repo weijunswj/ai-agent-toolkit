@@ -1275,13 +1275,12 @@ test('unknown and partially repaired n8n Skills shapes fail closed', () => {
   assertSnapshotEqual(missingRoot, missingBefore, 'missing required hook state must not be modified');
 });
 
-test('source-watch records the authoritative n8n Skills compatibility baseline without mutation authority', () => {
-  const advisory = readJson(path.join(repoRoot, 'repo', 'source-watch', 'advisory-targets.json'));
-  const target = advisory.targets.find((entry) => entry.id === 'n8n-skills-hook-compatibility');
-  assert.ok(target);
-  assert.equal(target.repo, 'n8n-io/skills');
-  assert.equal(target.ref, 'main');
-  assert.equal(target.baseline_sha, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
-  assert.match(target.recommendation, /must not mutate installed caches/i);
-  assert.match(target.remaining_work, /#248/);
+test('n8n Skills compatibility provenance remains local and source-watch has no mutation authority', () => {
+  const provenance = fs.readFileSync(path.join(__dirname, 'fixtures', 'n8n-skills-1.0.1', 'PROVENANCE.md'), 'utf8');
+  assert.match(provenance, /c350f8b4bd8417108bce266d88e21b8a1bb966db/);
+  const advisoryPath = path.join(repoRoot, 'repo', 'source-watch', 'advisory-targets.json');
+  assert.equal(fs.existsSync(advisoryPath), false);
+  const sourceWatchReadme = fs.readFileSync(path.join(repoRoot, 'repo', 'source-watch', 'README.md'), 'utf8');
+  assert.match(sourceWatchReadme, /deterministic review-notification-only/i);
+  assert.doesNotMatch(sourceWatchReadme, /advisory-targets\.json|mutation authority/i);
 });

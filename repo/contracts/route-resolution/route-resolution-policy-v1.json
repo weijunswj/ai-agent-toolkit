@@ -1,0 +1,58 @@
+{
+  "contract_version": "toolkit.route-resolution.policy.v1",
+  "schema_version": 1,
+  "architecture": [
+    "user-web-authority",
+    "versioned-role-registry",
+    "exact-resolved-launch-record",
+    "capability-proven-host-adapter",
+    "bounded-execution-loop"
+  ],
+  "hosts": ["codex", "claude-code", "opencode"],
+  "selection": {
+    "role_registry_is_authoritative": true,
+    "host_is_explicit": true,
+    "exact_record_required": true,
+    "provider_substitution": false,
+    "model_substitution": false,
+    "reasoning_substitution": false,
+    "service_tier_substitution": false,
+    "speed_substitution": false
+  },
+  "topology": {
+    "maximum_depth": 1,
+    "depth_one_route_resolution": "independent",
+    "root_speed_inheritance": false,
+    "omitted_child_speed": "standard",
+    "priority_child_exception": "only-an-explicit-homogeneous-g3-authority-and-tree-override",
+    "nested_children": false,
+    "cross_role_priority_spawn": false
+  },
+  "capability": {
+    "adapter_selects_route": false,
+    "adapter_proves_capability": true,
+    "adapter_executes_exact_record": true,
+    "unsupported_or_contradictory": "fail-closed"
+  },
+  "forbidden_active_authority": [
+    "fixed-worker-model-map",
+    "fixed-checker-model-map",
+    "ram-resource-admission",
+    "reservation-queue-policy",
+    "mandatory-independent-pre-pr-checker",
+    "fixed-g4-model-binding",
+    "fixed-g4a-model-binding"
+  ],
+  "failure_codes": [
+    "ROUTE_UNAVAILABLE",
+    "ROUTE_CONTRADICTION",
+    "ROUTE_REGISTRY_INVALID",
+    "ROUTE_METADATA_MISSING",
+    "ROUTE_SUBSTITUTION_FORBIDDEN",
+    "CHILD_SPEED_INHERITANCE_REJECTED",
+    "PRIORITY_CHILD_AUTHORITY_REQUIRED",
+    "HOST_CAPABILITY_UNAVAILABLE",
+    "HOST_CAPABILITY_CONTRADICTION",
+    "EXACT_LAUNCH_REQUIRED"
+  ]
+}

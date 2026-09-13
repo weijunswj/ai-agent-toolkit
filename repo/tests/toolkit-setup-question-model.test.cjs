@@ -15,7 +15,6 @@ const expectedCodexRows = [
   ['report-retention', 'Report retention'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['opencode-integration', 'OpenCode'],
-  ['antigravity-integration', 'Antigravity'],
 ];
 
 function assertGeneratedDocumentationEqual(actual, expected) {
@@ -162,8 +161,7 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.equal(byId['codex-helper-agents'], undefined);
   assert.match(byId['codex-toolkit-maintenance'].choices.find((choice) => choice.value === 'disable').consequence, /not uninstalled/i);
   assert.match(byId['opencode-integration'].afterApplying, /skill folders/i);
-  assert.match(byId['antigravity-integration'].afterApplying, /plugin metadata and skill folders/i);
-  assert.notEqual(byId['opencode-integration'].whatThisControls, byId['antigravity-integration'].whatThisControls);
+  assert.equal(byId['antigravity-integration'], undefined);
 });
 
 test('legacy migration stays advanced while ordinary setup and authoritative guidance omit helper capacity', () => {
@@ -173,7 +171,7 @@ test('legacy migration stays advanced while ordinary setup and authoritative gui
   current.delegation = { status: 'migration-required', helper_count: 1 };
   const rows = core.setupQuestionSpecs(args, current);
   assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  assert.equal(args.setupChoices.codexHelperCapacity, '');
   const rendered = `${core.renderSetupQuestionBank(rows)}\n${core.renderSetupQuestionBankTerminal(rows)}`;
   assert.doesNotMatch(rendered, /\bmigrate\b|PR #237|helper-agent quantit/i);
 
@@ -195,7 +193,7 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   const rows = core.setupQuestionSpecs(args, current);
   for (const row of rows) assert.ok(row.choices.some((choice) => choice.value === row.recommended));
   assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  assert.equal(args.setupChoices.codexHelperCapacity, '');
   const output = `${core.renderSetupQuestionBank(rows)}\n${JSON.stringify(rows)}`;
   assert.doesNotMatch(output, /Synthetic Private|C:\\|USERPROFILE|CODEX_HOME|GH_TOKEN|GITHUB_TOKEN/);
 });
@@ -294,9 +292,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
-  assert.equal(claude[0].presentation.total_visible_question_count, 6);
-  assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
+  assert.equal(claude[0].presentation.total_visible_question_count, 5);
+  assert.equal(claude[0].presentation.total_visible_section_count, 2);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
 });
 
 test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {

@@ -254,9 +254,7 @@ test('n8n-safety-router README tells agents to dry-run then ask before write', (
 test('generic AI coding agent templates stay slim and obsolete heavy templates are absent', () => {
   for (const relPath of [
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md'
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
@@ -264,6 +262,11 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
     assert.doesNotMatch(text, /\n# Skill Routing Rules\n/, relPath);
     assert.doesNotMatch(text, /Current Toolkit Skill Routing/, relPath);
   }
+
+  for (const relPath of [
+    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
+    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md'
+  ]) assert.equal(exists(relPath), false, relPath);
 
   for (const relPath of [
     'skills/repository-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
@@ -354,8 +357,7 @@ test('AGENTS n8n adapter publishes the canonical managed partial', () => {
 
 test('platform n8n adapters remain optional snippets and are not installer targets', () => {
   for (const relPath of [
-    'skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md',
-    'skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md'
+    'skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md'
   ]) {
     const text = stripGeneratedNotices(readText(relPath));
     assert.ok(text.length <= 2200, `${relPath} should stay brief`);
@@ -368,6 +370,7 @@ test('platform n8n adapters remain optional snippets and are not installer targe
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
     assert.doesNotMatch(text, /Workflow builder order[\s\S]{0,200}Workflow build preferences/, relPath);
   }
+  assert.equal(exists('skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md'), false);
 });
 test('adapter installer source has no standalone marker migration path', () => {
   for (const relPath of [
