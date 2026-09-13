@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program-reconciler.managed-terminal-lifecycle.v1",
+  "title": "Toolkit managed terminal lifecycle",
+  "description": "Ordered, idempotent terminal cleanup evidence. It grants no branch deletion authority by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "state", "terminal_decision", "durable_disposition", "closed", "closure_readback", "delete_eligible", "absence_readback", "terminal_receipt"],
+  "properties": {
+    "contract_version": { "const": "toolkit.github-program-reconciler.managed-terminal-lifecycle.v1" },
+    "state": { "enum": ["TERMINAL_DECISION", "DURABLE_DISPOSITION_OR_SUCCESSOR_RECEIPT", "CLOSE", "CLOSURE_READBACK", "DELETE_ELIGIBILITY_CHECK", "EXPECTED_REF_SHA_RECHECK", "SAFE_MANAGED_BRANCH_DELETE", "ABSENCE_READBACK", "TERMINAL_RECEIPT"] },
+    "terminal_decision": { "type": "boolean" },
+    "durable_disposition": { "type": "boolean" },
+    "closed": { "type": "boolean" },
+    "closure_readback": { "type": "boolean" },
+    "delete_eligible": { "type": "boolean" },
+    "absence_readback": { "type": "boolean" },
+    "terminal_receipt": { "type": "boolean" },
+    "branch": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,256}$" },
+    "reason_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" }
+  }
+}

@@ -30,10 +30,13 @@ const candidate = Object.freeze({
 function g4Evidence(overrides = {}) {
   return {
     status: 'PASS',
-    provider: 'OpenAI',
-    model_class: 'GPT-5.6 Sol High',
+    role: 'g4',
+    provider: 'openai',
+    model: 'gpt-6-astra',
     reasoning: 'high',
-    mode: 'standard',
+    service_tier: 'standard',
+    route_digest: digest('1'),
+    capability_proof_digest: digest('2'),
     fresh: true,
     isolated: true,
     read_only: true,
@@ -224,11 +227,13 @@ test('G4 admission enforces the exact independent complete-candidate contract', 
   assert.equal(result.authority, 'read-only-assurance');
 });
 
-test('G4 model, reasoning, and mode remain exact', () => {
+test('G4 route evidence is required without a fixed model binding', () => {
   for (const overrides of [
-    { model_class: 'GPT-5.6 Sol Max' },
-    { reasoning: 'max' },
-    { mode: 'nonstandard' },
+    { role: 'wrong-role' },
+    { provider: 'OpenAI' },
+    { service_tier: 'priority' },
+    { route_digest: 'missing' },
+    { capability_proof_digest: 'missing' },
   ]) {
     const result = admitG4(evidence({ g4: g4Evidence(overrides) }));
     assert.equal(result.admitted, false, JSON.stringify(overrides));

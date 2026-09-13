@@ -13,7 +13,7 @@ The maintained repository surfaces are:
 
 The only retained repository synchronizers are `sync-repo-doc-contract.cjs` and `sync-agent-instruction-shims.cjs`. They update managed blocks and instruction shims only; they do not publish project outputs.
 
-The Toolkit Local Bridge package version is declared in `repo/contracts/toolkit-local-bridge/version.json` and must remain aligned with authoritative native plugin inputs, checked-in native plugin metadata, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter metadata.
+The Toolkit package version is declared in `repo/contracts/toolkit-local-bridge/version.json` and must remain aligned with authoritative Codex, Claude Code, and OpenCode native package inputs, checked-in plugin metadata, `BRIDGE_VERSION`, and the Codex setup expected version. AG2 is skills-only proof-gated and has no plugin metadata.
 
 ## Allowed Writes
 

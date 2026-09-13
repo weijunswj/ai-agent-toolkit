@@ -45,7 +45,7 @@ test('A4 source shape does not absorb the A3 five-contract set or live execution
   assert.equal(policy.exclusions.includes('workflow_edits'), true);
   assert.equal(policy.authority_boundaries.a3_contract_count_added, 0);
   assert.equal(runtime.G4_AUTHORITY, 'read-only-assurance');
-  assert.equal(runtime.G4A_MODEL, 'GPT-5.6 Sol Max');
+  assert.equal(runtime.G4A_ROLE, 'final-audit');
 });
 
 test('privacy-safe report contains the required human companion and one action', () => {

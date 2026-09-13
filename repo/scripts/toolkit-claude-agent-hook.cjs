@@ -2,7 +2,8 @@
 'use strict';
 
 const fs = require('node:fs');
-const control = require('./toolkit-agent-control.cjs');
+const adapters = require('./toolkit-host-route-adapters.cjs');
+const routes = require('./toolkit-route-resolution.cjs');
 
 function readInput() {
   try { return JSON.parse(fs.readFileSync(0, 'utf8')); }
@@ -12,12 +13,21 @@ function readInput() {
 function decision(input, options = {}) {
   const toolName = String(input.tool_name || input.toolName || '');
   if (!/^(Agent|Task)$/.test(toolName)) return {};
-  const profile = control.readProfile('claude-code', options);
-  if (profile.topology === control.TOPOLOGIES.BROADER_NATIVE) return {};
-  const reason = profile.topology === control.TOPOLOGIES.CLAUDE_DIRECT
-    ? 'Native Claude Agent launches bypass Toolkit resource admission and mode verification. Use repo/scripts/toolkit-agent-control.cjs launch with a complete productive-parent launch specification.'
-    : 'Claude agent launch is blocked because the selected or unverifiable Toolkit profile is root-only.';
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+  const launchRecord = input.launch_record || input.launchRecord || input.tool_input?.launch_record || input.toolInput?.launch_record;
+  const proof = input.capability_proof || input.capabilityProof || input.tool_input?.capability_proof || input.toolInput?.capability_proof;
+  if (!launchRecord || !proof) return deny('EXACT_LAUNCH_REQUIRED');
+  try {
+    routes.validateResolvedLaunchRecord(launchRecord);
+    adapters.assertCapabilityForExactRecord(launchRecord, proof);
+    if (launchRecord.host !== 'claude-code') return deny('HOST_CAPABILITY_CONTRADICTION');
+    return {};
+  } catch (error) {
+    return deny(error.code || 'ROUTE_UNAVAILABLE');
+  }
+}
+
+function deny(code) {
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit denied the Claude launch: ${code}.` } };
 }
 
 if (require.main === module) {

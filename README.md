@@ -32,11 +32,11 @@ For normal human setup, keep the journey short:
 3. The agent must run the managed checkout setup script when it exists: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
 4. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
 5. If setup exits with code `23`, the complete compact bank must be visible in the same response as any recommended-default shortcut. Missing output is retried and never treated as approval; `--yes-recommended` is allowed only after you accept the displayed recommendations.
-6. Keep routine setup on the root agent; it must not spawn subagents for instruction, docs, state, choice, or validation inspection. Codex recommends root-only under the strict contract and exposes one helper only as a manual conservative memory backstop; runtime mechanics stay in a technical proposal. Capacity is not launch permission: unsupported admission, effort, or child non-fast enforcement stays root-only. Unsafe current capacity is labelled, user-owned conflicts require one exact `apply` confirmation in the same flow, and other hosts receive no invented enforcement profile.
+6. Keep routine setup on the root agent; it must not spawn subagents for instruction, docs, state, choice, or validation inspection. Every launch resolves independently through the versioned role registry, exact launch record, and capability-proven host adapter. An omitted depth-1 child speed resolves Standard and never inherits a Priority root.
 7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+10. OpenCode uses the native Toolkit plugin package after its separately authorised migration. AG2 remains a proof-gated skills-only projection; its migration-only bridge stays in place until a separate Web-accepted transition.
 
 More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 
@@ -67,7 +67,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | Skill | Use |
 |---|---|
 | [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, native OpenCode migration, AG2 skills-only proof, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, official Skills, and instance-level MCP references. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
@@ -87,18 +87,17 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 This section is only for manually copying Toolkit-owned skill folders under [skills/](skills/). Native Toolkit plugin setup belongs in [Toolkit Setup](#toolkit-setup).
 
 > [!IMPORTANT]
-> Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
+> Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install or update repo-local instruction files.
 
 Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
-`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
+`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code uses a tiny shim that points back to the target repo's `AGENTS.md`; do not install a shim by itself. OpenCode consumes the shared `AGENTS.md` surface. AG2 receives skills only after its supported discovery proof succeeds.
 
 | Platform | Manual Toolkit-owned skill folder locations | Active instruction files | Reference |
 |---|---|---|---|
 | Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | `AGENTS.md` | [Codex](repo/docs/HOW-TO-USE.md#codex). |
 | Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code](repo/docs/HOW-TO-USE.md#claude-code). |
 | OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | `AGENTS.md` | [OpenCode](repo/docs/HOW-TO-USE.md#opencode). |
-| Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\` | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
 
 Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No intermediate publication step is required.
 
@@ -136,7 +135,7 @@ For canonical surface rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/
 
 ## Validation
 
-Use targeted local checks before pushing. CI runs the full `npm run validate:all` merge gate; run it locally for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
+Use targeted local checks before pushing. CI owns the full merge gate; do not run local `npm run validate:all` in this repository. Run the full Node test suite and the focused contract/audit checks for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
 
 ```powershell
 node repo/scripts/sync-repo-doc-contract.cjs --check
@@ -159,14 +158,14 @@ git diff --check
 - `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
-- Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
+- Scheduled source-watch is PR-notification-only. It may compare active source-lock identity, attribution, deduplication, and reviewed-through state with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock pins, recreate retired advisory/semantic-review/cadence findings, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
 - The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
 - The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
   - `skills/n8n-safety-router/n8n-safety-rules.md`
   - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
   - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
-- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package, while `repo/contracts/toolkit-local-bridge/opencode-plugin/` contains the native OpenCode package source. They remain platform-separated and must not be used to cross-update another native platform. AG2 has no Toolkit plugin or instruction surface; its bridge is a proof-gated skills-only projection.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

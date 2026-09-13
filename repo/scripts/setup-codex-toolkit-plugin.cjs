@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.10.9';
+const EXPECTED_TOOLKIT_VERSION = '2.11.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -30,7 +30,10 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/repo-ignore-hygiene.cjs',
   'repo/scripts/repo-local-backup.cjs',
   'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
-  'repo/scripts/toolkit-agent-control.cjs',
+  'repo/scripts/toolkit-route-resolution.cjs',
+  'repo/scripts/toolkit-host-route-adapters.cjs',
+  'repo/scripts/toolkit-public-exposure.cjs',
+  'repo/scripts/setup-opencode-toolkit-plugin.cjs',
   'repo/scripts/claude-process-launch.cjs',
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
@@ -413,6 +416,88 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
     }
   }
   return errors;
+}
+
+function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode, cacheVersion = null) {
+  return Object.freeze({
+    contract_version: 'toolkit.local-bridge.codex-cache-recovery.v1',
+    state,
+    healthy: healthy === true,
+    manual_action: manualAction === true,
+    attempts: Math.max(0, Math.min(3, attempts)),
+    reason_code: String(reasonCode),
+    cache_version: cacheVersion || null
+  });
+}
+
+function recoverCodexCache(options = {}) {
+  let attempts = 0;
+  const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
+  const sourceVerified = typeof options.verifySource === 'function'
+    ? options.verifySource() === true
+    : options.source_verified !== false;
+  if (!sourceVerified) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE');
+
+  let state = 'SOURCE_VERIFIED';
+  const refreshRequired = options.refresh_required === true;
+  if (refreshRequired) {
+    state = 'REFRESHING';
+    if (typeof options.refreshSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL');
+    try {
+      if (options.refreshSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE');
+    } catch (_error) {
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE');
+    }
+  }
+
+  const rediscover = () => {
+    state = 'REDISCOVERING';
+    try {
+      if (typeof options.rediscover === 'function') return options.rediscover();
+      return options.cache || null;
+    } catch (_error) {
+      return { structural_failure: true };
+    }
+  };
+  const verify = (cache) => {
+    state = 'VERIFYING';
+    return cache && cache.present === true
+      && cache.version === expectedVersion
+      && cache.bytes_verified === true
+      && cache.trusted !== false
+      && cache.executing !== true
+      && cache.status !== 'executing'
+      && cache.status !== 'stale-executing';
+  };
+  let cache = rediscover();
+  if (verify(cache)) return cacheRecoveryResult(refreshRequired ? 'VERIFYING' : 'NOOP', true, false, attempts, 'CACHE_CURRENT', cache.version);
+
+  const transientLimit = Number.isInteger(options.transient_retries) ? Math.max(0, Math.min(1, options.transient_retries)) : 1;
+  while (cache?.transient === true && attempts < transientLimit) {
+    attempts += 1;
+    state = 'RETRYING_TRANSIENT';
+    if (typeof options.retryTransient !== 'function' || options.retryTransient(attempts) !== true) break;
+    cache = rediscover();
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REFRESHED', cache.version);
+  }
+  if (cache?.repairable === true) {
+    state = 'REPAIRING_ONCE';
+    if (typeof options.repairSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', cache?.version);
+    try {
+      if (options.repairSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'STRUCTURAL_FAILURE', cache?.version);
+    } catch (_error) {
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', cache?.version);
+    }
+    cache = rediscover();
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REPAIRED', cache.version);
+  }
+  const reason = cache?.trust_failure ? 'TRUST_FAILURE'
+    : cache?.ownership_failure ? 'OWNERSHIP_FAILURE'
+      : cache?.configuration_failure ? 'CONFIGURATION_FAILURE'
+        : cache?.structural_failure ? 'STRUCTURAL_FAILURE'
+          : cache?.transient === true ? 'TRANSIENT_UNRESOLVED' : 'CACHE_VERSION_OR_BYTES_UNVERIFIED';
+  const manual = ['STRUCTURAL_FAILURE', 'CONFIGURATION_FAILURE', 'PERMISSION_FAILURE', 'TRUST_FAILURE', 'OWNERSHIP_FAILURE', 'UNSUPPORTED_TOOL'].includes(reason);
+  return cacheRecoveryResult('TERMINAL', false, manual, attempts, reason, cache?.version);
 }
 
 function codexConfigPath(codexHome) {
@@ -1178,6 +1263,7 @@ module.exports = {
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
+  recoverCodexCache,
   verifySessionStartHook,
   verifySessionStartRuntime,
   windowsSessionStartCommand,

@@ -11,6 +11,8 @@ const Ajv2020 = require('ajv/dist/2020');
 const surface = runtime.humanSurfaceV2;
 const ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
+const CURRENT_ROOT = 'S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001';
+const CURRENT_LOCK = 'DL-S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001';
 const HISTORICAL_PROOF_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SCHEMA-CONSISTENCY-006';
 const HISTORICAL_PROOF_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SCHEMA-CONSISTENCY-006';
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
@@ -74,7 +76,7 @@ function descriptor(overrides = {}) {
       base_sha: MAIN_SHA,
       head: '1111111111111111111111111111111111111111',
       tree: '2222222222222222222222222222222222222222',
-      version: '2.10.9',
+      version: '2.11.0',
     },
     ...overrides,
   };
@@ -291,6 +293,147 @@ function historyInput(withObservation = false) {
       provider_observations: withObservation ? [providerObservation(context.inputDescriptor)] : null,
     },
   };
+}
+
+function replaceStrings(value, from, to) {
+  if (typeof value === 'string') return value.split(from).join(to);
+  if (Array.isArray(value)) return value.map((item) => replaceStrings(item, from, to));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceStrings(item, from, to)]));
+  return value;
+}
+
+function genericState(repository, parentIssue, childIssues, blockerIssue) {
+  const source = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(source.ok, true, JSON.stringify(source));
+  const state = replaceStrings(clone(source.canonical_state), REPOSITORY, repository);
+  const issueMap = new Map(state.children.map((child, index) => [child.issue, childIssues[index]]));
+  const mapIssue = (issue) => issueMap.get(issue) || issue;
+  delete state.concurrency_authority;
+  delete state.predecessor_contract_digest;
+  state.schema = 'generic.program.state.v1';
+  state.dependencies = [];
+  state.human_surface_v2_history = {
+    schema: 'toolkit.github.program.human-history.v2',
+    pr_history: [],
+    evidence_refs: [],
+    transitions: [],
+  };
+  state.parent = {
+    goal: 'Render a repository-neutral managed programme.',
+    issue: parentIssue,
+    title: 'Generic Programme ' + parentIssue,
+  };
+  state.children = state.children.map((child, index) => ({
+    ...child,
+    issue: childIssues[index],
+    title: 'Child ' + childIssues[index],
+    summary: 'Repository-neutral child ' + childIssues[index] + '.',
+    objective: 'Complete the independently governed child.',
+    dependencies: Array.isArray(child.dependencies) ? child.dependencies.map(mapIssue) : child.dependencies,
+    epochs: child.epochs.map((epoch) => ({
+      ...epoch,
+      state: epoch.state || (epoch.terminal_disposition ? epoch.terminal_disposition : 'PENDING / BLOCKED'),
+      status: epoch.status || (epoch.terminal_disposition ? epoch.terminal_disposition : 'PENDING / BLOCKED'),
+    })),
+    pr_registry: child.pr_registry.map((entry) => {
+      const fallbackCandidate = child.pr_registry.find((item) => item.candidate)?.candidate;
+      return {
+        ...entry,
+        candidate: entry.candidate === null
+          ? { ...fallbackCandidate, repository, branch: 'archived-pr-' + entry.pr }
+          : { ...entry.candidate, repository },
+      };
+    }),
+  }));
+  state.prs = state.prs.map((item) => {
+    const next = {
+      ...item,
+      child_issue: mapIssue(item.child_issue),
+      schema: 'github.program.pr-descriptor.v2',
+      repository,
+      candidate: null,
+    };
+    if (item.candidate !== undefined && item.candidate !== null) next.candidate = { ...item.candidate, repository };
+    return next;
+  });
+  const describedPrs = new Set(state.prs.map((item) => item.number));
+  for (const child of state.children) {
+    for (const entry of child.pr_registry) {
+      if (describedPrs.has(entry.pr)) continue;
+      state.prs.push({
+        ...state.prs[0],
+        number: entry.pr,
+        child_issue: child.issue,
+        summary: 'Synthetic repository-neutral registry descriptor for PR #' + entry.pr + '.',
+        purpose: 'Preserve the complete generic programme relationship graph for deterministic rendering.',
+        candidate: null,
+      });
+      describedPrs.add(entry.pr);
+    }
+  }
+  const evidenceIds = new Set(state.evidence_refs.map((item) => item.id));
+  for (const child of state.children) {
+    for (const entry of child.pr_registry) {
+      for (const reference of [entry.accepted_evidence_ref, entry.retirement_evidence_ref, entry.retention_evidence_ref]) {
+        if (reference === null || evidenceIds.has(reference)) continue;
+        state.evidence_refs.push({
+          id: reference,
+          kind: 'WEB',
+          reference: 'https://example.com/evidence/' + reference,
+          summary: 'Synthetic repository-neutral evidence reference.',
+        });
+        evidenceIds.add(reference);
+      }
+    }
+  }
+  state.historical_transitions = state.historical_transitions.map((item) => ({ ...item, child_issue: mapIssue(item.child_issue) }));
+  state.active_lanes = state.active_lanes.map((item) => ({
+    ...item,
+    ...(Object.prototype.hasOwnProperty.call(item, 'child_issue') ? { child_issue: mapIssue(item.child_issue) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(item, 'child') ? { child: mapIssue(item.child) } : {}),
+  }));
+  const current = state.children.find((child) => child.lifecycle === 'CURRENT');
+  assert.ok(current);
+  const currentEpoch = current.epochs.at(-1);
+  state.extensions = [{
+    schema: 'toolkit.github-program.current-execution.v1',
+    child_issue: current.issue,
+    current_epoch: currentEpoch.id,
+    epoch_state: 'PENDING / BLOCKED',
+    current_work_item: { issue: blockerIssue, title: 'Pre-epoch blocker', state: 'G3 implementation/validation' },
+    current_gate: 'G3 implementation/validation',
+    repair: '1/2',
+    next_transition: 'Resolve the pre-epoch blocker before the pending epoch may start.',
+    parked_backlog: [{ issue: 250, title: 'TK-010 — Parked investigations', status: 'PARKED / NON-BLOCKING', blocking: false }],
+  }];
+  return state;
+}
+
+function governanceBinding(repository, parentIssue, overrides = {}) {
+  return {
+    schema: 'toolkit.github-program.governance-binding.v1',
+    repository,
+    repository_identity: { repository, admitted: true },
+    governance: 'enabled',
+    managed_programme: { binding: 'EXISTING', parent_issue: parentIssue, status: 'BOUND', surface_version: 'human-v2' },
+    operation: { authorised: true, kind: 'PROGRAMME_SURFACE_MIGRATION' },
+    authority: { kind: 'USER_WEB_CONTROLLER', reference: 'https://example.com/web-controller/migration', body_sha256: 'a'.repeat(64) },
+    ...overrides,
+  };
+}
+
+function managedChildReads(parentResult) {
+  return parentResult.canonical_state.children.slice().sort((left, right) => left.order - right.order).map((child) => {
+    const rendered = surface.render({
+      source: { type: 'PARENT_READ', parent_read: parentResult.read },
+      target: { kind: 'child', issue: child.issue },
+    });
+    assert.equal(rendered.ok, true, JSON.stringify(rendered));
+    return { issue: child.issue, read: rendered.read };
+  });
 }
 
 function assertSurfaceResult(result, spec) {
@@ -559,7 +702,7 @@ function humanSurfaceContractInstance() {
     root: ROOT,
     lock: LOCK,
     version: 'human-v2',
-    package_version: '2.10.9',
+    package_version: '2.11.0',
     facade_export: 'humanSurfaceV2',
     operations: ['readComplete', 'render', 'extendHistory', 'planMigration'],
     stages: [
@@ -567,6 +710,15 @@ function humanSurfaceContractInstance() {
       'HISTORY', 'PROVIDER_ASSERTION', 'MIGRATION', 'LIFECYCLE', 'PUBLIC_AUDIT', 'SERIALIZE', 'READBACK',
     ],
     reserved_stems: ['AI-AGENT-TOOLKIT:GITHUB-PROGRAM-', 'MANAGED-PROGRAM-'],
+    governance: {
+      binding_schema: 'toolkit.github-program.governance-binding.v1',
+      consent_field: 'repository.governance',
+      identity_admission: 'exact repository identity',
+      managed_binding: 'existing or newly authorised managed programme binding',
+      authorised_operation: 'bootstrap/reconcile/Programme Apply/migration',
+      install_refresh_mutation: false,
+      disabled_or_unresolved: 'no initialise/migrate/reconcile/rewrite',
+    },
     inputs: {
       read_complete: read,
       expectations: { kind: 'parent', repository: REPOSITORY, issue: 240 },
@@ -636,6 +788,12 @@ function humanSurfaceContractInstance() {
       human_drift: 'MIGRATION_CHILD_DRIFT',
       legacy_human: 'MIGRATION_ORDER_INVALID',
       human_parent_history_null: true,
+      programme_wide_scope: 'parent plus all managed direct children',
+      programme_wide_action: 'WRITE_PROGRAMME',
+      programme_wide_requires_governance: true,
+      unknown_or_mixed_fails_closed: true,
+      format_migration_distinct_from_state_mutation: true,
+      idempotent_readback_recovery: 'fresh complete reads and replan',
     },
     safety: {
       provider_writes_external: true,
@@ -644,11 +802,25 @@ function humanSurfaceContractInstance() {
       caller_state_control: false,
       source_adapter_selection: false,
     },
+    programme_hierarchy: {
+      model: 'Programme -> Child -> Epoch -> Gates',
+      child_contains_epochs: true,
+      epoch_contains_gates: true,
+      gate_contains_epoch: false,
+      pre_epoch_blocker_is_separate: true,
+    },
+    current_execution_summary: {
+      fields: ['Current epoch', 'Epoch state', 'Current work item', 'Current gate', 'Repair', 'Next transition'],
+      source: 'canonical/durable state',
+      parent_rendering: 'compact',
+      child_rendering: 'detailed',
+      parked_backlog_heading: 'Parked backlog / not on current path',
+    },
     phase_projection: {
       schema: 'github.program.pr-phase-projection.v1',
       zones: ['CURRENT_DERIVED', 'STRUCTURAL_PROVENANCE', 'DESCRIPTOR_AT_CREATION', 'OMITTED'],
       production_flow: ['VALIDATED_IMMUTABLE_PR_DESCRIPTOR_V2', 'VALIDATED_BOUND_AUTHORITY_OR_NULL', 'h2BuildPrPhaseProjection', 'h2ValidatePrPhaseProjection', 'h2BuildPrTypedDocument', 'PUBLIC_AUDIT_AND_SERIALIZER'],
-      current_derived: ['authority_presence', 'number_state', 'pr_number', 'next_action'],
+      current_derived: ['authority_presence', 'number_state', 'pr_number', 'current_root', 'current_lock', 'next_action'],
       descriptor_at_creation: ['summary', 'purpose', 'changed_surfaces', 'scope', 'out_of_scope', 'design_constraints', 'validation_requirements', 'evidence_refs', 'repair_history', 'before_after', 'repair_budget', 'hosted_qualification', 'recovery_evidence', 'eli5_at_creation', 'next_action_pre_number'],
       carrier_projection: ['schema', 'phase', 'digest'],
       failure_codes: ['PR_PHASE_PROJECTION_INVALID/CANONICAL', 'PR_PHASE_PROVENANCE_INVALID/PUBLIC_AUDIT', 'DESCRIPTOR_TEXT_CURRENT_ZONE/PUBLIC_AUDIT', 'PRE_NUMBER_FIELD_IN_BOUND/PUBLIC_AUDIT', 'STRUCTURAL_FIELD_ZONE_INVALID/PUBLIC_AUDIT', 'BOUND_CURRENT_FIELD_MISSING/AUTHORITY', 'BOUND_AUTHORITY_CURRENT_MISMATCH/AUTHORITY', 'PROJECTION_DIGEST_MISMATCH/READBACK', 'CARRIER_PROJECTION_MISMATCH/READBACK', 'READBACK_MISMATCH/READBACK'],
@@ -705,6 +877,149 @@ test('readComplete preserves legacy v5 compatibility and reads a human-v2 parent
   assert.equal(human.ok, true);
   assert.equal(human.format, 'human-v2');
   assert.equal(human.canonical_sha256, rendered.canonical_sha256);
+});
+
+test('human-v2 renders the Programme -> Child -> Epoch -> Gates hierarchy and distinct current fields', () => {
+  const parent = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(parent.ok, true, JSON.stringify(parent));
+
+  const child = surface.render({
+    source: { type: 'PARENT_READ', parent_read: parent.read },
+    target: { kind: 'child', issue: 359 },
+  });
+  assert.equal(child.ok, true, JSON.stringify(child));
+
+  const hierarchy = {
+    model: 'Programme -> Child -> Epoch -> Gates',
+    child_contains_epochs: true,
+    epoch_contains_gates: true,
+    gate_contains_epoch: false,
+    pre_epoch_blocker_is_separate: true,
+  };
+  assert.deepEqual(parent.projection.hierarchy, hierarchy);
+  assert.deepEqual(child.projection.hierarchy, hierarchy);
+
+  const execution = child.projection.current_execution_summary;
+  assert.deepEqual(execution.current_epoch, {
+    id: 'E4',
+    name: 'E4 - Native Adapters',
+    gates: ['G1', 'G2', 'G3', 'G4'],
+  });
+  assert.equal(execution.epoch_state, 'PENDING');
+  assert.deepEqual(execution.current_work_item, {
+    issue: 359,
+    title: 'S2 — Productize retained skills + native host adapters',
+    state: 'CURRENT',
+  });
+  assert.equal(execution.current_gate, 'NOT_ACTIVE');
+  assert.equal(execution.repair, null);
+  assert.equal(execution.parked_backlog.length, 0);
+  assert.match(execution.next_transition, /Web authority is required before E4 may start/);
+
+  assert.match(parent.body, /## Current child execution/);
+  assert.match(parent.body, /## Parked backlog \/ not on current path/);
+  assert.match(child.body, /## Current execution/);
+  assert.match(child.body, /## Epochs \/ gates/);
+  assert.match(child.body, /\| E4 \\-/);
+  assert.match(child.body, /\| G1\\, G2\\, G3\\, G4 \| PENDING \|/);
+  assert.doesNotMatch(child.body, /pre-epoch blocker.*E4/i);
+});
+
+test('human-v2 renders repository-neutral synthetic programmes with distinct blocker and parked fields', () => {
+  const cases = [
+    { repository: 'octo/alpha', parent: 901, children: [902, 903, 904, 905, 906, 907], blocker: 9901 },
+    { repository: 'acme/beta', parent: 1201, children: [1202, 1203, 1204, 1205, 1206, 1207], blocker: 9921 },
+  ];
+  for (const item of cases) {
+    const state = genericState(item.repository, item.parent, item.children, item.blocker);
+    const parent = surface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'parent' } });
+    const child = surface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'child', issue: item.children[1] } });
+    assert.equal(parent.ok, true, JSON.stringify(parent));
+    assert.equal(child.ok, true, JSON.stringify(child));
+    assert.deepEqual(parent.projection.hierarchy, {
+      model: 'Programme -> Child -> Epoch -> Gates',
+      child_contains_epochs: true,
+      epoch_contains_gates: true,
+      gate_contains_epoch: false,
+      pre_epoch_blocker_is_separate: true,
+    });
+    assert.deepEqual(child.projection.current_execution_summary.current_work_item, {
+      issue: item.blocker,
+      title: 'Pre-epoch blocker',
+      state: 'G3 implementation/validation',
+    });
+    assert.equal(child.projection.current_execution_summary.current_epoch.id, 'E4');
+    assert.equal(child.projection.current_execution_summary.current_gate, 'G3 implementation/validation');
+    assert.equal(child.projection.current_execution_summary.repair, '1/2');
+    assert.deepEqual(child.projection.parked_backlog, [{
+      issue: 250,
+      title: 'TK-010 — Parked investigations',
+      status: 'PARKED / NON-BLOCKING',
+      blocking: false,
+    }]);
+    assert.match(child.body, /## Parked backlog \/ not on current path/);
+    assert.doesNotMatch(child.body, new RegExp('# ' + item.blocker + '.*E4', 'i'));
+    assert.doesNotMatch(parent.body, /weijunswj\/ai-agent-toolkit|# 240|# 359/);
+    const parentRead = publicRead(parent.body, { kind: 'parent', repository: item.repository, issue: item.parent });
+    const childRead = publicRead(child.body, {
+      kind: 'child', repository: item.repository, issue: item.children[1], parent_issue: item.parent, parent_read: parent.read,
+    });
+    assert.equal(parentRead.ok, true, JSON.stringify(parentRead));
+    assert.equal(childRead.ok, true, JSON.stringify(childRead));
+    assert.equal(parent.body, surface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'parent' } }).body);
+    assert.equal(child.body, surface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'child', issue: item.children[1] } }).body);
+  }
+});
+
+test('governed programme-wide human-v2 migration is deterministic, opt-in, and fail-closed', () => {
+  const repository = 'octo/alpha';
+  const parentIssue = 901;
+  const state = genericState(repository, parentIssue, [902, 903, 904, 905, 906, 907], 9901);
+  const parent = surface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'parent' } });
+  assert.equal(parent.ok, true, JSON.stringify(parent));
+  const managedReads = managedChildReads(parent);
+  const input = {
+    parent_read: parent.read,
+    managed_child_reads: managedReads,
+    governance: governanceBinding(repository, parentIssue, { managed_programme: { binding: 'NEW', parent_issue: parentIssue, status: 'BOUND', surface_version: 'human-v2' } }),
+    history_decision: null,
+    provider_observations: null,
+  };
+  const first = surface.planMigration(input);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.action, 'RECONCILED');
+  assert.equal(first.scope, 'WHOLE_PROGRAMME');
+  assert.equal(first.write_count, 0);
+  assert.deepEqual(first.managed_child_issues, [902, 903, 904, 905, 906, 907]);
+  assert.equal(first.recovery.readback_required, true);
+  assert.equal(first.recovery.interruption_recovery, 'FRESH_COMPLETE_READS_AND_REPLAN');
+  assert.equal(first.recovery.semantic_state_mutation, false);
+  assert.equal(first.provider_mutation_authorised, false);
+  assert.equal(first.safe_for_provider_write, false);
+  assert.deepEqual(surface.planMigration(input), first);
+
+  const noConsent = { ...input };
+  delete noConsent.governance;
+  expectFailure(surface.planMigration(noConsent), 'GOVERNANCE_OPT_IN_REQUIRED');
+  expectFailure(surface.planMigration({ ...input, governance: { ...input.governance, governance: 'disabled' } }), 'GOVERNANCE_BINDING_INVALID');
+  expectFailure(surface.planMigration({ ...input, governance: { ...input.governance, repository_identity: { repository: 'other/repository', admitted: true } } }), 'GOVERNANCE_BINDING_INVALID');
+  expectFailure(surface.planMigration({ ...input, managed_child_reads: managedReads.slice(0, -1) }), 'MIGRATION_INVENTORY_INVALID');
+  expectFailure(surface.planMigration({ ...input, managed_child_reads: [...managedReads.slice(0, -1), managedReads[0]] }), 'MIGRATION_INVENTORY_INVALID');
+  expectFailure(surface.planMigration({ ...input, history_decision: {} }), 'MIGRATION_SEMANTIC_STATE_CHANGE_FORBIDDEN');
+
+  const toolkitParent = surface.render({ source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) }, target: { kind: 'parent' } });
+  const toolkitReads = managedChildReads(toolkitParent);
+  toolkitReads[1] = { issue: 359, read: completeRead(LEGACY_STAGE_B.child) };
+  expectFailure(surface.planMigration({
+    parent_read: toolkitParent.read,
+    managed_child_reads: toolkitReads,
+    governance: governanceBinding(REPOSITORY, 240),
+    history_decision: null,
+    provider_observations: null,
+  }), 'MIGRATION_MIXED_SURFACE_STATE');
 });
 
 test('complete-read false records fail at COMPLETE_READ while malformed types fail at INPUT', () => {
@@ -807,6 +1122,34 @@ test('render and readComplete enforce child source binding and PR number states'
   assert.equal(replay.provider_mutation_authorised, false);
 });
 
+test('bound PR current position uses current authority without overwriting historical provenance', () => {
+  const inputDescriptor = descriptor();
+  const currentAuthority = boundAuthority(inputDescriptor, 403, {
+    root: CURRENT_ROOT,
+    lock: CURRENT_LOCK,
+  });
+  const rendered = surface.render({
+    source: { type: 'PR_DESCRIPTOR', descriptor: inputDescriptor, bound_authority: currentAuthority },
+    target: { kind: 'pr' },
+  });
+  assert.equal(rendered.ok, true, JSON.stringify(rendered));
+  assert.equal(rendered.projection.current_derived.current_root, CURRENT_ROOT);
+  assert.equal(rendered.projection.current_derived.current_lock, CURRENT_LOCK);
+  assert.equal(rendered.projection.structural_provenance.root, ROOT);
+  assert.equal(rendered.projection.structural_provenance.lock, LOCK);
+  assert.equal(rendered.body.includes('| Root | ' + CURRENT_ROOT.replaceAll('-', '\\-') + ' |'), true);
+  assert.equal(rendered.body.includes('| Lock | ' + CURRENT_LOCK.replaceAll('-', '\\-') + ' |'), true);
+  const read = publicRead(rendered.body, {
+    kind: 'pr',
+    repository: REPOSITORY,
+    descriptor: inputDescriptor,
+    bound_authority: currentAuthority,
+  });
+  assert.equal(read.ok, true, JSON.stringify(read));
+  assert.equal(read.projection.current_derived.current_root, CURRENT_ROOT);
+  assert.equal(read.projection.structural_provenance.root, ROOT);
+});
+
 test('Root-005 preserves the accepted Root-004 descriptor projection architecture', () => {
   const inputDescriptor = descriptor({
     summary: 'SentinelSummary',
@@ -862,7 +1205,7 @@ test('Root-005 preserves the accepted Root-004 descriptor projection architectur
     || item.field.startsWith('current_derived.')));
   assert.ok(bound.projection.typed_nodes.filter((item) => item.zone === 'DESCRIPTOR_AT_CREATION').length > 0);
 
-  const carrierMarker = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR-CARRIER human-v2 ';
+  const carrierMarker = '<!-- MANAGED-PROGRAM-PR-CARRIER human-v2 ';
   const carrierLine = bound.body.split('\n').find((line) => line.startsWith(carrierMarker));
   assert.ok(carrierLine);
   const carrier = JSON.parse(Buffer.from(carrierLine.slice(carrierMarker.length, -4), 'base64url').toString('utf8'));

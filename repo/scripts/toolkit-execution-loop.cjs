@@ -7,6 +7,8 @@ const path = require('node:path');
 
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const a2 = require('./toolkit-capability-registry.cjs');
+const routeResolution = require('./toolkit-route-resolution.cjs');
+const hostRouteAdapters = require('./toolkit-host-route-adapters.cjs');
 
 const CONTRACTS = Object.freeze([
   'toolkit.execution-loop.request.v1',
@@ -182,6 +184,7 @@ function assertPrivacySafe(value, location = 'record', seen = new Set()) {
 function laneId(value) {
   if (typeof value === 'string' && isSafeId(value)) return value;
   if (isRecord(value) && isSafeId(value.id)) return value.id;
+  if (isRecord(value) && isSafeId(value.launch_id)) return value.launch_id;
   fail('LANE_ID_INVALID');
 }
 
@@ -197,7 +200,9 @@ function normalizeRequest(options = {}) {
   if (!isSafeId(taskId) || !isDigest(taskDigest)) fail('TASK_BINDING_INVALID');
   if (!isDigest(repositoryId) || !isDigest(refDigest)) fail('REPOSITORY_BINDING_INVALID');
   if (!isDigest(authorityDigest)) fail('RUN_AUTHORITY_REQUIRED');
-  const rawLanes = Array.isArray(authority.lanes) ? authority.lanes : [];
+  const rawLanes = Array.isArray(authority.launches)
+    ? authority.launches
+    : (Array.isArray(authority.routes) ? authority.routes : (Array.isArray(authority.lanes) ? authority.lanes : []));
   if (rawLanes.length > LIMITS.laneCount) fail('LANE_SET_OVERSIZED');
   const requestedLanes = rawLanes.map(laneId);
   if (new Set(requestedLanes).size !== requestedLanes.length) fail('LANE_SET_DUPLICATE');
@@ -275,43 +280,11 @@ function getAdapter(adapters, id) {
   return isRecord(adapters) ? adapters[id] : undefined;
 }
 
-function requestedLaneSpec(lane) {
-  if (typeof lane === 'string') return { id: lane };
-  if (!isRecord(lane)) fail('LANE_ROUTE_INVALID');
-  const result = { id: laneId(lane) };
-  for (const field of ['provider', 'model', 'reasoning', 'role', 'host_classification']) {
-    if (hasOwn(lane, field)) {
-      if (typeof lane[field] !== 'string' || lane[field].length === 0 || lane[field].length > 512) fail('LANE_ROUTE_INVALID');
-      result[field] = lane[field];
-    }
-  }
-  return result;
-}
-
-function adapterEvidence(adapter, spec) {
-  if (!adapter) return { available: false };
-  let evidence = adapter;
-  if (typeof adapter.probe === 'function') evidence = invokeSync(adapter.probe, adapter, { lane_id: spec.id }, 'ADAPTER_PROBE_FAILED');
-  if (!isRecord(evidence)) return { available: false };
-  const result = {
-    available: evidence.available === true,
-    provider: evidence.provider,
-    model: evidence.model,
-    reasoning: evidence.reasoning,
-    role: evidence.role,
-    host_classification: evidence.host_classification,
-    trusted: evidence.trusted !== false && evidence.metadata_verified !== false,
-    adapter_handle: evidence.adapter_handle || evidence.handle,
-  };
-  if (result.host_classification !== undefined && !HOST_CLASSIFICATIONS.includes(result.host_classification)) result.host_classification = 'unsupported';
-  return result;
-}
-
 function routeBlock(reasonCode) {
   return { status: 'blocked', reason_code: reasonCode, launches: [] };
 }
 
-function createRoutePlan(request, laneRecords) {
+function createRoutePlan(request, laneRecords, exactLaunches = null) {
   const rootOnly = laneRecords.length === 0;
   const base = {
     contract_version: CONTRACTS[1],
@@ -324,12 +297,15 @@ function createRoutePlan(request, laneRecords) {
     root_only: rootOnly,
     lanes: laneRecords,
   };
+  if (Array.isArray(exactLaunches)) base.exact_launches = exactLaunches;
   return deepFreeze({ ...base, route_digest: digestValue(base) });
 }
 
 function validateRoutePlan(record) {
-  const keys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
-  if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[1] || !isSafeId(record.route_id) || !isSafeId(record.request_id)
+  const baseKeys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
+  const exactKeysAllowed = [...baseKeys.slice(0, -1), 'exact_launches', 'route_digest'];
+  const hasExactLaunches = hasOwn(record, 'exact_launches');
+  if ((!exactKeys(record, baseKeys) && !(hasExactLaunches && exactKeys(record, exactKeysAllowed))) || record.contract_version !== CONTRACTS[1] || !isSafeId(record.route_id) || !isSafeId(record.request_id)
     || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
     || typeof record.delegated !== 'boolean' || typeof record.root_only !== 'boolean' || !Array.isArray(record.lanes)
     || record.lanes.length > LIMITS.laneCount || !isDigest(record.route_digest)) fail('ROUTE_PLAN_INVALID');
@@ -341,11 +317,77 @@ function validateRoutePlan(record) {
       || !isSafeHandle(lane.adapter_handle) || !isDigest(lane.capability_digest)) fail('ROUTE_PLAN_INVALID');
     seen.add(lane.lane_id);
   }
+  if (record.delegated && !hasExactLaunches) fail('EXACT_ROUTE_AUTHORITY_REQUIRED');
+  if (hasExactLaunches) {
+    if (!record.exact_launches.length || record.exact_launches.length !== record.lanes.length) fail('ROUTE_PLAN_INVALID');
+    for (const item of record.exact_launches) {
+      if (!exactKeys(item, ['launch_record', 'capability_proof'])) fail('ROUTE_PLAN_INVALID');
+      const launchRecord = routeResolution.validateResolvedLaunchRecord(item.launch_record);
+      const capabilityProof = hostRouteAdapters.verifyProofForRecord(launchRecord, item.capability_proof);
+      const lane = record.lanes.find((candidate) => candidate.lane_id === launchRecord.launch_id);
+      if (!lane
+        || launchRecord.route_digest !== capabilityProof.launch_record_digest
+        || lane.provider !== launchRecord.provider
+        || lane.model !== launchRecord.model
+        || lane.reasoning !== launchRecord.reasoning
+        || lane.role !== launchRecord.role
+        || lane.capability_digest !== digestValue(capabilityProof)) fail('ROUTE_PLAN_INVALID');
+    }
+  }
   if (record.root_only !== (record.lanes.length === 0) || record.delegated === record.root_only) fail('ROUTE_PLAN_INVALID');
   const base = clone(record);
   delete base.route_digest;
   if (digestValue(base) !== record.route_digest) fail('ROUTE_PLAN_INVALID');
   return deepFreeze(clone(record));
+}
+
+function exactRouteAuthority(options) {
+  return isRecord(options.authority) && (Array.isArray(options.authority.launches) || Array.isArray(options.authority.routes));
+}
+
+function admitResolvedRoute(options, request, consent) {
+  const authority = options.authority;
+  const entries = Array.isArray(authority.launches) ? authority.launches : authority.routes;
+  if (!Array.isArray(entries) || entries.length !== request.requested_lanes.length) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
+  const lanes = [];
+  const exactLaunches = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!isRecord(entry) || laneId(entry) !== request.requested_lanes[index]) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
+    try {
+      const launchRecord = routeResolution.resolveLaunchRecord({
+        ...entry,
+        launch_id: request.requested_lanes[index],
+        authority_digest: request.current_authority_digest,
+        host: entry.host || entry.backend
+      });
+      const capability = entry.capability || getAdapter(options.adapters, request.requested_lanes[index]);
+      const proofResult = hostRouteAdapters.proveHostCapability({ launch_record: launchRecord, capability });
+      lanes.push({
+        lane_id: launchRecord.launch_id,
+        provider: launchRecord.provider,
+        model: launchRecord.model,
+        reasoning: launchRecord.reasoning,
+        role: launchRecord.role,
+        host_classification: 'hard-runtime-enforcement',
+        adapter_handle: `host-adapter-${launchRecord.host}`,
+        capability_digest: proofResult.proof_digest
+      });
+      exactLaunches.push({ launch_record: launchRecord, capability_proof: proofResult.proof });
+    } catch (error) {
+      if (error instanceof routeResolution.RouteResolutionError || error instanceof hostRouteAdapters.HostAdapterError) {
+        return { ...routeBlock(error.code), request };
+      }
+      throw error;
+    }
+  }
+  return {
+    status: 'admitted',
+    request,
+    route_plan: createRoutePlan(request, lanes, exactLaunches),
+    launches: [],
+    consent
+  };
 }
 
 function admitRoute(options = {}) {
@@ -361,49 +403,16 @@ function admitRoute(options = {}) {
   if (!request.delegated) {
     return { status: 'admitted', request, route_plan: createRoutePlan(request, []), launches: [], consent };
   }
-  if (request.requested_lanes.length === 0) return { ...routeBlock('WORKER_ROUTE_UNAVAILABLE'), request };
-  const authorityLanes = Array.isArray(options.authority && options.authority.lanes) ? options.authority.lanes : request.requested_lanes;
-  if (authorityLanes.length !== request.requested_lanes.length) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
-  const records = [];
-  for (let index = 0; index < request.requested_lanes.length; index += 1) {
-    let spec;
-    try { spec = requestedLaneSpec(authorityLanes[index]); } catch (error) {
-      if (error instanceof ExecutionLoopError) return { ...routeBlock(error.code), request };
-      throw error;
-    }
-    if (spec.id !== request.requested_lanes[index]) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
-    let evidence;
-    try { evidence = adapterEvidence(getAdapter(options.adapters, spec.id), spec); } catch (error) {
-      if (error instanceof ExecutionLoopError) return { ...routeBlock(error.code), request };
-      throw error;
-    }
-    if (!evidence.available) return { ...routeBlock('WORKER_ROUTE_UNAVAILABLE'), request };
-    if (evidence.host_classification === 'unsupported') return { ...routeBlock('WORKER_ROUTE_UNAVAILABLE'), request };
-    if (!evidence.trusted || !evidence.provider || !evidence.model || !evidence.reasoning || !evidence.role || !evidence.host_classification) return { ...routeBlock('MODEL_METADATA_UNVERIFIED'), request };
-    for (const field of ['provider', 'model', 'reasoning', 'role', 'host_classification']) {
-      if (hasOwn(spec, field) && spec[field] !== evidence[field]) return { ...routeBlock('WORKER_MODEL_MISMATCH'), request };
-    }
-    if (evidence.adapter_handle !== undefined && !isSafeHandle(evidence.adapter_handle)) return { ...routeBlock('MODEL_METADATA_UNVERIFIED'), request };
-    records.push({
-      lane_id: spec.id,
-      provider: evidence.provider,
-      model: evidence.model,
-      reasoning: evidence.reasoning,
-      role: evidence.role,
-      host_classification: evidence.host_classification,
-      adapter_handle: evidence.adapter_handle || 'adapter-' + digestValue({ lane: spec.id, provider: evidence.provider, model: evidence.model }).slice(0, 20),
-      capability_digest: digestValue({ lane_id: spec.id, provider: evidence.provider, model: evidence.model, reasoning: evidence.reasoning, role: evidence.role, host_classification: evidence.host_classification }),
-    });
-  }
-  const routePlan = createRoutePlan(request, records);
-  return { status: 'admitted', request, route_plan: routePlan, launches: [], consent };
+  if (exactRouteAuthority(options)) return admitResolvedRoute(options, request, consent);
+  return { ...routeBlock('EXACT_ROUTE_AUTHORITY_REQUIRED'), request };
 }
 
 function invokeAtomicLaunch(fn, receiver, argument, failureCode) {
   let result;
   try {
     result = fn.call(receiver, argument);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) throw error;
     fail(failureCode);
   }
   if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
@@ -420,37 +429,49 @@ function exactIdSet(actual, expected) {
 
 function executeAtomicLaunch(routePlan, options) {
   if (typeof options.prepareLaunch !== 'function' || typeof options.commitLaunchBatch !== 'function') fail('LAUNCH_ATOMICITY_UNAVAILABLE');
-  const reservations = [];
-  for (const lane of routePlan.lanes) {
-    const reservation = invokeAtomicLaunch(options.prepareLaunch, options, lane, 'LAUNCH_PREPARATION_FAILED');
-    if (!isRecord(reservation) || !exactKeys(reservation, ['lane_id', 'reservation_handle', 'inert'])
-      || reservation.lane_id !== lane.lane_id || !isSafeHandle(reservation.reservation_handle) || reservation.inert !== true) {
-      fail('LAUNCH_RESERVATION_INVALID');
+  if (Array.isArray(routePlan.exact_launches)) {
+    const launchLeases = [];
+    for (const item of routePlan.exact_launches) {
+      const launchRecord = routeResolution.validateResolvedLaunchRecord(item.launch_record);
+      const capabilityProof = hostRouteAdapters.validateCapabilityProof(item.capability_proof);
+      const lane = routePlan.lanes.find((candidate) => candidate.lane_id === launchRecord.launch_id);
+      if (!lane || capabilityProof.launch_record_digest !== launchRecord.route_digest) fail('HOST_CAPABILITY_CONTRADICTION');
+      const lease = invokeAtomicLaunch(options.prepareLaunch, options, {
+        lane,
+        launch_record: launchRecord,
+        capability_proof: capabilityProof
+      }, 'LAUNCH_PREPARATION_FAILED');
+      if (!isRecord(lease) || !exactKeys(lease, ['lane_id', 'launch_lease', 'inert'])
+        || lease.lane_id !== lane.lane_id || !isSafeHandle(lease.launch_lease) || lease.inert !== true) {
+        fail('LAUNCH_LEASE_INVALID');
+      }
+      launchLeases.push(deepFreeze({ lane_id: lease.lane_id, launch_lease: lease.launch_lease, inert: true }));
     }
-    reservations.push(deepFreeze({ lane_id: reservation.lane_id, reservation_handle: reservation.reservation_handle, inert: true }));
-  }
-  if (typeof options.beforeCommitLaunchBatch === 'function') {
-    let result;
-    try {
-      result = options.beforeCommitLaunchBatch({ route_plan: routePlan, reservations: deepFreeze(reservations.slice()), run: options.run, workspace_receipt: options.workspace_receipt });
-    } catch (error) {
-      if (error instanceof ExecutionLoopError) throw error;
-      fail('LAUNCH_BATCH_FAILED');
+    if (typeof options.beforeCommitLaunchBatch === 'function') {
+      const result = invokeAtomicLaunch(options.beforeCommitLaunchBatch, options, {
+        route_plan: routePlan,
+        launch_leases: deepFreeze(launchLeases.slice()),
+        exact_launches: routePlan.exact_launches,
+        run: options.run,
+        workspace_receipt: options.workspace_receipt
+      }, 'LAUNCH_BATCH_FAILED');
+      if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
     }
-    if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
+    const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
+      route_plan: routePlan,
+      launch_leases: deepFreeze(launchLeases.slice()),
+      exact_launches: routePlan.exact_launches,
+      run_id: options.run && options.run.run_id,
+      repository_id: options.run && options.run.repository_id,
+      authorized_ref_digest: options.run && options.run.authorized_ref_digest,
+      current_authority_digest: options.run && options.run.current_authority_digest,
+      workspace_receipt: options.workspace_receipt
+    }, 'LAUNCH_BATCH_FAILED');
+    const expectedExact = routePlan.lanes.map((lane) => lane.lane_id);
+    if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expectedExact)) fail('LAUNCH_BATCH_INVALID');
+    return { launches: expectedExact };
   }
-  const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
-    route_plan: routePlan,
-    reservations: deepFreeze(reservations.slice()),
-    run_id: options.run && options.run.run_id,
-    repository_id: options.run && options.run.repository_id,
-    authorized_ref_digest: options.run && options.run.authorized_ref_digest,
-    current_authority_digest: options.run && options.run.current_authority_digest,
-    workspace_receipt: options.workspace_receipt,
-  }, 'LAUNCH_BATCH_FAILED');
-  const expected = routePlan.lanes.map((lane) => lane.lane_id);
-  if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) fail('LAUNCH_BATCH_INVALID');
-  return { launches: expected };
+  fail('EXACT_LAUNCH_REQUIRED');
 }
 
 function createRunReceipt(options = {}) {
@@ -1302,6 +1323,7 @@ module.exports = {
   admitRun,
   createRoutePlan,
   validateRoutePlan,
+  executeAtomicLaunch,
   createRunReceipt,
   validateRunReceipt,
   transitionRun,
