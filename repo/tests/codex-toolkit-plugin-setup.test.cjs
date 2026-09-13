@@ -156,6 +156,10 @@ function writeJson(value) {
   process.stdout.write(JSON.stringify(value, null, 2) + '\\n');
 }
 
+function finishOutput(exitCode) {
+  process.stdout.end(() => process.exit(exitCode));
+}
+
 function copyPath(sourcePath, targetPath) {
   if (!fs.existsSync(sourcePath)) return;
   const stat = fs.statSync(sourcePath);
@@ -238,15 +242,18 @@ if (args[0] === 'plugin' && args[1] === 'list') {
   const state = readState();
   if (pluginListMode === 'invalid-json') {
     process.stdout.write(pluginListStdout || '{"installed":');
-    process.exit(0);
-  }
-  if (pluginListMode === 'non-zero') {
+    finishOutput(0);
+    return;
+  } else if (pluginListMode === 'non-zero') {
     process.stdout.write(pluginListStdout);
     process.stderr.write(pluginListStderr);
-    process.exit(pluginListExitCode);
+    finishOutput(pluginListExitCode);
+    return;
+  } else {
+    writePluginList(state);
+    finishOutput(0);
+    return;
   }
-  writePluginList(state);
-  process.exit(0);
 }
 
 if (args[0] === 'plugin' && args[1] === 'add') {
