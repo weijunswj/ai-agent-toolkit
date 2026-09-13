@@ -10,6 +10,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
 const EXPECTED_TOOLKIT_VERSION = '2.11.0';
+const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -906,10 +907,21 @@ function resolveCodexCommand(explicitCommand) {
 function runCodexJson(command, args) {
   const result = spawnCodex(command, args, {
     encoding: 'utf8',
-    timeout: commandTimeoutMs()
+    timeout: commandTimeoutMs(),
+    maxBuffer: CODEX_JSON_MAX_BUFFER_BYTES
   });
+  const resultError = result.error;
+  const resultErrorCode = String(resultError?.code || '').toUpperCase();
+  const resultErrorMessage = String(resultError?.message || resultError || '');
+  if (resultError) {
+    if (resultErrorCode === 'ENOBUFS' || /\bENOBUFS\b|maxbuffer|buffer.*(?:limit|exceed)/i.test(resultErrorMessage)) {
+      throw new Error(`codex ${args.join(' ')} returned an excessive response; one captured stream exceeded ${CODEX_JSON_MAX_BUFFER_BYTES} bytes`);
+    }
+    throw new Error(`codex ${args.join(' ')} failed: ${resultErrorMessage}`);
+  }
   if (result.status !== 0) {
-    throw new Error(`codex ${args.join(' ')} failed: ${commandOutput(result)}`);
+    const stderr = String(result.stderr || '').trim();
+    throw new Error(`codex ${args.join(' ')} failed: ${stderr || `exit ${result.status}`}`);
   }
   const output = (result.stdout || '').trim();
   try {
@@ -1243,6 +1255,7 @@ module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,
+  CODEX_JSON_MAX_BUFFER_BYTES,
   MARKETPLACE_REL_PATH,
   CACHE_FINGERPRINT_PATHS,
   CACHE_FINGERPRINT_DIRS,

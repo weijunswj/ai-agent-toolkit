@@ -122,7 +122,10 @@ function writeFakeHangingCodex(codexHome, options = {}) {
   const expectedToolkitVersion = setup.EXPECTED_TOOLKIT_VERSION;
   writeJson(path.join(codexHome, 'state.json'), {
     repoRoot: '',
-    installed: Boolean(options.initialInstalled)
+    installed: Boolean(options.initialInstalled),
+    marketplaceAddCount: 0,
+    installCount: 0,
+    removeCount: 0
   });
   fs.writeFileSync(fakeCodexScript, `
 'use strict';
@@ -135,6 +138,11 @@ const statePath = path.join(codexHome, 'state.json');
 const args = process.argv.slice(2);
 const omitSessionStart = ${JSON.stringify(Boolean(options.omitSessionStart))};
 const installDelayMs = ${JSON.stringify(options.installDelayMs || 0)};
+const pluginListMode = ${JSON.stringify(options.pluginListMode || 'default')};
+const pluginListPaddingBytes = ${JSON.stringify(options.pluginListPaddingBytes || 0)};
+const pluginListStdout = ${JSON.stringify(options.pluginListStdout || '')};
+const pluginListStderr = ${JSON.stringify(options.pluginListStderr || '')};
+const pluginListExitCode = ${JSON.stringify(options.pluginListExitCode ?? 7)};
 
 function readState() {
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -184,22 +192,8 @@ function installCache(repoRoot) {
   }
 }
 
-if (args[0] === 'plugin' && args[1] === '--help') {
-  process.stdout.write('Manage Codex plugins\\n');
-  process.exit(0);
-}
-
-if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
-  const state = readState();
-  state.repoRoot = path.resolve(args[3]);
-  writeState(state);
-  writeJson({ marketplaceName: 'ai-agent-toolkit-local' });
-  process.exit(0);
-}
-
-if (args[0] === 'plugin' && args[1] === 'list') {
-  const state = readState();
-  writeJson({
+function writePluginList(state) {
+  const pluginList = {
     installed: state.installed ? [
       {
         pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
@@ -216,13 +210,49 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       }
     ] : [],
     available: []
-  });
+  };
+  if (pluginListMode === 'large-valid' || pluginListMode === 'over-limit') {
+    pluginList.available.push({
+      name: 'large-json-fixture',
+      description: (pluginListMode === 'over-limit' ? 'OVER_LIMIT_PAYLOAD_' : 'LARGE_JSON_PAYLOAD_') + 'x'.repeat(pluginListPaddingBytes)
+    });
+  }
+  writeJson(pluginList);
+}
+
+if (args[0] === 'plugin' && args[1] === '--help') {
+  process.stdout.write('Manage Codex plugins\\n');
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
+  const state = readState();
+  state.repoRoot = path.resolve(args[3]);
+  state.marketplaceAddCount = (state.marketplaceAddCount || 0) + 1;
+  writeState(state);
+  writeJson({ marketplaceName: 'ai-agent-toolkit-local' });
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'list') {
+  const state = readState();
+  if (pluginListMode === 'invalid-json') {
+    process.stdout.write(pluginListStdout || '{"installed":');
+    process.exit(0);
+  }
+  if (pluginListMode === 'non-zero') {
+    process.stdout.write(pluginListStdout);
+    process.stderr.write(pluginListStderr);
+    process.exit(pluginListExitCode);
+  }
+  writePluginList(state);
   process.exit(0);
 }
 
 if (args[0] === 'plugin' && args[1] === 'add') {
   const finishInstall = () => {
     const state = readState();
+    state.installCount = (state.installCount || 0) + 1;
     installCache(state.repoRoot);
     state.installed = true;
     writeState(state);
@@ -303,6 +333,20 @@ function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
     timeout: 5000,
     windowsHide: true
   });
+}
+
+function readFileSnapshot(filePath) {
+  return fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+}
+
+function snapshotFiles(filePaths) {
+  return filePaths.map((filePath) => ({ filePath, bytes: readFileSnapshot(filePath) }));
+}
+
+function assertFilesUnchanged(snapshot) {
+  for (const { filePath, bytes } of snapshot) {
+    assert.deepEqual(readFileSnapshot(filePath), bytes, filePath);
+  }
 }
 
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
@@ -763,6 +807,114 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /list the branches/i);
   assert.match(bridgeDoc, /proceed without Toolkit repo-local rules/i);
   assert.match(bridgeDoc, /alter a managed block/i);
+});
+
+test('Codex JSON inspection accepts valid plugin-list JSON at the observed large-response scale', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  const paddingBytes = 1700000;
+  assert.ok(paddingBytes > 1024 * 1024);
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'large-valid',
+    pluginListPaddingBytes: paddingBytes
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /verified by Codex CLI plugin list and cache/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /LARGE_JSON_PAYLOAD_/);
+});
+
+test('Codex JSON inspection rejects an over-limit response explicitly without parsing partial JSON', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'over-limit',
+    pluginListPaddingBytes: setup.CODEX_JSON_MAX_BUFFER_BYTES
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /excessive response/i);
+  assert.match(result.stderr, new RegExp(String(setup.CODEX_JSON_MAX_BUFFER_BYTES)));
+  assert.doesNotMatch(result.stderr, /returned invalid JSON/i);
+  assert.doesNotMatch(output, /OVER_LIMIT_PAYLOAD_/);
+});
+
+test('Codex JSON inspection rejects invalid JSON without exposing plugin-list output', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    pluginListMode: 'invalid-json',
+    pluginListStdout: '{"installed":["INVALID_JSON_PAYLOAD'
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /returned invalid JSON/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /INVALID_JSON_PAYLOAD/);
+});
+
+test('Codex JSON inspection keeps bounded stderr for non-zero exit while suppressing stdout', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    pluginListMode: 'non-zero',
+    pluginListStdout: '{"leaked":"NON_ZERO_PLUGIN_LIST_PAYLOAD"}',
+    pluginListStderr: 'bounded Codex list diagnostic\n',
+    pluginListExitCode: 23
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /failed: bounded Codex list diagnostic/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /NON_ZERO_PLUGIN_LIST_PAYLOAD/);
+});
+
+test('Codex --write inspection failure performs zero setup, cache, hook, marketplace, install, or remove writes', () => {
+  const codexHome = tmpRoot();
+  const cacheRoot = writeInstalledCache(codexHome);
+  const cacheMarker = path.join(cacheRoot, 'inspection-failure-cache-marker.txt');
+  fs.writeFileSync(cacheMarker, 'cache unchanged\n');
+  writeCodexConfig(codexHome, { trustedHook: true });
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'over-limit',
+    pluginListPaddingBytes: setup.CODEX_JSON_MAX_BUFFER_BYTES
+  });
+
+  const configPath = path.join(codexHome, 'config.toml');
+  const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+  const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+  const runtimePath = path.join(cacheRoot, ...setup.SESSION_START_RUNTIME_REL_PATH.split('/'));
+  const marketplacePath = path.join(repoRoot, ...setup.MARKETPLACE_REL_PATH.split('/'));
+  const statePath = path.join(codexHome, 'state.json');
+  const before = snapshotFiles([
+    configPath,
+    manifestPath,
+    hooksPath,
+    runtimePath,
+    cacheMarker,
+    marketplacePath,
+    statePath
+  ]);
+
+  const result = runSetupWrite(codexHome, fakeCodex);
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /excessive response/i);
+  assert.doesNotMatch(output, /OVER_LIMIT_PAYLOAD_/);
+  assertFilesUnchanged(before);
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(state.marketplaceAddCount, 0);
+  assert.equal(state.installCount, 0);
+  assert.equal(state.removeCount, 0);
 });
 
 test('Codex Toolkit --write succeeds when plugin add installs then times out', () => {
