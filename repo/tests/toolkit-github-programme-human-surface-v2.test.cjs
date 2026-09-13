@@ -11,6 +11,8 @@ const Ajv2020 = require('ajv/dist/2020');
 const surface = runtime.humanSurfaceV2;
 const ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
+const CURRENT_ROOT = 'S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001';
+const CURRENT_LOCK = 'DL-S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001';
 const HISTORICAL_PROOF_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SCHEMA-CONSISTENCY-006';
 const HISTORICAL_PROOF_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SCHEMA-CONSISTENCY-006';
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
@@ -818,7 +820,7 @@ function humanSurfaceContractInstance() {
       schema: 'github.program.pr-phase-projection.v1',
       zones: ['CURRENT_DERIVED', 'STRUCTURAL_PROVENANCE', 'DESCRIPTOR_AT_CREATION', 'OMITTED'],
       production_flow: ['VALIDATED_IMMUTABLE_PR_DESCRIPTOR_V2', 'VALIDATED_BOUND_AUTHORITY_OR_NULL', 'h2BuildPrPhaseProjection', 'h2ValidatePrPhaseProjection', 'h2BuildPrTypedDocument', 'PUBLIC_AUDIT_AND_SERIALIZER'],
-      current_derived: ['authority_presence', 'number_state', 'pr_number', 'next_action'],
+      current_derived: ['authority_presence', 'number_state', 'pr_number', 'current_root', 'current_lock', 'next_action'],
       descriptor_at_creation: ['summary', 'purpose', 'changed_surfaces', 'scope', 'out_of_scope', 'design_constraints', 'validation_requirements', 'evidence_refs', 'repair_history', 'before_after', 'repair_budget', 'hosted_qualification', 'recovery_evidence', 'eli5_at_creation', 'next_action_pre_number'],
       carrier_projection: ['schema', 'phase', 'digest'],
       failure_codes: ['PR_PHASE_PROJECTION_INVALID/CANONICAL', 'PR_PHASE_PROVENANCE_INVALID/PUBLIC_AUDIT', 'DESCRIPTOR_TEXT_CURRENT_ZONE/PUBLIC_AUDIT', 'PRE_NUMBER_FIELD_IN_BOUND/PUBLIC_AUDIT', 'STRUCTURAL_FIELD_ZONE_INVALID/PUBLIC_AUDIT', 'BOUND_CURRENT_FIELD_MISSING/AUTHORITY', 'BOUND_AUTHORITY_CURRENT_MISMATCH/AUTHORITY', 'PROJECTION_DIGEST_MISMATCH/READBACK', 'CARRIER_PROJECTION_MISMATCH/READBACK', 'READBACK_MISMATCH/READBACK'],
@@ -1118,6 +1120,34 @@ test('render and readComplete enforce child source binding and PR number states'
   assert.equal(replay.ok, false);
   assert.equal(replay.safe_for_provider_write, false);
   assert.equal(replay.provider_mutation_authorised, false);
+});
+
+test('bound PR current position uses current authority without overwriting historical provenance', () => {
+  const inputDescriptor = descriptor();
+  const currentAuthority = boundAuthority(inputDescriptor, 403, {
+    root: CURRENT_ROOT,
+    lock: CURRENT_LOCK,
+  });
+  const rendered = surface.render({
+    source: { type: 'PR_DESCRIPTOR', descriptor: inputDescriptor, bound_authority: currentAuthority },
+    target: { kind: 'pr' },
+  });
+  assert.equal(rendered.ok, true, JSON.stringify(rendered));
+  assert.equal(rendered.projection.current_derived.current_root, CURRENT_ROOT);
+  assert.equal(rendered.projection.current_derived.current_lock, CURRENT_LOCK);
+  assert.equal(rendered.projection.structural_provenance.root, ROOT);
+  assert.equal(rendered.projection.structural_provenance.lock, LOCK);
+  assert.equal(rendered.body.includes('| Root | ' + CURRENT_ROOT.replaceAll('-', '\\-') + ' |'), true);
+  assert.equal(rendered.body.includes('| Lock | ' + CURRENT_LOCK.replaceAll('-', '\\-') + ' |'), true);
+  const read = publicRead(rendered.body, {
+    kind: 'pr',
+    repository: REPOSITORY,
+    descriptor: inputDescriptor,
+    bound_authority: currentAuthority,
+  });
+  assert.equal(read.ok, true, JSON.stringify(read));
+  assert.equal(read.projection.current_derived.current_root, CURRENT_ROOT);
+  assert.equal(read.projection.structural_provenance.root, ROOT);
 });
 
 test('Root-005 preserves the accepted Root-004 descriptor projection architecture', () => {

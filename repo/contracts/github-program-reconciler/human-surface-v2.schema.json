@@ -338,6 +338,8 @@
             "authority_presence",
             "number_state",
             "pr_number",
+            "current_root",
+            "current_lock",
             "next_action"
           ]
         },
@@ -482,8 +484,8 @@
       "properties": {
         "schema": { "const": "github.program.bind-pr-number.v1" },
         "decision": { "const": "BIND_PR_NUMBER" },
-        "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
-        "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
+        "root": { "$ref": "#/$defs/safeId" },
+        "lock": { "$ref": "#/$defs/safeId" },
         "source": { "$ref": "#/$defs/sourceAuthority" },
         "repository": { "$ref": "#/$defs/repository" },
         "pr_number": { "$ref": "#/$defs/issue" },
@@ -719,11 +721,13 @@
         "current_derived": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["authority_presence", "number_state", "pr_number", "next_action"],
+          "required": ["authority_presence", "number_state", "pr_number", "current_root", "current_lock", "next_action"],
           "properties": {
             "authority_presence": { "enum": ["ABSENT", "BOUND_VALIDATED"] },
             "number_state": { "enum": ["PRE_NUMBER", "BOUND"] },
             "pr_number": { "anyOf": [{ "$ref": "#/$defs/issue" }, { "type": "null" }] },
+            "current_root": { "$ref": "#/$defs/safeId" },
+            "current_lock": { "$ref": "#/$defs/safeId" },
             "next_action": { "$ref": "#/$defs/safeLine" }
           }
         },

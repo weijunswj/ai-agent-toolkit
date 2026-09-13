@@ -145,7 +145,6 @@ test('repo-local agent rules keep application error defaults compact', () => {
     'repo/contracts/agent-rules/ai-coding-agent-execution.md',
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
     'AGENTS.md',
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {

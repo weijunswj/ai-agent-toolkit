@@ -3906,7 +3906,7 @@ function h2BoundAuthority(value, descriptor, stage = 'AUTHORITY') {
   }
   h2Require(h2Exact(value, keys)
     && value.schema === H2_BIND_AUTHORITY_SCHEMA && value.decision === 'BIND_PR_NUMBER'
-    && value.root === descriptor.root && value.lock === descriptor.lock
+    && h2SafeId(value.root) && h2SafeId(value.lock)
     && h2Exact(value.source, sourceKeys) && value.source.kind === 'USER_WEB_CONTROLLER'
     && h2SafeLine(value.source.reference, 2048) && h2Hash(value.source.body_sha256)
     && h2Repository(value.repository) && h2Issue(value.pr_number)
@@ -4798,6 +4798,8 @@ function h2PhaseProjectionNodes(projection) {
   push('CURRENT_DERIVED', 'current_derived.number_state', 'table_cell', current.number_state);
   push('CURRENT_DERIVED', 'current_derived.pr_number', current.pr_number === null ? 'table_cell' : 'identifier',
     current.pr_number === null ? 'pending provider assignment' : current.pr_number);
+  push('CURRENT_DERIVED', 'current_derived.current_root', 'table_cell', current.current_root);
+  push('CURRENT_DERIVED', 'current_derived.current_lock', 'table_cell', current.current_lock);
   push('CURRENT_DERIVED', 'current_derived.next_action', 'paragraph', current.next_action);
   const structural = projection.structural_provenance;
   const structuralValues = [
@@ -4841,7 +4843,7 @@ function h2PhaseProjectionNodes(projection) {
   return nodes;
 }
 function h2ValidatePrPhaseProjection(projection) {
-  const currentKeys = ['authority_presence', 'number_state', 'pr_number', 'next_action'];
+  const currentKeys = ['authority_presence', 'number_state', 'pr_number', 'current_root', 'current_lock', 'next_action'];
   const structuralKeys = ['root', 'lock', 'repository', 'parent_issue', 'child_issue', 'epoch_id', 'gate',
     'role', 'completes_child', 'candidate', 'descriptor_sha256', 'candidate_sha256',
     'authority_source', 'authority_sha256'];
@@ -4869,6 +4871,7 @@ function h2ValidatePrPhaseProjection(projection) {
   h2Require(['ABSENT', 'BOUND_VALIDATED'].includes(current.authority_presence)
     && current.number_state === projection.phase
     && (current.pr_number === null || h2Issue(current.pr_number))
+    && h2SafeId(current.current_root) && h2SafeId(current.current_lock)
     && h2SafeLine(current.next_action), true, 'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
   h2Require(h2Repository(structural.repository) && h2Issue(structural.parent_issue)
     && h2Issue(structural.child_issue) && h2SafeId(structural.epoch_id) && h2SafeId(structural.gate)
@@ -4957,6 +4960,8 @@ function h2BuildPrPhaseProjection(descriptor, authority) {
       authority_presence: bound ? 'BOUND_VALIDATED' : 'ABSENT',
       number_state: bound ? 'BOUND' : 'PRE_NUMBER',
       pr_number: bound ? bound.pr_number : null,
+      current_root: bound ? bound.root : normalized.root,
+      current_lock: bound ? bound.lock : normalized.lock,
       next_action: bound ? 'Continue only under the bound controller authority.' : normalized.next_action_pre_number,
     },
     structural_provenance: {
@@ -5024,8 +5029,8 @@ function h2BuildPrTypedDocument(projection) {
     'These fields identify programme and candidate provenance only. They do not assert current provider state, gate activation, reviews, checks, Draft, Ready, merge, or finality.',
     '| Field | Value |',
     '| --- | --- |',
-    '| Root | ' + h2Cell(structural.root) + ' |',
-    '| Lock | ' + h2Cell(structural.lock) + ' |',
+    '| Root | ' + h2Cell(current.current_root) + ' |',
+    '| Lock | ' + h2Cell(current.current_lock) + ' |',
     '| Repository | ' + h2Cell(structural.repository) + ' |',
     '| Parent | #' + h2Identifier(structural.parent_issue) + ' |',
     '| Child | #' + h2Identifier(structural.child_issue) + ' |',
