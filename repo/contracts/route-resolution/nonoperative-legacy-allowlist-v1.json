@@ -1,17 +1,64 @@
 {
   "contract_version": "toolkit.route-resolution.nonoperative-legacy-allowlist.v1",
-  "schema_version": 1,
-  "purpose": "Names retained only for bounded migration detection and historical evidence; none are route or scheduling authority.",
-  "legacy_identifiers": [
-    "toolkit-agent-control",
-    "checker-admission",
-    "helper-capacity",
-    "reservation",
-    "worker-route",
-    "g4-model-binding",
-    "g4a-model-binding"
+  "schema_version": 2,
+  "purpose": "Exact identifier, path, and syntactic classifications retained only for bounded migration, tests, and historical evidence.",
+  "entries": [
+    { "identifier": "toolkit-agent-control", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history" },
+      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document" },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-agent-launch-lifecycle.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-local-bridge.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source" }
+    ] },
+    { "identifier": "checker-admission", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history" }
+    ] },
+    { "identifier": "helper-capacity", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-literal" },
+      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-symbol", "line_pattern": "(?:CODEX_HELPER_CAPACITY_(?:BEGIN|END)|['\\\"]helper-capacity['\\\"])" },
+      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-literal" },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-symbol", "line_pattern": "CODEX_HELPER_CAPACITY_(?:BEGIN|END)" },
+      { "path_prefix": "repo/tests/codex-delegation-", "path_suffix": ".test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-managed-config-migration.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
+      { "path_prefix": "repo/tests/toolkit-setup-", "path_suffix": ".test.cjs", "classification": "test-source" },
+      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document" }
+    ] },
+    { "identifier": "reservation", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" },
+      { "path": "repo/docs/FOR_AI_AGENTS.md", "classification": "migration-document" },
+      { "path": "repo/docs/HOW-TO-USE.md", "classification": "migration-document" },
+      { "path": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md", "classification": "migration-document" },
+      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document" },
+      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-state-field", "line_pattern": "(?:reservation_queue_policy|scheduler, checker, reservation, or resource)" },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
+      { "path": "repo/scripts/validate-nonoperative-legacy-identifiers.cjs", "classification": "contract-definition" },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/agent-instruction-shims.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/codex-delegation-malformed-repair.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-github-programme-projection-bootstrap-recovery-v5.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-setup-orchestrator-3.test.cjs", "classification": "test-source" },
+      { "path": "repo/tests/toolkit-setup-question-model.test.cjs", "classification": "test-source" },
+      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document" }
+    ] },
+    { "identifier": "worker-route", "rules": [{ "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" }] },
+    { "identifier": "g4-model-binding", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" }
+    ] },
+    { "identifier": "g4a-model-binding", "rules": [
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" }
+    ] }
   ],
-  "allowed_contexts": ["migration-detection", "historical-evidence", "repair-diagnostic"],
   "active_policy": false,
   "fallback": false
 }

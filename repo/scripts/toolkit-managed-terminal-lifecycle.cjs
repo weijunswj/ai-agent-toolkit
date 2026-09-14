@@ -116,7 +116,7 @@ function validateCompletedManagedEvidence(state) {
     || (state.absence_readback_evidence !== null && state.absence_readback_evidence !== undefined);
   if (!hasManagedEvidence) return;
   const expected = deletionEligibility(state.deletion_eligibility_evidence, state.branch);
-  deletionAcknowledgement(state.deletion_acknowledgement, expected);
+  if (state.deletion_observed_absent !== true) deletionAcknowledgement(state.deletion_acknowledgement, expected);
   if (state.absence_readback !== true) fail('ABSENCE_READBACK_UNVERIFIED');
   absenceReadback(state.absence_readback_evidence, expected);
 }
@@ -130,6 +130,8 @@ function createInitialState(options = {}) {
     closed: bool(options.closed),
     closure_readback: bool(options.closure_readback),
     delete_eligible: false,
+    deletion_intent_persisted: false,
+    deletion_observed_absent: false,
     absence_readback: false,
     terminal_receipt: false,
     branch: safeBranch(options.branch) ? options.branch : null,
@@ -189,22 +191,33 @@ function runManagedTerminalLifecycle(options = {}) {
     const resumedAck = state.deletion_acknowledgement;
     const resumedEligibility = state.deletion_eligibility_evidence;
     let expected;
-    if (resumedAck !== null || persistedState === 'SAFE_MANAGED_BRANCH_DELETE' || persistedState === 'ABSENCE_READBACK') {
-      if (!resumedAck || !resumedEligibility) fail('DELETION_ACKNOWLEDGEMENT_REQUIRED');
+    if (resumedAck !== null) {
+      if (!resumedEligibility) fail('DELETION_ACKNOWLEDGEMENT_REQUIRED');
       expected = deletionEligibility(resumedEligibility, state.branch);
       deletionAcknowledgement(resumedAck, expected);
     } else {
-      const expectedEligibility = deletionEligibility(options.eligibility_evidence, state.branch);
+      if ((persistedState === 'SAFE_MANAGED_BRANCH_DELETE' || persistedState === 'ABSENCE_READBACK')
+        && state.deletion_intent_persisted !== true) fail('DURABLE_CHECKPOINT_REQUIRED');
+      const expectedEligibility = deletionEligibility(resumedEligibility || options.eligibility_evidence, state.branch);
       const result = invoke(options, 'recheckExpectedRefSha', null, Object.freeze({ branch: state.branch, eligibility_evidence: expectedEligibility }));
       if (result === null || typeof result !== 'object') fail('EXPECTED_REF_SHA_UNVERIFIED');
-      const refreshed = exactTerminalIdentity(result, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
-      state.deletion_eligibility_evidence = refreshed;
-      expected = refreshed;
+      if (result.present === false) {
+        exactTerminalIdentity(result, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
+        state.deletion_observed_absent = true;
+        expected = expectedEligibility;
+      } else {
+        const refreshed = deletionEligibility(result, state.branch);
+        exactTerminalIdentity(refreshed, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
+        state.deletion_eligibility_evidence = refreshed;
+        expected = refreshed;
+      }
     }
     state.delete_eligible = true;
     state.reason_code = null;
     state.state = 'SAFE_MANAGED_BRANCH_DELETE';
-    if (!state.deletion_acknowledgement) {
+    if (!state.deletion_acknowledgement && !state.deletion_observed_absent) {
+      state.deletion_intent_persisted = true;
+      persistCheckpoint(options, state);
       const acknowledged = invoke(options, 'deleteBranch', null, Object.freeze({ branch: state.branch, eligibility_evidence: expected }));
       state.deletion_acknowledgement = deletionAcknowledgement(acknowledged, expected);
       persistCheckpoint(options, state);

@@ -126,7 +126,7 @@ test('terminal receipt cannot bypass missing managed deletion evidence', () => {
   }), (error) => error.code === 'DELETE_ELIGIBILITY_UNVERIFIED');
 });
 
-test('interrupted managed delete state without acknowledgement cannot repeat deletion', () => {
+test('interrupted managed delete intent rechecks ref state and proves absence without repeating deletion', () => {
   let deletions = 0;
   const sha = 'c'.repeat(40);
   const eligibility = {
@@ -142,7 +142,7 @@ test('interrupted managed delete state without acknowledgement cannot repeat del
     protected: false,
     checked_out: false
   };
-  assert.throws(() => lifecycle.recoverManagedTerminalLifecycle({
+  const resumed = lifecycle.recoverManagedTerminalLifecycle({
     issue_number: 502,
     branch: 'codex/terminal-502',
     managed_branch: true,
@@ -154,16 +154,50 @@ test('interrupted managed delete state without acknowledgement cannot repeat del
       closed: true,
       closure_readback: true,
       delete_eligible: true,
+      deletion_intent_persisted: true,
+      deletion_observed_absent: false,
       branch: 'codex/terminal-502',
       deletion_eligibility_evidence: eligibility,
       deletion_acknowledgement: null,
       absence_readback: false,
       terminal_receipt: false
     },
-    recheckExpectedRefSha: () => { throw new Error('must not recheck'); },
+    recheckExpectedRefSha: () => ({ trusted: true, present: false, ...eligibility }),
     deleteBranch: () => { deletions += 1; return { acknowledged: true, ...eligibility }; },
     persistState: () => true,
     readAbsence: () => ({ trusted: true, present: false, ...eligibility })
-  }), (error) => error.code === 'DELETION_ACKNOWLEDGEMENT_REQUIRED');
+  });
+  assert.equal(resumed.terminal_receipt, true);
+  assert.equal(deletions, 0);
+});
+
+test('fresh pre-delete evidence revalidates every safety flag', () => {
+  const eligibility = {
+    trusted: true, repository: 'weijunswj/ai-agent-toolkit', ownership: 'toolkit-managed',
+    ref: 'refs/heads/codex/terminal-503', sha: 'd'.repeat(40), terminal_state: 'terminal-success',
+    retained: false, unpublished_loss: false, default_branch: false, protected: false, checked_out: false
+  };
+  let deletions = 0;
+  assert.throws(() => lifecycle.runManagedTerminalLifecycle({
+    issue_number: 503, branch: 'codex/terminal-503', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, managed_branch: true, eligibility_evidence: eligibility,
+    recheckExpectedRefSha: () => ({ ...eligibility, protected: true }),
+    deleteBranch: () => { deletions += 1; }, persistState: () => true
+  }), (error) => error.code === 'DELETE_ELIGIBILITY_UNVERIFIED');
+  assert.equal(deletions, 0);
+});
+
+test('durable checkpoint capability is proven before irreversible deletion', () => {
+  const eligibility = {
+    trusted: true, repository: 'weijunswj/ai-agent-toolkit', ownership: 'toolkit-managed',
+    ref: 'refs/heads/codex/terminal-504', sha: 'e'.repeat(40), terminal_state: 'terminal-success',
+    retained: false, unpublished_loss: false, default_branch: false, protected: false, checked_out: false
+  };
+  let deletions = 0;
+  assert.throws(() => lifecycle.runManagedTerminalLifecycle({
+    issue_number: 504, branch: 'codex/terminal-504', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, managed_branch: true, eligibility_evidence: eligibility,
+    recheckExpectedRefSha: () => ({ ...eligibility }), deleteBranch: () => { deletions += 1; }
+  }), (error) => error.code === 'DURABLE_CHECKPOINT_REQUIRED');
   assert.equal(deletions, 0);
 });

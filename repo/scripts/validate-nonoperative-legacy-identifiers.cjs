@@ -6,14 +6,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ALLOWLIST_REL_PATH = 'repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json';
-const ALLOWED_CONTEXTS = new Set(['migration-detection', 'historical-evidence', 'repair-diagnostic']);
+const ALLOWED_CONTEXTS = new Set(['contract-definition', 'structured-history', 'historical-document', 'migration-document', 'migration-literal', 'migration-symbol', 'migration-state-field', 'test-source']);
 const CANDIDATE_EXTENSIONS = new Set(['.cjs', '.js', '.mjs', '.json', '.md', '.yaml', '.yml', '.toml', '.ps1', '.cmd', '.sh', '.py']);
-const HISTORICAL_AUDIT = 'repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md';
-const VALIDATOR_REL_PATH = 'repo/scripts/validate-nonoperative-legacy-identifiers.cjs';
-const EXACT_MIGRATION_FILES = new Map([
-  ['repo/scripts/toolkit-managed-config-migration.cjs', 'migration-detection'],
-  ['repo/tests/toolkit-managed-config-migration.test.cjs', 'repair-diagnostic'],
-]);
 
 function slash(value) {
   return String(value).split(path.sep).join('/');
@@ -30,18 +24,21 @@ function loadAllowlist(workspace) {
   const filePath = path.join(workspace, ...ALLOWLIST_REL_PATH.split('/'));
   const document = JSON.parse(readUtf8(filePath));
   if (!document || typeof document !== 'object' || Array.isArray(document)
-    || document.active_policy !== false || document.fallback !== false
-    || !Array.isArray(document.legacy_identifiers)
-    || !Array.isArray(document.allowed_contexts)
-    || document.legacy_identifiers.length === 0
-    || new Set(document.legacy_identifiers).size !== document.legacy_identifiers.length
-    || document.legacy_identifiers.some((value) => typeof value !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(value))
-    || document.allowed_contexts.some((value) => !ALLOWED_CONTEXTS.has(value))) {
+    || document.schema_version !== 2 || document.active_policy !== false || document.fallback !== false
+    || !Array.isArray(document.entries) || document.entries.length === 0
+    || document.entries.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry)
+      || typeof entry.identifier !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(entry.identifier)
+      || !Array.isArray(entry.rules) || entry.rules.length === 0
+      || entry.rules.some((rule) => !rule || typeof rule !== 'object' || Array.isArray(rule)
+        || !ALLOWED_CONTEXTS.has(rule.classification)
+        || (['migration-symbol', 'migration-state-field'].includes(rule.classification) && typeof rule.line_pattern !== 'string')
+        || (typeof rule.path !== 'string' && (typeof rule.path_prefix !== 'string' || typeof rule.path_suffix !== 'string'))))) {
     throw new Error(`${ALLOWLIST_REL_PATH} is malformed or enables active policy`);
   }
   return Object.freeze({
-    identifiers: Object.freeze([...document.legacy_identifiers]),
-    contexts: Object.freeze([...document.allowed_contexts])
+    entries: Object.freeze(document.entries.map((entry) => Object.freeze({ identifier: entry.identifier, rules: Object.freeze(entry.rules.map((rule) => Object.freeze({ ...rule }))) }))),
+    identifiers: Object.freeze(document.entries.map((entry) => entry.identifier)),
+    contexts: Object.freeze([...ALLOWED_CONTEXTS])
   });
 }
 
@@ -87,79 +84,33 @@ function lineText(text, lineNumber) {
   return lines[lineNumber - 1] || '';
 }
 
-function explicitContexts(text) {
-  const lines = text.split(/\r?\n/);
-  const contexts = [];
-  const malformed = [];
-  let open = null;
-  for (let index = 0; index < lines.length; index += 1) {
-    const begin = lines[index].match(/^\s*NONOPERATIVE-LEGACY-CONTEXT:\s*(migration-detection|historical-evidence|repair-diagnostic)\s*$/i);
-    const end = /^\s*NONOPERATIVE-LEGACY-CONTEXT:END\s*$/.test(lines[index]);
-    if (begin) {
-      if (open) malformed.push(index + 1);
-      else open = { context: begin[1].toLowerCase(), start: index + 1 };
-    } else if (end) {
-      if (!open) malformed.push(index + 1);
-      else {
-        contexts.push({ ...open, end: index + 1 });
-        open = null;
-      }
+function codeOccurrenceIsLiteral(line, column) {
+  const prefix = line.slice(0, column);
+  if (/^\s*(?:\/\/|\*)/.test(line) || prefix.includes('//')) return true;
+  for (const delimiter of ['"', "'", '`']) {
+    let open = false;
+    for (let index = 0; index < column; index += 1) {
+      if (line[index] === '\\') { index += 1; continue; }
+      if (line[index] === delimiter) open = !open;
     }
+    if (open) return true;
   }
-  if (open) malformed.push(open.start);
-  return { contexts, malformed };
+  const beforeSlash = prefix.lastIndexOf('/');
+  return beforeSlash >= 0 && line.indexOf('/', column) > column;
 }
 
-function jsonArraySectionContains(text, offset, field) {
-  const fieldStart = text.lastIndexOf(`"${field}"`, offset);
-  if (fieldStart < 0) return false;
-  const opening = text.indexOf('[', fieldStart);
-  const closing = text.indexOf(']', opening + 1);
-  return opening >= 0 && closing >= offset;
+function ruleMatchesPath(rule, relPath) {
+  if (typeof rule.path === 'string') return relPath === rule.path;
+  return relPath.startsWith(rule.path_prefix) && relPath.endsWith(rule.path_suffix);
 }
 
-function specialContext(relPath, text, offset, line) {
-  if (relPath === ALLOWLIST_REL_PATH) return 'migration-detection';
-  if (relPath === VALIDATOR_REL_PATH) return 'migration-detection';
-  if (relPath === 'repo/contracts/route-resolution/g3-implementation-allowlist-v1.json'
-    && jsonArraySectionContains(text, offset, 'delete_paths')) return 'historical-evidence';
-  if (relPath === 'repo/contracts/route-resolution/route-resolution-policy-v1.json'
-    && jsonArraySectionContains(text, offset, 'forbidden_active_authority')) return 'historical-evidence';
-  if (EXACT_MIGRATION_FILES.has(relPath)) return EXACT_MIGRATION_FILES.get(relPath);
-  if (relPath === HISTORICAL_AUDIT) return 'historical-evidence';
-  if (relPath === 'repo/scripts/codex-delegation-common.cjs' && /CODEX_HELPER_CAPACITY_(?:BEGIN|END)/.test(line)) return 'migration-detection';
-  if (relPath === 'repo/scripts/codex-delegation-layout.cjs' && /CODEX_HELPER_CAPACITY_(?:BEGIN|END)/.test(line)) return 'migration-detection';
-  if (relPath === 'repo/scripts/codex-delegation-state.cjs'
-    && /helper[-_ ]capacity/i.test(line)
-    && /(CODEX_HELPER_CAPACITY|Object\.freeze|markerCategories|assignmentsByCategory|malformed|official|approved|migrat)/i.test(line)) return 'migration-detection';
-  if (relPath === 'repo/scripts/setup-toolkit-core.cjs'
-    && /codex-helper-(?:capacity|count)|approve-high-helper-capacity|helper[-_ ]capacity/i.test(line)
-    && /--|owner_question_id|activation_key|detail_type|backward-compatible|Unsupported|Custom Codex helper capacity/i.test(line)) return 'migration-detection';
-  if (relPath === 'repo/scripts/codex-delegation-config.cjs'
-    && /helper[-_ ]capacity/i.test(line)
-    && /CODEX_HELPER_CAPACITY|marker|assignment|proposal|approved|migrat|legacy|unmarked|exact/i.test(line)) return 'migration-detection';
-  if (relPath === 'repo/tests/codex-delegation-malformed-repair.test.cjs') return 'repair-diagnostic';
-  if (relPath === 'repo/tests/codex-delegation-v2.test.cjs' && /CODEX-HELPER-CAPACITY/i.test(line)) return 'repair-diagnostic';
-  if (/^repo\/tests\/toolkit-setup-[^/]+\.test\.cjs$/.test(relPath)
-    && /--codex-helper-(?:capacity|count)|approve-high-helper-capacity|helper[-_ ]capacity/i.test(line)) return 'repair-diagnostic';
-  if (relPath === 'repo/tests/toolkit-setup-orchestrator-3.test.cjs'
-    && /assert\.match/.test(line)
-    && /reservations?/i.test(line)) return 'repair-diagnostic';
-  if (relPath === 'repo/tests/toolkit-local-bridge.test.cjs' && /toolkit-agent-control\.cjs/.test(line)) return 'repair-diagnostic';
-  return null;
-}
-
-function contextFor(relPath, text, offset, lineNumber, line, contexts) {
-  const explicit = contexts.find((entry) => lineNumber > entry.start && lineNumber < entry.end);
-  if (explicit) return explicit.context;
-  const special = specialContext(relPath, text, offset, line);
-  if (special) return special;
-
-  const activeAuthority = /\b(?:route|routing|scheduler|schedule|admission|admit|policy|authority|launch|execution|execute|provider|model|speed|queue|reservation)\b/i.test(line);
-  const explicitNonoperative = /\b(?:not|never|cannot|without|forbidden|retired|historical|diagnostic|repair|deprecated|obsolete|unsupported|unverifiable|unverified|stale|malformed|excluded|outside|bypass|false|failed|failure|removed|remove|preserv\w*|doesNotMatch|does\s+not|do\s+not|no)\b/i.test(line)
-    || /NONOPERATIVE|NON-OPERATIVE|migration-only|compatibility-only|legacy-only/i.test(line);
-  if (activeAuthority && !explicitNonoperative) return null;
-  if (explicitNonoperative || /\b(?:legacy|migration|old)\b/i.test(line)) return 'historical-evidence';
+function contextFor(entry, relPath, line, column) {
+  for (const rule of entry.rules) {
+    if (!ruleMatchesPath(rule, relPath)) continue;
+    if (rule.classification === 'migration-literal' && !codeOccurrenceIsLiteral(line, column)) continue;
+    if (typeof rule.line_pattern === 'string' && !new RegExp(rule.line_pattern).test(line)) continue;
+    return rule.classification;
+  }
   return null;
 }
 
@@ -186,16 +137,17 @@ function validateTrackedTree(workspace = process.cwd()) {
       continue;
     }
     filesScanned += 1;
-    const contexts = explicitContexts(text);
-    for (const line of contexts.malformed) findings.push({ code: 'CONTEXT_MARKER_MALFORMED', path: relPath, line });
-    for (const identifier of allowlist.identifiers) {
+    for (const entry of allowlist.entries) {
+      const identifier = entry.identifier;
       const pattern = identifierPattern(identifier);
       for (const match of text.matchAll(pattern)) {
         occurrences += 1;
         const offset = match.index || 0;
         const lineNumber = lineForOffset(text, offset);
-        const context = contextFor(relPath, text, offset, lineNumber, lineText(text, lineNumber), contexts.contexts);
-        if (!context || !allowlist.contexts.includes(context)) {
+        const line = lineText(text, lineNumber);
+        const column = offset - text.lastIndexOf('\n', Math.max(0, offset - 1)) - 1;
+        const context = contextFor(entry, relPath, line, column);
+        if (!context) {
           findings.push({ code: 'LEGACY_IDENTIFIER_UNCLASSIFIED', path: relPath, line: lineNumber, identifier, context: context || 'unknown' });
         }
       }

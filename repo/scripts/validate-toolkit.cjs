@@ -728,6 +728,14 @@ function validateTrackedLocalRuntimeFiles(errors) {
   }
 }
 
+function validateLegacyIdentifierAuditWiring(errors) {
+  const validatorPath = path.join(root, 'repo', 'scripts', 'validate-toolkit.cjs');
+  const source = fs.readFileSync(validatorPath, 'utf8');
+  if (!/const legacyIdentifierResult = legacyIdentifierAudit\.validateTrackedTree\(root\);/.test(source)) {
+    fail(errors, 'Retirement validator wiring is absent or bypassed in repo/scripts/validate-toolkit.cjs');
+  }
+}
+
 function validate() {
   const errors = [];
   validateRootTopology(errors);
@@ -742,6 +750,7 @@ function validate() {
   validateManagedSurfaces(errors);
   validateSourceWatch(errors);
   validateContracts(errors);
+  validateLegacyIdentifierAuditWiring(errors);
   const legacyIdentifierResult = legacyIdentifierAudit.validateTrackedTree(root);
   for (const finding of legacyIdentifierResult.findings) {
     fail(errors, `${finding.code}: ${finding.path || ''}${finding.line ? `:${finding.line}` : ''}`.trim());

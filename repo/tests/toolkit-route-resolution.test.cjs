@@ -31,6 +31,16 @@ test('omitted depth-one child speed is Standard and never inherits root Priority
 
 test('the homogeneous G3 priority child requires explicit authority and tree digests', () => {
   const root = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'g3-root' });
+  const authorityDigest = route.digestValue({ authority: 'g3-child' });
+  const priorityAuthority = route.createPriorityChildAuthority({
+    authority_digest: authorityDigest,
+    child_launch_id: 'g3-child',
+    parent: root,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    role: 'g3',
+    host: 'codex'
+  });
   const child = route.resolveDepthOneLaunch({
     role: 'g3',
     host: 'codex',
@@ -39,16 +49,23 @@ test('the homogeneous G3 priority child requires explicit authority and tree dig
     tree_digest: treeDigest,
     scope_digest: scopeDigest,
     speed: 'priority',
-    priority_child_authority: {
-      enabled: true,
-      accepted: true,
-      authority_digest: route.digestValue({ authority: 'g3-child' }),
-      tree_digest: treeDigest
-    }
+    priority_child_authority: priorityAuthority
   });
   assert.equal(child.speed, 'priority');
   assert.equal(child.child_priority_authorized, true);
   assert.match(child.child_authority_digest, /^[a-f0-9]{64}$/);
+  for (const changed of [
+    { child_launch_id: 'other-child' },
+    { parent_launch_id: 'other-parent' },
+    { scope_digest: route.digestValue({ scope: 'other' }) },
+    { tree_digest: route.digestValue({ tree: 'other' }) },
+    { role: 'recon' }
+  ]) {
+    assert.throws(() => route.resolveDepthOneLaunch({
+      role: 'g3', host: 'codex', parent: root, launch_id: 'g3-child', tree_digest: treeDigest,
+      scope_digest: scopeDigest, speed: 'priority', priority_child_authority: { ...priorityAuthority, ...changed }
+    }), codeIs('PRIORITY_CHILD_AUTHORITY_REQUIRED'));
+  }
 });
 
 test('route resolution fails closed for nested children and unsupported hosts', () => {

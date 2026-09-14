@@ -66,6 +66,58 @@ function lineRecords(text) {
   return records;
 }
 
+function scanTomlLexicalLines(text) {
+  const records = lineRecords(text);
+  const lines = [];
+  let multiline = null;
+  let squareDepth = 0;
+  let braceDepth = 0;
+  let unsafe = false;
+  for (const record of records) {
+    const startsInMultiline = multiline !== null;
+    const startsAtTopLevel = !startsInMultiline && squareDepth === 0 && braceDepth === 0;
+    let quote = multiline;
+    let index = 0;
+    let visibleText = '';
+    while (index < record.text.length) {
+      if (quote === 'multiline-basic' || quote === 'multiline-literal') {
+        const delimiter = quote === 'multiline-basic' ? '\"\"\"' : "'''";
+        const close = record.text.indexOf(delimiter, index);
+        if (close === -1) { index = record.text.length; continue; }
+        quote = null;
+        multiline = null;
+        index = close + 3;
+        continue;
+      }
+      const char = record.text[index];
+      if (char === '#') { visibleText += record.text.slice(index); break; }
+      if (record.text.startsWith('\"\"\"', index)) { quote = 'multiline-basic'; multiline = quote; index += 3; continue; }
+      if (record.text.startsWith("'''", index)) { quote = 'multiline-literal'; multiline = quote; index += 3; continue; }
+      if (char === '"' || char === "'") {
+        const delimiter = char;
+        index += 1;
+        let closed = false;
+        while (index < record.text.length) {
+          if (delimiter === '"' && record.text[index] === '\\') { index += 2; continue; }
+          if (record.text[index] === delimiter) { closed = true; index += 1; break; }
+          index += 1;
+        }
+        if (!closed) unsafe = true;
+        continue;
+      }
+      visibleText += char;
+      if (char === '[') squareDepth += 1;
+      else if (char === ']') { squareDepth -= 1; if (squareDepth < 0) unsafe = true; }
+      else if (char === '{') braceDepth += 1;
+      else if (char === '}') { braceDepth -= 1; if (braceDepth < 0) unsafe = true; }
+      index += 1;
+    }
+    lines.push({ ...record, visible_text: visibleText, top_level: startsAtTopLevel, inside_multiline: startsInMultiline });
+  }
+  if (multiline !== null || squareDepth !== 0 || braceDepth !== 0) unsafe = true;
+  return { lines, unsafe };
+}
+
 function validBody(kind, body) {
   const lines = body.map((line) => line.text);
   if (kind === 'legacy-limits') {
@@ -82,16 +134,20 @@ function validBody(kind, body) {
 
 function parseManagedBlocks(text) {
   const blocks = [];
-  const records = lineRecords(text);
+  const lexical = scanTomlLexicalLines(text);
+  const records = lexical.lines;
   const seen = new Set();
   let open = null;
-  let unsafe = false;
+  let unsafe = lexical.unsafe;
+  let visibleLegacy = false;
   for (const record of records) {
     const marker = record.text;
-    const begin = BY_BEGIN.get(marker);
-    const end = BY_END.get(marker);
-    const isToolkitMarker = marker.includes(MARKER_PREFIX)
-      || /^#\s*TOOLKIT[-_ ]HELPER[-_ ]CAPACITY[-_ ](?:BEGIN|END)\b/i.test(marker);
+    const markerEligible = record.top_level && !record.inside_multiline;
+    const begin = markerEligible ? BY_BEGIN.get(marker) : null;
+    const end = markerEligible ? BY_END.get(marker) : null;
+    const isToolkitMarker = markerEligible && (marker.includes(MARKER_PREFIX)
+      || /^#\s*TOOLKIT[-_ ]HELPER[-_ ]CAPACITY[-_ ](?:BEGIN|END)\b/i.test(marker));
+    if (markerEligible && LEGACY_MARKER.test(record.visible_text)) visibleLegacy = true;
     if (isToolkitMarker && !begin && !end) {
       unsafe = true;
       continue;
@@ -114,7 +170,7 @@ function parseManagedBlocks(text) {
     if (open) open.body.push(record);
   }
   if (open) unsafe = true;
-  return { blocks: unsafe ? [] : blocks, unsafe };
+  return { blocks: unsafe ? [] : blocks, unsafe, visibleLegacy };
 }
 
 function managedBlocks(text) {
@@ -125,7 +181,7 @@ function managedBlocks(text) {
 function inspectManagedConfiguration(input = {}) {
   const text = readConfig(input);
   const parsed = parseManagedBlocks(text);
-  const stale = LEGACY_MARKER.test(text);
+  const stale = parsed.visibleLegacy;
   const structural = stale && (parsed.unsafe || parsed.blocks.length === 0);
   return Object.freeze({
     contract_version: CONTRACT_VERSION,
@@ -198,5 +254,6 @@ module.exports = Object.freeze({
   planManagedConfigMigration,
   migrateManagedConfiguration,
   managedBlocks,
-  parseManagedBlocks
+  parseManagedBlocks,
+  scanTomlLexicalLines
 });

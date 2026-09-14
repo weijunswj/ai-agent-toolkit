@@ -32,7 +32,7 @@
     "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "version": { "const": "human-v2" },
-    "package_version": { "const": "2.11.2" },
+    "package_version": { "const": "2.11.3" },
     "facade_export": { "const": "humanSurfaceV2" },
     "operations": {
       "const": ["readComplete", "render", "extendHistory", "planMigration"]
@@ -212,7 +212,7 @@
     "migration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null", "programme_wide_scope", "programme_wide_action", "programme_wide_requires_governance", "unknown_or_mixed_fails_closed", "format_migration_distinct_from_state_mutation", "idempotent_readback_recovery"],
+      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null", "programme_wide_scope", "programme_wide_action", "programme_wide_requires_governance", "unknown_formats_fail_closed", "known_mixed_generation_recovery", "format_migration_distinct_from_state_mutation", "idempotent_readback_recovery"],
       "properties": {
         "max_write_plans": { "const": 1 },
         "legacy_legacy": { "const": "WRITE_PARENT" },
@@ -224,7 +224,8 @@
         "programme_wide_scope": { "const": "parent plus all managed direct children" },
         "programme_wide_action": { "const": "WRITE_PROGRAMME" },
         "programme_wide_requires_governance": { "const": true },
-        "unknown_or_mixed_fails_closed": { "const": true },
+        "unknown_formats_fail_closed": { "const": true },
+        "known_mixed_generation_recovery": { "const": "write only remaining legacy-v5 surfaces after exact canonical/readback validation" },
         "format_migration_distinct_from_state_mutation": { "const": true },
         "idempotent_readback_recovery": { "const": "fresh complete reads and replan" }
       }

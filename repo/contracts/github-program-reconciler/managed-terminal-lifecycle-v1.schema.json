@@ -5,7 +5,7 @@
   "description": "Ordered, idempotent terminal cleanup evidence. It grants no branch deletion authority by itself.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_version", "state", "terminal_decision", "durable_disposition", "closed", "closure_readback", "delete_eligible", "absence_readback", "terminal_receipt"],
+  "required": ["contract_version", "state", "terminal_decision", "durable_disposition", "closed", "closure_readback", "delete_eligible", "deletion_intent_persisted", "deletion_observed_absent", "absence_readback", "terminal_receipt"],
   "properties": {
     "contract_version": { "const": "toolkit.github-program-reconciler.managed-terminal-lifecycle.v1" },
     "state": { "enum": ["TERMINAL_DECISION", "DURABLE_DISPOSITION_OR_SUCCESSOR_RECEIPT", "CLOSE", "CLOSURE_READBACK", "DELETE_ELIGIBILITY_CHECK", "EXPECTED_REF_SHA_RECHECK", "SAFE_MANAGED_BRANCH_DELETE", "ABSENCE_READBACK", "TERMINAL_RECEIPT"] },
@@ -14,6 +14,8 @@
     "closed": { "type": "boolean" },
     "closure_readback": { "type": "boolean" },
     "delete_eligible": { "type": "boolean" },
+    "deletion_intent_persisted": { "type": "boolean" },
+    "deletion_observed_absent": { "type": "boolean" },
     "absence_readback": { "type": "boolean" },
     "terminal_receipt": { "type": "boolean" },
     "branch": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,256}$" },
@@ -25,7 +27,13 @@
   "allOf": [
     {
       "if": { "properties": { "terminal_receipt": { "const": true }, "delete_eligible": { "const": true } }, "required": ["terminal_receipt", "delete_eligible"] },
-      "then": { "required": ["deletion_eligibility_evidence", "deletion_acknowledgement", "absence_readback_evidence"] }
+      "then": {
+        "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
+        "anyOf": [
+          { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
+          { "properties": { "deletion_acknowledgement": { "not": { "type": "null" } } }, "required": ["deletion_acknowledgement"] }
+        ]
+      }
     }
   ],
   "$defs": {

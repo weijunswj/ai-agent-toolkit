@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PACKAGE_VERSION = '2.11.2';
+const PACKAGE_VERSION = '2.11.3';
 const CONTRACT_VERSION = 'toolkit.route-resolution.resolved-launch-record.v1';
 const RECEIPT_CONTRACT_VERSION = 'toolkit.route-resolution.exact-launch-receipt.v1';
 const REGISTRY_CONTRACT_VERSION = 'toolkit.route-resolution.role-registry.v1';
@@ -135,21 +135,62 @@ function assertExactInput(input, definition, field, code = 'ROUTE_CONTRADICTION'
   if (input[field] !== definition[field]) fail(code, { field, expected: definition[field], observed: input[field] });
 }
 
-function priorityAuthority(input) {
-  const nested = isRecord(input.priority_child_authority) ? input.priority_child_authority : {};
-  const authorityDigest = nested.authority_digest || input.child_authority_digest || input.authority_digest || null;
-  const treeDigest = nested.tree_digest || input.tree_override_digest || input.tree_digest || null;
-  const enabled = nested.enabled === true || nested.allow === true || input.allow_priority_child === true;
-  const accepted = nested.accepted === true;
-  return { enabled, accepted, authorityDigest, treeDigest };
+function priorityBindingPayload(authority) {
+  const payload = clone(authority);
+  delete payload.enabled;
+  delete payload.accepted;
+  delete payload.binding_digest;
+  return payload;
 }
 
-function validatePriorityAuthority(input) {
-  const authority = priorityAuthority(input);
-  if (!authority.enabled || !authority.accepted || !isDigest(authority.authorityDigest) || !isDigest(authority.treeDigest)) {
-    fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'explicit-authority-and-tree-override-required' });
+function validatePriorityAuthority(input, context) {
+  const authority = input.priority_child_authority;
+  const keys = ['enabled', 'accepted', 'authority_digest', 'binding_digest', 'child_launch_id', 'parent_launch_id', 'parent_route_digest', 'tree_digest', 'scope_digest', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'host', 'backend'];
+  if (!exactKeys(authority, keys)
+    || authority.enabled !== true
+    || authority.accepted !== true
+    || !isDigest(authority.authority_digest)
+    || !isDigest(authority.binding_digest)
+    || !isSafeId(authority.child_launch_id)
+    || !isSafeId(authority.parent_launch_id)
+    || !isDigest(authority.parent_route_digest)
+    || !isDigest(authority.tree_digest)
+    || !isDigest(authority.scope_digest)
+    || authority.binding_digest !== digestValue(priorityBindingPayload(authority))) {
+    fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'exact-bound-authority-required' });
+  }
+  for (const key of ['child_launch_id', 'parent_launch_id', 'parent_route_digest', 'tree_digest', 'scope_digest', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'host', 'backend']) {
+    if (authority[key] !== context[key]) fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'priority-authority-binding-mismatch', field: key });
   }
   return authority;
+}
+
+function createPriorityChildAuthority(input = {}) {
+  const parent = validateResolvedLaunchRecord(input.parent);
+  const registry = input.registry || loadRoleRegistry();
+  const definition = registry.roles[input.role];
+  const host = input.host;
+  if (!definition || !isSafeId(input.child_launch_id) || !isDigest(input.authority_digest)
+    || !isDigest(input.tree_digest) || !isDigest(input.scope_digest) || !HOSTS.includes(host)) {
+    fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'binding-input-invalid' });
+  }
+  const base = {
+    authority_digest: input.authority_digest,
+    child_launch_id: input.child_launch_id,
+    parent_launch_id: parent.launch_id,
+    parent_route_digest: parent.route_digest,
+    tree_digest: input.tree_digest,
+    scope_digest: input.scope_digest,
+    role: input.role,
+    provider: definition.provider,
+    model: definition.model,
+    reasoning: definition.reasoning,
+    service_tier: definition.service_tier,
+    speed: 'priority',
+    host,
+    backend: host
+  };
+  return deepFreeze({ enabled: true, accepted: true, ...base, binding_digest: digestValue(base) });
 }
 
 function parentRecord(input, registry) {
@@ -195,6 +236,7 @@ function resolveLaunchRecord(input = {}) {
   let speedSource;
   let childPriorityAuthorized = false;
   let childAuthorityDigest = null;
+  let pendingPriorityAuthority = false;
   if (depth === 1) {
     if (provided(input, 'speed')) {
       if (!SPEEDS.includes(input.speed)) fail('ROUTE_METADATA_MISSING', { field: 'speed' });
@@ -204,12 +246,7 @@ function resolveLaunchRecord(input = {}) {
           || definition.model !== 'gpt-5.6-luna' || definition.reasoning !== 'max') {
           fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'non-homogeneous-g3-child' });
         }
-        const authority = validatePriorityAuthority(input);
-        if (authority.treeDigest !== input.tree_digest) {
-          fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'priority-tree-scope-mismatch' });
-        }
-        childPriorityAuthorized = true;
-        childAuthorityDigest = authority.authorityDigest;
+        pendingPriorityAuthority = true;
         speedSource = 'explicit-child-authority';
       } else {
         speedSource = 'explicit-child-authority';
@@ -223,12 +260,31 @@ function resolveLaunchRecord(input = {}) {
     speed = definition.speed;
     speedSource = 'registry-default';
   }
+  const launchId = input.launch_id || `launch-${digestValue({ role, host, depth, parent_launch_id: parent?.launch_id || null, speed, tree_digest: input.tree_digest || null, scope_digest: input.scope_digest || null }).slice(0, 24)}`;
+  if (!isSafeId(launchId)) fail('ROUTE_METADATA_MISSING', { field: 'launch_id' });
+  if (pendingPriorityAuthority) {
+    const authority = validatePriorityAuthority(input, {
+      child_launch_id: launchId,
+      parent_launch_id: parent.launch_id,
+      parent_route_digest: parent.route_digest,
+      tree_digest: input.tree_digest,
+      scope_digest: input.scope_digest,
+      role,
+      provider: definition.provider,
+      model: definition.model,
+      reasoning: definition.reasoning,
+      service_tier: definition.service_tier,
+      speed,
+      host,
+      backend: host
+    });
+    childPriorityAuthorized = true;
+    childAuthorityDigest = authority.binding_digest;
+  }
   if (depth === 1 && speed === 'priority' && parentSpeed === 'priority' && !childPriorityAuthorized) {
     fail('CHILD_SPEED_INHERITANCE_REJECTED', { reason: 'priority-was-not-explicitly-authorized' });
   }
   if (depth === 1 && speed === 'priority' && !childPriorityAuthorized) fail('PRIORITY_CHILD_AUTHORITY_REQUIRED');
-  const launchId = input.launch_id || `launch-${digestValue({ role, host, depth, parent_launch_id: parent?.launch_id || null, speed, tree_digest: input.tree_digest || null, scope_digest: input.scope_digest || null }).slice(0, 24)}`;
-  if (!isSafeId(launchId)) fail('ROUTE_METADATA_MISSING', { field: 'launch_id' });
   const base = {
     contract_version: CONTRACT_VERSION,
     record_version: 1,
@@ -390,6 +446,7 @@ module.exports = Object.freeze({
   resolveRoute: resolveRoleRoute,
   resolveLaunchRecord,
   resolveDepthOneLaunch,
+  createPriorityChildAuthority,
   validateResolvedLaunchRecord,
   createExactLaunchReceipt,
   validateExactLaunchReceipt

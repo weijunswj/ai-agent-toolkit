@@ -31,18 +31,8 @@ function track(root, ...files) {
   execFileSync('git', ['-C', root, 'add', '--', ...files]);
 }
 
-test('canonical allowlist and narrow historical contexts pass', () => {
-  const root = fixtureRoot();
-  const legacy = token('toolkit', 'agent', 'control');
-  writeFile(path.join(root, 'repo', 'docs', 'history.md'), `Legacy migration evidence: ${legacy}.\n`);
-  writeFile(path.join(root, 'repo', 'docs', 'marked.md'), [
-    'NONOPERATIVE-LEGACY-CONTEXT: repair-diagnostic',
-    legacy,
-    'NONOPERATIVE-LEGACY-CONTEXT:END',
-    ''
-  ].join('\n'));
-  track(root, 'repo/docs/history.md', 'repo/docs/marked.md', validator.ALLOWLIST_REL_PATH);
-  const result = validator.validateTrackedTree(root);
+test('canonical tracked tree satisfies the exact retirement allowlist', () => {
+  const result = validator.validateTrackedTree(repoRoot);
   assert.equal(result.ok, true, JSON.stringify(result.findings));
 });
 
@@ -59,13 +49,25 @@ test('unknown and active route contexts fail without broad fixture exemptions', 
   assert.deepEqual(result.findings.map((finding) => finding.path).sort(), ['repo/fixture/active.js', 'repo/fixture/unknown.js']);
 });
 
-test('malformed context marker fails closed', () => {
+test('historical-looking markers cannot exempt executable retired identifiers', () => {
   const root = fixtureRoot();
-  const legacy = token('checker', 'admission');
-  writeFile(path.join(root, 'repo', 'fixture', 'malformed.md'), `NONOPERATIVE-LEGACY-CONTEXT: migration-detection\n${legacy}\n`);
-  track(root, 'repo/fixture/malformed.md', validator.ALLOWLIST_REL_PATH);
+  const target = path.join(root, 'repo', 'scripts', 'setup-toolkit-core.cjs');
+  writeFile(target, [
+    '// NONOPERATIVE-LEGACY-CONTEXT: historical',
+    'const reservation = false;',
+    '// NONOPERATIVE-LEGACY-CONTEXT:END',
+    ''
+  ].join('\n'));
+  track(root, 'repo/scripts/setup-toolkit-core.cjs', validator.ALLOWLIST_REL_PATH);
   const result = validator.validateTrackedTree(root);
   assert.equal(result.ok, false);
-  assert.ok(result.findings.some((finding) => finding.code === 'CONTEXT_MARKER_MALFORMED'));
   assert.ok(result.findings.some((finding) => finding.code === 'LEGACY_IDENTIFIER_UNCLASSIFIED'));
+});
+
+test('an exact migration field on its exact path remains narrowly classified', () => {
+  const root = fixtureRoot();
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-toolkit-core.cjs'), 'const state = { reservation_queue_policy: false };\n');
+  track(root, 'repo/scripts/setup-toolkit-core.cjs', validator.ALLOWLIST_REL_PATH);
+  const result = validator.validateTrackedTree(root);
+  assert.equal(result.ok, true, JSON.stringify(result.findings));
 });

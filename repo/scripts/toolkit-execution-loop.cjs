@@ -391,6 +391,7 @@ function admitResolvedRoute(options, request, consent) {
       }
       if (launchRecord.speed === 'priority') {
         if (!isRecord(priorityAuthority)) return { ...routeBlock('PRIORITY_CHILD_AUTHORITY_REQUIRED'), request };
+        if (priorityAuthority.authority_digest !== request.current_authority_digest) return { ...routeBlock('PRIORITY_CHILD_AUTHORITY_REQUIRED'), request };
         const resolvedPriority = routeResolution.resolveDepthOneLaunch({
           ...recordInput,
           authority_digest: request.current_authority_digest,

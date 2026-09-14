@@ -702,7 +702,7 @@ function humanSurfaceContractInstance() {
     root: ROOT,
     lock: LOCK,
     version: 'human-v2',
-    package_version: '2.11.2',
+    package_version: '2.11.3',
     facade_export: 'humanSurfaceV2',
     operations: ['readComplete', 'render', 'extendHistory', 'planMigration'],
     stages: [
@@ -791,7 +791,8 @@ function humanSurfaceContractInstance() {
       programme_wide_scope: 'parent plus all managed direct children',
       programme_wide_action: 'WRITE_PROGRAMME',
       programme_wide_requires_governance: true,
-      unknown_or_mixed_fails_closed: true,
+      unknown_formats_fail_closed: true,
+      known_mixed_generation_recovery: 'write only remaining legacy-v5 surfaces after exact canonical/readback validation',
       format_migration_distinct_from_state_mutation: true,
       idempotent_readback_recovery: 'fresh complete reads and replan',
     },
@@ -1013,13 +1014,35 @@ test('governed programme-wide human-v2 migration is deterministic, opt-in, and f
   const toolkitParent = surface.render({ source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) }, target: { kind: 'parent' } });
   const toolkitReads = managedChildReads(toolkitParent);
   toolkitReads[1] = { issue: 359, read: completeRead(LEGACY_STAGE_B.child) };
-  expectFailure(surface.planMigration({
+  const interruptedInput = {
     parent_read: toolkitParent.read,
     managed_child_reads: toolkitReads,
     governance: governanceBinding(REPOSITORY, 240),
     history_decision: null,
     provider_observations: null,
-  }), 'MIGRATION_MIXED_SURFACE_STATE');
+  };
+  const remainingChild = surface.planMigration(interruptedInput);
+  assert.equal(remainingChild.ok, true, JSON.stringify(remainingChild));
+  assert.equal(remainingChild.write_count, 1);
+  assert.equal(remainingChild.source_child_format, 'mixed-interrupted');
+  assert.deepEqual(remainingChild.writes.map((write) => `${write.kind}:${write.issue}`), ['child:359']);
+
+  const repairedReads = toolkitReads.slice();
+  repairedReads[1] = { issue: 359, read: remainingChild.writes[0].read };
+  const childBoundaryRecovered = surface.planMigration({ ...interruptedInput, managed_child_reads: repairedReads });
+  assert.equal(childBoundaryRecovered.ok, true, JSON.stringify(childBoundaryRecovered));
+  assert.equal(childBoundaryRecovered.write_count, 0);
+
+  const legacyParentInterrupted = surface.planMigration({ ...interruptedInput, parent_read: completeRead(LEGACY_STAGE_B.parent) });
+  assert.equal(legacyParentInterrupted.ok, true, JSON.stringify(legacyParentInterrupted));
+  assert.deepEqual(legacyParentInterrupted.writes.map((write) => `${write.kind}:${write.issue}`), ['parent:240', 'child:359']);
+
+  const parentBoundaryRecovered = surface.planMigration(interruptedInput);
+  assert.equal(parentBoundaryRecovered.ok, true, JSON.stringify(parentBoundaryRecovered));
+  assert.deepEqual(parentBoundaryRecovered.writes.map((write) => `${write.kind}:${write.issue}`), ['child:359']);
+  const allBoundariesRecovered = surface.planMigration({ ...interruptedInput, managed_child_reads: repairedReads });
+  assert.equal(allBoundariesRecovered.ok, true, JSON.stringify(allBoundariesRecovered));
+  assert.equal(allBoundariesRecovered.write_count, 0);
 });
 
 test('complete-read false records fail at COMPLETE_READ while malformed types fail at INPUT', () => {

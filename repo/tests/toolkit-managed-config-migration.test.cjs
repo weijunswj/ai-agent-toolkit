@@ -46,3 +46,14 @@ test('failed migration invokes rollback with the exact original bytes', () => {
   }), (error) => error.code === 'MIGRATION_WRITE_FAILED');
   assert.deepEqual(rollbackRequest, { original_text: text, attempted_text: '' });
 });
+
+test('exact-looking Toolkit blocks inside TOML multiline strings remain byte-for-byte user data', () => {
+  for (const delimiter of ['"""', "'''"]) {
+    const text = `note = ${delimiter}\n${migration.CODEX_DELEGATION_BEGIN || '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION v3'}\nmax_threads = 2\nmax_depth = 1\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION\n${delimiter}\n`;
+    const inspection = migration.inspectManagedConfiguration({ text });
+    assert.equal(inspection.status, 'NOOP');
+    assert.equal(inspection.block_count, 0);
+    assert.equal(migration.migrateManagedConfiguration({ text, write: false }).changed, false);
+    assert.equal(text.includes('max_threads = 2'), true);
+  }
+});

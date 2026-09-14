@@ -36,7 +36,7 @@
     "child_scope_digest_required": true,
     "nested_delegation": "reject",
     "priority_authority_requires_explicit_accepted": true,
-    "priority_authority_binds": ["parent_launch_id", "tree_digest", "scope_digest"]
+    "priority_authority_binds": ["child_launch_id", "parent_launch_id", "parent_route_digest", "tree_digest", "scope_digest", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend"]
   },
   "route_evidence_binding": ["launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "backend", "host", "tree_digest", "scope_digest", "route_digest"],
   "capability": {

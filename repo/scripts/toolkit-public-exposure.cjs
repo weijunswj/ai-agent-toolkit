@@ -41,36 +41,38 @@ function isPlaceholder(value) {
   return typeof value !== 'string' || value.length === 0 || PLACEHOLDER_PATTERN.test(value.trim());
 }
 
-function classifyExposure({ value, name = 'payload', place = 'unknown', action = 'publish', type = 'value', metadata = false, confirmed = false } = {}) {
+function classifyExposure({ value, name = 'payload', place = 'unknown', action = 'publish', type = 'value', metadata = false, confirmed = false, secret_context = false } = {}) {
   const normalizedName = normalizeField(name);
   if (confirmed === true) return Object.freeze({ classification: 'confirmed', finding: finding(type || 'confirmed-secret', name, place, action), code: 'SECRET_EXPOSURE_DETECTED' });
+  if (typeof value === 'string' && isPlaceholder(value)) return Object.freeze({ classification: 'none', finding: null });
   const pattern = secretPattern(value);
   if (pattern) return Object.freeze({ classification: 'confirmed', finding: finding(pattern.type, name, place, action), code: 'SECRET_EXPOSURE_DETECTED' });
-  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
-  if (SECRET_FIELDS.has(normalizedName)) {
-    if (isPlaceholder(value)) return Object.freeze({ classification: 'none', finding: null });
+  if (Array.isArray(value) || isRecord(value)) return Object.freeze({ classification: 'none', finding: null });
+  if (typeof value === 'string' && /(?:secret|credential|password|token|api[-_ ]?key|authorization)\s*[:=]\s*\S+/i.test(value)) {
+    return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-assignment', name, place, action) });
+  }
+  if (SECRET_FIELDS.has(normalizedName) || secret_context === true) {
     return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-value', name, place, action) });
   }
+  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
   if (typeof value === 'string' && /(?:secret|credential|password|token|api[-_ ]?key|authorization)/i.test(value)) {
     return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-text', name, place, action) });
   }
   return Object.freeze({ classification: 'none', finding: null });
 }
 
-function redactValue(value, name, place, findings, pathValue = '') {
-  const classification = classifyExposure({ value, name, place, action: 'publish' });
+function redactValue(value, name, place, findings, pathValue = '', secretContext = false) {
+  const normalizedName = normalizeField(name);
+  const nextSecretContext = secretContext || SECRET_FIELDS.has(normalizedName);
+  const classification = classifyExposure({ value, name, place, action: 'publish', secret_context: secretContext });
   if (classification.finding) findings.push(classification.finding);
   if (classification.classification !== 'none') return REDACTED;
-  if (Array.isArray(value)) return value.map((child, index) => redactValue(child, `${name}[${index}]`, place, findings, `${pathValue}[${index}]`));
+  if (Array.isArray(value)) return value.map((child, index) => redactValue(child, name, place, findings, `${pathValue}[${index}]`, nextSecretContext));
   if (isRecord(value)) {
     const result = {};
     for (const [key, child] of Object.entries(value)) {
       const childPlace = pathValue ? `${place}.${pathValue}.${key}` : `${place}.${key}`;
-      const childClass = classifyExposure({ value: child, name: key, place: childPlace, action: 'publish' });
-      if (childClass.finding) findings.push(childClass.finding);
-      result[key] = childClass.classification === 'none'
-        ? redactValue(child, key, childPlace, findings, key)
-        : REDACTED;
+      result[key] = redactValue(child, key, childPlace, findings, key, nextSecretContext);
     }
     return result;
   }

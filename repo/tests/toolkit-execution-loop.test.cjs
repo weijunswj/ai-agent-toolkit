@@ -300,12 +300,15 @@ test('integrated delegated admission binds an explicitly accepted Priority child
     requested_lanes: ['priority-child'],
   });
   const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'priority-parent' });
-  const priorityAuthority = {
-    enabled: true,
-    accepted: true,
-    authority_digest: route.digestValue({ authority: 'priority-integrated' }),
+  const priorityAuthority = route.createPriorityChildAuthority({
+    authority_digest: common.current_authority_digest,
+    child_launch_id: 'priority-child',
+    parent,
     tree_digest: treeDigest,
-  };
+    scope_digest: scopeDigest,
+    role: 'loop-manager',
+    host: 'codex'
+  });
   const child = route.resolveDepthOneLaunch({
     role: 'loop-manager',
     host: 'codex',
@@ -348,6 +351,14 @@ test('integrated delegated admission binds an explicitly accepted Priority child
   };
   const rejected = runtime.admitRoute({ ...common, authority: withoutAcceptedAuthority });
   assert.equal(rejected.reason_code, 'PRIORITY_CHILD_AUTHORITY_REQUIRED');
+  const reusedForOtherChild = {
+    ...authority,
+    launches: [{
+      ...authority.launches[0],
+      priority_child_authority: { ...priorityAuthority, child_launch_id: 'priority-child-b' }
+    }]
+  };
+  assert.equal(runtime.admitRoute({ ...common, authority: reusedForOtherChild }).reason_code, 'PRIORITY_CHILD_AUTHORITY_REQUIRED');
 });
 
 test('lifecycle admits exact live snapshot and rejects missing terminal evidence', () => {

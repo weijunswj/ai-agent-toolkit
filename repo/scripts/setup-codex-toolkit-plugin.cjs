@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.11.2';
+const EXPECTED_TOOLKIT_VERSION = '2.11.3';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
@@ -716,18 +716,76 @@ function configHasEnabledPlugin(configText) {
   return inspectConfiguredPluginState(configText, pluginId()).status === 'enabled';
 }
 
+function scanConfigTomlLexicalLines(text) {
+  const lines = [];
+  let multiline = null;
+  let squareDepth = 0;
+  let braceDepth = 0;
+  let unsafe = false;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const startsInMultiline = multiline !== null;
+    const startsAtTopLevel = !startsInMultiline && squareDepth === 0 && braceDepth === 0;
+    let quote = multiline;
+    let index = 0;
+    let visibleText = '';
+    while (index < line.length) {
+      if (quote === 'multiline-basic' || quote === 'multiline-literal') {
+        const delimiter = quote === 'multiline-basic' ? '\"\"\"' : "'''";
+        const close = line.indexOf(delimiter, index);
+        if (close === -1) { index = line.length; continue; }
+        quote = null;
+        multiline = null;
+        index = close + 3;
+        continue;
+      }
+      const char = line[index];
+      if (char === '#') { visibleText += line.slice(index); break; }
+      if (line.startsWith('\"\"\"', index)) { quote = 'multiline-basic'; multiline = quote; index += 3; continue; }
+      if (line.startsWith("'''", index)) { quote = 'multiline-literal'; multiline = quote; index += 3; continue; }
+      if (char === '"' || char === "'") {
+        const delimiter = char;
+        index += 1;
+        let closed = false;
+        while (index < line.length) {
+          if (delimiter === '"' && line[index] === '\\') { index += 2; continue; }
+          if (line[index] === delimiter) { closed = true; index += 1; break; }
+          index += 1;
+        }
+        if (!closed) unsafe = true;
+        continue;
+      }
+      visibleText += char;
+      if (char === '[') squareDepth += 1;
+      else if (char === ']') { squareDepth -= 1; if (squareDepth < 0) unsafe = true; }
+      else if (char === '{') braceDepth += 1;
+      else if (char === '}') { braceDepth -= 1; if (braceDepth < 0) unsafe = true; }
+      index += 1;
+    }
+    lines.push({ text: line, visible_text: visibleText, top_level: startsAtTopLevel, inside_multiline: startsInMultiline });
+  }
+  if (multiline !== null || squareDepth !== 0 || braceDepth !== 0) unsafe = true;
+  return { lines, unsafe };
+}
+
 function inspectConfiguredPluginState(configText, identity) {
   const id = escapeRegex(identity);
   const sectionPattern = new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`);
-  const lines = String(configText || '').split(/\r?\n/);
+  const lexical = scanConfigTomlLexicalLines(configText);
+  if (lexical.unsafe) return { status: 'unprovable', reason: 'Codex config TOML structure is malformed or ambiguous' };
+  const lines = lexical.lines;
   const sections = [];
   let body = null;
-  for (const line of lines) {
+  for (const record of lines) {
+    if (!record.top_level || record.inside_multiline) continue;
+    const line = record.text;
     const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
     if (section) {
       if (body) sections.push(body);
       body = sectionPattern.test(section[1].trim()) ? [] : null;
       continue;
+    }
+    if (record.visible_text.includes(identity) && /^\s*\[?\s*plugins\./.test(record.visible_text)) {
+      return { status: 'unprovable', reason: `Codex config contains a malformed or ambiguous plugin table for ${identity}` };
     }
     if (body) body.push(line);
   }
@@ -1133,28 +1191,15 @@ function evaluateConfigCacheFallback(options = {}) {
   const cache = verifyInstalledCache(codexHome, expectedVersion, { repoRoot });
   errors.push(...cache.errors);
   const hookTrust = detectHookTrustStatus(codexHome, cache.cacheRoot);
-  const installed = errors.length === 0 ? {
-    pluginId: pluginId(),
-    name: TOOLKIT_PLUGIN_NAME,
-    marketplaceName: TOOLKIT_MARKETPLACE_NAME,
-    version: expectedVersion,
-    installed: true,
-    enabled: true,
-    authPolicy: 'ON_USE',
-    source: {
-      source: 'local',
-      path: repoRoot
-    },
-    verificationSource: 'config-cache-fallback'
-  } : null;
+  errors.unshift('Native Codex installed-plugin inventory is required; config/cache evidence is diagnostic only');
 
   return {
-    ok: errors.length === 0,
-    installed,
+    ok: false,
+    installed: null,
     cacheRoot: cache.cacheRoot,
     errors,
     configurationProof,
-    verificationMethod: 'config-cache-fallback',
+    verificationMethod: 'config-cache-diagnostics',
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message
   };
@@ -1174,7 +1219,13 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
 
   if (!derived.installed) {
     if (options.allowConfigCacheFallback) {
-      return evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
+      const diagnostic = evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
+      return {
+        ...diagnostic,
+        errors: [...new Set([...derived.errors, ...diagnostic.errors])],
+        installed_state_proof: derived.proof,
+        refusesDowngrade: derived.refusesDowngrade
+      };
     }
     errors.push(...derived.errors);
     return {
@@ -1332,8 +1383,8 @@ function runCodexJson(command, args) {
   const output = (result.stdout || '').trim();
   try {
     return output ? JSON.parse(output) : {};
-  } catch (error) {
-    throw new Error(`codex ${args.join(' ')} returned invalid JSON: ${error.message}`);
+  } catch (_error) {
+    throw new Error(`codex ${args.join(' ')} returned invalid JSON; response content was suppressed`);
   }
 }
 

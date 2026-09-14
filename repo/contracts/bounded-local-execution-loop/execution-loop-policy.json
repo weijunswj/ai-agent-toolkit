@@ -30,7 +30,7 @@
       "omitted_child_speed": "standard",
       "root_priority_inheritance": false,
       "priority_child_requires_explicit_accepted_authority": true,
-      "priority_child_authority_binds": ["parent_launch_id", "tree_digest", "scope_digest"],
+      "priority_child_authority_binds": ["child_launch_id", "parent_launch_id", "parent_route_digest", "tree_digest", "scope_digest", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend"],
       "nested_delegation": "block"
     },
     "route_evidence_binding": ["launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend", "tree_digest", "scope_digest", "route_digest"],

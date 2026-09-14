@@ -645,7 +645,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
   }
 });
 
-test('Codex Toolkit verifier falls back to config and cache when CLI list omits installed plugin', () => {
+test('Codex Toolkit verifier retains config and cache evidence as diagnostics when native inventory omits the plugin', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);
   writeCodexConfig(codexHome, { trustedHook: true });
@@ -656,15 +656,11 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'verification-unavailable');
-  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /review and trust the current Toolkit `SessionStart` hook/);
-  assert.equal(state.installed.enabled, true);
-  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
-  assert.deepEqual(state.errors, []);
+  assert.match(state.errors.join('\n'), /native Codex installed-plugin inventory is required/i);
 });
 
 test('Codex Toolkit fallback rejects a local marketplace source outside this repo', () => {
@@ -700,7 +696,22 @@ test('Codex Toolkit fallback rejects local marketplace config without a source p
   assert.match(state.errors.join('\n'), /marketplace source path/i);
 });
 
-test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for this repo', () => {
+test('Codex Toolkit config inspection ignores marker-like plugin tables in strings and fails closed on ambiguous state', () => {
+  const identity = setup.pluginId();
+  const inBasicString = `note = \"\"\"\n[plugins.\"${identity}\"]\nenabled = true\n\"\"\"\n`;
+  const inLiteralString = `note = '''\n[plugins.\"${identity}\"]\nenabled = true\n'''\n`;
+  const duplicateEnabled = `[plugins.\"${identity}\"]\nenabled = true\nenabled = false\n`;
+  const disabled = `[plugins.\"${identity}\"]\nenabled = false\n`;
+  const malformed = `[plugins.\"${identity}\"\nenabled = true\n`;
+
+  assert.equal(setup.inspectConfiguredPluginState(inBasicString, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(inLiteralString, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(duplicateEnabled, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(disabled, identity).status, 'disabled');
+  assert.equal(setup.inspectConfiguredPluginState(malformed, identity).status, 'unprovable');
+});
+
+test('Codex Toolkit diagnostics accept a verbatim-prefixed marketplace source without manufacturing installed state', () => {
   const codexHome = tmpRoot();
   writeInstalledCache(codexHome);
   writeCodexConfig(codexHome, {
@@ -715,10 +726,11 @@ test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
-  assert.deepEqual(state.errors, []);
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
+  assert.match(state.errors.join('\n'), /native Codex installed-plugin inventory is required/i);
+  assert.doesNotMatch(state.errors.join('\n'), /marketplace source path does not match/i);
 });
 
 test('Codex Toolkit fallback does not infer hook trust from config text', () => {
@@ -732,8 +744,9 @@ test('Codex Toolkit fallback does not infer hook trust from config text', () => 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
   assert.equal(state.hookTrustStatus, 'verification-unavailable');
   assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
   assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
@@ -781,23 +794,9 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
 
   const result = runSetupVerify(codexHome, fakeCodex);
 
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /verified by config\/cache fallback/i);
-  assert.match(result.stdout, /Hook trust status: verification-unavailable/);
-  assert.match(result.stdout, /Hook execution status: verification unavailable; open `\/hooks` in Codex/);
-  assert.match(result.stdout, /\*\*Next Steps:\*\*/);
-  assert.match(result.stdout, /Verify the enabled Toolkit `SessionStart` hook belongs to the installed `ai-agent-toolkit` plugin/);
-  assert.match(result.stdout, /installed plugin-cache copy/);
-  assert.match(result.stdout, /not the managed Git checkout/);
-  assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
-  assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
-  assert.match(result.stdout, /Open `\/hooks` in Codex/i);
-  assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
-  assert.match(result.stdout, /applies to Codex only/i);
-  assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
-  assert.match(result.stdout, /Codex must not install or update Claude Code/i);
-  assert.doesNotMatch(result.stdout, /Hook trust status: (?:trusted|operational)/i);
-  assert.doesNotMatch(result.stdout, /pending-review/);
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /native Codex installed-plugin inventory is required/i);
+  assert.doesNotMatch(result.stdout, /verified by config\/cache fallback/i);
 });
 
 test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
@@ -863,6 +862,7 @@ test('Codex JSON inspection rejects invalid JSON without exposing plugin-list ou
 
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /returned invalid JSON/i);
+  assert.match(result.stderr, /response content was suppressed/i);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /INVALID_JSON_PAYLOAD/);
 });
 

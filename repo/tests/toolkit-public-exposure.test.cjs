@@ -36,3 +36,27 @@ test('safe metadata names cannot suppress secret-pattern detection in values', (
   assert.equal(recursive.payload.host, exposure.REDACTED);
   assert.equal(recursive.payload.account, 'safe-account');
 });
+
+test('metadata exemptions never suppress credential assignments or recursive secret context', () => {
+  const result = exposure.preparePublicPayload({
+    host: 'token=plain-credential-value',
+    masked_token: 'sk-' + 'abcdefghijklmnopqrstuvwxyz1234',
+    token: ['plain-value', '[REDACTED]'],
+    password: { nested: ['plain-value'] },
+    account: { nested: { credential: ['plain-value'] } }
+  });
+  assert.equal(result.classification, 'confirmed');
+  assert.equal(result.payload.host, exposure.REDACTED);
+  assert.equal(result.payload.masked_token, exposure.REDACTED);
+  assert.equal(result.payload.token[0], exposure.REDACTED);
+  assert.equal(result.payload.token[1], '[REDACTED]');
+  assert.equal(result.payload.password.nested[0], exposure.REDACTED);
+  assert.equal(result.payload.account.nested.credential[0], exposure.REDACTED);
+  assert.doesNotMatch(JSON.stringify(result.findings), /plain-credential-value|abcdefghijklmnopqrstuvwxyz|plain-value/);
+});
+
+test('strict whole-value masked placeholders remain non-secret', () => {
+  const result = exposure.preparePublicPayload({ host: 'github.com', masked_token: '[REDACTED]', token: '***', password: '<redacted>' });
+  assert.equal(result.classification, 'none');
+  assert.deepEqual(result.findings, []);
+});

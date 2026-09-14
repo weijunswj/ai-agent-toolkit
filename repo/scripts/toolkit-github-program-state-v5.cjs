@@ -3567,7 +3567,7 @@ function validateControllerBootstrap(value) {
     || value.parent_issue !== PARENT_ISSUE
     || value.programme_state_schema !== STATE_SCHEMA
     || value.surface_contract_schema !== SURFACE_SCHEMA
-    || value.toolkit_package_version !== '2.11.2'
+    || value.toolkit_package_version !== '2.11.3'
     || !isRecord(value.toolkit_contract)
     || !exactKeys(value.toolkit_contract, ['repository', 'revision', 'path', 'sha256'])
     || value.toolkit_contract.repository !== REPOSITORY
@@ -3624,7 +3624,7 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.11.2';
+const H2_PACKAGE_VERSION = '2.11.3';
 const H2_VERSION = 'human-v2';
 const H2_CANONICAL_CLASS = 'canonical-programme-state';
 const H2_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';
@@ -5671,29 +5671,33 @@ function h2PlanWholeProgrammeMigration(parent, input) {
   const governance = h2ValidateGovernanceBinding(input.governance, parent.state);
   const children = h2ValidateManagedChildReads(parent, input.managed_child_reads);
   const formats = new Set(children.map((item) => item.parsed.format));
-  h2Require(formats.size === 1, true, 'MIGRATION_MIXED_SURFACE_STATE', 'MIGRATION');
-  const sourceChildFormat = children[0].parsed.format;
+  const sourceChildFormat = formats.size === 1 ? children[0].parsed.format : 'mixed-interrupted';
   const writes = [];
   let action;
   let code;
   if (parent.format === 'human-v2') {
-    if (sourceChildFormat === 'legacy-v5') {
-      for (const item of children) writes.push(h2WritePlan('child', item.issue, h2BuildChildDoc(parent.state, item.issue)));
+    for (const item of children) {
+      const expected = h2BuildChildDoc(parent.state, item.issue);
+      if (item.parsed.format === 'legacy-v5') writes.push(h2WritePlan('child', item.issue, expected));
+      else {
+        h2Require(expected.body === item.parsed.read.body && h2Comparable(expected.carrier, item.parsed.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+      }
+    }
+    if (writes.length) {
       action = 'WRITE_PROGRAMME';
       code = 'MIGRATION_PROGRAMME_WRITE_READY';
     } else {
-      for (const item of children) {
-        const expected = h2BuildChildDoc(parent.state, item.issue);
-        h2Require(expected.body === item.parsed.read.body && h2Comparable(expected.carrier, item.parsed.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
-      }
       action = 'RECONCILED';
       code = 'MIGRATION_RECONCILED';
     }
   } else {
-    h2Require(sourceChildFormat === 'legacy-v5', true, 'MIGRATION_ORDER_INVALID', 'MIGRATION');
     const parentDocument = h2BuildParentDoc(parent.state);
     writes.push(h2WritePlan('parent', parent.state.parent.issue, parentDocument));
-    for (const item of children) writes.push(h2WritePlan('child', item.issue, h2BuildChildDoc(parent.state, item.issue)));
+    for (const item of children) {
+      const expected = h2BuildChildDoc(parent.state, item.issue);
+      if (item.parsed.format === 'legacy-v5') writes.push(h2WritePlan('child', item.issue, expected));
+      else h2Require(expected.body === item.parsed.read.body && h2Comparable(expected.carrier, item.parsed.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+    }
     action = 'WRITE_PROGRAMME';
     code = 'MIGRATION_PROGRAMME_WRITE_READY';
   }
