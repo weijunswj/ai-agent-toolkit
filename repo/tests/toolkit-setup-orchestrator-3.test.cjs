@@ -32,8 +32,9 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
     '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Selected topology: root-only/);
-  assert.match(result.stdout, /Capacity mode: root-only/);
+  assert.match(result.stdout, /Route contract: toolkit\.route-resolution\.resolved-launch-record\.v1/);
+  assert.match(result.stdout, /Host adapters: capability proof only/);
+  assert.doesNotMatch(result.stdout, /Selected topology:|Capacity mode:/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -87,7 +88,7 @@ test('target keep, skip, enable-sync, and disable remain distinct', () => {
   assert.match(second.stdout, /AG2 action this run: kept/);
 });
 
-test('setup docs explain automatic resource admission and honest enforcement disclosure', () => {
+test('setup docs explain route resolution and honest enforcement disclosure', () => {
   const docs = [
     'skills/toolkit-setup/SKILL.md',
     'repo/docs/FOR_AI_AGENTS.md',
@@ -98,16 +99,17 @@ test('setup docs explain automatic resource admission and honest enforcement dis
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
     assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
-    assert.match(text, /automatically limit|automatic memory|available memory|memory admission/i, relPath);
+    assert.match(text, /versioned role registry|exact (?:resolved )?launch record|capability(?:-only)? host adapter/i, relPath);
+    assert.match(text, /RAM|resource admission|reservations?|queue(?:\/refusal)?|checker/i, relPath);
+    assert.match(text, /does not|no longer|never|cannot|fails closed|unavailable/i, relPath);
     assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
-    assert.match(text, /does not ask|no ordinary .*capacity|no longer asks/i, relPath);
-    assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
   const bridge = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.doesNotMatch(bridge, /compatible with Codex Security|Codex Security compatible/i);
   assert.match(bridge, /executing `?SessionStart`? bridge in that installed cache/i);
   assert.match(bridge, /managed checkout is only its refresh source/i);
+  assert.match(bridge, /does not use host-reported RAM, resource admission, reservation, queue, or model-selection hints as launch policy/i);
 });
 
 test('generated Codex and Claude instruction surfaces preserve the compact host-neutral topology policy', () => {
@@ -129,15 +131,18 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);
 });
 
-test('Security policy never raises normal capacity or relabels sequential review as Deep Scan', () => {
+test('Route policy never turns host capacity or review labels into launch authority', () => {
   const core = fs.readFileSync(path.join(repoRoot, 'repo/scripts/setup-toolkit-core.cjs'), 'utf8');
   const delegation = fs.readFileSync(path.join(repoRoot, 'repo/scripts/codex-delegation-common.cjs'), 'utf8');
   const docs = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.match(delegation, /CODEX_V2_RAM_SAFE_HELPERS = 1/);
   assert.doesNotMatch(delegation, /CODEX_V2_RAM_SAFE_HELPERS = [7-9]/);
-  assert.match(core, /normal global capacity is never raised automatically/i);
-  assert.match(core, /explicitly make a temporary global increase with exact backup, restart, restoration, and another restart/i);
-  assert.match(core, /A sequential custom review is not an official Deep Security Scan/i);
-  assert.match(docs, /No documented Codex Security scan-scoped capacity activation exists/i);
-  assert.match(docs, /explicitly approved temporary global increase with backup and restoration/i);
+  assert.match(core, /routeResolution\.CONTRACT_VERSION/);
+  assert.match(core, /resource_admission:\s*false/);
+  assert.match(core, /reservation_queue_policy:\s*false/);
+  assert.match(core, /mandatory_pre_pr_checker:\s*false/);
+  assert.match(core, /never inherits a Priority root/i);
+  assert.doesNotMatch(core, /Fable 5|Opus 4\.8|Deep Security Scan/i);
+  assert.match(docs, /active route contract does not use host-reported RAM, resource admission, reservation, queue, or model-selection hints as launch policy/i);
+  assert.match(docs, /mandatory independent pre-PR checker route is retired/i);
 });

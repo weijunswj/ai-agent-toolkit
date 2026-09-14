@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-assurance-web-finality.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
+const adapters = require('../scripts/toolkit-host-route-adapters.cjs');
 
 const {
   DESIGN_LOCK_ID,
@@ -27,13 +29,39 @@ const candidate = Object.freeze({
   current: true,
 });
 
+const g4LaunchRecord = route.resolveRoleRoute({ role: 'g4', host: 'codex', launch_id: 'assurance-g4' });
+const g4CapabilityProof = adapters.proveHostCapability({
+  launch_record: g4LaunchRecord,
+  capability: {
+    available: true,
+    trusted: true,
+    metadata_verified: true,
+    launch_id: g4LaunchRecord.launch_id,
+    role: g4LaunchRecord.role,
+    provider: g4LaunchRecord.provider,
+    model: g4LaunchRecord.model,
+    reasoning: g4LaunchRecord.reasoning,
+    service_tier: g4LaunchRecord.service_tier,
+    speed: g4LaunchRecord.speed,
+    host: g4LaunchRecord.host,
+    backend: g4LaunchRecord.backend,
+    launch_record_digest: g4LaunchRecord.route_digest,
+  },
+}).proof;
+
 function g4Evidence(overrides = {}) {
   return {
     status: 'PASS',
-    provider: 'OpenAI',
-    model_class: 'GPT-5.6 Sol High',
+    role: 'g4',
+    provider: 'openai',
+    model: 'gpt-6-astra',
     reasoning: 'high',
-    mode: 'standard',
+    service_tier: 'standard',
+    speed: g4LaunchRecord.speed,
+    route_digest: g4LaunchRecord.route_digest,
+    capability_proof_digest: route.digestValue(g4CapabilityProof),
+    launch_record: g4LaunchRecord,
+    capability_proof: g4CapabilityProof,
     fresh: true,
     isolated: true,
     read_only: true,
@@ -224,11 +252,13 @@ test('G4 admission enforces the exact independent complete-candidate contract', 
   assert.equal(result.authority, 'read-only-assurance');
 });
 
-test('G4 model, reasoning, and mode remain exact', () => {
+test('G4 route evidence is required without a fixed model binding', () => {
   for (const overrides of [
-    { model_class: 'GPT-5.6 Sol Max' },
-    { reasoning: 'max' },
-    { mode: 'nonstandard' },
+    { role: 'wrong-role' },
+    { provider: 'OpenAI' },
+    { service_tier: 'priority' },
+    { route_digest: 'missing' },
+    { capability_proof_digest: 'missing' },
   ]) {
     const result = admitG4(evidence({ g4: g4Evidence(overrides) }));
     assert.equal(result.admitted, false, JSON.stringify(overrides));

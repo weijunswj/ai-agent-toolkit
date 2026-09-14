@@ -233,8 +233,8 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 ## Toolkit Plugin And Bridge
 
 - Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
-- Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
-- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter/plugin version output aligned.
+- Native host surfaces are Codex, Claude Code, and OpenCode. AG2 is skills-only and proof-gated; the OpenCode Local Bridge is migration-only until separately accepted native plugin transfer.
+- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION`, and the Codex/Claude/OpenCode setup version outputs aligned.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 - Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout setup script when it exists, with active `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only as bootstrap/fallback.
 
@@ -246,14 +246,14 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 - `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
-- Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
+- Scheduled source-watch is PR-notification-only. It may compare active source-lock identity, attribution, deduplication, and reviewed-through state with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock pins, recreate retired advisory/semantic-review/cadence findings, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
 - The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
 - The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
   - `skills/n8n-safety-router/n8n-safety-rules.md`
   - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
   - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
-- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package, while `repo/contracts/toolkit-local-bridge/opencode-plugin/` contains the native OpenCode package source. They remain platform-separated and must not be used to cross-update another native platform. AG2 has no Toolkit plugin or instruction surface; its bridge is a proof-gated skills-only projection.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

@@ -23,7 +23,7 @@ const legacyProjectToken = '_' + 'projects';
 const supportedTopologyScopes = new Set(['standalone-publisher', 'historical-evidence', 'non-operative-example']);
 const supportedMatcherKinds = new Set(['identifier-token', 'normalized-phrase', 'exact-filename']);
 const supportedStandaloneDispositions = new Set(['generic-permitted', 'always-forbidden']);
-const rootPolicyPaths = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md'];
+const rootPolicyPaths = ['AGENTS.md', 'CLAUDE.md', 'README.md'];
 const skillInstructionPattern = /^skills\/.+\/(?:SKILL|README|INSTALL)\.md$/i;
 
 function slash(value) {

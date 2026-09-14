@@ -13,6 +13,7 @@
     "surface_contract_schema",
     "toolkit_package_version",
     "toolkit_contract",
+    "governance",
     "conformance",
     "compatibility"
   ],
@@ -36,7 +37,7 @@
       "const": "toolkit.github-program.surface.v5"
     },
     "toolkit_package_version": {
-      "const": "2.10.9"
+      "const": "2.11.3"
     },
     "toolkit_contract": {
       "type": "object",
@@ -61,6 +62,33 @@
         "sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "repository_identity", "managed_programme"],
+      "properties": {
+        "state": { "enum": ["enabled", "disabled", "unresolved"] },
+        "repository_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "admitted"],
+          "properties": {
+            "repository": { "const": "weijunswj/ai-agent-toolkit" },
+            "admitted": { "type": "boolean" }
+          }
+        },
+        "managed_programme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "parent_issue", "surface_version"],
+          "properties": {
+            "status": { "enum": ["BOUND", "UNBOUND"] },
+            "parent_issue": { "type": "integer", "minimum": 1 },
+            "surface_version": { "type": "string", "pattern": "^human-v2$" }
+          }
         }
       }
     },

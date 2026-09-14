@@ -20,7 +20,7 @@ function malformedConfig(eol = '\n') {
   return `private_note = "SYNTHETIC-DO-NOT-PRINT"${eol}${eol}[features.multi_agent_v2]${eol}${malformed}${eol}${eol}[unrelated]${eol}keep = true${eol}`;
 }
 
-test('complete question bank precedes a sanitized malformed-marker proposal and decline performs no write or backup', () => {
+test('ordinary setup keeps malformed legacy marker repair migration-only', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const filePath = codexConfig(root);
@@ -33,25 +33,15 @@ test('complete question bank precedes a sanitized malformed-marker proposal and 
     env: { ...isolatedHomeEnv(root), SYNTHETIC_PRIVATE_ENV: 'ENV-DO-NOT-PRINT' },
     timeout: 300000,
   });
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  const bankEnd = result.stdout.indexOf('setup-toolkit-question-bank:complete');
-  const proposalStart = result.stdout.indexOf('# Codex helper-agent config preview');
-  assert.ok(bankEnd >= 0 && proposalStart > bankEnd);
-  assert.match(result.stdout, /Historical Toolkit marker repair required: yes/);
-  assert.match(result.stdout, /Malformed marker classes: missing-end-marker/);
-  assert.match(result.stdout, /Marker\/assignment categories to remove or replace:/);
-  assert.match(result.stdout, /Exact affected line ranges:/);
-  assert.match(result.stdout, /Proposal digest \(SHA-256\): [a-f0-9]{64}/);
-  assert.match(result.stdout, /Unrelated configuration bytes remain unchanged: yes/);
-  assert.match(result.stdout, /Planned exact backup metadata:/);
-  assert.match(result.stdout, /Exact restore command after the approved write \(PowerShell\):/);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Route contract: toolkit\.route-resolution\.resolved-launch-record\.v1/);
+  assert.doesNotMatch(result.stdout, /Codex helper-agent config preview|Historical Toolkit marker repair required/);
   assert.doesNotMatch(result.stdout, /SYNTHETIC-DO-NOT-PRINT|ENV-DO-NOT-PRINT/);
-  assert.match(result.stderr, /answer `apply`/);
   assert.deepEqual(fs.readFileSync(filePath), original);
   assert.deepEqual(backupFiles(root), []);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
-test('approved repair completes the bounded root-only repair after the full question bank', () => {
+test('explicit legacy repair flags do not become active setup policy', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const filePath = codexConfig(root);
@@ -66,16 +56,10 @@ test('approved repair completes the bounded root-only repair after the full ques
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /setup-toolkit-question-bank:complete/);
-  assert.match(result.stdout, /Historical Toolkit marker repair required: yes/);
-  assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
-  assert.match(result.stdout, /Malformed historical Toolkit marker material repaired: yes/);
-  assert.match(result.stdout, /Configuration changed this run: yes/);
-  const after = fs.readFileSync(filePath, 'utf8');
-  assert.match(after, /max_concurrent_threads_per_session = 1/);
-  assert.match(after, /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3/);
-  assert.ok(after.startsWith('private_note = "SYNTHETIC-DO-NOT-PRINT"\n\n'));
-  assert.ok(after.endsWith('[unrelated]\nkeep = true\n'));
-  assert.ok(backupFiles(root).length > 0);
+  assert.match(result.stdout, /Route contract: toolkit\.route-resolution\.resolved-launch-record\.v1/);
+  assert.doesNotMatch(result.stdout, /Configuration changed this run: yes|Historical Toolkit marker repair required/);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  assert.deepEqual(backupFiles(root), []);
 });
 
 test('plan and JSON question surfaces remain coherent and read-only for malformed synthetic config', () => {
@@ -91,7 +75,7 @@ test('plan and JSON question surfaces remain coherent and read-only for malforme
     ], { env: isolatedHomeEnv(root), timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.doesNotMatch(result.stdout, /codex-helper-agents|Codex helper agents/);
-    assert.match(result.stdout, /automatically limits|automatic.*memory|root-only/i);
+    assert.match(result.stdout, /Route contract|exact-launch-record|versioned role registry/i);
     assert.doesNotMatch(result.stdout, /SYNTHETIC-DO-NOT-PRINT/);
     assert.deepEqual(fs.readFileSync(filePath), original);
     assert.deepEqual(backupFiles(root), []);

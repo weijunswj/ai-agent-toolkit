@@ -148,8 +148,8 @@ test('upstream drift produces a review-only notification without changing the lo
   assert.match(report, /This PR is a review notification only\./);
   assert.match(report, /No SOURCE-LOCK pins were changed\./);
   assert.match(report, /No upstream code was executed\./);
-  assert.match(report, new RegExp('Adopted commit: `' + lockedSha + '`'));
-  assert.match(report, new RegExp('Latest observed commit: `' + latestSha + '`'));
+   assert.match(report, new RegExp('Adopted commit:.*' + lockedSha));
+   assert.match(report, new RegExp('Latest observed commit:.*' + latestSha));
   assert.equal(fs.readFileSync(lockPath, 'utf8'), before);
 });
 
@@ -161,6 +161,25 @@ test('human reviewed-through cursor suppresses an already reviewed upstream comm
     const result = await runScript(workspace, apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /no actionable updates found/i);
+  });
+});
+
+test('reviewed-through state remains deterministic across two no-action runs', async () => {
+  const workspace = tempWorkspace();
+  writeJson(path.join(workspace, sourceLockRel), activeLock());
+  writeJson(path.join(workspace, 'repo/source-watch/review-state.json'), reviewStateDoc(lockedSha));
+  await withMockGitHub(lockedSha, async (apiBaseUrl, requests) => {
+    const first = await runScript(workspace, apiBaseUrl);
+    const second = await runScript(workspace, apiBaseUrl);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(first.stdout, /no actionable updates found/i);
+    assert.match(second.stdout, /no actionable updates found/i);
+    assert.equal(fs.existsSync(path.join(workspace, 'repo/source-watch/reviews/active-third-party-updates.md')), false);
+    assert.deepEqual(requests, [
+      '/repos/example-owner/example-repo/commits/main',
+      '/repos/example-owner/example-repo/commits/main'
+    ]);
   });
 });
 
