@@ -987,6 +987,18 @@ function deriveCodexInstalledStateProof(pluginList, options = {}) {
     } catch {
       errors.push(`${pluginId()} cache manifest could not be read at ${manifestPath}`);
     }
+    const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+    try {
+      if (!fs.existsSync(hooksPath)) {
+        errors.push(`${pluginId()} installed cache SessionStart hook is missing at ${hooksPath}`);
+      } else {
+        errors.push(...verifySessionStartHook(hooksPath, {
+          windows: process.platform === 'win32'
+        }).map((error) => `${pluginId()} cache ${error}`));
+      }
+    } catch (error) {
+      errors.push(`${pluginId()} cache SessionStart hook could not be read at ${hooksPath}: ${error.message}`);
+    }
     try {
       errors.push(...verifyInstalledCacheFreshness(cacheRoot, repoRoot, { platform: process.platform }).map((error) => error));
     } catch {
