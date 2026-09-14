@@ -284,7 +284,7 @@ function routeBlock(reasonCode) {
   return { status: 'blocked', reason_code: reasonCode, launches: [] };
 }
 
-function createRoutePlan(request, laneRecords, exactLaunches = null) {
+function createRoutePlan(request, laneRecords, exactLaunches = null, treeDigest = null) {
   const rootOnly = laneRecords.length === 0;
   const base = {
     contract_version: CONTRACTS[1],
@@ -293,6 +293,8 @@ function createRoutePlan(request, laneRecords, exactLaunches = null) {
     task_digest: request.task_digest,
     repository_id: request.repository_id,
     authorized_ref_digest: request.authorized_ref_digest,
+    scope_digest: request.scope_digest,
+    tree_digest: rootOnly ? null : treeDigest,
     delegated: !rootOnly,
     root_only: rootOnly,
     lanes: laneRecords,
@@ -302,11 +304,12 @@ function createRoutePlan(request, laneRecords, exactLaunches = null) {
 }
 
 function validateRoutePlan(record) {
-  const baseKeys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
+  const baseKeys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'scope_digest', 'tree_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
   const exactKeysAllowed = [...baseKeys.slice(0, -1), 'exact_launches', 'route_digest'];
   const hasExactLaunches = hasOwn(record, 'exact_launches');
   if ((!exactKeys(record, baseKeys) && !(hasExactLaunches && exactKeys(record, exactKeysAllowed))) || record.contract_version !== CONTRACTS[1] || !isSafeId(record.route_id) || !isSafeId(record.request_id)
-    || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
+    || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest) || !isDigest(record.scope_digest)
+    || !(record.tree_digest === null || isDigest(record.tree_digest))
     || typeof record.delegated !== 'boolean' || typeof record.root_only !== 'boolean' || !Array.isArray(record.lanes)
     || record.lanes.length > LIMITS.laneCount || !isDigest(record.route_digest)) fail('ROUTE_PLAN_INVALID');
   const seen = new Set();
@@ -317,7 +320,8 @@ function validateRoutePlan(record) {
       || !isSafeHandle(lane.adapter_handle) || !isDigest(lane.capability_digest)) fail('ROUTE_PLAN_INVALID');
     seen.add(lane.lane_id);
   }
-  if (record.delegated && !hasExactLaunches) fail('EXACT_ROUTE_AUTHORITY_REQUIRED');
+  if (record.delegated && (!hasExactLaunches || !isDigest(record.tree_digest))) fail('EXACT_ROUTE_AUTHORITY_REQUIRED');
+  if (record.root_only && record.tree_digest !== null) fail('ROUTE_PLAN_INVALID');
   if (hasExactLaunches) {
     if (!record.exact_launches.length || record.exact_launches.length !== record.lanes.length) fail('ROUTE_PLAN_INVALID');
     for (const item of record.exact_launches) {
@@ -327,6 +331,8 @@ function validateRoutePlan(record) {
       const lane = record.lanes.find((candidate) => candidate.lane_id === launchRecord.launch_id);
       if (!lane
         || launchRecord.route_digest !== capabilityProof.launch_record_digest
+        || launchRecord.scope_digest !== record.scope_digest
+        || launchRecord.tree_digest !== record.tree_digest
         || lane.provider !== launchRecord.provider
         || lane.model !== launchRecord.model
         || lane.reasoning !== launchRecord.reasoning
@@ -349,19 +355,54 @@ function admitResolvedRoute(options, request, consent) {
   const authority = options.authority;
   const entries = Array.isArray(authority.launches) ? authority.launches : authority.routes;
   if (!Array.isArray(entries) || entries.length !== request.requested_lanes.length) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
+  const parentInput = authority.parent_launch || authority.parent;
+  if (!isRecord(parentInput)) return { ...routeBlock('PARENT_LAUNCH_REQUIRED'), request };
+  let parent;
+  try {
+    parent = routeResolution.validateResolvedLaunchRecord(parentInput);
+  } catch (error) {
+    if (error instanceof routeResolution.RouteResolutionError) return { ...routeBlock('PARENT_LAUNCH_INVALID'), request };
+    throw error;
+  }
+  if (parent.depth !== 0 || (authority.parent_launch_id !== undefined && authority.parent_launch_id !== parent.launch_id)) {
+    return { ...routeBlock('PARENT_LAUNCH_INVALID'), request };
+  }
+  if (!isDigest(authority.tree_digest)) return { ...routeBlock('TREE_SCOPE_AUTHORITY_REQUIRED'), request };
+  if (authority.scope_digest !== request.scope_digest) return { ...routeBlock('SCOPE_AUTHORITY_MISMATCH'), request };
   const lanes = [];
   const exactLaunches = [];
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     if (!isRecord(entry) || laneId(entry) !== request.requested_lanes[index]) return { ...routeBlock('TASK_WIDENING_REJECTED'), request };
+    if (entry.depth !== undefined && entry.depth !== 1) return { ...routeBlock('CHILD_DEPTH_REQUIRED'), request };
+    if (entry.parent !== undefined && (!isRecord(entry.parent) || entry.parent.route_digest !== parent.route_digest)) {
+      return { ...routeBlock('PARENT_LAUNCH_INVALID'), request };
+    }
     try {
-      const launchRecord = routeResolution.resolveLaunchRecord({
-        ...entry,
-        launch_id: request.requested_lanes[index],
-        authority_digest: request.current_authority_digest,
-        host: entry.host || entry.backend
-      });
-      const capability = entry.capability || getAdapter(options.adapters, request.requested_lanes[index]);
+      const { capability: entryCapability, parent: _entryParent, priority_child_authority: priorityAuthority, ...recordInput } = entry;
+      const launchRecord = routeResolution.validateResolvedLaunchRecord(recordInput);
+      if (launchRecord.launch_id !== request.requested_lanes[index]
+        || launchRecord.depth !== 1
+        || launchRecord.parent_launch_id !== parent.launch_id
+        || launchRecord.parent_speed !== parent.speed
+        || launchRecord.tree_digest !== authority.tree_digest
+        || launchRecord.scope_digest !== request.scope_digest) {
+        return { ...routeBlock('ROUTE_AUTHORITY_MISMATCH'), request };
+      }
+      if (launchRecord.speed === 'priority') {
+        if (!isRecord(priorityAuthority)) return { ...routeBlock('PRIORITY_CHILD_AUTHORITY_REQUIRED'), request };
+        const resolvedPriority = routeResolution.resolveDepthOneLaunch({
+          ...recordInput,
+          authority_digest: request.current_authority_digest,
+          parent,
+          parent_launch_id: parent.launch_id,
+          tree_digest: authority.tree_digest,
+          scope_digest: request.scope_digest,
+          priority_child_authority: priorityAuthority,
+        });
+        if (resolvedPriority.route_digest !== launchRecord.route_digest) return { ...routeBlock('ROUTE_AUTHORITY_MISMATCH'), request };
+      }
+      const capability = entryCapability || getAdapter(options.adapters, request.requested_lanes[index]);
       const proofResult = hostRouteAdapters.proveHostCapability({ launch_record: launchRecord, capability });
       lanes.push({
         lane_id: launchRecord.launch_id,
@@ -384,7 +425,7 @@ function admitResolvedRoute(options, request, consent) {
   return {
     status: 'admitted',
     request,
-    route_plan: createRoutePlan(request, lanes, exactLaunches),
+    route_plan: createRoutePlan(request, lanes, exactLaunches, authority.tree_digest),
     launches: [],
     consent
   };
@@ -427,13 +468,21 @@ function exactIdSet(actual, expected) {
     && [...actual].sort().every((item, index) => item === [...expected].sort()[index]);
 }
 
+function exactDigestSet(actual, expected) {
+  return Array.isArray(actual)
+    && actual.length === expected.length
+    && actual.every((item) => isDigest(item))
+    && new Set(actual).size === actual.length
+    && [...actual].sort().every((item, index) => item === [...expected].sort()[index]);
+}
+
 function executeAtomicLaunch(routePlan, options) {
   if (typeof options.prepareLaunch !== 'function' || typeof options.commitLaunchBatch !== 'function') fail('LAUNCH_ATOMICITY_UNAVAILABLE');
   if (Array.isArray(routePlan.exact_launches)) {
     const launchLeases = [];
     for (const item of routePlan.exact_launches) {
       const launchRecord = routeResolution.validateResolvedLaunchRecord(item.launch_record);
-      const capabilityProof = hostRouteAdapters.validateCapabilityProof(item.capability_proof);
+      const capabilityProof = hostRouteAdapters.verifyProofForRecord(launchRecord, item.capability_proof);
       const lane = routePlan.lanes.find((candidate) => candidate.lane_id === launchRecord.launch_id);
       if (!lane || capabilityProof.launch_record_digest !== launchRecord.route_digest) fail('HOST_CAPABILITY_CONTRADICTION');
       const lease = invokeAtomicLaunch(options.prepareLaunch, options, {
@@ -468,7 +517,15 @@ function executeAtomicLaunch(routePlan, options) {
       workspace_receipt: options.workspace_receipt
     }, 'LAUNCH_BATCH_FAILED');
     const expectedExact = routePlan.lanes.map((lane) => lane.lane_id);
-    if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expectedExact)) fail('LAUNCH_BATCH_INVALID');
+    const expectedDigests = routePlan.exact_launches.map((item) => item.launch_record.route_digest);
+    if (!isRecord(committed)
+      || !exactKeys(committed, ['atomic', 'acknowledged', 'accepted', 'route_digest', 'launch_record_digests', 'started_lane_ids'])
+      || committed.atomic !== true
+      || committed.acknowledged !== true
+      || committed.accepted !== true
+      || committed.route_digest !== routePlan.route_digest
+      || !exactDigestSet(committed.launch_record_digests, expectedDigests)
+      || !exactIdSet(committed.started_lane_ids, expectedExact)) fail('LAUNCH_BATCH_INVALID');
     return { launches: expectedExact };
   }
   fail('EXACT_LAUNCH_REQUIRED');

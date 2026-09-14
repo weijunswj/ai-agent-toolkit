@@ -17,6 +17,17 @@
       "reviewed_at": "2026-07-30",
       "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
       "owning_tracker": "#322"
+    },
+    {
+      "target_key": "source-lock:repo/source-watch/provenance/ui-ux-pro-max",
+      "target_kind": "source_lock",
+      "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "ref": "main",
+      "source_lock_path": "repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json",
+      "reviewed_through_sha": "10d6ca310541d3ffeee6dceda0a29e373796f321",
+      "reviewed_at": "2026-09-14",
+      "disposition": "NO_ACTION",
+      "owning_tracker": "#323"
     }
   ]
 }

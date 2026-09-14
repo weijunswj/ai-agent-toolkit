@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PACKAGE_VERSION = '2.11.0';
+const PACKAGE_VERSION = '2.11.1';
 const CONTRACT_VERSION = 'toolkit.route-resolution.resolved-launch-record.v1';
 const RECEIPT_CONTRACT_VERSION = 'toolkit.route-resolution.exact-launch-receipt.v1';
 const REGISTRY_CONTRACT_VERSION = 'toolkit.route-resolution.role-registry.v1';
@@ -140,12 +140,13 @@ function priorityAuthority(input) {
   const authorityDigest = nested.authority_digest || input.child_authority_digest || input.authority_digest || null;
   const treeDigest = nested.tree_digest || input.tree_override_digest || input.tree_digest || null;
   const enabled = nested.enabled === true || nested.allow === true || input.allow_priority_child === true;
-  return { enabled, authorityDigest, treeDigest };
+  const accepted = nested.accepted === true;
+  return { enabled, accepted, authorityDigest, treeDigest };
 }
 
 function validatePriorityAuthority(input) {
   const authority = priorityAuthority(input);
-  if (!authority.enabled || !isDigest(authority.authorityDigest) || !isDigest(authority.treeDigest)) {
+  if (!authority.enabled || !authority.accepted || !isDigest(authority.authorityDigest) || !isDigest(authority.treeDigest)) {
     fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'explicit-authority-and-tree-override-required' });
   }
   return authority;
@@ -176,9 +177,17 @@ function resolveLaunchRecord(input = {}) {
   const depth = input.depth === undefined ? 0 : input.depth;
   if (depth !== 0 && depth !== 1) fail('ROUTE_UNAVAILABLE', { reason: 'depth-out-of-bounds', depth });
   const parent = parentRecord(input, registry);
+  if (depth === 1 && !parent) fail('ROUTE_UNAVAILABLE', { reason: 'parent-launch-required' });
   if (depth === 1 && parent && parent.depth !== 0) fail('ROUTE_UNAVAILABLE', { reason: 'nested-child-forbidden' });
   if (depth === 1 && parent && input.parent_launch_id && input.parent_launch_id !== parent.launch_id) {
     fail('ROUTE_CONTRADICTION', { field: 'parent_launch_id' });
+  }
+  if (depth === 1 && (!isDigest(input.tree_digest) || !isDigest(input.scope_digest))) {
+    fail('ROUTE_METADATA_MISSING', { field: !isDigest(input.tree_digest) ? 'tree_digest' : 'scope_digest' });
+  }
+  if (depth === 0 && ((provided(input, 'tree_digest') && input.tree_digest !== null)
+    || (provided(input, 'scope_digest') && input.scope_digest !== null))) {
+    fail('ROUTE_CONTRADICTION', { reason: 'root-scope-metadata' });
   }
   const parentSpeed = parent ? parent.speed : (input.parent_speed === undefined ? null : input.parent_speed);
   if (parentSpeed !== null && !SPEEDS.includes(parentSpeed)) fail('ROUTE_METADATA_MISSING', { field: 'parent_speed' });
@@ -196,6 +205,9 @@ function resolveLaunchRecord(input = {}) {
           fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'non-homogeneous-g3-child' });
         }
         const authority = validatePriorityAuthority(input);
+        if (authority.treeDigest !== input.tree_digest) {
+          fail('PRIORITY_CHILD_AUTHORITY_REQUIRED', { reason: 'priority-tree-scope-mismatch' });
+        }
         childPriorityAuthorized = true;
         childAuthorityDigest = authority.authorityDigest;
         speedSource = 'explicit-child-authority';
@@ -215,7 +227,7 @@ function resolveLaunchRecord(input = {}) {
     fail('CHILD_SPEED_INHERITANCE_REJECTED', { reason: 'priority-was-not-explicitly-authorized' });
   }
   if (depth === 1 && speed === 'priority' && !childPriorityAuthorized) fail('PRIORITY_CHILD_AUTHORITY_REQUIRED');
-  const launchId = input.launch_id || `launch-${digestValue({ role, host, depth, parent_launch_id: parent?.launch_id || null, speed }).slice(0, 24)}`;
+  const launchId = input.launch_id || `launch-${digestValue({ role, host, depth, parent_launch_id: parent?.launch_id || null, speed, tree_digest: input.tree_digest || null, scope_digest: input.scope_digest || null }).slice(0, 24)}`;
   if (!isSafeId(launchId)) fail('ROUTE_METADATA_MISSING', { field: 'launch_id' });
   const base = {
     contract_version: CONTRACT_VERSION,
@@ -236,14 +248,16 @@ function resolveLaunchRecord(input = {}) {
     child_priority_authorized: childPriorityAuthorized,
     registry_version: registry.registry_version,
     registry_digest: digestValue(registry),
-    child_authority_digest: childAuthorityDigest
+    child_authority_digest: childAuthorityDigest,
+    tree_digest: depth === 1 ? input.tree_digest : null,
+    scope_digest: depth === 1 ? input.scope_digest : null,
   };
   const record = { ...base, route_digest: digestValue(base) };
   return validateResolvedLaunchRecord(record, { registry });
 }
 
 function validateResolvedLaunchRecord(record, options = {}) {
-  const keys = ['contract_version', 'record_version', 'launch_id', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'speed_source', 'backend', 'host', 'depth', 'parent_launch_id', 'parent_speed', 'child_priority_authorized', 'registry_version', 'registry_digest', 'child_authority_digest', 'route_digest'];
+  const keys = ['contract_version', 'record_version', 'launch_id', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'speed_source', 'backend', 'host', 'depth', 'parent_launch_id', 'parent_speed', 'child_priority_authorized', 'registry_version', 'registry_digest', 'child_authority_digest', 'tree_digest', 'scope_digest', 'route_digest'];
   if (!exactKeys(record, keys)
     || record.contract_version !== CONTRACT_VERSION
     || record.record_version !== 1
@@ -265,6 +279,9 @@ function validateResolvedLaunchRecord(record, options = {}) {
     || !/^\d+\.\d+\.\d+$/.test(record.registry_version)
     || !isDigest(record.registry_digest)
     || (record.child_authority_digest !== null && !isDigest(record.child_authority_digest))
+    || (record.depth === 0 && (record.tree_digest !== null || record.scope_digest !== null))
+    || (record.depth === 1 && (!isDigest(record.tree_digest) || !isDigest(record.scope_digest) || record.parent_launch_id === null))
+    || (record.depth === 0 && record.parent_launch_id !== null)
     || !isDigest(record.route_digest)) {
     fail('ROUTE_CONTRADICTION', { reason: 'resolved-record-shape' });
   }

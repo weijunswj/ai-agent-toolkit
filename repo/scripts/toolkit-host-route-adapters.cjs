@@ -9,6 +9,34 @@ const ADAPTERS = Object.freeze({
   'claude-code': 'toolkit-host-adapter.claude-code.v1',
   opencode: 'toolkit-host-adapter.opencode.v1'
 });
+const CAPABILITY_ROUTE_FIELDS = Object.freeze([
+  'launch_id',
+  'role',
+  'provider',
+  'model',
+  'reasoning',
+  'service_tier',
+  'speed',
+  'host',
+  'backend',
+  'launch_record_digest',
+]);
+const EXECUTION_ACKNOWLEDGEMENT_FIELDS = Object.freeze([
+  'accepted',
+  'acknowledged',
+  'launch_id',
+  'role',
+  'provider',
+  'model',
+  'reasoning',
+  'service_tier',
+  'speed',
+  'host',
+  'backend',
+  'launch_record_digest',
+  'capability_proof_digest',
+  'completed',
+]);
 
 class HostAdapterError extends Error {
   constructor(code, evidence = {}) {
@@ -44,8 +72,11 @@ function proofBase(record, host, adapterId) {
     contract_version: PROOF_CONTRACT_VERSION,
     proof_id: `proof-${route.digestValue({ launch_record_digest: record.route_digest, host, adapter_id: adapterId }).slice(0, 24)}`,
     host,
+    backend: record.backend,
     adapter_id: adapterId,
     launch_record_digest: record.route_digest,
+    launch_id: record.launch_id,
+    role: record.role,
     provider: record.provider,
     model: record.model,
     reasoning: record.reasoning,
@@ -58,13 +89,16 @@ function proofBase(record, host, adapterId) {
 }
 
 function validateCapabilityProof(proof) {
-  const keys = ['contract_version', 'proof_id', 'host', 'adapter_id', 'launch_record_digest', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'status', 'trusted', 'metadata_verified'];
+  const keys = ['contract_version', 'proof_id', 'host', 'backend', 'adapter_id', 'launch_record_digest', 'launch_id', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'status', 'trusted', 'metadata_verified'];
   if (!exactKeys(proof, keys)
     || proof.contract_version !== PROOF_CONTRACT_VERSION
     || !route.HOSTS.includes(proof.host)
+    || proof.backend !== proof.host
     || typeof proof.proof_id !== 'string'
     || typeof proof.adapter_id !== 'string'
     || !isDigest(proof.launch_record_digest)
+    || typeof proof.launch_id !== 'string'
+    || !/^[a-z][a-z0-9-]{0,63}$/.test(proof.role)
     || proof.provider !== 'openai'
     || !['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna'].includes(proof.model)
     || !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(proof.reasoning)
@@ -80,12 +114,13 @@ function validateCapabilityProof(proof) {
 
 function observedCapability(record, capability) {
   if (!isRecord(capability)) fail('HOST_CAPABILITY_UNAVAILABLE', { reason: 'capability-evidence-missing' });
-  if (capability.available !== true || capability.trusted === false || capability.metadata_verified === false) {
+  if (capability.available !== true || capability.trusted !== true || capability.metadata_verified !== true) {
     fail('HOST_CAPABILITY_UNAVAILABLE', { reason: 'host-reported-unavailable' });
   }
-  for (const field of ['provider', 'model', 'reasoning', 'service_tier', 'speed']) {
-    if (capability[field] !== undefined && capability[field] !== record[field]) {
-      fail('HOST_CAPABILITY_CONTRADICTION', { field, expected: record[field], observed: capability[field] });
+  for (const field of CAPABILITY_ROUTE_FIELDS) {
+    const expected = field === 'launch_record_digest' ? record.route_digest : record[field];
+    if (capability[field] !== expected) {
+      fail('HOST_CAPABILITY_CONTRADICTION', { field, expected, observed: capability[field] });
     }
   }
   return capability;
@@ -113,12 +148,34 @@ function proveHostCapability({ launch_record, capability, host, adapter_id } = {
 function verifyProofForRecord(record, proof) {
   route.validateResolvedLaunchRecord(record);
   const checked = validateCapabilityProof(proof);
-  if (checked.launch_record_digest !== record.route_digest || checked.host !== record.host || checked.provider !== record.provider
+  if (checked.launch_record_digest !== record.route_digest || checked.launch_id !== record.launch_id || checked.role !== record.role
+    || checked.host !== record.host || checked.backend !== record.backend || checked.provider !== record.provider
     || checked.model !== record.model || checked.reasoning !== record.reasoning || checked.service_tier !== record.service_tier
     || checked.speed !== record.speed || checked.adapter_id !== ADAPTERS[record.host]) {
     fail('HOST_CAPABILITY_CONTRADICTION', { reason: 'exact-record-mismatch' });
   }
   return checked;
+}
+
+function validateExecutionAcknowledgement(acknowledgement, record, proof) {
+  if (!exactKeys(acknowledgement, EXECUTION_ACKNOWLEDGEMENT_FIELDS)
+    || acknowledgement.accepted !== true
+    || acknowledgement.acknowledged !== true
+    || acknowledgement.launch_id !== record.launch_id
+    || acknowledgement.role !== record.role
+    || acknowledgement.provider !== record.provider
+    || acknowledgement.model !== record.model
+    || acknowledgement.reasoning !== record.reasoning
+    || acknowledgement.service_tier !== record.service_tier
+    || acknowledgement.speed !== record.speed
+    || acknowledgement.host !== record.host
+    || acknowledgement.backend !== record.backend
+    || acknowledgement.launch_record_digest !== record.route_digest
+    || acknowledgement.capability_proof_digest !== route.digestValue(proof)
+    || typeof acknowledgement.completed !== 'boolean') {
+    return null;
+  }
+  return Object.freeze(clone(acknowledgement));
 }
 
 function executeExactLaunch({ launch_record, capability_proof, executor } = {}) {
@@ -134,10 +191,11 @@ function executeExactLaunch({ launch_record, capability_proof, executor } = {}) 
     return route.createExactLaunchReceipt({ launch_record: record, capability_proof_digest: route.digestValue(checkedProof), status: 'rejected', started: false, completed: false });
   }
   if (result && typeof result.then === 'function') fail('HOST_CAPABILITY_CONTRADICTION', { reason: 'async-adapter-not-supported' });
-  if (result !== undefined && (!isRecord(result) || result.accepted !== true)) {
+  const acknowledgement = isRecord(result) ? validateExecutionAcknowledgement(result, record, checkedProof) : null;
+  if (!acknowledgement) {
     return route.createExactLaunchReceipt({ launch_record: record, capability_proof_digest: route.digestValue(checkedProof), status: 'rejected', started: false, completed: false });
   }
-  return route.createExactLaunchReceipt({ launch_record: record, capability_proof_digest: route.digestValue(checkedProof), status: 'accepted', started: true, completed: result?.completed === true });
+  return route.createExactLaunchReceipt({ launch_record: record, capability_proof_digest: route.digestValue(checkedProof), status: 'accepted', started: true, completed: acknowledgement.completed === true });
 }
 
 function getHostAdapter(host) {
@@ -164,5 +222,6 @@ module.exports = Object.freeze({
   assertCapabilityForExactRecord,
   executeExactLaunch,
   getHostAdapter,
-  validateCapabilityProof
+  validateCapabilityProof,
+  validateExecutionAcknowledgement,
 });

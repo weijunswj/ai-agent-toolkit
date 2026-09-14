@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.11.0';
+const expectedBridgeVersion = '2.11.1';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -423,11 +423,15 @@ function writeRepoToolkitFixture(repoPath, label) {
 }
 
 function writeCodexPluginRefreshFixture(repoPath) {
-  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit',
-    version: expectedBridgeVersion,
-    hooks: './.codex-plugin/hooks/hooks.json'
-  }, null, 2));
+  const manifest = readJson(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
+  manifest.version = expectedBridgeVersion;
+  manifest.hooks = './.codex-plugin/hooks/hooks.json';
+  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify(manifest, null, 2));
+  fs.cpSync(
+    path.join(repoRoot, '.codex-plugin', 'assets'),
+    path.join(repoPath, '.codex-plugin', 'assets'),
+    { recursive: true }
+  );
   writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
   writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
@@ -444,6 +448,11 @@ function writeCodexPluginRefreshFixture(repoPath) {
       ]
     }
   }, null, 2)}\n`);
+  fs.mkdirSync(path.join(repoPath, '.agents', 'plugins'), { recursive: true });
+  fs.copyFileSync(
+    path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'),
+    path.join(repoPath, '.agents', 'plugins', 'marketplace.json')
+  );
   for (const relPath of [
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',

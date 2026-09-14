@@ -47,7 +47,7 @@
     "routePlan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "route_id", "request_id", "task_digest", "repository_id", "authorized_ref_digest", "delegated", "root_only", "lanes", "route_digest"],
+      "required": ["contract_version", "route_id", "request_id", "task_digest", "repository_id", "authorized_ref_digest", "scope_digest", "tree_digest", "delegated", "root_only", "lanes", "route_digest"],
       "properties": {
         "contract_version": { "const": "toolkit.execution-loop.route-plan.v1" },
         "route_id": { "$ref": "#/$defs/id" },
@@ -55,6 +55,8 @@
         "task_digest": { "$ref": "#/$defs/digest" },
         "repository_id": { "$ref": "#/$defs/digest" },
         "authorized_ref_digest": { "$ref": "#/$defs/digest" },
+        "scope_digest": { "$ref": "#/$defs/digest" },
+        "tree_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
         "delegated": { "type": "boolean" },
         "root_only": { "type": "boolean" },
         "lanes": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/routeLane" } },
@@ -66,9 +68,59 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["launch_record", "capability_proof"],
-            "properties": {
-              "launch_record": { "type": "object", "required": ["contract_version", "launch_id", "route_digest"], "properties": { "contract_version": { "const": "toolkit.route-resolution.resolved-launch-record.v1" }, "launch_id": { "$ref": "#/$defs/id" }, "route_digest": { "$ref": "#/$defs/digest" } } },
-              "capability_proof": { "type": "object", "required": ["contract_version", "host", "adapter_id", "launch_record_digest", "status", "trusted", "metadata_verified"], "properties": { "contract_version": { "const": "toolkit.route-resolution.host-capability-proof.v1" }, "host": { "enum": ["codex", "claude-code", "opencode"] }, "adapter_id": { "$ref": "#/$defs/id" }, "launch_record_digest": { "$ref": "#/$defs/digest" }, "status": { "enum": ["available", "unsupported", "contradictory"] }, "trusted": { "const": true }, "metadata_verified": { "const": true } } }
+              "properties": {
+              "launch_record": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["contract_version", "record_version", "launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "speed_source", "backend", "host", "depth", "parent_launch_id", "parent_speed", "child_priority_authorized", "registry_version", "registry_digest", "child_authority_digest", "tree_digest", "scope_digest", "route_digest"],
+                "properties": {
+                  "contract_version": { "const": "toolkit.route-resolution.resolved-launch-record.v1" },
+                  "record_version": { "const": 1 },
+                  "launch_id": { "$ref": "#/$defs/id" },
+                  "role": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+                  "provider": { "const": "openai" },
+                  "model": { "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] },
+                  "reasoning": { "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
+                  "service_tier": { "const": "standard" },
+                  "speed": { "enum": ["standard", "priority"] },
+                  "speed_source": { "enum": ["registry-default", "child-default", "explicit-child-authority"] },
+                  "backend": { "enum": ["codex", "claude-code", "opencode"] },
+                  "host": { "enum": ["codex", "claude-code", "opencode"] },
+                  "depth": { "enum": [0, 1] },
+                  "parent_launch_id": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$" },
+                  "parent_speed": { "type": ["string", "null"], "enum": ["standard", "priority", null] },
+                  "child_priority_authorized": { "type": "boolean" },
+                  "registry_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+                  "registry_digest": { "$ref": "#/$defs/digest" },
+                  "child_authority_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                  "tree_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                  "scope_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                  "route_digest": { "$ref": "#/$defs/digest" }
+                }
+              },
+              "capability_proof": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["contract_version", "proof_id", "host", "backend", "adapter_id", "launch_record_digest", "launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "status", "trusted", "metadata_verified"],
+                "properties": {
+                  "contract_version": { "const": "toolkit.route-resolution.host-capability-proof.v1" },
+                  "proof_id": { "$ref": "#/$defs/id" },
+                  "host": { "enum": ["codex", "claude-code", "opencode"] },
+                  "backend": { "enum": ["codex", "claude-code", "opencode"] },
+                  "adapter_id": { "$ref": "#/$defs/id" },
+                  "launch_record_digest": { "$ref": "#/$defs/digest" },
+                  "launch_id": { "$ref": "#/$defs/id" },
+                  "role": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+                  "provider": { "const": "openai" },
+                  "model": { "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] },
+                  "reasoning": { "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
+                  "service_tier": { "const": "standard" },
+                  "speed": { "enum": ["standard", "priority"] },
+                  "status": { "enum": ["available", "unsupported", "contradictory"] },
+                  "trusted": { "const": true },
+                  "metadata_verified": { "const": true }
+                }
+              }
             }
           }
         },

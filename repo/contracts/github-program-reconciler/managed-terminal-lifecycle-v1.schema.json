@@ -17,6 +17,75 @@
     "absence_readback": { "type": "boolean" },
     "terminal_receipt": { "type": "boolean" },
     "branch": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,256}$" },
-    "reason_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" }
+    "reason_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" },
+    "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidence" },
+    "deletion_acknowledgement": { "$ref": "#/$defs/deletionAcknowledgement" },
+    "absence_readback_evidence": { "$ref": "#/$defs/absenceReadback" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "terminal_receipt": { "const": true }, "delete_eligible": { "const": true } }, "required": ["terminal_receipt", "delete_eligible"] },
+      "then": { "required": ["deletion_eligibility_evidence", "deletion_acknowledgement", "absence_readback_evidence"] }
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state"],
+      "properties": {
+        "trusted": { "const": true },
+        "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "ownership": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "terminal_state": { "enum": ["terminal-success", "terminal-failure", "terminal-blocked"] }
+      }
+    },
+    "eligibilityEvidence": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "$ref": "#/$defs/identity",
+          "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state", "retained", "unpublished_loss", "default_branch", "protected", "checked_out"],
+          "properties": {
+            "ownership": { "const": "toolkit-managed" },
+            "retained": { "const": false },
+            "unpublished_loss": { "const": false },
+            "default_branch": { "const": false },
+            "protected": { "const": false },
+            "checked_out": { "const": false }
+          }
+        }
+      ]
+    },
+    "deletionAcknowledgement": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["acknowledged", "repository", "ownership", "ref", "sha", "terminal_state"],
+          "properties": {
+            "acknowledged": { "const": true },
+            "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "ownership": { "const": "toolkit-managed" },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "terminal_state": { "enum": ["terminal-success", "terminal-failure", "terminal-blocked"] }
+          }
+        }
+      ]
+    },
+    "absenceReadback": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "$ref": "#/$defs/identity",
+          "required": ["trusted", "present", "repository", "ownership", "ref", "sha", "terminal_state"],
+          "properties": { "present": { "const": false }, "ownership": { "const": "toolkit-managed" } }
+        }
+      ]
+    }
   }
 }

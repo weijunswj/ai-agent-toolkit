@@ -23,6 +23,17 @@
   "routing": {
     "delegation_requires_current_authority": true,
     "complete_route_required_before_launch": true,
+    "delegated_admission": {
+      "maximum_child_depth": 1,
+      "parent_launch_identity_required": true,
+      "parent_launch_role_required": true,
+      "omitted_child_speed": "standard",
+      "root_priority_inheritance": false,
+      "priority_child_requires_explicit_accepted_authority": true,
+      "priority_child_authority_binds": ["parent_launch_id", "tree_digest", "scope_digest"],
+      "nested_delegation": "block"
+    },
+    "route_evidence_binding": ["launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend", "tree_digest", "scope_digest", "route_digest"],
     "workspace_receipt_required_before_substantive_start": true,
     "substantive_start_state": "workspace-ready",
     "exact_start_binding": ["run_id", "repository_id", "authorized_ref_digest", "current_authority_digest", "route_plan", "workspace_receipt", "snapshot_commit", "snapshot_tree"],

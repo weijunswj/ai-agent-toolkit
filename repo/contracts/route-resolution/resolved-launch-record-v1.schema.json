@@ -5,7 +5,7 @@
   "description": "An immutable route selected by authority and resolved through the role registry.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_version", "record_version", "launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "speed_source", "backend", "host", "depth", "parent_launch_id", "parent_speed", "child_priority_authorized", "registry_version", "registry_digest", "child_authority_digest", "route_digest"],
+  "required": ["contract_version", "record_version", "launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "speed_source", "backend", "host", "depth", "parent_launch_id", "parent_speed", "child_priority_authorized", "registry_version", "registry_digest", "child_authority_digest", "tree_digest", "scope_digest", "route_digest"],
   "properties": {
     "contract_version": { "const": "toolkit.route-resolution.resolved-launch-record.v1" },
     "record_version": { "const": 1 },
@@ -26,6 +26,8 @@
     "registry_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
     "registry_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "child_authority_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "tree_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "scope_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
     "route_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   }
 }

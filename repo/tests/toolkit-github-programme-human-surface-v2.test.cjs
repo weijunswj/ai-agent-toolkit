@@ -702,7 +702,7 @@ function humanSurfaceContractInstance() {
     root: ROOT,
     lock: LOCK,
     version: 'human-v2',
-    package_version: '2.11.0',
+    package_version: '2.11.1',
     facade_export: 'humanSurfaceV2',
     operations: ['readComplete', 'render', 'extendHistory', 'planMigration'],
     stages: [

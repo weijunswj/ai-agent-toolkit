@@ -9,6 +9,7 @@
     "known_secret_patterns": ["openai-key", "google-api-key", "bearer-token", "jwt", "private-key"]
   },
   "classification": {
+    "content_value_checks_precede_metadata_exemptions": true,
     "none": { "publish": "as-observed", "action": "none" },
     "possible": { "publish": "redacted", "action": "pause", "report": "type-name-place-action" },
     "confirmed": { "publish": "redacted", "action": "stop", "code": "SECRET_EXPOSURE_DETECTED", "report": "type-name-place-action" }

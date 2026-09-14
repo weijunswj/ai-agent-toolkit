@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.11.0';
+const EXPECTED_TOOLKIT_VERSION = '2.11.1';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
@@ -364,6 +364,22 @@ function fileFingerprint(filePath) {
   };
 }
 
+function cacheFingerprint(cacheRoot, repoRoot = '') {
+  const installedRoot = path.resolve(cacheRoot);
+  const sourceRoot = repoRoot ? path.resolve(repoRoot) : null;
+  const relFiles = new Set(listFingerprintFiles(installedRoot));
+  if (sourceRoot) for (const relPath of listFingerprintFiles(sourceRoot)) relFiles.add(relPath);
+  const material = [...relFiles].sort((left, right) => left.localeCompare(right)).map((relPath) => {
+    if (relPath.endsWith('/')) {
+      const installedDir = path.join(installedRoot, ...relPath.slice(0, -1).split('/'));
+      return `${relPath}\tDIR\t${fs.existsSync(installedDir) ? 'present' : 'missing'}`;
+    }
+    const installed = fileFingerprint(path.join(installedRoot, ...relPath.split('/')));
+    return `${relPath}\t${installed.exists ? installed.size : 0}\t${installed.hash}`;
+  }).join('\n');
+  return crypto.createHash('sha256').update(material, 'utf8').digest('hex');
+}
+
 function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
   const errors = [];
   if (!repoRoot) return errors;
@@ -419,7 +435,7 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
   return errors;
 }
 
-function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode, cacheVersion = null) {
+function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode, cache = null, proofs = {}) {
   return Object.freeze({
     contract_version: 'toolkit.local-bridge.codex-cache-recovery.v1',
     state,
@@ -427,27 +443,41 @@ function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode,
     manual_action: manualAction === true,
     attempts: Math.max(0, Math.min(3, attempts)),
     reason_code: String(reasonCode),
-    cache_version: cacheVersion || null
+    cache_version: cache?.version || null,
+    cache_root: cache?.cache_root || null,
+    cache_fingerprint: cache?.fingerprint || null,
+    source_proof: proofs.source_proof || null,
+    configuration_proof: proofs.configuration_proof || null,
+    installed_state_proof: proofs.installed_state_proof || cache?.installed_state_proof || null
   });
 }
 
 function recoverCodexCache(options = {}) {
   let attempts = 0;
   const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
-  const sourceVerified = typeof options.verifySource === 'function'
-    ? options.verifySource() === true
-    : options.source_verified !== false;
-  if (!sourceVerified) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE');
+  const sourceProof = options.source_proof;
+  const configurationProof = options.configuration_proof;
+  const proofTrusted = (proof) => proof && typeof proof === 'object' && !Array.isArray(proof)
+    && proof.trusted === true && proof.ambiguous !== true;
+  let sourceVerified = proofTrusted(sourceProof);
+  if (typeof options.verifySource === 'function') {
+    try { sourceVerified = sourceVerified && options.verifySource() === true; } catch (_error) { sourceVerified = false; }
+  }
+  if (!sourceVerified) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  if (!proofTrusted(configurationProof)) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  if (configurationProof.enabled === false || configurationProof.user_disabled === true) {
+    return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
 
   let state = 'SOURCE_VERIFIED';
   const refreshRequired = options.refresh_required === true;
   if (refreshRequired) {
     state = 'REFRESHING';
-    if (typeof options.refreshSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL');
+    if (typeof options.refreshSupported !== 'function' || typeof options.rediscover !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', null, { source_proof: sourceProof, configuration_proof: configurationProof });
     try {
-      if (options.refreshSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE');
+      if (options.refreshSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
     } catch (_error) {
-      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE');
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
     }
   }
 
@@ -455,23 +485,34 @@ function recoverCodexCache(options = {}) {
     state = 'REDISCOVERING';
     try {
       if (typeof options.rediscover === 'function') return options.rediscover();
-      return options.cache || null;
+      return refreshRequired ? null : (options.cache || null);
     } catch (_error) {
       return { structural_failure: true };
     }
   };
   const verify = (cache) => {
     state = 'VERIFYING';
+    const installedProof = cache?.installed_state_proof || options.installed_state_proof;
+    const fingerprint = cache?.fingerprint || installedProof?.fingerprint || null;
+    const fingerprintVerified = cache?.fingerprint_verified === true
+      || installedProof?.fingerprint_verified === true
+      || (typeof fingerprint === 'string' && /^[a-f0-9]{64}$/.test(fingerprint));
     return cache && cache.present === true
       && cache.version === expectedVersion
       && cache.bytes_verified === true
-      && cache.trusted !== false
+      && cache.trusted === true
+      && proofTrusted(installedProof)
+      && installedProof.active !== false
+      && (!refreshRequired || fingerprintVerified)
       && cache.executing !== true
       && cache.status !== 'executing'
       && cache.status !== 'stale-executing';
   };
   let cache = rediscover();
-  if (verify(cache)) return cacheRecoveryResult(refreshRequired ? 'VERIFYING' : 'NOOP', true, false, attempts, 'CACHE_CURRENT', cache.version);
+  if (cache?.version && compareSemver(cache.version, expectedVersion) > 0 && options.allow_downgrade !== true) {
+    return cacheRecoveryResult('TERMINAL', false, true, attempts, 'DOWNGRADE_PROTECTION', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
+  if (verify(cache)) return cacheRecoveryResult(refreshRequired ? 'VERIFYING' : 'NOOP', true, false, attempts, refreshRequired ? 'CACHE_REFRESHED' : 'CACHE_CURRENT', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
 
   const transientLimit = Number.isInteger(options.transient_retries) ? Math.max(0, Math.min(1, options.transient_retries)) : 1;
   while (cache?.transient === true && attempts < transientLimit) {
@@ -479,18 +520,18 @@ function recoverCodexCache(options = {}) {
     state = 'RETRYING_TRANSIENT';
     if (typeof options.retryTransient !== 'function' || options.retryTransient(attempts) !== true) break;
     cache = rediscover();
-    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REFRESHED', cache.version);
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REFRESHED', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
   }
   if (cache?.repairable === true) {
     state = 'REPAIRING_ONCE';
-    if (typeof options.repairSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', cache?.version);
+    if (typeof options.repairSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
     try {
-      if (options.repairSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'STRUCTURAL_FAILURE', cache?.version);
+      if (options.repairSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'STRUCTURAL_FAILURE', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
     } catch (_error) {
-      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', cache?.version);
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
     }
     cache = rediscover();
-    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REPAIRED', cache.version);
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REPAIRED', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
   }
   const reason = cache?.trust_failure ? 'TRUST_FAILURE'
     : cache?.ownership_failure ? 'OWNERSHIP_FAILURE'
@@ -498,7 +539,7 @@ function recoverCodexCache(options = {}) {
         : cache?.structural_failure ? 'STRUCTURAL_FAILURE'
           : cache?.transient === true ? 'TRANSIENT_UNRESOLVED' : 'CACHE_VERSION_OR_BYTES_UNVERIFIED';
   const manual = ['STRUCTURAL_FAILURE', 'CONFIGURATION_FAILURE', 'PERMISSION_FAILURE', 'TRUST_FAILURE', 'OWNERSHIP_FAILURE', 'UNSUPPORTED_TOOL'].includes(reason);
-  return cacheRecoveryResult('TERMINAL', false, manual, attempts, reason, cache?.version);
+  return cacheRecoveryResult('TERMINAL', false, manual, attempts, reason, cache, { source_proof: sourceProof, configuration_proof: configurationProof });
 }
 
 function codexConfigPath(codexHome) {
@@ -1276,6 +1317,7 @@ module.exports = {
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
+  cacheFingerprint,
   recoverCodexCache,
   verifySessionStartHook,
   verifySessionStartRuntime,

@@ -28,6 +28,17 @@
     "nested_children": false,
     "cross_role_priority_spawn": false
   },
+  "delegated_admission": {
+    "parent_launch_identity_required": true,
+    "parent_role_required": true,
+    "child_depth": 1,
+    "child_tree_digest_required": true,
+    "child_scope_digest_required": true,
+    "nested_delegation": "reject",
+    "priority_authority_requires_explicit_accepted": true,
+    "priority_authority_binds": ["parent_launch_id", "tree_digest", "scope_digest"]
+  },
+  "route_evidence_binding": ["launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "backend", "host", "tree_digest", "scope_digest", "route_digest"],
   "capability": {
     "adapter_selects_route": false,
     "adapter_proves_capability": true,

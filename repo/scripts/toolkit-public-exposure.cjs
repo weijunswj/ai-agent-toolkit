@@ -43,10 +43,10 @@ function isPlaceholder(value) {
 
 function classifyExposure({ value, name = 'payload', place = 'unknown', action = 'publish', type = 'value', metadata = false, confirmed = false } = {}) {
   const normalizedName = normalizeField(name);
-  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
   if (confirmed === true) return Object.freeze({ classification: 'confirmed', finding: finding(type || 'confirmed-secret', name, place, action), code: 'SECRET_EXPOSURE_DETECTED' });
   const pattern = secretPattern(value);
   if (pattern) return Object.freeze({ classification: 'confirmed', finding: finding(pattern.type, name, place, action), code: 'SECRET_EXPOSURE_DETECTED' });
+  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
   if (SECRET_FIELDS.has(normalizedName)) {
     if (isPlaceholder(value)) return Object.freeze({ classification: 'none', finding: null });
     return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-value', name, place, action) });

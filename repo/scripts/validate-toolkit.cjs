@@ -9,6 +9,7 @@ const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const surfaceAudit = require('./audit-published-surfaces.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
+const legacyIdentifierAudit = require('./validate-nonoperative-legacy-identifiers.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index += 1) {
@@ -741,6 +742,10 @@ function validate() {
   validateManagedSurfaces(errors);
   validateSourceWatch(errors);
   validateContracts(errors);
+  const legacyIdentifierResult = legacyIdentifierAudit.validateTrackedTree(root);
+  for (const finding of legacyIdentifierResult.findings) {
+    fail(errors, `${finding.code}: ${finding.path || ''}${finding.line ? `:${finding.line}` : ''}`.trim());
+  }
   validateLegacyReferences(errors);
   validateExecutables(errors);
   validateNoSecrets(errors);

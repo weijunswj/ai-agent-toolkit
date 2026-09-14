@@ -75,14 +75,16 @@ test('active setup source no longer imports the retired agent-control authority'
 
 test('depth-one launch resolution keeps omitted child speed Standard under a Priority root', () => {
   const root = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'profile-root' });
-  const child = route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, launch_id: 'profile-child' });
+  const treeDigest = route.digestValue({ tree: 'profile' });
+  const scopeDigest = route.digestValue({ scope: 'profile' });
+  const child = route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, tree_digest: treeDigest, scope_digest: scopeDigest, launch_id: 'profile-child' });
   assert.equal(root.speed, 'priority');
   assert.equal(child.speed, 'standard');
   assert.equal(child.speed_source, 'child-default');
   assert.equal(child.parent_speed, 'priority');
   assert.equal(child.child_priority_authorized, false);
   assert.throws(
-    () => route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, speed: 'priority' }),
+    () => route.resolveDepthOneLaunch({ role: 'loop-manager', host: 'codex', parent: root, tree_digest: treeDigest, scope_digest: scopeDigest, speed: 'priority' }),
     (error) => error.code === 'PRIORITY_CHILD_AUTHORITY_REQUIRED'
   );
 });
@@ -91,13 +93,39 @@ test('host adapter execution consumes only an exact resolved record and capabili
   const launch = route.resolveRoleRoute({ role: 'g1', host: 'claude-code', launch_id: 'profile-g1' });
   const capability = adapters.proveHostCapability({
     launch_record: launch,
-    capability: { available: true, trusted: true, metadata_verified: true }
+    capability: {
+      available: true,
+      trusted: true,
+      metadata_verified: true,
+      launch_id: launch.launch_id,
+      role: launch.role,
+      provider: launch.provider,
+      model: launch.model,
+      reasoning: launch.reasoning,
+      service_tier: launch.service_tier,
+      speed: launch.speed,
+      host: launch.host,
+      backend: launch.backend,
+      launch_record_digest: launch.route_digest,
+    }
   });
   const receipt = adapters.executeExactLaunch({
     launch_record: launch,
     capability_proof: capability.proof,
     executor: ({ launch_record, capability_proof }) => ({
-      accepted: launch_record.route_digest === capability_proof.launch_record_digest,
+      accepted: true,
+      acknowledged: true,
+      launch_id: launch_record.launch_id,
+      role: launch_record.role,
+      provider: launch_record.provider,
+      model: launch_record.model,
+      reasoning: launch_record.reasoning,
+      service_tier: launch_record.service_tier,
+      speed: launch_record.speed,
+      host: launch_record.host,
+      backend: launch_record.backend,
+      launch_record_digest: launch_record.route_digest,
+      capability_proof_digest: route.digestValue(capability_proof),
       completed: true,
     })
   });

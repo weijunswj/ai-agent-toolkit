@@ -25,3 +25,14 @@ test('safe metadata and required deployment configuration are handled separately
   assert.equal(exposure.requireDeploymentConfiguration({}, ['deployment_url']).code, 'REQUIRED_CONFIGURATION_MISSING');
   assert.equal(exposure.requireDeploymentConfiguration({ deployment_url: 'configured' }, ['deployment_url']).ok, true);
 });
+
+test('safe metadata names cannot suppress secret-pattern detection in values', () => {
+  const value = 'sk-' + 'a'.repeat(24);
+  const direct = exposure.classifyExposure({ value, name: 'host' });
+  assert.equal(direct.classification, 'confirmed');
+  assert.equal(direct.finding.type, 'openai-key');
+  const recursive = exposure.preparePublicPayload({ host: value, account: 'safe-account' });
+  assert.equal(recursive.classification, 'confirmed');
+  assert.equal(recursive.payload.host, exposure.REDACTED);
+  assert.equal(recursive.payload.account, 'safe-account');
+});

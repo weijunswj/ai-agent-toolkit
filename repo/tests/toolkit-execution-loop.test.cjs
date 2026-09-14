@@ -22,15 +22,54 @@ const common = {
 };
 
 function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']], capabilityOverrides = {}) {
+  const requestedLanes = entries.map(([launchId]) => launchId);
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: requestedLanes,
+  });
+  const treeDigest = route.digestValue({ tree: 'execution-loop-test' });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'execution-parent' });
   return {
     delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
     launches: entries.map(([launchId, role]) => {
-      const launch = route.resolveRoleRoute({ role, host: 'codex', launch_id: launchId });
+      const launch = route.resolveDepthOneLaunch({ role, host: 'codex', parent, tree_digest: treeDigest, scope_digest: scopeDigest, launch_id: launchId });
       return {
         ...launch,
-        capability: { available: true, trusted: true, metadata_verified: true, ...(capabilityOverrides[launchId] || {}) }
+        capability: {
+          available: true,
+          trusted: true,
+          metadata_verified: true,
+          launch_id: launch.launch_id,
+          role: launch.role,
+          provider: launch.provider,
+          model: launch.model,
+          reasoning: launch.reasoning,
+          service_tier: launch.service_tier,
+          speed: launch.speed,
+          host: launch.host,
+          backend: launch.backend,
+          launch_record_digest: launch.route_digest,
+          ...(capabilityOverrides[launchId] || {})
+        }
       };
     })
+  };
+}
+
+function batchAcknowledgement(routePlan, launchLeases) {
+  return {
+    atomic: true,
+    acknowledged: true,
+    accepted: true,
+    route_digest: routePlan.route_digest,
+    launch_record_digests: routePlan.exact_launches.map((item) => item.launch_record.route_digest),
+    started_lane_ids: launchLeases.map((item) => item.lane_id),
   };
 }
 
@@ -190,7 +229,7 @@ test('A3 complete atomic launch starts exactly the admitted lane set', () => {
     },
     commitLaunchBatch({ route_plan, launch_leases }) {
       batches.push({ route_digest: route_plan.route_digest, lanes: launch_leases.map((item) => item.lane_id) });
-      return { atomic: true, started_lane_ids: launch_leases.map((item) => item.lane_id) };
+      return batchAcknowledgement(route_plan, launch_leases);
     },
   }));
   assert.equal(result.admitted.status, 'admitted');
@@ -249,6 +288,66 @@ test('delegated route requires exact trusted metadata and complete adapter capab
   assert.equal(admitted.route_plan.lanes[0].host_classification, 'hard-runtime-enforcement');
   const unsupported = runtime.admitRoute({ ...common, authority: exactAuthority([['worker-a', 'g1']], { 'worker-a': { available: false } }) });
   assert.equal(unsupported.reason_code, 'HOST_CAPABILITY_UNAVAILABLE');
+});
+
+test('integrated delegated admission binds an explicitly accepted Priority child authority', () => {
+  const treeDigest = route.digestValue({ tree: 'priority-integrated' });
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: ['priority-child'],
+  });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'priority-parent' });
+  const priorityAuthority = {
+    enabled: true,
+    accepted: true,
+    authority_digest: route.digestValue({ authority: 'priority-integrated' }),
+    tree_digest: treeDigest,
+  };
+  const child = route.resolveDepthOneLaunch({
+    role: 'loop-manager',
+    host: 'codex',
+    parent,
+    launch_id: 'priority-child',
+    speed: 'priority',
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    priority_child_authority: priorityAuthority,
+  });
+  const capability = {
+    available: true,
+    trusted: true,
+    metadata_verified: true,
+    launch_id: child.launch_id,
+    role: child.role,
+    provider: child.provider,
+    model: child.model,
+    reasoning: child.reasoning,
+    service_tier: child.service_tier,
+    speed: child.speed,
+    host: child.host,
+    backend: child.backend,
+    launch_record_digest: child.route_digest,
+  };
+  const authority = {
+    delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    launches: [{ ...child, priority_child_authority: priorityAuthority, capability }],
+  };
+  const admitted = runtime.admitRoute({ ...common, authority });
+  assert.equal(admitted.status, 'admitted');
+  assert.equal(admitted.route_plan.exact_launches[0].launch_record.route_digest, child.route_digest);
+
+  const withoutAcceptedAuthority = {
+    ...authority,
+    launches: [{ ...authority.launches[0], priority_child_authority: { ...priorityAuthority, accepted: false } }],
+  };
+  const rejected = runtime.admitRoute({ ...common, authority: withoutAcceptedAuthority });
+  assert.equal(rejected.reason_code, 'PRIORITY_CHILD_AUTHORITY_REQUIRED');
 });
 
 test('lifecycle admits exact live snapshot and rejects missing terminal evidence', () => {

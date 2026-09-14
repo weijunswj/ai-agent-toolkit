@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-assurance-web-finality.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
+const adapters = require('../scripts/toolkit-host-route-adapters.cjs');
 
 const {
   DESIGN_LOCK_ID,
@@ -27,6 +29,26 @@ const candidate = Object.freeze({
   current: true,
 });
 
+const g4LaunchRecord = route.resolveRoleRoute({ role: 'g4', host: 'codex', launch_id: 'assurance-g4' });
+const g4CapabilityProof = adapters.proveHostCapability({
+  launch_record: g4LaunchRecord,
+  capability: {
+    available: true,
+    trusted: true,
+    metadata_verified: true,
+    launch_id: g4LaunchRecord.launch_id,
+    role: g4LaunchRecord.role,
+    provider: g4LaunchRecord.provider,
+    model: g4LaunchRecord.model,
+    reasoning: g4LaunchRecord.reasoning,
+    service_tier: g4LaunchRecord.service_tier,
+    speed: g4LaunchRecord.speed,
+    host: g4LaunchRecord.host,
+    backend: g4LaunchRecord.backend,
+    launch_record_digest: g4LaunchRecord.route_digest,
+  },
+}).proof;
+
 function g4Evidence(overrides = {}) {
   return {
     status: 'PASS',
@@ -35,8 +57,11 @@ function g4Evidence(overrides = {}) {
     model: 'gpt-6-astra',
     reasoning: 'high',
     service_tier: 'standard',
-    route_digest: digest('1'),
-    capability_proof_digest: digest('2'),
+    speed: g4LaunchRecord.speed,
+    route_digest: g4LaunchRecord.route_digest,
+    capability_proof_digest: route.digestValue(g4CapabilityProof),
+    launch_record: g4LaunchRecord,
+    capability_proof: g4CapabilityProof,
     fresh: true,
     isolated: true,
     read_only: true,

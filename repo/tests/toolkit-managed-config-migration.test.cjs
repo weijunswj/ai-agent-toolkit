@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const migration = require('../scripts/toolkit-managed-config-migration.cjs');
 
 test('managed config migration removes only an exact Toolkit-owned block', () => {
-  const text = 'user = true\n\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\nmax = 1\n# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY\n\nkeep = true\n';
+  const text = 'user = true\n\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\nmax_concurrent_threads_per_session = 2\n# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY\n\nkeep = true\n';
   let written = '';
   const preview = migration.planManagedConfigMigration({ text });
   assert.equal(preview.status, 'MIGRATION_REQUIRED');
@@ -15,10 +15,34 @@ test('managed config migration removes only an exact Toolkit-owned block', () =>
   assert.match(written, /user = true/);
   assert.match(written, /keep = true/);
   assert.doesNotMatch(written, /HELPER-CAPACITY/);
+  assert.equal(written, 'user = true\n\n\nkeep = true\n');
 });
 
 test('structurally ambiguous configuration is blocked without a write', () => {
   const result = migration.migrateManagedConfiguration({ text: 'helper-capacity = 1\n', write: true, atomic_write: () => { throw new Error('must not write'); } });
   assert.equal(result.status, 'BLOCKED');
   assert.equal(result.reason_code, 'STRUCTURAL_CONFIGURATION_UNSAFE');
+});
+
+test('marker presence with altered managed values is blocked without a write', () => {
+  let writes = 0;
+  const result = migration.migrateManagedConfiguration({
+    text: '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\nuser_value = 1\n# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY\n',
+    write: true,
+    atomic_write: () => { writes += 1; }
+  });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(writes, 0);
+});
+
+test('failed migration invokes rollback with the exact original bytes', () => {
+  const text = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\nmax_concurrent_threads_per_session = 2\n# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY\n';
+  let rollbackRequest;
+  assert.throws(() => migration.migrateManagedConfiguration({
+    text,
+    write: true,
+    atomic_write: () => { throw new Error('interrupted'); },
+    rollback: (request) => { rollbackRequest = request; return true; }
+  }), (error) => error.code === 'MIGRATION_WRITE_FAILED');
+  assert.deepEqual(rollbackRequest, { original_text: text, attempted_text: '' });
 });

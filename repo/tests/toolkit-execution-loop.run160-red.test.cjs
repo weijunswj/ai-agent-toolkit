@@ -18,12 +18,53 @@ const common = {
 };
 
 function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']]) {
+  const requestedLanes = entries.map(([launchId]) => launchId);
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: requestedLanes,
+  });
+  const treeDigest = route.digestValue({ tree: 'run160' });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'run160-parent' });
   return {
     delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
     launches: entries.map(([launchId, role]) => {
-      const launch = route.resolveRoleRoute({ role, host: 'codex', launch_id: launchId });
-      return { ...launch, capability: { available: true, trusted: true, metadata_verified: true } };
+      const launch = route.resolveDepthOneLaunch({ role, host: 'codex', parent, tree_digest: treeDigest, scope_digest: scopeDigest, launch_id: launchId });
+      return {
+        ...launch,
+        capability: {
+          available: true,
+          trusted: true,
+          metadata_verified: true,
+          launch_id: launch.launch_id,
+          role: launch.role,
+          provider: launch.provider,
+          model: launch.model,
+          reasoning: launch.reasoning,
+          service_tier: launch.service_tier,
+          speed: launch.speed,
+          host: launch.host,
+          backend: launch.backend,
+          launch_record_digest: launch.route_digest,
+        }
+      };
     })
+  };
+}
+
+function batchAcknowledgement(routePlan, launchLeases) {
+  return {
+    atomic: true,
+    acknowledged: true,
+    accepted: true,
+    route_digest: routePlan.route_digest,
+    launch_record_digests: routePlan.exact_launches.map((item) => item.launch_record.route_digest),
+    started_lane_ids: launchLeases.map((item) => item.lane_id),
   };
 }
 
@@ -126,9 +167,9 @@ test('RUN160 RED: delegated substantive start cannot occur from admitted without
     run_id: 'run-red-admitted',
     authority: exactAuthority(),
     prepareLaunch: (input) => ({ lane_id: input.lane.lane_id, launch_lease: 'lease-' + input.lane.lane_id, inert: true }),
-    commitLaunchBatch: () => {
+    commitLaunchBatch: ({ route_plan, launch_leases }) => {
       substantiveStarts += 1;
-      return { atomic: true, started_lane_ids: ['worker-a', 'worker-b'] };
+      return batchAcknowledgement(route_plan, launch_leases);
     },
   });
   assert.equal(result.status, 'admitted');
@@ -160,7 +201,7 @@ test('RUN160 RED: exact verified workspace evidence permits a complete delegated
     workspace_receipt: workspace.workspace_receipt,
     liveRefProvider: { read: () => live },
     prepareLaunch: (input) => ({ lane_id: input.lane.lane_id, launch_lease: 'lease-' + input.lane.lane_id, inert: true }),
-    commitLaunchBatch: ({ launch_leases }) => ({ atomic: true, started_lane_ids: launch_leases.map((item) => item.lane_id) }),
+    commitLaunchBatch: ({ route_plan, launch_leases }) => batchAcknowledgement(route_plan, launch_leases),
   });
   assert.equal(started.run.execution_state, 'running');
   assert.deepEqual(started.launches, ['worker-a', 'worker-b']);
