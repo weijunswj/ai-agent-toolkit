@@ -3567,7 +3567,7 @@ function validateControllerBootstrap(value) {
     || value.parent_issue !== PARENT_ISSUE
     || value.programme_state_schema !== STATE_SCHEMA
     || value.surface_contract_schema !== SURFACE_SCHEMA
-    || value.toolkit_package_version !== '2.11.1'
+    || value.toolkit_package_version !== '2.11.2'
     || !isRecord(value.toolkit_contract)
     || !exactKeys(value.toolkit_contract, ['repository', 'revision', 'path', 'sha256'])
     || value.toolkit_contract.repository !== REPOSITORY
@@ -3624,7 +3624,7 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.11.1';
+const H2_PACKAGE_VERSION = '2.11.2';
 const H2_VERSION = 'human-v2';
 const H2_CANONICAL_CLASS = 'canonical-programme-state';
 const H2_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';

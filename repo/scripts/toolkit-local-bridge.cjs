@@ -8,8 +8,11 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const {
   EXPECTED_TOOLKIT_VERSION,
+  pluginId,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
+  inspectCodexToolkitConfigurationProof,
+  inspectCodexToolkitInstalledState,
   inspectCodexPluginList,
   verifyInstalledCacheFreshness,
   cacheFingerprint,
@@ -28,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.11.1';
+const BRIDGE_VERSION = '2.11.2';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1964,7 +1967,7 @@ function classifyUpdateReport(context) {
   const actionable = repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
-    || ['stale', 'refresh-failed'].includes(cacheStatus)
+    || ['stale', 'missing', 'user-disabled', 'refresh-failed'].includes(cacheStatus)
     || ['repair-failed', 'partial-failed'].includes(repairStatus)
     || ['failed', 'not confirmed'].includes(targetStatus)
     || Boolean(context.warning);
@@ -2042,6 +2045,9 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, st
     }
     return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   }
+  if (nativePluginCache.status === 'missing') return 'run `setup toolkit` to install and verify the Codex plugin';
+  if (nativePluginCache.status === 'unverified') return 'run `setup toolkit` after the current Codex plugin configuration and installed state can be inspected';
+  if (nativePluginCache.status === 'user-disabled') return 'enable the Toolkit plugin in Codex configuration before refreshing it';
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
@@ -2154,6 +2160,12 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
+  } else if (nativePluginCache.status === 'missing') {
+    lines.push('- Codex native plugin cache is missing or the current installed Toolkit plugin was not reported. Run `setup toolkit` to install and verify it.');
+  } else if (nativePluginCache.status === 'unverified') {
+    lines.push('- Codex native plugin cache state could not be proven from current Codex configuration and installed-plugin inspection; no refresh was attempted.');
+  } else if (nativePluginCache.status === 'user-disabled') {
+    lines.push('- Codex explicitly reports the Toolkit plugin as user-disabled; its state was preserved and no refresh was attempted.');
   } else if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       lines.push('- Codex native plugin cache is stale even though auto-refresh is enabled. The hook will retry automatic refresh on the next run; use `setup toolkit` only if this persists.');
@@ -3535,46 +3547,66 @@ function runtimeClaudePluginRoot() {
   return path.resolve(process.env.CLAUDE_PLUGIN_ROOT || process.env.PLUGIN_ROOT || path.resolve(__dirname, '..', '..'));
 }
 
-function cacheManifestVersion(pluginRoot) {
-  try {
-    const manifest = readJsonIfExists(path.join(pluginRoot, '.codex-plugin', 'plugin.json'));
-    return typeof manifest?.version === 'string' ? manifest.version : null;
-  } catch (_error) {
-    return null;
-  }
-}
-
-function cacheInstalledStateProof(pluginRoot, repoPath, errors) {
-  let fingerprint = null;
-  try { fingerprint = cacheFingerprint(pluginRoot, repoPath); } catch (_error) {}
-  return {
-    trusted: true,
-    active: true,
-    cache_root: path.resolve(pluginRoot),
-    version: cacheManifestVersion(pluginRoot),
-    bytes_verified: errors.length === 0,
-    fingerprint,
-    fingerprint_verified: errors.length === 0 && typeof fingerprint === 'string'
-  };
-}
-
 function codexNativePluginCacheStatus(args, state) {
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.repo_path) return { status: '' };
   const repoPath = path.resolve(state.repo_path);
   if (!fs.existsSync(repoPath)) return { status: '' };
-  const pluginRoot = runtimeCodexPluginRoot();
-  const errors = verifyInstalledCacheFreshness(pluginRoot, repoPath);
-  const installedStateProof = cacheInstalledStateProof(pluginRoot, repoPath, errors);
+  const codexHome = path.resolve(defaultCodexHome());
+  const configurationProof = inspectCodexToolkitConfigurationProof({ codexHome });
+  if (configurationProof.trusted && configurationProof.user_disabled === true) {
+    return {
+      status: 'user-disabled',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      user_disabled: true,
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: []
+    };
+  }
+  if (configurationProof.trusted !== true || configurationProof.enabled !== true) {
+    return {
+      status: 'unverified',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: [configurationProof.reason || 'Current Codex Toolkit configuration could not be proven']
+        .slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    };
+  }
+
+  const installedState = inspectCodexToolkitInstalledState({
+    codexHome,
+    repoRoot: repoPath,
+    codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+  });
+  const installedStateProof = installedState.proof || null;
+  const installedErrors = installedState.errors || [];
+  const status = installedState.ok
+    ? 'fresh'
+    : (installedStateProof?.reported_version ? 'stale'
+      : (installedErrors.some((error) => /is not installed/i.test(error)) ? 'missing' : 'unverified'));
   return {
-    status: errors.length ? 'stale' : 'fresh',
-    plugin_root: pluginRoot,
+    status,
+    host: 'codex',
+    codex_home: codexHome,
+    plugin_root: installedStateProof?.cache_root || '',
     repo_path: repoPath,
-    version: installedStateProof.version,
-    fingerprint: installedStateProof.fingerprint,
-    fingerprint_verified: installedStateProof.fingerprint_verified,
+    plugin_id: pluginId(),
+    version: installedStateProof?.reported_version || null,
+    fingerprint: installedStateProof?.fingerprint || null,
+    fingerprint_verified: installedStateProof?.fingerprint_verified === true,
+    bytes_verified: installedStateProof?.bytes_verified === true,
+    cache_manifest_version: installedStateProof?.cache_manifest_version || null,
+    configuration_proof: configurationProof,
     installed_state_proof: installedStateProof,
-    errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    errors: installedErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
   };
 }
 
@@ -3832,7 +3864,7 @@ function maybeRepairThirdPartyCodexPluginHooks(args, state) {
 
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
   const before = codexNativePluginCacheStatus(args, state);
-  if (before.status !== 'stale') return before;
+  if (!['stale', 'missing'].includes(before.status)) return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
   const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
   if (validateRepo) {
@@ -3862,20 +3894,38 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
       errors: sourceErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
     };
   }
+  let sourceFingerprint;
+  try {
+    sourceFingerprint = cacheFingerprint(resolvedRepoPath, resolvedRepoPath, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    });
+  } catch (error) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: [`Codex plugin cache auto-refresh could not fingerprint the trusted repo: ${error.message}`]
+    };
+  }
+  if (!/^[a-f0-9]{64}$/.test(sourceFingerprint)) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: ['Codex plugin cache auto-refresh could not establish a valid trusted repo fingerprint']
+    };
+  }
   let refreshResult = null;
   const sourceProof = {
     trusted: true,
+    ambiguous: false,
+    plugin_id: pluginId(),
     source_root: resolvedRepoPath,
     version: EXPECTED_TOOLKIT_VERSION,
-    fingerprint: cacheFingerprint(resolvedRepoPath, resolvedRepoPath),
-    fingerprint_verified: true
+    fingerprint: sourceFingerprint,
+    source_fingerprint: sourceFingerprint,
+    fingerprint_verified: true,
+    evidence_source: 'trusted-repo-validation'
   };
-  const configurationProof = {
-    trusted: true,
-    enabled: true,
-    user_disabled: false,
-    source: 'toolkit-bridge-state'
-  };
+  const configurationProof = before.configuration_proof;
   const recovery = recoverCodexCache({
     expectedVersion: EXPECTED_TOOLKIT_VERSION,
     refresh_required: true,
@@ -3895,19 +3945,29 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
       return refreshResult.ok;
     },
     rediscover: () => {
-      const activeRoot = runtimeCodexPluginRoot();
-      const activeState = codexNativePluginCacheStatus(args, { ...state, repo_path: resolvedRepoPath });
+      const codexHome = path.resolve(defaultCodexHome());
+      const activeState = inspectCodexToolkitInstalledState({
+        codexHome,
+        repoRoot: resolvedRepoPath,
+        codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+      });
+      const proof = activeState.proof || null;
       return {
-        present: activeState.status === 'fresh',
-        trusted: activeState.status === 'fresh',
-        version: activeState.version,
-        bytes_verified: activeState.status === 'fresh',
-        fingerprint: activeState.fingerprint,
-        fingerprint_verified: activeState.fingerprint_verified,
-        cache_root: activeRoot,
-        installed_state_proof: activeState.installed_state_proof,
-        status: activeState.status,
-        executing: false
+        present: activeState.ok === true,
+        trusted: proof?.trusted === true,
+        version: proof?.reported_version || null,
+        bytes_verified: proof?.bytes_verified === true,
+        fingerprint: proof?.fingerprint || null,
+        source_fingerprint: proof?.source_fingerprint || null,
+        cache_fingerprint: proof?.cache_fingerprint || null,
+        fingerprint_verified: proof?.fingerprint_verified === true,
+        cache_root: proof?.cache_root || null,
+        installed_state_proof: proof,
+        status: activeState.ok ? 'fresh' : (proof?.reported_version ? 'stale' : 'unverified'),
+        executing: false,
+        trust_failure: proof?.trusted !== true,
+        structural_failure: proof?.ambiguous === true,
+        errors: activeState.errors || []
       };
     }
   });
@@ -3922,7 +3982,7 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
   return {
     ...before,
     status: 'refreshed',
-    plugin_root: recovery.cache_root || runtimeCodexPluginRoot(),
+    plugin_root: recovery.cache_root,
     version: recovery.cache_version,
     fingerprint: recovery.cache_fingerprint,
     fingerprint_verified: true,

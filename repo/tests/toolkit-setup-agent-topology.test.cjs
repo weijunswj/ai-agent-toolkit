@@ -10,7 +10,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = { TOPOLOGIES: { ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'exact-launch-record', BROADER_NATIVE: 'host-native' }, CAPACITY_MODES: { ROOT_ONLY: 'not-managed', AUTO: 'not-managed', MANUAL: 'not-managed' } };
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.11.1', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), route_sha256: 'c'.repeat(64), adapter_sha256: 'e'.repeat(64), process_launch_sha256: 'f'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.11.2', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), route_sha256: 'c'.repeat(64), adapter_sha256: 'e'.repeat(64), process_launch_sha256: 'f'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },

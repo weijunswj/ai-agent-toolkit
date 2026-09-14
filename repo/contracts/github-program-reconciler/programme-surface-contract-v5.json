@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "repository": "weijunswj/ai-agent-toolkit",
   "design_lock": "DL-S2-E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002",
-  "toolkit_package_version": "2.11.1",
+  "toolkit_package_version": "2.11.2",
   "canonical_state": {
     "schema": "toolkit.github-program.state.v5",
     "parent_issue": 240,
@@ -58,7 +58,7 @@
     "root": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008",
     "lock": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008",
     "version": "human-v2",
-    "package_version": "2.11.1",
+    "package_version": "2.11.2",
     "facade_export": "humanSurfaceV2",
     "operations": ["readComplete", "render", "extendHistory", "planMigration"],
     "failure_shape": ["ok", "code", "operation", "stage", "safe_for_provider_write", "provider_mutation_authorised"],

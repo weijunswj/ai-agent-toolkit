@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.11.1';
+const EXPECTED_TOOLKIT_VERSION = '2.11.2';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
@@ -78,6 +78,14 @@ function compareSemver(left, right) {
     if (leftPart < rightPart) return -1;
   }
   return 0;
+}
+
+function isSupportedCacheVersion(value) {
+  return typeof value === 'string' && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(value);
+}
+
+function isSha256Fingerprint(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }
 
 function readJson(filePath) {
@@ -328,6 +336,43 @@ function cacheRootFor(codexHome, version = EXPECTED_TOOLKIT_VERSION) {
   return path.join(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME, version);
 }
 
+function discoverInstalledCacheRoot(codexHome, observedVersion) {
+  const errors = [];
+  const version = typeof observedVersion === 'string' ? observedVersion.trim() : '';
+  if (!isSupportedCacheVersion(version)) {
+    return { cacheRoot: '', errors: [`${pluginId()} reported an invalid installed version; its cache root cannot be resolved`] };
+  }
+
+  const pluginCacheRoot = path.resolve(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME);
+  if (!fs.existsSync(pluginCacheRoot)) {
+    return {
+      cacheRoot: '',
+      errors: [`${pluginId()} reported installed version ${version}, but its plugin cache directory is missing: ${pluginCacheRoot}`]
+    };
+  }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(pluginCacheRoot, { withFileTypes: true });
+  } catch {
+    return {
+      cacheRoot: '',
+      errors: [`${pluginId()} installed cache directory could not be read: ${pluginCacheRoot}`]
+    };
+  }
+
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && entry.name === version)
+    .map((entry) => path.resolve(pluginCacheRoot, entry.name));
+  if (candidates.length !== 1) {
+    errors.push(candidates.length === 0
+      ? `${pluginId()} reported installed version ${version}, but its exact cache root is missing`
+      : `${pluginId()} reported installed version ${version}, but its cache root is ambiguous`);
+    return { cacheRoot: '', errors };
+  }
+  return { cacheRoot: candidates[0], errors };
+}
+
 function listFingerprintFiles(root) {
   const files = [];
   for (const relPath of CACHE_FINGERPRINT_PATHS) {
@@ -364,7 +409,30 @@ function fileFingerprint(filePath) {
   };
 }
 
-function cacheFingerprint(cacheRoot, repoRoot = '') {
+function fingerprintForMaterial(root, relPath, options = {}) {
+  const filePath = path.join(root, ...relPath.split('/'));
+  if (options.normalizeWindowsSessionStart === true
+    && relPath === '.codex-plugin/hooks/hooks.json'
+    && fs.existsSync(filePath)) {
+    try {
+      const hooks = readJson(filePath);
+      if (hooks.hooks?.SessionStart?.[0]?.hooks?.[0]) {
+        hooks.hooks.SessionStart[0].hooks[0].command = sourceSessionStartCommand();
+        const bytes = Buffer.from(`${JSON.stringify(hooks, null, 2)}\n`, 'utf8');
+        return {
+          exists: true,
+          size: bytes.length,
+          hash: crypto.createHash('sha256').update(bytes).digest('hex')
+        };
+      }
+    } catch {
+      // The ordinary file fingerprint below records malformed/unreadable bytes.
+    }
+  }
+  return fileFingerprint(filePath);
+}
+
+function cacheFingerprint(cacheRoot, repoRoot = '', options = {}) {
   const installedRoot = path.resolve(cacheRoot);
   const sourceRoot = repoRoot ? path.resolve(repoRoot) : null;
   const relFiles = new Set(listFingerprintFiles(installedRoot));
@@ -374,7 +442,7 @@ function cacheFingerprint(cacheRoot, repoRoot = '') {
       const installedDir = path.join(installedRoot, ...relPath.slice(0, -1).split('/'));
       return `${relPath}\tDIR\t${fs.existsSync(installedDir) ? 'present' : 'missing'}`;
     }
-    const installed = fileFingerprint(path.join(installedRoot, ...relPath.split('/')));
+    const installed = fingerprintForMaterial(installedRoot, relPath, options);
     return `${relPath}\t${installed.exists ? installed.size : 0}\t${installed.hash}`;
   }).join('\n');
   return crypto.createHash('sha256').update(material, 'utf8').digest('hex');
@@ -435,7 +503,70 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
   return errors;
 }
 
+function isTrustedRecoveryProof(proof) {
+  return Boolean(proof && typeof proof === 'object' && !Array.isArray(proof)
+    && proof.trusted === true && proof.ambiguous !== true);
+}
+
+function validSourceRecoveryProof(proof, expectedVersion) {
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && typeof proof.source_root === 'string'
+    && proof.source_root.length > 0
+    && proof.version === expectedVersion
+    && proof.fingerprint_verified === true
+    && proof.evidence_source === 'trusted-repo-validation'
+    && isSha256Fingerprint(proof.fingerprint);
+}
+
+function validConfigurationRecoveryProof(proof) {
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && proof.evidence_source === 'codex-config-inspection'
+    && typeof proof.enabled === 'boolean'
+    && typeof proof.user_disabled === 'boolean'
+    && (proof.enabled === true ? proof.user_disabled === false : proof.user_disabled === true);
+}
+
+function validInstalledRecoveryProof(proof, cache, expectedVersion, sourceProof) {
+  const cacheRoot = typeof cache?.cache_root === 'string' ? path.resolve(cache.cache_root) : '';
+  const proofRoot = typeof proof?.cache_root === 'string' ? path.resolve(proof.cache_root) : '';
+  const sourceRoot = typeof sourceProof?.source_root === 'string' ? path.resolve(sourceProof.source_root) : '';
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && proof.plugin_name === TOOLKIT_PLUGIN_NAME
+    && proof.marketplace_name === TOOLKIT_MARKETPLACE_NAME
+    && proof.evidence_source === 'codex-plugin-list+cache'
+    && proof.installed === true
+    && proof.enabled === true
+    && proof.active === true
+    && proof.current === true
+    && proof.reported_version === expectedVersion
+    && proof.active_version === expectedVersion
+    && proof.version === expectedVersion
+    && proof.cache_manifest_version === expectedVersion
+    && proof.bytes_verified === true
+    && proof.fingerprint_verified === true
+    && isSha256Fingerprint(proof.source_fingerprint)
+    && isSha256Fingerprint(proof.cache_fingerprint)
+    && isSha256Fingerprint(proof.fingerprint)
+    && isSha256Fingerprint(sourceProof?.fingerprint)
+    && proof.source_fingerprint === sourceProof.fingerprint
+    && proof.source_fingerprint === proof.cache_fingerprint
+    && proof.fingerprint === proof.cache_fingerprint
+    && proofRoot.length > 0
+    && proofRoot === cacheRoot
+    && sourceRoot.length > 0
+    && typeof proof.source_root === 'string'
+    && path.resolve(proof.source_root) === sourceRoot;
+}
+
 function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode, cache = null, proofs = {}) {
+  const sourceProof = isTrustedRecoveryProof(proofs.source_proof) ? proofs.source_proof : null;
+  const configurationProof = isTrustedRecoveryProof(proofs.configuration_proof) ? proofs.configuration_proof : null;
+  const installedStateProof = isTrustedRecoveryProof(proofs.installed_state_proof)
+    ? proofs.installed_state_proof
+    : (isTrustedRecoveryProof(cache?.installed_state_proof) ? cache.installed_state_proof : null);
   return Object.freeze({
     contract_version: 'toolkit.local-bridge.codex-cache-recovery.v1',
     state,
@@ -446,9 +577,9 @@ function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode,
     cache_version: cache?.version || null,
     cache_root: cache?.cache_root || null,
     cache_fingerprint: cache?.fingerprint || null,
-    source_proof: proofs.source_proof || null,
-    configuration_proof: proofs.configuration_proof || null,
-    installed_state_proof: proofs.installed_state_proof || cache?.installed_state_proof || null
+    source_proof: sourceProof,
+    configuration_proof: configurationProof,
+    installed_state_proof: installedStateProof
   });
 }
 
@@ -457,14 +588,12 @@ function recoverCodexCache(options = {}) {
   const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
   const sourceProof = options.source_proof;
   const configurationProof = options.configuration_proof;
-  const proofTrusted = (proof) => proof && typeof proof === 'object' && !Array.isArray(proof)
-    && proof.trusted === true && proof.ambiguous !== true;
-  let sourceVerified = proofTrusted(sourceProof);
+  let sourceVerified = validSourceRecoveryProof(sourceProof, expectedVersion);
   if (typeof options.verifySource === 'function') {
     try { sourceVerified = sourceVerified && options.verifySource() === true; } catch (_error) { sourceVerified = false; }
   }
   if (!sourceVerified) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
-  if (!proofTrusted(configurationProof)) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  if (!validConfigurationRecoveryProof(configurationProof)) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
   if (configurationProof.enabled === false || configurationProof.user_disabled === true) {
     return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
   }
@@ -493,17 +622,14 @@ function recoverCodexCache(options = {}) {
   const verify = (cache) => {
     state = 'VERIFYING';
     const installedProof = cache?.installed_state_proof || options.installed_state_proof;
-    const fingerprint = cache?.fingerprint || installedProof?.fingerprint || null;
-    const fingerprintVerified = cache?.fingerprint_verified === true
-      || installedProof?.fingerprint_verified === true
-      || (typeof fingerprint === 'string' && /^[a-f0-9]{64}$/.test(fingerprint));
     return cache && cache.present === true
       && cache.version === expectedVersion
       && cache.bytes_verified === true
       && cache.trusted === true
-      && proofTrusted(installedProof)
-      && installedProof.active !== false
-      && (!refreshRequired || fingerprintVerified)
+      && cache.fingerprint_verified === true
+      && isSha256Fingerprint(cache.fingerprint)
+      && validInstalledRecoveryProof(installedProof, cache, expectedVersion, sourceProof)
+      && cache.fingerprint === installedProof.fingerprint
       && cache.executing !== true
       && cache.status !== 'executing'
       && cache.status !== 'stale-executing';
@@ -646,6 +772,45 @@ function inspectCodexConfiguredPluginState(options = {}) {
   }
 }
 
+function inspectCodexToolkitConfigurationProof(options = {}) {
+  const identity = pluginId();
+  const inspection = inspectCodexConfiguredPluginState({
+    codexHome: options.codexHome || defaultCodexHome(),
+    identity
+  });
+  const base = {
+    trusted: false,
+    ambiguous: true,
+    plugin_id: identity,
+    plugin_name: TOOLKIT_PLUGIN_NAME,
+    marketplace_name: TOOLKIT_MARKETPLACE_NAME,
+    enabled: null,
+    user_disabled: null,
+    status: inspection.status,
+    evidence_source: 'codex-config-inspection',
+    reason: inspection.reason
+  };
+  if (inspection.status === 'enabled') {
+    return {
+      ...base,
+      trusted: true,
+      ambiguous: false,
+      enabled: true,
+      user_disabled: false
+    };
+  }
+  if (inspection.status === 'disabled') {
+    return {
+      ...base,
+      trusted: true,
+      ambiguous: false,
+      enabled: false,
+      user_disabled: true
+    };
+  }
+  return base;
+}
+
 function localMarketplaceSection(configText) {
   const name = escapeRegex(TOOLKIT_MARKETPLACE_NAME);
   return findTomlSection(
@@ -740,6 +905,200 @@ function findInstalledEntry(pluginList) {
   })[0] || null;
 }
 
+function deriveCodexInstalledStateProof(pluginList, options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
+  const identity = {
+    pluginId: pluginId(),
+    name: TOOLKIT_PLUGIN_NAME,
+    marketplaceName: TOOLKIT_MARKETPLACE_NAME
+  };
+  const errors = [];
+  let ambiguous = false;
+  const installedEntries = Array.isArray(pluginList?.installed) ? pluginList.installed : null;
+  if (!installedEntries) {
+    errors.push('Codex plugin list did not contain a valid installed array');
+    ambiguous = true;
+  }
+  const matches = installedEntries ? findInstalledPluginEntries(pluginList, identity) : [];
+  if (matches.length === 0) {
+    errors.push(`${pluginId()} is not installed`);
+    ambiguous = true;
+  } else if (matches.length !== 1) {
+    errors.push(`${pluginId()} has ambiguous installed state: Codex reported ${matches.length} matching entries`);
+    ambiguous = true;
+  }
+
+  const entry = matches.length === 1 ? matches[0] : null;
+  let observedVersion = '';
+  let activeVersion = '';
+  let cacheRoot = '';
+  if (entry) {
+    if (entry.pluginId !== identity.pluginId) errors.push(`${pluginId()} installed entry did not report the exact plugin identity`);
+    if (entry.name !== identity.name || entry.marketplaceName !== identity.marketplaceName) {
+      errors.push(`${pluginId()} installed entry name or marketplace identity is malformed`);
+    }
+    if (entry.installed !== true) errors.push(`${pluginId()} is not reported as installed`);
+    if (typeof entry.enabled !== 'boolean') errors.push(`${pluginId()} installed entry did not report an explicit enabled boolean`);
+    else if (!entry.enabled) errors.push(`${pluginId()} is installed but not enabled`);
+    if (entry.authPolicy !== 'ON_USE') {
+      errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${entry.authPolicy || '<missing>'}`);
+    }
+    const sourcePath = entry.source?.path;
+    if (sourcePath !== undefined && sourcePath !== null && typeof sourcePath !== 'string') {
+      errors.push(`${pluginId()} installed entry reported a malformed source path`);
+    } else if (typeof sourcePath === 'string' && sourcePath.trim() && comparablePath(sourcePath) !== comparablePath(repoRoot)) {
+      errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
+    }
+
+    observedVersion = typeof entry.version === 'string' ? entry.version.trim() : '';
+    if (!isSupportedCacheVersion(observedVersion)) {
+      errors.push(`${pluginId()} installed entry did not report a valid active version`);
+    }
+    const activeVersionKey = Object.prototype.hasOwnProperty.call(entry, 'activeVersion')
+      ? 'activeVersion'
+      : (Object.prototype.hasOwnProperty.call(entry, 'active_version') ? 'active_version' : 'version');
+    activeVersion = typeof entry[activeVersionKey] === 'string' ? entry[activeVersionKey].trim() : '';
+    if (!isSupportedCacheVersion(activeVersion)) {
+      errors.push(`${pluginId()} installed entry did not report a valid active version`);
+    } else if (observedVersion && activeVersion !== observedVersion) {
+      errors.push(`${pluginId()} reported installed version ${observedVersion} but active version ${activeVersion}`);
+    }
+    if (isSupportedCacheVersion(observedVersion) && observedVersion !== expectedVersion) {
+      errors.push(`${pluginId()} expected version ${expectedVersion}: ${observedVersion}`);
+    }
+  }
+
+  if (isSupportedCacheVersion(observedVersion)) {
+    const discovered = discoverInstalledCacheRoot(codexHome, observedVersion);
+    cacheRoot = discovered.cacheRoot;
+    errors.push(...discovered.errors);
+  }
+
+  let manifestVersion = '';
+  if (cacheRoot) {
+    const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+    try {
+      const manifest = readJson(manifestPath);
+      manifestVersion = typeof manifest.version === 'string' ? manifest.version : '';
+      if (manifest.name !== TOOLKIT_PLUGIN_NAME) errors.push(`${pluginId()} cache manifest has wrong plugin name: ${manifest.name || '<missing>'}`);
+      if (manifestVersion !== observedVersion) errors.push(`${pluginId()} cache manifest version does not match observed installed version ${observedVersion}: ${manifestVersion || '<missing>'}`);
+    } catch {
+      errors.push(`${pluginId()} cache manifest could not be read at ${manifestPath}`);
+    }
+    try {
+      errors.push(...verifyInstalledCacheFreshness(cacheRoot, repoRoot, { platform: process.platform }).map((error) => error));
+    } catch {
+      errors.push(`${pluginId()} installed cache freshness could not be verified at ${cacheRoot}`);
+    }
+  }
+
+  let sourceFingerprint = '';
+  let cacheFingerprintValue = '';
+  if (cacheRoot) {
+    try {
+      const fingerprintOptions = { normalizeWindowsSessionStart: process.platform === 'win32' };
+      sourceFingerprint = cacheFingerprint(repoRoot, repoRoot, fingerprintOptions);
+      cacheFingerprintValue = cacheFingerprint(cacheRoot, repoRoot, fingerprintOptions);
+    } catch {
+      errors.push(`${pluginId()} source/cache fingerprint could not be computed`);
+    }
+  }
+  const bytesVerified = Boolean(cacheRoot && manifestVersion === observedVersion && !errors.some((error) => /cache|freshness|manifest|missing repo file|stale for repo file/i.test(error)));
+  const fingerprintVerified = isSha256Fingerprint(sourceFingerprint)
+    && isSha256Fingerprint(cacheFingerprintValue)
+    && sourceFingerprint === cacheFingerprintValue
+    && bytesVerified;
+  if (!bytesVerified) errors.push(`${pluginId()} installed cache bytes could not be verified against the current source`);
+  if (!fingerprintVerified) errors.push(`${pluginId()} installed cache fingerprint could not be verified against the current source`);
+
+  const trusted = Boolean(entry
+    && entry.pluginId === identity.pluginId
+    && entry.name === identity.name
+    && entry.marketplaceName === identity.marketplaceName
+    && entry.installed === true
+    && entry.enabled === true
+    && entry.authPolicy === 'ON_USE'
+    && isSupportedCacheVersion(observedVersion)
+    && activeVersion === observedVersion
+    && cacheRoot
+    && manifestVersion === observedVersion
+    && bytesVerified
+    && fingerprintVerified
+    && errors.length === 0);
+  const proof = {
+    trusted,
+    ambiguous,
+    plugin_id: identity.pluginId,
+    plugin_name: identity.name,
+    marketplace_name: identity.marketplaceName,
+    installed: entry?.installed === true,
+    enabled: entry?.enabled === true,
+    active: Boolean(entry?.installed === true && entry?.enabled === true && activeVersion && activeVersion === observedVersion),
+    reported_version: observedVersion || null,
+    active_version: activeVersion || null,
+    version: observedVersion || null,
+    current: observedVersion === expectedVersion,
+    cache_root: cacheRoot || null,
+    cache_manifest_version: manifestVersion || null,
+    bytes_verified: bytesVerified,
+    source_root: repoRoot,
+    source_fingerprint: sourceFingerprint || null,
+    cache_fingerprint: cacheFingerprintValue || null,
+    fingerprint: cacheFingerprintValue || null,
+    fingerprint_verified: fingerprintVerified,
+    evidence_source: 'codex-plugin-list+cache',
+    reason: errors[0] || ''
+  };
+  const refusesDowngrade = isSupportedCacheVersion(observedVersion)
+    && compareSemver(observedVersion, expectedVersion) > 0;
+  return {
+    ok: trusted && proof.current === true,
+    installed: entry,
+    cacheRoot: cacheRoot || (isSupportedCacheVersion(observedVersion) ? cacheRootFor(codexHome, observedVersion) : ''),
+    errors: [...new Set(errors)],
+    verificationMethod: 'codex-cli-list+cache',
+    installedStateProof: proof,
+    proof,
+    refusesDowngrade
+  };
+}
+
+function inspectCodexToolkitInstalledState(options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'pluginList')) {
+    return {
+      ok: false,
+      pluginList: null,
+      proof: {
+        trusted: false,
+        ambiguous: true,
+        plugin_id: pluginId(),
+        evidence_source: 'codex-plugin-list+cache',
+        reason: 'Synthetic plugin-list input is not supported for current installed-state inspection'
+      },
+      errors: ['Current installed Toolkit state must come from supported Codex plugin inspection; synthetic plugin-list input was refused']
+    };
+  }
+  const inspection = inspectCodexPluginList(options);
+  if (!inspection.ok) {
+    return {
+      ok: false,
+      pluginList: null,
+      proof: {
+        trusted: false,
+        ambiguous: true,
+        plugin_id: pluginId(),
+        evidence_source: 'codex-plugin-list+cache',
+        reason: inspection.errors?.[0] || 'Codex plugin inspection failed'
+      },
+      errors: inspection.errors || ['Codex plugin inspection failed']
+    };
+  }
+  const derived = deriveCodexInstalledStateProof(inspection.pluginList, options);
+  return { ...derived, pluginList: inspection.pluginList };
+}
+
 function evaluateConfigCacheFallback(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
@@ -747,12 +1106,13 @@ function evaluateConfigCacheFallback(options = {}) {
   const errors = [];
   const configPath = codexConfigPath(codexHome);
   let configText = '';
+  const configurationProof = inspectCodexToolkitConfigurationProof({ codexHome });
 
   if (!fs.existsSync(configPath)) {
     errors.push(`Codex config/cache fallback requires Codex config at ${configPath}`);
   } else {
     configText = fs.readFileSync(configPath, 'utf8');
-    if (!configHasEnabledPlugin(configText)) {
+    if (configurationProof.status !== 'enabled') {
       errors.push(`Codex config must enable [plugins."${pluginId()}"]`);
     }
     errors.push(...verifyLocalMarketplaceConfig(configText, repoRoot).errors);
@@ -781,6 +1141,7 @@ function evaluateConfigCacheFallback(options = {}) {
     installed,
     cacheRoot: cache.cacheRoot,
     errors,
+    configurationProof,
     verificationMethod: 'config-cache-fallback',
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message
@@ -792,54 +1153,46 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
   const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
   const errors = [];
-  const installed = findInstalledEntry(pluginList);
-  const cacheRoot = cacheRootFor(codexHome, expectedVersion);
-  const hookTrust = detectHookTrustStatus(codexHome, cacheRoot);
-  let refusesDowngrade = false;
+  const derived = deriveCodexInstalledStateProof(pluginList, {
+    codexHome,
+    repoRoot,
+    expectedVersion
+  });
+  const hookTrust = detectHookTrustStatus(codexHome, derived.cacheRoot);
 
-  if (!installed) {
+  if (!derived.installed) {
     if (options.allowConfigCacheFallback) {
       return evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
     }
-    errors.push(`${pluginId()} is not installed`);
+    errors.push(...derived.errors);
     return {
       ok: false,
       installed: null,
-      cacheRoot,
+      cacheRoot: derived.cacheRoot,
       errors,
       verificationMethod: 'codex-cli-list',
       hookTrustStatus: hookTrust.status,
       hookTrustMessage: hookTrust.message,
-      refusesDowngrade
+      installed_state_proof: derived.proof,
+      refusesDowngrade: derived.refusesDowngrade
     };
   }
-  if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
-  if (installed.version !== expectedVersion) {
-    if (compareSemver(installed.version, expectedVersion) > 0) {
-      refusesDowngrade = true;
-      errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or remove the newer plugin explicitly before retrying.`);
-    } else {
-      errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
-    }
+  if (derived.refusesDowngrade) {
+    errors.push(`Refusing downgrade: installed ${pluginId()} version ${derived.proof.reported_version} is newer than source version ${expectedVersion}. Update the managed source checkout or remove the newer plugin explicitly before retrying.`);
   }
-  if (installed.authPolicy !== 'ON_USE') {
-    errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
-  }
-  if (installed.source?.path && path.resolve(installed.source.path) !== repoRoot) {
-    errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);
-  }
-
-  errors.push(...verifyInstalledCache(codexHome, expectedVersion, { repoRoot }).errors);
+  errors.push(...derived.errors.filter((error) => !errors.includes(error)));
 
   return {
-    ok: errors.length === 0,
-    installed,
-    cacheRoot,
+    ok: derived.ok && errors.length === 0,
+    installed: derived.installed,
+    cacheRoot: derived.cacheRoot,
     errors,
-    verificationMethod: 'codex-cli-list',
+    verificationMethod: derived.verificationMethod,
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message,
-    refusesDowngrade
+    installed_state_proof: derived.proof,
+    configurationProof: inspectCodexToolkitConfigurationProof({ codexHome }),
+    refusesDowngrade: derived.refusesDowngrade
   };
 }
 
@@ -1096,7 +1449,7 @@ async function runCodexAddAndVerify(command, addArgs, options) {
 
     if (childExit && childExit.code !== 0) {
       terminateChild(child);
-      throw new Error(`codex ${addArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+      throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install; exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
     }
 
     await sleep(pollMs);
@@ -1252,13 +1605,14 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     ? 'The exact current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex; the exact current Toolkit `SessionStart` hook must be reviewed and trusted. Codex skips the hook until it is trusted.'
     : state.hookTrustMessage;
   const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
+  const reportedProof = state.installed_state_proof || {};
   const summary = {
     ok: true,
     plugin_id: pluginId(),
-    version: EXPECTED_TOOLKIT_VERSION,
-    installed: true,
-    enabled: true,
-    current: true,
+    version: reportedProof.reported_version || state.installed?.version || EXPECTED_TOOLKIT_VERSION,
+    installed: state.installed?.installed === true,
+    enabled: state.installed?.enabled === true,
+    current: reportedProof.current === true || state.installed?.version === EXPECTED_TOOLKIT_VERSION,
     cache_root: state.cacheRoot,
     verification_method: state.verificationMethod,
     hook_trust_status: hookTrustStatus,
@@ -1305,10 +1659,16 @@ module.exports = {
   SESSION_START_POWERSHELL_REL_PATH,
   SESSION_START_RUNTIME_REL_PATH,
   codexToolkitInstallCommands,
+  pluginId,
+  cacheRootFor,
+  discoverInstalledCacheRoot,
   defaultWindowsPowerShellPath,
+  deriveCodexInstalledStateProof,
   evaluateCodexToolkitPluginState,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
+  inspectCodexToolkitConfigurationProof,
+  inspectCodexToolkitInstalledState,
   inspectCodexPluginList,
   inspectConfiguredPluginState,
   prepareInstalledSessionStart,

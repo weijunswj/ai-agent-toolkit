@@ -3,7 +3,7 @@
   "contract_version": "toolkit.route-resolution.role-registry.v1",
   "schema_version": 1,
   "registry_id": "toolkit-default-role-registry",
-  "registry_version": "2.11.1",
+  "registry_version": "2.11.2",
   "roles": {
     "g1": {
       "provider": "openai",

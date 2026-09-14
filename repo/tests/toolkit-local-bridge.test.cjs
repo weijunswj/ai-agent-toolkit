@@ -27,6 +27,8 @@ const {
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
+  CACHE_FINGERPRINT_DIRS,
+  cacheRootFor,
   prepareInstalledSessionStart,
   sourceSessionStartCommand,
   windowsSessionStartCommand,
@@ -44,7 +46,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.11.1';
+const expectedBridgeVersion = '2.11.2';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -192,6 +194,8 @@ function writeDisabledHookHub(hub) {
 function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  const codexHome = path.join(root, 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha no-target fixture\n' });
   for (const relPath of CACHE_FINGERPRINT_PATHS) {
     const sourcePath = path.join(repoRoot, ...relPath.split('/'));
@@ -227,17 +231,21 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     '--sync-source', initialSource
   ], { env });
   assert.equal(setup.status, 0, setup.stderr);
-  return { root, hub, sourceRepo, pluginRoot, temp, env };
+  return { root, hub, sourceRepo, pluginRoot, codexHome, temp, env };
 }
 
 function runFixtureBridge(fixture, args) {
   const originalPluginRoot = process.env.PLUGIN_ROOT;
+  const originalCodexHome = process.env.CODEX_HOME;
   if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.pluginRoot;
+  process.env.CODEX_HOME = fixture.codexHome;
   try {
     return runBridge(args);
   } finally {
     if (originalPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
     else process.env.PLUGIN_ROOT = originalPluginRoot;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
   }
 }
 
@@ -478,8 +486,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const source = process.cwd();",
-    "const target = process.env.PLUGIN_ROOT;",
-    "if (!target) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    `const expectedVersion = ${JSON.stringify(expectedBridgeVersion)};`,
+    "const codexHome = process.env.CODEX_HOME;",
+    "if (!codexHome) { console.error('missing CODEX_HOME'); process.exit(9); }",
+    "const target = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedVersion);",
     "fs.rmSync(target, { recursive: true, force: true });",
     "fs.mkdirSync(path.dirname(target), { recursive: true });",
     "fs.cpSync(source, target, {",
@@ -494,6 +504,16 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
     "}",
+    "const pluginStatePath = process.env.CODEX_TOOLKIT_TEST_PLUGIN_STATE;",
+    "const rediscoveryMode = process.env.CODEX_TOOLKIT_TEST_REDISCOVERY_MODE || 'current';",
+    "if (pluginStatePath && fs.existsSync(pluginStatePath)) {",
+    "  const pluginState = JSON.parse(fs.readFileSync(pluginStatePath, 'utf8'));",
+    "  if (rediscoveryMode === 'missing') pluginState.installed = [];",
+    "  else if (rediscoveryMode === 'ambiguous') pluginState.installed = [...(pluginState.installed || []), ...(pluginState.installed || [])];",
+    "  else if (rediscoveryMode !== 'stale') for (const entry of pluginState.installed || []) if (entry.pluginId === 'ai-agent-toolkit@ai-agent-toolkit-local') entry.version = expectedVersion;",
+    "  fs.writeFileSync(pluginStatePath, JSON.stringify(pluginState, null, 2) + '\\n');",
+    "}",
+    "if (process.env.CODEX_TOOLKIT_TEST_CORRUPT_REFRESHED_CACHE === '1') fs.appendFileSync(path.join(target, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '\\n// corrupted refreshed cache\\n');",
     "process.stdout.write(JSON.stringify({ ok: true }));",
     ''
   ].join('\n'));
@@ -760,6 +780,122 @@ function writeFakeCodexPluginList(root, pluginList) {
     ''
   ].join('\n'));
   return { commandPath, statePath };
+}
+
+function copyCachePath(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) return;
+  const stat = fs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    if (path.basename(sourcePath) === 'skills') {
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    }
+    fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+    return;
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function writeCodexCacheFromSource(codexHome, sourceRepo, version = expectedBridgeVersion) {
+  const cacheRoot = cacheRootFor(codexHome, version);
+  for (const relPath of CACHE_FINGERPRINT_PATHS) {
+    copyCachePath(path.join(sourceRepo, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
+  }
+  for (const relDir of CACHE_FINGERPRINT_DIRS) {
+    copyCachePath(path.join(sourceRepo, ...relDir.split('/')), path.join(cacheRoot, ...relDir.split('/')));
+  }
+  if (process.platform === 'win32') prepareInstalledSessionStart(cacheRoot);
+  if (version !== expectedBridgeVersion) {
+    const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+    const manifest = readJson(manifestPath);
+    manifest.version = version;
+    writeJson(manifestPath, manifest);
+  }
+  return cacheRoot;
+}
+
+function writeCodexConfiguration(codexHome, sourceRepo, enabled = true, extra = '') {
+  fs.mkdirSync(codexHome, { recursive: true });
+  writeFile(path.join(codexHome, 'config.toml'), [
+    '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]',
+    `enabled = ${enabled ? 'true' : 'false'}`,
+    '',
+    '[marketplaces.ai-agent-toolkit-local]',
+    `path = ${JSON.stringify(path.resolve(sourceRepo))}`,
+    extra,
+    ''
+  ].join('\n'));
+}
+
+function setupCodexEvidence(root, sourceRepo, options = {}) {
+  const codexHome = options.codexHome || path.join(root, 'codex-home');
+  const version = options.version || expectedBridgeVersion;
+  const cacheRoot = writeCodexCacheFromSource(codexHome, options.cacheSourceRepo || sourceRepo, version);
+  if (options.cacheMutation) options.cacheMutation(cacheRoot);
+  writeCodexConfiguration(codexHome, sourceRepo, options.enabled !== false, options.configExtra || '');
+  const fake = writeFakeCodexPluginList(root, codexPluginList([{
+    pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
+    name: 'ai-agent-toolkit',
+    marketplaceName: 'ai-agent-toolkit-local',
+    version,
+    installed: true,
+    enabled: options.enabled !== false,
+    authPolicy: 'ON_USE',
+    source: { source: 'local', path: path.resolve(sourceRepo) }
+  }, ...(options.additionalEntries || [])]));
+  return { codexHome, cacheRoot, fake };
+}
+
+function codexEvidenceEnv(root, evidence, extra = {}) {
+  return isolatedHomeEnv(root, {
+    CODEX_HOME: evidence.codexHome,
+    CODEX_TOOLKIT_CODEX_CLI: evidence.fake.commandPath,
+    CODEX_TOOLKIT_TEST_PLUGIN_STATE: evidence.fake.statePath,
+    ...extra
+  });
+}
+
+function createCodexRefreshScenario(options = {}) {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex refresh source\n' });
+  writeRepoToolkitFixture(sourceRepo, 'codex refresh source');
+  writeCodexPluginRefreshFixture(sourceRepo);
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: options.initialVersion || '2.11.1',
+    enabled: options.enabled !== false,
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache A\n');
+      if (options.cacheMutation) options.cacheMutation(cacheRoot);
+    }
+  });
+  const hub = path.join(root, 'hub', 'current');
+  const initial = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh',
+    '--enable-target', 'opencode',
+    '--sync-source', 'repo'
+  ], { env: codexEvidenceEnv(root, evidence) });
+  assert.equal(initial.status, 0, initial.stderr);
+  return { root, sourceRepo, evidence, hub, options };
+}
+
+function runCodexRefreshScenario(scenario, extra = {}) {
+  return run(['--hub', scenario.hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: codexEvidenceEnv(scenario.root, scenario.evidence, {
+      PLUGIN_ROOT: scenario.evidence.cacheRoot,
+      ...(scenario.options.rediscoveryMode ? { CODEX_TOOLKIT_TEST_REDISCOVERY_MODE: scenario.options.rediscoveryMode } : {}),
+      ...extra
+    })
+  });
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -4099,10 +4235,15 @@ test('hook report is generated when target sync happens without a repo commit ch
 test('hook report tells user to run setup toolkit when Codex native plugin cache is stale', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex cache source\n' });
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
+  writeCodexPluginRefreshFixture(sourceRepo);
   const hub = path.join(root, 'hub', 'current');
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: '2.11.1',
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache\n');
+    }
+  });
 
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
@@ -4110,14 +4251,11 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     '--enable-auto-sync',
     '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'stale-executing-root') })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4131,10 +4269,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'stale-executing-root') })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4147,11 +4282,15 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   const fixture = createRepoAutoUpdateFixture();
   const root = fixture.root;
   const sourceRepo = fixture.repo;
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(sourceRepo);
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: '2.11.1',
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache\n');
+    }
+  });
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
@@ -4160,14 +4299,11 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
     '--enable-codex-plugin-auto-refresh',
     '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'old-cache-A') })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4178,6 +4314,59 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
   assert.doesNotMatch(report.text, /run `setup toolkit`/);
+});
+
+test('production bridge refresh starts from cache A, installs observed cache B, and verifies B as final proof', () => {
+  const scenario = createCodexRefreshScenario();
+  const result = runCodexRefreshScenario(scenario);
+  assert.equal(result.status, 0, result.stderr);
+
+  const cacheA = scenario.evidence.cacheRoot;
+  const cacheB = cacheRootFor(scenario.evidence.codexHome, expectedBridgeVersion);
+  assert.notEqual(path.resolve(cacheA), path.resolve(cacheB));
+  assert.deepEqual(verifyInstalledCacheFreshness(cacheB, scenario.sourceRepo), []);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(cacheA, scenario.sourceRepo), []);
+  assert.equal(readJson(scenario.evidence.fake.statePath).installed[0].version, expectedBridgeVersion);
+
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+});
+
+test('production bridge rejects a claimed refresh when fresh rediscovery is missing or ambiguous', () => {
+  for (const rediscoveryMode of ['missing', 'ambiguous']) {
+    const scenario = createCodexRefreshScenario({ rediscoveryMode });
+    const result = runCodexRefreshScenario(scenario);
+    assert.equal(result.status, 0, `${rediscoveryMode}: ${result.stderr}`);
+    const report = readLatestReport(scenario.hub);
+    assert.match(report.text, /Codex native plugin cache auto-refresh failed/);
+    assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+    const installed = readJson(scenario.evidence.fake.statePath).installed;
+    assert.equal(installed.length, rediscoveryMode === 'missing' ? 0 : 2);
+  }
+});
+
+test('production bridge rejects bytes and fingerprint mismatch on rediscovered cache B', () => {
+  const scenario = createCodexRefreshScenario();
+  const result = runCodexRefreshScenario(scenario, { CODEX_TOOLKIT_TEST_CORRUPT_REFRESHED_CACHE: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  const cacheB = cacheRootFor(scenario.evidence.codexHome, expectedBridgeVersion);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(cacheB, scenario.sourceRepo), []);
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /Codex native plugin cache auto-refresh failed/);
+  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+});
+
+test('production bridge preserves explicit user-disabled config and does not refresh', () => {
+  const scenario = createCodexRefreshScenario({ enabled: false });
+  const result = runCodexRefreshScenario(scenario);
+  assert.equal(result.status, 0, result.stderr);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(scenario.evidence.cacheRoot, scenario.sourceRepo), []);
+  assert.equal(readJson(scenario.evidence.fake.statePath).installed[0].version, '2.11.1');
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /user-disabled/);
+  assert.match(report.text, /no refresh was attempted/i);
+  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
 });
 
 test('Claude hook reports host-local manual native cache action and never runs Codex refresh', () => {
@@ -4216,11 +4405,14 @@ test('Claude hook reports host-local manual native cache action and never runs C
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
   writeCodexPluginRefreshFixture(fixture.repo);
   const refreshedCommit = commitAll(fixture.repo, 'add codex plugin refresh fixture');
   git(fixture.repo, ['push', 'origin', 'main']);
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+  const evidence = setupCodexEvidence(fixture.root, fixture.repo, {
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+    }
+  });
 
   let result = run([
     '--hub', hub,
@@ -4231,20 +4423,20 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
     '--write'
-  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(fixture.root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
+    env: codexEvidenceEnv(fixture.root, evidence, {
       PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
+      PLUGIN_ROOT: path.join(fixture.root, 'stale-cache-A')
     })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(currentCommit(fixture.repo), refreshedCommit);
   assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    verifyInstalledCacheFreshness(cacheRootFor(evidence.codexHome, expectedBridgeVersion), fixture.repo),
     [],
     'auto-refresh should leave the installed plugin cache matching the trusted repo'
   );
@@ -4259,8 +4451,6 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
 test('Codex auto-refresh runs before delegated target sync failure', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
 
   let result = run([
     '--hub', hub,
@@ -4285,18 +4475,24 @@ test('Codex auto-refresh runs before delegated target sync failure', () => {
   git(fixture.upstream, ['add', '.']);
   git(fixture.upstream, ['commit', '-m', 'refresh codex cache but fail delegated sync']);
   git(fixture.upstream, ['push', 'origin', 'main']);
+  const evidence = setupCodexEvidence(fixture.root, fixture.repo, {
+    cacheSourceRepo: fixture.upstream,
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+    }
+  });
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
+    env: codexEvidenceEnv(fixture.root, evidence, {
       PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
+      PLUGIN_ROOT: path.join(fixture.root, 'stale-cache-A')
     })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(result.stdout, /delegated repo sync failed/);
   assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    verifyInstalledCacheFreshness(cacheRootFor(evidence.codexHome, expectedBridgeVersion), fixture.repo),
     [],
     'auto-refresh should still update the Codex plugin cache before delegated sync failure is reported'
   );
