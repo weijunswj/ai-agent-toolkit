@@ -2,7 +2,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Ajv2020 = require('ajv/dist/2020');
 const lifecycle = require('../scripts/toolkit-managed-terminal-lifecycle.cjs');
+
+const lifecycleSchema = JSON.parse(fs.readFileSync(path.join(
+  __dirname,
+  '..',
+  'contracts',
+  'github-program-reconciler',
+  'managed-terminal-lifecycle-v1.schema.json'
+), 'utf8'));
+const validateLifecycleState = new Ajv2020({ allErrors: true, strict: false }).compile(lifecycleSchema);
 
 test('retained terminal branch completes without deletion', () => {
   const calls = [];
@@ -168,7 +180,32 @@ test('interrupted managed delete intent rechecks ref state and proves absence wi
     readAbsence: () => ({ trusted: true, present: false, ...eligibility })
   });
   assert.equal(resumed.terminal_receipt, true);
+  assert.equal(resumed.deletion_intent_persisted, true);
+  assert.equal(resumed.deletion_observed_absent, true);
+  assert.equal(resumed.absence_readback, true);
+  assert.equal(validateLifecycleState(resumed), true, JSON.stringify(validateLifecycleState.errors));
   assert.equal(deletions, 0);
+});
+
+test('managed terminal schema rejects unsafe or incomplete observed-absence evidence', () => {
+  const sha = '9'.repeat(40);
+  const eligibility = {
+    trusted: true, repository: 'weijunswj/ai-agent-toolkit', ownership: 'toolkit-managed',
+    ref: 'refs/heads/codex/terminal-unsafe', sha, terminal_state: 'terminal-blocked',
+    retained: false, unpublished_loss: false, default_branch: false, protected: false, checked_out: false
+  };
+  const incomplete = {
+    contract_version: 'toolkit.github-program-reconciler.managed-terminal-lifecycle.v1',
+    state: 'TERMINAL_RECEIPT', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, delete_eligible: true,
+    deletion_intent_persisted: true, deletion_observed_absent: true,
+    deletion_acknowledgement: null, absence_readback: false, terminal_receipt: true,
+    branch: 'codex/terminal-unsafe', reason_code: null,
+    deletion_eligibility_evidence: eligibility,
+    absence_readback_evidence: { ...eligibility, trusted: true, present: false }
+  };
+  assert.equal(validateLifecycleState(incomplete), false);
+  assert.ok(validateLifecycleState.errors.some((error) => error.instancePath === '/absence_readback'));
 });
 
 test('fresh pre-delete evidence revalidates every safety flag', () => {
@@ -222,6 +259,7 @@ test('already-absent managed branch persists eligibility before receipt and repl
   assert.deepEqual(first.deletion_eligibility_evidence, { ...eligibility, present: false });
   assert.equal(first.deletion_observed_absent, true);
   assert.equal(first.deletion_intent_persisted, false);
+  assert.equal(validateLifecycleState(first), true, JSON.stringify(validateLifecycleState.errors));
   assert.equal(deletions, 0);
   assert.ok(checkpoints.some((state) => state.deletion_eligibility_evidence && state.deletion_observed_absent === false));
   const replay = lifecycle.recoverManagedTerminalLifecycle({ ...options, state: first });

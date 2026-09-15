@@ -18,6 +18,8 @@
     "deletion_observed_absent": { "type": "boolean" },
     "absence_readback": { "type": "boolean" },
     "terminal_receipt": { "type": "boolean" },
+    "retained": { "type": "boolean" },
+    "issue_number": { "type": ["integer", "null"], "minimum": 1 },
     "branch": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,256}$" },
     "reason_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" },
     "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidence" },
@@ -39,7 +41,10 @@
       "if": { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
       "then": {
         "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
-        "properties": { "deletion_intent_persisted": { "const": false } }
+        "properties": {
+          "deletion_acknowledgement": { "type": "null" },
+          "absence_readback": { "const": true }
+        }
       }
     }
   ],

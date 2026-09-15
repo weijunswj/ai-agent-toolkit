@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PACKAGE_VERSION = '2.11.4';
+const PACKAGE_VERSION = '2.11.5';
 const CONTRACT_VERSION = 'toolkit.route-resolution.resolved-launch-record.v1';
 const RECEIPT_CONTRACT_VERSION = 'toolkit.route-resolution.exact-launch-receipt.v1';
 const REGISTRY_CONTRACT_VERSION = 'toolkit.route-resolution.role-registry.v1';
