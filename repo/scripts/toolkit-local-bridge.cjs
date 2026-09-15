@@ -7,10 +7,17 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const {
+  EXPECTED_TOOLKIT_VERSION,
+  pluginId,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
+  inspectCodexToolkitConfigurationProof,
+  inspectCodexToolkitInstalledState,
   inspectCodexPluginList,
-  verifyInstalledCacheFreshness
+  verifyInstalledCacheFreshness,
+  cacheFingerprint,
+  recoverCodexCache,
+  validateRepoPluginSource
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
   reconcileN8nSkillsPlugin
@@ -24,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.10.9';
+const BRIDGE_VERSION = '2.11.6';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -34,6 +41,7 @@ const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
+const AG2_PROOF_CONTRACT_VERSION = 'toolkit.local-bridge.ag2-skills-projection-proof.v1';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -97,6 +105,48 @@ function reportTimestampSgt(value) {
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function ag2SkillsProjectionProof(input = {}) {
+  const discovery = input.discovery && typeof input.discovery === 'object' ? input.discovery : {};
+  const contradictory = discovery.plugin_authority === true || discovery.skills_only === false;
+  const supported = discovery.supported === true
+    && discovery.destination_kind === 'supported-skills-directory'
+    && discovery.skills_only === true
+    && discovery.plugin_authority === false
+    && typeof discovery.target_path === 'string'
+    && discovery.target_path.length > 0;
+  if (contradictory) {
+    return Object.freeze({
+      contract_version: AG2_PROOF_CONTRACT_VERSION,
+      status: 'CONTRADICTORY',
+      destination_kind: 'unknown',
+      skills_only: true,
+      plugin_authority: false,
+      discovery_authority: 'unavailable',
+      reason_code: 'AG2_DISCOVERY_CONTRADICTORY'
+    });
+  }
+  if (!supported) {
+    return Object.freeze({
+      contract_version: AG2_PROOF_CONTRACT_VERSION,
+      status: 'AG2_PROOF_UNAVAILABLE',
+      destination_kind: 'unknown',
+      skills_only: true,
+      plugin_authority: false,
+      discovery_authority: 'unavailable',
+      reason_code: 'AG2_PROOF_UNAVAILABLE'
+    });
+  }
+  return Object.freeze({
+    contract_version: AG2_PROOF_CONTRACT_VERSION,
+    status: 'PROVEN',
+    destination_kind: 'supported-skills-directory',
+    skills_only: true,
+    plugin_authority: false,
+    discovery_authority: 'supported-read-only-evidence',
+    reason_code: 'AG2_SKILLS_DESTINATION_PROVEN'
+  });
 }
 
 function parseListValue(value) {
@@ -1039,17 +1089,18 @@ function discoverAg2(args, targetState, hubPath) {
   }
   const internalAdapterPath = path.join(hubPath, 'adapters', 'ag2');
   const home = os.homedir();
-  const antigravityConfigDir = home ? path.join(home, '.antigravity') : '';
+  const ag2ConfigDir = home ? path.join(home, '.antigravity') : '';
   const geminiConfigDir = home ? path.join(home, '.gemini', 'config') : '';
-  const geminiPluginsDir = geminiConfigDir ? path.join(geminiConfigDir, 'plugins') : '';
-  const defaultTargetPath = geminiPluginsDir ? path.join(geminiPluginsDir, TOOLKIT_NAME) : '';
   const savedTargetPath = String(targetState.target_path || '');
-  const targetPath = savedTargetPath && path.resolve(savedTargetPath) !== path.resolve(internalAdapterPath)
-    ? savedTargetPath
-    : defaultTargetPath;
-  const antigravityConfigExists = Boolean(antigravityConfigDir && fs.existsSync(antigravityConfigDir));
+  const savedSkillsTargetPath = String(targetState.skills_target_path || '');
+  const supportedDiscovery = targetState.discovery_authority === 'supported-read-only-evidence'
+    && targetState.destination_kind === 'supported-skills-directory'
+    && targetState.skills_only === true
+    && targetState.plugin_authority === false
+    && savedSkillsTargetPath.length > 0;
+  const targetPath = supportedDiscovery ? savedSkillsTargetPath : '';
+  const ag2ConfigExists = Boolean(ag2ConfigDir && fs.existsSync(ag2ConfigDir));
   const geminiConfigExists = Boolean(geminiConfigDir && fs.existsSync(geminiConfigDir));
-  const geminiPluginsDirExists = Boolean(geminiPluginsDir && fs.existsSync(geminiPluginsDir));
   const managedAdapterExists = fs.existsSync(internalAdapterPath);
   const appTargetExists = Boolean(targetPath && fs.existsSync(targetPath));
   const persistedState = Boolean(
@@ -1063,9 +1114,8 @@ function discoverAg2(args, targetState, hubPath) {
   const ag2PackageDetected = Boolean(selected);
   const detected = (
     ag2PackageDetected ||
-    antigravityConfigExists ||
+    ag2ConfigExists ||
     geminiConfigExists ||
-    geminiPluginsDirExists ||
     managedAdapterExists ||
     appTargetExists ||
     persistedState ||
@@ -1075,20 +1125,29 @@ function discoverAg2(args, targetState, hubPath) {
     target: 'ag2',
     detected,
     target_path: targetPath,
+    legacy_target_path: savedTargetPath,
     internal_adapter_path: internalAdapterPath,
     python_command: selected?.command || '',
     ag2_package_detected: ag2PackageDetected,
+    projection_proof: ag2SkillsProjectionProof({
+      discovery: {
+        supported: supportedDiscovery,
+        destination_kind: targetState.destination_kind,
+        target_path: targetPath,
+        skills_only: targetState.skills_only,
+        plugin_authority: targetState.plugin_authority
+      }
+    }),
     signals: {
       selected_python_command: selected?.command || '',
       tried_python_commands: tried,
-      antigravity_config_dir: antigravityConfigDir,
-      antigravity_config_exists: antigravityConfigExists,
+      ag2_config_dir: ag2ConfigDir,
+      ag2_config_exists: ag2ConfigExists,
       gemini_config_dir: geminiConfigDir,
       gemini_config_exists: geminiConfigExists,
-      gemini_plugins_dir: geminiPluginsDir,
-      gemini_plugins_dir_exists: geminiPluginsDirExists,
       managed_adapter_exists: managedAdapterExists,
       app_target_exists: appTargetExists,
+      projection_discovery_supported: supportedDiscovery,
       persisted_state: persistedState,
       explicitly_enabled: explicitlyEnabled
     }
@@ -1231,42 +1290,31 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     ''
   ].join('\n');
 
-  const ag2Plugin = {
-    name: TOOLKIT_NAME,
-    version: BRIDGE_VERSION,
-    description: 'AI Agent Toolkit local bridge adapter for Antigravity 2.',
-    author: {
-      name: 'AI Agent Toolkit'
-    },
-    repository: DEFAULT_REPO_REMOTE,
-    license: 'UNLICENSED'
-  };
-
   const ag2Readme = [
-    '# AI Agent Toolkit Antigravity 2 Adapter',
+    '# AI Agent Toolkit AG2 Skills Projection',
     '',
-    'Generated by the Toolkit Local Bridge Hub after the user explicitly enables the Antigravity 2 target.',
+    'Generated by the Toolkit Local Bridge Hub only after supported read-only AG2 skills-directory discovery.',
     '',
-    'This plugin-scoped skill folder is safe to load from the Antigravity/Gemini user plugin config. It is not source of truth. Update Toolkit through the native Codex or Claude Code plugin package and let the bridge sync enabled targets.',
+    'This directory contains skills only. It is not a Toolkit plugin and it is not source of truth. The bridge must retain existing delivery and stop with AG2_PROOF_UNAVAILABLE when supported discovery is absent.',
     ''
   ].join('\n');
 
   const ag2Skill = [
     '---',
     `name: ${TOOLKIT_NAME}`,
-    'description: Use when working in Antigravity 2 with the AI Agent Toolkit local bridge. Applies source-first policy, opt-in bridge setup, and audit/sync commands without using Codex or Claude private plugin caches.',
+    'description: Use when AG2 has a supported skills-only projection of the AI Agent Toolkit. Applies source-first policy without plugin authority.',
     '---',
     '',
     '# AI Agent Toolkit AG2 Adapter',
     '',
-    'Use this skill when Antigravity 2 needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
+    'Use this skill when AG2 needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
     '',
     'Core rules:',
     '',
     '- Treat AGENTS.md and Toolkit skills/docs as portable policy. Hooks are optional automation only.',
-    '- Do not install or update Codex or Claude Code from Antigravity 2.',
+    '- Do not install or update Codex, Claude Code, AG2, or any package from this projection.',
     '- Do not read Codex or Claude private plugin cache paths as bridge source.',
-    '- Do not install npm, pip, Python, AG2, Antigravity 2, OpenCode, or any package by default.',
+    '- Do not infer an AG2 destination or plugin installation from package presence.',
     '- Do not mutate project repos by default.',
     '- Use the Toolkit Local Bridge Hub manifest and state files under the user-local hub.',
     '',
@@ -1278,20 +1326,6 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     '```',
     ''
   ].join('\n');
-
-  const ag2Metadata = {
-    name: 'ai-agent-toolkit-ag2-adapter',
-    architecture_version: ARCHITECTURE_VERSION,
-    toolkit_bridge_version: BRIDGE_VERSION,
-    description: 'Local AG2 adapter metadata generated by the Toolkit Local Bridge Hub after explicit AG2 enablement.',
-    policy: {
-      source_of_truth: 'Toolkit source, skills, docs, validators, and native plugin package state',
-      no_package_install_by_default: true,
-      no_project_repo_mutation_by_default: true,
-      no_codex_or_claude_cross_update: true,
-      hooks_are_optional_automation_only: true
-    }
-  };
 
   const adapterFiles = {
     'SKILL.md': textPayload(opencodeSkill),
@@ -1306,10 +1340,7 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     [TARGET_MANIFEST_FILE]: targetManifestPayload('opencode', managedSkillNames)
   };
   const ag2Payload = {
-    'plugin.json': textPayload(`${JSON.stringify(ag2Plugin, null, 2)}\n`),
-    'installed_version.json': textPayload(`${JSON.stringify({ version: BRIDGE_VERSION }, null, 2)}\n`),
     'README.md': textPayload(ag2Readme),
-    'ai-agent-toolkit-ag2-adapter.json': textPayload(`${JSON.stringify(ag2Metadata, null, 2)}\n`),
     [TARGET_MANIFEST_FILE]: targetManifestPayload('ag2', managedSkillNames)
   };
 
@@ -1828,7 +1859,7 @@ function maybePrintAgentRulesPreflight(args) {
 }
 
 function targetDisplayName(targetName) {
-  if (targetName === 'ag2') return 'Antigravity 2';
+  if (targetName === 'ag2') return 'AG2 skills projection';
   if (targetName === 'opencode') return 'OpenCode';
   return targetName;
 }
@@ -1936,7 +1967,7 @@ function classifyUpdateReport(context) {
   const actionable = repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
-    || ['stale', 'refresh-failed'].includes(cacheStatus)
+    || ['stale', 'missing', 'user-disabled', 'refresh-failed'].includes(cacheStatus)
     || ['repair-failed', 'partial-failed'].includes(repairStatus)
     || ['failed', 'not confirmed'].includes(targetStatus)
     || Boolean(context.warning);
@@ -2014,6 +2045,9 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, st
     }
     return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   }
+  if (nativePluginCache.status === 'missing') return 'run `setup toolkit` to install and verify the Codex plugin';
+  if (nativePluginCache.status === 'unverified') return 'run `setup toolkit` after the current Codex plugin configuration and installed state can be inspected';
+  if (nativePluginCache.status === 'user-disabled') return 'enable the Toolkit plugin in Codex configuration before refreshing it';
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
@@ -2126,6 +2160,12 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
+  } else if (nativePluginCache.status === 'missing') {
+    lines.push('- Codex native plugin cache is missing or the current installed Toolkit plugin was not reported. Run `setup toolkit` to install and verify it.');
+  } else if (nativePluginCache.status === 'unverified') {
+    lines.push('- Codex native plugin cache state could not be proven from current Codex configuration and installed-plugin inspection; no refresh was attempted.');
+  } else if (nativePluginCache.status === 'user-disabled') {
+    lines.push('- Codex explicitly reports the Toolkit plugin as user-disabled; its state was preserved and no refresh was attempted.');
   } else if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       lines.push('- Codex native plugin cache is stale even though auto-refresh is enabled. The hook will retry automatic refresh on the next run; use `setup toolkit` only if this persists.');
@@ -2451,7 +2491,16 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
     ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
   };
   updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
+  updateTargetState(
+    nextState,
+    'ag2',
+    discoveries.ag2,
+    checksum,
+    false,
+    nextState.targets.ag2.enabled
+      ? (discoveries.ag2.projection_proof?.status === 'PROVEN' ? '' : 'AG2_PROOF_UNAVAILABLE')
+      : 'not enabled'
+  );
   const plannedTargetSyncs = SUPPORTED_TARGETS
     .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
     .map((target) => targetSyncPlan(target, discoveries[target], payloads));
@@ -2557,8 +2606,10 @@ function validateStagedHub(stagePath, checksum) {
   if (!fs.existsSync(path.join(stagePath, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
     throw new Error('staged OpenCode adapter SKILL.md missing');
   }
-  if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'plugin.json'))) {
-    throw new Error('staged AG2 adapter plugin metadata missing');
+  for (const obsolete of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+    if (fs.existsSync(path.join(stagePath, 'adapters', 'ag2', obsolete))) {
+      throw new Error(`staged AG2 plugin authority remains: ${obsolete}`);
+    }
   }
   if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
     throw new Error('staged AG2 adapter SKILL.md missing');
@@ -3200,7 +3251,7 @@ function removeStaleManagedSkills(targetName, targetPath, previousNames, current
   return removed.sort((left, right) => left.localeCompare(right));
 }
 
-function syncTargetPayload(targetName, targetPath, payloads, sourceType) {
+function syncTargetPayload(targetName, targetPath, payloads, sourceType, options = {}) {
   const payload = appTargetPayload(targetName, payloads);
   const skillNames = targetSkillNames(targetName, payloads);
   const previousNames = previousManagedSkillNames(targetPath);
@@ -3221,6 +3272,13 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType) {
     writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content);
   }
 
+  if (targetName === 'ag2' && options.proof?.status === 'PROVEN') {
+    for (const legacyFile of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+      const legacyPath = path.join(targetPath, legacyFile);
+      if (fs.existsSync(legacyPath)) fs.rmSync(legacyPath, { force: true });
+    }
+  }
+
   return {
     target: targetName,
     targetPath,
@@ -3233,11 +3291,13 @@ function targetWouldSync(targetName, state, checksum, discovery, payloads) {
   const target = state.targets[targetName];
   if (!target.enabled) return false;
   if (target.explicitly_disabled) return false;
+  if (targetName === 'ag2' && discovery?.projection_proof?.status !== 'PROVEN') return false;
   const targetCurrent = discovery && payloads ? targetOutputIsCurrent(targetName, discovery, payloads) : true;
   return target.synced_version !== BRIDGE_VERSION || target.synced_checksum !== checksum || !targetCurrent;
 }
 
 function targetIsSynced(targetName, targetState, checksum, discovery, payloads) {
+  if (targetName === 'ag2' && discovery?.projection_proof?.status !== 'PROVEN') return false;
   return (
     targetState.synced_version === BRIDGE_VERSION &&
     targetState.synced_checksum === checksum &&
@@ -3255,7 +3315,17 @@ function targetStatus(targetState, discovery, checksum) {
 function updateTargetState(state, targetName, discovery, checksum, synced, skipReason) {
   const target = state.targets[targetName];
   target.detected = discovery.detected;
-  target.target_path = discovery.target_path;
+  if (discovery.target_path) target.target_path = discovery.target_path;
+  if (targetName === 'ag2' && discovery.legacy_target_path && !target.target_path) {
+    target.target_path = discovery.legacy_target_path;
+  }
+  if (targetName === 'ag2' && discovery.projection_proof?.status === 'PROVEN') {
+    target.skills_target_path = discovery.target_path;
+    target.discovery_authority = 'supported-read-only-evidence';
+    target.destination_kind = 'supported-skills-directory';
+    target.skills_only = true;
+    target.plugin_authority = false;
+  }
   target.skip_reason = skipReason || '';
   if (synced) {
     target.synced_version = BRIDGE_VERSION;
@@ -3283,13 +3353,10 @@ function stagingReconciliationParents(args, hubPath, state) {
   );
   parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
 
-  const internalAg2Adapter = path.join(hubPath, 'adapters', 'ag2');
-  const savedAg2Target = String(state.targets.ag2.target_path || '');
-  const defaultAg2Target = path.join(os.homedir(), '.gemini', 'config', 'plugins', TOOLKIT_NAME);
-  const ag2Target = savedAg2Target && path.resolve(savedAg2Target) !== path.resolve(internalAg2Adapter)
-    ? savedAg2Target
-    : defaultAg2Target;
-  parents.push(assertSafeWritePath(path.join(ag2Target, 'skills'), 'Antigravity 2 staging reconciliation parent'));
+  const savedAg2SkillsTarget = String(state.targets.ag2.skills_target_path || '');
+  if (savedAg2SkillsTarget) {
+    parents.push(assertSafeWritePath(savedAg2SkillsTarget, 'AG2 skills projection staging reconciliation parent'));
+  }
   return [...new Set(parents.map((value) => path.resolve(value)))];
 }
 
@@ -3398,11 +3465,15 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       const targetState = state.targets[target];
       const discovery = discoveries[target];
       return [target, {
-        status: targetStatus(targetState, discovery, checksum),
+        status: target === 'ag2' && discovery.projection_proof?.status !== 'PROVEN'
+          ? 'blocked-proof'
+          : targetStatus(targetState, discovery, checksum),
         detected: discovery.detected,
         enabled: targetState.enabled,
         explicitly_disabled: targetState.explicitly_disabled,
         target_path: discovery.target_path,
+        legacy_target_path: target === 'ag2' ? discovery.legacy_target_path || '' : undefined,
+        skills_target_path: target === 'ag2' ? targetState.skills_target_path || '' : undefined,
         target_exists: targetOutputExists(target, discovery, payloads),
         internal_adapter_path: discovery.internal_adapter_path,
         internal_adapter_exists: fs.existsSync(discovery.internal_adapter_path),
@@ -3410,6 +3481,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
         synced_version: targetState.synced_version,
         synced_at: targetState.last_sync,
         ag2_package_detected: target === 'ag2' ? discovery.ag2_package_detected : undefined,
+        projection_proof: target === 'ag2' ? discovery.projection_proof : undefined,
         python_command: target === 'ag2' ? discovery.python_command || '' : undefined,
         would_write: targetWouldSync(target, state, checksum, discovery, payloads),
         skip_reason: targetState.enabled ? targetState.skip_reason : 'not enabled',
@@ -3480,13 +3552,61 @@ function codexNativePluginCacheStatus(args, state) {
   if (!state.repo_path) return { status: '' };
   const repoPath = path.resolve(state.repo_path);
   if (!fs.existsSync(repoPath)) return { status: '' };
-  const pluginRoot = runtimeCodexPluginRoot();
-  const errors = verifyInstalledCacheFreshness(pluginRoot, repoPath);
+  const codexHome = path.resolve(defaultCodexHome());
+  const configurationProof = inspectCodexToolkitConfigurationProof({ codexHome });
+  if (configurationProof.trusted && configurationProof.user_disabled === true) {
+    return {
+      status: 'user-disabled',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      user_disabled: true,
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: []
+    };
+  }
+  if (configurationProof.trusted !== true || configurationProof.enabled !== true) {
+    return {
+      status: 'unverified',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: [configurationProof.reason || 'Current Codex Toolkit configuration could not be proven']
+        .slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    };
+  }
+
+  const installedState = inspectCodexToolkitInstalledState({
+    codexHome,
+    repoRoot: repoPath,
+    codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+  });
+  const installedStateProof = installedState.proof || null;
+  const installedErrors = installedState.errors || [];
+  const status = installedState.ok
+    ? 'fresh'
+    : (installedStateProof?.reported_version ? 'stale'
+      : (installedErrors.some((error) => /is not installed/i.test(error)) ? 'missing' : 'unverified'));
   return {
-    status: errors.length ? 'stale' : 'fresh',
-    plugin_root: pluginRoot,
+    status,
+    host: 'codex',
+    codex_home: codexHome,
+    plugin_root: installedStateProof?.cache_root || '',
     repo_path: repoPath,
-    errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    plugin_id: pluginId(),
+    version: installedStateProof?.reported_version || null,
+    fingerprint: installedStateProof?.fingerprint || null,
+    fingerprint_verified: installedStateProof?.fingerprint_verified === true,
+    bytes_verified: installedStateProof?.bytes_verified === true,
+    cache_manifest_version: installedStateProof?.cache_manifest_version || null,
+    configuration_proof: configurationProof,
+    installed_state_proof: installedStateProof,
+    errors: installedErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
   };
 }
 
@@ -3744,7 +3864,7 @@ function maybeRepairThirdPartyCodexPluginHooks(args, state) {
 
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
   const before = codexNativePluginCacheStatus(args, state);
-  if (before.status !== 'stale') return before;
+  if (!['stale', 'missing'].includes(before.status)) return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
   const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
   if (validateRepo) {
@@ -3766,36 +3886,107 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
       errors: [`Codex plugin setup helper not found in trusted repo: ${setupScript}`]
     };
   }
-
-  const result = runCommand(process.execPath, [
-    setupScript,
-    '--write',
-    '--json',
-    '--repo-root',
-    resolvedRepoPath
-  ], {
-    cwd: resolvedRepoPath,
-    timeout: 180000
-  });
-  if (!result.ok) {
+  const sourceErrors = validateRepoPluginSource(resolvedRepoPath, EXPECTED_TOOLKIT_VERSION);
+  if (sourceErrors.length) {
     return {
       ...before,
       status: 'refresh-failed',
-      errors: [`Codex plugin cache auto-refresh failed: ${commandOutput(result)}`]
+      errors: sourceErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
     };
   }
-
-  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, resolvedRepoPath);
-  if (afterErrors.length) {
+  let sourceFingerprint;
+  try {
+    sourceFingerprint = cacheFingerprint(resolvedRepoPath, resolvedRepoPath, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    });
+  } catch (error) {
     return {
       ...before,
       status: 'refresh-failed',
-      errors: afterErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+      errors: [`Codex plugin cache auto-refresh could not fingerprint the trusted repo: ${error.message}`]
+    };
+  }
+  if (!/^[a-f0-9]{64}$/.test(sourceFingerprint)) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: ['Codex plugin cache auto-refresh could not establish a valid trusted repo fingerprint']
+    };
+  }
+  let refreshResult = null;
+  const sourceProof = {
+    trusted: true,
+    ambiguous: false,
+    plugin_id: pluginId(),
+    source_root: resolvedRepoPath,
+    version: EXPECTED_TOOLKIT_VERSION,
+    fingerprint: sourceFingerprint,
+    source_fingerprint: sourceFingerprint,
+    fingerprint_verified: true,
+    evidence_source: 'trusted-repo-validation'
+  };
+  const configurationProof = before.configuration_proof;
+  const recovery = recoverCodexCache({
+    expectedVersion: EXPECTED_TOOLKIT_VERSION,
+    refresh_required: true,
+    source_proof: sourceProof,
+    configuration_proof: configurationProof,
+    refreshSupported: () => {
+      refreshResult = runCommand(process.execPath, [
+        setupScript,
+        '--write',
+        '--json',
+        '--repo-root',
+        resolvedRepoPath
+      ], {
+        cwd: resolvedRepoPath,
+        timeout: 180000
+      });
+      return refreshResult.ok;
+    },
+    rediscover: () => {
+      const codexHome = path.resolve(defaultCodexHome());
+      const activeState = inspectCodexToolkitInstalledState({
+        codexHome,
+        repoRoot: resolvedRepoPath,
+        codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+      });
+      const proof = activeState.proof || null;
+      return {
+        present: activeState.ok === true,
+        trusted: proof?.trusted === true,
+        version: proof?.reported_version || null,
+        bytes_verified: proof?.bytes_verified === true,
+        fingerprint: proof?.fingerprint || null,
+        source_fingerprint: proof?.source_fingerprint || null,
+        cache_fingerprint: proof?.cache_fingerprint || null,
+        fingerprint_verified: proof?.fingerprint_verified === true,
+        cache_root: proof?.cache_root || null,
+        installed_state_proof: proof,
+        status: activeState.ok ? 'fresh' : (proof?.reported_version ? 'stale' : 'unverified'),
+        executing: false,
+        trust_failure: proof?.trusted !== true,
+        structural_failure: proof?.ambiguous === true,
+        errors: activeState.errors || []
+      };
+    }
+  });
+  if (!recovery.healthy) {
+    const detail = refreshResult && !refreshResult.ok ? commandOutput(refreshResult) : recovery.reason_code;
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: [`Codex plugin cache auto-refresh failed: ${detail}`]
     };
   }
   return {
     ...before,
     status: 'refreshed',
+    plugin_root: recovery.cache_root,
+    version: recovery.cache_version,
+    fingerprint: recovery.cache_fingerprint,
+    fingerprint_verified: true,
+    installed_state_proof: recovery.installed_state_proof,
     errors: []
   };
 }
@@ -4246,7 +4437,9 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
+      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource, {
+        proof: discoveries[plan.target].projection_proof
+      }));
       updateTargetState(nextState, plan.target, discoveries[plan.target], checksum, true, '');
     }
 
@@ -4303,6 +4496,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  AG2_PROOF_CONTRACT_VERSION,
   ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
   acquireLock,
@@ -4316,6 +4510,7 @@ module.exports = {
   releaseRecoveryMarker,
   run,
   adapterPayloads,
+  ag2SkillsProjectionProof,
   payloadChecksum,
   compareSemver,
   getRepoValidationLabels,

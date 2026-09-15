@@ -1,0 +1,73 @@
+{
+  "$schema": "./role-registry-v1.schema.json",
+  "contract_version": "toolkit.route-resolution.role-registry.v1",
+  "schema_version": 1,
+  "registry_id": "toolkit-default-role-registry",
+  "registry_version": "2.11.6",
+  "roles": {
+    "g1": {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "reasoning": "low",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "g2": {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoning": "high",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "g3": {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "reasoning": "max",
+      "service_tier": "standard",
+      "speed": "priority",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "recon": {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "reasoning": "max",
+      "service_tier": "standard",
+      "speed": "priority",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "g4": {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "reasoning": "high",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "loop-manager": {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "reasoning": "max",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "final-audit": {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "reasoning": "max",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    },
+    "browser-computer": {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "reasoning": "medium",
+      "service_tier": "standard",
+      "speed": "standard",
+      "allowed_hosts": ["codex", "claude-code", "opencode"]
+    }
+  }
+}

@@ -122,7 +122,10 @@ function writeFakeHangingCodex(codexHome, options = {}) {
   const expectedToolkitVersion = setup.EXPECTED_TOOLKIT_VERSION;
   writeJson(path.join(codexHome, 'state.json'), {
     repoRoot: '',
-    installed: Boolean(options.initialInstalled)
+    installed: Boolean(options.initialInstalled),
+    marketplaceAddCount: 0,
+    installCount: 0,
+    removeCount: 0
   });
   fs.writeFileSync(fakeCodexScript, `
 'use strict';
@@ -135,6 +138,11 @@ const statePath = path.join(codexHome, 'state.json');
 const args = process.argv.slice(2);
 const omitSessionStart = ${JSON.stringify(Boolean(options.omitSessionStart))};
 const installDelayMs = ${JSON.stringify(options.installDelayMs || 0)};
+const pluginListMode = ${JSON.stringify(options.pluginListMode || 'default')};
+const pluginListPaddingBytes = ${JSON.stringify(options.pluginListPaddingBytes || 0)};
+const pluginListStdout = ${JSON.stringify(options.pluginListStdout || '')};
+const pluginListStderr = ${JSON.stringify(options.pluginListStderr || '')};
+const pluginListExitCode = ${JSON.stringify(options.pluginListExitCode ?? 7)};
 
 function readState() {
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -146,6 +154,10 @@ function writeState(state) {
 
 function writeJson(value) {
   process.stdout.write(JSON.stringify(value, null, 2) + '\\n');
+}
+
+function finishOutput(exitCode) {
+  process.stdout.end(() => process.exit(exitCode));
 }
 
 function copyPath(sourcePath, targetPath) {
@@ -184,22 +196,8 @@ function installCache(repoRoot) {
   }
 }
 
-if (args[0] === 'plugin' && args[1] === '--help') {
-  process.stdout.write('Manage Codex plugins\\n');
-  process.exit(0);
-}
-
-if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
-  const state = readState();
-  state.repoRoot = path.resolve(args[3]);
-  writeState(state);
-  writeJson({ marketplaceName: 'ai-agent-toolkit-local' });
-  process.exit(0);
-}
-
-if (args[0] === 'plugin' && args[1] === 'list') {
-  const state = readState();
-  writeJson({
+function writePluginList(state) {
+  const pluginList = {
     installed: state.installed ? [
       {
         pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
@@ -216,13 +214,52 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       }
     ] : [],
     available: []
-  });
+  };
+  if (pluginListMode === 'large-valid' || pluginListMode === 'over-limit') {
+    pluginList.available.push({
+      name: 'large-json-fixture',
+      description: (pluginListMode === 'over-limit' ? 'OVER_LIMIT_PAYLOAD_' : 'LARGE_JSON_PAYLOAD_') + 'x'.repeat(pluginListPaddingBytes)
+    });
+  }
+  writeJson(pluginList);
+}
+
+if (args[0] === 'plugin' && args[1] === '--help') {
+  process.stdout.write('Manage Codex plugins\\n');
   process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
+  const state = readState();
+  state.repoRoot = path.resolve(args[3]);
+  state.marketplaceAddCount = (state.marketplaceAddCount || 0) + 1;
+  writeState(state);
+  writeJson({ marketplaceName: 'ai-agent-toolkit-local' });
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'list') {
+  const state = readState();
+  if (pluginListMode === 'invalid-json') {
+    process.stdout.write(pluginListStdout || '{"installed":');
+    finishOutput(0);
+    return;
+  } else if (pluginListMode === 'non-zero') {
+    process.stdout.write(pluginListStdout);
+    process.stderr.write(pluginListStderr);
+    finishOutput(pluginListExitCode);
+    return;
+  } else {
+    writePluginList(state);
+    finishOutput(0);
+    return;
+  }
 }
 
 if (args[0] === 'plugin' && args[1] === 'add') {
   const finishInstall = () => {
     const state = readState();
+    state.installCount = (state.installCount || 0) + 1;
     installCache(state.repoRoot);
     state.installed = true;
     writeState(state);
@@ -305,6 +342,20 @@ function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
   });
 }
 
+function readFileSnapshot(filePath) {
+  return fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+}
+
+function snapshotFiles(filePaths) {
+  return filePaths.map((filePath) => ({ filePath, bytes: readFileSnapshot(filePath) }));
+}
+
+function assertFilesUnchanged(snapshot) {
+  for (const { filePath, bytes } of snapshot) {
+    assert.deepEqual(readFileSnapshot(filePath), bytes, filePath);
+  }
+}
+
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
 });
@@ -345,6 +396,7 @@ test('Windows SessionStart preparation installs strict launcher metadata without
   assert.equal(fs.readFileSync(claudeSentinel, 'utf8'), 'unchanged\n');
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_LAUNCHER_REL_PATH), true);
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_POWERSHELL_REL_PATH), true);
+  assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes('repo/scripts/toolkit-toml-structural.cjs'), true);
   assert.deepEqual(setup.verifyInstalledCacheFreshness(codexCache, repoRoot), []);
 });
 
@@ -594,7 +646,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
   }
 });
 
-test('Codex Toolkit verifier falls back to config and cache when CLI list omits installed plugin', () => {
+test('Codex Toolkit verifier retains config and cache evidence as diagnostics when native inventory omits the plugin', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);
   writeCodexConfig(codexHome, { trustedHook: true });
@@ -605,15 +657,11 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'verification-unavailable');
-  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /review and trust the current Toolkit `SessionStart` hook/);
-  assert.equal(state.installed.enabled, true);
-  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
-  assert.deepEqual(state.errors, []);
+  assert.match(state.errors.join('\n'), /native Codex installed-plugin inventory is required/i);
 });
 
 test('Codex Toolkit fallback rejects a local marketplace source outside this repo', () => {
@@ -649,7 +697,27 @@ test('Codex Toolkit fallback rejects local marketplace config without a source p
   assert.match(state.errors.join('\n'), /marketplace source path/i);
 });
 
-test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for this repo', () => {
+test('Codex Toolkit config inspection ignores marker-like plugin tables in strings and fails closed on ambiguous state', () => {
+  const identity = setup.pluginId();
+  const inBasicString = `note = \"\"\"\n[plugins.\"${identity}\"]\nenabled = true\n\"\"\"\n`;
+  const inLiteralString = `note = '''\n[plugins.\"${identity}\"]\nenabled = true\n'''\n`;
+  const duplicateEnabled = `[plugins.\"${identity}\"]\nenabled = true\nenabled = false\n`;
+  const disabled = `[plugins.\"${identity}\"]\nenabled = false\n`;
+  const malformed = `[plugins.\"${identity}\"\nenabled = true\n`;
+
+  assert.equal(setup.inspectConfiguredPluginState(inBasicString, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(inLiteralString, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(duplicateEnabled, identity).status, 'unprovable');
+  assert.equal(setup.inspectConfiguredPluginState(disabled, identity).status, 'disabled');
+  assert.equal(setup.inspectConfiguredPluginState(malformed, identity).status, 'unprovable');
+});
+
+test('Codex Toolkit config proof rejects tomllib-valid escaped triple-quote fake state', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'toolkit-toml', 'escaped-triple-quote-user-content.toml'), 'utf8');
+  assert.equal(setup.inspectConfiguredPluginState(text, setup.pluginId()).status, 'unprovable');
+});
+
+test('Codex Toolkit diagnostics accept a verbatim-prefixed marketplace source without manufacturing installed state', () => {
   const codexHome = tmpRoot();
   writeInstalledCache(codexHome);
   writeCodexConfig(codexHome, {
@@ -664,10 +732,11 @@ test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
-  assert.deepEqual(state.errors, []);
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
+  assert.match(state.errors.join('\n'), /native Codex installed-plugin inventory is required/i);
+  assert.doesNotMatch(state.errors.join('\n'), /marketplace source path does not match/i);
 });
 
 test('Codex Toolkit fallback does not infer hook trust from config text', () => {
@@ -681,8 +750,9 @@ test('Codex Toolkit fallback does not infer hook trust from config text', () => 
     allowConfigCacheFallback: true
   });
 
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
+  assert.equal(state.ok, false);
+  assert.equal(state.verificationMethod, 'config-cache-diagnostics');
+  assert.equal(state.installed, null);
   assert.equal(state.hookTrustStatus, 'verification-unavailable');
   assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
   assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
@@ -730,23 +800,9 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
 
   const result = runSetupVerify(codexHome, fakeCodex);
 
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /verified by config\/cache fallback/i);
-  assert.match(result.stdout, /Hook trust status: verification-unavailable/);
-  assert.match(result.stdout, /Hook execution status: verification unavailable; open `\/hooks` in Codex/);
-  assert.match(result.stdout, /\*\*Next Steps:\*\*/);
-  assert.match(result.stdout, /Verify the enabled Toolkit `SessionStart` hook belongs to the installed `ai-agent-toolkit` plugin/);
-  assert.match(result.stdout, /installed plugin-cache copy/);
-  assert.match(result.stdout, /not the managed Git checkout/);
-  assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
-  assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
-  assert.match(result.stdout, /Open `\/hooks` in Codex/i);
-  assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
-  assert.match(result.stdout, /applies to Codex only/i);
-  assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
-  assert.match(result.stdout, /Codex must not install or update Claude Code/i);
-  assert.doesNotMatch(result.stdout, /Hook trust status: (?:trusted|operational)/i);
-  assert.doesNotMatch(result.stdout, /pending-review/);
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /native Codex installed-plugin inventory is required/i);
+  assert.doesNotMatch(result.stdout, /verified by config\/cache fallback/i);
 });
 
 test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
@@ -763,6 +819,115 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /list the branches/i);
   assert.match(bridgeDoc, /proceed without Toolkit repo-local rules/i);
   assert.match(bridgeDoc, /alter a managed block/i);
+});
+
+test('Codex JSON inspection accepts valid plugin-list JSON at the observed large-response scale', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  const paddingBytes = 1700000;
+  assert.ok(paddingBytes > 1024 * 1024);
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'large-valid',
+    pluginListPaddingBytes: paddingBytes
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /verified by Codex CLI plugin list and cache/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /LARGE_JSON_PAYLOAD_/);
+});
+
+test('Codex JSON inspection rejects an over-limit response explicitly without parsing partial JSON', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'over-limit',
+    pluginListPaddingBytes: setup.CODEX_JSON_MAX_BUFFER_BYTES
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /excessive response/i);
+  assert.match(result.stderr, new RegExp(String(setup.CODEX_JSON_MAX_BUFFER_BYTES)));
+  assert.doesNotMatch(result.stderr, /returned invalid JSON/i);
+  assert.doesNotMatch(output, /OVER_LIMIT_PAYLOAD_/);
+});
+
+test('Codex JSON inspection rejects invalid JSON without exposing plugin-list output', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    pluginListMode: 'invalid-json',
+    pluginListStdout: '{"installed":["INVALID_JSON_PAYLOAD'
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /returned invalid JSON/i);
+  assert.match(result.stderr, /response content was suppressed/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /INVALID_JSON_PAYLOAD/);
+});
+
+test('Codex JSON inspection keeps bounded stderr for non-zero exit while suppressing stdout', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    pluginListMode: 'non-zero',
+    pluginListStdout: '{"leaked":"NON_ZERO_PLUGIN_LIST_PAYLOAD"}',
+    pluginListStderr: 'bounded Codex list diagnostic\n',
+    pluginListExitCode: 23
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /failed: bounded Codex list diagnostic/i);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /NON_ZERO_PLUGIN_LIST_PAYLOAD/);
+});
+
+test('Codex --write inspection failure performs zero setup, cache, hook, marketplace, install, or remove writes', () => {
+  const codexHome = tmpRoot();
+  const cacheRoot = writeInstalledCache(codexHome);
+  const cacheMarker = path.join(cacheRoot, 'inspection-failure-cache-marker.txt');
+  fs.writeFileSync(cacheMarker, 'cache unchanged\n');
+  writeCodexConfig(codexHome, { trustedHook: true });
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: true,
+    pluginListMode: 'over-limit',
+    pluginListPaddingBytes: setup.CODEX_JSON_MAX_BUFFER_BYTES
+  });
+
+  const configPath = path.join(codexHome, 'config.toml');
+  const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+  const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+  const runtimePath = path.join(cacheRoot, ...setup.SESSION_START_RUNTIME_REL_PATH.split('/'));
+  const marketplacePath = path.join(repoRoot, ...setup.MARKETPLACE_REL_PATH.split('/'));
+  const statePath = path.join(codexHome, 'state.json');
+  const before = snapshotFiles([
+    configPath,
+    manifestPath,
+    hooksPath,
+    runtimePath,
+    cacheMarker,
+    marketplacePath,
+    statePath
+  ]);
+
+  const result = runSetupWrite(codexHome, fakeCodex);
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /excessive response/i);
+  assert.doesNotMatch(output, /OVER_LIMIT_PAYLOAD_/);
+  assertFilesUnchanged(before);
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(state.marketplaceAddCount, 0);
+  assert.equal(state.installCount, 0);
+  assert.equal(state.removeCount, 0);
 });
 
 test('Codex Toolkit --write succeeds when plugin add installs then times out', () => {
@@ -794,7 +959,8 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
 
 test('Codex cache fingerprints include every new installed setup dependency and reject missing or stale bytes', () => {
   const dependencies = [
-    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs',
+    'repo/scripts/toolkit-host-route-adapters.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
@@ -839,7 +1005,7 @@ test('Codex Toolkit --write human output reports the changed hook with JSON-alig
 test('Codex Toolkit --write refreshes same-version stale cache by removing before reinstall', () => {
   const codexHome = tmpRoot();
   const staleRoot = writeInstalledCache(codexHome, { staleBridgeScript: true });
-  fs.appendFileSync(path.join(staleRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n// stale controller\n');
+  fs.appendFileSync(path.join(staleRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '\n// stale route resolver\n');
   const sentinel = path.join(codexHome, 'user-owned-sentinel.txt');
   fs.writeFileSync(sentinel, 'unchanged\n');
   const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true });

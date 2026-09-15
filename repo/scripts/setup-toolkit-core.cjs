@@ -8,8 +8,27 @@ const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
-const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
+const routeResolution = require('./toolkit-route-resolution.cjs');
+const hostRouteAdapters = require('./toolkit-host-route-adapters.cjs');
+const managedConfigMigration = require('./toolkit-managed-config-migration.cjs');
+
+// Compatibility names below are deliberately capability-only. They allow old
+// setup-state readers to be migrated without retaining worker, checker, RAM, or
+// queue policy as an active authority.
+const agentControl = Object.freeze({
+  TOPOLOGIES: Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'exact-launch-record', BROADER_NATIVE: 'host-native' }),
+  CAPACITY_MODES: Object.freeze({ ROOT_ONLY: 'not-managed', AUTO: 'host-selected', MANUAL: 'host-selected' }),
+  ROLES: Object.freeze({ WORKER: 'executor', CHECKER: 'assurance' }),
+  HOSTS: Object.freeze({ CLAUDE: 'claude-code' }),
+  MAX_MANUAL_WORKERS: 1,
+  inspectResourceCapability: () => ({ supported: false, source: 'not-a-routing-input' }),
+  readProfile: () => ({ supported: false, topology: 'root-only', capacity_mode: 'not-managed', manual_maximum: 0 }),
+  validActivationProof: (proof) => proof?.schema === 3 && typeof proof.cache_identity === 'string',
+  invalidateProfile: (_host, reason) => ({ status: 'root-only', supported: false, reason, topology: 'root-only', capacity_mode: 'not-managed', manual_maximum: 0 }),
+  configureProfile: (_host, options = {}) => ({ status: 'configured', supported: true, topology: options.topology || 'exact-launch-record', capacity_mode: 'not-managed', manual_maximum: 0, route_contract: routeResolution.CONTRACT_VERSION }),
+  claudeInvocationArgs: () => ['--version']
+});
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -17,7 +36,7 @@ const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPERS, RUNTIMES, RESTORE_FLAG } = delegation;
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
-const SUPPORTED_HOSTS = ['codex', 'claude-code'];
+const SUPPORTED_HOSTS = ['codex', 'claude-code', 'opencode'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
 const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
 const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
@@ -390,22 +409,14 @@ function preferenceSummary(options) {
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
       : 'manual-verification-only',
-    helper_capacity_backstop: options.host === 'codex'
-      ? (choices.codexHelperCapacity || 'question-required')
-      : (choices.claudeAgentCapacity || 'question-required'),
-    selected_topology: options.host === 'codex'
-      ? 'native-unintercepted-root-only'
-      : (choices.claudeTopology || 'question-required'),
-    helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
-      ? options.codexHelperCount
-      : (options.host === 'codex' && choices.codexHelperCapacity === 'one-helper'
-          ? CODEX_V2_RAM_SAFE_HELPERS
-          : (options.host === 'codex' && choices.codexHelperCapacity === 'root-only' ? 0 : 'unchanged')),
+    route_resolution: 'versioned-role-registry -> exact-launch-record -> capability-proven-host-adapter',
+    selected_host: options.host || 'codex',
+    child_speed_default: 'standard; independent depth-1 resolution; never inherited',
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
     opencode_sync: targetChoice('opencode'),
-    ag2_antigravity_sync: targetChoice('ag2')
+    ag2_skills_projection: targetChoice('ag2')
   };
 }
 
@@ -455,14 +466,13 @@ function setupPlan(options = {}) {
   return {
     name: 'setup toolkit',
     host,
-    codex_helper_runtime: host === 'codex' ? (options.codexRuntime || RUNTIMES.UNKNOWN) : 'not-applicable',
-    codex_helper_policy: host === 'codex' ? {
-      routine: 'main agent only by default',
-      ram_safe_helpers: CODEX_V2_RAM_SAFE_HELPERS,
-      v2_total_threads: CODEX_V2_RAM_SAFE_HELPERS + 1,
-      recursive_delegation: 'prohibited by policy; hard enforcement depends on detected runtime',
-      security_capacity: 'no automatic elevation',
-    } : { routine: 'portable policy only' },
+    route_resolution_policy: {
+      contract: routeResolution.CONTRACT_VERSION,
+      role_registry: 'repo/contracts/route-resolution/role-registry-v1.json',
+      launch_record: 'exact resolved launch record required before execution',
+      child_speed: 'omitted depth-1 child speed resolves Standard and never inherits a Priority root',
+      host_adapter: 'capability proof only; host adapters cannot select policy'
+    },
     default_mode: 'plan-only; use --execute --auto-main or --execute --profile auto-main to run',
     managed_source: {
       required: true,
@@ -544,7 +554,7 @@ function setupPlan(options = {}) {
       },
       {
         id: 'approved_target_sync',
-        title: 'Enable only selected OpenCode and AG2/Antigravity targets, then sync enabled targets',
+        title: 'Enable only selected OpenCode and AG2 skills-only targets, then sync enabled targets',
         commands: [
           ...(disableTargetArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', disableTargetArgs)] : []),
           ...((options.enableTargets || []).length ? [
@@ -560,14 +570,12 @@ function setupPlan(options = {}) {
       },
       {
         id: 'host_delegation_control',
-        title: host === 'codex'
-          ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
-          : 'Apply the selected Claude-only topology and admission profile as the final fallible setup operation',
-        commands: host === 'codex' && ['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choices.codexHelperCapacity)
-          ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
-          : (host === 'claude-code' && (choices.claudeTopology !== 'keep' || choices.claudeAgentCapacity !== 'keep')
-              ? ['write only the Claude Code profile under ~/.ai-agent-toolkit/agent-control/profiles/claude-code.json']
-              : [])
+        title: 'Resolve exact role routes and prove host capability before the bounded execution loop',
+        commands: [
+          'node repo/scripts/toolkit-route-resolution.cjs --check',
+          'node repo/scripts/toolkit-host-route-adapters.cjs --check'
+        ],
+        stop_if: 'the role registry, exact launch record, or capability proof is unsupported or contradictory'
       },
       {
         id: 'final_summary',
@@ -1234,160 +1242,55 @@ function needsPipedCodexProposalApproval(args, current) {
     && preview.requires_user_confirmation === true;
 }
 async function confirmSelectedDelegationProposal(args, current, questionBank) {
-  const assertQuestionBankConsumed = () => {
-    if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
-  };
-  if (args.host !== 'codex') {
-    if (args.host === 'claude-code') {
-      const selectedTopology = args.setupChoices.claudeTopology === 'keep' ? current.agentProfile.topology : args.setupChoices.claudeTopology;
-      const managedCapacity = ['automatic', 'manual'].includes(args.setupChoices.claudeAgentCapacity);
-      if (managedCapacity && !['toolkit-direct', agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(selectedTopology)) {
-        throw new Error('Automatic or manual Toolkit admission requires the Direct Toolkit-managed subagents topology.');
-      }
-    }
-    assertQuestionBankConsumed();
-    return null;
+  if (questionBank?.remaining_input?.length) {
+    throw new Error('Setup question bank received unexpected extra non-empty input.');
   }
-  const choice = args.setupChoices.codexHelperCapacity;
-  if (!['one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(choice)) {
-    assertQuestionBankConsumed();
-    return null;
-  }
-  if (current.delegation.status === 'migration-required' && choice !== 'migrate') {
-    throw new Error('Selected helper setting remains unapplied. The exact PR #237 legacy setting can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
-  }
-  if (choice === 'migrate' && (current.runtime.runtime !== RUNTIMES.V2 || current.delegation.status !== 'migration-required')) {
-    throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed PR #237 legacy setting is available to migrate; choose an ordinary helper setting or `keep`.');
-  }
-  const helperCount = selectedHelperCount(args, current);
-  const previewOptions = {
-    runtime: current.runtime.runtime,
-    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-  };
-  const preview = choice === 'remove'
-    ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
-    : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
-        ...previewOptions,
-        helperCount,
-        allowUserOwnedReplacement: true,
-      });
-  if (preview.selected_outcome_matches === true) {
-    assertQuestionBankConsumed();
-    args.codexDelegationPreview = preview;
-    return preview;
-  }
-  if (!['preview', 'removal-preview'].includes(preview.status)) {
-    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration or runtime detection problem, then rerun setup. ${preview.detail || preview.status}`);
-  }
-  preview.before_semantics = current.delegation.detail;
-  if (choice === 'remove') printDelegationRemovalPreview(preview);
-  else printDelegationPreview(preview);
-  if (preview.requires_user_confirmation && !args.approveCodexConfigProposal) {
-    let answer = '';
-    if (questionBank.remaining_input.length) answer = String(questionBank.remaining_input.shift()).trim().toLowerCase();
-    else if (process.stdin.isTTY) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      try { answer = (await rl.question('Type apply to approve this exact Codex configuration proposal: ')).trim().toLowerCase(); }
-      finally { rl.close(); }
-    }
-    if (answer !== 'apply') {
-      throw new Error('Selected helper setting remains unapplied. Required action: review the exact technical proposal and answer `apply`, or pass --approve-codex-config-proposal.');
-    }
-    args.approveCodexConfigProposal = true;
-  }
-  assertQuestionBankConsumed();
-  args.codexDelegationPreview = preview;
-  return preview;
+  // Native helper/resource configuration is no longer a Toolkit authority.
+  // Keep the call boundary for old callers, but make it an explicit no-op.
+  args.codexDelegationPreview = null;
+  return null;
 }
 
+// Legacy setup answers are parsed only for a bounded migration preview. They
+// never select a worker count, scheduler, checker, reservation, or resource
+// policy. Runtime setup is governed by the route registry below.
 async function applyHostDelegationControl(args, current, nativeCache = {}) {
-  if (args.host === 'claude-code') {
-    const resolved = resolveClaudeTopologyCapacity(args, current);
-    const topology = resolved.topology;
-    const capacityMode = resolved.capacity_mode;
-    const strict = [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
-    const installedEnforcement = nativeCache.restart_required !== true
-      && nativeCache.strict_enforcement_verified === true && nativeCache.trusted === true
-      && nativeCache.hook_active === true && agentControl.validActivationProof(nativeCache.activation_proof, {
-        pluginVersion: nativeCache.installed_version || nativeCache.version,
-        cachePath: nativeCache.cache_path,
-      });
-    const launchCapable = current.agentCapability?.launch_supported === true;
-    const resourceCapable = current.agentCapability?.resource_counter_supported === true;
-    const directEnforceable = launchCapable && installedEnforcement && resourceCapable;
-    const enforceable = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? directEnforceable : installedEnforcement;
-    if (topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT && !directEnforceable) {
-      const reason = nativeCache.restart_required === true
-        ? 'Current Toolkit activation is restart-pending; direct Claude capability verification was deferred.'
-        : 'Current Claude CLI controls, native hook trust/activation, installed Toolkit bytes, exact worker/checker launches, or required resource counters could not be verified.';
-      const invalidated = agentControl.invalidateProfile('claude-code', reason);
-      return { ...invalidated, status: nativeCache.restart_required === true ? 'restart-pending-root-only' : 'capability-lost-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
-    }
-    if (topology === agentControl.TOPOLOGIES.ROOT_ONLY && !installedEnforcement) {
-      const invalidated = agentControl.invalidateProfile('claude-code', 'Root-only remains the safe fallback while current native hook trust/activation or installed Toolkit bytes are unverified.');
-      return { ...invalidated, status: 'safe-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
-    }
-    const configured = agentControl.configureProfile('claude-code', {
-      topology,
-      capacity_mode: capacityMode,
-      manual_maximum: resolved.manual_maximum,
-      enforcement_verified: strict,
-      activation_proof: nativeCache.activation_proof,
-      claude_cli: current.agentCapability?.claude_command || processLaunch.resolveClaudeCommandInput({
-        explicit: args.claudeCli,
-        persisted: current.agentProfile?.claude_cli,
-      }),
-      resource_counter_supported: resourceCapable,
-      resource_counter_source: current.agentCapability?.resource_counter_source,
-    });
-    return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: !strict || enforceable, client_scope: 'Claude-only Toolkit profile' };
+  const host = args.host || 'codex';
+  if (!['codex', 'claude-code', 'opencode'].includes(host)) {
+    return { status: 'blocked', reason_code: 'ROUTE_UNAVAILABLE', changed: false, client_scope: 'unsupported host' };
   }
-  if (args.host !== 'codex') {
-    return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
+  if (host === 'claude-code'
+    && current?.agentProfile?.topology === 'exact-launch-record'
+    && current?.agentCapability?.supported !== true) {
+    return {
+      status: 'capability-lost-root-only',
+      changed: false,
+      route_contract: routeResolution.CONTRACT_VERSION,
+      exact_launch_required: true,
+      fallback: 'root-only',
+      resource_admission: false,
+      reservation_queue_policy: false,
+      mandatory_pre_pr_checker: false,
+      reason_code: 'HOST_CAPABILITY_UNVERIFIED'
+    };
   }
-  const choice = args.setupChoices.codexHelperCapacity;
-  const configPath = current.delegation.config_path || delegation.codexConfigPath();
-  const options = {
-    runtime: current.runtime.runtime,
-    helperCount: selectedHelperCount(args, current),
-    codexCommand: args.codexCli,
-    codexHome: delegation.defaultCodexHome(),
-    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-    allowUserOwnedReplacement: args.approveCodexConfigProposal,
+  const migration = host === 'codex' && current?.delegation?.config_text
+    ? managedConfigMigration.planManagedConfigMigration({ text: current.delegation.config_text })
+    : { status: 'NOOP', reason_code: 'NO_LEGACY_POLICY' };
+  return {
+    status: host === 'opencode' ? 'native-plugin-migration-only' : 'route-registry-active',
+    changed: false,
+    route_contract: routeResolution.CONTRACT_VERSION,
+    host_adapter: hostRouteAdapters.ADAPTERS[host] || null,
+    selected_role: null,
+    exact_launch_required: true,
+    scheduler_policy: false,
+    resource_admission: false,
+    reservation_queue_policy: false,
+    mandatory_pre_pr_checker: false,
+    migration: { status: migration.status, reason_code: migration.reason_code || 'NO_LEGACY_POLICY' },
+    native_cache_status: nativeCache.status || 'not-mutated'
   };
-  if (!['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
-  if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
-  const preview = args.codexDelegationPreview;
-  if (preview?.selected_outcome_matches === true) {
-    const verifiedNoop = delegation.previewCodexDelegation(configPath, {
-      runtime: current.runtime.runtime,
-      helperCount: options.helperCount,
-      setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-      allowUserOwnedReplacement: true,
-    });
-    if (verifiedNoop.selected_outcome_matches !== true) {
-      throw new Error('Selected helper setting remains unapplied. The previously matching user-owned Codex configuration changed before final verification; rerun setup.');
-    }
-    return verifiedNoop;
-  }
-  if (!preview || !['preview', 'removal-preview'].includes(preview.status) || !preview.approval_binding) {
-    throw new Error('Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal. Rerun setup to receive a fresh proposal.');
-  }
-  options.backupGenerationId = preview.backup_generation_id;
-  options.approvedProposal = preview.approval_binding;
-  const effectiveChoice = ['one-helper', 'root-only', 'custom'].includes(choice) ? 'custom' : choice;
-  const result = await delegation.delegationResultForChoice(effectiveChoice, configPath, options);
-  if (result.status === 'approval-stale' || result.status === 'approval-invalid') throw new Error(result.detail);
-  if (choice === 'remove') {
-    if (result.status !== 'removed' || result.changed !== true) {
-      throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
-    }
-    return result;
-  }
-  if (result.status !== 'configured' || result.helper_count !== options.helperCount) {
-    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
-  }
-  return result;
 }
 
 function inspectClaudeAgentCapability(args) {
@@ -1400,22 +1303,19 @@ function inspectClaudeAgentCapability(args) {
   let command;
   try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
   catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability();
     return {
       supported: false, launch_supported: false, executable_available: false,
-      launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
-      resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
+      launch_verification: 'deferred-until-post-approval', capability_proof: false,
+      detector: `Claude CLI unavailable: ${error.message}`,
       launch_probe_status: 'deferred', version: '', version_verification: 'deferred',
       direct_only: false, medium_effort: false, non_fast_environment_override: false,
     };
   }
-  const resourceCapability = agentControl.inspectResourceCapability();
   return {
     supported: false, launch_supported: false, executable_available: true,
-    launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
-    resource_counter_source: resourceCapability.source,
-    detector: 'Claude executable and resource counters inspected observationally; exact worker/checker launch capability is deferred until post-approval current-plugin verification',
-    launch_probe_status: 'deferred', launch_probe_exit_status: null, checker_probe_exit_status: null,
+    launch_verification: 'deferred-until-post-approval', capability_proof: false,
+    detector: 'Claude executable inspected observationally; exact role route and host capability remain bound to a resolved launch record',
+    launch_probe_status: 'deferred', launch_probe_exit_status: null,
     claude_command: command, version: '', version_verification: 'deferred',
     direct_only: false, medium_effort: false, non_fast_environment_override: false,
   };
@@ -1432,41 +1332,24 @@ function probeClaudeAgentCapability(args) {
   let command;
   try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
   catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability();
     return {
-      supported: false, launch_supported: false, resource_counter_supported: resourceCapability.supported,
-      resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
+      supported: false, launch_supported: false, capability_proof: false,
+      detector: `Claude CLI unavailable: ${error.message}`,
       version: '', direct_only: false, medium_effort: false, non_fast_environment_override: false,
     };
   }
-  const probeEnv = { ...env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CAPABILITY_PROBE: '1' };
+  const probeEnv = { ...env, AI_AGENT_TOOLKIT_CAPABILITY_PROBE: '1' };
   const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000, env: probeEnv });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
-  const probeSpecs = [
-    { role: agentControl.ROLES.WORKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].worker, effort: 'medium' },
-    { role: agentControl.ROLES.CHECKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].checker, effort: 'medium' },
-  ];
-  const probes = probeSpecs.map((spec) => helper.runClaudeCommand(command, agentControl.claudeInvocationArgs(spec), {
-    timeout: 10000,
-    input: '',
-    env: probeEnv,
-  }));
-  const probeOutput = probes.map((probe) => `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`).join('\n').trim();
-  const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--|unknown model|model .*not (?:found|available|supported)/i.test(probeOutput);
-  const launchSupported = versionResult.status === 0 && version.length > 0 && probes.every((probe) => probe.status === 0);
-  const resourceCapability = agentControl.inspectResourceCapability();
-  const probeStatus = launchSupported ? 'supported' : (unsupportedSyntax ? 'unsupported-syntax' : 'indeterminate-runtime-failure');
+  const launchSupported = versionResult.status === 0 && version.length > 0;
+  const probeStatus = launchSupported ? 'supported' : 'indeterminate-runtime-failure';
   return {
-    supported: launchSupported && resourceCapability.supported,
+    supported: launchSupported,
     launch_supported: launchSupported,
-    resource_counter_supported: resourceCapability.supported,
-    resource_counter_source: resourceCapability.source,
-    detector: launchSupported
-      ? 'post-approval claude --version plus bounded empty-input exact-argv capability probe with maintenance isolation'
-      : `Claude launch capability ${probeStatus}`,
+    capability_proof: false,
+    detector: launchSupported ? 'post-approval claude --version capability probe; exact role metadata remains controller-selected' : `Claude launch capability ${probeStatus}`,
     launch_probe_status: probeStatus,
-    launch_probe_exit_status: Number.isInteger(probes[0]?.status) ? probes[0].status : null,
-    checker_probe_exit_status: Number.isInteger(probes[1]?.status) ? probes[1].status : null,
+    launch_probe_exit_status: Number.isInteger(versionResult.status) ? versionResult.status : null,
     claude_command: command,
     version,
     direct_only: launchSupported,
@@ -1587,11 +1470,11 @@ function recommendedChoice(key, current, args) {
 
 function strictClaudeSetupCapability(current) {
   return current.agentCapability?.launch_supported === true
-    && current.agentCapability?.resource_counter_supported === true
     && current.nativePlugin?.strict_enforcement_verified === true
     && current.nativePlugin?.trusted === true
     && current.nativePlugin?.hook_active === true
-    && agentControl.validActivationProof(current.nativePlugin?.activation_proof);
+    && typeof current.nativePlugin?.route_sha256 === 'string'
+    && typeof current.nativePlugin?.adapter_sha256 === 'string';
 }
 
 function wizardChoice(value, label, consequence) {
@@ -1862,28 +1745,14 @@ function reconcileClaudeQuestionChoices(args, current) {
 }
 
 function resolveClaudeTopologyCapacity(args, current) {
-  reconcileClaudeQuestionChoices(args, current);
-  const profile = current.agentProfile || agentControl.readProfile('claude-code');
-  const topologyChoice = args.setupChoices.claudeTopology || 'keep';
-  const capacityChoice = args.setupChoices.claudeAgentCapacity || 'keep';
-  // A direct selection authorizes post-approval verification; it never turns
-  // an observational snapshot into an optimistic capability claim.
-  let topology = topologyChoice === 'keep' && profile.supported === true ? profile.topology
-    : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice] || agentControl.TOPOLOGIES.ROOT_ONLY);
-  if (capacityChoice === 'root-only' && topology !== agentControl.TOPOLOGIES.BROADER_NATIVE) topology = agentControl.TOPOLOGIES.ROOT_ONLY;
-  let capacityMode;
-  if (topology !== agentControl.TOPOLOGIES.CLAUDE_DIRECT) capacityMode = agentControl.CAPACITY_MODES.ROOT_ONLY;
-  else if (capacityChoice === 'keep' && profile.supported === true && profile.topology === topology
-    && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) capacityMode = profile.capacity_mode;
-  else capacityMode = capacityChoice === 'manual' ? agentControl.CAPACITY_MODES.MANUAL : agentControl.CAPACITY_MODES.AUTO;
-  const manualMaximum = capacityMode === agentControl.CAPACITY_MODES.MANUAL ? (args.claudeManualMaximum ?? profile.manual_maximum) : 0;
-  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL && (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > agentControl.MAX_MANUAL_WORKERS)) {
-    throw new Error('Manual Claude agent maximum is outside the supported bounds.');
-  }
-  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL) args.claudeManualMaximum = manualMaximum;
-  args.setupChoices.claudeTopology = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct' : (topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
-  args.setupChoices.claudeAgentCapacity = capacityMode === agentControl.CAPACITY_MODES.AUTO ? 'automatic' : (capacityMode === agentControl.CAPACITY_MODES.MANUAL ? 'manual' : 'root-only');
-  return { topology, capacity_mode: capacityMode, manual_maximum: manualMaximum };
+  const requested = args?.setupChoices?.claudeTopology || args?.claudeTopologyRequested || '';
+  return {
+    topology: requested === 'root-only' ? 'root-only' : requested === 'broader-native' ? 'host-native' : 'exact-launch-record',
+    capacity_mode: 'not-managed',
+    manual_maximum: 0,
+    route_contract: routeResolution.CONTRACT_VERSION,
+    legacy_answers_ignored: true
+  };
 }
 
 function currentHelperOutcome(current) {
@@ -2053,17 +1922,6 @@ function setupQuestionSpecs(args, current) {
   ];
 
   if (args.host === 'codex') {
-    // Ordinary setup never asks users to choose helper quantities. Existing explicit
-    // or saved state is preserved; otherwise fail closed to root-only until a
-    // Toolkit-controlled launch path proves live memory admission.
-    if (!args.setupChoices.codexHelperCapacity) {
-      const unsafeV2Shape = current.delegation?.layout?.multiAgentV2Tables?.length > 1
-        || current.delegation?.layout?.multiAgentV2Children?.length > 0;
-      args.setupChoices.codexHelperCapacity = unsafeV2Shape
-        || (current.delegation?.status === 'unconfigured' && [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime))
-        ? 'root-only'
-        : 'keep';
-    }
     specs.push(resolvedQuestion({
       id: 'codex-toolkit-maintenance',
       key: 'codexPluginAutoRefresh',
@@ -2087,35 +1945,6 @@ function setupQuestionSpecs(args, current) {
       afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
     }));
   } else {
-    const capabilitySupported = strictClaudeSetupCapability(current);
-    const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
-    specs.push(resolvedQuestion({
-      id: 'claude-agent-topology',
-      key: 'claudeTopology',
-      section: 'Computer performance',
-      title: 'How should Claude Code use agents?',
-      prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'Whether Claude Code remains root-only, uses only directly controlled Toolkit workers, or permits broader native agent behavior. Broader native agents remain outside Toolkit resource admission.',
-      choices: [
-        wizardChoice('toolkit-direct', 'Direct Toolkit-managed subagents only', capabilitySupported
-          ? 'Allow only direct Toolkit-controlled workers with verified resource admission and native Agent/Task bypass blocked.'
-          : 'Request direct Toolkit-controlled workers; setup verifies current active Toolkit bytes and exact worker/checker launches only after approval, and otherwise leaves root-only active.'),
-        wizardChoice('root-only', 'Root agent only', 'Use no helper agents under the Toolkit profile.'),
-        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit admission and its resource guarantees.'),
-        wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale or unverifiable strict state falls back safely to root-only.`),
-      ],
-      recommendation: {
-        value: recommendedChoice('claudeTopology', current, args),
-        outcome: capabilitySupported ? 'Use direct Toolkit-managed subagents with native Agent launches blocked.' : 'Use the root agent only until every strict launch control is verifiable.',
-        reason: capabilitySupported ? 'The detected CLI, installed bytes, trust, active hook, and resource counters satisfy the strict direct-worker boundary.' : 'Unavailable or stale capability proof cannot safely support a strict direct-worker claim.',
-      },
-      selected: args.setupChoices.claudeTopology,
-      current: `Current topology: ${activeProfile.topology || 'root-only'}.`,
-      afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
-      availability: { status: capabilitySupported ? 'available' : 'post-approval-verification-required', condition: capabilitySupported ? 'Existing strict proof is present, but exact launch capability is reverified after approval.' : 'Direct mode is selectable as a request but remains inactive unless every post-approval gate verifies.' },
-    }));
-    // Capacity is derived only after the visible topology answer is known. Rendering
-    // this bank cannot create hidden state that later overrides the user's choice.
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
@@ -2161,30 +1990,30 @@ function setupQuestionSpecs(args, current) {
   }
   if (current.audit?.targets?.ag2?.detected || current.audit?.targets?.ag2?.enabled) {
     const target = current.audit.targets.ag2;
-    const targetCurrent = targetCurrentOutcome(target, 'Antigravity');
+    const targetCurrent = targetCurrentOutcome(target, 'AG2 skills projection');
     specs.push(resolvedQuestion({
-      id: 'antigravity-integration',
+      id: 'ag2-skills-projection',
       key: 'ag2Target',
       section: 'Other coding apps',
-      title: 'Antigravity',
-      prompt: 'Antigravity Toolkit choice',
-      whatThisControls: 'Whether Toolkit synchronizes an Antigravity plugin-scoped integration containing plugin metadata, installed-version metadata, the Toolkit adapter, and managed skill folders. This does not install Antigravity or the optional Python AG2 package.',
+      title: 'AG2 skills projection',
+      prompt: 'AG2 skills-only projection choice',
+      whatThisControls: 'Whether Toolkit keeps a skills-only AG2 projection after supported read-only destination discovery. It never installs a Toolkit plugin or infers an unsupported destination.',
       choices: [
-        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.'),
-        wizardChoice('disable', 'Turn off', 'Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.'),
+        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the skills-only projection only when the AG2 proof gate establishes a supported destination.'),
+        wizardChoice('disable', 'Turn off', 'Disable future AG2 skills projection synchronization without deleting unverified existing delivery.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${targetCurrent}`),
-        wizardChoice('skip', 'Skip this time', 'Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.'),
+        wizardChoice('skip', 'Skip this time', 'Make no AG2 target-state or file change during this setup.'),
       ],
       recommendation: {
         value: recommendedChoice('ag2Target', current, args),
-        outcome: target.enabled ? 'Keep the current Antigravity integration setting.' : 'Keep Antigravity unchanged unless you intentionally enable Toolkit synchronization.',
-        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving current managed behavior.' : 'Detection alone is not consent to write an Antigravity plugin-scoped folder.',
+        outcome: target.enabled ? 'Keep the current AG2 skills-projection setting.' : 'Keep AG2 unchanged unless supported skills-directory discovery is proven.',
+        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving migration-safe delivery.' : 'Package presence or host detection is not proof of a supported skills destination.',
       },
       selected: args.setupChoices.targets.ag2,
       current: targetCurrent,
       currentVerification: target.detected === true || target.enabled === true ? 'state-derived' : 'unverified',
-      afterApplying: 'Enable writes the Toolkit-owned Antigravity plugin metadata and skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Restart or reopen Antigravity if it does not reload plugin files automatically.',
-      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when Antigravity is detected or Toolkit already has enabled state for it.' },
+      afterApplying: 'Enable writes only skills after the proof gate succeeds; when proof is unavailable, setup reports AG2_PROOF_UNAVAILABLE and retains existing delivery.',
+      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when AG2 is detected or Toolkit already has enabled state for it.' },
     }));
   }
   return withPresentationMetadata(specs.map((spec) => ({
@@ -2212,7 +2041,6 @@ function plannedQuestionBank(args, current) {
   for (const spec of initialSpecs) {
     if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
   }
-  if (planned.host === 'claude-code') resolveClaudeTopologyCapacity(planned, current);
   const resolvedSpecs = setupQuestionSpecs(planned, current);
   assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
@@ -2549,11 +2377,11 @@ function setupQuestionDocumentationSpecs() {
       codex_plugin_auto_refresh_enabled: true,
       targets: {
         opencode: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
-        ag2: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
+        ag2: { detected: false, enabled: false, synced: false, explicitly_disabled: false, proof_status: 'AG2_PROOF_UNAVAILABLE' },
       },
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
-    delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
+    delegation: { status: 'route-registry-active', ownership: 'route-registry', detail: 'documentation fixture' },
     nativePlugin: { status: 'fresh' },
   };
   return plannedQuestionBank(args, current).specs;
@@ -3872,61 +3700,17 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
-  console.log('Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children from verified available memory.');
+  console.log('Route-policy questions shown: no; User/Web authority and the versioned role registry select exact launches.');
   console.log('Preference/target writes before answers: no');
   console.log('');
-  if (args.host === 'codex') {
-  console.log('## Codex helper agents');
-  console.log(`Codex helper-agent runtime: ${unknown(current?.runtime?.runtime || delegation.runtime)}`);
-  console.log(`Runtime detection: ${unknown(current?.runtime?.detector)}`);
-  console.log(`Normal helper capacity: ${Number.isSafeInteger(delegation.helper_count)
-    ? `${delegation.helper_count} helper agent${delegation.helper_count === 1 ? '' : 's'}; ${delegation.total_threads || delegation.helper_count + 1} total session threads including the main agent (the root counts toward the total)`
-    : 'unchanged or not configured'}`);
-  console.log('Routine policy: Main agent only by default');
-  console.log('Ordinary helper limit: At most one directly justified helper');
-  console.log('Helper use for speed alone: Not allowed by Toolkit policy');
-  console.log('Defined multi-worker workflow exception: Only when the user invoked that workflow, its worker count is stated, and higher persistent or temporary capacity was explicitly approved');
-  console.log('Worker topology policy: Direct children of the root with no needless scope overlap; helpers must not spawn helpers; root retains coordination and final judgment');
-  console.log('Helpers creating helpers: Prohibited by Toolkit policy');
-  console.log(`Recursive delegation enforcement: ${unknown(delegation.recursive_helper_control || (delegation.runtime === RUNTIMES.V2 ? 'policy-only; no native hard block verified' : 'unverified'))}`);
-  console.log('Runtime resource admission: Toolkit-controlled child paths reserve memory atomically before launch and fail closed when live state is unprovable.');
-  const technicalSetting = delegation.runtime === RUNTIMES.V2 && Number.isSafeInteger(delegation.total_threads)
-    ? `features.multi_agent_v2.max_concurrent_threads_per_session = ${delegation.total_threads}`
-    : (delegation.runtime === RUNTIMES.V1 && Number.isSafeInteger(delegation.helper_count)
-        ? `agents.max_threads = ${delegation.helper_count}; agents.max_depth = 1`
-        : 'not changed');
-  console.log(`Technical setting: ${technicalSetting}`);
-  console.log(`Helper-capacity outcome this run: ${delegationOutcomeSummary(args, delegation)}`);
-  console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
-  console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
-  console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
-  console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
-  console.log('Codex config path: <Codex user configuration>');
-  console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
-  console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);
-  console.log(`Temporary editor cleanup: ${unknown(delegation.temporary_cleanup || 'no temporary editor directory created')}`);
-  if (delegation.backup_metadata_path) console.log(`Exact backup metadata: ${delegation.backup_metadata_path}`);
-  if (delegation.restore_commands?.setup_script_path) console.log(`Restore command setup script: ${delegation.restore_commands.setup_script_path}`);
-  if (delegation.restore_commands?.powershell) console.log(`Exact restore command (PowerShell): ${delegation.restore_commands.powershell}`);
-  if (delegation.restore_commands?.posix) console.log(`Exact restore command (POSIX shell): ${delegation.restore_commands.posix}`);
+  console.log('## Route resolution');
+  console.log(`Route contract: ${routeResolution.CONTRACT_VERSION}`);
+  console.log('Role registry: versioned and source-bound');
+  console.log('Launch record: exact model, reasoning, service tier, speed, depth, and host capability required');
+  console.log('Child speed: omitted depth-1 child resolves Standard; root Priority is never inherited');
+  console.log('Host adapters: capability proof only; no model, speed, tier, backend, or host substitution');
+  console.log(`Route control outcome: ${unknown(delegation.status || 'route-registry-active')}`);
   console.log('');
-  console.log('## Codex Security capacity');
-  console.log('Security capacity behavior: normal global capacity is never raised automatically');
-  console.log('Isolated Security exception: unsupported by the currently documented Codex Security plugin and app-server interfaces');
-  console.log('If a selected Security workflow requires more workers, raising global capacity may exhaust RAM. Never imply that an official Deep Scan can run with insufficient capacity. Use a lower-capacity ordinary or sequential review, run Deep Scan on another sufficiently provisioned machine, or explicitly make a temporary global increase with exact backup, restart, restoration, and another restart. A sequential custom review is not an official Deep Security Scan.');
-  console.log('');
-  } else {
-    console.log('## Claude Code agent topology');
-    console.log(`Selected topology: ${unknown(delegation.topology)}`);
-    console.log(`Capacity mode: ${unknown(delegation.capacity_mode)}`);
-    console.log(`Manual maximum backstop: ${delegation.manual_maximum || 'not selected'}; restrictive only and never above the live memory ceiling`);
-    console.log('Toolkit-controlled child effort: medium by default; higher effort requires one named difficult role and narrow justification');
-    console.log('Toolkit-controlled child fast mode: disabled with CLAUDE_CODE_DISABLE_FAST_MODE=1');
-    console.log('Nested Toolkit-controlled children: blocked by direct-only --disallowedTools Agent');
-    console.log('Native, built-in, team, plugin, user-created, and third-party workers outside the launch script: not covered by Toolkit admission');
-    console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
-    console.log('');
-  }
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
@@ -3976,7 +3760,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('### OpenCode');
   printTargetSummary('OpenCode', targets.opencode || {}, targetChoices.opencode);
   console.log('');
-  console.log('### AG2/Antigravity');
+  console.log('### AG2 skills-only projection');
   printTargetSummary('AG2', targets.ag2 || {}, targetChoices.ag2);
   console.log('');
   console.log('## Validation');

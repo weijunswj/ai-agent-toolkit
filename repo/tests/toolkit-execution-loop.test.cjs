@@ -11,6 +11,7 @@ const contractPath = path.join(repoRoot, 'repo', 'contracts', 'bounded-local-exe
 const a1RuntimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
 const runtime = require(runtimePath);
 const a1 = require(a1RuntimePath);
+const route = require('../scripts/toolkit-route-resolution.cjs');
 
 const common = {
   task: { id: 'task-1', digest: 'a'.repeat(64) },
@@ -19,6 +20,58 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
 };
+
+function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']], capabilityOverrides = {}) {
+  const requestedLanes = entries.map(([launchId]) => launchId);
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: requestedLanes,
+  });
+  const treeDigest = route.digestValue({ tree: 'execution-loop-test' });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'execution-parent' });
+  return {
+    delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    launches: entries.map(([launchId, role]) => {
+      const launch = route.resolveDepthOneLaunch({ role, host: 'codex', parent, tree_digest: treeDigest, scope_digest: scopeDigest, launch_id: launchId });
+      return {
+        ...launch,
+        capability: {
+          available: true,
+          trusted: true,
+          metadata_verified: true,
+          launch_id: launch.launch_id,
+          role: launch.role,
+          provider: launch.provider,
+          model: launch.model,
+          reasoning: launch.reasoning,
+          service_tier: launch.service_tier,
+          speed: launch.speed,
+          host: launch.host,
+          backend: launch.backend,
+          launch_record_digest: launch.route_digest,
+          ...(capabilityOverrides[launchId] || {})
+        }
+      };
+    })
+  };
+}
+
+function batchAcknowledgement(routePlan, launchLeases) {
+  return {
+    atomic: true,
+    acknowledged: true,
+    accepted: true,
+    route_digest: routePlan.route_digest,
+    launch_record_digests: routePlan.exact_launches.map((item) => item.launch_record.route_digest),
+    started_lane_ids: launchLeases.map((item) => item.lane_id),
+  };
+}
 
 function commitOperation(overrides = {}) {
   const paths = overrides.authorized_paths || ['src/file.txt'];
@@ -67,27 +120,40 @@ test('A3 route admission is all-or-none before any lane launch', () => {
   const launches = [];
   const result = runtime.admitRun({
     ...common,
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: false, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority([['worker-a', 'g1'], ['worker-b', 'g2']], { 'worker-b': { available: false } }),
     launch(lane) { launches.push(lane); },
   });
   assert.equal(result.status, 'blocked');
-  assert.equal(result.reason_code, 'WORKER_ROUTE_UNAVAILABLE');
+  assert.equal(result.reason_code, 'HOST_CAPABILITY_UNAVAILABLE');
   assert.deepEqual(launches, []);
+});
+
+test('A3 start revalidates affirmative capability status before preparation', () => {
+  const admitted = runtime.admitRun({
+    ...common,
+    run_id: 'run-capability-status',
+    authority: exactAuthority([['worker-a', 'g1']]),
+  });
+  assert.equal(admitted.status, 'admitted');
+  for (const [status, code] of [['unsupported', 'HOST_CAPABILITY_UNAVAILABLE'], ['contradictory', 'HOST_CAPABILITY_CONTRADICTION']]) {
+    const plan = JSON.parse(JSON.stringify(admitted.route_plan));
+    plan.exact_launches[0].capability_proof.status = status;
+    let preparations = 0;
+    let commits = 0;
+    assert.throws(() => runtime.executeAtomicLaunch(plan, {
+      prepareLaunch: () => { preparations += 1; },
+      commitLaunchBatch: () => { commits += 1; },
+    }), (error) => error.code === code);
+    assert.equal(preparations, 0);
+    assert.equal(commits, 0);
+  }
 });
 
 function delegatedLaunchOptions(overrides = {}) {
   return {
     ...common,
     run_id: 'run-launch',
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority(),
     ...overrides,
   };
 }
@@ -124,10 +190,11 @@ test('A3 launch preparation failure creates no substantive starts', () => {
   const prepared = [];
   let substantiveStarts = 0;
   const result = startDelegated(delegatedLaunchOptions({
-    prepareLaunch(lane) {
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
       prepared.push(lane.lane_id);
       if (lane.lane_id === 'worker-b') throw new Error('lane refused preparation');
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+      return { lane_id: lane.lane_id, launch_lease: 'lease-' + lane.lane_id, inert: true };
     },
     commitLaunchBatch() {
       substantiveStarts += 1;
@@ -145,11 +212,12 @@ test('A3 launch preparation failure creates no substantive starts', () => {
 
 test('A3 atomic batch refusal after later-lane validation creates no substantive starts', () => {
   const result = startDelegated(delegatedLaunchOptions({
-    prepareLaunch(lane) {
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
+      return { lane_id: lane.launch_id || lane.lane_id, launch_lease: 'lease-' + (lane.launch_id || lane.lane_id), inert: true };
     },
-    commitLaunchBatch({ reservations }) {
-      assert.deepEqual(reservations.map((item) => item.lane_id), ['worker-a', 'worker-b']);
+    commitLaunchBatch({ launch_leases }) {
+      assert.deepEqual(launch_leases.map((item) => item.lane_id), ['worker-a', 'worker-b']);
       throw new Error('worker-b refused at atomic start boundary');
     },
   }));
@@ -160,8 +228,9 @@ test('A3 atomic batch refusal after later-lane validation creates no substantive
 
 test('A3 unsupported async launch shape creates no substantive starts', () => {
   const result = startDelegated(delegatedLaunchOptions({
-    prepareLaunch(lane) {
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
+      return { lane_id: lane.launch_id || lane.lane_id, launch_lease: 'lease-' + (lane.launch_id || lane.lane_id), inert: true };
     },
     commitLaunchBatch() {
       return Promise.resolve({ atomic: true, started_lane_ids: ['worker-a', 'worker-b'] });
@@ -175,12 +244,13 @@ test('A3 unsupported async launch shape creates no substantive starts', () => {
 test('A3 complete atomic launch starts exactly the admitted lane set', () => {
   const batches = [];
   const result = startDelegated(delegatedLaunchOptions({
-    prepareLaunch(lane) {
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
+      return { lane_id: lane.launch_id || lane.lane_id, launch_lease: 'lease-' + (lane.launch_id || lane.lane_id), inert: true };
     },
-    commitLaunchBatch({ route_plan, reservations }) {
-      batches.push({ route_digest: route_plan.route_digest, lanes: reservations.map((item) => item.lane_id) });
-      return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) };
+    commitLaunchBatch({ route_plan, launch_leases }) {
+      batches.push({ route_digest: route_plan.route_digest, lanes: launch_leases.map((item) => item.lane_id) });
+      return batchAcknowledgement(route_plan, launch_leases);
     },
   }));
   assert.equal(result.admitted.status, 'admitted');
@@ -220,30 +290,96 @@ test('root-only admission uses zero worker launches and does not widen the task'
   assert.deepEqual(result.route_plan.lanes, []);
   assert.deepEqual(launches, []);
   assert.equal(Object.isFrozen(result.route_plan), true);
-  const request = runtime.normalizeRequest({ ...common, authority: { delegated: true, lanes: ['worker-a'] } });
+  const request = runtime.normalizeRequest({ ...common, authority: exactAuthority([['worker-a', 'g1']]) });
   const widened = runtime.admitRoute({
     ...common,
     request,
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority(),
   });
   assert.equal(widened.reason_code, 'TASK_WIDENING_REJECTED');
 });
 
 test('delegated route requires exact trusted metadata and complete adapter capability', () => {
-  const baseAuthority = { delegated: true, lanes: [{ id: 'worker-a', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' }] };
-  const missing = runtime.admitRoute({ ...common, authority: baseAuthority, adapters: { 'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high' } } });
-  assert.equal(missing.reason_code, 'MODEL_METADATA_UNVERIFIED');
-  const mismatch = runtime.admitRoute({ ...common, authority: baseAuthority, adapters: { 'worker-a': { available: true, provider: 'OpenAI', model: 'other-model', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' } } });
-  assert.equal(mismatch.reason_code, 'WORKER_MODEL_MISMATCH');
-  const guidance = runtime.admitRoute({ ...common, authority: baseAuthority, adapters: { 'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only', adapter_handle: 'handle-a' } } });
-  assert.equal(guidance.status, 'admitted');
-  assert.equal(guidance.route_plan.lanes[0].host_classification, 'guidance-only');
-  const unsupported = runtime.admitRoute({ ...common, authority: baseAuthority, adapters: { 'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'unsupported' } } });
-  assert.equal(unsupported.reason_code, 'WORKER_ROUTE_UNAVAILABLE');
+  const missing = runtime.admitRoute({ ...common, authority: exactAuthority([['worker-a', 'g1']], { 'worker-a': { available: false } }) });
+  assert.equal(missing.reason_code, 'HOST_CAPABILITY_UNAVAILABLE');
+  const mismatch = runtime.admitRoute({ ...common, authority: exactAuthority([['worker-a', 'g1']], { 'worker-a': { model: 'gpt-5.6-sol' } }) });
+  assert.equal(mismatch.reason_code, 'HOST_CAPABILITY_CONTRADICTION');
+  const admitted = runtime.admitRoute({ ...common, authority: exactAuthority([['worker-a', 'g1']]) });
+  assert.equal(admitted.status, 'admitted');
+  assert.equal(admitted.route_plan.lanes[0].host_classification, 'hard-runtime-enforcement');
+  const unsupported = runtime.admitRoute({ ...common, authority: exactAuthority([['worker-a', 'g1']], { 'worker-a': { available: false } }) });
+  assert.equal(unsupported.reason_code, 'HOST_CAPABILITY_UNAVAILABLE');
+});
+
+test('integrated delegated admission binds an explicitly accepted Priority child authority', () => {
+  const treeDigest = route.digestValue({ tree: 'priority-integrated' });
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: ['priority-child'],
+  });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'priority-parent' });
+  const priorityAuthority = route.createPriorityChildAuthority({
+    authority_digest: common.current_authority_digest,
+    child_launch_id: 'priority-child',
+    parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    role: 'loop-manager',
+    host: 'codex'
+  });
+  const child = route.resolveDepthOneLaunch({
+    role: 'loop-manager',
+    host: 'codex',
+    parent,
+    launch_id: 'priority-child',
+    speed: 'priority',
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    priority_child_authority: priorityAuthority,
+  });
+  const capability = {
+    available: true,
+    trusted: true,
+    metadata_verified: true,
+    launch_id: child.launch_id,
+    role: child.role,
+    provider: child.provider,
+    model: child.model,
+    reasoning: child.reasoning,
+    service_tier: child.service_tier,
+    speed: child.speed,
+    host: child.host,
+    backend: child.backend,
+    launch_record_digest: child.route_digest,
+  };
+  const authority = {
+    delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    launches: [{ ...child, priority_child_authority: priorityAuthority, capability }],
+  };
+  const admitted = runtime.admitRoute({ ...common, authority });
+  assert.equal(admitted.status, 'admitted');
+  assert.equal(admitted.route_plan.exact_launches[0].launch_record.route_digest, child.route_digest);
+
+  const withoutAcceptedAuthority = {
+    ...authority,
+    launches: [{ ...authority.launches[0], priority_child_authority: { ...priorityAuthority, accepted: false } }],
+  };
+  const rejected = runtime.admitRoute({ ...common, authority: withoutAcceptedAuthority });
+  assert.equal(rejected.reason_code, 'PRIORITY_CHILD_AUTHORITY_REQUIRED');
+  const reusedForOtherChild = {
+    ...authority,
+    launches: [{
+      ...authority.launches[0],
+      priority_child_authority: { ...priorityAuthority, child_launch_id: 'priority-child-b' }
+    }]
+  };
+  assert.equal(runtime.admitRoute({ ...common, authority: reusedForOtherChild }).reason_code, 'PRIORITY_CHILD_AUTHORITY_REQUIRED');
 });
 
 test('lifecycle admits exact live snapshot and rejects missing terminal evidence', () => {

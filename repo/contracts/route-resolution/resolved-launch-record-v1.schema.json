@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.route-resolution.resolved-launch-record.v1",
+  "title": "Toolkit exact resolved launch record",
+  "description": "An immutable route selected by authority and resolved through the role registry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "record_version", "launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "speed_source", "backend", "host", "depth", "parent_launch_id", "parent_speed", "child_priority_authorized", "registry_version", "registry_digest", "child_authority_digest", "tree_digest", "scope_digest", "route_digest"],
+  "properties": {
+    "contract_version": { "const": "toolkit.route-resolution.resolved-launch-record.v1" },
+    "record_version": { "const": 1 },
+    "launch_id": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$" },
+    "role": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "provider": { "const": "openai" },
+    "model": { "type": "string", "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] },
+    "reasoning": { "type": "string", "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
+    "service_tier": { "const": "standard" },
+    "speed": { "enum": ["standard", "priority"] },
+    "speed_source": { "enum": ["registry-default", "child-default", "explicit-child-authority"] },
+    "backend": { "enum": ["codex", "claude-code", "opencode"] },
+    "host": { "enum": ["codex", "claude-code", "opencode"] },
+    "depth": { "enum": [0, 1] },
+    "parent_launch_id": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$" },
+    "parent_speed": { "type": ["string", "null"], "enum": ["standard", "priority", null] },
+    "child_priority_authorized": { "type": "boolean" },
+    "registry_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "registry_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "child_authority_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "tree_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "scope_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "route_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
