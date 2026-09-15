@@ -116,7 +116,7 @@
                   "reasoning": { "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
                   "service_tier": { "const": "standard" },
                   "speed": { "enum": ["standard", "priority"] },
-                  "status": { "enum": ["available", "unsupported", "contradictory"] },
+                  "status": { "const": "available" },
                   "trusted": { "const": true },
                   "metadata_verified": { "const": true }
                 }

@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const toml = require('./toolkit-toml-structural.cjs');
 const {
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
@@ -134,20 +135,20 @@ function validBody(kind, body) {
 
 function parseManagedBlocks(text) {
   const blocks = [];
-  const lexical = scanTomlLexicalLines(text);
+  const lexical = toml.analyseToml(text);
   const records = lexical.lines;
   const seen = new Set();
   let open = null;
-  let unsafe = lexical.unsafe;
+  let unsafe = lexical.validity.ok !== true;
   let visibleLegacy = false;
   for (const record of records) {
     const marker = record.text;
-    const markerEligible = record.top_level && !record.inside_multiline;
+    const markerEligible = record.top_level && record.structural_comment;
     const begin = markerEligible ? BY_BEGIN.get(marker) : null;
     const end = markerEligible ? BY_END.get(marker) : null;
     const isToolkitMarker = markerEligible && (marker.includes(MARKER_PREFIX)
       || /^#\s*TOOLKIT[-_ ]HELPER[-_ ]CAPACITY[-_ ](?:BEGIN|END)\b/i.test(marker));
-    if (markerEligible && LEGACY_MARKER.test(record.visible_text)) visibleLegacy = true;
+    if (LEGACY_MARKER.test(record.visible_text)) visibleLegacy = true;
     if (isToolkitMarker && !begin && !end) {
       unsafe = true;
       continue;
@@ -255,5 +256,8 @@ module.exports = Object.freeze({
   migrateManagedConfiguration,
   managedBlocks,
   parseManagedBlocks,
-  scanTomlLexicalLines
+  scanTomlLexicalLines: (text) => {
+    const analysis = toml.analyseToml(text);
+    return { lines: analysis.lines, unsafe: analysis.validity.ok !== true };
+  }
 });

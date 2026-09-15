@@ -6,10 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const tomlStructural = require('./toolkit-toml-structural.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.11.3';
+const EXPECTED_TOOLKIT_VERSION = '2.11.4';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
@@ -27,6 +28,7 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/toolkit-toml-structural.cjs',
   'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
   'repo/scripts/repo-ignore-hygiene.cjs',
   'repo/scripts/repo-local-backup.cjs',
@@ -768,29 +770,10 @@ function scanConfigTomlLexicalLines(text) {
 }
 
 function inspectConfiguredPluginState(configText, identity) {
-  const id = escapeRegex(identity);
-  const sectionPattern = new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`);
-  const lexical = scanConfigTomlLexicalLines(configText);
-  if (lexical.unsafe) return { status: 'unprovable', reason: 'Codex config TOML structure is malformed or ambiguous' };
-  const lines = lexical.lines;
-  const sections = [];
-  let body = null;
-  for (const record of lines) {
-    if (!record.top_level || record.inside_multiline) continue;
-    const line = record.text;
-    const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
-    if (section) {
-      if (body) sections.push(body);
-      body = sectionPattern.test(section[1].trim()) ? [] : null;
-      continue;
-    }
-    if (record.visible_text.includes(identity) && /^\s*\[?\s*plugins\./.test(record.visible_text)) {
-      return { status: 'unprovable', reason: `Codex config contains a malformed or ambiguous plugin table for ${identity}` };
-    }
-    if (body) body.push(line);
-  }
-  if (body) sections.push(body);
-
+  const analysis = tomlStructural.analyseToml(configText);
+  if (analysis.validity.ok !== true) return { status: 'unprovable', reason: 'Codex config TOML structure is multiple, malformed, or ambiguous' };
+  const sections = analysis.tables.filter((table) => table.array !== true
+    && table.path.length === 2 && table.path[0] === 'plugins' && table.path[1] === identity);
   if (sections.length !== 1) {
     return {
       status: 'unprovable',
@@ -799,10 +782,10 @@ function inspectConfiguredPluginState(configText, identity) {
         : `Codex config has multiple [plugins."${identity}"] sections`
     };
   }
-  const enabledValues = sections[0]
-    .map((line) => line.match(/^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/))
-    .filter(Boolean)
-    .map((match) => match[1].toLowerCase());
+  const enabledValues = analysis.assignments.filter((assignment) => assignment.table_path.length === 2
+    && assignment.table_path[0] === 'plugins' && assignment.table_path[1] === identity
+    && assignment.key_path.length === 1 && assignment.key_path[0] === 'enabled'
+    && assignment.value_kind === 'boolean').map((assignment) => assignment.value);
   if (enabledValues.length !== 1) {
     return {
       status: 'unprovable',
@@ -810,7 +793,7 @@ function inspectConfiguredPluginState(configText, identity) {
     };
   }
   return {
-    status: enabledValues[0] === 'true' ? 'enabled' : 'disabled',
+    status: enabledValues[0] === true ? 'enabled' : 'disabled',
     reason: `Codex config explicitly reports [plugins."${identity}"] as ${enabledValues[0]}`
   };
 }

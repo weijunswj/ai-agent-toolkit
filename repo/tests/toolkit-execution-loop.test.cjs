@@ -128,6 +128,27 @@ test('A3 route admission is all-or-none before any lane launch', () => {
   assert.deepEqual(launches, []);
 });
 
+test('A3 start revalidates affirmative capability status before preparation', () => {
+  const admitted = runtime.admitRun({
+    ...common,
+    run_id: 'run-capability-status',
+    authority: exactAuthority([['worker-a', 'g1']]),
+  });
+  assert.equal(admitted.status, 'admitted');
+  for (const [status, code] of [['unsupported', 'HOST_CAPABILITY_UNAVAILABLE'], ['contradictory', 'HOST_CAPABILITY_CONTRADICTION']]) {
+    const plan = JSON.parse(JSON.stringify(admitted.route_plan));
+    plan.exact_launches[0].capability_proof.status = status;
+    let preparations = 0;
+    let commits = 0;
+    assert.throws(() => runtime.executeAtomicLaunch(plan, {
+      prepareLaunch: () => { preparations += 1; },
+      commitLaunchBatch: () => { commits += 1; },
+    }), (error) => error.code === code);
+    assert.equal(preparations, 0);
+    assert.equal(commits, 0);
+  }
+});
+
 function delegatedLaunchOptions(overrides = {}) {
   return {
     ...common,

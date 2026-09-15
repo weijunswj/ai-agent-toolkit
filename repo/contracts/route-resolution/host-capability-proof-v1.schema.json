@@ -20,7 +20,7 @@
     "reasoning": { "type": "string", "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
     "service_tier": { "const": "standard" },
     "speed": { "enum": ["standard", "priority"] },
-    "status": { "enum": ["available", "unsupported", "contradictory"] },
+    "status": { "const": "available" },
     "trusted": { "type": "boolean" },
     "metadata_verified": { "type": "boolean" }
   }

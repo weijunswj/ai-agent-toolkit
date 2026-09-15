@@ -46,8 +46,12 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.11.3';
+const expectedBridgeVersion = '2.11.4';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
+const testTomlPython = (() => {
+  const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
+  return result.status === 0 ? String(result.stdout || '').trim() : '';
+})();
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -80,6 +84,7 @@ function isolatedHomeEnv(root, extra = {}) {
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
     UV_PYTHON: '',
+    ...(testTomlPython ? { AI_AGENT_TOOLKIT_PYTHON: testTomlPython } : {}),
     ...extra
   };
 }
@@ -469,12 +474,18 @@ function writeCodexPluginRefreshFixture(repoPath) {
     'repo/scripts/setup-opencode-toolkit-plugin.cjs',
     'repo/scripts/toolkit-host-route-adapters.cjs',
     'repo/scripts/toolkit-public-exposure.cjs',
-    'repo/scripts/toolkit-route-resolution.cjs'
+    'repo/scripts/toolkit-route-resolution.cjs',
+    'repo/scripts/toolkit-toml-structural.cjs'
   ]) {
     const target = path.join(repoPath, ...relPath.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
   }
+  fs.cpSync(
+    path.join(repoRoot, 'skills', 'repository-agent-rules'),
+    path.join(repoPath, 'skills', 'repository-agent-rules'),
+    { recursive: true }
+  );
   writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -4255,7 +4266,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'stale-executing-root') })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4269,7 +4280,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'stale-executing-root') })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4303,7 +4314,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: path.join(root, 'old-cache-A') })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);

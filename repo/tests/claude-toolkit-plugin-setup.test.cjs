@@ -10,6 +10,25 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-claude-toolkit-plugin.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
+const adapters = require('../scripts/toolkit-host-route-adapters.cjs');
+const agentHook = require('../scripts/toolkit-claude-agent-hook.cjs');
+
+test('Claude Agent admission rejects non-available capability proof states', () => {
+  const launch = route.resolveRoleRoute({ role: 'g1', host: 'claude-code', launch_id: 'claude-status-proof' });
+  const capability = {
+    available: true, trusted: true, metadata_verified: true,
+    launch_id: launch.launch_id, role: launch.role, provider: launch.provider, model: launch.model,
+    reasoning: launch.reasoning, service_tier: launch.service_tier, speed: launch.speed,
+    host: launch.host, backend: launch.backend, launch_record_digest: launch.route_digest,
+  };
+  const proof = adapters.proveHostCapability({ launch_record: launch, capability }).proof;
+  for (const [status, code] of [['unsupported', 'HOST_CAPABILITY_UNAVAILABLE'], ['contradictory', 'HOST_CAPABILITY_CONTRADICTION']]) {
+    const result = agentHook.decision({ tool_name: 'Agent', launch_record: launch, capability_proof: { ...proof, status } });
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, new RegExp(code));
+  }
+});
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'claude-toolkit-plugin-'));

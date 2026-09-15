@@ -60,3 +60,18 @@ test('strict whole-value masked placeholders remain non-secret', () => {
   assert.equal(result.classification, 'none');
   assert.deepEqual(result.findings, []);
 });
+
+test('generic credential-shaped content is unsafe before metadata exemptions', () => {
+  const generic = `ghp_${'A'.repeat(36)}`;
+  for (const name of ['payload', 'host']) {
+    const result = exposure.classifyExposure({ value: generic, name, metadata: name === 'host' });
+    assert.equal(result.classification, 'possible');
+    assert.equal(result.finding.type, 'credential-like-token');
+  }
+  const recursive = exposure.preparePublicPayload({ host: generic, secret: ['synthetic-value'], masked_token: '[REDACTED]' });
+  assert.equal(recursive.classification, 'possible');
+  assert.equal(recursive.payload.host, exposure.REDACTED);
+  assert.equal(recursive.payload.secret[0], exposure.REDACTED);
+  assert.equal(recursive.payload.masked_token, '[REDACTED]');
+  assert.doesNotMatch(JSON.stringify(recursive.findings), /ghp_|synthetic-value/);
+});

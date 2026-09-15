@@ -6,10 +6,12 @@
     "placeholder": "[REDACTED]",
     "values_are_never_published": true,
     "secret_field_names": ["api_key", "apikey", "authorization", "cookie", "credential", "password", "private_key", "secret", "token"],
-    "known_secret_patterns": ["openai-key", "google-api-key", "bearer-token", "jwt", "private-key"]
+    "known_secret_patterns": ["openai-key", "google-api-key", "bearer-token", "jwt", "private-key"],
+    "generic_credential_patterns": ["github-token", "gitlab-token", "npm-token", "slack-token", "stripe-key"]
   },
   "classification": {
     "content_value_checks_precede_metadata_exemptions": true,
+    "classification_order": ["confirmed-exposure", "whole-value-placeholder", "recognised-secret-pattern", "credential-assignment", "inherited-secret-field", "generic-credential-content", "proven-safe-metadata"],
     "none": { "publish": "as-observed", "action": "none" },
     "possible": { "publish": "redacted", "action": "pause", "report": "type-name-place-action" },
     "confirmed": { "publish": "redacted", "action": "stop", "code": "SECRET_EXPOSURE_DETECTED", "report": "type-name-place-action" }

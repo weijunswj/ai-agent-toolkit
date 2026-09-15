@@ -201,15 +201,13 @@ function runManagedTerminalLifecycle(options = {}) {
       const expectedEligibility = deletionEligibility(resumedEligibility || options.eligibility_evidence, state.branch);
       const result = invoke(options, 'recheckExpectedRefSha', null, Object.freeze({ branch: state.branch, eligibility_evidence: expectedEligibility }));
       if (result === null || typeof result !== 'object') fail('EXPECTED_REF_SHA_UNVERIFIED');
+      const refreshed = deletionEligibility(result, state.branch);
+      exactTerminalIdentity(refreshed, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
+      state.deletion_eligibility_evidence = refreshed;
+      expected = refreshed;
+      persistCheckpoint(options, state);
       if (result.present === false) {
-        exactTerminalIdentity(result, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
         state.deletion_observed_absent = true;
-        expected = expectedEligibility;
-      } else {
-        const refreshed = deletionEligibility(result, state.branch);
-        exactTerminalIdentity(refreshed, expectedEligibility, 'EXPECTED_REF_SHA_UNVERIFIED');
-        state.deletion_eligibility_evidence = refreshed;
-        expected = refreshed;
       }
     }
     state.delete_eligible = true;

@@ -14,6 +14,7 @@ const SECRET_PATTERNS = Object.freeze([
   { type: 'private-key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ }
 ]);
 const PLACEHOLDER_PATTERN = /^(?:\[REDACTED\]|\*{3,}|x{3,}|<redacted>|masked|unset|not[-_ ]?set|null|undefined)$/i;
+const GENERIC_CREDENTIAL_PATTERN = /^(?:gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|(?:pk|sk)_(?:live|test)_[A-Za-z0-9]{16,})$/i;
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -54,10 +55,13 @@ function classifyExposure({ value, name = 'payload', place = 'unknown', action =
   if (SECRET_FIELDS.has(normalizedName) || secret_context === true) {
     return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-value', name, place, action) });
   }
-  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
+  if (typeof value === 'string' && GENERIC_CREDENTIAL_PATTERN.test(value.trim())) {
+    return Object.freeze({ classification: 'possible', finding: finding('credential-like-token', name, place, action) });
+  }
   if (typeof value === 'string' && /(?:secret|credential|password|token|api[-_ ]?key|authorization)/i.test(value)) {
     return Object.freeze({ classification: 'possible', finding: finding(type || 'credential-like-text', name, place, action) });
   }
+  if (metadata || SAFE_METADATA_FIELDS.has(normalizedName)) return Object.freeze({ classification: 'none', finding: null });
   return Object.freeze({ classification: 'none', finding: null });
 }
 
@@ -122,6 +126,7 @@ module.exports = Object.freeze({
   REDACTED,
   SECRET_FIELDS,
   SECRET_PATTERNS,
+  GENERIC_CREDENTIAL_PATTERN,
   classifyExposure,
   preparePublicPayload,
   assertSafePublicPayload,

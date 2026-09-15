@@ -191,7 +191,7 @@ function createGitBackedSetupRepo(root, options = {}) {
 
 function createGitBackedRealSetupRepo(root) {
   const result = createGitBackedSetupRepo(root);
-  for (const name of ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'codex-delegation-common.cjs', 'codex-delegation-layout.cjs', 'codex-delegation-state.cjs', 'codex-delegation-backup.cjs', 'codex-delegation-config.cjs', 'claude-process-launch.cjs', 'setup-claude-toolkit-plugin.cjs', 'toolkit-route-resolution.cjs', 'toolkit-host-route-adapters.cjs', 'toolkit-managed-config-migration.cjs']) {
+  for (const name of ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'codex-delegation-common.cjs', 'codex-delegation-layout.cjs', 'codex-delegation-state.cjs', 'codex-delegation-backup.cjs', 'codex-delegation-config.cjs', 'claude-process-launch.cjs', 'setup-claude-toolkit-plugin.cjs', 'toolkit-route-resolution.cjs', 'toolkit-host-route-adapters.cjs', 'toolkit-managed-config-migration.cjs', 'toolkit-toml-structural.cjs']) {
     writeFile(
       path.join(result.setupRepo, 'repo', 'scripts', name),
       fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')

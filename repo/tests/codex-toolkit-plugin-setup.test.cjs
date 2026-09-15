@@ -396,6 +396,7 @@ test('Windows SessionStart preparation installs strict launcher metadata without
   assert.equal(fs.readFileSync(claudeSentinel, 'utf8'), 'unchanged\n');
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_LAUNCHER_REL_PATH), true);
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_POWERSHELL_REL_PATH), true);
+  assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes('repo/scripts/toolkit-toml-structural.cjs'), true);
   assert.deepEqual(setup.verifyInstalledCacheFreshness(codexCache, repoRoot), []);
 });
 
@@ -709,6 +710,11 @@ test('Codex Toolkit config inspection ignores marker-like plugin tables in strin
   assert.equal(setup.inspectConfiguredPluginState(duplicateEnabled, identity).status, 'unprovable');
   assert.equal(setup.inspectConfiguredPluginState(disabled, identity).status, 'disabled');
   assert.equal(setup.inspectConfiguredPluginState(malformed, identity).status, 'unprovable');
+});
+
+test('Codex Toolkit config proof rejects tomllib-valid escaped triple-quote fake state', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'toolkit-toml', 'escaped-triple-quote-user-content.toml'), 'utf8');
+  assert.equal(setup.inspectConfiguredPluginState(text, setup.pluginId()).status, 'unprovable');
 });
 
 test('Codex Toolkit diagnostics accept a verbatim-prefixed marketplace source without manufacturing installed state', () => {

@@ -1,62 +1,65 @@
 {
   "contract_version": "toolkit.route-resolution.nonoperative-legacy-allowlist.v1",
-  "schema_version": 2,
-  "purpose": "Exact identifier, path, and syntactic classifications retained only for bounded migration, tests, and historical evidence.",
+  "schema_version": 3,
+  "purpose": "Exact identifier, bounded path, classification, lexical occurrence kind, and anchored token exemptions retained only for migration, tests, and historical evidence.",
   "entries": [
     { "identifier": "toolkit-agent-control", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history" },
-      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document" },
-      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
-      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-agent-launch-lifecycle.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-local-bridge.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-agent-launch-lifecycle.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-local-bridge.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] }
     ] },
     { "identifier": "checker-admission", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/contracts/route-resolution/g3-implementation-allowlist-v1.json", "classification": "structured-history", "occurrence_kinds": ["json-string-value"] }
     ] },
     { "identifier": "helper-capacity", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-literal" },
-      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-symbol", "line_pattern": "(?:CODEX_HELPER_CAPACITY_(?:BEGIN|END)|['\\\"]helper-capacity['\\\"])" },
-      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-literal" },
-      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
-      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-symbol", "line_pattern": "CODEX_HELPER_CAPACITY_(?:BEGIN|END)" },
-      { "path_prefix": "repo/tests/codex-delegation-", "path_suffix": ".test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-managed-config-migration.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
-      { "path_prefix": "repo/tests/toolkit-setup-", "path_suffix": ".test.cjs", "classification": "test-source" },
-      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path_prefix": "repo/scripts/codex-delegation-", "path_suffix": ".cjs", "classification": "migration-symbol", "occurrence_kinds": ["javascript-executable"], "token_pattern": "^CODEX_HELPER_CAPACITY_(?:BEGIN|END)$" },
+      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-symbol", "occurrence_kinds": ["javascript-executable"], "token_pattern": "^CODEX_HELPER_CAPACITY_(?:BEGIN|END)$" },
+      { "path_prefix": "repo/tests/codex-delegation-", "path_suffix": ".test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-managed-config-migration.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/fixtures/toolkit-toml/escaped-triple-quote-user-content.toml", "classification": "test-source", "occurrence_kinds": ["toml-string"] },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path_prefix": "repo/tests/toolkit-setup-", "path_suffix": ".test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] }
     ] },
     { "identifier": "reservation", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" },
-      { "path": "repo/docs/FOR_AI_AGENTS.md", "classification": "migration-document" },
-      { "path": "repo/docs/HOW-TO-USE.md", "classification": "migration-document" },
-      { "path": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md", "classification": "migration-document" },
-      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document" },
-      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-state-field", "line_pattern": "(?:reservation_queue_policy|scheduler, checker, reservation, or resource)" },
-      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal" },
-      { "path": "repo/scripts/validate-nonoperative-legacy-identifiers.cjs", "classification": "contract-definition" },
-      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/agent-instruction-shims.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/codex-delegation-malformed-repair.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-github-programme-projection-bootstrap-recovery-v5.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-setup-orchestrator-3.test.cjs", "classification": "test-source" },
-      { "path": "repo/tests/toolkit-setup-question-model.test.cjs", "classification": "test-source" },
-      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/docs/FOR_AI_AGENTS.md", "classification": "migration-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] },
+      { "path": "repo/docs/HOW-TO-USE.md", "classification": "migration-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] },
+      { "path": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md", "classification": "migration-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] },
+      { "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md", "classification": "historical-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] },
+      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-state-field", "occurrence_kinds": ["javascript-executable"], "token_pattern": "^reservation_queue_policy$" },
+      { "path": "repo/scripts/setup-toolkit-core.cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/scripts/toolkit-managed-config-migration.cjs", "classification": "migration-literal", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/scripts/validate-nonoperative-legacy-identifiers.cjs", "classification": "contract-definition", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment"] },
+      { "path": "repo/tests/validate-nonoperative-legacy-identifiers.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/agent-instruction-shims.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/codex-delegation-malformed-repair.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-github-programme-projection-bootstrap-recovery-v5.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-setup-agent-profile-execution.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-setup-orchestrator-1.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-setup-orchestrator-3.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "repo/tests/toolkit-setup-question-model.test.cjs", "classification": "test-source", "occurrence_kinds": ["javascript-string", "javascript-template-quasi", "javascript-regex-literal", "javascript-comment", "javascript-executable"] },
+      { "path": "skills/toolkit-setup/SKILL.md", "classification": "migration-document", "occurrence_kinds": ["markdown-prose", "markdown-inline-code", "markdown-fenced-code"] }
     ] },
-    { "identifier": "worker-route", "rules": [{ "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" }] },
+    { "identifier": "worker-route", "rules": [{ "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] }] },
     { "identifier": "g4-model-binding", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history", "occurrence_kinds": ["json-string-value"] }
     ] },
     { "identifier": "g4a-model-binding", "rules": [
-      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition" },
-      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history" }
+      { "path": "repo/contracts/route-resolution/nonoperative-legacy-allowlist-v1.json", "classification": "contract-definition", "occurrence_kinds": ["json-string-value"] },
+      { "path": "repo/contracts/route-resolution/route-resolution-policy-v1.json", "classification": "structured-history", "occurrence_kinds": ["json-string-value"] }
     ] }
   ],
   "active_policy": false,

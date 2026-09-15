@@ -90,6 +90,8 @@ function proofBase(record, host, adapterId) {
 
 function validateCapabilityProof(proof) {
   const keys = ['contract_version', 'proof_id', 'host', 'backend', 'adapter_id', 'launch_record_digest', 'launch_id', 'role', 'provider', 'model', 'reasoning', 'service_tier', 'speed', 'status', 'trusted', 'metadata_verified'];
+  if (isRecord(proof) && proof.status === 'unsupported') fail('HOST_CAPABILITY_UNAVAILABLE', { reason: 'proof-status-unsupported' });
+  if (isRecord(proof) && proof.status === 'contradictory') fail('HOST_CAPABILITY_CONTRADICTION', { reason: 'proof-status-contradictory' });
   if (!exactKeys(proof, keys)
     || proof.contract_version !== PROOF_CONTRACT_VERSION
     || !route.HOSTS.includes(proof.host)
@@ -104,7 +106,7 @@ function validateCapabilityProof(proof) {
     || !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(proof.reasoning)
     || proof.service_tier !== 'standard'
     || !['standard', 'priority'].includes(proof.speed)
-    || !['available', 'unsupported', 'contradictory'].includes(proof.status)
+    || proof.status !== 'available'
     || proof.trusted !== true
     || proof.metadata_verified !== true) {
     fail('HOST_CAPABILITY_CONTRADICTION', { reason: 'proof-shape' });

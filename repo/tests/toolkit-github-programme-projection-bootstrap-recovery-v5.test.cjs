@@ -810,7 +810,7 @@ test('bootstrap proof uses workspace bytes and never requires a historical Git o
     return;
   }
   const bootstrap = JSON.parse(fs.readFileSync(bootstrapPath, 'utf8'));
-  if (bootstrap.toolkit_package_version !== '2.11.3') {
+  if (bootstrap.toolkit_package_version !== '2.11.4') {
     t.skip('bootstrap commit B is intentionally absent during source commit validation');
     return;
   }

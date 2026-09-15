@@ -34,6 +34,13 @@
           { "properties": { "deletion_acknowledgement": { "not": { "type": "null" } } }, "required": ["deletion_acknowledgement"] }
         ]
       }
+    },
+    {
+      "if": { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
+      "then": {
+        "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
+        "properties": { "deletion_intent_persisted": { "const": false } }
+      }
     }
   ],
   "$defs": {

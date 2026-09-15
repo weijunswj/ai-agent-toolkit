@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const migration = require('../scripts/toolkit-managed-config-migration.cjs');
+const fs = require('node:fs');
+const path = require('node:path');
 
 test('managed config migration removes only an exact Toolkit-owned block', () => {
   const text = 'user = true\n\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\nmax_concurrent_threads_per_session = 2\n# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY\n\nkeep = true\n';
@@ -56,4 +58,15 @@ test('exact-looking Toolkit blocks inside TOML multiline strings remain byte-for
     assert.equal(migration.migrateManagedConfiguration({ text, write: false }).changed, false);
     assert.equal(text.includes('max_threads = 2'), true);
   }
+});
+
+test('tomllib-valid escaped triple-quote user content cannot manufacture owned ranges', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'toolkit-toml', 'escaped-triple-quote-user-content.toml'), 'utf8');
+  let writes = 0;
+  const inspection = migration.inspectManagedConfiguration({ text });
+  const result = migration.migrateManagedConfiguration({ text, write: true, atomic_write: () => { writes += 1; } });
+  assert.equal(inspection.status, 'NOOP');
+  assert.equal(inspection.block_count, 0);
+  assert.equal(result.changed, false);
+  assert.equal(writes, 0);
 });

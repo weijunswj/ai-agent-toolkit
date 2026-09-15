@@ -755,20 +755,26 @@ test('validation workflow contains only retained read-only checks', () => {
 });
 
 test('normal Toolkit validation fails when retirement validation is bypassed', () => {
-  const cwd = copyRepo();
-  const scriptPath = path.join(cwd, 'repo', 'scripts', 'validate-toolkit.cjs');
-  const source = fs.readFileSync(scriptPath, 'utf8');
-  const wired = [
-    '  const legacyIdentifierResult = legacyIdentifierAudit.validateTrackedTree(root);',
-    '  for (const finding of legacyIdentifierResult.findings) {',
-    "    fail(errors, `${finding.code}: ${finding.path || ''}${finding.line ? `:${finding.line}` : ''}`.trim());",
-    '  }'
-  ].join('\n');
-  assert.match(source, /legacyIdentifierAudit\.validateTrackedTree\(root\)/);
-  fs.writeFileSync(scriptPath, source.replace(wired, '  // retirement validator deliberately bypassed by fixture'), 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Retirement validator wiring is absent or bypassed/i);
+  for (const eol of ['\n', '\r\n']) {
+    const cwd = copyRepo();
+    const scriptPath = path.join(cwd, 'repo', 'scripts', 'validate-toolkit.cjs');
+    const source = fs.readFileSync(scriptPath, 'utf8').replace(/\r?\n/g, eol);
+    const wired = [
+      '  const legacyIdentifierResult = legacyIdentifierAudit.validateTrackedTree(root);',
+      '  for (const finding of legacyIdentifierResult.findings) {',
+      "    fail(errors, `${finding.code}: ${finding.path || ''}${finding.line ? `:${finding.line}` : ''}`.trim());",
+      '  }'
+    ].join(eol);
+    assert.equal((source.match(/legacyIdentifierAudit\.validateTrackedTree\(root\)/g) || []).length, 1);
+    assert.equal(source.includes(wired), true, `wiring fixture missing for ${JSON.stringify(eol)}`);
+    const changed = source.replace(wired, '  // retirement validator deliberately bypassed by fixture');
+    assert.notEqual(changed, source, `wiring was not removed for ${JSON.stringify(eol)}`);
+    assert.equal((changed.match(/legacyIdentifierAudit\.validateTrackedTree\(root\)/g) || []).length, 0);
+    fs.writeFileSync(scriptPath, changed, 'utf8');
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Retirement validator wiring is absent or bypassed/i);
+  }
 });
 
 test('retired publisher and writeback machinery remains absent', () => {

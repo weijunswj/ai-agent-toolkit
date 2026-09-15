@@ -100,3 +100,17 @@ test('executor acceptance requires a complete acknowledgement bound to the exact
   assert.equal(mismatched.status, 'rejected');
   assert.equal(mismatched.started, false);
 });
+
+test('unsupported and contradictory proof states fail before executor invocation', () => {
+  const launch = record();
+  const available = adapters.proveHostCapability({ launch_record: launch, capability: capabilityFor(launch) }).proof;
+  for (const [status, code] of [['unsupported', 'HOST_CAPABILITY_UNAVAILABLE'], ['contradictory', 'HOST_CAPABILITY_CONTRADICTION']]) {
+    let invocations = 0;
+    assert.throws(() => adapters.executeExactLaunch({
+      launch_record: launch,
+      capability_proof: { ...available, status },
+      executor: () => { invocations += 1; }
+    }), (error) => error.code === code);
+    assert.equal(invocations, 0);
+  }
+});

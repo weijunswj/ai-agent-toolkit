@@ -201,3 +201,30 @@ test('durable checkpoint capability is proven before irreversible deletion', () 
   }), (error) => error.code === 'DURABLE_CHECKPOINT_REQUIRED');
   assert.equal(deletions, 0);
 });
+
+test('already-absent managed branch persists eligibility before receipt and replays without delete', () => {
+  const eligibility = {
+    trusted: true, repository: 'weijunswj/ai-agent-toolkit', ownership: 'toolkit-managed',
+    ref: 'refs/heads/codex/terminal-505', sha: 'f'.repeat(40), terminal_state: 'terminal-success',
+    retained: false, unpublished_loss: false, default_branch: false, protected: false, checked_out: false
+  };
+  let deletions = 0;
+  const checkpoints = [];
+  const options = {
+    issue_number: 505, branch: 'codex/terminal-505', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, managed_branch: true, eligibility_evidence: eligibility,
+    recheckExpectedRefSha: () => ({ ...eligibility, present: false }),
+    deleteBranch: () => { deletions += 1; return null; },
+    readAbsence: () => ({ ...eligibility, trusted: true, present: false }),
+    persistState: (state) => { checkpoints.push(state); return true; }
+  };
+  const first = lifecycle.runManagedTerminalLifecycle(options);
+  assert.deepEqual(first.deletion_eligibility_evidence, { ...eligibility, present: false });
+  assert.equal(first.deletion_observed_absent, true);
+  assert.equal(first.deletion_intent_persisted, false);
+  assert.equal(deletions, 0);
+  assert.ok(checkpoints.some((state) => state.deletion_eligibility_evidence && state.deletion_observed_absent === false));
+  const replay = lifecycle.recoverManagedTerminalLifecycle({ ...options, state: first });
+  assert.deepEqual(replay, first);
+  assert.equal(deletions, 0);
+});
