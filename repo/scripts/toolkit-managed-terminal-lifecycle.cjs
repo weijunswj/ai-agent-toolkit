@@ -195,6 +195,10 @@ function runManagedTerminalLifecycle(options = {}) {
       if (!resumedEligibility) fail('DELETION_ACKNOWLEDGEMENT_REQUIRED');
       expected = deletionEligibility(resumedEligibility, state.branch);
       deletionAcknowledgement(resumedAck, expected);
+    } else if (state.deletion_observed_absent === true) {
+      expected = deletionEligibility(resumedEligibility, state.branch);
+      if (state.absence_readback !== true) fail('ABSENCE_READBACK_UNVERIFIED');
+      absenceReadback(state.absence_readback_evidence, expected);
     } else {
       if ((persistedState === 'SAFE_MANAGED_BRANCH_DELETE' || persistedState === 'ABSENCE_READBACK')
         && state.deletion_intent_persisted !== true) fail('DURABLE_CHECKPOINT_REQUIRED');

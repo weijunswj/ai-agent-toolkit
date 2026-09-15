@@ -97,6 +97,20 @@ test('template expressions remain executable while unambiguous regex literals re
   assert.ok(result.findings.some((finding) => finding.occurrence_kind === 'javascript-executable'));
 });
 
+test('regex literals after return cannot hide a later executable retired identifier', () => {
+  const root = fixtureRoot();
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-toolkit-core.cjs'), [
+    'function matches(value) { return /[\\"\']/u.test(value); }',
+    'const reservation = active;',
+    ''
+  ].join('\n'));
+  track(root, 'repo/scripts/setup-toolkit-core.cjs', validator.ALLOWLIST_REL_PATH);
+  const result = validator.validateTrackedTree(root);
+  assert.equal(result.ok, false);
+  assert.ok(result.findings.some((finding) => finding.identifier === 'reservation'
+    && finding.occurrence_kind === 'javascript-executable'));
+});
+
 test('nearby migration state text cannot exempt a different executable occurrence', () => {
   const root = fixtureRoot();
   writeFile(path.join(root, 'repo', 'scripts', 'setup-toolkit-core.cjs'), 'const reservation = execute(); const state = { reservation_queue_policy: false };\n');

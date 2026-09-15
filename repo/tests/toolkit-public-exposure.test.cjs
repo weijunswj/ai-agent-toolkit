@@ -75,3 +75,14 @@ test('generic credential-shaped content is unsafe before metadata exemptions', (
   assert.equal(recursive.payload.masked_token, '[REDACTED]');
   assert.doesNotMatch(JSON.stringify(recursive.findings), /ghp_|synthetic-value/);
 });
+
+test('embedded URL userinfo credentials are unsafe under metadata-safe and ordinary names', () => {
+  const generic = `ghp_${'A'.repeat(36)}`;
+  const value = `https://user:${generic}@example.test/path`;
+  for (const name of ['host', 'payload']) {
+    const result = exposure.classifyExposure({ value, name, metadata: name === 'host' });
+    assert.equal(result.classification, 'possible');
+    assert.equal(result.finding.type, 'credential-like-token');
+    assert.doesNotMatch(JSON.stringify(result.finding), /ghp_|example\.test|user/i);
+  }
+});

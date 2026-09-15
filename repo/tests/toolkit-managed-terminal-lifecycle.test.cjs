@@ -266,3 +266,54 @@ test('already-absent managed branch persists eligibility before receipt and repl
   assert.deepEqual(replay, first);
   assert.equal(deletions, 0);
 });
+
+test('actual durable ABSENCE_READBACK checkpoint replays with no duplicate callbacks', () => {
+  const eligibility = {
+    trusted: true, repository: 'weijunswj/ai-agent-toolkit', ownership: 'toolkit-managed',
+    ref: 'refs/heads/codex/terminal-506', sha: '8'.repeat(40), terminal_state: 'terminal-success',
+    retained: false, unpublished_loss: false, default_branch: false, protected: false, checked_out: false
+  };
+  const checkpoints = [];
+  let deletions = 0;
+  let rechecks = 0;
+  let absenceReads = 0;
+  const first = lifecycle.runManagedTerminalLifecycle({
+    issue_number: 506, branch: 'codex/terminal-506', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, managed_branch: true, eligibility_evidence: eligibility,
+    recheckExpectedRefSha: () => { rechecks += 1; return { ...eligibility, present: false }; },
+    deleteBranch: () => { deletions += 1; return null; },
+    readAbsence: () => { absenceReads += 1; return { ...eligibility, trusted: true, present: false }; },
+    persistState: (state) => { checkpoints.push(state); return true; }
+  });
+  const durable = checkpoints.at(-1);
+  assert.equal(durable.state, 'ABSENCE_READBACK');
+  assert.equal(durable.absence_readback, true);
+  assert.equal(validateLifecycleState(durable), true, JSON.stringify(validateLifecycleState.errors));
+  const replay = lifecycle.recoverManagedTerminalLifecycle({
+    issue_number: 506, branch: 'codex/terminal-506', managed_branch: true, state: durable,
+    recheckExpectedRefSha: () => { rechecks += 1; return null; },
+    deleteBranch: () => { deletions += 1; return null; },
+    readAbsence: () => { absenceReads += 1; return null; },
+    persistState: () => true
+  });
+  assert.equal(first.terminal_receipt, true);
+  assert.equal(replay.terminal_receipt, true);
+  assert.equal(rechecks, 1);
+  assert.equal(absenceReads, 1);
+  assert.equal(deletions, 0);
+});
+
+test('schema rejects null evidence wherever observed absence requires runtime proof', () => {
+  const state = {
+    contract_version: 'toolkit.github-program-reconciler.managed-terminal-lifecycle.v1',
+    state: 'ABSENCE_READBACK', terminal_decision: true, durable_disposition: true,
+    closed: true, closure_readback: true, delete_eligible: true,
+    deletion_intent_persisted: false, deletion_observed_absent: true,
+    deletion_acknowledgement: null, absence_readback: true, terminal_receipt: false,
+    branch: 'codex/terminal-507', reason_code: null,
+    deletion_eligibility_evidence: null, absence_readback_evidence: null
+  };
+  assert.equal(validateLifecycleState(state), false);
+  assert.ok(validateLifecycleState.errors.some((error) => error.instancePath === '/deletion_eligibility_evidence'));
+  assert.ok(validateLifecycleState.errors.some((error) => error.instancePath === '/absence_readback_evidence'));
+});

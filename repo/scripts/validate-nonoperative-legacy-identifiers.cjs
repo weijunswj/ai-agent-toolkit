@@ -81,7 +81,11 @@ function executableToken(text, offset) {
 function javascriptSpans(text) {
   const spans = []; let state = 'code'; let start = -1; let templateDepth = 0; let index = 0; let previous = '';
   const add = (kind, end) => { spans.push({ kind, start, end, token: text.slice(start, end) }); start = -1; };
-  const regexAllowed = () => previous === '' || /[=([{,:;!?&|+*%^~<>]/.test(previous);
+  const regexAllowed = () => {
+    if (previous === '' || /[=([{,:;!?&|+*%^~<>]/.test(previous)) return true;
+    const priorWord = text.slice(0, index).match(/([A-Za-z_$][A-Za-z0-9_$]*)\s*$/)?.[1];
+    return new Set(['await', 'case', 'delete', 'in', 'instanceof', 'new', 'return', 'throw', 'typeof', 'void', 'yield']).has(priorWord);
+  };
   while (index < text.length) {
     const char = text[index];
     if (state === 'line-comment') { if (char === '\n') { add('javascript-comment', index); state = 'code'; } index += 1; continue; }

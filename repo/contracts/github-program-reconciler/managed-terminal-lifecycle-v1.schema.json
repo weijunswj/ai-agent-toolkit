@@ -31,6 +31,10 @@
       "if": { "properties": { "terminal_receipt": { "const": true }, "delete_eligible": { "const": true } }, "required": ["terminal_receipt", "delete_eligible"] },
       "then": {
         "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
+        "properties": {
+          "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidenceObject" },
+          "absence_readback_evidence": { "$ref": "#/$defs/absenceReadbackObject" }
+        },
         "anyOf": [
           { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
           { "properties": { "deletion_acknowledgement": { "not": { "type": "null" } } }, "required": ["deletion_acknowledgement"] }
@@ -42,8 +46,10 @@
       "then": {
         "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
         "properties": {
+          "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidenceObject" },
           "deletion_acknowledgement": { "type": "null" },
-          "absence_readback": { "const": true }
+          "absence_readback": { "const": true },
+          "absence_readback_evidence": { "$ref": "#/$defs/absenceReadbackObject" }
         }
       }
     }
@@ -65,19 +71,20 @@
     "eligibilityEvidence": {
       "anyOf": [
         { "type": "null" },
-        {
-          "$ref": "#/$defs/identity",
-          "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state", "retained", "unpublished_loss", "default_branch", "protected", "checked_out"],
-          "properties": {
-            "ownership": { "const": "toolkit-managed" },
-            "retained": { "const": false },
-            "unpublished_loss": { "const": false },
-            "default_branch": { "const": false },
-            "protected": { "const": false },
-            "checked_out": { "const": false }
-          }
-        }
+        { "$ref": "#/$defs/eligibilityEvidenceObject" }
       ]
+    },
+    "eligibilityEvidenceObject": {
+      "$ref": "#/$defs/identity",
+      "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state", "retained", "unpublished_loss", "default_branch", "protected", "checked_out"],
+      "properties": {
+        "ownership": { "const": "toolkit-managed" },
+        "retained": { "const": false },
+        "unpublished_loss": { "const": false },
+        "default_branch": { "const": false },
+        "protected": { "const": false },
+        "checked_out": { "const": false }
+      }
     },
     "deletionAcknowledgement": {
       "anyOf": [
@@ -100,12 +107,13 @@
     "absenceReadback": {
       "anyOf": [
         { "type": "null" },
-        {
-          "$ref": "#/$defs/identity",
-          "required": ["trusted", "present", "repository", "ownership", "ref", "sha", "terminal_state"],
-          "properties": { "present": { "const": false }, "ownership": { "const": "toolkit-managed" } }
-        }
+        { "$ref": "#/$defs/absenceReadbackObject" }
       ]
+    },
+    "absenceReadbackObject": {
+      "$ref": "#/$defs/identity",
+      "required": ["trusted", "present", "repository", "ownership", "ref", "sha", "terminal_state"],
+      "properties": { "present": { "const": false }, "ownership": { "const": "toolkit-managed" } }
     }
   }
 }

@@ -83,7 +83,33 @@ function lineRecords(text) {
 }
 
 function decodeBasicString(raw) {
-  try { return JSON.parse(raw); } catch { return null; }
+  const source = String(raw || '');
+  if (source.length < 2 || source[0] !== '"' || source[source.length - 1] !== '"') return null;
+  let value = '';
+  for (let index = 1; index < source.length - 1; index += 1) {
+    const char = source[index];
+    if (char !== '\\') {
+      if (char === '"' || char.charCodeAt(0) <= 0x1f || char.charCodeAt(0) === 0x7f) return null;
+      value += char;
+      continue;
+    }
+    index += 1;
+    const escape = source[index];
+    const simple = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
+    if (Object.prototype.hasOwnProperty.call(simple, escape)) {
+      value += simple[escape];
+      continue;
+    }
+    if (escape !== 'u' && escape !== 'U') return null;
+    const width = escape === 'u' ? 4 : 8;
+    const encoded = source.slice(index + 1, index + 1 + width);
+    if (!new RegExp(`^[0-9A-Fa-f]{${width}}$`).test(encoded)) return null;
+    const codePoint = Number.parseInt(encoded, 16);
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
+    value += String.fromCodePoint(codePoint);
+    index += width;
+  }
+  return value;
 }
 
 function parseDottedKey(raw) {
@@ -163,13 +189,21 @@ function scanLexically(text) {
     }
     if (state === 'multiline-basic') {
       if (char === '\\') { index += Math.min(2, source.length - index); continue; }
-      if (source.startsWith('"""', index)) { index += 3; closeSpan('multiline-basic-string', index); state = 'code'; continue; }
+      if (source.startsWith('"""', index)) {
+        let quoteEnd = index + 3;
+        while (source[quoteEnd] === '"') quoteEnd += 1;
+        index = quoteEnd; closeSpan('multiline-basic-string', index); state = 'code'; continue;
+      }
       if (char === '\n') lineDepths.set(index + 1, { square, brace, string: state });
       index += 1;
       continue;
     }
     if (state === 'multiline-literal') {
-      if (source.startsWith("'''", index)) { index += 3; closeSpan('multiline-literal-string', index); state = 'code'; continue; }
+      if (source.startsWith("'''", index)) {
+        let quoteEnd = index + 3;
+        while (source[quoteEnd] === "'") quoteEnd += 1;
+        index = quoteEnd; closeSpan('multiline-literal-string', index); state = 'code'; continue;
+      }
       if (char === '\n') lineDepths.set(index + 1, { square, brace, string: state });
       index += 1;
       continue;
@@ -246,7 +280,7 @@ function analyseToml(text) {
       if (path) {
         currentTable = path;
         tables.push({ path, array: table[1] === '[[', start: line.start, end: line.end, text: line.text });
-      }
+      } else currentTable = null;
       continue;
     }
     let quote = null;
@@ -260,7 +294,7 @@ function analyseToml(text) {
     }
     if (equals === -1) continue;
     const key = parseDottedKey(code.slice(0, equals).trim());
-    if (!key) continue;
+    if (!key || currentTable === null) continue;
     const rawValue = code.slice(equals + 1).trim();
     assignments.push({
       table_path: [...currentTable],

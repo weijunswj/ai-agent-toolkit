@@ -14,7 +14,7 @@ const SECRET_PATTERNS = Object.freeze([
   { type: 'private-key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ }
 ]);
 const PLACEHOLDER_PATTERN = /^(?:\[REDACTED\]|\*{3,}|x{3,}|<redacted>|masked|unset|not[-_ ]?set|null|undefined)$/i;
-const GENERIC_CREDENTIAL_PATTERN = /^(?:gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|(?:pk|sk)_(?:live|test)_[A-Za-z0-9]{16,})$/i;
+const GENERIC_CREDENTIAL_PATTERN = /(?:gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|(?:pk|sk)_(?:live|test)_[A-Za-z0-9]{16,})/i;
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

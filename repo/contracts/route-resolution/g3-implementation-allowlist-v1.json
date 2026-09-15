@@ -4,7 +4,7 @@
   "root": "S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001",
   "lock": "DL-S2-PRE-E4-STALE-AUTHORITY-ORCHESTRATION-RESIDUE-001",
   "gate": "G3",
-  "package_version": "2.11.5",
+  "package_version": "2.11.6",
   "mutable_paths": [
     "AGENTS.md", "README.md", ".github/ai-agent-toolkit-programme.json", ".github/workflows/source-watch-plan.yml", ".github/workflows/source-watch-pr.yml", ".claude-plugin/marketplace.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
     "repo/contracts/agent-rules/toolkit-skill-routing.md", "repo/contracts/source-of-truth-contract.md", "repo/contracts/bounded-local-execution-loop/execution-loop-contract.schema.json", "repo/contracts/bounded-local-execution-loop/execution-loop-policy.json", "repo/contracts/github-program-receipt/github-program-receipt-policy.json", "repo/contracts/github-program-receipt/run-receipt-v1.schema.json", "repo/contracts/github-program-reconciler/controller-bootstrap-v1.schema.json", "repo/contracts/github-program-reconciler/human-surface-v2.schema.json", "repo/contracts/github-program-reconciler/programme-state-v5.schema.json", "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json", "repo/contracts/independent-assurance-web-finality/assurance-web-finality-contract.schema.json", "repo/contracts/independent-assurance-web-finality/assurance-web-finality-policy.json", "repo/contracts/toolkit-local-bridge/claude-plugin/marketplace.json", "repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json", "repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json", "repo/contracts/toolkit-local-bridge/version.json",
