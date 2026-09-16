@@ -31,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.11.7';
+const BRIDGE_VERSION = '2.11.8';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -470,6 +470,12 @@ function assertPreferenceBoundary(args) {
   if (incompatible.length) throw new Error(`--preference-only cannot be combined with: ${incompatible.join(', ')}`);
   if (!requestedPreferenceFields(args).length) {
     throw new Error('--preference-only requires at least one explicit global preference');
+  }
+}
+
+function assertRepoAutoUpdatePrerequisite(args, state) {
+  if (args.enableRepoAutoUpdate && !(args.repoPath || state?.repo_path)) {
+    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
   }
 }
 
@@ -4624,6 +4630,7 @@ function runPreferenceOnly({ args, hubPath, rawState }) {
   }
   try {
     const latestRaw = readJsonIfExists(path.join(hubPath, 'state.json'));
+    assertRepoAutoUpdatePrerequisite(args, latestRaw);
     const next = applyPreferenceOnlyRawState(latestRaw, args);
     writeFileAtomically(path.join(hubPath, 'state.json'), `${JSON.stringify(next, null, 2)}\n`);
   } finally {
@@ -4660,6 +4667,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
   const existingRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
   const existingState = normalizedState(existingRawState);
+  assertRepoAutoUpdatePrerequisite(args, existingState);
   const scopeDiscoveries = (args.reconcileStaging || args.preferenceOnly)
     ? {}
     : {
@@ -4713,9 +4721,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   if (args.write && cleanupResult.error_count && !args.hook) {
     console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
   }
-  if (args.enableRepoAutoUpdate && !nextState.repo_path) {
-    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
-  }
+  assertRepoAutoUpdatePrerequisite(args, nextState);
   const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
   nextState = initialSnapshot.state;
   let { discoveries, payloads, checksum } = initialSnapshot;

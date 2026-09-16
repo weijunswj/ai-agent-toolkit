@@ -7,7 +7,7 @@ const plugin = require('../scripts/setup-opencode-toolkit-plugin.cjs');
 test('OpenCode native package is ready at the frozen version', () => {
   const result = plugin.validateRepoOpenCodePlugin(process.cwd());
   assert.equal(result.ok, true);
-  assert.equal(result.package_version, '2.11.7');
+  assert.equal(result.package_version, '2.11.8');
   const state = plugin.migrationState({ repoRoot: process.cwd() });
   assert.equal(state.state, 'PLUGIN_PACKAGE_READY');
   assert.equal(state.bridge_removal_allowed, false);
