@@ -31,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.12.0';
+const BRIDGE_VERSION = '2.12.1';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -42,9 +42,10 @@ const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const AG2_PROOF_CONTRACT_VERSION = 'toolkit.local-bridge.ag2-skills-projection-proof.v1';
-const EXECUTION_AUTHORITY_CONTRACT = 'toolkit.local-bridge.execution-authority.v2';
-const LOCKED_PROJECTION_CONTRACT = 'toolkit.local-bridge.execution-authority.locked-projection.v2';
-const DELEGATED_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-authority-envelope.v2';
+const INVOCATION_AUTHORITY_CONTRACT = 'toolkit.local-bridge.invocation-authority.v1';
+const DELEGATED_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-invocation-authority.v1';
+const REPORT_CREATE_ATTEMPTS = 20;
+const phaseContextState = new WeakMap();
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -172,7 +173,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     disableTargets: [],
     scopedSyncTargets: [],
     parentScopeDigest: '',
-    delegatedV2: false,
+    delegatedAuthority: false,
     enableAutoSync: false,
     disableAutoSync: false,
     enableRepoAutoUpdate: false,
@@ -249,7 +250,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--scope-target-sync=')) args.scopedSyncTargets.push(...parseListValue(arg.slice('--scope-target-sync='.length)));
     else if (arg === '--parent-scope-digest') args.parentScopeDigest = next();
     else if (arg.startsWith('--parent-scope-digest=')) args.parentScopeDigest = arg.slice('--parent-scope-digest='.length);
-    else if (arg === '--delegated-authority-v2') args.delegatedV2 = true;
+    else if (arg === '--delegated-invocation-authority') args.delegatedAuthority = true;
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--sync-source') args.syncSource = next();
@@ -286,7 +287,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     throw new Error('--parent-scope-digest requires one SHA-256 digest');
   }
   if (args.write && (args.parentScopeDigest || args.scopedSyncTargets.length)) {
-    throw new Error('write-mode --parent-scope-digest and --scope-target-sync are retired; delegated writes require --delegated-authority-v2 with a v2 envelope on stdin');
+    throw new Error('write-mode --parent-scope-digest and --scope-target-sync are retired; delegated writes require --delegated-invocation-authority with the fixed payload on stdin');
   }
   if (!SYNC_SOURCES.includes(args.syncSource)) {
     throw new Error(`--sync-source must be repo, codex-plugin, or claude-plugin: ${args.syncSource}`);
@@ -359,40 +360,8 @@ function requestedPreferenceFields(args) {
   return [...new Set(fields)].sort();
 }
 
-function effectResourceId(kind, identity, target = '', action = '') {
-  return `${kind}:${sha256(canonicalJson({ identity, target, action })).slice(0, 20)}`;
-}
-
-function makeEffect(kind, resource, options = {}) {
-  const effectId = options.effect_id || `effect:${sha256(canonicalJson({
-    kind,
-    resource_id: resource.resource_id,
-    target: options.target || '',
-    action: options.action || ''
-  })).slice(0, 24)}`;
-  return {
-    effect_id: effectId,
-    kind,
-    resource_id: resource.resource_id,
-    delegable: options.delegable === true,
-    ...(options.target ? { target: options.target } : {}),
-    ...(options.action ? { action: options.action } : {})
-  };
-}
-
-function addAuthorityEffect(resources, effects, kind, binding, options = {}) {
-  const resource = {
-    resource_id: binding.resource_id || effectResourceId(kind, binding.identity, options.target, options.action),
-    ...binding
-  };
-  if (!resources.some((entry) => entry.resource_id === resource.resource_id)) resources.push(resource);
-  const effect = makeEffect(kind, resource, options);
-  if (!effects.some((entry) => entry.effect_id === effect.effect_id)) effects.push(effect);
-  return effect;
-}
-
-function readDelegatedEnvelope(args, testHooks = {}) {
-  if (!args.delegatedV2) return null;
+function readDelegatedAuthority(args, testHooks = {}) {
+  if (!args.delegatedAuthority) return null;
   const raw = testHooks.delegatedEnvelopeRaw !== undefined
     ? String(testHooks.delegatedEnvelopeRaw)
     : fs.readFileSync(0, 'utf8');
@@ -400,19 +369,23 @@ function readDelegatedEnvelope(args, testHooks = {}) {
   try {
     envelope = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`delegated v2 envelope is not valid JSON: ${error.message}`);
+    throw new Error(`delegated authority payload is not valid JSON: ${error.message}`);
   }
-  if (!envelope || envelope.contract !== DELEGATED_AUTHORITY_CONTRACT) {
-    throw new Error('delegated v2 envelope has the wrong contract');
+  if (!envelope || envelope.contract !== DELEGATED_AUTHORITY_CONTRACT) throw new Error('delegated authority payload has the wrong contract');
+  const keys = Object.keys(envelope).sort();
+  const expectedKeys = ['actions', 'child', 'contract', 'destinations', 'hub', 'parent_invocation_id', 'repository_result'].sort();
+  if (canonicalJson(keys) !== canonicalJson(expectedKeys)) throw new Error('delegated authority payload has unexpected fields');
+  if (!envelope.actions || Object.keys(envelope.actions).some((key) => key !== 'targets')) throw new Error('delegated authority payload has invalid actions');
+  if (canonicalJson(Object.keys(envelope.destinations || {}).sort()) !== canonicalJson(['targets'])) throw new Error('delegated authority payload has invalid destinations');
+  if (canonicalJson(Object.keys(envelope.hub || {}).sort()) !== canonicalJson(['path'])) throw new Error('delegated authority payload has invalid hub identity');
+  if (canonicalJson(Object.keys(envelope.repository_result || {}).sort()) !== canonicalJson(['branch', 'commit', 'path', 'remote'])) throw new Error('delegated authority payload has invalid repository result');
+  if (canonicalJson(Object.keys(envelope.child || {}).sort()) !== canonicalJson(['script_path', 'source_commit', 'source_identity', 'source_repository'])) throw new Error('delegated authority payload has invalid child identity');
+  if (Object.values(envelope.actions.targets || {}).some((action) => !['enable-sync', 'sync'].includes(action))) {
+    throw new Error('delegated authority payload contains an unsupported target action');
   }
-  const { digest, ...unsigned } = envelope;
-  if (!/^[0-9a-f]{64}$/.test(String(digest || '')) || sha256(canonicalJson(unsigned)) !== digest) {
-    throw new Error('delegated v2 envelope digest mismatch');
-  }
-  const effectIds = new Set(envelope.delegable_effect_ids || []);
-  if (!(envelope.effects || []).every((effect) => effect.delegable === true && effectIds.has(effect.effect_id))) {
-    throw new Error('delegated v2 envelope contains an undelegable effect');
-  }
+  const targetNames = Object.keys(envelope.actions.targets || {}).sort();
+  if (targetNames.some((target) => !SUPPORTED_TARGETS.includes(target))) throw new Error('delegated authority payload contains an unsupported target');
+  if (canonicalJson(targetNames) !== canonicalJson(Object.keys(envelope.destinations.targets || {}).sort())) throw new Error('delegated authority target actions and destinations differ');
   return deepFreeze(envelope);
 }
 
@@ -421,13 +394,7 @@ function resolveExecutionAuthority({ args, hubPath, rawState, discoveries, deleg
   const targetActions = {};
   for (const target of args.enableTargets) targetActions[target] = 'enable-sync';
   for (const target of args.disableTargets) targetActions[target] = 'disable';
-  if (delegatedEnvelope) {
-    for (const effect of delegatedEnvelope.effects || []) {
-      if (effect.target && ['target.state.write', 'target.destination.write', 'hub.adapter.replace'].includes(effect.kind)) {
-        targetActions[effect.target] = effect.action || 'sync';
-      }
-    }
-  }
+  if (delegatedEnvelope) Object.assign(targetActions, delegatedEnvelope.actions.targets || {});
   const durableTargetsMayAuthorize = !delegatedEnvelope && ((!args.hook && args.syncEnabled) || (args.hook && rawState?.auto_sync_enabled === true));
   if (durableTargetsMayAuthorize) {
     for (const target of SUPPORTED_TARGETS) {
@@ -455,93 +422,24 @@ function resolveExecutionAuthority({ args, hubPath, rawState, discoveries, deleg
     !args.suppressUpdateReport &&
     (args.hook || repoMaintenance || Object.keys(targetActions).length)
   );
-  const requestedActions = {
-    preferences: preferenceFields,
-    targets: Object.fromEntries(Object.entries(targetActions).sort(([left], [right]) => left.localeCompare(right))),
-    repo_maintenance: repoMaintenance,
-    native_maintenance: nativeMaintenance,
-    report_maintenance: reportMaintenance,
-    staging_reconciliation: args.reconcileStaging || ''
-  };
   const destinations = Object.fromEntries(Object.keys(targetActions).sort().map((target) => [
     target,
     discoveries?.[target]?.target_path ? path.resolve(discoveries[target].target_path) : ''
   ]));
-  const resources = [];
-  const effects = [];
   const statePath = path.join(hubPath, 'state.json');
   const manifestPath = path.join(hubPath, 'manifest.json');
-  for (const field of preferenceFields) {
-    addAuthorityEffect(resources, effects, 'preference.field.write', {
-      resource_type: 'field', identity: `${path.resolve(statePath)}#${field}`, path: path.resolve(statePath), field
-    });
-  }
-  for (const [target, action] of Object.entries(targetActions)) {
-    addAuthorityEffect(resources, effects, 'target.state.write', {
-      resource_type: 'field', identity: `${path.resolve(statePath)}#targets.${target}`, path: path.resolve(statePath), target, action
-    }, { target, action, delegable: action !== 'disable' });
-    if (['enable-sync', 'sync'].includes(action)) {
-      const destination = destinations[target] || '';
-      addAuthorityEffect(resources, effects, 'hub.adapter.replace', {
-        resource_type: 'directory', identity: path.resolve(hubPath, 'adapters', target), path: path.resolve(hubPath, 'adapters', target), target, action
-      }, { target, action, delegable: true });
-      addAuthorityEffect(resources, effects, 'target.destination.write', {
-        resource_type: 'directory', identity: destination || `unresolved:${target}`, path: destination, target, action
-      }, { target, action, delegable: true });
-      addAuthorityEffect(resources, effects, 'target.destination.remove', {
-        resource_type: 'directory', identity: destination || `unresolved:${target}`, path: destination, target, action
-      }, { target, action, delegable: true });
-    }
-  }
   const directReportTrigger = Boolean(args.hook || args.repoUpdateNow || args.openUpdateReport || isLegacyDelegatedRepoSync(args));
   const reportCreateEligible = !args.preferenceOnly && !args.suppressUpdateReport && rawState?.update_report_enabled !== false && directReportTrigger && !delegatedEnvelope;
   const noTargetPersistenceEligible = !args.preferenceOnly && args.syncEnabled && !Object.keys(targetActions).length && Boolean(
     rawState?.hub_version || Object.keys(rawState?.bridge_versions_by_source || {}).length || rawState?.auto_sync_enabled || rawState?.repo_auto_update_enabled
   );
-  const managedWriteCeiling = preferenceFields.length || Object.keys(targetActions).length || repoMaintenance || nativeMaintenance || reportMaintenance || reportCreateEligible || noTargetPersistenceEligible || args.reconcileStaging;
-  if (managedWriteCeiling) {
-    addAuthorityEffect(resources, effects, 'hub.state.write', {
-      resource_type: 'file', identity: path.resolve(statePath), path: path.resolve(statePath)
-    }, { delegable: Boolean(delegatedEnvelope || repoMaintenance) });
-    if (!args.preferenceOnly) addAuthorityEffect(resources, effects, 'hub.manifest.write', {
-      resource_type: 'file', identity: path.resolve(manifestPath), path: path.resolve(manifestPath)
-    }, { delegable: Boolean(delegatedEnvelope || repoMaintenance) });
-  }
+  const managedWriteCeiling = Boolean(preferenceFields.length || Object.keys(targetActions).length || repoMaintenance || nativeMaintenance || reportMaintenance || reportCreateEligible || noTargetPersistenceEligible || args.reconcileStaging);
   const reportDir = path.resolve(updateReportDir());
-  if (reportMaintenance) {
-    addAuthorityEffect(resources, effects, 'report.cleanup', {
-      resource_type: 'report-set', identity: reportDir, path: reportDir, candidate_paths: []
-    });
-  }
-  if (reportCreateEligible) {
-    addAuthorityEffect(resources, effects, 'report.create', {
-      resource_type: 'file', identity: reportDir, path: reportDir
-    });
-    addAuthorityEffect(resources, effects, 'report.open', {
-      resource_type: 'file', identity: reportDir, path: reportDir
-    });
-  }
   const repoPath = path.resolve(args.repoPath || rawState?.repo_path || '.');
-  if (repoMaintenance) {
-    const repoBinding = { resource_type: 'repository', identity: repoPath, path: repoPath, branch: args.repoBranch || rawState?.repo_branch || DEFAULT_REPO_BRANCH, remote: args.repoRemote || rawState?.repo_remote || DEFAULT_REPO_REMOTE };
-    for (const kind of ['repository.fetch', 'repository.switch', 'repository.fast-forward-merge']) addAuthorityEffect(resources, effects, kind, repoBinding);
-    addAuthorityEffect(resources, effects, 'delegated.child.launch', { resource_type: 'process', identity: path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), path: path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs') });
-    addAuthorityEffect(resources, effects, 'failure-status.persist', { resource_type: 'field', identity: `${path.resolve(statePath)}#last_repo_update_status`, path: path.resolve(statePath), field: 'last_repo_update_status' });
-  }
-  if (nativeMaintenance) {
-    addAuthorityEffect(resources, effects, 'native.cache.maintenance', { resource_type: 'directory', identity: path.resolve(defaultCodexHome()), path: path.resolve(defaultCodexHome()) });
-    addAuthorityEffect(resources, effects, 'third-party.hook.repair', { resource_type: 'directory', identity: path.resolve(defaultCodexHome()), path: path.resolve(defaultCodexHome()) });
-  }
-  if (args.reconcileStaging) addAuthorityEffect(resources, effects, 'staging.reconcile', { resource_type: 'logical', identity: args.reconcileStaging, action: args.reconcileStaging });
-  if (delegatedEnvelope) {
-    const delegatedIds = new Set(delegatedEnvelope.delegable_effect_ids || []);
-    const childEffects = (delegatedEnvelope.effects || []).filter((effect) => delegatedIds.has(effect.effect_id));
-    effects.splice(0, effects.length, ...childEffects.map((effect) => ({ ...effect })));
-    resources.splice(0, resources.length, ...(delegatedEnvelope.resources || []).filter((resource) => childEffects.some((effect) => effect.resource_id === resource.resource_id)).map((resource) => ({ ...resource })));
-  }
-  const initialBindings = {
+  const bindings = {
     hub: path.resolve(hubPath),
-    initial_state_digest: sha256(canonicalJson(rawState || null)),
+    state_path: path.resolve(statePath),
+    manifest_path: path.resolve(manifestPath),
     source_script: path.resolve(__filename),
     source_identity: sha256(fs.readFileSync(__filename)),
     source_repository: path.resolve(__dirname, '..', '..'),
@@ -555,32 +453,46 @@ function resolveExecutionAuthority({ args, hubPath, rawState, discoveries, deleg
     }
   };
   if (delegatedEnvelope) {
-    if (path.resolve(hubPath) !== path.resolve(delegatedEnvelope.hub)) throw new Error('delegated v2 hub binding mismatch');
-    if (path.resolve(__filename) !== path.resolve(delegatedEnvelope.child_script_path)) throw new Error('delegated v2 child script path mismatch');
-    if (initialBindings.source_identity !== delegatedEnvelope.child_source_identity) throw new Error('delegated v2 child source identity mismatch');
-    if (initialBindings.source_commit !== delegatedEnvelope.updated_source_commit) throw new Error('delegated v2 updated source commit mismatch');
+    if (path.resolve(hubPath) !== path.resolve(delegatedEnvelope.hub.path)) throw new Error('delegated hub binding mismatch');
+    if (path.resolve(__filename) !== path.resolve(delegatedEnvelope.child.script_path)) throw new Error('delegated child script path mismatch');
+    if (bindings.source_identity !== delegatedEnvelope.child.source_identity) throw new Error('delegated child source identity mismatch');
+    if (bindings.source_commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated child source commit mismatch');
+    if (path.resolve(bindings.source_repository) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated child source repository mismatch');
+    if (path.resolve(delegatedEnvelope.repository_result.path) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated repository result path mismatch');
+    if (delegatedEnvelope.repository_result.commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated repository result commit mismatch');
+    const childBranch = gitCommand(delegatedEnvelope.child.source_repository, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const childRemote = gitCommand(delegatedEnvelope.child.source_repository, ['remote', 'get-url', 'origin']);
+    if (!childBranch.ok || childBranch.stdout.trim() !== delegatedEnvelope.repository_result.branch) throw new Error('delegated repository result branch mismatch');
+    if (!childRemote.ok || childRemote.stdout.trim() !== delegatedEnvelope.repository_result.remote) throw new Error('delegated repository result remote mismatch');
+    if (canonicalJson(destinations) !== canonicalJson(delegatedEnvelope.destinations.targets || {})) throw new Error('delegated target destination binding mismatch');
   }
-  const unsigned = {
-    contract: EXECUTION_AUTHORITY_CONTRACT,
+  const authority = {
+    contract: INVOCATION_AUTHORITY_CONTRACT,
     invocation_id: delegatedEnvelope?.parent_invocation_id
       ? `${delegatedEnvelope.parent_invocation_id}:child`
-      : sha256(canonicalJson({ argv: args.argv, hub: path.resolve(hubPath), state: initialBindings.initial_state_digest, source: initialBindings.source_identity })).slice(0, 32),
+      : crypto.randomUUID(),
     entrypoint: args.reconcileStaging
       ? 'staging-reconciliation'
       : (delegatedEnvelope ? 'delegated-child' : (args.preferenceOnly ? 'preference-only' : (args.hook ? 'hook-maintenance' : (args.repoUpdateNow ? 'repo-maintenance' : 'manual')))),
     write_requested: args.write === true,
     sync_source: args.syncSource,
-    parent_envelope_digest: delegatedEnvelope?.digest || '',
-    initial_bindings: initialBindings,
-    resources: resources.sort((left, right) => left.resource_id.localeCompare(right.resource_id)),
-    authorised_effects: effects.sort((left, right) => left.effect_id.localeCompare(right.effect_id))
+    actions: {
+      preferences: preferenceFields,
+      targets: Object.fromEntries(Object.entries(targetActions).sort(([left], [right]) => left.localeCompare(right))),
+      hub: { state_write: managedWriteCeiling, manifest_write: managedWriteCeiling && !args.preferenceOnly },
+      repository: { update: repoMaintenance, failure_status: repoMaintenance, delegate_sync: repoMaintenance },
+      native: { cache_maintenance: nativeMaintenance, hook_repair: nativeMaintenance },
+      reports: { cleanup: reportMaintenance, create: reportCreateEligible, open: reportCreateEligible },
+      staging: { reconcile: Boolean(args.reconcileStaging), generation: args.reconcileStaging || '' }
+    },
+    bindings
   };
-  return deepFreeze({ ...unsigned, digest: sha256(canonicalJson(unsigned)) });
+  authority.state_binding = authorityStateBinding(rawState, authority);
+  return deepFreeze(authority);
 }
 
 function scopeTargetAction(args, target) {
-  const effect = args.executionAuthority?.authorised_effects?.find((entry) => entry.target === target && entry.kind === 'target.state.write');
-  return effect?.action || '';
+  return args.executionAuthority?.actions?.targets?.[target] || '';
 }
 
 function scopeAllowsTargetState(args, target) {
@@ -592,46 +504,103 @@ function scopeAllowsTargetSync(args, target) {
 }
 
 function scopeHasExecutableWrite(args) {
-  return Boolean(args.executionAuthority?.authorised_effects?.length);
+  const actions = args.executionAuthority?.actions || {};
+  return Boolean(
+    actions.preferences?.length || Object.keys(actions.targets || {}).length || actions.hub?.state_write || actions.repository?.update ||
+    actions.native?.cache_maintenance || actions.reports?.cleanup || actions.reports?.create || actions.staging?.reconcile
+  );
 }
 
-function revalidateExecutionAuthority(args, discoveries) {
+function authorityStateBinding(rawState, authority) {
+  const state = rawState && typeof rawState === 'object' && !Array.isArray(rawState) ? rawState : {};
+  const binding = {};
+  if (authority.actions.repository.update) {
+    binding.repository = {
+      enabled: state.repo_auto_update_enabled === true,
+      path: state.repo_path ? path.resolve(state.repo_path) : '',
+      branch: state.repo_branch || DEFAULT_REPO_BRANCH,
+      remote: state.repo_remote || DEFAULT_REPO_REMOTE
+    };
+  }
+  if (authority.actions.native.cache_maintenance || authority.actions.native.hook_repair) {
+    binding.native = { enabled: state.codex_plugin_auto_refresh_enabled === true };
+  }
+  if (authority.actions.reports.cleanup || authority.actions.reports.create || authority.actions.reports.open) {
+    binding.reports = {
+      enabled: state.update_report_enabled !== false,
+      retention_days: state.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS
+    };
+  }
+  binding.targets = Object.fromEntries(Object.keys(authority.actions.targets || {}).sort().map((target) => {
+    const current = state.targets?.[target] || {};
+    return [target, {
+      enabled: current.enabled === true,
+      explicitly_disabled: current.explicitly_disabled === true,
+      target_path: current.target_path ? path.resolve(current.target_path) : ''
+    }];
+  }));
+  return binding;
+}
+
+function lockIsOwned(lock) {
+  if (!lock?.acquired || !lock.lockPath || !lock.token) return false;
+  try {
+    return readJsonIfExists(lock.lockPath)?.token === lock.token;
+  } catch {
+    return false;
+  }
+}
+
+function revalidateExecutionAuthority(args, discoveries, rawState = null) {
   for (const target of SUPPORTED_TARGETS.filter((name) => scopeTargetAction(args, name))) {
     const lockedDestination = discoveries?.[target]?.target_path
       ? path.resolve(discoveries[target].target_path)
       : '';
-    const authorisedDestination = args.executionAuthority.initial_bindings.target_destinations[target] || '';
+    const authorisedDestination = args.executionAuthority.bindings.target_destinations[target] || '';
     if (lockedDestination !== authorisedDestination) {
       throw new Error(`Execution authority destination changed while waiting for the lock: ${target}`);
     }
   }
+  if (rawState !== null) {
+    const expected = args.expectedAuthorityStateBinding || args.executionAuthority.state_binding;
+    const actual = authorityStateBinding(rawState, args.executionAuthority);
+    if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error('authority-relevant state changed before managed mutation');
+  }
   return true;
 }
 
-function effectAuthorised(args, kind, options = {}) {
-  return args.executionAuthority?.authorised_effects?.some((effect) => (
-    effect.kind === kind &&
-    (!options.target || effect.target === options.target) &&
-    (!options.action || effect.action === options.action)
-  )) || false;
+function actionAuthorised(args, kind, options = {}) {
+  const actions = args.executionAuthority?.actions || {};
+  if (kind === 'preference.field.write') return actions.preferences?.includes(options.field);
+  if (kind === 'hub.state.write') return actions.hub?.state_write === true;
+  if (kind === 'hub.manifest.write') return actions.hub?.manifest_write === true;
+  if (kind === 'hub.adapter.replace' || kind === 'target.destination.write' || kind === 'target.destination.remove') {
+    return ['enable-sync', 'sync'].includes(actions.targets?.[options.target]);
+  }
+  if (['repository.fetch', 'repository.switch', 'repository.fast-forward-merge'].includes(kind)) return actions.repository?.update === true;
+  if (kind === 'delegated.child.launch') return actions.repository?.delegate_sync === true;
+  if (kind === 'failure-status.persist') return actions.repository?.failure_status === true;
+  if (kind === 'native.cache.maintenance') return actions.native?.cache_maintenance === true;
+  if (kind === 'third-party.hook.repair') return actions.native?.hook_repair === true;
+  if (kind === 'report.cleanup') return actions.reports?.cleanup === true;
+  if (kind === 'report.create') return actions.reports?.create === true;
+  if (kind === 'report.open') return actions.reports?.open === true;
+  if (kind === 'staging.reconcile') return actions.staging?.reconcile === true;
+  return false;
 }
 
 function authorityPreferenceFields(args) {
-  return (args.executionAuthority?.resources || [])
-    .filter((resource) => resource.resource_type === 'field' && resource.field && effectAuthorised(args, 'preference.field.write'))
-    .filter((resource) => args.executionAuthority.authorised_effects.some((effect) => effect.kind === 'preference.field.write' && effect.resource_id === resource.resource_id))
-    .map((resource) => resource.field)
-    .sort();
+  return [...(args.executionAuthority?.actions?.preferences || [])].sort();
 }
 
 function derivedActionSummary(args) {
   return {
     preferences: authorityPreferenceFields(args),
     targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => [target, scopeTargetAction(args, target)]).filter(([, action]) => action)),
-    repo_maintenance: effectAuthorised(args, 'repository.fetch'),
-    native_maintenance: effectAuthorised(args, 'native.cache.maintenance'),
-    report_maintenance: effectAuthorised(args, 'report.cleanup'),
-    staging_reconciliation: effectAuthorised(args, 'staging.reconcile') ? args.reconcileStaging : ''
+    repo_maintenance: args.executionAuthority?.actions?.repository?.update === true,
+    native_maintenance: args.executionAuthority?.actions?.native?.cache_maintenance === true,
+    report_maintenance: args.executionAuthority?.actions?.reports?.cleanup === true,
+    staging_reconciliation: args.executionAuthority?.actions?.staging?.reconcile ? args.reconcileStaging : ''
   };
 }
 
@@ -653,181 +622,106 @@ function listUpdateReportCandidates(options = {}) {
     .sort((left, right) => left.localeCompare(right));
 }
 
-function freezeLockedProjection(args, { hubPath, rawState, discoveries, testHooks = {} }) {
-  revalidateExecutionAuthority(args, discoveries);
-  if (args.delegatedEnvelope) {
-    const lockedStateDigest = sha256(canonicalJson(rawState || null));
-    if (lockedStateDigest !== args.delegatedEnvelope.initial_bindings.initial_state_digest) {
-      throw new Error('delegated v2 initial state binding changed before child projection');
-    }
-    for (const [target, destination] of Object.entries(args.delegatedEnvelope.initial_bindings.target_destinations || {})) {
-      const discovered = discoveries?.[target]?.target_path ? path.resolve(discoveries[target].target_path) : '';
-      if (discovered !== path.resolve(destination)) {
-        throw new Error(`delegated v2 destination changed before child projection: ${target}`);
-      }
+function beginMutationPhase(args, { lock, hubPath, rawState, discoveries, testHooks = {} }) {
+  if (!lockIsOwned(lock)) throw new Error('managed mutation phase requires the exact owned lock');
+  revalidateExecutionAuthority(args, discoveries, rawState);
+  if (args.phaseContext) invalidatePhaseContext(args.phaseContext);
+  let reportCandidates = [];
+  let reportInventoryError = '';
+  if (actionAuthorised(args, 'report.cleanup')) {
+    try {
+      const inventory = testHooks.listUpdateReportCandidates || listUpdateReportCandidates;
+      reportCandidates = inventory({ retentionDays: normalizedState(rawState).update_report_retention_days });
+    } catch (error) {
+      reportInventoryError = String(error.message || error);
     }
   }
-  if (testHooks.beforeProjectionFreeze) testHooks.beforeProjectionFreeze({ args, hubPath, rawState, discoveries });
-  const resources = (args.executionAuthority.resources || []).map((resource) => {
-    if (resource.resource_type === 'report-set' && effectAuthorised(args, 'report.cleanup')) {
-      let candidatePaths = [];
-      try {
-        candidatePaths = listUpdateReportCandidates({ retentionDays: normalizedState(rawState).update_report_retention_days });
-      } catch (error) {
-        args.lockedReportInventoryError = error.message;
-      }
-      return { ...resource, candidate_paths: candidatePaths };
-    }
-    if (resource.resource_type === 'file' && resource.identity === args.executionAuthority.initial_bindings.report_directory && (effectAuthorised(args, 'report.create') || effectAuthorised(args, 'report.open'))) {
-      const reportPath = nextUpdateReportPath();
-      return { ...resource, identity: path.resolve(reportPath), path: path.resolve(reportPath) };
-    }
-    if (resource.resource_type === 'repository' && resource.path && fs.existsSync(resource.path)) {
-      const head = gitCommand(resource.path, ['rev-parse', 'HEAD']);
-      const branch = gitCommand(resource.path, ['rev-parse', '--abbrev-ref', 'HEAD']);
-      if (head.ok && branch.ok) return { ...resource, commit: head.stdout.trim(), action: branch.stdout.trim() };
-    }
-    return { ...resource };
+  const context = deepFreeze({
+    invocation_id: args.executionAuthority.invocation_id,
+    lock_path: path.resolve(lock.lockPath),
+    lock_token: lock.token,
+    hub: path.resolve(hubPath),
+    report_candidates: reportCandidates,
+    report_inventory_error: reportInventoryError
   });
-  const unsigned = {
-    contract: LOCKED_PROJECTION_CONTRACT,
-    authority_digest: args.executionAuthority.digest,
-    lock_domain: path.resolve(path.dirname(hubPath)),
-    locked_state_digest: sha256(canonicalJson(rawState || null)),
-    resources,
-    authorised_effects: args.executionAuthority.authorised_effects.map((effect) => ({ ...effect }))
-  };
-  const projection = deepFreeze({ ...unsigned, digest: sha256(canonicalJson(unsigned)) });
-  args.lockedProjection = projection;
-  args.lockedRawState = rawState && typeof rawState === 'object' ? JSON.parse(JSON.stringify(rawState)) : rawState;
-  args.effectTrace.locked_projection_digest = projection.digest;
-  return projection;
+  phaseContextState.set(context, { active: true, firstMutation: false, lock, args, testHooks });
+  if (!lock.phaseContexts) lock.phaseContexts = [];
+  lock.phaseContexts.push(context);
+  args.phaseContext = context;
+  if (testHooks.afterPhaseContextCreated) testHooks.afterPhaseContextCreated({ context, lock });
+  return context;
 }
 
-function revalidateProjectionBeforeFirstEffect(args) {
-  const hubPath = args.executionAuthority.initial_bindings.hub;
-  const rawState = readJsonIfExists(path.join(hubPath, 'state.json'));
-  const currentStateDigest = sha256(canonicalJson(rawState || null));
-  if (currentStateDigest !== args.lockedProjection.locked_state_digest) {
-    const before = args.lockedRawState && typeof args.lockedRawState === 'object' ? args.lockedRawState : {};
-    const after = rawState && typeof rawState === 'object' ? rawState : {};
-    const changedKeys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((key) => canonicalJson(before[key]) !== canonicalJson(after[key]));
-    throw new Error(`locked state changed after projection freeze and before the first managed effect (${args.lockedProjection.locked_state_digest} -> ${currentStateDigest}; fields: ${changedKeys.join(', ') || '<root>'})`);
+function invalidatePhaseContext(context) {
+  const state = phaseContextState.get(context);
+  if (state) state.active = false;
+}
+
+function validatePhaseContext(context) {
+  const state = phaseContextState.get(context);
+  if (!state?.active || !lockIsOwned(state.lock)) {
+    if (state) state.active = false;
+    throw new Error('managed mutation phase context is expired or its lock was lost');
   }
+  return state;
+}
+
+function revalidateBeforeFirstMutation(args) {
+  const hubPath = args.executionAuthority.bindings.hub;
+  const rawState = readJsonIfExists(path.join(hubPath, 'state.json'));
   const state = normalizedState(rawState);
   const discoveries = {
     opencode: discoverOpenCode(args, state.targets.opencode, hubPath),
     ag2: discoverAg2(args, state.targets.ag2, hubPath)
   };
-  revalidateExecutionAuthority(args, discoveries);
-  if (args.delegatedEnvelope && sha256(canonicalJson(rawState || null)) !== args.delegatedEnvelope.initial_bindings.initial_state_digest) {
-    throw new Error('delegated v2 initial state binding changed before the first managed effect');
-  }
-  for (const resource of args.lockedProjection?.resources || []) {
-    if (resource.resource_type !== 'repository' || !resource.path || !resource.commit) continue;
-    const head = gitCommand(resource.path, ['rev-parse', 'HEAD']);
-    const branch = gitCommand(resource.path, ['rev-parse', '--abbrev-ref', 'HEAD']);
-    if (!head.ok || !branch.ok || head.stdout.trim() !== resource.commit || branch.stdout.trim() !== resource.action) {
-      throw new Error('repository resource changed after projection freeze and before the first managed effect');
-    }
-  }
+  revalidateExecutionAuthority(args, discoveries, rawState);
 }
 
-function consumeEffect(args, kind, options, callback) {
+function assertActualMutationInput(args, kind, options = {}) {
   const opts = options || {};
-  const authorised = args.lockedProjection?.authorised_effects?.find((effect) => (
-    effect.kind === kind && (!opts.target || effect.target === opts.target) && (!opts.action || effect.action === opts.action)
-  ));
-  if (!authorised) throw new Error(`effect is not authorised by the locked projection: ${kind}${opts.target ? `:${opts.target}` : ''}`);
-  if (args.effectTrace.before_first_managed_effect !== true) {
-    if (args.testHooks?.beforeFirstManagedEffect) args.testHooks.beforeFirstManagedEffect({ kind, options: opts });
-    revalidateProjectionBeforeFirstEffect(args);
-    args.effectTrace.before_first_managed_effect = true;
-  }
-  const key = `${authorised.effect_id}:${kind}`;
-  const occurrence = (args.effectTrace.occurrences[key] || 0) + 1;
-  args.effectTrace.occurrences[key] = occurrence;
-  const record = {
-    ...authorised,
-    effect_id: `${authorised.effect_id}:${occurrence}`,
-    occurrence,
-    projection_digest: args.lockedProjection.digest,
-    details_digest: sha256(canonicalJson(opts.details || {})),
-    status: 'planned'
+  if (!actionAuthorised(args, kind, opts)) throw new Error(`managed mutation is not authorised: ${kind}${opts.target ? `:${opts.target}` : ''}`);
+  const details = opts.details || {};
+  const bindings = args.executionAuthority.bindings;
+  const exactPath = details.path || details.repoPath || '';
+  const requirePath = (expected, label) => {
+    if (!exactPath || path.resolve(exactPath) !== path.resolve(expected)) throw new Error(`${label} input does not match invocation authority`);
   };
-  args.effectTrace.planned_effects.push(record);
-  try {
-    const result = callback();
-    args.effectTrace.actual_effects.push({ ...record, status: 'actual' });
-    return result;
-  } catch (error) {
-    args.effectTrace.blocked_effects.push({ ...record, status: 'blocked', reason: String(error.message || error) });
-    throw error;
+  if (kind === 'hub.state.write') requirePath(bindings.state_path, 'hub state writer');
+  if (kind === 'hub.manifest.write') requirePath(bindings.manifest_path, 'hub manifest writer');
+  if (kind === 'hub.adapter.replace') requirePath(path.join(bindings.hub, 'adapters', opts.target), 'hub adapter writer');
+  if (kind === 'target.destination.write' || kind === 'target.destination.remove') requirePath(bindings.target_destinations[opts.target], 'target writer');
+  if (kind.startsWith('repository.')) requirePath(bindings.repository.path, 'repository helper');
+  if (kind === 'delegated.child.launch') requirePath(path.join(bindings.repository.path, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'delegated child');
+  if (kind === 'native.cache.maintenance' || kind === 'third-party.hook.repair') requirePath(path.resolve(defaultCodexHome()), 'native helper');
+  if (kind === 'staging.reconcile' && details.generation_id !== args.executionAuthority.actions.staging.generation) throw new Error('staging generation does not match invocation authority');
+  if (kind === 'report.create' || kind === 'report.open') {
+    if (!exactPath || !isInside(bindings.report_directory, path.resolve(exactPath))) throw new Error('report path does not match invocation authority');
+    if (kind === 'report.open' && path.resolve(exactPath) !== path.resolve(args.createdReportPath || '')) throw new Error('only this invocation\'s freshly created report may be opened');
   }
 }
 
-function recordSupportingEffect(args, kind, details = {}) {
-  const authorised = args.executionAuthority?.authorised_effects?.find((effect) => effect.kind === kind)
-    || args.executionAuthority?.authorised_effects?.[0];
-  if (!authorised) return;
-  args.effectTrace.supporting_effects.push({
-    ...authorised,
-    effect_id: `${authorised.effect_id}:supporting:${args.effectTrace.supporting_effects.length + 1}`,
-    details_digest: sha256(canonicalJson(details)),
-    status: 'supporting',
-    reason: details.reason || 'bounded transaction mechanic'
-  });
+function runAuthorisedMutation(args, kind, options, callback) {
+  const phase = validatePhaseContext(args.phaseContext);
+  assertActualMutationInput(args, kind, options);
+  if (!phase.firstMutation) {
+    if (phase.testHooks?.beforeFirstManagedEffect) phase.testHooks.beforeFirstManagedEffect({ kind, options: options || {} });
+    revalidateBeforeFirstMutation(args);
+    validatePhaseContext(args.phaseContext);
+    phase.firstMutation = true;
+  }
+  return callback();
 }
 
-function initializeEffectTrace(args, testHooks = {}) {
+function initializeInvocationRuntime(args, testHooks = {}) {
   args.testHooks = testHooks;
-  args.effectTrace = {
-    authority_digest: args.executionAuthority.digest,
-    locked_projection_digest: '',
-    planned_effects: [],
-    actual_effects: [],
-    supporting_effects: [],
-    blocked_effects: [],
-    occurrences: {},
-    before_first_managed_effect: false,
-    delegated_receipt: args.delegatedEnvelope ? {
-      role: 'child',
-      envelope_digest: args.delegatedEnvelope.digest,
-      parent_authority_digest: args.delegatedEnvelope.parent_authority_digest,
-      parent_projection_digest: args.delegatedEnvelope.parent_projection_digest,
-      parent_invocation_id: args.delegatedEnvelope.parent_invocation_id
-    } : null
-  };
-}
-
-function plannedWritesFromEffects(args) {
-  const writeKinds = new Set([
-    'preference.field.write', 'target.state.write', 'hub.state.write', 'hub.manifest.write', 'hub.adapter.replace',
-    'target.destination.write', 'target.destination.remove', 'staging.reconcile', 'report.cleanup', 'report.create',
-    'native.cache.maintenance', 'third-party.hook.repair', 'failure-status.persist', 'repository.switch', 'repository.fast-forward-merge'
-  ]);
-  return (args.effectTrace?.planned_effects || []).filter((effect) => writeKinds.has(effect.kind)).map((effect) => {
-    const resource = args.lockedProjection?.resources?.find((entry) => entry.resource_id === effect.resource_id)
-      || args.executionAuthority?.resources?.find((entry) => entry.resource_id === effect.resource_id) || {};
-    return { kind: effect.kind, path: resource.path || resource.identity || '', ...(effect.target ? { target: effect.target } : {}) };
-  });
-}
-
-function effectReconciliation(args) {
-  const planned = args.effectTrace?.planned_effects || [];
-  const actual = args.effectTrace?.actual_effects || [];
-  const plannedCounts = new Map();
-  for (const effect of planned) plannedCounts.set(effect.effect_id, (plannedCounts.get(effect.effect_id) || 0) + 1);
-  const unmatchedActual = actual.filter((effect) => plannedCounts.get(effect.effect_id) !== 1).map((effect) => effect.effect_id);
-  const actualIds = new Set(actual.map((effect) => effect.effect_id));
-  const unconsumedPlanned = planned.filter((effect) => !actualIds.has(effect.effect_id) && !(args.effectTrace?.blocked_effects || []).some((blocked) => blocked.effect_id === effect.effect_id)).map((effect) => effect.effect_id);
-  return {
-    exact: unmatchedActual.length === 0 && unconsumedPlanned.length === 0,
-    planned_count: planned.length,
-    actual_count: actual.length,
-    unmatched_actual: unmatchedActual,
-    unconsumed_planned: unconsumedPlanned
-  };
+  args.expectedAuthorityStateBinding = args.executionAuthority.state_binding;
+  args.phaseContext = null;
+  args.createdReportPath = '';
+  args.delegatedReceipt = args.delegatedEnvelope ? {
+    role: 'child',
+    parent_invocation_id: args.delegatedEnvelope.parent_invocation_id,
+    child_source_identity: args.delegatedEnvelope.child.source_identity
+  } : null;
 }
 
 function assertPreferenceBoundary(args) {
@@ -874,7 +768,7 @@ function printHelp() {
     '  --enable-target opencode|ag2',
     '  --disable-target opencode|ag2',
     '  --preference-only',
-    '  --delegated-authority-v2   internal child mode; reads one v2 envelope from stdin',
+    '  --delegated-invocation-authority  internal child mode; reads one fixed authority payload from stdin',
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
@@ -1213,7 +1107,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = consumeEffect(args, 'repository.switch', { details: { repoPath, from: currentBranch, to: branch } }, () => (
+    const switchResult = runAuthorisedMutation(args, 'repository.switch', { details: { repoPath, from: currentBranch, to: branch } }, () => (
       gitCommand(repoPath, ['switch', branch], { timeout: 120000 })
     ));
     if (!switchResult.ok) {
@@ -1224,7 +1118,7 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  const fetchResult = consumeEffect(args, 'repository.fetch', { details: { repoPath, branch, remote: expectedRemote } }, () => (
+  const fetchResult = runAuthorisedMutation(args, 'repository.fetch', { details: { repoPath, branch, remote: expectedRemote } }, () => (
     fetchWithCredentialFallback(repoPath, branch)
   ));
   if (!fetchResult.ok) {
@@ -1249,7 +1143,7 @@ function validateAndUpdateRepo(state, args = {}) {
     });
   }
   if (fromCommit !== fetchedCommit) {
-    const merge = consumeEffect(args, 'repository.fast-forward-merge', { details: { repoPath, fromCommit, fetchedCommit } }, () => (
+    const merge = runAuthorisedMutation(args, 'repository.fast-forward-merge', { details: { repoPath, fromCommit, fetchedCommit } }, () => (
       gitCommand(repoPath, ['merge', '--ff-only', 'FETCH_HEAD'], { timeout: 120000 })
     ));
     if (!merge.ok) {
@@ -2153,19 +2047,20 @@ function cleanupUpdateReports(options = {}) {
 function runAuthorisedUpdateReportCleanup(args, state) {
   if (
     args.write !== true ||
-    !effectAuthorised(args, 'report.cleanup')
+    !actionAuthorised(args, 'report.cleanup')
   ) {
     return state.last_update_report_cleanup || null;
   }
-  const binding = args.lockedProjection?.resources?.find((resource) => resource.resource_type === 'report-set');
-  if (!binding) throw new Error('report cleanup lacks a locked candidate binding');
-  const cleanupResult = consumeEffect(args, 'report.cleanup', {
-    details: { candidate_paths: binding.candidate_paths || [], inventory_error: args.lockedReportInventoryError || '' }
-  }, () => cleanupUpdateReports(args.lockedReportInventoryError ? {
-    retentionDays: state.update_report_retention_days
-  } : {
+  validatePhaseContext(args.phaseContext);
+  if (args.phaseContext.report_inventory_error) {
+    if (!args.hook) console.warn(`Toolkit update report cleanup warning: ${sanitizeOutputMessage(args.phaseContext.report_inventory_error)}; no cleanup performed`);
+    return state.last_update_report_cleanup || null;
+  }
+  const cleanupResult = runAuthorisedMutation(args, 'report.cleanup', {
+    details: { candidate_paths: args.phaseContext.report_candidates || [] }
+  }, () => cleanupUpdateReports({
     retentionDays: state.update_report_retention_days,
-    candidatePaths: binding.candidate_paths || []
+    candidatePaths: args.phaseContext.report_candidates || []
   }));
   if (cleanupResult.error_count && !args.hook) {
     console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
@@ -2828,9 +2723,13 @@ function buildUpdateReport({ args, state, checksum, context }) {
 
 function writeUpdateReportFile(markdown, exactPath = '') {
   const reportPath = exactPath ? path.resolve(exactPath) : nextUpdateReportPath();
-  if (exactPath && fs.existsSync(reportPath)) throw new Error(`reserved update report path is no longer available: ${reportPath}`);
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, markdown, 'utf8');
+  try {
+    fs.writeFileSync(reportPath, markdown, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(`reserved update report path is no longer available: ${reportPath}`);
+    throw error;
+  }
   return reportPath;
 }
 
@@ -2893,7 +2792,7 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
   if (!shouldConsiderUpdateReport(args, state) || !classification.meaningful) {
     return { state, reportPath: '' };
   }
-  if (!effectAuthorised(args, 'report.create')) {
+  if (!actionAuthorised(args, 'report.create')) {
     return { state, reportPath: '' };
   }
   const reportContext = {
@@ -2906,23 +2805,29 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
     return { state, reportPath: '' };
   }
   const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
-  const createEffect = args.lockedProjection?.authorised_effects?.find((effect) => effect.kind === 'report.create');
-  const createBinding = args.lockedProjection?.resources?.find((resource) => resource.resource_id === createEffect?.resource_id);
-  if (!createBinding?.path || createBinding.path === args.executionAuthority.initial_bindings.report_directory) {
-    throw new Error('report creation lacks an exact locked report path');
-  }
-  if (args.testHooks?.beforeReportCreation) args.testHooks.beforeReportCreation({ reportPath: createBinding.path, classification });
-  const reportPath = consumeEffect(args, 'report.create', { details: { path: createBinding.path, classification: classification.kind } }, () => {
-    const writtenPath = path.resolve(writeReport(markdown, createBinding.path));
-    if (writtenPath !== path.resolve(createBinding.path) || !isUpdateReportPath(writtenPath)) {
-      throw new Error('report writer did not create the exact locked report path');
+  let reportPath = '';
+  let lastCollision = null;
+  for (let attempt = 0; attempt < REPORT_CREATE_ATTEMPTS; attempt += 1) {
+    const candidate = path.resolve(nextUpdateReportPath(new Date(Date.now() + attempt * 1000)));
+    if (args.testHooks?.beforeReportCreation) args.testHooks.beforeReportCreation({ reportPath: candidate, classification, attempt });
+    try {
+      reportPath = runAuthorisedMutation(args, 'report.create', { details: { path: candidate, classification: classification.kind } }, () => {
+        const writtenPath = path.resolve(writeReport(markdown, candidate));
+        if (writtenPath !== candidate || !isUpdateReportPath(writtenPath)) throw new Error('report writer did not create the exact authorised report path');
+        return writtenPath;
+      });
+      break;
+    } catch (error) {
+      if (!/already available|reserved update report path|EEXIST/i.test(String(error.message || error))) throw error;
+      lastCollision = error;
     }
-    return writtenPath;
-  });
+  }
+  if (!reportPath) throw new Error(`exclusive update report creation exhausted bounded attempts: ${lastCollision?.message || 'collision'}`);
+  args.createdReportPath = reportPath;
   state.last_update_report_path = reportPath;
   state.last_update_report_signature = signature;
-  if ((args.openUpdateReport || classification.actionable) && effectAuthorised(args, 'report.open')) {
-    consumeEffect(args, 'report.open', { details: { path: reportPath } }, () => openReport(reportPath));
+  if ((args.openUpdateReport || classification.actionable) && actionAuthorised(args, 'report.open')) {
+    runAuthorisedMutation(args, 'report.open', { details: { path: reportPath } }, () => openReport(reportPath));
   }
   return { state, reportPath };
 }
@@ -3251,7 +3156,7 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
   const plannedHubTargets = new Set(plannedTargetSyncs.map((plan) => plan.target));
   for (const target of SUPPORTED_TARGETS.filter((name) => scopeAllowsTargetSync(args, name) && plannedHubTargets.has(name))) {
     const targetPath = path.join(hubPath, 'adapters', target);
-    consumeEffect(args, 'hub.adapter.replace', { target, action: scopeTargetAction(args, target), details: { path: targetPath } }, () => withOwnedStaging({
+    runAuthorisedMutation(args, 'hub.adapter.replace', { target, action: scopeTargetAction(args, target), details: { path: targetPath } }, () => withOwnedStaging({
       target: targetPath,
       stagePrefix: `.${target}.staging-`,
       operation: 'target-directory-copy',
@@ -3271,12 +3176,13 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
   }
   const persistedState = scopedStateForPersistence(hubPath, state, args);
   const manifest = scopedManifestForPersistence({ hubPath, args, state: persistedState, discoveries, checksum, sourceCommit });
-  consumeEffect(args, 'hub.manifest.write', { details: { path: path.join(hubPath, 'manifest.json') } }, () => {
+  runAuthorisedMutation(args, 'hub.manifest.write', { details: { path: path.join(hubPath, 'manifest.json') } }, () => {
     writeFileAtomically(path.join(hubPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   });
-  consumeEffect(args, 'hub.state.write', { details: { path: path.join(hubPath, 'state.json') } }, () => {
+  runAuthorisedMutation(args, 'hub.state.write', { details: { path: path.join(hubPath, 'state.json') } }, () => {
     writeFileAtomically(path.join(hubPath, 'state.json'), `${JSON.stringify(persistedState, null, 2)}\n`);
   });
+  args.expectedAuthorityStateBinding = authorityStateBinding(persistedState, args.executionAuthority);
 }
 
 function validateStagedHub(stagePath, checksum) {
@@ -3786,6 +3692,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
 // releasing.
 function releaseLock(lock) {
   if (!lock?.acquired || !lock.lockPath) return;
+  for (const context of lock.phaseContexts || []) invalidatePhaseContext(context);
   let current = null;
   try {
     current = readJsonIfExists(lock.lockPath);
@@ -3949,7 +3856,7 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType, options
 
   const staleNames = previousNames.filter((name) => !new Set(skillNames).has(name));
   const removedSkillNames = staleNames.length && options.args
-    ? consumeEffect(options.args, 'target.destination.remove', {
+    ? runAuthorisedMutation(options.args, 'target.destination.remove', {
         target: targetName,
         action: scopeTargetAction(options.args, targetName),
         details: { path: targetPath, skill_names: staleNames }
@@ -4089,13 +3996,12 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
     throw new Error(`staging reconciliation blocked: ${reconciliationLock.skipReason}`);
   }
   try {
-    recordSupportingEffect(args, 'staging.reconcile', { reason: 'lock acquisition bounded by initial authority' });
     if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'staging-reconciliation', lock: reconciliationLock });
     const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
     if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'staging-reconciliation', latestRawState });
     const lockedParents = stagingReconciliationParents(args, hubPath, normalizedState(latestRawState));
-    freezeLockedProjection(args, { hubPath, rawState: latestRawState, discoveries: {}, testHooks });
-    const reconciliation = consumeEffect(args, 'staging.reconcile', { details: { generation_id: args.reconcileStaging, parents: lockedParents } }, () => reconcileOwnedStaging(lockedParents, args.reconcileStaging, {
+    beginMutationPhase(args, { lock: reconciliationLock, hubPath, rawState: latestRawState, discoveries: {}, testHooks });
+    const reconciliation = runAuthorisedMutation(args, 'staging.reconcile', { details: { generation_id: args.reconcileStaging, parents: lockedParents } }, () => reconcileOwnedStaging(lockedParents, args.reconcileStaging, {
       write: true,
       liveness: testHooks.stagingLiveness,
       beforeDelete: testHooks.beforeStagingReconciliationDelete
@@ -4107,7 +4013,6 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
     console.log(JSON.stringify(output, null, 2));
     return { status: 0, audit: reconciliation.audit, reconciliation };
   } finally {
-    recordSupportingEffect(args, 'staging.reconcile', { reason: 'exact owned lock release' });
     releaseLock(reconciliationLock);
   }
 }
@@ -4136,7 +4041,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'state.json') });
     plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'manifest.json') });
   }
-  if (effectAuthorised(args, 'report.cleanup')) {
+  if (actionAuthorised(args, 'report.cleanup')) {
     plannedWrites.push({ kind: 'update-report-maintenance', path: updateReportDir() });
   }
   return {
@@ -4149,15 +4054,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     downgrade_enforcement_source: args.syncSource,
     dry_run: dryRun,
     execution_authority: args.executionAuthority,
-    authority_digest: args.executionAuthority?.digest || '',
-    locked_projection_digest: args.effectTrace?.locked_projection_digest || '',
-    authorised_effects: args.executionAuthority?.authorised_effects || [],
-    planned_effects: args.effectTrace?.planned_effects || [],
-    actual_effects: args.effectTrace?.actual_effects || [],
-    supporting_effects: args.effectTrace?.supporting_effects || [],
-    blocked_effects: args.effectTrace?.blocked_effects || [],
-    effect_reconciliation: effectReconciliation(args),
-    delegated_receipt: args.effectTrace?.delegated_receipt || null,
+    delegated_receipt: args.delegatedReceipt || null,
     requested_authority: { entrypoint: args.executionAuthority?.entrypoint || '' },
     authorised_actions: derivedActionSummary(args),
     eligible_actions: {
@@ -4168,7 +4065,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       .filter((target) => scopeAllowsTargetSync(args, target) && !targetNeedsSync[target])
       .map((target) => ({ target, action: 'sync', reason: 'not stale or proof unavailable' })),
     out_of_scope_stale_targets: outOfScopeStaleTargets,
-    planned_writes: args.effectTrace?.planned_effects?.length ? plannedWritesFromEffects(args) : plannedWrites,
+    planned_writes: plannedWrites,
     hub_path: hubPath,
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
@@ -4236,12 +4133,12 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
 
 function isHookNoop(args, existingState) {
   if (!args.hook) return false;
-  if (effectAuthorised(args, 'repository.fetch') || effectAuthorised(args, 'native.cache.maintenance')) return false;
+  if (actionAuthorised(args, 'repository.fetch') || actionAuthorised(args, 'native.cache.maintenance')) return false;
   return !SUPPORTED_TARGETS.some((target) => scopeTargetAction(args, target));
 }
 
 function shouldRunRepoAutoUpdate(args, state) {
-  if (!effectAuthorised(args, 'repository.fetch')) return false;
+  if (!actionAuthorised(args, 'repository.fetch')) return false;
   if (!args.write) return false;
   if (args.skipRepoAutoUpdate) return false;
   if (!state.repo_auto_update_enabled) return false;
@@ -4595,10 +4492,10 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 }
 
 function maybeRepairThirdPartyCodexPluginHooks(args, state) {
-  if (!effectAuthorised(args, 'third-party.hook.repair')) return { status: '' };
+  if (!actionAuthorised(args, 'third-party.hook.repair')) return { status: '' };
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
-  return consumeEffect(args, 'third-party.hook.repair', { details: { codex_home: defaultCodexHome() } }, () => repairThirdPartyCodexPluginHooks({
+  return runAuthorisedMutation(args, 'third-party.hook.repair', { details: { path: defaultCodexHome() } }, () => repairThirdPartyCodexPluginHooks({
     write: true,
     currentPluginRoot: runtimeCodexPluginRoot()
   }));
@@ -4736,9 +4633,9 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
 function nativePluginCacheStatusForReport(args, state, options = {}) {
   if (
     args.syncSource === 'codex-plugin' &&
-    effectAuthorised(args, 'native.cache.maintenance')
+    actionAuthorised(args, 'native.cache.maintenance')
   ) {
-    return consumeEffect(args, 'native.cache.maintenance', { details: { repoPath: options.repoPath || state.repo_path } }, () => refreshCodexNativePluginCacheFromRepo({
+    return runAuthorisedMutation(args, 'native.cache.maintenance', { details: { path: defaultCodexHome(), repoPath: options.repoPath || state.repo_path } }, () => refreshCodexNativePluginCacheFromRepo({
       args,
       state,
       repoPath: options.repoPath || state.repo_path,
@@ -4753,39 +4650,31 @@ function buildDelegatedAuthorityEnvelope({ args, hubPath, repoPath, snapshot }) 
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`updated repo bridge script not found: ${scriptPath}`);
   }
-  const effects = (args.lockedProjection?.authorised_effects || []).filter((effect) => effect.delegable === true);
-  const resourceIds = new Set(effects.map((effect) => effect.resource_id));
-  const resources = (args.lockedProjection?.resources || []).filter((resource) => resourceIds.has(resource.resource_id));
-  const rawState = readJsonIfExists(path.join(hubPath, 'state.json'));
-  const initialBindings = {
-    ...args.executionAuthority.initial_bindings,
-    hub: path.resolve(hubPath),
-    initial_state_digest: sha256(canonicalJson(rawState || null)),
-    target_destinations: Object.fromEntries(effects.filter((effect) => effect.target).map((effect) => [
-      effect.target,
-      path.resolve(snapshot.discoveries[effect.target].target_path)
-    ])),
-    source_script: path.resolve(scriptPath),
-    source_identity: sha256(fs.readFileSync(scriptPath)),
-    source_repository: path.resolve(repoPath),
-    source_commit: currentToolkitCommit({ repo_path: repoPath })
-  };
-  const unsigned = {
+  const targetActions = Object.fromEntries(Object.entries(args.executionAuthority.actions.targets || {})
+    .filter(([, action]) => ['enable-sync', 'sync'].includes(action)));
+  const targetDestinations = Object.fromEntries(Object.keys(targetActions).map((target) => [
+    target,
+    path.resolve(snapshot.discoveries[target].target_path)
+  ]));
+  return deepFreeze({
     contract: DELEGATED_AUTHORITY_CONTRACT,
-    parent_authority_digest: args.executionAuthority.digest,
-    parent_projection_digest: args.lockedProjection.digest,
     parent_invocation_id: args.executionAuthority.invocation_id,
-    delegable_effect_ids: effects.map((effect) => effect.effect_id).sort(),
-    effects,
-    resources,
-    hub: path.resolve(hubPath),
-    source_repository: path.resolve(repoPath),
-    updated_source_commit: initialBindings.source_commit,
-    child_script_path: path.resolve(scriptPath),
-    child_source_identity: initialBindings.source_identity,
-    initial_bindings: initialBindings
-  };
-  return deepFreeze({ ...unsigned, digest: sha256(canonicalJson(unsigned)) });
+    actions: { targets: targetActions },
+    destinations: { targets: targetDestinations },
+    hub: { path: path.resolve(hubPath) },
+    repository_result: {
+      path: path.resolve(repoPath),
+      branch: args.executionAuthority.bindings.repository.branch,
+      remote: args.executionAuthority.bindings.repository.remote,
+      commit: currentToolkitCommit({ repo_path: repoPath })
+    },
+    child: {
+      script_path: path.resolve(scriptPath),
+      source_identity: sha256(fs.readFileSync(scriptPath)),
+      source_repository: path.resolve(repoPath),
+      source_commit: currentToolkitCommit({ repo_path: repoPath })
+    }
+  });
 }
 
 function runDelegatedRepoSync({ args, hubPath, repoPath, snapshot }) {
@@ -4800,19 +4689,18 @@ function runDelegatedRepoSync({ args, hubPath, repoPath, snapshot }) {
     hubPath,
     '--skip-repo-auto-update',
     '--suppress-update-report',
-    '--delegated-authority-v2',
+    '--delegated-invocation-authority',
     '--audit'
   ];
-  const result = consumeEffect(args, 'delegated.child.launch', { details: { scriptPath, envelope_digest: envelope.digest } }, () => runCommand(process.execPath, delegateArgs, {
+  assertActualMutationInput(args, 'delegated.child.launch', { details: { path: scriptPath } });
+  const result = runCommand(process.execPath, delegateArgs, {
     cwd: repoPath,
     timeout: 120000,
     input: `${JSON.stringify(envelope)}\n`
-  }));
-  args.effectTrace.delegated_receipt = {
-    envelope_digest: envelope.digest,
-    parent_authority_digest: envelope.parent_authority_digest,
-    parent_projection_digest: envelope.parent_projection_digest,
-    child_source_identity: envelope.child_source_identity,
+  });
+  args.delegatedReceipt = {
+    parent_invocation_id: envelope.parent_invocation_id,
+    child_source_identity: envelope.child.source_identity,
     exit_status: result.status
   };
   if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
@@ -4830,14 +4718,13 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
   }
 
-  recordSupportingEffect(args, 'repository.fetch', { reason: 'lock acquisition bounded by initial authority' });
   if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'repo-update', lock });
   const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
   if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'repo-update', lockedRawState });
   state = applyRequestedState(normalizedState(lockedRawState), args);
   assertSourceDowngradeAllowed(state, args);
   const lockedSnapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
-  freezeLockedProjection(args, { hubPath, rawState: lockedRawState, discoveries: lockedSnapshot.discoveries, testHooks });
+  beginMutationPhase(args, { lock, hubPath, rawState: lockedRawState, discoveries: lockedSnapshot.discoveries, testHooks });
   state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
 
   let statusState = state;
@@ -4859,7 +4746,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     } catch (error) {
       const details = error.repoUpdateDetails || {};
-      statusState = consumeEffect(args, 'failure-status.persist', { details: { status: error.repoUpdateStatus || 'skipped' } }, () => applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      statusState = runAuthorisedMutation(args, 'failure-status.persist', { details: { status: error.repoUpdateStatus || 'skipped' } }, () => applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
         fromCommit: details.fromCommit || '',
         toCommit: details.toCommit || '',
         error: details.error || error.message
@@ -4901,20 +4788,18 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       throw error;
     }
   } finally {
-    recordSupportingEffect(args, 'repository.fetch', { reason: 'exact owned lock release' });
     releaseLock(lock);
   }
 
   const refreshLock = acquireLock(path.dirname(hubPath), args);
   try {
     if (refreshLock.acquired) {
-      recordSupportingEffect(args, 'hub.state.write', { reason: 'relock acquisition bounded by initial authority' });
       if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'post-repo-refresh', refreshLock });
       const refreshRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || statusState;
       statusState = normalizedState(refreshRawState);
       assertSourceDowngradeAllowed(statusState, args);
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      freezeLockedProjection(args, { hubPath, rawState: refreshRawState, discoveries: snapshot.discoveries, testHooks });
+      beginMutationPhase(args, { lock: refreshLock, hubPath, rawState: refreshRawState, discoveries: snapshot.discoveries, testHooks });
       statusState = snapshot.state;
       plannedTargetSyncs = snapshot.plannedTargetSyncs;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
@@ -4924,7 +4809,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
     }
   } finally {
-    if (refreshLock.acquired) recordSupportingEffect(args, 'hub.state.write', { reason: 'exact owned relock release' });
     releaseLock(refreshLock);
   }
 
@@ -4936,14 +4820,13 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     let report = { state: failedState, reportPath: '' };
     try {
       if (relock.acquired) {
-        recordSupportingEffect(args, 'failure-status.persist', { reason: 'failure relock bounded by initial authority' });
         if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'delegated-failure', relock });
         const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || statusState;
         const latestState = normalizedState(latestRawState);
         assertSourceDowngradeAllowed(latestState, args);
         let projectionSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
-        freezeLockedProjection(args, { hubPath, rawState: latestRawState, discoveries: projectionSnapshot.discoveries, testHooks });
-        failedState = consumeEffect(args, 'failure-status.persist', { details: { status: 'sync-delegation-failed' } }, () => applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+        beginMutationPhase(args, { lock: relock, hubPath, rawState: latestRawState, discoveries: projectionSnapshot.discoveries, testHooks });
+        failedState = runAuthorisedMutation(args, 'failure-status.persist', { details: { status: 'sync-delegation-failed' } }, () => applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
           fromCommit: updateResult.fromCommit,
           toCommit: updateResult.toCommit,
           error: error.message
@@ -4980,7 +4863,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         snapshot = failedSnapshot;
       }
     } finally {
-      if (relock.acquired) recordSupportingEffect(args, 'failure-status.persist', { reason: 'exact owned failure relock release' });
       releaseLock(relock);
     }
     printUpdateReportLine(args, report.reportPath);
@@ -4998,13 +4880,12 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let report = { state: finalState, reportPath: '' };
   try {
     if (reportLock.acquired) {
-      recordSupportingEffect(args, 'report.create', { reason: 'report relock bounded by initial authority' });
       if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'final-report', reportLock });
       const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || finalState;
       const latestState = normalizedState(latestRawState);
       assertSourceDowngradeAllowed(latestState, args);
       let reportSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
-      freezeLockedProjection(args, { hubPath, rawState: latestRawState, discoveries: reportSnapshot.discoveries, testHooks });
+      beginMutationPhase(args, { lock: reportLock, hubPath, rawState: latestRawState, discoveries: reportSnapshot.discoveries, testHooks });
       const reportState = reportSnapshot.state;
       const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
         reportSnapshot.checksum === plannedChecksum &&
@@ -5037,7 +4918,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       snapshot = reportSnapshot;
     }
   } finally {
-    if (reportLock.acquired) recordSupportingEffect(args, 'report.create', { reason: 'exact owned report relock release' });
     releaseLock(reportLock);
   }
   printUpdateReportLine(args, report.reportPath);
@@ -5066,7 +4946,6 @@ function persistActiveNoTargetWrite({
   }
 
   try {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'lock acquisition bounded by initial authority' });
     if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'no-target', lock });
     const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
     if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'no-target', latestRawState });
@@ -5074,7 +4953,7 @@ function persistActiveNoTargetWrite({
     assertSourceDowngradeAllowed(latestState, args);
     let state = applyRequestedState(latestState, args);
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
-    freezeLockedProjection(args, { hubPath, rawState: latestRawState, discoveries: snapshot.discoveries, testHooks });
+    beginMutationPhase(args, { lock, hubPath, rawState: latestRawState, discoveries: snapshot.discoveries, testHooks });
     state = snapshot.state;
     state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
     snapshot = { ...snapshot, state };
@@ -5084,7 +4963,7 @@ function persistActiveNoTargetWrite({
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(consumeEffect(args, 'target.destination.write', {
+      targetSyncs.push(runAuthorisedMutation(args, 'target.destination.write', {
         target: plan.target,
         action: scopeTargetAction(args, plan.target),
         details: { path: targetPath }
@@ -5109,7 +4988,6 @@ function persistActiveNoTargetWrite({
     }
     return { ...report, snapshot, persisted: true };
   } finally {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'exact owned lock release' });
     releaseLock(lock);
   }
 }
@@ -5153,13 +5031,6 @@ function preferenceOnlyAudit(args, hubPath, rawState) {
     bridge_version: BRIDGE_VERSION,
     dry_run: !args.write,
     execution_authority: args.executionAuthority,
-    authority_digest: args.executionAuthority.digest,
-    locked_projection_digest: args.effectTrace?.locked_projection_digest || '',
-    authorised_effects: args.executionAuthority.authorised_effects,
-    planned_effects: args.effectTrace?.planned_effects || [],
-    actual_effects: args.effectTrace?.actual_effects || [],
-    supporting_effects: args.effectTrace?.supporting_effects || [],
-    blocked_effects: args.effectTrace?.blocked_effects || [],
     requested_authority: { entrypoint: args.executionAuthority.entrypoint },
     authorised_actions: derivedActionSummary(args),
     eligible_actions: { preferences: authorityPreferenceFields(args) },
@@ -5186,18 +5057,16 @@ function runPreferenceOnly({ args, hubPath, rawState }) {
     return { status: 0, audit };
   }
   try {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'lock acquisition bounded by initial authority' });
     if (args.testHooks?.afterLockAcquired) args.testHooks.afterLockAcquired({ route: 'preference-only', lock });
     const latestRaw = readJsonIfExists(path.join(hubPath, 'state.json'));
     if (args.testHooks?.afterLockedStateRead) args.testHooks.afterLockedStateRead({ route: 'preference-only', latestRaw });
     assertRepoAutoUpdatePrerequisite(args, latestRaw);
-    freezeLockedProjection(args, { hubPath, rawState: latestRaw, discoveries: {}, testHooks: args.testHooks });
+    beginMutationPhase(args, { lock, hubPath, rawState: latestRaw, discoveries: {}, testHooks: args.testHooks });
     const next = applyPreferenceOnlyRawState(latestRaw, args);
-    consumeEffect(args, 'hub.state.write', { details: { fields: authorityPreferenceFields(args) } }, () => {
+    runAuthorisedMutation(args, 'hub.state.write', { details: { path: path.join(hubPath, 'state.json'), fields: authorityPreferenceFields(args) } }, () => {
       writeFileAtomically(path.join(hubPath, 'state.json'), `${JSON.stringify(next, null, 2)}\n`);
     });
   } finally {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'exact owned lock release' });
     releaseLock(lock);
   }
   if (args.audit) console.log(JSON.stringify({ ...audit, dry_run: false }, null, 2));
@@ -5213,7 +5082,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     return { status: 0, audit: null, checker_session_noop: true };
   }
   const args = parseArgs(argv);
-  args.delegatedEnvelope = readDelegatedEnvelope(args, testHooks);
+  args.delegatedEnvelope = readDelegatedAuthority(args, testHooks);
   if (
     requestedPreferenceFields(args).length &&
     !args.hook &&
@@ -5246,7 +5115,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     discoveries: authorityDiscoveries,
     delegatedEnvelope: args.delegatedEnvelope
   });
-  initializeEffectTrace(args, testHooks);
+  initializeInvocationRuntime(args, testHooks);
   if (args.preferenceOnly) return runPreferenceOnly({ args, hubPath, rawState: existingRawState });
   if (args.reconcileStaging) {
     assertSourceDowngradeAllowed(existingState, args);
@@ -5365,7 +5234,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   }
 
   try {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'lock acquisition bounded by initial authority' });
     if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'managed-write', lock });
     const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
     if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'managed-write', lockedRawState });
@@ -5373,7 +5241,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     assertSourceDowngradeAllowed(lockedState, args);
     nextState = applyRequestedState(lockedState, args);
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
-    freezeLockedProjection(args, { hubPath, rawState: lockedRawState, discoveries: snapshot.discoveries, testHooks });
+    beginMutationPhase(args, { lock, hubPath, rawState: lockedRawState, discoveries: snapshot.discoveries, testHooks });
     nextState = snapshot.state;
     nextState.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, nextState);
     snapshot = { ...snapshot, state: nextState };
@@ -5383,7 +5251,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(consumeEffect(args, 'target.destination.write', {
+      targetSyncs.push(runAuthorisedMutation(args, 'target.destination.write', {
         target: plan.target,
         action: scopeTargetAction(args, plan.target),
         details: { path: targetPath }
@@ -5427,7 +5295,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     else if (!args.hook) console.log('Toolkit local bridge sync complete.');
     return { status: 0, audit: finalAudit };
   } finally {
-    recordSupportingEffect(args, 'hub.state.write', { reason: 'exact owned lock release' });
     releaseLock(lock);
   }
 }
@@ -5462,6 +5329,8 @@ module.exports = {
   parseArgs,
   releaseLock,
   releaseRecoveryMarker,
+  assertActualMutationInput,
+  validatePhaseContext,
   run,
   adapterPayloads,
   ag2SkillsProjectionProof,

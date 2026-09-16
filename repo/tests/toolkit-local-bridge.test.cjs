@@ -25,7 +25,9 @@ const {
   classifyUpdateReport,
   maybeWriteUpdateReport,
   canonicalJson,
-  sha256
+  sha256,
+  assertActualMutationInput,
+  validatePhaseContext
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -48,7 +50,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.12.0';
+const expectedBridgeVersion = '2.12.1';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -554,7 +556,7 @@ function writeDriftingRealBridge(repoPath) {
   const marker = "  const existingRawState = readJsonIfExists(path.join(hubPath, 'state.json'));";
   assert.equal(source.includes(marker), true, 'delegated discovery seam marker must exist');
   const seam = [
-    "  if (args.delegatedV2 && process.env.TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B) {",
+    "  if (args.delegatedAuthority && process.env.TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B) {",
     "    const fixtureStatePath = path.join(hubPath, 'state.json');",
     "    const fixtureState = readJsonIfExists(fixtureStatePath);",
     "    fixtureState.targets.opencode.target_path = process.env.TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B;",
@@ -1007,7 +1009,207 @@ test('dry-run audit performs no writes and reports planned targets', () => {
   assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills$/);
 });
 
-test('execution authority v2 preserves the 16-case target-consent regression matrix', async (t) => {
+test('risk-first OpenCode managed-write phase binds the lock, fresh destination, and short-lived context', async (t) => {
+  const fixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const targetA = path.join(root, 'target-a', 'skills');
+    const targetB = path.join(root, 'target-b', 'skills');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      auto_sync_enabled: true,
+      update_report_enabled: false,
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: targetA,
+          synced_version: '1.0.0',
+          synced_checksum: 'stale'
+        }
+      }
+    });
+    return { root, hub, targetA, targetB };
+  };
+  const invoke = (item, hooks = {}) => runBridge([
+    '--hub', item.hub,
+    '--sync-enabled',
+    '--write',
+    '--suppress-update-report'
+  ], hooks);
+
+  await t.test('exact destination A succeeds and the context expires on release', () => {
+    const item = fixture();
+    let captured = null;
+    const result = invoke(item, { afterPhaseContextCreated({ context }) { captured = context; } });
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(path.join(item.targetA, 'ai-agent-toolkit', 'SKILL.md')), true);
+    assert.ok(captured);
+    assert.throws(() => validatePhaseContext(captured), /expired|lock was lost/);
+  });
+
+  await t.test('A to B drift after acquisition rejects before Bridge-managed writes', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      afterLockAcquired() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.targets.opencode.target_path = item.targetB;
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    }), /destination changed|authority-relevant state changed/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(item.targetB), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('A to B drift at the last boundary rejects before the first mutating helper', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      beforeFirstManagedEffect() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.targets.opencode.target_path = item.targetB;
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    }), /destination changed|authority-relevant state changed/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(item.targetB), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('lock replacement invalidates the context before the first mutating helper', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      beforeFirstManagedEffect() {
+        writeJson(path.join(path.dirname(item.hub), 'update.lock'), {
+          created_at: new Date().toISOString(),
+          pid: process.pid,
+          token: 'replacement-token'
+        });
+      }
+    }), /expired|lock was lost/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('unrelated metadata survives and does not reject authority', () => {
+    const item = fixture();
+    const result = invoke(item, {
+      afterLockAcquired() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.future_unrelated_metadata = { retained: true };
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    });
+    assert.equal(result.status, 0);
+    assert.deepEqual(readJson(path.join(item.hub, 'state.json')).future_unrelated_metadata, { retained: true });
+  });
+});
+
+test('actual helper inputs cannot substitute target, hub, repository, or native destinations', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const repo = path.join(root, 'repo');
+  const args = {
+    executionAuthority: {
+      actions: {
+        targets: { opencode: 'sync' },
+        hub: { state_write: true, manifest_write: true },
+        repository: { update: true, delegate_sync: true },
+        native: { cache_maintenance: true, hook_repair: true },
+        reports: {},
+        staging: {}
+      },
+      bindings: {
+        hub,
+        state_path: path.join(hub, 'state.json'),
+        manifest_path: path.join(hub, 'manifest.json'),
+        target_destinations: { opencode: target },
+        repository: { path: repo },
+        report_directory: updateReportDir()
+      }
+    }
+  };
+  assert.throws(() => assertActualMutationInput(args, 'target.destination.write', {
+    target: 'opencode', details: { path: path.join(root, 'target-b') }
+  }), /target writer input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'hub.state.write', {
+    details: { path: path.join(root, 'other-state.json') }
+  }), /hub state writer input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: path.join(root, 'other-repo') }
+  }), /repository helper input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'native.cache.maintenance', {
+    details: { path: path.join(root, 'other-native-cache') }
+  }), /native helper input does not match/);
+});
+
+test('fixed delegated payload accepts exact authority and rejects added actions, wrong source, and wrong repository result', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const base = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(target) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: {
+      script_path: script,
+      source_identity: sha256(fs.readFileSync(script)),
+      source_repository: repoRoot,
+      source_commit: commit
+    }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    auto_sync_enabled: true,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: target,
+        synced_version: '1.0.0',
+        synced_checksum: 'stale'
+      }
+    }
+  });
+  const invoke = (payload) => runBridge([
+    '--hub', hub,
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update',
+    '--suppress-update-report',
+    '--delegated-invocation-authority',
+    '--opencode-target', target
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) });
+
+  const success = invoke(base);
+  assert.equal(success.status, 0);
+  assert.equal(fs.existsSync(path.join(target, 'ai-agent-toolkit', 'SKILL.md')), true);
+
+  const addedAction = JSON.parse(JSON.stringify(base));
+  addedAction.actions.repository = { update: true };
+  assert.throws(() => invoke(addedAction), /invalid actions/);
+
+  const wrongSource = JSON.parse(JSON.stringify(base));
+  wrongSource.child.source_identity = '0'.repeat(64);
+  assert.throws(() => invoke(wrongSource), /child source identity mismatch/);
+
+  const wrongResult = JSON.parse(JSON.stringify(base));
+  wrongResult.repository_result.commit = '0'.repeat(40);
+  assert.throws(() => invoke(wrongResult), /repository result commit mismatch/);
+});
+
+test('invocation authority preserves the 16-case target-consent regression matrix', async (t) => {
   const staleState = (root, overrides = {}) => ({
     schema_version: 1,
     architecture_version: 2,
@@ -1172,25 +1374,25 @@ test('execution authority v2 preserves the 16-case target-consent regression mat
     const hub = path.join(root, 'hub', 'current');
     const config = path.join(root, 'opencode-config');
     const audit = parseLastJson(run(['--hub', hub, '--enable-target', 'opencode', '--opencode-config-dir', config], { env: isolatedHomeEnv(root) }).stdout);
-    assert.equal(audit.execution_authority.initial_bindings.target_destinations.opencode, path.resolve(config, 'skills'));
+    assert.equal(audit.execution_authority.bindings.target_destinations.opencode, path.resolve(config, 'skills'));
     assert.ok(audit.planned_writes.some((entry) => entry.kind === 'hub-adapter-subtree' && entry.target === 'opencode'));
     assert.ok(audit.planned_writes.some((entry) => entry.kind === 'managed-target-destination' && entry.target === 'opencode'));
     assert.equal(fs.existsSync(hub), false);
   });
 
-  await t.test('12 scope is digest-bound and immutable in exported audit JSON', () => {
+  await t.test('12 one fixed-shape authority carries exact actions and destinations', () => {
     const root = tmpRoot();
     const audit = parseLastJson(run(['--hub', path.join(root, 'hub', 'current'), '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) }).stdout);
-    assert.equal(audit.execution_authority.contract, 'toolkit.local-bridge.execution-authority.v2');
-    assert.match(audit.execution_authority.digest, /^[0-9a-f]{64}$/);
-    assert.match(audit.execution_authority.initial_bindings.initial_state_digest, /^[0-9a-f]{64}$/);
+    assert.equal(audit.execution_authority.contract, 'toolkit.local-bridge.invocation-authority.v1');
+    assert.deepEqual(audit.execution_authority.actions.targets, { opencode: 'enable-sync' });
+    assert.equal(audit.execution_authority.bindings.target_destinations.opencode, path.resolve(root, '.config', 'opencode', 'skills'));
   });
 
   await t.test('13 legacy write-mode delegated scope flags are rejected', () => {
     const root = tmpRoot();
     const result = run(['--hub', path.join(root, 'hub', 'current'), '--scope-target-sync', 'opencode', '--parent-scope-digest', 'bad', '--write'], { env: isolatedHomeEnv(root) });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /--parent-scope-digest requires one SHA-256 digest|delegated writes require --delegated-authority-v2/);
+    assert.match(result.stderr, /--parent-scope-digest requires one SHA-256 digest|delegated writes require --delegated-invocation-authority/);
   });
 
   await t.test('14 report status collection is read-only', () => {
@@ -1230,154 +1432,6 @@ test('execution authority v2 preserves the 16-case target-consent regression mat
       beforeHubPayloadWrite() { throw new Error('selected target failure'); }
     }), /selected target failure/);
     assert.deepEqual(snapshotTree(ag2Adapter), before);
-  });
-});
-
-test('execution authority v2 schema and adversarial lock/effect matrix', async (t) => {
-  const schema = readJson(path.join(repoRoot, 'repo', 'contracts', 'toolkit-local-bridge', 'execution-authority-v2.schema.json'));
-  await t.test('01 one schema defines root, effects, resources, projection, receipts, and delegation', () => {
-    assert.equal(schema.$id, 'toolkit.local-bridge.execution-authority.v2');
-    for (const name of ['executionAuthority', 'effectRecord', 'resourceBinding', 'initialBindings', 'lockedProjection', 'plannedEffect', 'actualEffect', 'supportingEffect', 'blockedEffect', 'delegatedEnvelope']) {
-      assert.ok(schema.$defs[name], `missing schema definition ${name}`);
-    }
-  });
-
-  const stateFor = (root) => ({
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: expectedBridgeVersion,
-    bridge_versions_by_source: { repo: expectedBridgeVersion },
-    auto_sync_enabled: false,
-    update_report_enabled: false,
-    update_report_retention_days: 7,
-    targets: {
-      opencode: {
-        enabled: true,
-        explicitly_disabled: false,
-        target_path: path.join(root, 'destination-a', 'skills'),
-        synced_version: '1.0.0',
-        synced_checksum: 'stale'
-      },
-      ag2: { enabled: false, explicitly_disabled: true }
-    }
-  });
-
-  await t.test('02 F1 destination A to B after lock fails before cleanup or managed effects', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), stateFor(root));
-    const before = snapshotTree(hub);
-    assert.throws(() => runBridge(['--hub', hub, '--disable-target', 'opencode', '--write'], {
-      afterLockAcquired() {
-        const state = readJson(path.join(hub, 'state.json'));
-        state.targets.opencode.target_path = path.join(root, 'destination-b', 'skills');
-        writeJson(path.join(hub, 'state.json'), state);
-      }
-    }), /destination changed while waiting for the lock: opencode/);
-    assert.equal(fs.existsSync(path.join(hub, 'manifest.json')), false);
-    assert.equal(fs.existsSync(path.join(hub, 'adapters')), false);
-    assert.notDeepEqual(snapshotTree(hub), before, 'only the deterministic competing-writer fixture changes state');
-  });
-
-  await t.test('03 exact destination target state write succeeds with planned/actual equality', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), stateFor(root));
-    const result = run(['--hub', hub, '--disable-target', 'opencode', '--write', '--audit'], { env: isolatedHomeEnv(root) });
-    assert.equal(result.status, 0, result.stderr);
-    const audit = parseLastJson(result.stdout);
-    assert.equal(readJson(path.join(hub, 'state.json')).targets.opencode.explicitly_disabled, true);
-    assert.equal(audit.effect_reconciliation.exact, true);
-    assert.ok(audit.actual_effects.some((effect) => effect.kind === 'hub.state.write'));
-  });
-
-  await t.test('04 drift after projection but before first managed effect fails closed', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), stateFor(root));
-    assert.throws(() => runBridge(['--hub', hub, '--disable-target', 'opencode', '--write'], {
-      beforeFirstManagedEffect() {
-        const state = readJson(path.join(hub, 'state.json'));
-        state.targets.opencode.target_path = path.join(root, 'destination-b', 'skills');
-        writeJson(path.join(hub, 'state.json'), state);
-      }
-    }), /locked state changed after projection freeze|destination changed/);
-    assert.equal(fs.existsSync(path.join(hub, 'manifest.json')), false);
-  });
-
-  await t.test('05 no-target persistence consumes only exact hub effects', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), {
-      schema_version: 1,
-      architecture_version: 2,
-      hub_version: expectedBridgeVersion,
-      bridge_versions_by_source: { repo: expectedBridgeVersion },
-      auto_sync_enabled: false,
-      update_report_enabled: false,
-      targets: {}
-    });
-    const result = run(['--hub', hub, '--sync-enabled', '--write', '--audit'], { env: isolatedHomeEnv(root) });
-    assert.equal(result.status, 0, result.stderr);
-    const audit = parseLastJson(result.stdout);
-    assert.equal(audit.effect_reconciliation.exact, true);
-    assert.deepEqual([...new Set(audit.actual_effects.map((effect) => effect.kind))].sort(), ['hub.manifest.write', 'hub.state.write']);
-  });
-
-  await t.test('06 no-target locked-state drift fails before hub persistence', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), {
-      schema_version: 1,
-      architecture_version: 2,
-      hub_version: expectedBridgeVersion,
-      bridge_versions_by_source: { repo: expectedBridgeVersion },
-      auto_sync_enabled: false,
-      update_report_enabled: false,
-      targets: {},
-      fixture: 'a'
-    });
-    assert.throws(() => runBridge(['--hub', hub, '--sync-enabled', '--write'], {
-      beforeFirstManagedEffect() {
-        const state = readJson(path.join(hub, 'state.json'));
-        state.fixture = 'b';
-        writeJson(path.join(hub, 'state.json'), state);
-      }
-    }), /locked state changed after projection freeze/);
-    assert.equal(fs.existsSync(path.join(hub, 'manifest.json')), false);
-  });
-
-  await t.test('07 suppression grants no report effects while another authorised write succeeds', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), stateFor(root));
-    const result = run(['--hub', hub, '--disable-target', 'opencode', '--suppress-update-report', '--write', '--audit'], { env: isolatedHomeEnv(root) });
-    assert.equal(result.status, 0, result.stderr);
-    const audit = parseLastJson(result.stdout);
-    assert.equal(audit.authorised_effects.some((effect) => effect.kind.startsWith('report.')), false);
-    assert.equal(audit.actual_effects.some((effect) => effect.kind.startsWith('report.')), false);
-    assert.equal(readJson(path.join(hub, 'state.json')).targets.opencode.enabled, false);
-  });
-
-  await t.test('08 canonical audit fields are present and every actual effect maps exactly once', () => {
-    const root = tmpRoot();
-    const hub = path.join(root, 'hub', 'current');
-    writeJson(path.join(hub, 'state.json'), stateFor(root));
-    const result = run(['--hub', hub, '--disable-target', 'opencode', '--write', '--audit'], { env: isolatedHomeEnv(root) });
-    const audit = parseLastJson(result.stdout);
-    for (const field of ['authority_digest', 'locked_projection_digest', 'authorised_effects', 'planned_effects', 'actual_effects', 'supporting_effects', 'blocked_effects']) assert.ok(Object.hasOwn(audit, field));
-    assert.match(audit.authority_digest, /^[0-9a-f]{64}$/);
-    assert.match(audit.locked_projection_digest, /^[0-9a-f]{64}$/);
-    assert.equal(audit.effect_reconciliation.exact, true);
-  });
-
-  await t.test('09-20 effect classes cover repo, delegation, reports, staging, native, repair, and failure persistence', () => {
-    const kinds = new Set(schema.$defs.effectKind.enum);
-    for (const kind of [
-      'repository.fetch', 'repository.switch', 'repository.fast-forward-merge', 'delegated.child.launch',
-      'report.cleanup', 'report.create', 'report.open', 'staging.reconcile', 'native.cache.maintenance',
-      'third-party.hook.repair', 'failure-status.persist', 'target.destination.remove'
-    ]) assert.equal(kinds.has(kind), true, `missing effect kind ${kind}`);
   });
 });
 
@@ -1442,7 +1496,7 @@ test('report cleanup follows immutable report-maintenance authority inside the w
     assert.equal(state.last_update_report_cleanup.skipped_count, 1);
     const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
     assert.equal(audit.authorised_actions.report_maintenance, false);
-    assert.equal(audit.planned_writes.some((entry) => entry.kind === 'report.cleanup'), false);
+    assert.equal(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'), false);
     assert.equal(audit.update_report_cleanup.skipped_count, 1);
   });
 
@@ -1458,8 +1512,115 @@ test('report cleanup follows immutable report-maintenance authority inside the w
     assert.equal(fs.existsSync(fixture.reportPath), false);
     const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
     assert.equal(audit.authorised_actions.report_maintenance, true);
-    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'report.cleanup'));
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'));
     assert.equal(audit.update_report_cleanup.deleted_count, 1);
+  });
+
+  await t.test('cleanup inventory failure performs no cleanup and never rescans', () => {
+    const fixture = createFixture();
+    const protectedReport = path.join(updateReportDir(), `toolkit-update-20000101-000001-${process.pid}.md`);
+    writeFile(protectedReport, '# protected report\n');
+    const result = runBridge([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write'
+    ], {
+      listUpdateReportCandidates() { throw new Error('synthetic inventory failure'); }
+    });
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(protectedReport), true);
+    fs.rmSync(protectedReport, { force: true });
+  });
+
+  await t.test('a report injected after the bounded inventory is never deleted', () => {
+    const fixture = createFixture();
+    const inventoried = path.join(updateReportDir(), `toolkit-update-20000101-000002-${process.pid}.md`);
+    const injected = path.join(updateReportDir(), `toolkit-update-20000101-000003-${process.pid}.md`);
+    writeFile(inventoried, '# inventoried report\n');
+    const expired = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(inventoried, expired, expired);
+    runBridge([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write'
+    ], {
+      listUpdateReportCandidates() { return [inventoried]; },
+      beforeFirstManagedEffect() {
+        writeFile(injected, '# late report\n');
+        fs.utimesSync(injected, expired, expired);
+      }
+    });
+    assert.equal(fs.existsSync(inventoried), false);
+    assert.equal(fs.existsSync(injected), true);
+    fs.rmSync(injected, { force: true });
+  });
+});
+
+test('report creation is exclusive, bounded, and never clobbers a collision', async (t) => {
+  const fixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      auto_sync_enabled: true,
+      update_report_enabled: true,
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: path.join(root, 'opencode', 'skills'),
+          synced_version: '1.0.0',
+          synced_checksum: 'stale'
+        }
+      }
+    });
+    return { root, hub };
+  };
+  const invoke = (item, hooks) => runBridge([
+    '--hub', item.hub,
+    '--hook',
+    '--sync-enabled',
+    '--sync-source', 'repo',
+    '--write'
+  ], { listUpdateReportCandidates() { return []; }, ...hooks });
+
+  await t.test('one occupied candidate is preserved and a later exclusive candidate succeeds', () => {
+    const item = fixture();
+    let occupied = '';
+    const result = invoke(item, {
+      beforeReportCreation({ reportPath, attempt }) {
+        if (attempt === 0) {
+          occupied = reportPath;
+          writeFile(reportPath, '# existing report\n');
+        }
+      }
+    });
+    assert.equal(result.status, 0);
+    const created = readJson(path.join(item.hub, 'state.json')).last_update_report_path;
+    assert.ok(created);
+    assert.notEqual(path.resolve(created), path.resolve(occupied));
+    assert.equal(fs.readFileSync(occupied, 'utf8'), '# existing report\n');
+    fs.rmSync(occupied, { force: true });
+    fs.rmSync(created, { force: true });
+  });
+
+  await t.test('bounded collision exhaustion fails without clobbering any occupied candidate', () => {
+    const item = fixture();
+    const occupied = [];
+    assert.throws(() => invoke(item, {
+      beforeReportCreation({ reportPath }) {
+        occupied.push(reportPath);
+        writeFile(reportPath, '# existing report\n');
+      }
+    }), /exclusive update report creation exhausted bounded attempts/);
+    assert.equal(occupied.length, 20);
+    for (const reportPath of occupied) {
+      assert.equal(fs.readFileSync(reportPath, 'utf8'), '# existing report\n');
+      fs.rmSync(reportPath, { force: true });
+    }
   });
 });
 
@@ -4621,17 +4782,16 @@ test('hook report includes external repo advance and OpenCode target sync', () =
   assert.match(report.text, /target sync status: `synced`/);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.delegated_receipt.exit_status, 0);
-  assert.match(audit.delegated_receipt.envelope_digest, /^[0-9a-f]{64}$/);
-  assert.ok(audit.actual_effects.some((effect) => effect.kind === 'delegated.child.launch'));
+  assert.match(audit.delegated_receipt.child_source_identity, /^[0-9a-f]{64}$/);
 });
 
-test('delegated v2 real child rejects parent destination A versus child discovery B before target writes', () => {
+test('fixed delegated child rejects parent destination A versus child discovery B before target writes', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   const targetA = path.join(fixture.root, 'target-a', 'skills');
   const targetB = path.join(fixture.root, 'target-b', 'skills');
   writeRealBridgeDelegator(fixture.repo);
-  commitAll(fixture.repo, 'install exact delegated v2 child');
+  commitAll(fixture.repo, 'install exact delegated child');
   git(fixture.repo, ['push', 'origin', 'main']);
   fixture.initialCommit = currentCommit(fixture.repo);
   git(fixture.upstream, ['fetch', 'origin', 'main']);
@@ -4664,7 +4824,7 @@ test('delegated v2 real child rejects parent destination A versus child discover
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /delegated v2 initial state binding changed|delegated v2 destination changed|Execution authority destination changed/);
+  assert.match(result.stdout, /delegated target destination binding mismatch|Execution authority destination changed|authority-relevant state changed/);
   assert.deepEqual(snapshotTree(targetA), targetABefore);
   assert.equal(fs.existsSync(targetB), false);
   assert.notEqual(readJson(path.join(hub, 'state.json')).last_repo_update_status, 'sync-delegation-failed', 'drift blocks even failure-status persistence');
@@ -5527,13 +5687,12 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
     hub,
     '--skip-repo-auto-update',
     '--suppress-update-report',
-    '--delegated-authority-v2',
+    '--delegated-invocation-authority',
     '--audit'
   ]);
-  assert.equal(delegateReceipts[0].envelope.contract, 'toolkit.local-bridge.delegated-authority-envelope.v2');
-  assert.match(delegateReceipts[0].envelope.digest, /^[0-9a-f]{64}$/);
-  assert.equal(delegateReceipts[0].envelope.updated_source_commit, updatedCommit);
-  assert.ok(delegateReceipts[0].envelope.effects.some((effect) => effect.target === 'ag2'));
+  assert.equal(delegateReceipts[0].envelope.contract, 'toolkit.local-bridge.delegated-invocation-authority.v1');
+  assert.equal(delegateReceipts[0].envelope.repository_result.commit, updatedCommit);
+  assert.equal(delegateReceipts[0].envelope.actions.targets.ag2, 'sync');
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'updated');
   assert.equal(state.bridge_versions_by_source.repo, '9.9.9');
@@ -5780,63 +5939,6 @@ test('central report classification opens only actionable reports', () => {
   assert.equal(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'partial-failed' } }).actionable, true);
   assert.equal(classifyUpdateReport({ ...base, targetSyncStatus: 'failed' }).actionable, true);
 
-  const writes = [];
-  const opens = [];
-  const createdPaths = [];
-  const invoke = (context) => {
-    const root = tmpRoot();
-    const hubPath = path.join(root, 'hub', 'current');
-    const rawState = { update_report_enabled: true };
-    writeJson(path.join(hubPath, 'state.json'), rawState);
-    const candidate = path.join(updateReportDir(), `toolkit-update-20991231-2359${String(writes.length + 10).slice(-2)}.md`);
-    fs.rmSync(candidate, { force: true });
-    const effects = [
-      { effect_id: 'create', kind: 'report.create', resource_id: 'report-create', delegable: false },
-      { effect_id: 'open', kind: 'report.open', resource_id: 'report-open', delegable: false }
-    ];
-    const args = {
-      hook: true,
-      repoUpdateNow: false,
-      openUpdateReport: false,
-      suppressUpdateReport: false,
-      syncSource: 'repo',
-      executionAuthority: {
-        initial_bindings: { hub: hubPath, report_directory: updateReportDir(), target_destinations: {} },
-        authorised_effects: effects,
-        resources: []
-      },
-      lockedProjection: {
-        digest: 'a'.repeat(64),
-        locked_state_digest: sha256(canonicalJson(rawState)),
-        authorised_effects: effects,
-        resources: [
-          { resource_id: 'report-create', resource_type: 'file', identity: candidate, path: candidate },
-          { resource_id: 'report-open', resource_type: 'file', identity: candidate, path: candidate }
-        ]
-      },
-      effectTrace: { planned_effects: [], actual_effects: [], blocked_effects: [], supporting_effects: [], occurrences: {}, before_first_managed_effect: false },
-      testHooks: {}
-    };
-    const result = maybeWriteUpdateReport({
-      args,
-      hubPath,
-      state: { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 },
-      checksum: 'fixture',
-      context,
-      writeReport(markdown, exactPath) { writes.push(markdown); writeFile(exactPath, markdown); createdPaths.push(exactPath); return exactPath; },
-      openReport(reportPath) { opens.push(reportPath); return { ok: true }; },
-    });
-    return result;
-  };
-  invoke({ ...base, repo: { status: 'updated' } });
-  assert.equal(writes.length, 1);
-  assert.equal(opens.length, 0);
-  invoke({ ...base, repo: { status: 'validation-failed' } });
-  assert.equal(writes.length, 2);
-  assert.deepEqual(opens, [createdPaths[1]]);
-  invoke(base);
-  assert.equal(writes.length, 2);
-  for (const reportPath of createdPaths) fs.rmSync(reportPath, { force: true });
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
