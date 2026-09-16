@@ -131,9 +131,13 @@ Recovery of a recoverable lock is race-safe through an atomic recovery claim and
 
 Release removes the lock only when the current lock file still carries that run's ownership token: a lock replaced by another process is never deleted, even by the process that previously owned that path. Marker release is equally token-guarded. Locks are released in normal success and caught-failure paths; recovery from abrupt process termination relies on the dead-owner rule above, not on cleanup code running after a forced kill.
 
-Every invocation resolves one immutable `toolkit.local-bridge.invocation-action-scope.v1` from the initial arguments, entry-point context, initial raw state, and concrete target destinations. The scope is SHA-256 digest-bound before execution. Lock-time revalidation may confirm, narrow, or reject it; a changed destination or attempted authority expansion fails closed. Delegated repo synchronization receives only exact target actions plus the parent scope digest.
+Every invocation resolves and deep-freezes one immutable `toolkit.local-bridge.execution-authority.v2` ceiling from its entrypoint, explicit request, initial raw state, concrete resources, and initial discoveries. The root authority is canonical-JSON/SHA-256 digest-bound. After acquiring the lock, the Bridge rereads state and resources, recomputes discovery, rejects destination or resource drift, and freezes a second digest-bound locked projection that may equal, narrow, or reject the initial ceiling but can never widen it. Only effects present in both objects can execute. The historical `invocation-action-scope-v1.schema.json` remains evidence only and is neither accepted nor emitted as executable write authority.
 
-`--write` is execution consent, not mutation authority. It performs no write unless the invocation scope contains an exact preference, target, repo-maintenance, native-maintenance, report-maintenance, or staging-reconciliation action. `--preference-only` may change only explicitly named global fields under the bridge lock. It does not discover or normalize target state, generate adapters, replace the hub, sync destinations, refresh native caches, repair hooks, update repositories, clean reports, or create maintenance reports.
+`--write` is execution consent, not mutation authority. It performs no write unless execution authority v2 contains the exact preference, target, repo, native, report, failure-status, delegation, or staging effect and the locked projection retains it. `--preference-only` may change only explicitly named global fields under the bridge lock. It does not discover or normalize target state, generate adapters, replace the hub, sync destinations, refresh native caches, repair hooks, update repositories, clean reports, or create maintenance reports.
+
+Canonical runtime audit evidence records `authority_digest`, `locked_projection_digest`, `authorised_effects`, `planned_effects`, `actual_effects`, `supporting_effects`, and `blocked_effects`. `planned_effects` is authoritative. The compatibility `planned_writes` view is derived only from its write/delete effects. Lock ownership, temp files, staging generations, and backups are supporting transaction effects bounded by the matching initial resource ceiling; they never grant a broader managed effect.
+
+Repo-update delegation uses one `toolkit.local-bridge.delegated-authority-envelope.v2` JSON object over the direct child process's stdin. The envelope binds the parent authority/projection, invocation, delegable effect IDs, exact targets/actions/destinations, hub, source repository and commit, child script identity, and initial bindings. The child recomputes the envelope digest, proves its own source identity, acquires the hub lock, rereads current state and discovery, and rejects any mismatch before writing. `--parent-scope-digest` and write-mode `--scope-target-sync` are retired.
 
 Target work is isolated. For each authorized target, the bridge stages, validates, and atomically replaces only `adapters/<target>` and that target's managed destination. Excluded target state, unknown fields, manifest target entries, adapter bytes, and destination bytes are preserved. Disable changes only the selected target's bounded state and leaves delivered files in place. Whole-hub replacement is not used for ordinary scoped target work.
 
@@ -430,11 +434,13 @@ Before the repo-update and target-sync work, the same startup hook also runs a p
 
 The delegated repo script builds the target payload from the updated local Toolkit repo `skills/` tree plus the small `ai-agent-toolkit` adapter skill. It must not use Codex or Claude private plugin caches as the skill payload source.
 
-The delegated command shape is:
+The delegated process shape is internal-only:
 
 ```powershell
-node <repo_path>/repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update
+node <repo_path>/repo/scripts/toolkit-local-bridge.cjs --write --sync-source repo --hub <same-hub> --skip-repo-auto-update --suppress-update-report --delegated-authority-v2 --audit
 ```
+
+The parent sends the canonical delegated v2 envelope on stdin. Flags and durable enabled-target state cannot add child effects, and delegated children do not independently clean, create, or open update reports.
 
 The hook validation is intentionally lighter than the full Node test suite so SessionStart stays short. Run the documented local checks manually before publication or broad maintenance changes:
 

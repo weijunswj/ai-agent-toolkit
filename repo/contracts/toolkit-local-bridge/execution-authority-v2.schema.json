@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.execution-authority.v2",
+  "title": "Toolkit Local Bridge execution authority v2",
+  "description": "The sole executable write authority for one Local Bridge invocation, including its immutable initial ceiling, locked projection, effect receipts, and delegated child envelope.",
+  "oneOf": [
+    { "$ref": "#/$defs/executionAuthority" },
+    { "$ref": "#/$defs/lockedProjection" },
+    { "$ref": "#/$defs/delegatedEnvelope" }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "effectKind": {
+      "enum": [
+        "preference.field.write",
+        "target.state.write",
+        "hub.state.write",
+        "hub.manifest.write",
+        "hub.adapter.replace",
+        "target.destination.write",
+        "target.destination.remove",
+        "staging.reconcile",
+        "report.cleanup",
+        "report.create",
+        "report.open",
+        "repository.fetch",
+        "repository.switch",
+        "repository.fast-forward-merge",
+        "delegated.child.launch",
+        "native.cache.maintenance",
+        "third-party.hook.repair",
+        "failure-status.persist"
+      ]
+    },
+    "resourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "resource_type", "identity"],
+      "properties": {
+        "resource_id": { "type": "string", "minLength": 1 },
+        "resource_type": {
+          "enum": ["file", "directory", "repository", "process", "field", "report-set", "logical"]
+        },
+        "identity": { "type": "string", "minLength": 1 },
+        "target": { "enum": ["opencode", "ag2"] },
+        "action": { "type": "string" },
+        "path": { "type": "string" },
+        "field": { "type": "string" },
+        "branch": { "type": "string" },
+        "remote": { "type": "string" },
+        "commit": { "type": "string" },
+        "candidate_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "effectRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect_id", "kind", "resource_id", "delegable"],
+      "properties": {
+        "effect_id": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/effectKind" },
+        "resource_id": { "type": "string", "minLength": 1 },
+        "delegable": { "type": "boolean" },
+        "target": { "enum": ["opencode", "ag2"] },
+        "action": { "type": "string" },
+        "occurrence": { "type": "integer", "minimum": 1 },
+        "projection_digest": { "$ref": "#/$defs/digest" },
+        "details_digest": { "$ref": "#/$defs/digest" },
+        "status": { "enum": ["authorised", "planned", "actual", "supporting", "blocked"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "initialBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hub", "initial_state_digest", "source_script", "source_identity", "target_destinations", "report_directory"],
+      "properties": {
+        "hub": { "type": "string", "minLength": 1 },
+        "initial_state_digest": { "$ref": "#/$defs/digest" },
+        "source_script": { "type": "string", "minLength": 1 },
+        "source_identity": { "type": "string", "minLength": 1 },
+        "source_repository": { "type": "string" },
+        "source_commit": { "type": "string" },
+        "target_destinations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opencode": { "type": "string" },
+            "ag2": { "type": "string" }
+          }
+        },
+        "report_directory": { "type": "string", "minLength": 1 },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "branch", "remote"],
+          "properties": {
+            "path": { "type": "string" },
+            "branch": { "type": "string" },
+            "remote": { "type": "string" }
+          }
+        }
+      }
+    },
+    "executionAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "invocation_id", "entrypoint", "write_requested", "sync_source", "initial_bindings", "resources", "authorised_effects", "digest"],
+      "properties": {
+        "contract": { "const": "toolkit.local-bridge.execution-authority.v2" },
+        "invocation_id": { "type": "string", "minLength": 1 },
+        "entrypoint": { "enum": ["manual", "preference-only", "hook-maintenance", "repo-maintenance", "staging-reconciliation", "delegated-child"] },
+        "write_requested": { "type": "boolean" },
+        "sync_source": { "enum": ["repo", "codex-plugin", "claude-plugin"] },
+        "parent_envelope_digest": { "type": "string", "pattern": "^(?:|[0-9a-f]{64})$" },
+        "initial_bindings": { "$ref": "#/$defs/initialBindings" },
+        "resources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/resourceBinding" }
+        },
+        "authorised_effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effectRecord" }
+        },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "lockedProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "authority_digest", "lock_domain", "locked_state_digest", "resources", "authorised_effects", "digest"],
+      "properties": {
+        "contract": { "const": "toolkit.local-bridge.execution-authority.locked-projection.v2" },
+        "authority_digest": { "$ref": "#/$defs/digest" },
+        "lock_domain": { "type": "string", "minLength": 1 },
+        "locked_state_digest": { "$ref": "#/$defs/digest" },
+        "resources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/resourceBinding" }
+        },
+        "authorised_effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effectRecord" }
+        },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "delegatedEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "parent_authority_digest", "parent_projection_digest", "parent_invocation_id", "delegable_effect_ids", "effects", "resources", "hub", "source_repository", "updated_source_commit", "child_script_path", "child_source_identity", "initial_bindings", "digest"],
+      "properties": {
+        "contract": { "const": "toolkit.local-bridge.delegated-authority-envelope.v2" },
+        "parent_authority_digest": { "$ref": "#/$defs/digest" },
+        "parent_projection_digest": { "$ref": "#/$defs/digest" },
+        "parent_invocation_id": { "type": "string", "minLength": 1 },
+        "delegable_effect_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effectRecord" }
+        },
+        "resources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/resourceBinding" }
+        },
+        "hub": { "type": "string", "minLength": 1 },
+        "source_repository": { "type": "string", "minLength": 1 },
+        "updated_source_commit": { "type": "string", "minLength": 1 },
+        "child_script_path": { "type": "string", "minLength": 1 },
+        "child_source_identity": { "type": "string", "minLength": 1 },
+        "initial_bindings": { "$ref": "#/$defs/initialBindings" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "plannedEffect": {
+      "allOf": [{ "$ref": "#/$defs/effectRecord" }, { "properties": { "status": { "const": "planned" } } }]
+    },
+    "actualEffect": {
+      "allOf": [{ "$ref": "#/$defs/effectRecord" }, { "properties": { "status": { "const": "actual" } } }]
+    },
+    "supportingEffect": {
+      "allOf": [{ "$ref": "#/$defs/effectRecord" }, { "properties": { "status": { "const": "supporting" } } }]
+    },
+    "blockedEffect": {
+      "allOf": [{ "$ref": "#/$defs/effectRecord" }, { "properties": { "status": { "const": "blocked" } } }]
+    }
+  }
+}
