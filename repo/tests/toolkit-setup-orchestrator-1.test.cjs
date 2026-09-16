@@ -285,7 +285,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.deepEqual(fs.readFileSync(configPath, 'utf8'), 'model = "gpt-5.6"\n');
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
-  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
+  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --preference-only --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
 });

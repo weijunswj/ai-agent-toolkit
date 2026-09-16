@@ -31,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.11.6';
+const BRIDGE_VERSION = '2.11.7';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -42,6 +42,7 @@ const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const AG2_PROOF_CONTRACT_VERSION = 'toolkit.local-bridge.ag2-skills-projection-proof.v1';
+const INVOCATION_ACTION_SCOPE_CONTRACT = 'toolkit.local-bridge.invocation-action-scope.v1';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -160,12 +161,15 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     argv,
     write: false,
+    preferenceOnly: false,
     audit: false,
     hook: false,
     syncEnabled: false,
     forceDowngrade: false,
     enableTargets: [],
     disableTargets: [],
+    scopedSyncTargets: [],
+    parentScopeDigest: '',
     enableAutoSync: false,
     disableAutoSync: false,
     enableRepoAutoUpdate: false,
@@ -199,6 +203,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
     if (arg === '--write') args.write = true;
+    else if (arg === '--preference-only') args.preferenceOnly = true;
     else if (arg === '--audit') args.audit = true;
     else if (arg === '--hook') args.hook = true;
     else if (arg === '--sync-enabled') args.syncEnabled = true;
@@ -237,6 +242,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
     else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--disable-target=')) args.disableTargets.push(...parseListValue(arg.slice('--disable-target='.length)));
+    else if (arg === '--scope-target-sync') args.scopedSyncTargets.push(...parseListValue(next()));
+    else if (arg.startsWith('--scope-target-sync=')) args.scopedSyncTargets.push(...parseListValue(arg.slice('--scope-target-sync='.length)));
+    else if (arg === '--parent-scope-digest') args.parentScopeDigest = next();
+    else if (arg.startsWith('--parent-scope-digest=')) args.parentScopeDigest = arg.slice('--parent-scope-digest='.length);
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--sync-source') args.syncSource = next();
@@ -259,8 +268,18 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  for (const target of [...args.enableTargets, ...args.disableTargets]) {
+  for (const target of [...args.enableTargets, ...args.disableTargets, ...args.scopedSyncTargets]) {
     if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  }
+  args.enableTargets = [...new Set(args.enableTargets)];
+  args.disableTargets = [...new Set(args.disableTargets)];
+  args.scopedSyncTargets = [...new Set(args.scopedSyncTargets)];
+  const contradictoryTargets = args.enableTargets.filter((target) => args.disableTargets.includes(target));
+  if (contradictoryTargets.length) {
+    throw new Error(`Targets cannot be enabled and disabled in one invocation: ${contradictoryTargets.join(', ')}`);
+  }
+  if (args.parentScopeDigest && !/^[0-9a-f]{64}$/i.test(args.parentScopeDigest)) {
+    throw new Error('--parent-scope-digest requires one SHA-256 digest');
   }
   if (!SYNC_SOURCES.includes(args.syncSource)) {
     throw new Error(`--sync-source must be repo, codex-plugin, or claude-plugin: ${args.syncSource}`);
@@ -301,6 +320,159 @@ function assertReconciliationCommandArgs(args) {
   }
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function requestedPreferenceFields(args) {
+  const fields = [];
+  if (args.enableAutoSync || args.disableAutoSync) fields.push('auto_sync_enabled');
+  if (args.enableRepoAutoUpdate || args.disableRepoAutoUpdate) {
+    fields.push('repo_auto_update_enabled', 'last_repo_update_status', 'last_repo_update_error');
+  }
+  if (args.repoPath) fields.push('repo_path');
+  if (args.repoBranch) fields.push('repo_branch');
+  if (args.repoRemote) fields.push('repo_remote');
+  if (args.enableUpdateReports || args.disableUpdateReports) fields.push('update_report_enabled');
+  if (args.updateReportRetentionDaysExplicit) fields.push('update_report_retention_days');
+  if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) {
+    fields.push('update_report_open_enabled', 'update_report_open_behavior', 'legacy_update_report_open_migrated');
+  }
+  if (args.enableCodexPluginAutoRefresh || args.disableCodexPluginAutoRefresh) fields.push('codex_plugin_auto_refresh_enabled');
+  return [...new Set(fields)].sort();
+}
+
+function resolveInvocationActionScope({ args, hubPath, rawState, discoveries }) {
+  const preferenceFields = requestedPreferenceFields(args);
+  const targetActions = {};
+  for (const target of args.enableTargets) targetActions[target] = 'enable-sync';
+  for (const target of args.disableTargets) targetActions[target] = 'disable';
+  for (const target of args.scopedSyncTargets) {
+    if (!targetActions[target]) targetActions[target] = 'sync';
+  }
+  const durableTargetsMayAuthorize = (!args.hook && args.syncEnabled) || (args.hook && rawState?.auto_sync_enabled === true);
+  if (durableTargetsMayAuthorize) {
+    for (const target of SUPPORTED_TARGETS) {
+      const persisted = rawState?.targets?.[target];
+      if (!targetActions[target] && persisted?.enabled === true && persisted?.explicitly_disabled !== true) {
+        targetActions[target] = 'sync';
+      }
+    }
+  }
+
+  const repoMaintenance = Boolean(
+    !args.preferenceOnly &&
+    !args.skipRepoAutoUpdate &&
+    (args.repoUpdateNow || args.hook) &&
+    rawState?.repo_auto_update_enabled === true
+  );
+  const nativeMaintenance = Boolean(
+    !args.preferenceOnly &&
+    args.hook &&
+    args.syncSource === 'codex-plugin' &&
+    rawState?.codex_plugin_auto_refresh_enabled === true
+  );
+  const reportMaintenance = Boolean(
+    !args.preferenceOnly &&
+    !args.suppressUpdateReport &&
+    (args.hook || repoMaintenance || Object.keys(targetActions).length)
+  );
+  const requestedActions = {
+    preferences: preferenceFields,
+    targets: Object.fromEntries(Object.entries(targetActions).sort(([left], [right]) => left.localeCompare(right))),
+    repo_maintenance: repoMaintenance,
+    native_maintenance: nativeMaintenance,
+    report_maintenance: reportMaintenance,
+    staging_reconciliation: args.reconcileStaging || ''
+  };
+  const destinations = Object.fromEntries(Object.keys(targetActions).sort().map((target) => [
+    target,
+    discoveries?.[target]?.target_path ? path.resolve(discoveries[target].target_path) : ''
+  ]));
+  const unsigned = {
+    contract: INVOCATION_ACTION_SCOPE_CONTRACT,
+    entrypoint: args.reconcileStaging
+      ? 'staging-reconciliation'
+      : (args.preferenceOnly ? 'preference-only' : (args.hook ? 'hook-maintenance' : (args.repoUpdateNow ? 'repo-maintenance' : 'manual'))),
+    write_requested: args.write === true,
+    hub: path.resolve(hubPath),
+    sync_source: args.syncSource,
+    parent_scope_digest: args.parentScopeDigest || '',
+    initial_state_digest: sha256(canonicalJson(rawState || null)),
+    requested_actions: requestedActions,
+    authorised_actions: requestedActions,
+    destinations
+  };
+  const scope = { ...unsigned, digest: sha256(canonicalJson(unsigned)) };
+  return deepFreeze(scope);
+}
+
+function scopeTargetAction(args, target) {
+  return args.invocationActionScope?.authorised_actions?.targets?.[target] || '';
+}
+
+function scopeAllowsTargetState(args, target) {
+  return ['enable-sync', 'disable', 'sync'].includes(scopeTargetAction(args, target));
+}
+
+function scopeAllowsTargetSync(args, target) {
+  return ['enable-sync', 'sync'].includes(scopeTargetAction(args, target));
+}
+
+function scopeHasExecutableWrite(args) {
+  const actions = args.invocationActionScope?.authorised_actions;
+  return Boolean(
+    actions && (
+      actions.preferences?.length ||
+      Object.keys(actions.targets || {}).length ||
+      actions.repo_maintenance ||
+      actions.native_maintenance ||
+      actions.report_maintenance ||
+      actions.staging_reconciliation
+    )
+  );
+}
+
+function revalidateInvocationScope(args, discoveries) {
+  for (const target of Object.keys(args.invocationActionScope?.authorised_actions?.targets || {})) {
+    const lockedDestination = discoveries?.[target]?.target_path
+      ? path.resolve(discoveries[target].target_path)
+      : '';
+    const authorisedDestination = args.invocationActionScope.destinations[target] || '';
+    if (lockedDestination !== authorisedDestination) {
+      throw new Error(`Invocation action scope destination changed while waiting for the lock: ${target}`);
+    }
+  }
+  return true;
+}
+
+function assertPreferenceBoundary(args) {
+  if (!args.preferenceOnly) return;
+  const incompatible = [];
+  if (args.hook) incompatible.push('--hook');
+  if (args.syncEnabled) incompatible.push('--sync-enabled');
+  if (args.repoUpdateNow) incompatible.push('--repo-update-now');
+  if (args.reconcileStaging) incompatible.push('--reconcile-staging');
+  if (args.enableTargets.length) incompatible.push('--enable-target');
+  if (args.disableTargets.length) incompatible.push('--disable-target');
+  if (args.scopedSyncTargets.length) incompatible.push('--scope-target-sync');
+  if (args.setAg2PythonCommand) incompatible.push('--set-ag2-python-command');
+  if (incompatible.length) throw new Error(`--preference-only cannot be combined with: ${incompatible.join(', ')}`);
+  if (!requestedPreferenceFields(args).length) {
+    throw new Error('--preference-only requires at least one explicit global preference');
+  }
+}
+
 function printHelp() {
   console.log([
     'Toolkit Local Bridge updater',
@@ -321,6 +493,8 @@ function printHelp() {
     'Options:',
     '  --enable-target opencode|ag2',
     '  --disable-target opencode|ag2',
+    '  --preference-only',
+    '  --scope-target-sync opencode|ag2 (delegated/internal)',
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
@@ -2490,19 +2664,26 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
     opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
     ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
   };
-  updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  updateTargetState(
-    nextState,
-    'ag2',
-    discoveries.ag2,
-    checksum,
-    false,
-    nextState.targets.ag2.enabled
-      ? (discoveries.ag2.projection_proof?.status === 'PROVEN' ? '' : 'AG2_PROOF_UNAVAILABLE')
-      : 'not enabled'
-  );
+  if (scopeAllowsTargetState(args, 'opencode')) {
+    updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
+  }
+  if (scopeAllowsTargetState(args, 'ag2')) {
+    updateTargetState(
+      nextState,
+      'ag2',
+      discoveries.ag2,
+      checksum,
+      false,
+      nextState.targets.ag2.enabled
+        ? (discoveries.ag2.projection_proof?.status === 'PROVEN' ? '' : 'AG2_PROOF_UNAVAILABLE')
+        : 'not enabled'
+    );
+  }
+  const needsSyncTargets = SUPPORTED_TARGETS
+    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
   const plannedTargetSyncs = SUPPORTED_TARGETS
-    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
+    .filter((target) => scopeAllowsTargetSync(args, target))
+    .filter((target) => needsSyncTargets.includes(target))
     .map((target) => targetSyncPlan(target, discoveries[target], payloads));
   const skippedTargets = SUPPORTED_TARGETS
     .filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled);
@@ -2514,6 +2695,8 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
     discoveries,
     payloads,
     checksum,
+    needsSyncTargets,
+    outOfScopeStaleTargets: needsSyncTargets.filter((target) => !scopeAllowsTargetSync(args, target)),
     plannedTargetSyncs,
     skippedTargets
   };
@@ -2568,34 +2751,77 @@ function withOwnedStaging(options, callback) {
   }
 }
 
-function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }, testHooks = {}) {
-  return withOwnedStaging({
-    target: hubPath,
-    stagePrefix: '.staging-',
-    operation: 'hub-snapshot-replacement',
-    sourceType: args.syncSource,
-    afterRegistration: testHooks.afterHubStagingRegistration,
-    beforeDelete: testHooks.beforeHubStagingCleanup
-  }, (stagePath, generation) => {
-    if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation });
-    if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation });
-    writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
-    writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
-    writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
-      state,
-      discoveries,
-      checksum,
-      sourceCommit,
-      syncSource: args.syncSource,
-      hubPath
-    }));
-    writeJson(path.join(stagePath, 'state.json'), state);
-    if (testHooks.afterHubPayloadWrite) testHooks.afterHubPayloadWrite({ stagePath, generation });
-    validateStagedHub(stagePath, checksum);
-    if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation });
-    if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation });
-    replaceDirectoryAtomically(stagePath, hubPath, testHooks.replaceDirectoryOptions || {});
-  });
+function scopedStateForPersistence(hubPath, state, args) {
+  const raw = readJsonIfExists(path.join(hubPath, 'state.json'));
+  const persisted = JSON.parse(JSON.stringify(state));
+  persisted.targets = persisted.targets && typeof persisted.targets === 'object' ? persisted.targets : {};
+  for (const target of SUPPORTED_TARGETS) {
+    if (scopeAllowsTargetState(args, target)) continue;
+    if (raw?.targets && Object.prototype.hasOwnProperty.call(raw.targets, target)) {
+      persisted.targets[target] = JSON.parse(JSON.stringify(raw.targets[target]));
+    } else {
+      delete persisted.targets[target];
+    }
+  }
+  return persisted;
+}
+
+function scopedManifestForPersistence({ hubPath, args, state, discoveries, checksum, sourceCommit }) {
+  const previous = readJsonIfExists(path.join(hubPath, 'manifest.json'));
+  const current = buildManifest({ state: normalizedState(state), discoveries, checksum, sourceCommit, syncSource: args.syncSource, hubPath });
+  const manifest = previous && typeof previous === 'object' && !Array.isArray(previous)
+    ? { ...previous, ...current }
+    : { ...current };
+  manifest.targets = previous?.targets && typeof previous.targets === 'object'
+    ? JSON.parse(JSON.stringify(previous.targets))
+    : {};
+  for (const target of SUPPORTED_TARGETS) {
+    if (scopeAllowsTargetState(args, target)) manifest.targets[target] = current.targets[target];
+  }
+  return manifest;
+}
+
+function validateStagedTargetAdapter(stagePath, target, payloads) {
+  const required = target === 'opencode'
+    ? path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md')
+    : path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  if (!fs.existsSync(required)) throw new Error(`staged ${target} adapter SKILL.md missing`);
+  if (target === 'ag2') {
+    for (const obsolete of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+      if (fs.existsSync(path.join(stagePath, obsolete))) throw new Error(`staged AG2 plugin authority remains: ${obsolete}`);
+    }
+  }
+  if (!Object.keys(payloads[target] || {}).length) throw new Error(`staged ${target} adapter payload is empty`);
+}
+
+function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit, plannedTargetSyncs = [] }, testHooks = {}) {
+  revalidateInvocationScope(args, discoveries);
+  fs.mkdirSync(path.join(hubPath, 'adapters'), { recursive: true });
+  const plannedHubTargets = new Set(plannedTargetSyncs.map((plan) => plan.target));
+  for (const target of SUPPORTED_TARGETS.filter((name) => scopeAllowsTargetSync(args, name) && plannedHubTargets.has(name))) {
+    const targetPath = path.join(hubPath, 'adapters', target);
+    withOwnedStaging({
+      target: targetPath,
+      stagePrefix: `.${target}.staging-`,
+      operation: 'target-directory-copy',
+      sourceType: args.syncSource,
+      afterRegistration: testHooks.afterHubStagingRegistration,
+      beforeDelete: testHooks.beforeHubStagingCleanup
+    }, (stagePath, generation) => {
+      if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation, target });
+      if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation, target });
+      writePayloadTree(stagePath, payloads[target]);
+      if (testHooks.afterHubPayloadWrite) testHooks.afterHubPayloadWrite({ stagePath, generation, target });
+      validateStagedTargetAdapter(stagePath, target, payloads);
+      if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation, target });
+      if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation, target });
+      replaceDirectoryAtomically(stagePath, targetPath, testHooks.replaceDirectoryOptions || {});
+    });
+  }
+  const persistedState = scopedStateForPersistence(hubPath, state, args);
+  const manifest = scopedManifestForPersistence({ hubPath, args, state: persistedState, discoveries, checksum, sourceCommit });
+  writeFileAtomically(path.join(hubPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileAtomically(path.join(hubPath, 'state.json'), `${JSON.stringify(persistedState, null, 2)}\n`);
 }
 
 function validateStagedHub(stagePath, checksum) {
@@ -3419,6 +3645,28 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
 
 function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
   const dryRun = !args.write;
+  const targetNeedsSync = Object.fromEntries(SUPPORTED_TARGETS.map((target) => [
+    target,
+    targetWouldSync(target, state, checksum, discoveries[target], payloads)
+  ]));
+  const authorisedTargetWrites = SUPPORTED_TARGETS.filter((target) => (
+    scopeAllowsTargetSync(args, target) && targetNeedsSync[target]
+  ));
+  const outOfScopeStaleTargets = SUPPORTED_TARGETS.filter((target) => (
+    targetNeedsSync[target] && !scopeAllowsTargetSync(args, target)
+  ));
+  const plannedWrites = [];
+  for (const target of authorisedTargetWrites) {
+    plannedWrites.push({ kind: 'hub-adapter-subtree', target, path: path.join(hubPath, 'adapters', target) });
+    plannedWrites.push({ kind: 'managed-target-destination', target, path: discoveries[target].target_path });
+  }
+  for (const target of SUPPORTED_TARGETS.filter((name) => scopeTargetAction(args, name) === 'disable')) {
+    plannedWrites.push({ kind: 'target-state-disable', target, path: path.join(hubPath, 'state.json') });
+  }
+  if (authorisedTargetWrites.length || Object.keys(args.invocationActionScope?.authorised_actions?.targets || {}).length) {
+    plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'state.json') });
+    plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'manifest.json') });
+  }
   return {
     architecture_version: ARCHITECTURE_VERSION,
     bridge_version: BRIDGE_VERSION,
@@ -3428,6 +3676,18 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     hub_reporting_version: state.hub_version,
     downgrade_enforcement_source: args.syncSource,
     dry_run: dryRun,
+    invocation_action_scope: args.invocationActionScope,
+    requested_authority: args.invocationActionScope?.requested_actions || {},
+    authorised_actions: args.invocationActionScope?.authorised_actions || {},
+    eligible_actions: {
+      target_sync: authorisedTargetWrites,
+      preferences: args.invocationActionScope?.authorised_actions?.preferences || []
+    },
+    blocked_actions: SUPPORTED_TARGETS
+      .filter((target) => scopeAllowsTargetSync(args, target) && !targetNeedsSync[target])
+      .map((target) => ({ target, action: 'sync', reason: 'not stale or proof unavailable' })),
+    out_of_scope_stale_targets: outOfScopeStaleTargets,
+    planned_writes: plannedWrites,
     hub_path: hubPath,
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
@@ -3483,7 +3743,9 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
         ag2_package_detected: target === 'ag2' ? discovery.ag2_package_detected : undefined,
         projection_proof: target === 'ag2' ? discovery.projection_proof : undefined,
         python_command: target === 'ag2' ? discovery.python_command || '' : undefined,
-        would_write: targetWouldSync(target, state, checksum, discovery, payloads),
+        needs_sync: targetNeedsSync[target],
+        authorised_would_write: scopeAllowsTargetSync(args, target) && targetNeedsSync[target],
+        would_write: scopeAllowsTargetSync(args, target) && targetNeedsSync[target],
         skip_reason: targetState.enabled ? targetState.skip_reason : 'not enabled',
         signals: discovery.signals
       }];
@@ -3493,14 +3755,13 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
 
 function isHookNoop(args, existingState) {
   if (!args.hook) return false;
-  if (!existingState || !existingState.hub_version) return true;
-  const repoAutoUpdateActive = existingState.repo_auto_update_enabled && !args.skipRepoAutoUpdate;
-  if (!repoAutoUpdateActive && !existingState.auto_sync_enabled) return true;
-  if (repoAutoUpdateActive) return false;
-  return !SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled);
+  const actions = args.invocationActionScope?.authorised_actions;
+  if (actions?.repo_maintenance || actions?.native_maintenance) return false;
+  return !Object.keys(actions?.targets || {}).length;
 }
 
 function shouldRunRepoAutoUpdate(args, state) {
+  if (args.invocationActionScope?.authorised_actions?.repo_maintenance !== true) return false;
   if (!args.write) return false;
   if (args.skipRepoAutoUpdate) return false;
   if (!state.repo_auto_update_enabled) return false;
@@ -3854,6 +4115,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 }
 
 function maybeRepairThirdPartyCodexPluginHooks(args, state) {
+  if (args.invocationActionScope?.authorised_actions?.native_maintenance !== true) return { status: '' };
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
   return repairThirdPartyCodexPluginHooks({
@@ -3992,7 +4254,10 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
 }
 
 function nativePluginCacheStatusForReport(args, state, options = {}) {
-  if (args.syncSource === 'codex-plugin') {
+  if (
+    args.syncSource === 'codex-plugin' &&
+    args.invocationActionScope?.authorised_actions?.native_maintenance === true
+  ) {
     return refreshCodexNativePluginCacheFromRepo({
       args,
       state,
@@ -4010,15 +4275,19 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
   }
   const delegateArgs = [
     scriptPath,
-    '--sync-enabled',
     '--write',
     '--sync-source',
     'repo',
     '--hub',
     hubPath,
     '--skip-repo-auto-update',
-    '--suppress-update-report'
+    '--suppress-update-report',
+    '--parent-scope-digest',
+    args.invocationActionScope.digest
   ];
+  for (const target of Object.keys(args.invocationActionScope.authorised_actions.targets || {})) {
+    if (scopeAllowsTargetSync(args, target)) delegateArgs.push('--scope-target-sync', target);
+  }
   const result = runCommand(process.execPath, delegateArgs, {
     cwd: repoPath,
     timeout: 120000
@@ -4289,6 +4558,82 @@ function persistActiveNoTargetWrite({
   }
 }
 
+function applyPreferenceOnlyRawState(rawState, args) {
+  const next = rawState && typeof rawState === 'object' && !Array.isArray(rawState)
+    ? JSON.parse(JSON.stringify(rawState))
+    : {};
+  if (args.enableAutoSync) next.auto_sync_enabled = true;
+  if (args.disableAutoSync) next.auto_sync_enabled = false;
+  if (args.enableRepoAutoUpdate) next.repo_auto_update_enabled = true;
+  if (args.disableRepoAutoUpdate) next.repo_auto_update_enabled = false;
+  if (args.enableRepoAutoUpdate) {
+    next.last_repo_update_status = 'configured';
+    next.last_repo_update_error = '';
+  }
+  if (args.disableRepoAutoUpdate) {
+    next.last_repo_update_status = 'disabled';
+    next.last_repo_update_error = '';
+  }
+  if (args.repoPath) next.repo_path = path.resolve(args.repoPath);
+  if (args.repoBranch) next.repo_branch = args.repoBranch;
+  if (args.repoRemote) next.repo_remote = args.repoRemote;
+  if (args.enableUpdateReports) next.update_report_enabled = true;
+  if (args.disableUpdateReports) next.update_report_enabled = false;
+  if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
+  if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) {
+    next.legacy_update_report_open_migrated = next.update_report_open_enabled === true || next.legacy_update_report_open_migrated === true;
+    next.update_report_open_enabled = false;
+    next.update_report_open_behavior = 'action-required-only';
+  }
+  if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
+  if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
+  return next;
+}
+
+function preferenceOnlyAudit(args, hubPath, rawState) {
+  const next = applyPreferenceOnlyRawState(rawState, args);
+  return {
+    architecture_version: ARCHITECTURE_VERSION,
+    bridge_version: BRIDGE_VERSION,
+    dry_run: !args.write,
+    invocation_action_scope: args.invocationActionScope,
+    requested_authority: args.invocationActionScope.requested_actions,
+    authorised_actions: args.invocationActionScope.authorised_actions,
+    eligible_actions: { preferences: args.invocationActionScope.authorised_actions.preferences },
+    blocked_actions: [],
+    out_of_scope_stale_targets: [],
+    planned_writes: args.write || args.invocationActionScope.write_requested
+      ? [{ kind: 'state-preferences', path: path.join(hubPath, 'state.json'), fields: args.invocationActionScope.authorised_actions.preferences }]
+      : [],
+    preference_preview: Object.fromEntries(
+      args.invocationActionScope.authorised_actions.preferences.map((field) => [field, next[field]])
+    )
+  };
+}
+
+function runPreferenceOnly({ args, hubPath, rawState }) {
+  const audit = preferenceOnlyAudit(args, hubPath, rawState);
+  if (!args.write) {
+    console.log(JSON.stringify(audit, null, 2));
+    return { status: 0, audit };
+  }
+  const lock = acquireLock(path.dirname(hubPath), args);
+  if (!lock.acquired) {
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping preference write.`);
+    return { status: 0, audit };
+  }
+  try {
+    const latestRaw = readJsonIfExists(path.join(hubPath, 'state.json'));
+    const next = applyPreferenceOnlyRawState(latestRaw, args);
+    writeFileAtomically(path.join(hubPath, 'state.json'), `${JSON.stringify(next, null, 2)}\n`);
+  } finally {
+    releaseLock(lock);
+  }
+  if (args.audit) console.log(JSON.stringify({ ...audit, dry_run: false }, null, 2));
+  else console.log('Toolkit local bridge preferences updated.');
+  return { status: 0, audit: { ...audit, dry_run: false } };
+}
+
 function run(argv = process.argv.slice(2), testHooks = {}) {
   if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1' && argv.includes('--hook')) {
     return { status: 0, audit: null, capability_probe_noop: true };
@@ -4297,9 +4642,37 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     return { status: 0, audit: null, checker_session_noop: true };
   }
   const args = parseArgs(argv);
+  if (
+    requestedPreferenceFields(args).length &&
+    !args.hook &&
+    !args.syncEnabled &&
+    !args.repoUpdateNow &&
+    !args.reconcileStaging &&
+    !args.enableTargets.length &&
+    !args.disableTargets.length &&
+    !args.scopedSyncTargets.length &&
+    !args.setAg2PythonCommand
+  ) {
+    args.preferenceOnly = true;
+  }
+  assertPreferenceBoundary(args);
   assertReconciliationCommandArgs(args);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
-  const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+  const existingRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+  const existingState = normalizedState(existingRawState);
+  const scopeDiscoveries = (args.reconcileStaging || args.preferenceOnly)
+    ? {}
+    : {
+        opencode: discoverOpenCode(args, existingState.targets.opencode, hubPath),
+        ag2: discoverAg2(args, existingState.targets.ag2, hubPath)
+      };
+  args.invocationActionScope = resolveInvocationActionScope({
+    args,
+    hubPath,
+    rawState: existingRawState,
+    discoveries: scopeDiscoveries
+  });
+  if (args.preferenceOnly) return runPreferenceOnly({ args, hubPath, rawState: existingRawState });
   if (args.reconcileStaging) {
     assertSourceDowngradeAllowed(existingState, args);
     return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
@@ -4307,6 +4680,15 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   maybePrintAgentRulesPreflight(args);
 
   assertSourceDowngradeAllowed(existingState, args);
+
+  if (args.write && !scopeHasExecutableWrite(args)) {
+    const nextState = normalizedState(existingState);
+    const snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
+    const audit = buildAudit({ args, hubPath, ...snapshot });
+    if (args.syncEnabled && !args.audit && !args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    else if (args.audit || !args.hook) console.log(JSON.stringify(audit, null, 2));
+    return { status: 0, audit };
+  }
 
   if (isHookNoop(args, existingState)) {
     if (existingState?.hub_version && !existingState.auto_sync_enabled) {
@@ -4347,7 +4729,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   if (shouldRunRepoAutoUpdate(args, nextState)) {
     return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads, testHooks });
   }
-  const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
+  const hasTargetSync = initialSnapshot.plannedTargetSyncs.length > 0;
   if (
     args.syncEnabled &&
     !args.enableTargets.length &&

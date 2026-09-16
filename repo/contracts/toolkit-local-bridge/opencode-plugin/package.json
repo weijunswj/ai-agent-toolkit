@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit-opencode-plugin",
-  "version": "2.11.6",
+  "version": "2.11.7",
   "description": "Native OpenCode host adapter package for AI Agent Toolkit.",
   "main": "index.js",
   "license": "UNLICENSED",

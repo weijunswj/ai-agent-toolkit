@@ -131,9 +131,13 @@ Recovery of a recoverable lock is race-safe through an atomic recovery claim and
 
 Release removes the lock only when the current lock file still carries that run's ownership token: a lock replaced by another process is never deleted, even by the process that previously owned that path. Marker release is equally token-guarded. Locks are released in normal success and caught-failure paths; recovery from abrupt process termination relies on the dead-owner rule above, not on cleanup code running after a forced kill.
 
-Every successful state write rereads the latest state while holding this authoritative lock. From that locked state generation, the bridge resolves the Toolkit source again and rebuilds adapter payloads, checksum, discoveries, target plans, skipped-target context, manifest inputs, and related report context before writing. Pre-lock derived values are audit-only and are never combined with a later locked state in a committed snapshot. The write preserves unrelated top-level and forward-compatible fields, updates only the running source in `bridge_versions_by_source`, and preserves every other recognized source entry. `hub_version` is then calculated as the maximum of its existing valid value and every valid per-source value, so an older source run or forced same-source downgrade cannot lower the compatibility watermark. Staged hub replacement remains atomic and crash-safe under the existing transaction.
+Every invocation resolves one immutable `toolkit.local-bridge.invocation-action-scope.v1` from the initial arguments, entry-point context, initial raw state, and concrete target destinations. The scope is SHA-256 digest-bound before execution. Lock-time revalidation may confirm, narrow, or reject it; a changed destination or attempted authority expansion fails closed. Delegated repo synchronization receives only exact target actions plus the parent scope digest.
 
-An active `--write` run persists this prepared source state after it acquires the lock even when no target, repo, cache, repair, or report action is needed. Report eligibility is evaluated only after that first snapshot; report metadata causes a second snapshot only when a report is actually created. A fully disabled hook remains a deliberate early no-write return when repo auto-update and auto-sync are disabled, or when no enabled target or maintenance action makes the hook active. Lock contention also remains a visible hook skip and does not claim that an unpersisted source version was recorded.
+`--write` is execution consent, not mutation authority. It performs no write unless the invocation scope contains an exact preference, target, repo-maintenance, native-maintenance, report-maintenance, or staging-reconciliation action. `--preference-only` may change only explicitly named global fields under the bridge lock. It does not discover or normalize target state, generate adapters, replace the hub, sync destinations, refresh native caches, repair hooks, update repositories, clean reports, or create maintenance reports.
+
+Target work is isolated. For each authorized target, the bridge stages, validates, and atomically replaces only `adapters/<target>` and that target's managed destination. Excluded target state, unknown fields, manifest target entries, adapter bytes, and destination bytes are preserved. Disable changes only the selected target's bounded state and leaves delivered files in place. Whole-hub replacement is not used for ordinary scoped target work.
+
+Every authorized maintenance state write rereads the latest state while holding the authoritative lock, resolves the Toolkit source again, and rebuilds the authorized plan. Pre-lock values remain audit-only. The write preserves unrelated top-level and forward-compatible fields and every excluded target entry. A fully disabled hook remains a deliberate early no-write return when repo auto-update and auto-sync are disabled, or when no enabled target or maintenance action makes the hook active. Lock contention remains a visible hook skip and does not claim an unpersisted action.
 
 Downgrade enforcement is source-scoped. A running bridge compares itself only with `bridge_versions_by_source[sync_source]`; a newer repo, Codex, or Claude Code entry never blocks another source. `--force-downgrade` bypasses only that same-source comparison and updates only the running source entry. New bridges never use `hub_version` for downgrade enforcement.
 
@@ -167,6 +171,7 @@ node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write  # only after supported skills discovery proof
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-update-reports --preference-only --write
 ```
 
 Supported flags:
@@ -176,6 +181,7 @@ Supported flags:
 - `--disable-target opencode`.
 - `--disable-target ag2`.
 - `--sync-enabled`.
+- `--preference-only`; restricts the invocation to explicitly named global preference fields.
 - `--enable-auto-sync`.
 - `--disable-auto-sync`.
 - `--enable-repo-auto-update`.
@@ -194,6 +200,8 @@ Supported flags:
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.
 - `--force-downgrade`.
+
+Audit and dry-run JSON separates `needs_sync` observation from `authorised_would_write` / `would_write`. It records requested authority, authorized and eligible actions, blocked actions, out-of-scope stale targets, concrete destinations, and exact planned writes. A stale excluded target may report `needs_sync: true` while both executable-write fields remain false.
 - `--python-command <command>`.
 - AG2 destination discovery is read-only and proof-gated; there is no Python-command or plugin-install shortcut.
 - `--sync-source repo|codex-plugin|claude-plugin`.

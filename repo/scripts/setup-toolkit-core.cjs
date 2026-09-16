@@ -436,7 +436,7 @@ function setupPlan(options = {}) {
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(retentionDays));
   }
-  if (reportArgs.length) reportArgs.push('--write', ...hubArgs);
+  if (reportArgs.length) reportArgs.push('--preference-only', '--write', ...hubArgs);
 
   const repoAutoArgs = [];
   if (choices.repoAutoUpdate === 'enable') {
@@ -449,11 +449,12 @@ function setupPlan(options = {}) {
       '--repo-remote',
       quote(options.repoRemote || DEFAULT_REPO_REMOTE),
       '--enable-auto-sync',
+      '--preference-only',
       '--write',
       ...hubArgs
     );
   } else if (choices.repoAutoUpdate === 'disable') {
-    repoAutoArgs.push('--disable-repo-auto-update', '--write', ...hubArgs);
+    repoAutoArgs.push('--disable-repo-auto-update', '--preference-only', '--write', ...hubArgs);
   }
 
   const targetArgs = [];
@@ -546,6 +547,7 @@ function setupPlan(options = {}) {
             && ['enable', 'disable'].includes(choices.codexPluginAutoRefresh)
             ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', [
                 options.codexPluginAutoRefresh === false ? '--disable-codex-plugin-auto-refresh' : '--enable-codex-plugin-auto-refresh',
+                '--preference-only',
                 '--write',
                 ...hubArgs
               ])]
@@ -554,12 +556,11 @@ function setupPlan(options = {}) {
       },
       {
         id: 'approved_target_sync',
-        title: 'Enable only selected OpenCode and AG2 skills-only targets, then sync enabled targets',
+        title: 'Apply only the explicitly selected OpenCode and AG2 target actions',
         commands: [
           ...(disableTargetArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', disableTargetArgs)] : []),
           ...((options.enableTargets || []).length ? [
-            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', targetArgs),
-            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--sync-enabled', '--write', ...hubArgs])
+            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', targetArgs)
           ] : [])
         ]
       },
@@ -3502,6 +3503,7 @@ function writeBridgePreferences(args) {
         '--repo-remote',
         args.repoRemote,
         '--enable-auto-sync',
+        '--preference-only',
         '--write'
       ]
     );
@@ -3509,7 +3511,7 @@ function writeBridgePreferences(args) {
     runBridgeWrite(
       args,
       'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
-      ['--disable-repo-auto-update', '--write']
+      ['--disable-repo-auto-update', '--preference-only', '--write']
     );
   }
 
@@ -3523,7 +3525,7 @@ function writeBridgePreferences(args) {
     runBridgeWrite(
       args,
       'node repo/scripts/toolkit-local-bridge.cjs update report preferences --write',
-      [...reportArgs, '--write']
+      [...reportArgs, '--preference-only', '--write']
     );
   }
 
@@ -3531,7 +3533,7 @@ function writeBridgePreferences(args) {
     runBridgeWrite(
       args,
       'node repo/scripts/toolkit-local-bridge.cjs Codex cache preference --write',
-      [args.codexPluginAutoRefresh ? '--enable-codex-plugin-auto-refresh' : '--disable-codex-plugin-auto-refresh', '--write']
+      [args.codexPluginAutoRefresh ? '--enable-codex-plugin-auto-refresh' : '--disable-codex-plugin-auto-refresh', '--preference-only', '--write']
     );
   }
 }
@@ -3548,7 +3550,6 @@ function runApprovedTargetSync(args) {
     for (const target of args.enableTargets) enableArgs.push('--enable-target', target);
     enableArgs.push('--write');
     runBridgeWrite(args, `node repo/scripts/toolkit-local-bridge.cjs ${enableArgs.join(' ')}`, enableArgs);
-    runBridgeWrite(args, 'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write', ['--sync-enabled', '--write']);
   }
 }
 

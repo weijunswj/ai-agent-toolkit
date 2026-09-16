@@ -46,7 +46,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.11.6';
+const expectedBridgeVersion = '2.11.7';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -991,6 +991,232 @@ test('dry-run audit performs no writes and reports planned targets', () => {
   assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills$/);
 });
 
+test('invocation action scope v1 enforces the 16-case target-consent regression matrix', async (t) => {
+  const staleState = (root, overrides = {}) => ({
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    bridge_versions_by_source: { repo: expectedBridgeVersion },
+    auto_sync_enabled: true,
+    update_report_enabled: false,
+    codex_plugin_auto_refresh_enabled: false,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: path.join(root, 'opencode', 'skills'),
+        synced_version: '1.0.0',
+        synced_checksum: 'stale',
+        future_target_field: 'preserve-opencode'
+      },
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: path.join(root, 'ag2', 'skills'),
+        synced_version: '1.0.0',
+        synced_checksum: 'stale',
+        future_target_field: 'preserve-ag2'
+      }
+    },
+    ...overrides
+  });
+
+  await t.test('01 --write alone grants zero mutation authority', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(hub), false);
+    assert.deepEqual(parseLastJson(result.stdout).planned_writes, []);
+  });
+
+  await t.test('02 preference-only changes named globals and preserves stale target state and bytes', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const target = path.join(root, 'opencode', 'skills');
+    const adapter = path.join(hub, 'adapters', 'opencode');
+    const state = staleState(root);
+    writeJson(path.join(hub, 'state.json'), state);
+    writeFile(path.join(target, 'sentinel.txt'), 'target bytes\n');
+    writeFile(path.join(adapter, 'sentinel.txt'), 'adapter bytes\n');
+    const targetBefore = snapshotTree(target);
+    const adapterBefore = snapshotTree(adapter);
+    const result = run(['--hub', hub, '--disable-update-reports', '--preference-only', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const after = readJson(path.join(hub, 'state.json'));
+    assert.equal(after.update_report_enabled, false);
+    assert.deepEqual(after.targets, state.targets);
+    assert.deepEqual(snapshotTree(target), targetBefore);
+    assert.deepEqual(snapshotTree(adapter), adapterBefore);
+  });
+
+  await t.test('03 preference-only dry-run enumerates only the named state field', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--enable-update-reports', '--preference-only'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const audit = parseLastJson(result.stdout);
+    assert.deepEqual(audit.authorised_actions.preferences, ['update_report_enabled']);
+    assert.deepEqual(audit.out_of_scope_stale_targets, []);
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('04 preference-only rejects target authority mixing', () => {
+    const root = tmpRoot();
+    const result = run(['--hub', path.join(root, 'hub', 'current'), '--preference-only', '--enable-update-reports', '--enable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--preference-only cannot be combined with: --enable-target/);
+  });
+
+  await t.test('05 contradictory target actions fail before mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--enable-target', 'opencode', '--disable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('06 observed stale excluded targets report needs_sync without executable write', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.targets.opencode.needs_sync, true);
+    assert.equal(audit.targets.opencode.authorised_would_write, false);
+    assert.equal(audit.targets.opencode.would_write, false);
+    assert.ok(audit.out_of_scope_stale_targets.includes('opencode'));
+  });
+
+  await t.test('07 explicit enable-sync writes only OpenCode hub and destination', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const ag2Adapter = path.join(hub, 'adapters', 'ag2');
+    const ag2Target = path.join(root, 'ag2', 'skills');
+    const state = staleState(root);
+    state.targets.opencode.enabled = false;
+    state.targets.opencode.explicitly_disabled = true;
+    writeJson(path.join(hub, 'state.json'), state);
+    writeFile(path.join(ag2Adapter, 'sentinel.txt'), 'ag2 hub bytes\n');
+    writeFile(path.join(ag2Target, 'sentinel.txt'), 'ag2 target bytes\n');
+    const ag2AdapterBefore = snapshotTree(ag2Adapter);
+    const ag2TargetBefore = snapshotTree(ag2Target);
+    const result = run(['--hub', hub, '--enable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(snapshotTree(ag2Adapter), ag2AdapterBefore);
+    assert.deepEqual(snapshotTree(ag2Target), ag2TargetBefore);
+    assert.equal(readJson(path.join(hub, 'state.json')).targets.ag2.future_target_field, 'preserve-ag2');
+  });
+
+  await t.test('08 disable changes only selected target state and leaves delivered bytes', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const target = path.join(root, 'opencode', 'skills');
+    const adapter = path.join(hub, 'adapters', 'opencode');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    writeFile(path.join(target, 'sentinel.txt'), 'delivered bytes\n');
+    writeFile(path.join(adapter, 'sentinel.txt'), 'hub bytes\n');
+    const targetBefore = snapshotTree(target);
+    const adapterBefore = snapshotTree(adapter);
+    const result = run(['--hub', hub, '--disable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const after = readJson(path.join(hub, 'state.json'));
+    assert.equal(after.targets.opencode.enabled, false);
+    assert.equal(after.targets.opencode.explicitly_disabled, true);
+    assert.deepEqual(snapshotTree(target), targetBefore);
+    assert.deepEqual(snapshotTree(adapter), adapterBefore);
+  });
+
+  await t.test('09 manual sync-enabled derives only initially enabled targets', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    state.targets.ag2.enabled = false;
+    state.targets.ag2.explicitly_disabled = true;
+    writeJson(path.join(hub, 'state.json'), state);
+    const audit = parseLastJson(run(['--hub', hub, '--sync-enabled'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.deepEqual(audit.authorised_actions.targets, { opencode: 'sync' });
+    assert.equal(audit.targets.ag2.authorised_would_write, false);
+  });
+
+  await t.test('10 hook maintenance derives bounded durable target authority', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root, { repo_auto_update_enabled: false });
+    state.targets.ag2.enabled = false;
+    writeJson(path.join(hub, 'state.json'), state);
+    const result = run(['--hub', hub, '--hook', '--sync-enabled', '--sync-source', 'claude-plugin'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const audit = parseLastJson(result.stdout);
+    assert.deepEqual(audit.authorised_actions.targets, { opencode: 'sync' });
+    assert.equal(audit.authorised_actions.repo_maintenance, false);
+  });
+
+  await t.test('11 explicit target dry-run binds destination and exact planned writes without mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const config = path.join(root, 'opencode-config');
+    const audit = parseLastJson(run(['--hub', hub, '--enable-target', 'opencode', '--opencode-config-dir', config], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.invocation_action_scope.destinations.opencode, path.resolve(config, 'skills'));
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'hub-adapter-subtree' && entry.target === 'opencode'));
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'managed-target-destination' && entry.target === 'opencode'));
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('12 scope is digest-bound and immutable in exported audit JSON', () => {
+    const root = tmpRoot();
+    const audit = parseLastJson(run(['--hub', path.join(root, 'hub', 'current'), '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.invocation_action_scope.contract, 'toolkit.local-bridge.invocation-action-scope.v1');
+    assert.match(audit.invocation_action_scope.digest, /^[0-9a-f]{64}$/);
+    assert.match(audit.invocation_action_scope.initial_state_digest, /^[0-9a-f]{64}$/);
+  });
+
+  await t.test('13 delegated target scope rejects malformed parent digest', () => {
+    const root = tmpRoot();
+    const result = run(['--hub', path.join(root, 'hub', 'current'), '--scope-target-sync', 'opencode', '--parent-scope-digest', 'bad', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--parent-scope-digest requires one SHA-256 digest/);
+  });
+
+  await t.test('14 report status collection is read-only', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    const before = snapshotTree(hub);
+    const result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(snapshotTree(hub), before);
+  });
+
+  await t.test('15 locked revalidation may fail but never widens destination scope', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    writeJson(path.join(hub, 'state.json'), state);
+    assert.throws(() => runBridge(['--hub', hub, '--sync-enabled', '--write'], {
+      afterInitialSnapshotDerivation() {
+        const changed = readJson(path.join(hub, 'state.json'));
+        changed.targets.opencode.target_path = path.join(root, 'different', 'skills');
+        writeJson(path.join(hub, 'state.json'), changed);
+      }
+    }), /destination changed while waiting for the lock: opencode/);
+  });
+
+  await t.test('16 target failure never falls back to excluded target mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    state.targets.ag2.enabled = false;
+    writeJson(path.join(hub, 'state.json'), state);
+    const ag2Adapter = path.join(hub, 'adapters', 'ag2');
+    writeFile(path.join(ag2Adapter, 'sentinel.txt'), 'excluded bytes\n');
+    const before = snapshotTree(ag2Adapter);
+    assert.throws(() => runBridge(['--hub', hub, '--enable-target', 'opencode', '--write'], {
+      beforeHubPayloadWrite() { throw new Error('selected target failure'); }
+    }), /selected target failure/);
+    assert.deepEqual(snapshotTree(ag2Adapter), before);
+  });
+});
+
 test('explicit OpenCode setup writes only managed hub and OpenCode target paths', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1394,7 +1620,10 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
   }).stdout);
   assert.notEqual(audit.checksum, beforeChecksum);
   assert.equal(audit.targets.opencode.synced, false);
-  assert.equal(audit.targets.opencode.would_write, true);
+  assert.equal(audit.targets.opencode.needs_sync, true);
+  assert.equal(audit.targets.opencode.authorised_would_write, false);
+  assert.equal(audit.targets.opencode.would_write, false);
+  assert.deepEqual(audit.out_of_scope_stale_targets, ['opencode']);
 });
 
 test('sync-enabled updates changed Toolkit skill contents from the configured repo source', () => {
@@ -1515,11 +1744,12 @@ test('audit separates hub adapter metadata from app-facing target sync', () => {
   assert.equal(audit.targets.opencode.internal_adapter_exists, true);
   assert.equal(audit.targets.opencode.target_exists, false);
   assert.equal(audit.targets.opencode.synced, false);
-  assert.equal(audit.targets.opencode.would_write, true);
+  assert.equal(audit.targets.opencode.needs_sync, true);
+  assert.equal(audit.targets.opencode.would_write, false);
   assert.equal(path.resolve(audit.targets.opencode.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'opencode')));
   assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(opencodeTarget));
 
-  assert.equal(audit.targets.ag2.internal_adapter_exists, true);
+  assert.equal(audit.targets.ag2.internal_adapter_exists, false, 'blocked excluded AG2 payload is not generated');
   assert.equal(audit.targets.ag2.target_exists, false);
   assert.equal(audit.targets.ag2.synced, false);
   assert.equal(audit.targets.ag2.would_write, false);
@@ -1589,7 +1819,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
   assert.equal(result.status, 0, result.stderr);
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.bridge_versions_by_source['claude-plugin'], '9.7.0');
-  assert.equal(state.bridge_versions_by_source['codex-plugin'], expectedBridgeVersion);
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], undefined, 'preference-only writes do not persist source maintenance state');
   assert.equal(state.hub_version, '9.9.9');
 });
 
@@ -1737,7 +1967,7 @@ test('repo same-source downgrade names managed source remediation', () => {
     bridge_versions_by_source: { repo: '9.9.9' },
     targets: {}
   });
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'repo'], {
+  const result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'repo'], {
     env: isolatedHomeEnv(root)
   });
   assert.notEqual(result.status, 0);
@@ -1757,7 +1987,7 @@ test('legacy migration seeds only an attributable recognized source', () => {
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1769,7 +1999,7 @@ test('legacy migration seeds only an attributable recognized source', () => {
   assert.equal(state.bridge_versions_by_source.repo, undefined);
   assert.equal(state.preserved_setting, 'keep');
 
-  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1789,7 +2019,7 @@ test('attributable legacy same-source history still refuses a genuine downgrade'
     last_sync_source: 'claude-plugin',
     targets: {}
   });
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  const result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.notEqual(result.status, 0);
@@ -1808,7 +2038,7 @@ test('unattributed legacy hub versions do not cross-block and establish the runn
     if (lastSyncSource) legacy.last_sync_source = lastSyncSource;
     writeJson(path.join(hub, 'state.json'), legacy);
 
-    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    const result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
       env: isolatedHomeEnv(root)
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1829,7 +2059,7 @@ test('partially migrated state never attributes the reporting watermark to a mis
     targets: {}
   });
 
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  const result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1851,7 +2081,7 @@ test('malformed and attacker-controlled version maps follow the safe normalizati
     bridge_versions_by_source: ['repo', '9.9.9'],
     targets: {}
   });
-  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1870,7 +2100,7 @@ test('malformed and attacker-controlled version maps follow the safe normalizati
     },
     targets: {}
   }, null, 2).replace('"constructor": "99.0.0"', '"__proto__": "99.0.0",\n      "constructor": "99.0.0"')}\n`, 'utf8');
-  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  result = run(['--hub', hub, '--write', '--scope-target-sync', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1925,8 +2155,12 @@ test('unsupported running sync sources fail closed without writing state', () =>
 test('alternating source writes preserve all source entries and stable state', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--enable-target', 'opencode', '--sync-source', 'repo'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
   for (const source of ['codex-plugin', 'claude-plugin', 'repo', 'codex-plugin']) {
-    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {
+    result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', source], {
       env: isolatedHomeEnv(root)
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1943,12 +2177,16 @@ test('alternating source writes preserve all source entries and stable state', (
 test('concurrent source writers retry lock contention and preserve every source entry', async () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  const setup = run(['--hub', hub, '--write', '--enable-auto-sync', '--enable-target', 'opencode', '--sync-source', 'repo'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(setup.status, 0, setup.stderr);
   const worker = [
     "'use strict';",
     "const { spawnSync } = require('node:child_process');",
     'const [script, hub, source, cwd, home] = process.argv.slice(1);',
     'for (let attempt = 0; attempt < 500; attempt += 1) {',
-    "  const result = spawnSync(process.execPath, [script, '--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {",
+    "  const result = spawnSync(process.execPath, [script, '--hub', hub, '--write', '--sync-enabled', '--sync-source', source], {",
     "    cwd, encoding: 'utf8', env: { ...process.env, PATH: '', USERPROFILE: home, HOME: home, LOCALAPPDATA: home }",
     '  });',
     '  if (result.status === 0) process.exit(0);',
@@ -1976,7 +2214,7 @@ test('concurrent source writers retry lock contention and preserve every source 
   });
 });
 
-test('writer recomputes its complete snapshot from state committed before lock acquisition', () => {
+test('writer rejects lock-time target destination widening from a concurrent commit', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const sourceA = createMinimalToolkitSource(path.join(root, 'source-a'), { alpha: 'source A\n' });
@@ -2010,13 +2248,13 @@ test('writer recomputes its complete snapshot from state committed before lock a
   writeJson(path.join(hub, 'state.json'), state);
 
   let writerBResult = null;
-  const writerAResult = runBridge([
-    '--hub', hub,
-    '--sync-enabled',
-    '--write',
-    '--sync-source', 'repo'
-  ], {
-    afterInitialSnapshotDerivation(initialSnapshot) {
+  assert.throws(() => runBridge([
+      '--hub', hub,
+      '--sync-enabled',
+      '--write',
+      '--sync-source', 'repo'
+    ], {
+      afterInitialSnapshotDerivation(initialSnapshot) {
       assert.equal(initialSnapshot.sourceRoot, path.resolve(sourceA));
       assert.deepEqual(initialSnapshot.plannedTargetSyncs, []);
       assert.match(initialSnapshot.payloads.opencode['skills/alpha/SKILL.md'].toString('utf8'), /source A/);
@@ -2040,11 +2278,10 @@ test('writer recomputes its complete snapshot from state committed before lock a
       ].join('\n'));
       git(sourceB, ['add', '.']);
       git(sourceB, ['commit', '-m', 'advance source B after writer B snapshot']);
-    }
-  });
+      }
+    }), /Invocation action scope destination changed while waiting for the lock: opencode/);
 
   assert.ok(writerBResult, 'writer B must commit while writer A is paused before lock acquisition');
-  assert.equal(writerAResult.status, 0);
   const finalState = readJson(path.join(hub, 'state.json'));
   const manifest = readJson(path.join(hub, 'manifest.json'));
   const expectedPayloads = adapterPayloads({ repo_path: sourceB });
@@ -2055,14 +2292,14 @@ test('writer recomputes its complete snapshot from state committed before lock a
     'claude-plugin': expectedBridgeVersion
   });
   assert.deepEqual(finalState.future_bridge_metadata, { owner: 'future-version', preserve: true });
-  assert.equal(manifest.checksum, payloadChecksum(expectedPayloads));
-  assert.equal(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']));
+  assert.notEqual(manifest.checksum, payloadChecksum(expectedPayloads), 'rejected writer does not adopt source bytes committed after the authorized snapshot');
+  assert.notEqual(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']), 'rejected writer does not adopt a later source commit');
   assert.equal(path.resolve(finalState.targets.opencode.target_path), path.resolve(sourceBTarget));
   assert.equal(path.resolve(manifest.targets.opencode.target_path), path.resolve(sourceBTarget));
   assert.equal(finalState.targets.opencode.synced_checksum, manifest.checksum);
-  assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B/);
   assert.doesNotMatch(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source A/);
-  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B/);
 
   const hubRoot = path.dirname(hub);
   const residuePattern = /^(?:update\.lock(?:$|\.recovery(?:$|\.)|\.displaced\.)|\.staging-)/;
@@ -2084,22 +2321,22 @@ test('writer recomputes its complete snapshot from state committed before lock a
   const rerunManifest = readJson(path.join(hub, 'manifest.json'));
   assert.equal(rerunState.repo_path, path.resolve(sourceB));
   assert.equal(path.resolve(rerunState.targets.opencode.target_path), path.resolve(sourceBTarget));
-  assert.equal(rerunManifest.checksum, firstChecksum);
+  assert.notEqual(rerunManifest.checksum, firstChecksum);
   assert.deepEqual(rerunState.bridge_versions_by_source, firstVersions);
   assert.deepEqual(rerunState.future_bridge_metadata, { owner: 'future-version', preserve: true });
-  assert.equal(rerunState.targets.opencode.synced_checksum, firstChecksum);
+  assert.equal(rerunState.targets.opencode.synced_checksum, rerunManifest.checksum);
   assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
   assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
 
   const rerunAudit = run(['--hub', hub, '--audit', '--sync-source', 'repo'], { env });
   assert.equal(rerunAudit.status, 0, rerunAudit.stderr);
   const audit = parseLastJson(rerunAudit.stdout);
-  assert.equal(audit.checksum, firstChecksum);
+  assert.equal(audit.checksum, rerunManifest.checksum);
   assert.equal(audit.targets.opencode.synced, true);
   assert.equal(audit.targets.opencode.would_write, false);
 });
 
-test('owned hub snapshot success and handled payload, validation, and replacement failures leave no generation residue', () => {
+test('owned scoped hub target success and handled payload, validation, and replacement failures leave no generation residue', () => {
   const cases = [
     { name: 'success', hooks: {}, succeeds: true },
     {
@@ -2109,7 +2346,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
     },
     {
       name: 'validation',
-      hooks: { afterHubPayloadWrite({ stagePath }) { fs.rmSync(path.join(stagePath, 'state.json')); } },
+      hooks: { afterHubPayloadWrite({ stagePath }) { fs.rmSync(path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md')); } },
       succeeds: false
     },
     {
@@ -2125,6 +2362,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
     const args = [
       '--hub', hub,
       '--enable-auto-sync',
+      '--enable-target', 'opencode',
       '--write',
       '--sync-source', 'repo'
     ];
@@ -2144,7 +2382,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
         else process.env[key] = value;
       }
     }
-    assert.deepEqual(ownedStagingArtifacts(path.dirname(hub)), [], `${fixture.name} hub staging must be cleaned`);
+    assert.deepEqual(ownedStagingArtifacts(path.join(hub, 'adapters')), [], `${fixture.name} target staging must be cleaned`);
   }
 });
 
@@ -3519,7 +3757,7 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
 
   let result = run(['--hub', hub, '--enable-auto-sync', '--write'], { env });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
+  assert.equal(result.stdout, 'Toolkit local bridge preferences updated.\n');
 
   result = run(['--hub', hub, '--audit'], { env });
   assert.equal(result.status, 0, result.stderr);
@@ -3547,8 +3785,10 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
   assert.match(result.stderr, /must stay under the current user home or temp directory/);
 
   const lockState = readJson(path.join(hub, 'state.json'));
-  lockState.targets.opencode.enabled = true;
-  lockState.targets.opencode.explicitly_disabled = false;
+  lockState.targets = {
+    ...(lockState.targets || {}),
+    opencode: { ...(lockState.targets?.opencode || {}), enabled: true, explicitly_disabled: false }
+  };
   writeJson(path.join(hub, 'state.json'), lockState);
   const lockPath = path.join(path.dirname(hub), 'update.lock');
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
@@ -3561,7 +3801,7 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
   const blockedReportDir = path.join(tempRoot, 'ai-agent-toolkit', 'update-reports');
   writeFile(blockedReportDir, 'synthetic directory blocker\n');
   const cleanupHub = path.join(root, 'cleanup warning hub', 'current');
-  result = run(['--hub', cleanupHub, '--enable-auto-sync', '--write'], { env });
+  result = run(['--hub', cleanupHub, '--disable-target', 'opencode', '--write'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /Toolkit update report cleanup warning: .*<private-path>/);
   assert.equal(result.stderr.includes(blockedReportDir), false);
@@ -4984,16 +5224,18 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
 
   const delegateArgs = fs.readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(delegateArgs.length, 1);
-  assert.deepEqual(delegateArgs[0], [
-    '--sync-enabled',
+  assert.deepEqual(delegateArgs[0].slice(0, 8), [
     '--write',
     '--sync-source',
     'repo',
     '--hub',
     hub,
     '--skip-repo-auto-update',
-    '--suppress-update-report'
+    '--suppress-update-report',
+    '--parent-scope-digest'
   ]);
+  assert.match(delegateArgs[0][8], /^[0-9a-f]{64}$/);
+  assert.deepEqual(delegateArgs[0].slice(9), ['--scope-target-sync', 'ag2']);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'updated');
   assert.equal(state.bridge_versions_by_source.repo, '9.9.9');
@@ -5197,7 +5439,7 @@ test('legacy update-report open flags retain failure-only behavior', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
 });
 
-test('legacy persisted all-report opening migrates while retention is preserved', () => {
+test('preference-only report enable preserves unrelated legacy opening bytes while audit normalizes read-only', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), {
@@ -5213,8 +5455,8 @@ test('legacy persisted all-report opening migrates while retention is preserved'
   });
   assert.equal(result.status, 0, result.stderr);
   let state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.update_report_open_enabled, false);
-  assert.equal(state.legacy_update_report_open_migrated, true);
+  assert.equal(state.update_report_open_enabled, true);
+  assert.equal(state.legacy_update_report_open_migrated, undefined);
   assert.equal(state.update_report_retention_days, 14);
 
   result = run(['--hub', hub, '--audit'], {
