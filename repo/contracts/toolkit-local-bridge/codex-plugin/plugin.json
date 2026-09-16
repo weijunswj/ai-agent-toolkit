@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "2.11.8",
+  "version": "2.11.9",
   "description": "Source-first AI-agent toolkit with native Codex routing, exact launch evidence, Windows-safe hook repair, and capability-proven host adapters.",
   "author": {
     "name": "weijunswj",

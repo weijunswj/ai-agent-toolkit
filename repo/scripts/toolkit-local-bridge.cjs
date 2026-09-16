@@ -31,7 +31,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.11.8';
+const BRIDGE_VERSION = '2.11.9';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1742,6 +1742,20 @@ function cleanupUpdateReports(options = {}) {
   });
 
   return result;
+}
+
+function runAuthorisedUpdateReportCleanup(args, state) {
+  if (
+    args.write !== true ||
+    args.invocationActionScope?.authorised_actions?.report_maintenance !== true
+  ) {
+    return state.last_update_report_cleanup || null;
+  }
+  const cleanupResult = cleanupUpdateReports({ retentionDays: state.update_report_retention_days });
+  if (cleanupResult.error_count && !args.hook) {
+    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
+  }
+  return cleanupResult;
 }
 
 function updateReportTimestamp(date = new Date()) {
@@ -3673,6 +3687,9 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'state.json') });
     plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'manifest.json') });
   }
+  if (args.invocationActionScope?.authorised_actions?.report_maintenance === true) {
+    plannedWrites.push({ kind: 'update-report-maintenance', path: updateReportDir() });
+  }
   return {
     architecture_version: ARCHITECTURE_VERSION,
     bridge_version: BRIDGE_VERSION,
@@ -4315,6 +4332,8 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 
   state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
   assertSourceDowngradeAllowed(state, args);
+  revalidateInvocationScope(args, discoveries);
+  state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
 
   let statusState = state;
   let updateResult = null;
@@ -4512,7 +4531,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 function persistActiveNoTargetWrite({
   args,
   hubPath,
-  cleanupResult,
   buildReportContext,
   testHooks = {}
 }) {
@@ -4530,9 +4548,10 @@ function persistActiveNoTargetWrite({
     const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
     assertSourceDowngradeAllowed(latestState, args);
     let state = applyRequestedState(latestState, args);
-    state.last_update_report_cleanup = cleanupResult;
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
     state = snapshot.state;
+    state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
+    snapshot = { ...snapshot, state };
 
     // Source-version persistence is independent of optional report creation.
     writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
@@ -4706,21 +4725,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   }
 
   let nextState = applyRequestedState(existingState, args);
-  const cleanupResult = args.write
-    ? cleanupUpdateReports({ retentionDays: nextState.update_report_retention_days })
-    : (nextState.last_update_report_cleanup || {
-        retention_days: nextState.update_report_retention_days,
-        report_log_directory: updateReportDir(),
-        max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
-        deleted_count: 0,
-        skipped_count: 0,
-        error_count: 0,
-        errors: []
-      });
-  nextState.last_update_report_cleanup = cleanupResult;
-  if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
-  }
   assertRepoAutoUpdatePrerequisite(args, nextState);
   const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
   nextState = initialSnapshot.state;
@@ -4760,7 +4764,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const report = persistActiveNoTargetWrite({
       args,
       hubPath,
-      cleanupResult,
       testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
@@ -4785,7 +4788,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const report = persistActiveNoTargetWrite({
       args,
       hubPath,
-      cleanupResult,
       testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
@@ -4816,9 +4818,10 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
     assertSourceDowngradeAllowed(lockedState, args);
     nextState = applyRequestedState(lockedState, args);
-    nextState.last_update_report_cleanup = cleanupResult;
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
     nextState = snapshot.state;
+    nextState.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, nextState);
+    snapshot = { ...snapshot, state: nextState };
     ({ discoveries, payloads, checksum } = snapshot);
     writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
 

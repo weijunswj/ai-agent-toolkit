@@ -2,7 +2,7 @@
 
 const manifest = Object.freeze({
   name: 'ai-agent-toolkit-opencode',
-  version: '2.11.8',
+  version: '2.11.9',
   host: 'opencode',
   authority: 'capability-proven-host-adapter',
   skills_only: true,

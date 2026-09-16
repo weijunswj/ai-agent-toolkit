@@ -46,7 +46,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.11.8';
+const expectedBridgeVersion = '2.11.9';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -1214,6 +1214,88 @@ test('invocation action scope v1 enforces the 16-case target-consent regression 
       beforeHubPayloadWrite() { throw new Error('selected target failure'); }
     }), /selected target failure/);
     assert.deepEqual(snapshotTree(ag2Adapter), before);
+  });
+});
+
+test('report cleanup follows immutable report-maintenance authority inside the write path', async (t) => {
+  const createFixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const reportDir = path.join(root, 'ai-agent-toolkit', 'update-reports');
+    const reportPath = path.join(reportDir, 'toolkit-update-20200101-010101.md');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      update_report_enabled: false,
+      update_report_retention_days: 7,
+      last_update_report_cleanup: {
+        retention_days: 7,
+        report_log_directory: reportDir,
+        max_report_files: 20,
+        deleted_count: 0,
+        skipped_count: 1,
+        error_count: 0,
+        errors: []
+      },
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: path.join(root, 'opencode', 'skills')
+        }
+      }
+    });
+    writeFile(reportPath, '# expired synthetic report\n');
+    const expired = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(reportPath, expired, expired);
+    return {
+      root,
+      hub,
+      reportDir,
+      reportPath,
+      env: isolatedHomeEnv(root, { TMP: root, TEMP: root, TMPDIR: root })
+    };
+  };
+
+  await t.test('suppression preserves report bytes while the selected target action succeeds', () => {
+    const fixture = createFixture();
+    const before = snapshotTree(fixture.reportDir);
+    const result = run([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--suppress-update-report',
+      '--write',
+      '--audit'
+    ], { env: fixture.env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(fixture.reportPath), true);
+    assert.deepEqual(snapshotTree(fixture.reportDir), before);
+    const state = readJson(path.join(fixture.hub, 'state.json'));
+    assert.equal(state.targets.opencode.enabled, false);
+    assert.equal(state.targets.opencode.explicitly_disabled, true);
+    assert.equal(state.last_update_report_cleanup.skipped_count, 1);
+    const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
+    assert.equal(audit.authorised_actions.report_maintenance, false);
+    assert.equal(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'), false);
+    assert.equal(audit.update_report_cleanup.skipped_count, 1);
+  });
+
+  await t.test('authorised report maintenance removes the expired report', () => {
+    const fixture = createFixture();
+    const result = run([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write',
+      '--audit'
+    ], { env: fixture.env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(fixture.reportPath), false);
+    const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
+    assert.equal(audit.authorised_actions.report_maintenance, true);
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'));
+    assert.equal(audit.update_report_cleanup.deleted_count, 1);
   });
 });
 
