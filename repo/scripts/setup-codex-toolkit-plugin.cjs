@@ -10,7 +10,7 @@ const tomlStructural = require('./toolkit-toml-structural.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.12.1';
+const EXPECTED_TOOLKIT_VERSION = '2.12.2';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';

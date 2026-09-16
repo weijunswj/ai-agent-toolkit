@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PACKAGE_VERSION = '2.12.1';
+const PACKAGE_VERSION = '2.12.2';
 const PLUGIN_REL = 'repo/contracts/toolkit-local-bridge/opencode-plugin';
 const STATES = Object.freeze(['LEGACY_BRIDGE', 'PLUGIN_PACKAGE_READY', 'INSTALLED_VERIFIED', 'NATIVE_UAT_ACCEPTED', 'BRIDGE_REMOVAL_AUTHORISED']);
 
@@ -24,7 +24,7 @@ function validateRepoOpenCodePlugin(repoRoot = repoRootFrom()) {
   let packageJson = null;
   try { packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8')); } catch (error) { errors.push(`package.json: ${error.message}`); }
   if (!fs.existsSync(indexPath)) errors.push('index.js is missing');
-  if (packageJson?.version !== PACKAGE_VERSION) errors.push('OpenCode plugin package version is not 2.12.1');
+  if (packageJson?.version !== PACKAGE_VERSION) errors.push('OpenCode plugin package version is not 2.12.2');
   if (packageJson?.main !== 'index.js') errors.push('OpenCode plugin package main is not index.js');
   return Object.freeze({ ok: errors.length === 0, package_version: packageJson?.version || null, errors, package_path: packagePath, index_path: indexPath });
 }

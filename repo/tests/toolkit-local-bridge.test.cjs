@@ -50,7 +50,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.12.1';
+const expectedBridgeVersion = '2.12.2';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -1121,14 +1121,16 @@ test('actual helper inputs cannot substitute target, hub, repository, or native 
         repository: { update: true, delegate_sync: true },
         native: { cache_maintenance: true, hook_repair: true },
         reports: {},
-        staging: {}
+        staging: { reconcile: true, generation: 'fixture-generation' }
       },
       bindings: {
         hub,
         state_path: path.join(hub, 'state.json'),
         manifest_path: path.join(hub, 'manifest.json'),
         target_destinations: { opencode: target },
-        repository: { path: repo },
+        repository: { path: repo, branch: 'main', remote: 'origin-a' },
+        native_source_repository: repo,
+        staging_parents: [path.join(root, 'staging-a')],
         report_directory: updateReportDir()
       }
     }
@@ -1140,11 +1142,222 @@ test('actual helper inputs cannot substitute target, hub, repository, or native 
     details: { path: path.join(root, 'other-state.json') }
   }), /hub state writer input does not match/);
   assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
-    details: { repoPath: path.join(root, 'other-repo') }
+    details: { repoPath: path.join(root, 'other-repo'), branch: 'main', remote: 'origin-a' }
   }), /repository helper input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: repo, branch: 'other', remote: 'origin-a' }
+  }), /repository branch input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: repo, branch: 'main', remote: 'origin-b' }
+  }), /repository remote input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'hub.state.write', {
+    details: { path: path.join(hub, 'state.json'), hubPath: path.join(root, 'other-hub') }
+  }), /hub input does not match/);
   assert.throws(() => assertActualMutationInput(args, 'native.cache.maintenance', {
-    details: { path: path.join(root, 'other-native-cache') }
+    details: { path: path.join(root, 'other-native-cache'), repoPath: repo }
   }), /native helper input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'native.cache.maintenance', {
+    details: { path: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')), repoPath: path.join(root, 'other-source') }
+  }), /native source repository input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'staging.reconcile', {
+    details: { generation_id: 'fixture-generation', parents: [path.join(root, 'staging-b')] }
+  }), /staging parent input does not match/);
+});
+
+test('expired phase context leaves no pre-guard adapter directory and lock loss blocks hub replacement', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', target,
+    '--write'
+  ], {
+    afterPhaseContextCreated({ lock }) {
+      writeJson(lock.lockPath, { created_at: new Date().toISOString(), pid: process.pid, token: 'replacement' });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters')), false, 'rejected context must not create adapters/ before its guard');
+  fs.rmSync(path.join(path.dirname(hub), 'update.lock'), { force: true });
+
+  const existingAdapter = path.join(hub, 'adapters', 'opencode');
+  writeFile(path.join(existingAdapter, 'sentinel.txt'), 'existing adapter\n');
+  const before = snapshotTree(existingAdapter);
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', target,
+    '--write'
+  ], {
+    beforeHubReplacement({ generation }) {
+      writeJson(path.join(path.dirname(hub), 'update.lock'), {
+        created_at: new Date().toISOString(), pid: process.pid, token: `replacement-${generation.record.generation_id}`
+      });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.deepEqual(snapshotTree(existingAdapter), before, 'lock replacement must be detected before adapter replacement');
+});
+
+test('authority drift during hub staging is rejected and cannot become a verified own result', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const targetA = path.join(root, 'target-a', 'skills');
+  const targetB = path.join(root, 'target-b', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', targetA,
+    '--write'
+  ], {
+    beforeHubReplacement() {
+      const state = readJson(path.join(hub, 'state.json'));
+      state.targets.opencode = { enabled: true, explicitly_disabled: false, target_path: targetB };
+      writeJson(path.join(hub, 'state.json'), state);
+    }
+  }), /authority-relevant state changed|destination changed/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+  assert.equal(path.resolve(readJson(path.join(hub, 'state.json')).targets.opencode.target_path), path.resolve(targetB));
+});
+
+test('delegated child cannot widen payload actions through CLI flags or mutate reports', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const opencodeTarget = path.join(root, 'opencode', 'skills');
+  const ag2Target = path.join(root, 'ag2', 'skills');
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const payload = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-narrowing-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(opencodeTarget) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: { script_path: script, source_identity: sha256(fs.readFileSync(script)), source_repository: repoRoot, source_commit: commit }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    auto_sync_enabled: true,
+    update_report_enabled: true,
+    update_report_retention_days: 1,
+    targets: {
+      opencode: { enabled: true, explicitly_disabled: false, target_path: opencodeTarget, synced_checksum: 'stale' },
+      ag2: { enabled: true, explicitly_disabled: false, target_path: ag2Target, synced_checksum: 'stale' }
+    }
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--delegated-invocation-authority', '--opencode-target', opencodeTarget,
+    '--enable-target', 'ag2', '--enable-auto-sync'
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) }), /delegated.*ordinary|delegated.*CLI|payload authority/i);
+  assert.equal(fs.existsSync(ag2Target), false);
+
+  let inventoryCalled = false;
+  const result = runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--delegated-invocation-authority', '--opencode-target', opencodeTarget
+  ], {
+    delegatedEnvelopeRaw: JSON.stringify(payload),
+    listUpdateReportCandidates() {
+      inventoryCalled = true;
+      return [];
+    }
+  });
+  assert.equal(result.status, 0);
+  assert.equal(inventoryCalled, false, 'delegated mode has zero report cleanup authority even without suppression');
+});
+
+test('delegated payload source A cannot be replaced by state-selected source B', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const foreignRepo = createMinimalToolkitSource(path.join(root, 'foreign'), { 'foreign-skill': 'foreign source B\n' });
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const payload = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-source-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(target) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: { script_path: script, source_identity: sha256(fs.readFileSync(script)), source_repository: repoRoot, source_commit: commit }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    repo_path: foreignRepo,
+    update_report_enabled: false,
+    targets: { opencode: { enabled: true, explicitly_disabled: false, target_path: target, synced_checksum: 'stale' } }
+  });
+  const result = runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--suppress-update-report', '--delegated-invocation-authority', '--opencode-target', target
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) });
+  assert.equal(result.status, 0);
+  assert.equal(fs.existsSync(path.join(target, 'foreign-skill')), false);
+  assert.equal(fs.existsSync(path.join(target, 'toolkit-setup', 'SKILL.md')), true);
+});
+
+test('report open rejects replacement at the same pathname after exclusive creation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: true,
+    targets: {}
+  });
+  let replacedPath = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target,
+    '--open-update-report', '--write'
+  ], {
+    beforeReportOpen({ reportPath }) {
+      replacedPath = reportPath;
+      fs.rmSync(reportPath, { force: true });
+      fs.writeFileSync(reportPath, '# competing replacement\n', 'utf8');
+    }
+  }), /report was replaced or changed before open/);
+  assert.notEqual(replacedPath, '');
+  assert.equal(fs.readFileSync(replacedPath, 'utf8'), '# competing replacement\n');
+  fs.rmSync(replacedPath, { force: true });
+});
+
+test('repo-update admission failure releases the exact owned lock', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report'
+  ]);
+  assert.equal(configured.status, 0);
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report'
+  ], {
+    afterLockedStateRead({ route }) {
+      if (route === 'repo-update') throw new Error('deterministic admission rejection');
+    }
+  }), /deterministic admission rejection/);
+  assert.equal(fs.existsSync(path.join(path.dirname(hub), 'update.lock')), false, 'failed admission must release its owned lock');
 });
 
 test('fixed delegated payload accepts exact authority and rejects added actions, wrong source, and wrong repository result', () => {
