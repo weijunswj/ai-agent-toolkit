@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,6 +10,16 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-codex-toolkit-plugin.cjs');
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-toolkit-plugin-'));
@@ -358,6 +369,46 @@ function assertFilesUnchanged(snapshot) {
 
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
+});
+
+test('delegated native authority CLI contract is accepted and source identity substitution fails before effects', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const scriptPath = path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path')),
+    CODEX_HOME: codexHome,
+    PATH: '',
+    CODEX_TOOLKIT_CODEX_CLI: ''
+  };
+  const authority = {
+    contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
+    parent_invocation_id: 'test-native-authority',
+    action: 'native.cache.maintenance',
+    repository: repoRoot,
+    codex_home: codexHome,
+    setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+    executable: path.resolve(process.execPath),
+    expected_version: setup.EXPECTED_TOOLKIT_VERSION,
+    env_digest: sha256(canonicalJson(env)),
+    allowed_effects: [
+      'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
+      'codex.plugin.add', 'codex.session-start.write', 'toml.structural.check'
+    ]
+  };
+  const invoke = (value) => spawnSync(process.execPath, [
+    scriptPath, '--write', '--json', '--repo-root', repoRoot, '--codex-home', codexHome,
+    '--delegated-invocation-authority', Buffer.from(canonicalJson(value), 'utf8').toString('base64url')
+  ], { cwd: repoRoot, encoding: 'utf8', env, windowsHide: true, timeout: 30000 });
+  const accepted = invoke(authority);
+  assert.equal(accepted.status, 2);
+  assert.doesNotMatch(accepted.stderr, /Unknown argument: --delegated-invocation-authority/);
+  assert.match(accepted.stderr, /unsupported in this environment|No usable Codex CLI/);
+
+  const substituted = invoke({ ...authority, setup_source_sha256: '0'.repeat(64) });
+  assert.equal(substituted.status, 2);
+  assert.match(substituted.stderr, /setup source identity changed before child start/);
+  assert.equal(fs.existsSync(codexHome), false, 'invalid delegated authority must fail before native writes');
 });
 
 test('Codex SessionStart verifier rejects the old direct bridge command and incomplete matchers', () => {

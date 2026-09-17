@@ -10,7 +10,7 @@ const tomlStructural = require('./toolkit-toml-structural.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.12.3';
+const EXPECTED_TOOLKIT_VERSION = '2.13.0';
 const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
@@ -65,6 +65,70 @@ const CODEX_PLUGIN_ICON_SPECS = [
     height: 512
   }
 ];
+const DELEGATED_NATIVE_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-native-setup-authority.v1';
+let activeDelegatedNativeAuthority = null;
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function decodeDelegatedNativeAuthority(encoded) {
+  if (!encoded) return null;
+  let value;
+  try {
+    value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('delegated native authority is not valid canonical base64url JSON');
+  }
+  if (canonicalJson(value) !== Buffer.from(encoded, 'base64url').toString('utf8')) {
+    throw new Error('delegated native authority is not canonical');
+  }
+  return value;
+}
+
+function establishDelegatedNativeAuthority(options) {
+  const authority = options.delegatedInvocationAuthority;
+  activeDelegatedNativeAuthority = null;
+  if (!authority) return null;
+  if (!options.write) throw new Error('delegated native authority requires --write');
+  if (authority.contract !== DELEGATED_NATIVE_AUTHORITY_CONTRACT || authority.action !== 'native.cache.maintenance') {
+    throw new Error('delegated native authority contract is invalid');
+  }
+  if (!/^[a-f0-9]{64}$/.test(String(authority.setup_source_sha256 || ''))) throw new Error('delegated native authority source identity is invalid');
+  if (path.resolve(authority.repository || '') !== options.repoRoot) throw new Error('delegated native repository does not match --repo-root');
+  if (path.resolve(authority.codex_home || '') !== options.codexHome) throw new Error('delegated native Codex home does not match the child operand');
+  if (path.resolve(authority.executable || '') !== path.resolve(process.execPath)) throw new Error('delegated native executable identity does not match the child runtime');
+  if (authority.expected_version !== EXPECTED_TOOLKIT_VERSION) throw new Error('delegated native Toolkit version does not match the child');
+  if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source identity changed before child start');
+  if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before child start');
+  const required = [
+    'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
+    'codex.plugin.add', 'codex.session-start.write', 'toml.structural.check'
+  ].sort();
+  if (canonicalJson([...(authority.allowed_effects || [])].sort()) !== canonicalJson(required)) {
+    throw new Error('delegated native effect ceiling is invalid');
+  }
+  activeDelegatedNativeAuthority = Object.freeze(JSON.parse(JSON.stringify(authority)));
+  return activeDelegatedNativeAuthority;
+}
+
+function verifyDelegatedNativeContinuity(action) {
+  const authority = activeDelegatedNativeAuthority;
+  if (!authority) return null;
+  if (!authority.allowed_effects.includes(action)) throw new Error(`delegated native action is not authorised: ${action}`);
+  if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source changed before effect');
+  if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before effect');
+  if (path.resolve(authority.executable) !== path.resolve(process.execPath)) throw new Error('delegated native executable changed before effect');
+  return authority;
+}
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -111,7 +175,7 @@ function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPat
   return `& ${powershellSingleQuoted(powershellPath)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/${SESSION_START_POWERSHELL_REL_PATH}"`;
 }
 
-function writeFileAtomically(filePath, bytes) {
+function writeFileAtomicallyStandalone(filePath, bytes) {
   const tempPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   try {
@@ -120,6 +184,36 @@ function writeFileAtomically(filePath, bytes) {
   } finally {
     fs.rmSync(tempPath, { force: true });
   }
+}
+
+function writeCodexSessionStart(filePath, bytes) {
+  const authority = activeDelegatedNativeAuthority;
+  if (!authority) return writeFileAtomicallyStandalone(filePath, bytes);
+  const exactPath = path.resolve(filePath);
+  const codexHome = path.resolve(authority.codex_home);
+  const relative = path.relative(codexHome, exactPath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('delegated native session-start write escaped the Codex home');
+  if (!exactPath.endsWith(path.join('.codex-plugin', 'hooks', 'hooks.json')) && !exactPath.endsWith(SESSION_START_RUNTIME_REL_PATH.split('/').join(path.sep))) {
+    throw new Error('delegated native session-start write target is not an accepted managed file');
+  }
+  const value = Buffer.from(bytes);
+  const tempPath = `${exactPath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  try {
+    verifyDelegatedNativeContinuity('codex.session-start.write');
+    fs.mkdirSync(path.dirname(exactPath), { recursive: true });
+    verifyDelegatedNativeContinuity('codex.session-start.write');
+    fs.writeFileSync(tempPath, value, { flag: 'wx', mode: 0o600 });
+    if (!fs.readFileSync(tempPath).equals(value)) throw new Error('delegated native temporary write postcondition failed');
+    verifyDelegatedNativeContinuity('codex.session-start.write');
+    fs.renameSync(tempPath, exactPath);
+    if (!fs.readFileSync(exactPath).equals(value)) throw new Error('delegated native session-start write postcondition failed');
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      verifyDelegatedNativeContinuity('codex.session-start.write');
+      fs.rmSync(tempPath, { force: true });
+    }
+  }
+  return Object.freeze({ action: 'writeCodexSessionStart', path: exactPath, sha256: sha256(value), byte_length: value.length });
 }
 
 function pngSize(filePath) {
@@ -315,7 +409,7 @@ function prepareInstalledSessionStart(cacheRoot, options = {}) {
   const runtimeBytes = Buffer.from(`${JSON.stringify({ schema: 1, node_path: nodePath }, null, 2)}\n`, 'utf8');
   const hooksChanged = !fs.readFileSync(hooksPath).equals(hooksBytes);
   const runtimeChanged = !fs.existsSync(runtimePath) || !fs.readFileSync(runtimePath).equals(runtimeBytes);
-  const writeAtomic = options.writeFileAtomically || writeFileAtomically;
+  const writeAtomic = options.writeFileAtomically || writeCodexSessionStart;
   if (runtimeChanged) writeAtomic(runtimePath, runtimeBytes);
   const runtimeErrors = verifySessionStartRuntime(cacheRoot, { ...options, platform: 'win32', nodePath });
   if (runtimeErrors.length) throw new Error(runtimeErrors.join('; '));
@@ -770,7 +864,21 @@ function scanConfigTomlLexicalLines(text) {
 }
 
 function inspectConfiguredPluginState(configText, identity) {
-  const analysis = tomlStructural.analyseToml(configText);
+  const analysis = tomlStructural.analyseToml(configText, activeDelegatedNativeAuthority ? {
+    launchParser(candidate, input) {
+      verifyDelegatedNativeContinuity('toml.structural.check');
+      const command = String(candidate.command || '');
+      const args = [...(candidate.args || []), '-c', String(candidate.script || '')];
+      if (!command || !String(candidate.script || '').includes('tomllib.loads')) throw new Error('delegated TOML parser operands are invalid');
+      return spawnSync(command, args, {
+        input: Buffer.from(input),
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 60000,
+        maxBuffer: 1024 * 1024
+      });
+    }
+  } : {});
   if (analysis.validity.ok !== true) return { status: 'unprovable', reason: 'Codex config TOML structure is multiple, malformed, or ambiguous' };
   const sections = analysis.tables.filter((table) => table.array !== true
     && table.path.length === 2 && table.path[0] === 'plugins' && table.path[1] === identity);
@@ -1302,8 +1410,29 @@ function codexSpawnParts(command, args) {
   };
 }
 
+function delegatedCodexAction(args) {
+  const exact = canonicalJson(args);
+  if (exact === canonicalJson(['plugin', '--help'])) return 'codex.command.probe';
+  if (exact === canonicalJson(['plugin', 'list', '--json', '--available'])) return 'codex.plugin.list';
+  if (exact === canonicalJson(['plugin', 'marketplace', 'add', activeDelegatedNativeAuthority?.repository, '--json'])) return 'codex.marketplace.add';
+  if (exact === canonicalJson(['plugin', 'remove', pluginId(), '--json'])) return 'codex.plugin.remove';
+  if (exact === canonicalJson(['plugin', 'add', pluginId(), '--json'])) return 'codex.plugin.add';
+  throw new Error(`delegated native Codex argv is not admitted: ${args.join(' ')}`);
+}
+
+function admitDelegatedCodexLaunch(command, args) {
+  if (!activeDelegatedNativeAuthority) return null;
+  const action = delegatedCodexAction(args);
+  verifyDelegatedNativeContinuity(action);
+  const candidates = commandCandidates('').map((value) => path.resolve(value));
+  const exactCommand = path.resolve(command);
+  if (!candidates.includes(exactCommand)) throw new Error('delegated native Codex executable was substituted');
+  return Object.freeze({ action, executable: exactCommand, argv_digest: sha256(canonicalJson(args)) });
+}
+
 function spawnCodex(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
+  admitDelegatedCodexLaunch(command, args);
   return spawnSync(parts.command, parts.args, {
     ...options,
     windowsHide: true
@@ -1312,6 +1441,7 @@ function spawnCodex(command, args, options = {}) {
 
 function spawnCodexProcess(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
+  admitDelegatedCodexLaunch(command, args);
   return spawn(parts.command, parts.args, {
     stdio: 'ignore',
     ...options,
@@ -1510,6 +1640,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoRoot: repoRootFromScript(),
     codexHome: defaultCodexHome(),
     codexCommand: '',
+    delegatedInvocationAuthority: null,
     write: false,
     json: false
   };
@@ -1522,6 +1653,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--codex-home=')) options.codexHome = arg.slice('--codex-home='.length);
     else if (arg === '--codex-cli') options.codexCommand = next();
     else if (arg.startsWith('--codex-cli=')) options.codexCommand = arg.slice('--codex-cli='.length);
+    else if (arg === '--delegated-invocation-authority') options.delegatedInvocationAuthority = decodeDelegatedNativeAuthority(next());
+    else if (arg.startsWith('--delegated-invocation-authority=')) options.delegatedInvocationAuthority = decodeDelegatedNativeAuthority(arg.slice('--delegated-invocation-authority='.length));
     else if (arg === '--write') options.write = true;
     else if (arg === '--verify') options.write = false;
     else if (arg === '--json') options.json = true;
@@ -1562,6 +1695,13 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   if (options.help) {
     console.log(usage());
     return 0;
+  }
+
+  try {
+    establishDelegatedNativeAuthority(options);
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    return 2;
   }
 
   const repoErrors = validateRepoPluginSource(options.repoRoot);

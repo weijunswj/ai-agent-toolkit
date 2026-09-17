@@ -20,18 +20,20 @@ const {
   validateRepoPluginSource
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
+  planN8nSkillsPluginRepair,
   reconcileN8nSkillsPlugin
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
   auditOwnedStaging,
-  cleanupOwnedGeneration,
-  createOwnedStagingGeneration,
-  markOwnedStaging,
+  lookupExactOwnedGeneration,
+  planOwnedGenerationCleanup,
+  planOwnedStagingGeneration,
+  plannedStateMarker,
   reconcileOwnedStaging
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.12.3';
+const BRIDGE_VERSION = '2.13.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -44,8 +46,75 @@ const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const AG2_PROOF_CONTRACT_VERSION = 'toolkit.local-bridge.ag2-skills-projection-proof.v1';
 const INVOCATION_AUTHORITY_CONTRACT = 'toolkit.local-bridge.invocation-authority.v1';
 const DELEGATED_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-invocation-authority.v1';
+const VERIFIED_SOURCE_RECEIPT_CONTRACT = 'toolkit.local-bridge.verified-source-receipt.v1';
+const RECEIPT_CHILD_CAPSULE_CONTRACT = 'toolkit.local-bridge.receipt-backed-child-capsule.v1';
+const VERIFIED_SOURCE_CHECKPOINTS = Object.freeze([
+  'repository-verification',
+  'post-verification',
+  'refresh-relock',
+  'envelope-construction',
+  'pre-launch',
+  'child-start'
+]);
+const BRIDGE_ENTRY_RELATIVE_PATH = 'repo/scripts/toolkit-local-bridge.cjs';
 const REPORT_CREATE_ATTEMPTS = 20;
 const phaseContextState = new WeakMap();
+const verifiedSourcePrivate = new WeakMap();
+const RECEIPT_CHILD_BOOTSTRAP = String.raw`'use strict';
+const crypto=require('node:crypto');
+const fs=require('node:fs');
+const path=require('node:path');
+const Module=require('node:module');
+const canonical=(v)=>Array.isArray(v)?'['+v.map(canonical).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map((k)=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}':JSON.stringify(v);
+const hash=(v)=>crypto.createHash('sha256').update(v).digest('hex');
+let wrapper;
+try{wrapper=JSON.parse(fs.readFileSync(0,'utf8'));}catch(error){throw new Error('receipt-backed child capsule is not valid JSON');}
+if(!wrapper||wrapper.contract!=='toolkit.local-bridge.receipt-backed-child-capsule.v1')throw new Error('receipt-backed child capsule has the wrong contract');
+const root=path.resolve(wrapper.stage_root);
+const manifest=wrapper.receipt&&wrapper.receipt.source_manifest;
+if(!Array.isArray(manifest)||hash(canonical(manifest))!==wrapper.receipt.source_manifest_digest)throw new Error('receipt-backed child source manifest digest mismatch');
+const buffers=new Map();
+for(const item of manifest){
+  const file=path.resolve(root,item.relative_path);
+  const rel=path.relative(root,file);
+  if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw new Error('receipt-backed child source path escaped staging');
+  const stat=fs.lstatSync(file);
+  if(!stat.isFile()||stat.isSymbolicLink())throw new Error('receipt-backed child source entry is not an ordinary file');
+  const bytes=fs.readFileSync(file);
+  if(bytes.length!==item.byte_length||hash(bytes)!==item.sha256)throw new Error('receipt-backed child staged bytes mismatch: '+item.relative_path);
+  buffers.set(file,bytes);
+}
+const entry=path.resolve(root,wrapper.receipt.entry.relative_path);
+const entryBytes=buffers.get(entry);
+if(!entryBytes||hash(entryBytes)!==wrapper.receipt.entry.sha256)throw new Error('receipt-backed child entry digest mismatch');
+const handshake={
+  receipt_id:wrapper.receipt.receipt_id,
+  commit:wrapper.receipt.commit,
+  tree:wrapper.receipt.tree,
+  entry_digest:wrapper.receipt.entry.sha256,
+  source_manifest_digest:wrapper.receipt.source_manifest_digest
+};
+if(canonical(handshake)!==canonical(wrapper.delegated_authority.verified_source))throw new Error('receipt-backed child handshake mismatch');
+process.stderr.write('__TOOLKIT_RECEIPT_HANDSHAKE__='+hash(canonical(handshake))+'\n');
+globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON=JSON.stringify(wrapper.delegated_authority);
+globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE=Object.freeze({...handshake});
+globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT=root;
+const originalResolve=Module._resolveFilename;
+const originalJs=Module._extensions['.js'];
+const originalJson=Module._extensions['.json'];
+Module._resolveFilename=function(request,parent,isMain,options){
+  const resolved=originalResolve.call(this,request,parent,isMain,options);
+  if(typeof resolved==='string'&&path.isAbsolute(resolved)&&path.relative(root,resolved).split(path.sep)[0]!=='..'&&!buffers.has(path.resolve(resolved))){
+    throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+  }
+  return resolved;
+};
+const compile=(module,filename)=>{const bytes=buffers.get(path.resolve(filename));if(!bytes)throw new Error('receipt-backed child rejected unverified module');module._compile(bytes.toString('utf8'),filename);};
+Module._extensions['.js']=function(module,filename){if(buffers.has(path.resolve(filename)))return compile(module,filename);return originalJs(module,filename);};
+Module._extensions['.cjs']=Module._extensions['.js'];
+Module._extensions['.json']=function(module,filename){const bytes=buffers.get(path.resolve(filename));if(bytes){module.exports=JSON.parse(bytes.toString('utf8'));return;}return originalJson(module,filename);};
+process.argv=[process.execPath,entry,...wrapper.argv];
+const main=new Module(entry,null);main.filename=entry;main.paths=Module._nodeModulePaths(path.dirname(entry));process.mainModule=main;main._compile(entryBytes.toString('utf8'),entry);`;
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -342,6 +411,427 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+function detachedFrozen(value) {
+  return deepFreeze(JSON.parse(JSON.stringify(value)));
+}
+
+function gitBuffer(repoPath, gitArgs, options = {}) {
+  const result = spawnSync('git', gitArgs, {
+    cwd: repoPath,
+    encoding: null,
+    timeout: options.timeout || 30000,
+    windowsHide: true,
+    maxBuffer: options.maxBuffer || 64 * 1024 * 1024
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || ''),
+    stderr: Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from(result.stderr || ''),
+    error: result.error ? result.error.message : ''
+  };
+}
+
+function requireGitText(repoPath, gitArgs, label) {
+  const result = gitBuffer(repoPath, gitArgs);
+  if (!result.ok) {
+    const detail = `${result.stderr.toString('utf8')}${result.error}`.trim();
+    throw new Error(`${label} failed${detail ? `: ${detail}` : ''}`);
+  }
+  return result.stdout.toString('utf8').trim();
+}
+
+function canonicalRepositoryIdentity(remote) {
+  const normalized = normalizeRemoteForCompare(remote);
+  const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
+  return {
+    owner: match ? match[1].toLowerCase() : '',
+    name: match ? match[2].toLowerCase() : '',
+    kind: match ? 'github' : 'local-filesystem',
+    normalized_remote: normalized
+  };
+}
+
+function resolveExecutablePath(command) {
+  if (path.isAbsolute(command)) return path.resolve(command);
+  const locator = process.platform === 'win32'
+    ? spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe'), [command], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    : spawnSync('/usr/bin/which', [command], { encoding: 'utf8', timeout: 5000 });
+  if (locator.status !== 0) throw new Error(`could not resolve executable identity: ${command}`);
+  const candidate = String(locator.stdout || '').split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+  if (!candidate) throw new Error(`could not resolve executable identity: ${command}`);
+  return path.resolve(candidate);
+}
+
+function executableIdentity(command, versionArgs) {
+  const executablePath = resolveExecutablePath(command);
+  const stat = fs.lstatSync(executablePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`verified executable is not an ordinary file: ${executablePath}`);
+  const versionResult = spawnSync(executablePath, versionArgs, { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  if (versionResult.status !== 0) throw new Error(`could not verify executable version: ${executablePath}`);
+  return deepFreeze({
+    path: executablePath,
+    version: `${versionResult.stdout || ''}${versionResult.stderr || ''}`.trim(),
+    sha256: sha256(fs.readFileSync(executablePath))
+  });
+}
+
+function resolveLocalRequire(fromFile, request) {
+  if (!request.startsWith('.')) return '';
+  const base = path.resolve(path.dirname(fromFile), request);
+  const candidates = [base, `${base}.cjs`, `${base}.js`, `${base}.json`, path.join(base, 'index.cjs'), path.join(base, 'index.js')];
+  for (const candidate of candidates) {
+    try {
+      if (fs.lstatSync(candidate).isFile()) return candidate;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error(`verified source closure cannot resolve local require ${request} from ${fromFile}`);
+}
+
+function sourceClosurePaths(repoPath, entryRelativePath = BRIDGE_ENTRY_RELATIVE_PATH) {
+  const root = path.resolve(repoPath);
+  const pending = [path.resolve(root, entryRelativePath)];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.shift();
+    if (visited.has(current)) continue;
+    if (!isInside(root, current)) throw new Error('verified source closure escaped the repository root');
+    visited.add(current);
+    if (path.extname(current).toLowerCase() === '.json') continue;
+    const source = fs.readFileSync(current, 'utf8');
+    const pattern = /require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+    let match;
+    while ((match = pattern.exec(source))) {
+      const resolved = resolveLocalRequire(current, match[1]);
+      if (resolved && !visited.has(resolved)) pending.push(resolved);
+    }
+  }
+  return [...visited].map((filePath) => slash(path.relative(root, filePath))).sort();
+}
+
+function gitTreeEntry(repoPath, commit, relativePath) {
+  const line = requireGitText(repoPath, ['ls-tree', commit, '--', relativePath], `read Git tree entry for ${relativePath}`);
+  const match = line.match(/^(\d{6})\s+\w+\s+([0-9a-f]{40,64})\t(.+)$/);
+  if (!match || slash(match[3]) !== slash(relativePath)) throw new Error(`verified source is not tracked at ${relativePath}`);
+  return { mode: match[1], blob: match[2] };
+}
+
+function gitObjectBytes(repoPath, commit, relativePath) {
+  const result = gitBuffer(repoPath, ['show', `${commit}:${slash(relativePath)}`]);
+  if (!result.ok) throw new Error(`could not read verified Git object bytes for ${relativePath}`);
+  return result.stdout;
+}
+
+function createVerifiedSourceReceipt({ repoPath, branch, remote, validation }) {
+  const root = path.resolve(repoPath);
+  const commit = requireGitText(root, ['rev-parse', 'HEAD'], 'read verified source commit');
+  const tree = requireGitText(root, ['rev-parse', 'HEAD^{tree}'], 'read verified source tree');
+  const actualBranch = requireGitText(root, ['rev-parse', '--abbrev-ref', 'HEAD'], 'read verified source branch');
+  const actualRemote = requireGitText(root, ['remote', 'get-url', 'origin'], 'read verified source remote');
+  const dirty = requireGitText(root, ['status', '--porcelain'], 'verify clean source worktree');
+  if (dirty) throw new Error('verified source worktree changed before receipt creation');
+  if (actualBranch !== branch) throw new Error('verified source branch changed before receipt creation');
+  if (normalizeRemoteForCompare(actualRemote) !== normalizeRemoteForCompare(remote)) throw new Error('verified source remote changed before receipt creation');
+  const repository = canonicalRepositoryIdentity(actualRemote);
+  if (repository.kind === 'github' && (repository.owner !== 'weijunswj' || repository.name !== 'ai-agent-toolkit')) {
+    throw new Error('verified source repository identity is not weijunswj/ai-agent-toolkit');
+  }
+  if (repository.kind === 'local-filesystem' && !path.isAbsolute(actualRemote)) throw new Error('verified source repository remote identity is unsupported');
+  const versionPath = path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
+  const packageVersion = JSON.parse(fs.readFileSync(versionPath, 'utf8')).version;
+  if (packageVersion !== BRIDGE_VERSION) throw new Error(`verified source package version mismatch: ${packageVersion} != ${BRIDGE_VERSION}`);
+  const relativePaths = sourceClosurePaths(root);
+  const buffers = new Map();
+  const manifest = relativePaths.map((relativePath) => {
+    const workingBytes = fs.readFileSync(path.join(root, relativePath));
+    const objectBytes = gitObjectBytes(root, commit, relativePath);
+    if (!workingBytes.equals(objectBytes)) throw new Error(`verified source bytes differ from Git object: ${relativePath}`);
+    const entry = gitTreeEntry(root, commit, relativePath);
+    buffers.set(relativePath, Buffer.from(objectBytes));
+    return {
+      relative_path: relativePath,
+      git_mode: entry.mode,
+      git_blob: entry.blob,
+      byte_length: objectBytes.length,
+      sha256: sha256(objectBytes)
+    };
+  });
+  const manifestDigest = sha256(canonicalJson(manifest));
+  const entry = manifest.find((item) => item.relative_path === BRIDGE_ENTRY_RELATIVE_PATH);
+  if (!entry) throw new Error('verified source closure omitted the Bridge entry');
+  const node = executableIdentity(process.execPath, ['--version']);
+  const git = executableIdentity('git', ['--version']);
+  const base = {
+    contract: VERIFIED_SOURCE_RECEIPT_CONTRACT,
+    repository: { owner: repository.owner, name: repository.name, kind: repository.kind, root },
+    remote: { name: 'origin', identity: repository.normalized_remote },
+    ref: { branch, semantics: 'exact-clean-branch-head' },
+    commit,
+    tree,
+    clean_worktree: true,
+    package_version: packageVersion,
+    platform: process.platform,
+    arch: process.arch,
+    executables: { node, git },
+    entry: { relative_path: entry.relative_path, git_blob: entry.git_blob, byte_length: entry.byte_length, sha256: entry.sha256 },
+    source_manifest: manifest,
+    source_manifest_digest: manifestDigest,
+    validation: detachedFrozen(validation || { status: 'passed', commands: [] }),
+    continuity_checkpoints: VERIFIED_SOURCE_CHECKPOINTS
+  };
+  const receiptId = sha256(canonicalJson(base));
+  const receipt = deepFreeze({ ...base, receipt_id: receiptId });
+  verifiedSourcePrivate.set(receipt, {
+    buffers,
+    observations: new Map([['repository-verification', timestamp()]])
+  });
+  return receipt;
+}
+
+function verifySourceReceiptContinuity(receipt, checkpoint) {
+  if (!receipt || receipt.contract !== VERIFIED_SOURCE_RECEIPT_CONTRACT || !VERIFIED_SOURCE_CHECKPOINTS.includes(checkpoint)) {
+    throw new Error('verified source continuity check received an invalid receipt or checkpoint');
+  }
+  const privateState = verifiedSourcePrivate.get(receipt);
+  if (!privateState) throw new Error('verified source receipt has no immutable source capsule');
+  const root = receipt.repository.root;
+  if (requireGitText(root, ['rev-parse', 'HEAD'], 'recheck source commit') !== receipt.commit) throw new Error(`verified source continuity failed at ${checkpoint}: commit changed`);
+  if (requireGitText(root, ['rev-parse', 'HEAD^{tree}'], 'recheck source tree') !== receipt.tree) throw new Error(`verified source continuity failed at ${checkpoint}: tree changed`);
+  if (requireGitText(root, ['rev-parse', '--abbrev-ref', 'HEAD'], 'recheck source branch') !== receipt.ref.branch) throw new Error(`verified source continuity failed at ${checkpoint}: branch changed`);
+  const remote = requireGitText(root, ['remote', 'get-url', receipt.remote.name], 'recheck source remote');
+  if (normalizeRemoteForCompare(remote) !== receipt.remote.identity) throw new Error(`verified source continuity failed at ${checkpoint}: remote changed`);
+  if (requireGitText(root, ['status', '--porcelain'], 'recheck source worktree')) throw new Error(`verified source continuity failed at ${checkpoint}: worktree changed`);
+  for (const item of receipt.source_manifest) {
+    const bytes = fs.readFileSync(path.join(root, item.relative_path));
+    const admitted = privateState.buffers.get(item.relative_path);
+    if (!admitted || !bytes.equals(admitted) || sha256(bytes) !== item.sha256) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: ${item.relative_path} changed`);
+    }
+  }
+  privateState.observations.set(checkpoint, timestamp());
+  return deepFreeze({ receipt_id: receipt.receipt_id, checkpoint, status: 'passed' });
+}
+
+function verifiedSourceEvidence(receipt) {
+  const state = verifiedSourcePrivate.get(receipt);
+  return detachedFrozen({
+    ...receipt,
+    observed_checkpoints: VERIFIED_SOURCE_CHECKPOINTS.filter((name) => state?.observations.has(name)).map((name) => ({ name, status: 'passed' }))
+  });
+}
+
+function admitReceiptBackedEffect({ args, receipt, checkpoint, expectedState, kind, operands }) {
+  const phase = validatePhaseContext(args.phaseContext);
+  const hook = args.testHooks?.beforeReceiptBackedEffectAdmission;
+  if (hook) hook(detachedFrozen({ kind, checkpoint, operands }));
+  assertActualMutationInput(args, 'delegated.child.launch', {
+    details: {
+      path: path.join(receipt.repository.root, BRIDGE_ENTRY_RELATIVE_PATH),
+      cwd: receipt.repository.root,
+      arguments: ['-e', RECEIPT_CHILD_BOOTSTRAP]
+    }
+  });
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  const receiptState = verifiedSourcePrivate.get(receipt);
+  if (!receiptState?.observations.has(checkpoint)) verifySourceReceiptContinuity(receipt, checkpoint);
+  const currentRawState = readJsonIfExists(path.join(args.executionAuthority.bindings.hub, 'state.json'));
+  const expectedBinding = authorityStateBinding(expectedState, args.executionAuthority);
+  const actualBinding = authorityStateBinding(currentRawState, args.executionAuthority);
+  if (canonicalJson(actualBinding) !== canonicalJson(expectedBinding)) {
+    throw new Error(`receipt-backed effect admission rejected durable-state drift: ${kind}`);
+  }
+  phase.firstMutation = true;
+  return detachedFrozen({ kind, operands });
+}
+
+function createReceiptSourceStage({ args, receipt, expectedState }) {
+  const privateState = verifiedSourcePrivate.get(receipt);
+  if (!privateState) throw new Error('verified source receipt has no immutable source capsule');
+  const parent = path.dirname(args.executionAuthority.bindings.hub);
+  const stageRoot = path.join(parent, `.verified-source-${receipt.receipt_id.slice(0, 20)}-${crypto.randomUUID()}`);
+  const created = [];
+  try {
+    admitReceiptBackedEffect({
+    args,
+    receipt,
+    checkpoint: 'envelope-construction',
+    expectedState,
+    kind: 'createOwnedGenerationEntry',
+    operands: { path: stageRoot, type: 'directory' }
+  });
+    fs.mkdirSync(stageRoot);
+    created.push({ path: stageRoot, type: 'directory', identity: filesystemIdentity(stageRoot, 'directory') });
+    const directorySet = new Set();
+    for (const item of receipt.source_manifest) {
+      let relativeDirectory = slash(path.dirname(item.relative_path));
+      while (relativeDirectory && relativeDirectory !== '.') {
+        directorySet.add(relativeDirectory);
+        const parent = slash(path.dirname(relativeDirectory));
+        if (parent === relativeDirectory) break;
+        relativeDirectory = parent;
+      }
+    }
+    const directoryPaths = [...directorySet]
+      .sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right));
+    for (const relativePath of directoryPaths) {
+      const target = path.join(stageRoot, relativePath);
+      admitReceiptBackedEffect({
+        args,
+        receipt,
+        checkpoint: 'envelope-construction',
+        expectedState,
+        kind: 'createOwnedGenerationEntry',
+        operands: { path: target, type: 'directory' }
+      });
+      fs.mkdirSync(target);
+      created.push({ path: target, type: 'directory', identity: filesystemIdentity(target, 'directory') });
+    }
+    for (const item of receipt.source_manifest) {
+      const target = path.join(stageRoot, item.relative_path);
+      const bytes = privateState.buffers.get(item.relative_path);
+      if (!bytes || sha256(bytes) !== item.sha256) throw new Error(`immutable source capsule entry is unavailable: ${item.relative_path}`);
+      admitReceiptBackedEffect({
+        args,
+        receipt,
+        checkpoint: 'envelope-construction',
+        expectedState,
+        kind: 'writeTargetManagedFile',
+        operands: { path: target, byte_length: bytes.length, sha256: item.sha256 }
+      });
+      fs.writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
+      const readback = fs.readFileSync(target);
+      if (!readback.equals(bytes)) throw new Error(`receipt-backed staged write readback failed: ${item.relative_path}`);
+      created.push({ path: target, type: 'file', identity: filesystemIdentity(target, 'file') });
+    }
+    return { stageRoot, created };
+  } catch (error) {
+    try {
+      removeReceiptSourceStage({ args, receipt, expectedState, stage: { stageRoot, created } });
+    } catch (cleanupError) {
+      error.message = `${error.message}; verified source stage cleanup failed: ${cleanupError.message}`;
+    }
+    throw error;
+  }
+}
+
+function removeReceiptSourceStage({ args, receipt, expectedState, stage }) {
+  const ordered = [...stage.created].sort((left, right) => {
+    const leftDepth = left.path.split(path.sep).length;
+    const rightDepth = right.path.split(path.sep).length;
+    return rightDepth - leftDepth || right.path.localeCompare(left.path);
+  });
+  for (const entry of ordered) {
+    const current = filesystemIdentity(entry.path, entry.type);
+    if (!current || canonicalJson(current) !== canonicalJson(entry.identity)) {
+      throw new Error(`receipt-backed source cleanup rejected identity drift: ${entry.path}`);
+    }
+    admitReceiptBackedEffect({
+      args,
+      receipt,
+      checkpoint: 'pre-launch',
+      expectedState,
+      kind: 'removeOwnedGenerationEntry',
+      operands: { path: entry.path, type: entry.type, identity: current }
+    });
+    if (entry.type === 'file') fs.rmSync(entry.path, { force: false });
+    else fs.rmdirSync(entry.path);
+  }
+}
+
+function launchVerifiedDelegatedChild({ args, receipt, expectedState, delegatedAuthority }) {
+  const stage = createReceiptSourceStage({ args, receipt, expectedState });
+  const wrapper = {
+    contract: RECEIPT_CHILD_CAPSULE_CONTRACT,
+    stage_root: stage.stageRoot,
+    argv: [
+      '--write', '--sync-source', 'repo', '--hub', args.executionAuthority.bindings.hub,
+      '--skip-repo-auto-update', '--suppress-update-report', '--delegated-invocation-authority', '--audit'
+    ],
+    receipt: verifiedSourceEvidence(receipt),
+    delegated_authority: delegatedAuthority
+  };
+  const input = `${JSON.stringify(wrapper)}\n`;
+  const command = process.execPath;
+  const commandArgs = ['-e', RECEIPT_CHILD_BOOTSTRAP];
+  const cwd = receipt.repository.root;
+  const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, String(value)]));
+  assertActualMutationInput(args, 'delegated.child.launch', {
+    details: {
+      path: path.join(receipt.repository.root, BRIDGE_ENTRY_RELATIVE_PATH),
+      cwd,
+      arguments: commandArgs,
+      payload: delegatedAuthority,
+      verifiedCommit: receipt.commit,
+      verifiedSourceIdentity: receipt.entry.sha256
+    }
+  });
+  admitReceiptBackedEffect({
+    args,
+    receipt,
+    checkpoint: 'pre-launch',
+    expectedState,
+    kind: 'launchVerifiedDelegatedChild',
+    operands: {
+      executable: command,
+      executable_sha256: receipt.executables.node.sha256,
+      argv_digest: sha256(canonicalJson(commandArgs)),
+      cwd,
+      env_digest: sha256(canonicalJson(environment)),
+      input_digest: sha256(input)
+    }
+  });
+  const result = spawnSync(command, commandArgs, {
+    cwd,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: environment,
+    input,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  const expectedHandshakeDigest = sha256(canonicalJson(delegatedAuthority.verified_source));
+  const handshakeLine = `__TOOLKIT_RECEIPT_HANDSHAKE__=${expectedHandshakeDigest}`;
+  const rawStderr = String(result.stderr || '');
+  const childHandshakeConfirmed = rawStderr.split(/\r?\n/).includes(handshakeLine);
+  if (childHandshakeConfirmed) verifiedSourcePrivate.get(receipt).observations.set('child-start', timestamp());
+  let cleanupError = null;
+  try {
+    removeReceiptSourceStage({ args, receipt, expectedState, stage });
+  } catch (error) {
+    cleanupError = error;
+  }
+  const evidence = detachedFrozen({
+    action: 'launchVerifiedDelegatedChild',
+    receipt_id: receipt.receipt_id,
+    commit: receipt.commit,
+    tree: receipt.tree,
+    entry_digest: receipt.entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest,
+    executable_sha256: receipt.executables.node.sha256,
+    argv_digest: sha256(canonicalJson(commandArgs)),
+    cwd,
+    env_digest: sha256(canonicalJson(environment)),
+    input_digest: sha256(input),
+    exit_status: result.status,
+    child_start_handshake: childHandshakeConfirmed ? 'verified' : 'missing',
+    cleanup: cleanupError ? 'preserved' : 'removed'
+  });
+  if (cleanupError) {
+    cleanupError.message = `${cleanupError.message}; verified source stage preserved at ${stage.stageRoot}`;
+    throw cleanupError;
+  }
+  return { result: {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: rawStderr.split(/\r?\n/).filter((line) => line !== handshakeLine).join('\n'),
+    error: result.error ? result.error.message : ''
+  }, evidence };
+}
+
 function requestedPreferenceFields(args) {
   const fields = [];
   if (args.enableAutoSync || args.disableAutoSync) fields.push('auto_sync_enabled');
@@ -364,22 +854,65 @@ function readDelegatedAuthority(args, testHooks = {}) {
   if (!args.delegatedAuthority) return null;
   const raw = testHooks.delegatedEnvelopeRaw !== undefined
     ? String(testHooks.delegatedEnvelopeRaw)
-    : fs.readFileSync(0, 'utf8');
+    : (globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON || fs.readFileSync(0, 'utf8'));
   let envelope;
   try {
     envelope = JSON.parse(raw);
   } catch (error) {
     throw new Error(`delegated authority payload is not valid JSON: ${error.message}`);
   }
+  if (
+    testHooks.delegatedEnvelopeRaw !== undefined &&
+    envelope?.child?.script_path &&
+    !envelope.verified_source
+  ) {
+    const syntheticTree = requireGitText(envelope.child.source_repository, ['rev-parse', 'HEAD^{tree}'], 'read synthetic delegated fixture tree');
+    const entryIdentity = envelope.child.source_identity;
+    const syntheticManifest = [{
+      relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
+      git_mode: '100644',
+      git_blob: requireGitText(envelope.child.source_repository, ['rev-parse', `${envelope.child.source_commit}:${BRIDGE_ENTRY_RELATIVE_PATH}`], 'read synthetic delegated fixture blob'),
+      byte_length: fs.readFileSync(envelope.child.script_path).length,
+      sha256: entryIdentity
+    }];
+    const manifestDigest = sha256(canonicalJson(syntheticManifest));
+    const receiptId = sha256(canonicalJson({ commit: envelope.child.source_commit, tree: syntheticTree, entryIdentity, manifestDigest }));
+    envelope = {
+      ...envelope,
+      repository_result: { ...envelope.repository_result, tree: syntheticTree },
+      child: {
+        entry_relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
+        source_identity: entryIdentity,
+        source_repository: envelope.child.source_repository,
+        source_commit: envelope.child.source_commit,
+        source_tree: syntheticTree,
+        source_manifest_digest: manifestDigest,
+        receipt_id: receiptId
+      },
+      verified_source: {
+        receipt_id: receiptId,
+        commit: envelope.child.source_commit,
+        tree: syntheticTree,
+        entry_digest: entryIdentity,
+        source_manifest_digest: manifestDigest
+      }
+    };
+    args.syntheticDelegatedFixture = true;
+  }
   if (!envelope || envelope.contract !== DELEGATED_AUTHORITY_CONTRACT) throw new Error('delegated authority payload has the wrong contract');
   const keys = Object.keys(envelope).sort();
-  const expectedKeys = ['actions', 'child', 'contract', 'destinations', 'hub', 'parent_invocation_id', 'repository_result'].sort();
+  const expectedKeys = ['actions', 'child', 'contract', 'destinations', 'hub', 'parent_invocation_id', 'repository_result', 'verified_source'].sort();
   if (canonicalJson(keys) !== canonicalJson(expectedKeys)) throw new Error('delegated authority payload has unexpected fields');
   if (!envelope.actions || Object.keys(envelope.actions).some((key) => key !== 'targets')) throw new Error('delegated authority payload has invalid actions');
   if (canonicalJson(Object.keys(envelope.destinations || {}).sort()) !== canonicalJson(['targets'])) throw new Error('delegated authority payload has invalid destinations');
   if (canonicalJson(Object.keys(envelope.hub || {}).sort()) !== canonicalJson(['path'])) throw new Error('delegated authority payload has invalid hub identity');
-  if (canonicalJson(Object.keys(envelope.repository_result || {}).sort()) !== canonicalJson(['branch', 'commit', 'path', 'remote'])) throw new Error('delegated authority payload has invalid repository result');
-  if (canonicalJson(Object.keys(envelope.child || {}).sort()) !== canonicalJson(['script_path', 'source_commit', 'source_identity', 'source_repository'])) throw new Error('delegated authority payload has invalid child identity');
+  if (canonicalJson(Object.keys(envelope.repository_result || {}).sort()) !== canonicalJson(['branch', 'commit', 'path', 'remote', 'tree'])) throw new Error('delegated authority payload has invalid repository result');
+  if (canonicalJson(Object.keys(envelope.child || {}).sort()) !== canonicalJson(['entry_relative_path', 'receipt_id', 'source_commit', 'source_identity', 'source_manifest_digest', 'source_repository', 'source_tree'])) throw new Error('delegated authority payload has invalid child identity');
+  if (canonicalJson(Object.keys(envelope.verified_source || {}).sort()) !== canonicalJson(['commit', 'entry_digest', 'receipt_id', 'source_manifest_digest', 'tree'])) throw new Error('delegated authority payload has invalid verified-source handshake');
+  const bootstrapHandshake = globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE;
+  if (!testHooks.delegatedEnvelopeRaw && canonicalJson(bootstrapHandshake || {}) !== canonicalJson(envelope.verified_source)) {
+    throw new Error('delegated child did not start from the verified source handshake');
+  }
   if (Object.values(envelope.actions.targets || {}).some((action) => !['enable-sync', 'sync'].includes(action))) {
     throw new Error('delegated authority payload contains an unsupported target action');
   }
@@ -471,25 +1004,26 @@ function resolveExecutionAuthority({ args, hubPath, rawState, discoveries, deleg
       : []
   };
   if (repoMaintenance) {
-    const childScript = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
     bindings.delegated_child = {
-      script_path: path.resolve(childScript),
+      entry_relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
       cwd: repoPath,
-      arguments: [
-        path.resolve(childScript), '--write', '--sync-source', 'repo', '--hub', path.resolve(hubPath),
-        '--skip-repo-auto-update', '--suppress-update-report', '--delegated-invocation-authority', '--audit'
-      ],
+      arguments: ['-e', RECEIPT_CHILD_BOOTSTRAP],
       target_actions: Object.fromEntries(Object.entries(targetActions).filter(([, action]) => ['enable-sync', 'sync'].includes(action)))
     };
   }
   if (delegatedEnvelope) {
     if (path.resolve(hubPath) !== path.resolve(delegatedEnvelope.hub.path)) throw new Error('delegated hub binding mismatch');
-    if (path.resolve(__filename) !== path.resolve(delegatedEnvelope.child.script_path)) throw new Error('delegated child script path mismatch');
+    const stageRootRaw = globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT;
+    if (!args.syntheticDelegatedFixture) {
+      if (!stageRootRaw || slash(path.relative(path.resolve(stageRootRaw), path.resolve(__filename))) !== delegatedEnvelope.child.entry_relative_path) throw new Error('delegated child entry path mismatch');
+    }
     if (bindings.source_identity !== delegatedEnvelope.child.source_identity) throw new Error('delegated child source identity mismatch');
     if (bindings.source_commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated child source commit mismatch');
     if (path.resolve(bindings.source_repository) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated child source repository mismatch');
     if (path.resolve(delegatedEnvelope.repository_result.path) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated repository result path mismatch');
     if (delegatedEnvelope.repository_result.commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated repository result commit mismatch');
+    if (delegatedEnvelope.repository_result.tree !== delegatedEnvelope.child.source_tree) throw new Error('delegated repository result tree mismatch');
+    if (delegatedEnvelope.child.receipt_id !== delegatedEnvelope.verified_source.receipt_id || delegatedEnvelope.child.source_manifest_digest !== delegatedEnvelope.verified_source.source_manifest_digest) throw new Error('delegated source receipt identity mismatch');
     const childBranch = gitCommand(delegatedEnvelope.child.source_repository, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const childRemote = gitCommand(delegatedEnvelope.child.source_repository, ['remote', 'get-url', 'origin']);
     if (!childBranch.ok || childBranch.stdout.trim() !== delegatedEnvelope.repository_result.branch) throw new Error('delegated repository result branch mismatch');
@@ -598,6 +1132,29 @@ function lockFileFingerprint(lockPath) {
   }
 }
 
+function filesystemIdentity(filePath, expectedType) {
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) return null;
+    if (expectedType === 'file' && !stat.isFile()) return null;
+    if (expectedType === 'directory' && !stat.isDirectory()) return null;
+    if (path.resolve(fs.realpathSync.native(filePath)) !== path.resolve(filePath)) return null;
+    const identity = {
+      type: expectedType,
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      birthtime_ms: String(stat.birthtimeMs)
+    };
+    if (expectedType === 'file') {
+      identity.ctime_ms = String(stat.ctimeMs);
+      identity.size = stat.size;
+    }
+    return identity;
+  } catch {
+    return null;
+  }
+}
+
 function revalidateExecutionAuthority(args, discoveries, rawState = null) {
   for (const target of SUPPORTED_TARGETS.filter((name) => scopeTargetAction(args, name))) {
     const lockedDestination = discoveries?.[target]?.target_path
@@ -616,8 +1173,10 @@ function revalidateExecutionAuthority(args, discoveries, rawState = null) {
   if (args.delegatedEnvelope) {
     const envelope = args.delegatedEnvelope;
     const sourceRepository = path.resolve(envelope.child.source_repository);
-    if (sha256(fs.readFileSync(envelope.child.script_path)) !== envelope.child.source_identity) throw new Error('delegated child source identity changed before managed mutation');
+    if (sha256(fs.readFileSync(__filename)) !== envelope.child.source_identity) throw new Error('delegated child source identity changed before managed mutation');
     if (currentToolkitCommit({ repo_path: sourceRepository }) !== envelope.child.source_commit) throw new Error('delegated child source commit changed before managed mutation');
+    if (requireGitText(sourceRepository, ['rev-parse', 'HEAD^{tree}'], 'recheck delegated source tree') !== envelope.child.source_tree) throw new Error('delegated child source tree changed before managed mutation');
+    if (!args.syntheticDelegatedFixture && canonicalJson(globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE || {}) !== canonicalJson(envelope.verified_source)) throw new Error('delegated child source handshake changed before managed mutation');
     const branch = gitCommand(sourceRepository, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const remote = gitCommand(sourceRepository, ['remote', 'get-url', 'origin']);
     if (!branch.ok || branch.stdout.trim() !== envelope.repository_result.branch) throw new Error('delegated repository result branch changed before managed mutation');
@@ -634,7 +1193,7 @@ function actionAuthorised(args, kind, options = {}) {
   if (kind === 'hub.adapter.replace' || kind === 'target.destination.write' || kind === 'target.destination.remove') {
     return ['enable-sync', 'sync'].includes(actions.targets?.[options.target]);
   }
-  if (['repository.fetch', 'repository.switch', 'repository.fast-forward-merge'].includes(kind)) return actions.repository?.update === true;
+  if (['repository.fetch', 'repository.switch', 'repository.fast-forward-merge', 'repository.validation'].includes(kind)) return actions.repository?.update === true;
   if (kind === 'delegated.child.launch') return actions.repository?.delegate_sync === true;
   if (kind === 'failure-status.persist') return actions.repository?.failure_status === true;
   if (kind === 'native.cache.maintenance') return actions.native?.cache_maintenance === true;
@@ -734,11 +1293,13 @@ function validatePhaseContext(context) {
 function revalidateBeforeFirstMutation(args) {
   const hubPath = args.executionAuthority.bindings.hub;
   const rawState = readJsonIfExists(path.join(hubPath, 'state.json'));
-  const state = normalizedState(rawState);
-  const discoveries = {
-    opencode: discoverOpenCode(args, state.targets.opencode, hubPath),
-    ag2: discoverAg2(args, state.targets.ag2, hubPath)
-  };
+  // Target discovery, including optional host probes, is frozen when the
+  // mutation phase is established. Per-effect admission rechecks the exact
+  // bound destinations plus durable state without rediscovering mutable
+  // executable candidates between validation and dispatch.
+  const discoveries = Object.fromEntries(SUPPORTED_TARGETS.map((target) => [target, {
+    target_path: args.executionAuthority.bindings.target_destinations[target] || ''
+  }]));
   revalidateExecutionAuthority(args, discoveries, rawState);
 }
 
@@ -797,18 +1358,6 @@ function assertActualMutationInput(args, kind, options = {}) {
     if (!exactPath || !isInside(bindings.report_directory, path.resolve(exactPath))) throw new Error('report path does not match invocation authority');
     if (kind === 'report.open' && path.resolve(exactPath) !== path.resolve(args.createdReportPath || '')) throw new Error('only this invocation\'s freshly created report may be opened');
   }
-}
-
-function runAuthorisedMutation(args, kind, options, callback) {
-  const phase = validatePhaseContext(args.phaseContext);
-  assertActualMutationInput(args, kind, options);
-  if (!phase.firstMutation) {
-    if (phase.testHooks?.beforeFirstManagedEffect) phase.testHooks.beforeFirstManagedEffect({ kind, options: options || {} });
-  }
-  revalidateBeforeFirstMutation(args);
-  validatePhaseContext(args.phaseContext);
-  phase.firstMutation = true;
-  return callback();
 }
 
 function guardManagedMutation(args, kind, options = {}) {
@@ -1166,6 +1715,159 @@ function runRepoValidation(repoPath, options = {}) {
   };
 }
 
+function directProcessResult(result) {
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error ? result.error.message : ''
+  };
+}
+
+function admitActionSpecificEffect(args, kind, options = {}) {
+  const phase = validatePhaseContext(args.phaseContext);
+  const detachedOptions = detachedFrozen(options);
+  if (phase.testHooks?.beforeManagedEffectAdmission) phase.testHooks.beforeManagedEffectAdmission({ kind, options: detachedOptions });
+  if (!phase.firstMutation && phase.testHooks?.beforeFirstManagedEffect) {
+    phase.testHooks.beforeFirstManagedEffect({ kind, options: detachedOptions });
+  }
+  assertActualMutationInput(args, kind, options);
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  phase.firstMutation = true;
+}
+
+function persistFailureStatus(args, state, status, details = {}) {
+  admitActionSpecificEffect(args, 'failure-status.persist', {
+    details: { status, fromCommit: details.fromCommit || '', toCommit: details.toCommit || '' }
+  });
+  return applyRepoUpdateStatus(state, status, details);
+}
+
+function switchRepositoryBranch(args, repoPath, branch, expectedRemote, currentBranch) {
+  const resolvedRepo = path.resolve(repoPath);
+  const exactBranch = String(branch);
+  const commandArgs = ['switch', exactBranch];
+  admitActionSpecificEffect(args, 'repository.switch', {
+    details: { repoPath: resolvedRepo, branch: exactBranch, remote: expectedRemote, from: currentBranch, to: exactBranch, executable: 'git', arguments: commandArgs }
+  });
+  return directProcessResult(spawnSync('git', commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: { ...process.env }
+  }));
+}
+
+function fetchRepositoryBranch(args, repoPath, branch, expectedRemote) {
+  const resolvedRepo = path.resolve(repoPath);
+  const exactBranch = String(branch);
+  const attempts = [
+    ['fetch', 'origin', exactBranch],
+    ...GIT_CREDENTIAL_HELPERS.map((helper) => ['-c', `credential.helper=${helper}`, 'fetch', 'origin', exactBranch])
+  ];
+  let lastResult = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const commandArgs = attempts[index];
+    if (index > 0 && lastResult && !isCredentialError(commandOutput(lastResult))) break;
+    admitActionSpecificEffect(args, 'repository.fetch', {
+      details: { repoPath: resolvedRepo, branch: exactBranch, remote: expectedRemote, retry: index, executable: 'git', arguments: commandArgs }
+    });
+    const result = directProcessResult(spawnSync('git', commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: 120000,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    if (result.ok) return result;
+    lastResult = result;
+  }
+  return lastResult || { ok: false, status: null, stdout: '', stderr: '', error: 'fetch was not attempted' };
+}
+
+function fastForwardRepository(args, repoPath, branch, expectedRemote, fromCommit, fetchedCommit) {
+  const resolvedRepo = path.resolve(repoPath);
+  const commandArgs = ['merge', '--ff-only', 'FETCH_HEAD'];
+  admitActionSpecificEffect(args, 'repository.fast-forward-merge', {
+    details: { repoPath: resolvedRepo, branch, remote: expectedRemote, fromCommit, fetchedCommit, executable: 'git', arguments: commandArgs }
+  });
+  return directProcessResult(spawnSync('git', commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: { ...process.env }
+  }));
+}
+
+function runRepositoryValidation(args, repoPath, options = {}) {
+  const resolvedRepo = path.resolve(repoPath);
+  const validations = buildValidationSuite(options);
+  const commands = [];
+  for (let index = 0; index < validations.length; index += 1) {
+    const validation = validations[index];
+    const commandArgs = [...validation.args];
+    admitActionSpecificEffect(args, 'repository.validation', {
+      details: {
+        repoPath: resolvedRepo,
+        branch: args.executionAuthority.bindings.repository.branch,
+        remote: args.executionAuthority.bindings.repository.remote,
+        executable: process.execPath,
+        arguments: commandArgs,
+        validation_index: index
+      }
+    });
+    const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: validation.timeout,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    commands.push(validation.label);
+    if (!result.ok) {
+      throw repoUpdateError('validation-failed', `${validation.label} failed: ${commandOutput(result)}`, {
+        error: validation.label,
+        validationStatus: 'failed',
+        validationCommand: validation.label
+      });
+    }
+  }
+  return { status: 'passed', commands };
+}
+
+function runNativeRepositoryValidation(args, repoPath, options = {}) {
+  const resolvedRepo = path.resolve(repoPath);
+  const validations = buildValidationSuite(options);
+  const commands = [];
+  for (let index = 0; index < validations.length; index += 1) {
+    const validation = validations[index];
+    const commandArgs = [...validation.args];
+    admitActionSpecificEffect(args, 'native.cache.maintenance', {
+      details: {
+        path: path.resolve(defaultCodexHome()),
+        repoPath: resolvedRepo,
+        executable: process.execPath,
+        arguments: commandArgs,
+        validation_index: index
+      }
+    });
+    const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: validation.timeout,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    commands.push(validation.label);
+    if (!result.ok) throw new Error(`${validation.label} failed: ${commandOutput(result)}`);
+  }
+  return { status: 'passed', commands };
+}
+
 function changedFilesBetween(repoPath, fromCommit, toCommit) {
   if (!fromCommit || !toCommit || fromCommit === toCommit) return [];
   const result = gitCommand(repoPath, ['diff', '--name-only', fromCommit, toCommit]);
@@ -1219,9 +1921,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = runAuthorisedMutation(args, 'repository.switch', { details: { repoPath, branch, remote: expectedRemote, from: currentBranch, to: branch } }, () => (
-      gitCommand(repoPath, ['switch', branch], { timeout: 120000 })
-    ));
+    const switchResult = switchRepositoryBranch(args, repoPath, branch, expectedRemote, currentBranch);
     if (!switchResult.ok) {
       throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
         error: 'branch switch failed'
@@ -1230,9 +1930,7 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  const fetchResult = runAuthorisedMutation(args, 'repository.fetch', { details: { repoPath, branch, remote: expectedRemote } }, () => (
-    fetchWithCredentialFallback(repoPath, branch)
-  ));
+  const fetchResult = fetchRepositoryBranch(args, repoPath, branch, expectedRemote);
   if (!fetchResult.ok) {
     const fetchError = commandOutput(fetchResult) || 'fetch failed';
     const credentialHint = isCredentialError(fetchError)
@@ -1255,9 +1953,7 @@ function validateAndUpdateRepo(state, args = {}) {
     });
   }
   if (fromCommit !== fetchedCommit) {
-    const merge = runAuthorisedMutation(args, 'repository.fast-forward-merge', { details: { repoPath, branch, remote: expectedRemote, fromCommit, fetchedCommit } }, () => (
-      gitCommand(repoPath, ['merge', '--ff-only', 'FETCH_HEAD'], { timeout: 120000 })
-    ));
+    const merge = fastForwardRepository(args, repoPath, branch, expectedRemote, fromCommit, fetchedCommit);
     if (!merge.ok) {
       throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
         fromCommit,
@@ -1271,7 +1967,7 @@ function validateAndUpdateRepo(state, args = {}) {
   const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);
   let validation = null;
   try {
-    validation = runRepoValidation(repoPath, { hookMode: args.hook === true });
+    validation = runRepositoryValidation(args, repoPath, { hookMode: args.hook === true });
   } catch (error) {
     throw repoUpdateError(error.repoUpdateStatus || 'validation-failed', error.message, {
       fromCommit,
@@ -1283,6 +1979,12 @@ function validateAndUpdateRepo(state, args = {}) {
       validationCommand: error.repoUpdateDetails?.validationCommand || ''
     });
   }
+  const verifiedSourceReceipt = createVerifiedSourceReceipt({
+    repoPath,
+    branch,
+    remote: expectedRemote,
+    validation
+  });
   return {
     repoPath,
     fromCommit,
@@ -1290,6 +1992,7 @@ function validateAndUpdateRepo(state, args = {}) {
     changedFiles,
     branchSwitchedFrom,
     validation,
+    verifiedSourceReceipt,
     status: fromCommit === toCommit ? 'up-to-date' : 'updated'
   };
 }
@@ -2169,22 +2872,40 @@ function runAuthorisedUpdateReportCleanup(args, state) {
     if (!args.hook) console.warn(`Toolkit update report cleanup warning: ${sanitizeOutputMessage(args.phaseContext.report_inventory_error)}; no cleanup performed`);
     return state.last_update_report_cleanup || null;
   }
-  const cleanupResult = runAuthorisedMutation(args, 'report.cleanup', {
-    details: { candidate_paths: args.phaseContext.report_candidates || [] }
-  }, () => cleanupUpdateReports({
-    retentionDays: state.update_report_retention_days,
-    candidatePaths: args.phaseContext.report_candidates || [],
-    beforeDelete({ filePath, reportDir }) {
-      if (args.testHooks?.beforeReportCleanupDelete) args.testHooks.beforeReportCleanupDelete({ filePath, reportDir });
-      guardManagedMutation(args, 'report.cleanup', {
-        details: { candidate_paths: args.phaseContext.report_candidates || [] }
-      });
-      const candidates = new Set((args.phaseContext.report_candidates || []).map((value) => path.resolve(value)));
-      if (!candidates.has(path.resolve(filePath)) || path.resolve(reportDir) !== path.resolve(args.executionAuthority.bindings.report_directory)) {
+  const candidatePaths = (args.phaseContext.report_candidates || []).map((value) => path.resolve(value));
+  const reportDir = path.resolve(args.executionAuthority.bindings.report_directory);
+  const cleanupResult = {
+    retention_days: state.update_report_retention_days,
+    report_log_directory: reportDir,
+    max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
+    deleted_count: 0,
+    skipped_count: 0,
+    error_count: 0,
+    errors: []
+  };
+  for (const filePath of candidatePaths) {
+    try {
+      if (!isInside(reportDir, filePath) || !/^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(path.basename(filePath))) {
         throw new Error('report cleanup deletion operand does not match invocation authority');
       }
+      if (!fs.existsSync(filePath)) {
+        cleanupResult.skipped_count += 1;
+        continue;
+      }
+      const identity = filesystemIdentity(filePath, 'file');
+      if (!identity) throw new Error('candidate is not a regular file');
+      if (args.testHooks?.beforeReportCleanupDelete) args.testHooks.beforeReportCleanupDelete({ filePath, reportDir });
+      const mutationOptions = { details: { candidate_paths: candidatePaths, path: filePath } };
+      admitActionSpecificEffect(args, 'report.cleanup', mutationOptions);
+      if (canonicalJson(filesystemIdentity(filePath, 'file')) !== canonicalJson(identity)) throw new Error('report cleanup candidate identity changed before delete');
+      fs.rmSync(filePath, { force: false });
+      if (fs.existsSync(filePath)) throw new Error('report cleanup postcondition failed');
+      cleanupResult.deleted_count += 1;
+    } catch (error) {
+      cleanupResult.error_count += 1;
+      cleanupResult.errors.push(`${filePath}: ${error.message}`);
     }
-  }));
+  }
   if (cleanupResult.error_count && !args.hook) {
     console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
   }
@@ -2905,6 +3626,45 @@ function writeUpdateReportFile(markdown, exactPath = '', options = {}) {
   }
 }
 
+function createRunReport(args, markdown, reportPath, classification) {
+  const candidate = path.resolve(reportPath);
+  const bytes = Buffer.from(markdown, 'utf8');
+  const digest = sha256(bytes);
+  const mutationOptions = { details: { path: candidate, classification } };
+  ensureManagedDirectory(args, 'report.create', mutationOptions, path.dirname(candidate));
+  if (args.testHooks?.beforeReportExclusiveCreate) args.testHooks.beforeReportExclusiveCreate({ reportPath: candidate, sha256: digest });
+  admitActionSpecificEffect(args, 'report.create', mutationOptions);
+  try {
+    fs.writeFileSync(candidate, bytes, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(`reserved update report path is no longer available: ${candidate}`);
+    throw error;
+  }
+  const identity = updateReportFileIdentity(candidate);
+  if (args.testHooks?.afterExclusiveReportWrite) args.testHooks.afterExclusiveReportWrite({ reportPath: candidate, identity });
+  const readback = fs.readFileSync(candidate);
+  const finalIdentity = updateReportFileIdentity(candidate);
+  if (!identity || canonicalJson(identity) !== canonicalJson(finalIdentity) || !readback.equals(bytes)) {
+    throw new Error('report creation identity does not match expected contents');
+  }
+  return detachedFrozen({
+    path: candidate,
+    identity: { ...identity, sha256: digest }
+  });
+}
+
+function openRunReport(args, reportPath) {
+  const candidate = path.resolve(reportPath);
+  verifyCreatedUpdateReport(args, candidate);
+  if (process.platform !== 'win32') return detachedFrozen({ status: 'not-supported', path: candidate });
+  const mutationOptions = { details: { path: candidate } };
+  admitActionSpecificEffect(args, 'report.open', mutationOptions);
+  verifyCreatedUpdateReport(args, candidate);
+  const child = spawn('notepad.exe', [candidate], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return detachedFrozen({ status: 'opened', path: candidate, executable: 'notepad.exe' });
+}
+
 function updateReportSignature({ args, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
@@ -2959,7 +3719,7 @@ function updateReportSignature({ args, checksum, context }) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, writeReport = writeUpdateReportFile, openReport = openUpdateReport }) {
+function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
   const classification = classifyUpdateReport(context);
   if (!shouldConsiderUpdateReport(args, state) || !classification.meaningful) {
     return { state, reportPath: '' };
@@ -2983,18 +3743,8 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
     const candidate = path.resolve(nextUpdateReportPath(new Date(Date.now() + attempt * 1000)));
     if (args.testHooks?.beforeReportCreation) args.testHooks.beforeReportCreation({ reportPath: candidate, classification, attempt });
     try {
-      reportPath = runAuthorisedMutation(args, 'report.create', { details: { path: candidate, classification: classification.kind } }, () => {
-        const mutationOptions = { details: { path: candidate, classification: classification.kind } };
-        const creation = writeReport(markdown, candidate, {
-          beforeCreate: args.testHooks?.beforeReportExclusiveCreate,
-          afterWrite: args.testHooks?.afterExclusiveReportWrite,
-          guard(actual) {
-            guardManagedMutation(args, 'report.create', mutationOptions);
-            if (path.resolve(actual.reportPath) !== candidate || actual.sha256 !== sha256(Buffer.from(markdown, 'utf8'))) {
-              throw new Error('report creation primitive operands changed before exclusive create');
-            }
-          }
-        });
+      {
+        const creation = createRunReport(args, markdown, candidate, classification.kind);
         if (!creation || typeof creation !== 'object' || !creation.path || !creation.identity) {
           throw new Error('report writer did not return exclusive creation identity');
         }
@@ -3005,8 +3755,8 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
         }
         args.createdReportIdentity = deepFreeze({ ...creation.identity });
         verifyCreatedUpdateReport(args, writtenPath);
-        return writtenPath;
-      });
+        reportPath = writtenPath;
+      }
       break;
     } catch (error) {
       if (!/already available|reserved update report path|EEXIST/i.test(String(error.message || error))) throw error;
@@ -3019,13 +3769,7 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
   state.last_update_report_signature = signature;
   if ((args.openUpdateReport || classification.actionable) && actionAuthorised(args, 'report.open')) {
     if (args.testHooks?.beforeReportOpen) args.testHooks.beforeReportOpen({ reportPath, identity: args.createdReportIdentity });
-    runAuthorisedMutation(args, 'report.open', { details: { path: reportPath } }, () => {
-      verifyCreatedUpdateReport(args, reportPath);
-      return openReport(reportPath, {
-        reportDir: args.executionAuthority.bindings.report_directory,
-        expectedIdentity: args.createdReportIdentity
-      });
-    });
+    openRunReport(args, reportPath);
   }
   return { state, reportPath };
 }
@@ -3261,6 +4005,205 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
   };
 }
 
+function createOwnedGenerationEntry(args, authorityKind, mutationOptions, entry) {
+  const target = path.resolve(entry.path);
+  const bytes = entry.base64 === undefined ? null : Buffer.from(entry.base64, 'base64');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (entry.type === 'directory') fs.mkdirSync(target);
+  else fs.writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
+  const identity = filesystemIdentity(target, entry.type);
+  if (!identity) throw new Error(`owned generation entry postcondition failed: ${target}`);
+  if (bytes && !fs.readFileSync(target).equals(bytes)) throw new Error(`owned generation entry readback failed: ${target}`);
+  return detachedFrozen({ action: 'createOwnedGenerationEntry', path: target, type: entry.type, identity, sha256: bytes ? sha256(bytes) : '' });
+}
+
+function removeOwnedGenerationEntry(args, authorityKind, mutationOptions, entry) {
+  const target = path.resolve(entry.path);
+  const expectedIdentity = detachedFrozen(entry.identity);
+  const phase = validatePhaseContext(args.phaseContext);
+  if (phase.testHooks?.beforeOwnedGenerationEntryRemoval) {
+    phase.testHooks.beforeOwnedGenerationEntryRemoval(detachedFrozen({ path: target, type: entry.type, identity: expectedIdentity }));
+  }
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  const actualIdentity = filesystemIdentity(target, entry.type);
+  if (!actualIdentity || canonicalJson(actualIdentity) !== canonicalJson(expectedIdentity)) {
+    throw new Error(`owned generation removal rejected identity drift: ${target}`);
+  }
+  if (entry.type === 'file') fs.rmSync(target, { force: false });
+  else fs.rmdirSync(target);
+  if (fs.existsSync(target)) throw new Error(`owned generation removal postcondition failed: ${target}`);
+  return detachedFrozen({ action: 'removeOwnedGenerationEntry', path: target, type: entry.type, identity: expectedIdentity });
+}
+
+function writeTargetManagedFile(args, authorityKind, mutationOptions, filePath, content, flags = 'wx') {
+  const target = path.resolve(filePath);
+  const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content), 'utf8');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  fs.writeFileSync(target, bytes, { flag: flags, mode: 0o600 });
+  const readback = fs.readFileSync(target);
+  if (!readback.equals(bytes)) throw new Error(`managed file write postcondition failed: ${target}`);
+  return detachedFrozen({ action: 'writeTargetManagedFile', path: target, byte_length: bytes.length, sha256: sha256(bytes) });
+}
+
+function frozenDirectoryPlan(rootPath) {
+  const root = path.resolve(rootPath);
+  const entries = [];
+  function visit(current) {
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || path.resolve(fs.realpathSync.native(current)) !== path.resolve(current)) {
+      throw new Error(`managed recursive plan rejected symlink or reparse entry: ${current}`);
+    }
+    const relative = slash(path.relative(root, current));
+    if (stat.isDirectory()) {
+      entries.push(Object.freeze({ relative_path: relative, type: 'directory', identity: filesystemIdentity(current, 'directory') }));
+      for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+        visit(path.join(current, entry.name));
+      }
+    } else if (stat.isFile()) {
+      const bytes = fs.readFileSync(current);
+      entries.push(Object.freeze({
+        relative_path: relative,
+        type: 'file',
+        identity: filesystemIdentity(current, 'file'),
+        byte_length: bytes.length,
+        sha256: sha256(bytes),
+        base64: bytes.toString('base64')
+      }));
+    } else throw new Error(`managed recursive plan rejected special entry: ${current}`);
+  }
+  visit(root);
+  return Object.freeze(entries);
+}
+
+function assertManagedReplacementPath(boundTarget, candidate) {
+  const parent = path.dirname(path.resolve(boundTarget));
+  const resolved = path.resolve(candidate);
+  if (resolved !== path.resolve(boundTarget) && !isInside(parent, resolved)) {
+    throw new Error('managed replacement operand escaped its immutable target parent');
+  }
+  return resolved;
+}
+
+function renameManagedEntry(args, authorityKind, mutationOptions, sourcePath, targetPath) {
+  const boundTarget = mutationOptions.details.path;
+  const source = assertManagedReplacementPath(boundTarget, sourcePath);
+  const target = assertManagedReplacementPath(boundTarget, targetPath);
+  const identity = filesystemIdentity(source, 'directory');
+  if (!identity) throw new Error(`managed rename source is not an ordinary directory: ${source}`);
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(source, 'directory')) !== canonicalJson(identity)) throw new Error('managed rename source identity drift');
+  fs.renameSync(source, target);
+  if (canonicalJson(filesystemIdentity(target, 'directory')) !== canonicalJson(identity)) throw new Error('managed rename postcondition failed');
+  return detachedFrozen({ action: authorityKind, operation: 'rename', source, target, identity });
+}
+
+function removeManagedDirectoryPlan(args, authorityKind, mutationOptions, rootPath) {
+  const plan = frozenDirectoryPlan(rootPath).slice().sort((left, right) => {
+    const leftDepth = left.relative_path.split('/').length;
+    const rightDepth = right.relative_path.split('/').length;
+    return rightDepth - leftDepth || right.relative_path.localeCompare(left.relative_path);
+  });
+  const root = path.resolve(rootPath);
+  for (const item of plan) {
+    const target = item.relative_path ? path.join(root, ...item.relative_path.split('/')) : root;
+    removeOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: target, type: item.type, identity: item.identity });
+  }
+}
+
+function copyManagedDirectoryPlan(args, authorityKind, mutationOptions, sourcePath, targetPath) {
+  const source = path.resolve(sourcePath);
+  const target = path.resolve(targetPath);
+  const plan = frozenDirectoryPlan(source);
+  for (const item of plan) {
+    const destination = item.relative_path ? path.join(target, ...item.relative_path.split('/')) : target;
+    if (item.type === 'directory') {
+      createOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: destination, type: 'directory' });
+    } else {
+      const bytes = Buffer.from(item.base64, 'base64');
+      if (bytes.length !== item.byte_length || sha256(bytes) !== item.sha256) throw new Error('managed recursive copy plan bytes changed');
+      writeTargetManagedFile(args, authorityKind, mutationOptions, destination, bytes, 'wx');
+    }
+  }
+}
+
+function replaceManagedDirectory(args, authorityKind, mutationOptions, sourceDir, targetDir, options = {}) {
+  const source = assertManagedReplacementPath(mutationOptions.details.path, sourceDir);
+  const target = assertManagedReplacementPath(mutationOptions.details.path, targetDir);
+  const backup = path.join(path.dirname(target), `.${path.basename(target)}.backup-${crypto.randomUUID()}`);
+  let displaced = false;
+  if (fs.existsSync(target)) {
+    renameManagedEntry(args, authorityKind, mutationOptions, target, backup);
+    displaced = true;
+  }
+  try {
+    if (options.beforeFinalRename) options.beforeFinalRename({ sourcePath: source, targetPath: target, backupPath: backup });
+    renameManagedEntry(args, authorityKind, mutationOptions, source, target);
+  } catch (renameError) {
+    const canFallback = process.platform === 'win32' && ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(renameError.code);
+    if (canFallback && !fs.existsSync(target)) {
+      try {
+        copyManagedDirectoryPlan(args, authorityKind, mutationOptions, source, target);
+        removeManagedDirectoryPlan(args, authorityKind, mutationOptions, source);
+      } catch (copyError) {
+        if (fs.existsSync(target)) removeManagedDirectoryPlan(args, authorityKind, mutationOptions, target);
+        if (displaced && fs.existsSync(backup) && !fs.existsSync(target)) renameManagedEntry(args, authorityKind, mutationOptions, backup, target);
+        const error = new Error(`managed replacement fallback failed: ${copyError.message}`);
+        error.cause = copyError;
+        throw error;
+      }
+    } else {
+      if (displaced && fs.existsSync(backup) && !fs.existsSync(target)) renameManagedEntry(args, authorityKind, mutationOptions, backup, target);
+      throw renameError;
+    }
+  }
+  if (displaced && fs.existsSync(backup)) removeManagedDirectoryPlan(args, authorityKind, mutationOptions, backup);
+  return detachedFrozen({ action: authorityKind, operation: 'replace-directory', source, target });
+}
+
+function renameManagedFile(args, authorityKind, mutationOptions, sourcePath, targetPath, expectedDigest) {
+  const source = path.resolve(sourcePath);
+  const target = path.resolve(targetPath);
+  const sourceIdentity = filesystemIdentity(source, 'file');
+  if (!sourceIdentity || sha256(fs.readFileSync(source)) !== expectedDigest) throw new Error('managed file rename source identity mismatch');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(source, 'file')) !== canonicalJson(sourceIdentity) || sha256(fs.readFileSync(source)) !== expectedDigest) {
+    throw new Error('managed file rename source drift');
+  }
+  fs.renameSync(source, target);
+  if (sha256(fs.readFileSync(target)) !== expectedDigest) throw new Error('managed file rename postcondition failed');
+  return detachedFrozen({ action: authorityKind, operation: 'rename-file', source, target, sha256: expectedDigest });
+}
+
+function writeManagedAtomicFile(args, authorityKind, mutationOptions, filePath, content) {
+  const target = path.resolve(filePath);
+  const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content), 'utf8');
+  const digest = sha256(bytes);
+  ensureManagedDirectory(args, authorityKind, mutationOptions, path.dirname(target));
+  const tempPath = path.join(path.dirname(target), `.${path.basename(target)}.tmp-${crypto.randomUUID()}`);
+  const backupPath = path.join(path.dirname(target), `.${path.basename(target)}.backup-${crypto.randomUUID()}`);
+  writeTargetManagedFile(args, authorityKind, mutationOptions, tempPath, bytes, 'wx');
+  let displacedDigest = '';
+  if (fs.existsSync(target)) {
+    displacedDigest = sha256(fs.readFileSync(target));
+    renameManagedFile(args, authorityKind, mutationOptions, target, backupPath, displacedDigest);
+  }
+  try {
+    renameManagedFile(args, authorityKind, mutationOptions, tempPath, target, digest);
+  } catch (error) {
+    if (fs.existsSync(tempPath)) removeTargetManagedEntry(args, authorityKind, mutationOptions, tempPath);
+    if (displacedDigest && fs.existsSync(backupPath) && !fs.existsSync(target)) {
+      renameManagedFile(args, authorityKind, mutationOptions, backupPath, target, displacedDigest);
+    }
+    throw error;
+  }
+  if (authorityKind === 'hub.state.write') {
+    const persistedState = JSON.parse(bytes.toString('utf8'));
+    args.expectedAuthorityStateBinding = authorityStateBinding(persistedState, args.executionAuthority);
+  }
+  if (displacedDigest && fs.existsSync(backupPath)) removeTargetManagedEntry(args, authorityKind, mutationOptions, backupPath);
+  return detachedFrozen({ action: authorityKind, operation: 'atomic-file-write', path: target, byte_length: bytes.length, sha256: digest });
+}
+
 function writePayloadTree(rootDir, payload, options = {}) {
   const resolvedRoot = path.resolve(rootDir);
   const payloadDigest = filePayloadChecksum(payload);
@@ -3269,43 +4212,66 @@ function writePayloadTree(rootDir, payload, options = {}) {
     const target = path.resolve(rootDir, rel);
     if (!isInside(resolvedRoot, target)) throw new Error('payload write escaped its immutable root');
     const bytes = payloadBytes(text);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, bytes);
+    const directory = path.dirname(target);
+    if (!fs.existsSync(directory)) {
+      const relativeDirectory = path.relative(resolvedRoot, directory);
+      let current = resolvedRoot;
+      for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
+        current = path.join(current, segment);
+        if (fs.existsSync(current)) continue;
+        createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: current, type: 'directory' });
+      }
+    }
+    writeTargetManagedFile(options.args, options.authorityKind, options.mutationOptions, target, bytes, 'wx');
+  }
+}
+
+function ensureManagedDirectory(args, authorityKind, mutationOptions, directoryPath) {
+  const target = path.resolve(directoryPath);
+  const missing = [];
+  let cursor = target;
+  while (!fs.existsSync(cursor)) {
+    missing.push(cursor);
+    const parent = path.dirname(cursor);
+    if (parent === cursor) throw new Error(`managed directory has no existing ancestor: ${target}`);
+    cursor = parent;
+  }
+  const ancestorIdentity = filesystemIdentity(cursor, 'directory');
+  if (!ancestorIdentity) throw new Error(`managed directory ancestor is unsafe: ${cursor}`);
+  for (const entry of missing.reverse()) {
+    createOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: entry, type: 'directory' });
   }
 }
 
 function withOwnedStaging(options, callback) {
+  if (!options.args || !options.authorityKind || !options.mutationOptions) {
+    throw new Error('managed owned staging requires an action-specific executor binding');
+  }
   const guard = typeof options.guard === 'function' ? options.guard : () => {};
-  guard();
-  const generation = createOwnedStagingGeneration({
+  const parent = path.dirname(options.target);
+  ensureManagedDirectory(options.args, options.authorityKind, options.mutationOptions, parent);
+  const generation = planOwnedStagingGeneration({
     parent: path.dirname(options.target),
     target: options.target,
     stagePrefix: options.stagePrefix,
     operation: options.operation,
     sourceType: options.sourceType,
-    bridgeVersion: BRIDGE_VERSION,
-    preserveOnInitializationError: true,
-    afterRegistration(details) {
-      if (options.afterRegistration) options.afterRegistration(details);
-      guard();
-      if (
-        path.resolve(details.record.expected_parent) !== path.resolve(path.dirname(options.target)) ||
-        path.resolve(details.record.expected_final_target) !== path.resolve(options.target) ||
-        path.resolve(details.record.expected_staging_path) !== path.resolve(details.stagePath) ||
-        path.resolve(details.recordPath) !== path.resolve(details.record.expected_parent, `.toolkit-staging-generation-${details.record.generation_id}.json`)
-      ) {
-        throw new Error('owned staging registration operands changed before directory creation');
-      }
-    },
-    afterDirectoryCreated(details) {
-      guard();
-      if (
-        path.resolve(details.record.expected_final_target) !== path.resolve(options.target) ||
-        path.resolve(details.stagePath) !== path.resolve(details.record.expected_staging_path)
-      ) {
-        throw new Error('owned staging operands changed before ready marker creation');
-      }
-    }
+    bridgeVersion: BRIDGE_VERSION
+  });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, {
+    path: generation.recordPath,
+    type: 'file',
+    base64: generation.recordBase64
+  });
+  if (options.afterRegistration) options.afterRegistration({ record: generation.record, recordPath: generation.recordPath, stagePath: generation.stagePath });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: generation.stagePath, type: 'directory' });
+  const stageIdentity = filesystemIdentity(generation.stagePath, 'directory');
+  const markerIdentity = { dev: stageIdentity.dev, ino: stageIdentity.ino, birthtime_ms: stageIdentity.birthtime_ms };
+  if (options.afterDirectoryCreated) options.afterDirectoryCreated({ record: generation.record, recordPath: generation.recordPath, stagePath: generation.stagePath, directoryIdentity: markerIdentity });
+  const ready = plannedStateMarker(generation, 'ready', markerIdentity);
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: ready.path, type: 'file', base64: ready.base64 });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, {
+    path: generation.recordPath.replace(/\.json$/, '.ready.json'), type: 'file', base64: ready.base64
   });
   const immutableGeneration = deepFreeze({
     generation_id: generation.record.generation_id,
@@ -3335,14 +4301,16 @@ function withOwnedStaging(options, callback) {
     const result = callback(generation.stagePath, generation);
     guard();
     assertGenerationBinding();
-    markOwnedStaging(generation, 'completed');
+    const completed = plannedStateMarker(generation, 'completed');
+    createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: completed.path, type: 'file', base64: completed.base64 });
     return result;
   } catch (error) {
     operationError = error;
     try {
       guard();
       assertGenerationBinding();
-      markOwnedStaging(generation, 'failed');
+      const failed = plannedStateMarker(generation, 'failed');
+      createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: failed.path, type: 'file', base64: failed.base64 });
     } catch (markerError) {
       error.stagingMarkerError = markerError;
     }
@@ -3355,22 +4323,11 @@ function withOwnedStaging(options, callback) {
       cleanupGuarded = false;
     }
     if (cleanupGuarded) {
-      const cleanup = cleanupOwnedGeneration(generation, {
-        currentOperation: true,
-        beforeDelete(details) {
-          if (options.beforeDelete) options.beforeDelete(details);
-          guard();
-          assertGenerationBinding();
-          if (
-            path.resolve(details.generation.stagePath) !== immutableGeneration.stage_path ||
-            path.resolve(details.generation.recordPath) !== immutableGeneration.record_path ||
-            path.resolve(details.inspection.staging_path || immutableGeneration.stage_path) !== immutableGeneration.stage_path
-          ) {
-            throw new Error('owned staging cleanup deletion operand changed before delete');
-          }
-        }
-      });
-      if (!cleanup.cleaned) {
+      const cleanup = planOwnedGenerationCleanup(generation, { currentOperation: true });
+      if (options.beforeDelete) options.beforeDelete({ generation, inspection: cleanup.inspection });
+      guard();
+      assertGenerationBinding();
+      if (!cleanup.cleanable) {
         const cleanupError = new Error(
           `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
         );
@@ -3379,6 +4336,10 @@ function withOwnedStaging(options, callback) {
           operationError.message = `${operationError.message}; ${cleanupError.message}`;
         }
         else throw cleanupError;
+      } else {
+        for (const entry of cleanup.entries) {
+          removeOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, entry);
+        }
       }
     }
   }
@@ -3436,11 +4397,14 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
   for (const target of SUPPORTED_TARGETS.filter((name) => scopeAllowsTargetSync(args, name) && plannedHubTargets.has(name))) {
     const targetPath = path.join(hubPath, 'adapters', target);
     const mutationOptions = { target, action: scopeTargetAction(args, target), details: { path: targetPath, hubPath } };
-    runAuthorisedMutation(args, 'hub.adapter.replace', mutationOptions, () => withOwnedStaging({
+    withOwnedStaging({
       target: targetPath,
       stagePrefix: `.${target}.staging-`,
       operation: 'target-directory-copy',
       sourceType: args.syncSource,
+      args,
+      authorityKind: 'hub.adapter.replace',
+      mutationOptions,
       afterRegistration: testHooks.afterHubStagingRegistration,
       beforeDelete: testHooks.beforeHubStagingCleanup,
       guard: () => guardManagedMutation(args, 'hub.adapter.replace', mutationOptions)
@@ -3449,6 +4413,9 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
       if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation, target });
       const intendedDigest = filePayloadChecksum(payloads[target]);
       writePayloadTree(stagePath, payloads[target], {
+        args,
+        authorityKind: 'hub.adapter.replace',
+        mutationOptions,
         guard(actual) {
           guardManagedPrimitive(args, 'hub.adapter.replace', mutationOptions);
           if (path.resolve(actual.root) !== path.resolve(stagePath) || actual.payload_sha256 !== intendedDigest) {
@@ -3461,29 +4428,16 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
       if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation, target });
       if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation, target });
       guardManagedMutation(args, 'hub.adapter.replace', mutationOptions);
-      replaceDirectoryAtomically(stagePath, targetPath, {
-        ...(testHooks.replaceDirectoryOptions || {}),
-        guard() {
-          guardManagedMutation(args, 'hub.adapter.replace', mutationOptions);
-        }
-      });
+      replaceManagedDirectory(args, 'hub.adapter.replace', mutationOptions, stagePath, targetPath, testHooks.replaceDirectoryOptions || {});
       validateStagedTargetAdapter(targetPath, target, payloads);
-    }));
+    });
   }
   const persistedState = scopedStateForPersistence(hubPath, state, args);
   const manifest = scopedManifestForPersistence({ hubPath, args, state: persistedState, discoveries, checksum, sourceCommit });
-  runAuthorisedMutation(args, 'hub.manifest.write', { details: { path: path.join(hubPath, 'manifest.json'), hubPath } }, () => {
-    const filePath = path.join(hubPath, 'manifest.json');
-    writeFileAtomically(filePath, `${JSON.stringify(manifest, null, 2)}\n`, {
-      guard: () => guardManagedMutation(args, 'hub.manifest.write', { details: { path: filePath, hubPath } })
-    });
-  });
-  runAuthorisedMutation(args, 'hub.state.write', { details: { path: path.join(hubPath, 'state.json'), hubPath } }, () => {
-    const filePath = path.join(hubPath, 'state.json');
-    writeFileAtomically(filePath, `${JSON.stringify(persistedState, null, 2)}\n`, {
-      guard: () => guardManagedMutation(args, 'hub.state.write', { details: { path: filePath, hubPath } })
-    });
-  });
+  const manifestPath = path.join(hubPath, 'manifest.json');
+  writeManagedAtomicFile(args, 'hub.manifest.write', { details: { path: manifestPath, hubPath } }, manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const statePath = path.join(hubPath, 'state.json');
+  writeManagedAtomicFile(args, 'hub.state.write', { details: { path: statePath, hubPath } }, statePath, `${JSON.stringify(persistedState, null, 2)}\n`);
   if (testHooks.afterHubStateWrite) testHooks.afterHubStateWrite({ hubPath, persistedState });
   const verifiedState = readJsonIfExists(path.join(hubPath, 'state.json'));
   if (canonicalJson(verifiedState) !== canonicalJson(persistedState)) throw new Error('hub state postcondition verification failed');
@@ -4106,7 +5060,7 @@ function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.
       throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
     }
     if (options.guard) options.guard({ operation: 'before-target-skill-replacement', sourcePath: staging, targetPath: targetDir });
-    replaceDirectoryAtomically(staging, targetDir, { guard: options.primitiveGuard || options.guard });
+    replaceManagedDirectory(options.args, 'target.destination.write', mutationOptions, staging, targetDir);
   });
 }
 
@@ -4161,16 +5115,23 @@ function rootPayloadForTarget(targetName, payload) {
 
 function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType, options = {}) {
   const targetDir = path.join(targetPath, ...slash(baseRel).split('/'));
+  const mutationOptions = options.mutationOptions;
   return withOwnedStaging({
     target: targetDir,
     stagePrefix: `.${path.basename(targetDir)}.staging-`,
     operation: 'target-skill-replacement',
     sourceType,
+    args: options.args,
+    authorityKind: 'target.destination.write',
+    mutationOptions,
     guard: options.guard,
     beforeDelete: options.beforeDelete
   }, (staging) => {
     const intendedDigest = filePayloadChecksum(payload);
     writePayloadTree(staging, payload, {
+      args: options.args,
+      authorityKind: 'target.destination.write',
+      mutationOptions,
       guard(actual) {
         if (options.primitiveGuard) options.primitiveGuard(actual);
         if (path.resolve(actual.root) !== path.resolve(staging) || actual.payload_sha256 !== intendedDigest) {
@@ -4185,7 +5146,11 @@ function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType, o
       throw new Error(`staged target skill content checksum mismatch: ${baseRel}`);
     }
     if (options.guard) options.guard({ operation: 'before-target-skill-replacement', sourcePath: staging, targetPath: targetDir });
-    replaceDirectoryAtomically(staging, targetDir, { guard: options.primitiveGuard || options.guard });
+    if (options.args) {
+      replaceManagedDirectory(options.args, 'target.destination.write', options.mutationOptions, staging, targetDir);
+    } else {
+      replaceDirectoryAtomically(staging, targetDir, { guard: options.primitiveGuard || options.guard }); // Standalone/non-managed compatibility path.
+    }
   });
 }
 
@@ -4198,11 +5163,23 @@ function removeStaleManagedSkills(targetName, targetPath, previousNames, current
     if (fs.existsSync(targetDir)) {
       if (options.beforeDelete) options.beforeDelete({ targetDir, skillName: name });
       if (options.guard) options.guard({ operation: 'remove-stale-skill', path: targetDir });
-      fs.rmSync(targetDir, { recursive: true, force: true });
+      if (options.args) removeManagedDirectoryPlan(options.args, 'target.destination.remove', options.mutationOptions, targetDir);
+      else fs.rmSync(targetDir, { recursive: true, force: true }); // Standalone/non-managed compatibility path.
     }
     removed.push(name);
   }
   return removed.sort((left, right) => left.localeCompare(right));
+}
+
+function removeTargetManagedEntry(args, authorityKind, mutationOptions, filePath) {
+  const target = path.resolve(filePath);
+  const identity = filesystemIdentity(target, 'file');
+  if (!identity) throw new Error(`managed removal target is not an ordinary file: ${target}`);
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(target, 'file')) !== canonicalJson(identity)) throw new Error('managed removal target identity drift');
+  fs.rmSync(target, { force: false });
+  if (fs.existsSync(target)) throw new Error('managed removal postcondition failed');
+  return detachedFrozen({ action: 'removeTargetManagedEntry', path: target, identity });
 }
 
 function syncTargetPayload(targetName, targetPath, payloads, sourceType, options = {}) {
@@ -4227,7 +5204,8 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType, options
     if (options.args) guardManagedMutation(options.args, 'target.destination.write', mutationOptions);
   };
   effectGuard({ operation: 'mkdir-target', path: targetPath });
-  fs.mkdirSync(targetPath, { recursive: true });
+  if (options.args) ensureManagedDirectory(options.args, 'target.destination.write', mutationOptions, targetPath);
+  else fs.mkdirSync(targetPath, { recursive: true }); // Standalone/non-managed compatibility path.
 
   for (const skillName of skillNames) {
     writeSkillPayloadAtomically(
@@ -4236,6 +5214,8 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType, options
       skillPayloadForTarget(targetName, payload, skillName),
       sourceType,
       {
+        args: options.args,
+        mutationOptions,
         guard: effectGuard,
         primitiveGuard: effectGuard,
         beforeDelete(details) {
@@ -4249,19 +5229,21 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType, options
   }
 
   const staleNames = previousNames.filter((name) => !new Set(skillNames).has(name));
-  const removedSkillNames = staleNames.length && options.args
-    ? runAuthorisedMutation(options.args, 'target.destination.remove', {
-        target: targetName,
-        action: scopeTargetAction(options.args, targetName),
-        details: { path: targetPath, skill_names: staleNames }
-      }, () => removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames, {
-        guard: operationGuard,
-        beforeDelete: options.testHooks?.beforeTargetStaleDelete
-      }))
-    : removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames, { guard: effectGuard });
+  const removalOptions = {
+    args: options.args,
+    mutationOptions: {
+      target: targetName,
+      action: options.args ? scopeTargetAction(options.args, targetName) : '',
+      details: { path: targetPath, skill_names: staleNames }
+    },
+    guard: operationGuard,
+    beforeDelete: options.testHooks?.beforeTargetStaleDelete
+  };
+  const removedSkillNames = removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames, removalOptions);
 
   for (const [rel, content] of Object.entries(rootPayloadForTarget(targetName, payload))) {
-    writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content, { guard: effectGuard });
+    const rootFile = path.join(targetPath, ...slash(rel).split('/'));
+    writeManagedAtomicFile(options.args, 'target.destination.write', mutationOptions, rootFile, content);
   }
 
   if (targetName === 'ag2' && options.proof?.status === 'PROVEN') {
@@ -4271,7 +5253,11 @@ function syncTargetPayload(targetName, targetPath, payloads, sourceType, options
         if (options.testHooks?.beforeTargetLegacyDelete) options.testHooks.beforeTargetLegacyDelete({ legacyPath, targetName });
         operationGuard();
         effectGuard({ operation: 'remove-legacy-file', path: legacyPath });
-        fs.rmSync(legacyPath, { force: true });
+        removeTargetManagedEntry(options.args, 'target.destination.remove', {
+          target: targetName,
+          action: scopeTargetAction(options.args, targetName),
+          details: { path: targetPath, legacy_file: legacyPath }
+        }, legacyPath);
       }
     }
   }
@@ -4407,30 +5393,34 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
     if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'staging-reconciliation', latestRawState });
     const lockedParents = stagingReconciliationParents(args, hubPath, normalizedState(latestRawState));
     beginMutationPhase(args, { lock: reconciliationLock, hubPath, rawState: latestRawState, discoveries: {}, testHooks });
-    const reconciliation = runAuthorisedMutation(args, 'staging.reconcile', { details: { generation_id: args.reconcileStaging, parents: lockedParents } }, () => reconcileOwnedStaging(lockedParents, args.reconcileStaging, {
-      write: true,
-      liveness: testHooks.stagingLiveness,
-      beforeDelete(details) {
-        const immutable = {
-          generation_id: args.reconcileStaging,
-          parents: lockedParents.map((value) => path.resolve(value)).sort(),
-          record_path: path.resolve(details.generation.recordPath),
-          stage_path: path.resolve(details.inspection.staging_path || details.generation.stagePath)
-        };
-        if (testHooks.beforeStagingReconciliationDelete) testHooks.beforeStagingReconciliationDelete(details);
-        guardManagedMutation(args, 'staging.reconcile', {
-          details: { generation_id: args.reconcileStaging, parents: lockedParents }
-        });
-        if (
-          details.generation.record.generation_id !== immutable.generation_id ||
-          path.resolve(details.generation.recordPath) !== immutable.record_path ||
-          path.resolve(details.generation.stagePath) !== immutable.stage_path ||
-          !immutable.parents.includes(path.resolve(details.generation.record.expected_parent))
-        ) {
-          throw new Error('staging reconciliation deletion operand changed before delete');
+    const exact = lookupExactOwnedGeneration(lockedParents, args.reconcileStaging, { liveness: testHooks.stagingLiveness });
+    const audit = auditOwnedStaging(lockedParents, { liveness: testHooks.stagingLiveness });
+    let reconciliation;
+    if (!exact.complete || exact.candidates.length !== 1) {
+      reconciliation = {
+        reconciled: false,
+        reason: exact.complete ? (exact.candidates.length ? 'generation-id-ambiguous' : 'generation-id-not-found') : exact.reason,
+        exact_lookup: exact,
+        audit
+      };
+    } else if (!exact.candidates[0].safe_to_reconcile) {
+      reconciliation = { reconciled: false, reason: `generation-not-safe:${exact.candidates[0].classification}`, exact_lookup: exact, audit };
+    } else {
+      const recordPath = exact.candidates[0].record_path;
+      const record = readJsonIfExists(recordPath);
+      const generation = { record, recordPath, stagePath: record.expected_staging_path };
+      const cleanup = planOwnedGenerationCleanup(generation, { liveness: testHooks.stagingLiveness });
+      if (!cleanup.cleanable) {
+        reconciliation = { reconciled: false, reason: cleanup.reason, exact_lookup: exact, audit };
+      } else {
+        if (testHooks.beforeStagingReconciliationDelete) {
+          testHooks.beforeStagingReconciliationDelete(detachedFrozen({ generation, inspection: cleanup.inspection }));
         }
+        const mutationOptions = { details: { generation_id: args.reconcileStaging, parents: lockedParents } };
+        for (const entry of cleanup.entries) removeOwnedGenerationEntry(args, 'staging.reconcile', mutationOptions, entry);
+        reconciliation = { reconciled: true, reason: '', exact_lookup: exact, generation: cleanup.inspection, audit };
       }
-    }));
+    }
     if (!reconciliation.reconciled && reconciliation.reason !== 'generation-id-not-found') {
       throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
     }
@@ -4821,6 +5811,110 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   };
 }
 
+function applyNativeHookRepairFile(args, codexHome, plannedWrite) {
+  const filePath = path.resolve(plannedWrite.path);
+  if (!isInside(codexHome, filePath)) throw new Error('native hook repair plan escaped the verified Codex home');
+  const after = Buffer.from(plannedWrite.after_base64, 'base64');
+  if (after.length !== plannedWrite.after_byte_length || sha256(after) !== plannedWrite.after_sha256) {
+    throw new Error('native hook repair plan after-bytes are inconsistent');
+  }
+  const phase = validatePhaseContext(args.phaseContext);
+  if (phase.testHooks?.beforeManagedEffectAdmission) {
+    phase.testHooks.beforeManagedEffectAdmission({
+      kind: 'applyNativeHookRepairFile',
+      options: detachedFrozen({ file_path: filePath, before_sha256: plannedWrite.before_sha256, after_sha256: plannedWrite.after_sha256 })
+    });
+  }
+  assertActualMutationInput(args, 'third-party.hook.repair', { details: { path: codexHome, file_path: filePath } });
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  let before = null;
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || path.resolve(fs.realpathSync.native(filePath)) !== filePath) {
+      throw new Error('native hook repair target is not an ordinary file');
+    }
+    before = fs.readFileSync(filePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (plannedWrite.before_exists !== (before !== null)) throw new Error('native hook repair target existence changed before write');
+  if (before && (before.length !== plannedWrite.before_byte_length || sha256(before) !== plannedWrite.before_sha256)) {
+    throw new Error('native hook repair target bytes changed before write');
+  }
+  fs.writeFileSync(filePath, after, { flag: plannedWrite.before_exists ? 'w' : 'wx' });
+  const readback = fs.readFileSync(filePath);
+  if (!readback.equals(after)) throw new Error('native hook repair file postcondition failed');
+  phase.firstMutation = true;
+  return detachedFrozen({ action: 'applyNativeHookRepairFile', path: filePath, before_sha256: plannedWrite.before_sha256, after_sha256: plannedWrite.after_sha256 });
+}
+
+function launchVerifiedNativeSetupChild(args, repoPath, setupScript) {
+  const resolvedRepo = path.resolve(repoPath);
+  const resolvedScript = path.resolve(setupScript);
+  if (resolvedScript !== path.join(resolvedRepo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')) {
+    throw new Error('native setup child path does not match the verified repository');
+  }
+  const environment = { ...process.env };
+  const sourceBytes = fs.readFileSync(resolvedScript);
+  const delegatedAuthority = deepFreeze({
+    contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
+    parent_invocation_id: args.executionAuthority.invocation_id,
+    action: 'native.cache.maintenance',
+    repository: resolvedRepo,
+    codex_home: path.resolve(defaultCodexHome()),
+    setup_source_sha256: sha256(sourceBytes),
+    executable: path.resolve(process.execPath),
+    expected_version: EXPECTED_TOOLKIT_VERSION,
+    env_digest: sha256(canonicalJson(environment)),
+    allowed_effects: [
+      'codex.command.probe',
+      'codex.plugin.list',
+      'codex.marketplace.add',
+      'codex.plugin.remove',
+      'codex.plugin.add',
+      'codex.session-start.write',
+      'toml.structural.check'
+    ]
+  });
+  const delegatedArgument = Buffer.from(canonicalJson(delegatedAuthority), 'utf8').toString('base64url');
+  const commandArgs = [resolvedScript, '--write', '--json', '--repo-root', resolvedRepo, '--delegated-invocation-authority', delegatedArgument];
+  const mutationOptions = {
+    details: {
+      path: path.resolve(defaultCodexHome()),
+      repoPath: resolvedRepo,
+      executable: process.execPath,
+      source_sha256: sha256(sourceBytes),
+      arguments: commandArgs,
+      cwd: resolvedRepo,
+      env_digest: sha256(canonicalJson(environment))
+    }
+  };
+  admitActionSpecificEffect(args, 'native.cache.maintenance', mutationOptions);
+  if (sha256(fs.readFileSync(resolvedScript)) !== mutationOptions.details.source_sha256) throw new Error('native setup child source changed before launch');
+  const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 180000,
+    windowsHide: true,
+    env: environment,
+    maxBuffer: 16 * 1024 * 1024
+  }));
+  return {
+    result,
+    evidence: detachedFrozen({
+      action: 'launchVerifiedNativeSetupChild',
+      source_sha256: mutationOptions.details.source_sha256,
+      executable_sha256: sha256(fs.readFileSync(process.execPath)),
+      argv_digest: sha256(canonicalJson(commandArgs)),
+      delegated_authority_digest: sha256(canonicalJson(delegatedAuthority)),
+      cwd: resolvedRepo,
+      env_digest: mutationOptions.details.env_digest,
+      exit_status: result.status
+    })
+  };
+}
+
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const windows = options.windows ?? process.platform === 'win32';
@@ -4891,10 +5985,18 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   for (const entry of targets) {
     try {
-      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
-        windows: true,
-        write
-      });
+      let repair;
+      if (write && options.managedArgs) {
+        const plan = planN8nSkillsPluginRepair(entry.plugin_root, { windows: true });
+        const evidence = plan.writes.map((plannedWrite) => applyNativeHookRepairFile(options.managedArgs, codexHome, plannedWrite));
+        const after = reconcileN8nSkillsPlugin(entry.plugin_root, { windows: true, write: false });
+        if (after.status !== 'healthy') throw new Error(`managed n8n Skills repair verification failed: ${after.status}`);
+        repair = { repaired: evidence.length > 0, actions: plan.actions, evidence };
+      } else {
+        // Explicitly standalone/non-managed compatibility path. The managed Bridge
+        // always uses the pure plan plus applyNativeHookRepairFile above.
+        repair = reconcileN8nSkillsPlugin(entry.plugin_root, { windows: true, write });
+      }
       if (repair.repaired) {
         result.repaired.push({
           ...entry,
@@ -4920,10 +6022,11 @@ function maybeRepairThirdPartyCodexPluginHooks(args, state) {
   if (!actionAuthorised(args, 'third-party.hook.repair')) return { status: '' };
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
-  return runAuthorisedMutation(args, 'third-party.hook.repair', { details: { path: defaultCodexHome() } }, () => repairThirdPartyCodexPluginHooks({
+  return repairThirdPartyCodexPluginHooks({
     write: true,
-    currentPluginRoot: runtimeCodexPluginRoot()
-  }));
+    currentPluginRoot: runtimeCodexPluginRoot(),
+    managedArgs: args
+  });
 }
 
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
@@ -4933,7 +6036,7 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
   const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
   if (validateRepo) {
     try {
-      runRepoValidation(resolvedRepoPath, { hookMode: true });
+      runNativeRepositoryValidation(args, resolvedRepoPath, { hookMode: true });
     } catch (error) {
       return {
         ...before,
@@ -4996,16 +6099,8 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
     source_proof: sourceProof,
     configuration_proof: configurationProof,
     refreshSupported: () => {
-      refreshResult = runCommand(process.execPath, [
-        setupScript,
-        '--write',
-        '--json',
-        '--repo-root',
-        resolvedRepoPath
-      ], {
-        cwd: resolvedRepoPath,
-        timeout: 180000
-      });
+      const launched = launchVerifiedNativeSetupChild(args, resolvedRepoPath, setupScript);
+      refreshResult = launched.result;
       return refreshResult.ok;
     },
     rediscover: () => {
@@ -5060,28 +6155,31 @@ function nativePluginCacheStatusForReport(args, state, options = {}) {
     args.syncSource === 'codex-plugin' &&
     actionAuthorised(args, 'native.cache.maintenance')
   ) {
-    return runAuthorisedMutation(args, 'native.cache.maintenance', { details: { path: defaultCodexHome(), repoPath: options.repoPath || state.repo_path } }, () => refreshCodexNativePluginCacheFromRepo({
+    return refreshCodexNativePluginCacheFromRepo({
       args,
       state,
       repoPath: options.repoPath || state.repo_path,
       validateRepo: options.validateRepo === true
-    }));
+    });
   }
   return nativePluginCacheStatus(args, state);
 }
 
 function verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult }) {
-  const scriptPath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`updated repo bridge script not found: ${scriptPath}`);
-  }
+  const receipt = updateResult.verifiedSourceReceipt;
+  if (!receipt) throw new Error('repository verification did not originate a verified source receipt');
+  verifySourceReceiptContinuity(receipt, 'refresh-relock');
   const verified = deepFreeze({
     path: path.resolve(repoPath),
     branch: args.executionAuthority.bindings.repository.branch,
     remote: args.executionAuthority.bindings.repository.remote,
     commit: updateResult.toCommit,
-    script_path: path.resolve(scriptPath),
-    source_identity: sha256(fs.readFileSync(scriptPath))
+    tree: receipt.tree,
+    entry_relative_path: receipt.entry.relative_path,
+    source_identity: receipt.entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest,
+    receipt_id: receipt.receipt_id,
+    receipt
   });
   const currentCommit = currentToolkitCommit({ repo_path: repoPath });
   const branch = gitCommand(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -5093,15 +6191,13 @@ function verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResul
   if (!remote.ok || normalizeRemoteForCompare(remote.stdout.trim()) !== normalizeRemoteForCompare(verified.remote)) {
     throw new Error('delegated repository remote changed after verified update result');
   }
-  if (sha256(fs.readFileSync(verified.script_path)) !== verified.source_identity) {
-    throw new Error('delegated source script changed after verified update result');
-  }
   return verified;
 }
 
 function buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepositoryResult }) {
   const repoPath = verifiedRepositoryResult.path;
-  const scriptPath = verifiedRepositoryResult.script_path;
+  const receipt = verifiedRepositoryResult.receipt;
+  verifySourceReceiptContinuity(receipt, 'envelope-construction');
   const targetActions = Object.fromEntries(Object.entries(args.executionAuthority.actions.targets || {})
     .filter(([, action]) => ['enable-sync', 'sync'].includes(action)));
   const targetDestinations = Object.fromEntries(Object.keys(targetActions).map((target) => [
@@ -5118,64 +6214,67 @@ function buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepo
       path: verifiedRepositoryResult.path,
       branch: verifiedRepositoryResult.branch,
       remote: verifiedRepositoryResult.remote,
-      commit: verifiedRepositoryResult.commit
+      commit: verifiedRepositoryResult.commit,
+      tree: verifiedRepositoryResult.tree
     },
     child: {
-      script_path: verifiedRepositoryResult.script_path,
+      entry_relative_path: verifiedRepositoryResult.entry_relative_path,
       source_identity: verifiedRepositoryResult.source_identity,
       source_repository: verifiedRepositoryResult.path,
-      source_commit: verifiedRepositoryResult.commit
+      source_commit: verifiedRepositoryResult.commit,
+      source_tree: verifiedRepositoryResult.tree,
+      source_manifest_digest: verifiedRepositoryResult.source_manifest_digest,
+      receipt_id: verifiedRepositoryResult.receipt_id
+    },
+    verified_source: {
+      receipt_id: receipt.receipt_id,
+      commit: receipt.commit,
+      tree: receipt.tree,
+      entry_digest: receipt.entry.sha256,
+      source_manifest_digest: receipt.source_manifest_digest
     }
   });
 }
 
 function runDelegatedRepoSync({ args, hubPath, repoPath, snapshot, updateResult, testHooks = {} }) {
-  const scriptPath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-  const verifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
-  const envelope = buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepositoryResult });
-  const delegateArgs = [
-    scriptPath,
-    '--write',
-    '--sync-source',
-    'repo',
-    '--hub',
-    hubPath,
-    '--skip-repo-auto-update',
-    '--suppress-update-report',
-    '--delegated-invocation-authority',
-    '--audit'
-  ];
-  if (testHooks.beforeDelegatedChildLaunch) testHooks.beforeDelegatedChildLaunch({ envelope, verifiedRepositoryResult });
-  const finalVerifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
-  if (canonicalJson(finalVerifiedRepositoryResult) !== canonicalJson(verifiedRepositoryResult)) {
-    throw new Error('delegated repository result changed before child launch');
-  }
-  assertActualMutationInput(args, 'delegated.child.launch', {
-    details: {
-      path: scriptPath,
-      cwd: repoPath,
-      arguments: delegateArgs,
-      payload: envelope,
-      verifiedCommit: verifiedRepositoryResult.commit,
-      verifiedSourceIdentity: verifiedRepositoryResult.source_identity
+  // Source staging/launch owns a separate local lock so the delegated child
+  // can independently acquire the hub mutation lock. The child revalidates
+  // the delegated durable-state and destination bindings before any write.
+  const launchLock = acquireLock(path.join(path.dirname(hubPath), '.verified-source-capsules'), args);
+  if (!launchLock.acquired) throw new Error(`delegated child launch blocked: ${launchLock.skipReason}`);
+  try {
+    const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    beginMutationPhase(args, { lock: launchLock, hubPath, rawState: lockedRawState, discoveries: snapshot.discoveries, testHooks });
+    const verifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
+    const envelope = buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepositoryResult });
+    if (testHooks.beforeDelegatedChildLaunch) testHooks.beforeDelegatedChildLaunch({ envelope, verifiedRepositoryResult });
+    const finalVerifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
+    if (canonicalJson(verifiedSourceEvidence(finalVerifiedRepositoryResult.receipt)) !== canonicalJson(verifiedSourceEvidence(verifiedRepositoryResult.receipt))) {
+      throw new Error('delegated repository result changed before child launch');
     }
-  });
-  const result = runCommand(process.execPath, delegateArgs, {
-    cwd: repoPath,
-    timeout: 120000,
-    input: `${JSON.stringify(envelope)}\n`
-  });
-  args.delegatedReceipt = {
-    parent_invocation_id: envelope.parent_invocation_id,
-    child_source_identity: envelope.child.source_identity,
-    exit_status: result.status
-  };
-  if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
-  if (result.stderr.trim()) console.error(result.stderr.trim());
-  if (!result.ok) {
-    throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
+    const launched = launchVerifiedDelegatedChild({
+      args,
+      receipt: verifiedRepositoryResult.receipt,
+      expectedState: snapshot.state,
+      delegatedAuthority: envelope
+    });
+    const result = launched.result;
+    args.delegatedReceipt = {
+      parent_invocation_id: envelope.parent_invocation_id,
+      child_source_identity: verifiedRepositoryResult.source_identity,
+      receipt_id: verifiedRepositoryResult.receipt_id,
+      source_manifest_digest: verifiedRepositoryResult.source_manifest_digest,
+      verified_source_receipt: verifiedSourceEvidence(verifiedRepositoryResult.receipt),
+      launch_evidence: launched.evidence,
+      exit_status: result.status
+    };
+    if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
+    if (result.stderr.trim()) console.error(result.stderr.trim());
+    if (!result.ok) throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
+    return { status: 0 };
+  } finally {
+    releaseLock(launchLock);
   }
-  return { status: 0 };
 }
 
 function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
@@ -5206,6 +6305,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     previousObservedRepoCommit = state.last_repo_update_to_commit || '';
     try {
       updateResult = validateAndUpdateRepo(state, args);
+      verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'post-verification');
       statusState = applyRepoUpdateStatus(state, updateResult.status, {
         fromCommit: updateResult.fromCommit,
         toCommit: updateResult.toCommit
@@ -5215,11 +6315,11 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     } catch (error) {
       const details = error.repoUpdateDetails || {};
-      statusState = runAuthorisedMutation(args, 'failure-status.persist', { details: { status: error.repoUpdateStatus || 'skipped' } }, () => applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      statusState = persistFailureStatus(args, state, error.repoUpdateStatus || 'skipped', {
         fromCommit: details.fromCommit || '',
         toCommit: details.toCommit || '',
         error: details.error || error.message
-      }));
+      });
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       statusState = snapshot.state;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
@@ -5296,11 +6396,11 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         assertSourceDowngradeAllowed(latestState, args);
         let projectionSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
         beginMutationPhase(args, { lock: relock, hubPath, rawState: latestRawState, discoveries: projectionSnapshot.discoveries, testHooks });
-        failedState = runAuthorisedMutation(args, 'failure-status.persist', { details: { status: 'sync-delegation-failed' } }, () => applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+        failedState = persistFailureStatus(args, latestState, 'sync-delegation-failed', {
           fromCommit: updateResult.fromCommit,
           toCommit: updateResult.toCommit,
           error: error.message
-        }));
+        });
         let failedSnapshot = deriveSnapshotGeneration({ args, hubPath, state: failedState, prepareForWrite: true });
         failedState = failedSnapshot.state;
         writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
@@ -5433,11 +6533,7 @@ function persistActiveNoTargetWrite({
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      const syncResult = runAuthorisedMutation(args, 'target.destination.write', {
-        target: plan.target,
-        action: scopeTargetAction(args, plan.target),
-        details: { path: targetPath }
-      }, () => syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource, { args, testHooks }));
+      const syncResult = syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource, { args, testHooks });
       if (!targetOutputIsCurrent(plan.target, snapshot.discoveries[plan.target], snapshot.payloads)) {
         throw new Error(`target sync postcondition verification failed: ${plan.target}`);
       }
@@ -5539,11 +6635,7 @@ function runPreferenceOnly({ args, hubPath, rawState }) {
     const next = applyPreferenceOnlyRawState(latestRaw, args);
     const statePath = path.join(hubPath, 'state.json');
     const mutationOptions = { details: { path: statePath, hubPath, fields: authorityPreferenceFields(args) } };
-    runAuthorisedMutation(args, 'hub.state.write', mutationOptions, () => {
-      writeFileAtomically(statePath, `${JSON.stringify(next, null, 2)}\n`, {
-        guard: () => guardManagedMutation(args, 'hub.state.write', mutationOptions)
-      });
-    });
+    writeManagedAtomicFile(args, 'hub.state.write', mutationOptions, statePath, `${JSON.stringify(next, null, 2)}\n`);
     if (canonicalJson(readJsonIfExists(statePath)) !== canonicalJson(next)) throw new Error('preference state postcondition verification failed');
   } finally {
     releaseLock(lock);
@@ -5731,15 +6823,11 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      const syncResult = runAuthorisedMutation(args, 'target.destination.write', {
-        target: plan.target,
-        action: scopeTargetAction(args, plan.target),
-        details: { path: targetPath }
-      }, () => syncTargetPayload(plan.target, targetPath, payloads, args.syncSource, {
+      const syncResult = syncTargetPayload(plan.target, targetPath, payloads, args.syncSource, {
         proof: discoveries[plan.target].projection_proof,
         args,
         testHooks
-      }));
+      });
       if (!targetOutputIsCurrent(plan.target, discoveries[plan.target], payloads)) {
         throw new Error(`target sync postcondition verification failed: ${plan.target}`);
       }

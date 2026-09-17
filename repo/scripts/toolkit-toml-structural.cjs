@@ -34,19 +34,20 @@ function pythonCandidates() {
   });
 }
 
-function validateToml(text) {
+function validateToml(text, options = {}) {
   const input = Buffer.from(String(text || ''), 'utf8');
   const key = crypto.createHash('sha256').update(input).digest('hex');
   if (CACHE.has(key)) return { ...CACHE.get(key) };
   const failures = [];
   for (const candidate of pythonCandidates()) {
-    const result = spawnSync(candidate.command, [...candidate.args, '-c', PYTHON_VALIDATE], {
-      input,
+    const launch = options.launchParser || ((fixedCandidate, fixedInput) => spawnSync(fixedCandidate.command, [...fixedCandidate.args, '-c', PYTHON_VALIDATE], {
+      input: fixedInput,
       encoding: 'utf8',
       windowsHide: true,
       timeout: 60000,
       maxBuffer: 1024 * 1024,
-    });
+    }));
+    const result = launch(Object.freeze({ command: candidate.command, args: Object.freeze([...candidate.args]), script: PYTHON_VALIDATE }), Buffer.from(input));
     if (result.error) {
       failures.push(`${candidate.command}: unavailable`);
       continue;
@@ -262,9 +263,9 @@ function codeBeforeComment(line, lineStart, lexical) {
   return comment ? line.slice(0, comment.start - lineStart) : line;
 }
 
-function analyseToml(text) {
+function analyseToml(text, options = {}) {
   const source = String(text || '');
-  const validity = validateToml(source);
+  const validity = validateToml(source, options);
   const lexical = scanLexically(source);
   const lines = lineRecords(source).map((record) => structuralLine(record, lexical));
   const tables = [];

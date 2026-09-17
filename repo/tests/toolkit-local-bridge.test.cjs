@@ -50,7 +50,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.12.3';
+const expectedBridgeVersion = '2.13.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -384,6 +384,11 @@ function writeHookLightSmokeFixture(repoPath) {
 
 function writeRepoToolkitFixture(repoPath, label) {
   writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
+  writeJson(path.join(repoPath, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), {
+    version: expectedBridgeVersion,
+    version_policy: 'semver',
+    version_notes: 'Toolkit Local Bridge test fixture version.'
+  });
   writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'SKILL.md'), [
     '---',
     'name: fixture-skill',
@@ -416,7 +421,7 @@ function writeRepoToolkitFixture(repoPath, label) {
     "'use strict';",
     "const fs = require('node:fs');",
     "const marker = process.env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER;",
-    "const input = fs.readFileSync(0, 'utf8').trim();",
+    "const input = String(globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON || fs.readFileSync(0, 'utf8')).trim();",
     "if (marker) fs.appendFileSync(marker, `${JSON.stringify({ args: process.argv.slice(2), envelope: input ? JSON.parse(input) : null })}\\n`, 'utf8');",
     "if (!process.argv.includes('--skip-repo-auto-update')) {",
     "  console.error('missing recursion guard');",
@@ -1009,6 +1014,71 @@ test('dry-run audit performs no writes and reports planned targets', () => {
   assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills$/);
 });
 
+test('executor-ownership source inventory classifies every semantic filesystem mutation and process launch', () => {
+  const files = [
+    'toolkit-local-bridge.cjs',
+    'toolkit-staging-generations.cjs',
+    'repair-codex-plugin-windows-hooks.cjs',
+    'setup-codex-toolkit-plugin.cjs',
+    'toolkit-toml-structural.cjs'
+  ];
+  const classifications = {
+    'toolkit-local-bridge.cjs': {
+      executor: new Set([
+        'createReceiptSourceStage', 'removeReceiptSourceStage', 'launchVerifiedDelegatedChild',
+        'switchRepositoryBranch', 'fetchRepositoryBranch', 'fastForwardRepository',
+        'runRepositoryValidation', 'runNativeRepositoryValidation', 'runAuthorisedUpdateReportCleanup',
+        'createRunReport', 'openRunReport', 'createOwnedGenerationEntry', 'removeOwnedGenerationEntry',
+        'writeTargetManagedFile', 'renameManagedEntry', 'renameManagedFile', 'removeTargetManagedEntry',
+        'applyNativeHookRepairFile', 'launchVerifiedNativeSetupChild',
+        'cleanupSpentLockArtifacts', 'retireDisplacedEvidence', 'claimRecoveryMarker',
+        'releaseRecoveryMarker', 'acquireLock', 'releaseLock'
+      ]),
+      verifiedReadOrStandalone: new Set([
+        'gitBuffer', 'resolveExecutablePath', 'executableIdentity', 'writeJson', 'commandProbe',
+        'runCommand', 'currentToolkitCommit', 'cleanupUpdateReports', 'writeUpdateReportFile',
+        'renameSyncWithRetry', 'replaceDirectoryAtomically', 'copyDirectoryAtomically',
+        'writeFileAtomically', 'removeStaleManagedSkills', 'syncTargetPayload'
+      ])
+    },
+    'toolkit-staging-generations.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['writeExclusiveJson', 'createOwnedStagingGeneration', 'cleanupOwnedGeneration'])
+    },
+    'repair-codex-plugin-windows-hooks.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['writeJsonFile', 'ensureWrapper', 'patchFile'])
+    },
+    'setup-codex-toolkit-plugin.cjs': {
+      executor: new Set(['writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess']),
+      verifiedReadOrStandalone: new Set(['writeFileAtomicallyStandalone'])
+    },
+    'toolkit-toml-structural.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['validateToml'])
+    }
+  };
+  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(/g;
+  const inventory = [];
+  for (const name of files) {
+    const source = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
+    const functions = [...source.matchAll(/(?:^|\n)function\s+([A-Za-z0-9_$]+)\s*\(/g)].map((match) => ({ name: match[1], index: match.index }));
+    for (const match of source.matchAll(callPattern)) {
+      const owner = functions.filter((candidate) => candidate.index < match.index).at(-1)?.name || '<top-level>';
+      const classification = classifications[name].executor.has(owner)
+        ? 'accepted-executor'
+        : (classifications[name].verifiedReadOrStandalone.has(owner) ? 'verified-read-or-structurally-non-managed' : 'UNCLASSIFIED');
+      inventory.push({ name, owner, call: match[0], classification });
+    }
+  }
+  assert.equal(inventory.length, 88, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
+  assert.deepEqual(inventory.filter((entry) => entry.classification === 'UNCLASSIFIED'), []);
+  const bridgeSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'utf8');
+  assert.doesNotMatch(bridgeSource, /runAuthorisedMutation|execute\s*\(\s*kind\s*,\s*callback/);
+  const repairSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs'), 'utf8');
+  assert.doesNotMatch(repairSource, /auditPluginRoot\([^)]*verifyOutput\s*:\s*true/s, 'managed repair must not enable the n8n runtime audit subprocess');
+});
+
 test('risk-first OpenCode managed-write phase binds the lock, fresh destination, and short-lived context', async (t) => {
   const fixture = () => {
     const root = tmpRoot();
@@ -1440,7 +1510,7 @@ test('delegated handoff rejects HEAD movement after the verified repository resu
       fs.writeFileSync(path.join(fixture.repo, 'late-head-movement.txt'), 'later commit\n');
       commitAll(fixture.repo, 'late head movement');
     }
-  }), /repository commit changed after verified update result|repository result changed before child launch/);
+  }), /repository commit changed after verified update result|repository result changed before child launch|verified source continuity failed at refresh-relock: commit changed/);
 });
 
 test('staging reconciliation validates the actual deletion operand after its callback boundary', () => {
@@ -1471,7 +1541,7 @@ test('staging reconciliation validates the actual deletion operand after its cal
       beforeStagingReconciliationDelete({ generation: actual }) {
         actual.stagePath = substitute;
       }
-    }), /deletion operand changed before delete/);
+    }), /deletion operand changed before delete|Cannot assign to read only property/);
   } finally {
     if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
     else process.env.OPENCODE_CONFIG_DIR = previousOpenCodeConfig;
@@ -5132,6 +5202,7 @@ test('hook report includes external repo advance and OpenCode target sync', () =
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./, `${result.stdout}\n${result.stderr}`);
   const report = readLatestReport(hub);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
   assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
