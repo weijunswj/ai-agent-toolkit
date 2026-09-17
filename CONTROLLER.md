@@ -9,6 +9,7 @@ Source baseline: owner `CUSTOM_INSTRUCTIONS.md` plus later accepted Web/Toolkit 
 ## Bootstrap and precedence
 
 - At the start of material coding-controller work, read this file fresh from canonical `main` and, when a run/gate contract requires it, bind the exact revision consumed.
+- Test-only exception: during an explicit owner-authorised bootstrap validation before this file is merged, read the exact authorised PR head/ref instead. That candidate is test evidence only and does not become canonical authority until merged/read back.
 - For a Toolkit-managed repository, read its bootstrap/entry guidance and reconcile Parent/current Children/PRs/native relationships/chronology/current authority before material work.
 - Never infer consent, mutation authority, finality, scope expansion, ownership transfer, waiver, or route substitution.
 - Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, stop and reject it without analysing or acting on it.
