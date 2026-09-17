@@ -26,6 +26,7 @@ const {
   maybeWriteUpdateReport,
   canonicalJson,
   sha256,
+  RECEIPT_CHILD_BOOTSTRAP,
   assertActualMutationInput,
   validatePhaseContext
 } = require('../scripts/toolkit-local-bridge.cjs');
@@ -68,6 +69,48 @@ function tmpBaseDir() {
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(tmpBaseDir(), 'toolkit-bridge-'));
+}
+
+function runReceiptBootstrapFixture(files, entryRelativePath, options = {}) {
+  const root = tmpRoot();
+  const stageRoot = path.join(root, 'stage');
+  for (const [relativePath, bytes] of Object.entries(files)) writeFile(path.join(stageRoot, ...relativePath.split('/')), bytes);
+  if (options.prepare) options.prepare({ root, stageRoot });
+  const sourceManifest = Object.entries(files).map(([relativePath, bytes]) => {
+    const buffer = Buffer.from(bytes);
+    return { relative_path: relativePath, git_mode: '100644', git_blob: '1'.repeat(40), byte_length: buffer.length, sha256: sha256(buffer) };
+  }).sort((left, right) => left.relative_path.localeCompare(right.relative_path));
+  const entry = sourceManifest.find((item) => item.relative_path === entryRelativePath);
+  const receipt = {
+    receipt_id: sha256('bootstrap-fixture-receipt'),
+    commit: '2'.repeat(40),
+    tree: '3'.repeat(40),
+    entry,
+    source_manifest: sourceManifest,
+    source_manifest_digest: sha256(canonicalJson(sourceManifest))
+  };
+  const verifiedSource = {
+    receipt_id: receipt.receipt_id,
+    commit: receipt.commit,
+    tree: receipt.tree,
+    entry_digest: entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest
+  };
+  const wrapper = {
+    contract: 'toolkit.local-bridge.receipt-backed-child-capsule.v1',
+    stage_root: stageRoot,
+    argv: [],
+    receipt,
+    delegated_authority: { verified_source: verifiedSource }
+  };
+  const result = spawnSync(process.execPath, ['-e', RECEIPT_CHILD_BOOTSTRAP], {
+    cwd: root,
+    input: `${JSON.stringify(wrapper)}\n`,
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, ...(options.env || {}) }
+  });
+  return { root, stageRoot, result };
 }
 
 function run(args, options = {}) {
@@ -900,6 +943,8 @@ function createCodexRefreshScenario(options = {}) {
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex refresh source\n' });
   writeRepoToolkitFixture(sourceRepo, 'codex refresh source');
   writeCodexPluginRefreshFixture(sourceRepo);
+  commitAll(sourceRepo, 'add codex plugin refresh fixture');
+  git(sourceRepo, ['remote', 'add', 'origin', sourceRepo]);
   const evidence = setupCodexEvidence(root, sourceRepo, {
     version: options.initialVersion || '2.11.1',
     enabled: options.enabled !== false,
@@ -912,6 +957,8 @@ function createCodexRefreshScenario(options = {}) {
   const initial = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
+    '--repo-branch', 'main',
+    '--repo-remote', sourceRepo,
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
@@ -925,6 +972,7 @@ function createCodexRefreshScenario(options = {}) {
 function runCodexRefreshScenario(scenario, extra = {}) {
   return run(['--hub', scenario.hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
     env: codexEvidenceEnv(scenario.root, scenario.evidence, {
+      PATH: process.env.PATH,
       PLUGIN_ROOT: scenario.evidence.cacheRoot,
       ...(scenario.options.rediscoveryMode ? { CODEX_TOOLKIT_TEST_REDISCOVERY_MODE: scenario.options.rediscoveryMode } : {}),
       ...extra
@@ -1050,7 +1098,10 @@ test('executor-ownership source inventory classifies every semantic filesystem m
       verifiedReadOrStandalone: new Set(['writeJsonFile', 'ensureWrapper', 'patchFile'])
     },
     'setup-codex-toolkit-plugin.cjs': {
-      executor: new Set(['writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess']),
+      executor: new Set([
+        'establishDelegatedNativeMutationPhase', 'releaseDelegatedNativeMutationPhase',
+        'writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess'
+      ]),
       verifiedReadOrStandalone: new Set(['writeFileAtomicallyStandalone'])
     },
     'toolkit-toml-structural.cjs': {
@@ -1058,7 +1109,7 @@ test('executor-ownership source inventory classifies every semantic filesystem m
       verifiedReadOrStandalone: new Set(['validateToml'])
     }
   };
-  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(/g;
+  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|openSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(/g;
   const inventory = [];
   for (const name of files) {
     const source = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
@@ -1071,12 +1122,62 @@ test('executor-ownership source inventory classifies every semantic filesystem m
       inventory.push({ name, owner, call: match[0], classification });
     }
   }
-  assert.equal(inventory.length, 88, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
+  assert.equal(inventory.length, 92, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
   assert.deepEqual(inventory.filter((entry) => entry.classification === 'UNCLASSIFIED'), []);
   const bridgeSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'utf8');
+  const setupSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
+  const functionBody = (source, name) => {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `missing structural executor ${name}`);
+    const next = source.indexOf('\nfunction ', start + 1);
+    return source.slice(start, next === -1 ? source.length : next);
+  };
+  assert.match(functionBody(bridgeSource, 'fastForwardRepository'), /commandArgs = \['merge', '--ff-only', fetchedCommit\][\s\S]*admitActionSpecificEffect[\s\S]*spawnSync\('git', commandArgs/);
+  assert.match(functionBody(bridgeSource, 'launchVerifiedNativeSetupChild'), /verifySourceReceiptContinuity\(receipt, 'pre-launch'\)[\s\S]*admitActionSpecificEffect[\s\S]*spawnSync\(process\.execPath, commandArgs/);
+  assert.match(functionBody(bridgeSource, 'createRunReport'), /admitActionSpecificEffect[\s\S]*fs\.writeFileSync\(candidate, bytes, \{ flag: 'wx'/);
+  assert.match(functionBody(setupSource, 'establishDelegatedNativeMutationPhase'), /authority_digest[\s\S]*bound_state_digest[\s\S]*fs\.writeFileSync\(lockPath, bytes, \{ flag: 'wx'/);
+  assert.match(functionBody(setupSource, 'writeCodexSessionStart'), /verifyDelegatedNativeContinuity[\s\S]*fs\.mkdirSync\(current\)[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.writeFileSync\(tempPath[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.renameSync\(tempPath, exactPath\)/);
+  assert.match(functionBody(setupSource, 'spawnCodex'), /verifyDelegatedNativeContinuity[\s\S]*spawnSync\(parts\.command, parts\.args/);
+  assert.match(functionBody(setupSource, 'spawnCodexProcess'), /verifyDelegatedNativeContinuity[\s\S]*spawn\(parts\.command, parts\.args/);
   assert.doesNotMatch(bridgeSource, /runAuthorisedMutation|execute\s*\(\s*kind\s*,\s*callback/);
   const repairSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs'), 'utf8');
   assert.doesNotMatch(repairSource, /auditPluginRoot\([^)]*verifyOutput\s*:\s*true/s, 'managed repair must not enable the n8n runtime audit subprocess');
+});
+
+test('receipt bootstrap rejects relative JavaScript and JSON loads that resolve outside the admitted manifest', () => {
+  for (const extension of ['cjs', 'json']) {
+    const relativeRequest = `../../../outside.${extension}`;
+    const source = `'use strict';\nrequire(${JSON.stringify(relativeRequest)});\n`;
+    const fixture = runReceiptBootstrapFixture({ 'repo/scripts/main.cjs': source }, 'repo/scripts/main.cjs', {
+      prepare({ root }) {
+        writeFile(path.join(root, `outside.${extension}`), extension === 'json' ? '{"escaped":true}\n' : "throw new Error('outside module executed');\n");
+      }
+    });
+    assert.notEqual(fixture.result.status, 0);
+    assert.match(fixture.result.stderr, /rejected executable relative load outside manifest/);
+  }
+});
+
+test('receipt bootstrap detects directory resolution redirection after admitted buffers were captured', () => {
+  const marker = path.join(tmpRoot(), 'outside-module-executed.txt');
+  const main = [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const target = path.join(__dirname, 'dep.js');",
+    "fs.rmSync(target);",
+    "fs.mkdirSync(path.join(__dirname, 'dep'));",
+    "fs.writeFileSync(path.join(__dirname, 'dep', 'index.js'), `require('node:fs').writeFileSync(process.env.TOOLKIT_BOOTSTRAP_MARKER, 'executed')`);",
+    "require('./dep');",
+    ''
+  ].join('\n');
+  const fixture = runReceiptBootstrapFixture({
+    'repo/scripts/main.cjs': main,
+    'repo/scripts/dep.js': "module.exports = 'admitted';\n"
+  }, 'repo/scripts/main.cjs', { env: { TOOLKIT_BOOTSTRAP_MARKER: marker } });
+  assert.notEqual(fixture.result.status, 0);
+  assert.match(fixture.result.stderr, /rejected changed local resolution target|rejected executable relative load outside manifest/);
+  assert.equal(fs.existsSync(marker), false, 'redirected unlisted module must not execute');
 });
 
 test('risk-first OpenCode managed-write phase binds the lock, fresh destination, and short-lived context', async (t) => {
@@ -1511,6 +1612,33 @@ test('delegated handoff rejects HEAD movement after the verified repository resu
       commitAll(fixture.repo, 'late head movement');
     }
   }), /repository commit changed after verified update result|repository result changed before child launch|verified source continuity failed at refresh-relock: commit changed/);
+});
+
+test('verifier-owned source identity rejects setup-source replacement before hub or native publication', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.equal(configured.status, 0);
+  writeRealBridgeDelegator(fixture.upstream);
+  commitAll(fixture.upstream, 'publish verifier-owned native setup fixture');
+  git(fixture.upstream, ['push', 'origin', 'main']);
+  const beforeHubState = fs.readFileSync(path.join(hub, 'state.json'));
+  let admittedSetupDigest = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    afterRepositoryVerification({ receipt }) {
+      admittedSetupDigest = receipt.native_setup.entry_sha256;
+      fs.appendFileSync(path.join(fixture.repo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), '\n// replacement after verifier ownership\n');
+    }
+  }), /verified source continuity failed at post-verification: (?:worktree changed|.*setup-codex-toolkit-plugin\.cjs changed|native setup source closure changed)/);
+  assert.match(admittedSetupDigest, /^[a-f0-9]{64}$/);
+  assert.notEqual(sha256(fs.readFileSync(path.join(fixture.repo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'))), admittedSetupDigest);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), beforeHubState, 'replacement source must fail before hub publication');
 });
 
 test('staging reconciliation validates the actual deletion operand after its callback boundary', () => {
@@ -5420,6 +5548,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(sourceRepo);
+  commitAll(sourceRepo, 'record verified codex plugin refresh fixture');
   const evidence = setupCodexEvidence(root, sourceRepo, {
     version: '2.11.1',
     cacheMutation(cacheRoot) {
@@ -5429,6 +5558,8 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
@@ -5438,7 +5569,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
+    env: codexEvidenceEnv(root, evidence, { PATH: process.env.PATH, PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -6129,6 +6260,31 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   assert.equal(state.hub_version, '9.9.9');
   assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
+});
+
+test('fast-forward dispatch uses the admitted immutable commit when FETCH_HEAD is replaced before launch', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.equal(configured.status, 0);
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'immutable-fast-forward-operand');
+  let replaced = false;
+  const result = runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    beforeManagedEffectAdmission({ kind }) {
+      if (kind !== 'repository.fast-forward-merge' || replaced) return;
+      replaced = true;
+      fs.writeFileSync(path.join(fixture.repo, '.git', 'FETCH_HEAD'), `${fixture.initialCommit}\t\tbranch 'main' of ${fixture.origin}\n`);
+    }
+  });
+  assert.equal(result.status, 0);
+  assert.equal(replaced, true);
+  assert.equal(currentCommit(fixture.repo), updatedCommit, 'mutable FETCH_HEAD must not substitute for the admitted commit SHA');
 });
 
 test('repo update failure does not sync targets', () => {

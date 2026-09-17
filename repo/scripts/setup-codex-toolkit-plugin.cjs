@@ -67,6 +67,8 @@ const CODEX_PLUGIN_ICON_SPECS = [
 ];
 const DELEGATED_NATIVE_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-native-setup-authority.v1';
 let activeDelegatedNativeAuthority = null;
+let activeDelegatedNativePhase = null;
+let delegatedNativeTestHooks = null;
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -108,6 +110,17 @@ function establishDelegatedNativeAuthority(options) {
   if (path.resolve(authority.executable || '') !== path.resolve(process.execPath)) throw new Error('delegated native executable identity does not match the child runtime');
   if (authority.expected_version !== EXPECTED_TOOLKIT_VERSION) throw new Error('delegated native Toolkit version does not match the child');
   if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source identity changed before child start');
+  if (!/^[a-f0-9]{64}$/.test(String(authority.source_cache_fingerprint || ''))) throw new Error('delegated native source fingerprint is invalid');
+  if (!authority.verified_source || authority.verified_source.setup_source_sha256 !== authority.setup_source_sha256
+    || !/^[a-f0-9]{64}$/.test(String(authority.verified_source.receipt_id || ''))
+    || !/^[a-f0-9]{40,64}$/.test(String(authority.verified_source.commit || ''))
+    || !/^[a-f0-9]{40,64}$/.test(String(authority.verified_source.tree || ''))
+    || !/^[a-f0-9]{64}$/.test(String(authority.verified_source.source_manifest_digest || ''))) {
+    throw new Error('delegated native verifier-owned source receipt is invalid');
+  }
+  if (!/^[0-9a-f-]{36}$/.test(String(authority.mutation_phase_id || ''))) throw new Error('delegated native mutation phase identity is invalid');
+  const expectedPhasePath = path.join(options.codexHome, `.ai-agent-toolkit-native-phase-${authority.mutation_phase_id}.json`);
+  if (path.resolve(authority.mutation_phase_lock_path || '') !== expectedPhasePath) throw new Error('delegated native mutation phase path is invalid');
   if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before child start');
   const required = [
     'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
@@ -120,14 +133,109 @@ function establishDelegatedNativeAuthority(options) {
   return activeDelegatedNativeAuthority;
 }
 
-function verifyDelegatedNativeContinuity(action) {
+function stableFilesystemIdentity(targetPath, expectedType) {
+  const exactPath = path.resolve(targetPath);
+  const stat = fs.lstatSync(exactPath);
+  if (stat.isSymbolicLink()) throw new Error(`delegated native ${expectedType} identity is a symbolic link`);
+  if (expectedType === 'directory' && !stat.isDirectory()) throw new Error('delegated native directory identity changed');
+  if (expectedType === 'file' && !stat.isFile()) throw new Error('delegated native file identity changed');
+  return Object.freeze({
+    path: exactPath,
+    realpath: path.resolve(fs.realpathSync.native(exactPath)),
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    type: expectedType
+  });
+}
+
+function delegatedNativeStaticState(authority) {
+  return Object.freeze({
+    authority_digest: sha256(canonicalJson(authority)),
+    repository: stableFilesystemIdentity(authority.repository, 'directory'),
+    codex_home: stableFilesystemIdentity(authority.codex_home, 'directory'),
+    setup_source: stableFilesystemIdentity(__filename, 'file'),
+    executable: stableFilesystemIdentity(process.execPath, 'file'),
+    setup_source_sha256: authority.setup_source_sha256,
+    source_cache_fingerprint: authority.source_cache_fingerprint,
+    verified_source: authority.verified_source,
+    env_digest: authority.env_digest
+  });
+}
+
+function establishDelegatedNativeMutationPhase(options, testHooks = {}) {
+  const authority = activeDelegatedNativeAuthority;
+  activeDelegatedNativePhase = null;
+  delegatedNativeTestHooks = testHooks || null;
+  if (!authority) return null;
+  const lockPath = path.resolve(authority.mutation_phase_lock_path);
+  const boundState = delegatedNativeStaticState(authority);
+  const record = Object.freeze({
+    contract: 'toolkit.local-bridge.delegated-native-mutation-phase.v1',
+    phase_id: authority.mutation_phase_id,
+    parent_invocation_id: authority.parent_invocation_id,
+    authority_digest: boundState.authority_digest,
+    bound_state_digest: sha256(canonicalJson(boundState))
+  });
+  const bytes = Buffer.from(canonicalJson(record), 'utf8');
+  fs.writeFileSync(lockPath, bytes, { flag: 'wx', mode: 0o600 });
+  const identity = stableFilesystemIdentity(lockPath, 'file');
+  activeDelegatedNativePhase = {
+    lockPath,
+    bytes,
+    identity,
+    boundState,
+    sequence: 0
+  };
+  return Object.freeze({ phase_id: authority.mutation_phase_id, lock_path: lockPath, bound_state_digest: record.bound_state_digest });
+}
+
+function assertStableIdentity(actual, expected, label) {
+  if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error(`delegated native ${label} identity changed`);
+}
+
+function verifyDelegatedNativeContinuity(action, operands = {}, options = {}) {
   const authority = activeDelegatedNativeAuthority;
   if (!authority) return null;
   if (!authority.allowed_effects.includes(action)) throw new Error(`delegated native action is not authorised: ${action}`);
+  const phase = activeDelegatedNativePhase;
+  if (!phase) throw new Error('delegated native mutation phase is not established');
+  if (!options.postcondition && delegatedNativeTestHooks?.beforeEffect) delegatedNativeTestHooks.beforeEffect(Object.freeze({ action, operands: JSON.parse(JSON.stringify(operands)), sequence: phase.sequence }));
   if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source changed before effect');
   if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before effect');
   if (path.resolve(authority.executable) !== path.resolve(process.execPath)) throw new Error('delegated native executable changed before effect');
-  return authority;
+  assertStableIdentity(stableFilesystemIdentity(authority.repository, 'directory'), phase.boundState.repository, 'repository');
+  assertStableIdentity(stableFilesystemIdentity(authority.codex_home, 'directory'), phase.boundState.codex_home, 'Codex home');
+  assertStableIdentity(stableFilesystemIdentity(__filename, 'file'), phase.boundState.setup_source, 'setup source');
+  assertStableIdentity(stableFilesystemIdentity(process.execPath, 'file'), phase.boundState.executable, 'executable');
+  assertStableIdentity(stableFilesystemIdentity(phase.lockPath, 'file'), phase.identity, 'phase lock');
+  if (!fs.readFileSync(phase.lockPath).equals(phase.bytes)) throw new Error('delegated native mutation phase lock was replaced');
+  if (sha256(canonicalJson(delegatedNativeStaticState(authority))) !== sha256(canonicalJson(phase.boundState))) {
+    throw new Error('delegated native mutation phase bound state changed');
+  }
+  canonicalJson(operands);
+  return null;
+}
+
+function completeDelegatedNativeEffect(action, operands = {}) {
+  if (!activeDelegatedNativeAuthority) return;
+  verifyDelegatedNativeContinuity(action, operands, { postcondition: true });
+  activeDelegatedNativePhase.sequence += 1;
+  if (delegatedNativeTestHooks?.afterEffect) delegatedNativeTestHooks.afterEffect(Object.freeze({ action, operands: JSON.parse(JSON.stringify(operands)), sequence: activeDelegatedNativePhase.sequence }));
+}
+
+function releaseDelegatedNativeMutationPhase() {
+  const phase = activeDelegatedNativePhase;
+  activeDelegatedNativePhase = null;
+  delegatedNativeTestHooks = null;
+  activeDelegatedNativeAuthority = null;
+  if (!phase) return;
+  try {
+    assertStableIdentity(stableFilesystemIdentity(phase.lockPath, 'file'), phase.identity, 'phase lock');
+    if (!fs.readFileSync(phase.lockPath).equals(phase.bytes)) return;
+    fs.unlinkSync(phase.lockPath);
+  } catch {
+    // Revoked or replaced phase evidence is intentionally preserved.
+  }
 }
 
 function slash(value) {
@@ -199,18 +307,37 @@ function writeCodexSessionStart(filePath, bytes) {
   const value = Buffer.from(bytes);
   const tempPath = `${exactPath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   try {
-    verifyDelegatedNativeContinuity('codex.session-start.write');
-    fs.mkdirSync(path.dirname(exactPath), { recursive: true });
-    verifyDelegatedNativeContinuity('codex.session-start.write');
+    const relativeParent = path.relative(codexHome, path.dirname(exactPath));
+    let current = codexHome;
+    for (const part of relativeParent.split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      if (fs.existsSync(current)) {
+        stableFilesystemIdentity(current, 'directory');
+        continue;
+      }
+      const mkdirOperands = { kind: 'mkdir', path: current };
+      verifyDelegatedNativeContinuity('codex.session-start.write', mkdirOperands);
+      fs.mkdirSync(current);
+      stableFilesystemIdentity(current, 'directory');
+      completeDelegatedNativeEffect('codex.session-start.write', mkdirOperands);
+    }
+    const writeOperands = { kind: 'exclusive-write', path: tempPath, sha256: sha256(value), byte_length: value.length };
+    verifyDelegatedNativeContinuity('codex.session-start.write', writeOperands);
     fs.writeFileSync(tempPath, value, { flag: 'wx', mode: 0o600 });
     if (!fs.readFileSync(tempPath).equals(value)) throw new Error('delegated native temporary write postcondition failed');
-    verifyDelegatedNativeContinuity('codex.session-start.write');
+    completeDelegatedNativeEffect('codex.session-start.write', writeOperands);
+    const renameOperands = { kind: 'rename', source: tempPath, destination: exactPath, sha256: sha256(value) };
+    verifyDelegatedNativeContinuity('codex.session-start.write', renameOperands);
     fs.renameSync(tempPath, exactPath);
     if (!fs.readFileSync(exactPath).equals(value)) throw new Error('delegated native session-start write postcondition failed');
+    completeDelegatedNativeEffect('codex.session-start.write', renameOperands);
   } finally {
     if (fs.existsSync(tempPath)) {
-      verifyDelegatedNativeContinuity('codex.session-start.write');
+      const cleanupOperands = { kind: 'cleanup', path: tempPath };
+      verifyDelegatedNativeContinuity('codex.session-start.write', cleanupOperands);
       fs.rmSync(tempPath, { force: true });
+      if (fs.existsSync(tempPath)) throw new Error('delegated native temporary cleanup postcondition failed');
+      completeDelegatedNativeEffect('codex.session-start.write', cleanupOperands);
     }
   }
   return Object.freeze({ action: 'writeCodexSessionStart', path: exactPath, sha256: sha256(value), byte_length: value.length });
@@ -866,17 +993,25 @@ function scanConfigTomlLexicalLines(text) {
 function inspectConfiguredPluginState(configText, identity) {
   const analysis = tomlStructural.analyseToml(configText, activeDelegatedNativeAuthority ? {
     launchParser(candidate, input) {
-      verifyDelegatedNativeContinuity('toml.structural.check');
       const command = String(candidate.command || '');
       const args = [...(candidate.args || []), '-c', String(candidate.script || '')];
       if (!command || !String(candidate.script || '').includes('tomllib.loads')) throw new Error('delegated TOML parser operands are invalid');
-      return spawnSync(command, args, {
+      const operands = {
+        kind: 'toml-parser-launch',
+        executable: path.resolve(command),
+        argv_digest: sha256(canonicalJson(args)),
+        input_sha256: sha256(Buffer.from(input))
+      };
+      verifyDelegatedNativeContinuity('toml.structural.check', operands);
+      const result = spawnSync(command, args, {
         input: Buffer.from(input),
         encoding: 'utf8',
         windowsHide: true,
         timeout: 60000,
         maxBuffer: 1024 * 1024
       });
+      completeDelegatedNativeEffect('toml.structural.check', operands);
+      return result;
     }
   } : {});
   if (analysis.validity.ok !== true) return { status: 'unprovable', reason: 'Codex config TOML structure is multiple, malformed, or ambiguous' };
@@ -1420,33 +1555,38 @@ function delegatedCodexAction(args) {
   throw new Error(`delegated native Codex argv is not admitted: ${args.join(' ')}`);
 }
 
-function admitDelegatedCodexLaunch(command, args) {
+function delegatedCodexLaunchOperands(command, args) {
   if (!activeDelegatedNativeAuthority) return null;
   const action = delegatedCodexAction(args);
-  verifyDelegatedNativeContinuity(action);
   const candidates = commandCandidates('').map((value) => path.resolve(value));
   const exactCommand = path.resolve(command);
   if (!candidates.includes(exactCommand)) throw new Error('delegated native Codex executable was substituted');
-  return Object.freeze({ action, executable: exactCommand, argv_digest: sha256(canonicalJson(args)) });
+  return Object.freeze({ action, operands: { kind: 'codex-command', executable: exactCommand, argv_digest: sha256(canonicalJson(args)), argv: [...args] } });
 }
 
 function spawnCodex(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
-  admitDelegatedCodexLaunch(command, args);
-  return spawnSync(parts.command, parts.args, {
+  const admitted = delegatedCodexLaunchOperands(command, args);
+  if (admitted) verifyDelegatedNativeContinuity(admitted.action, admitted.operands);
+  const result = spawnSync(parts.command, parts.args, {
     ...options,
     windowsHide: true
   });
+  if (admitted) completeDelegatedNativeEffect(admitted.action, admitted.operands);
+  return result;
 }
 
 function spawnCodexProcess(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
-  admitDelegatedCodexLaunch(command, args);
-  return spawn(parts.command, parts.args, {
+  const admitted = delegatedCodexLaunchOperands(command, args);
+  if (admitted) verifyDelegatedNativeContinuity(admitted.action, admitted.operands);
+  const child = spawn(parts.command, parts.args, {
     stdio: 'ignore',
     ...options,
     windowsHide: true
   });
+  if (admitted) completeDelegatedNativeEffect(admitted.action, admitted.operands);
+  return child;
 }
 
 function commandCandidates(explicitCommand) {
@@ -1699,11 +1839,13 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
 
   try {
     establishDelegatedNativeAuthority(options);
+    establishDelegatedNativeMutationPhase(options, dependencies.nativePhaseTestHooks || {});
   } catch (error) {
     console.error(`FAIL: ${error.message}`);
     return 2;
   }
 
+  try {
   const repoErrors = validateRepoPluginSource(options.repoRoot);
   if (repoErrors.length > 0) {
     for (const error of repoErrors) console.error(`FAIL: ${error}`);
@@ -1821,6 +1963,9 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     console.log(nextStepsForState(reportedState, options).join('\n'));
   }
   return 0;
+  } finally {
+    releaseDelegatedNativeMutationPhase();
+  }
 }
 
 if (require.main === module) {

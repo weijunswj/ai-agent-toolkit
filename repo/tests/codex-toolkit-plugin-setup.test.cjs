@@ -374,6 +374,7 @@ test('Codex Toolkit plugin source validates manifest icon assets', () => {
 test('delegated native authority CLI contract is accepted and source identity substitution fails before effects', () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
   const scriptPath = path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
   const env = {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path')),
@@ -381,6 +382,7 @@ test('delegated native authority CLI contract is accepted and source identity su
     PATH: '',
     CODEX_TOOLKIT_CODEX_CLI: ''
   };
+  const mutationPhaseId = crypto.randomUUID();
   const authority = {
     contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
     parent_invocation_id: 'test-native-authority',
@@ -388,6 +390,18 @@ test('delegated native authority CLI contract is accepted and source identity su
     repository: repoRoot,
     codex_home: codexHome,
     setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+    source_cache_fingerprint: setup.cacheFingerprint(repoRoot, repoRoot, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    }),
+    verified_source: {
+      receipt_id: sha256('fixture-receipt'),
+      commit: '1'.repeat(40),
+      tree: '2'.repeat(40),
+      setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+      source_manifest_digest: sha256('fixture-manifest')
+    },
+    mutation_phase_id: mutationPhaseId,
+    mutation_phase_lock_path: path.join(codexHome, `.ai-agent-toolkit-native-phase-${mutationPhaseId}.json`),
     executable: path.resolve(process.execPath),
     expected_version: setup.EXPECTED_TOOLKIT_VERSION,
     env_digest: sha256(canonicalJson(env)),
@@ -405,10 +419,82 @@ test('delegated native authority CLI contract is accepted and source identity su
   assert.doesNotMatch(accepted.stderr, /Unknown argument: --delegated-invocation-authority/);
   assert.match(accepted.stderr, /unsupported in this environment|No usable Codex CLI/);
 
-  const substituted = invoke({ ...authority, setup_source_sha256: '0'.repeat(64) });
+  const substituted = invoke({
+    ...authority,
+    setup_source_sha256: '0'.repeat(64),
+    verified_source: { ...authority.verified_source, setup_source_sha256: '0'.repeat(64) }
+  });
   assert.equal(substituted.status, 2);
   assert.match(substituted.stderr, /setup source identity changed before child start/);
-  assert.equal(fs.existsSync(codexHome), false, 'invalid delegated authority must fail before native writes');
+  assert.equal(fs.readdirSync(codexHome).length, 0, 'delegated phase evidence must be released and invalid authority must write nothing');
+});
+
+test('delegated native child phase revocation after one command blocks every later command and preserves replacement evidence', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
+  const fakeCodex = path.join(root, 'fake-codex.cjs');
+  const dispatchLog = path.join(root, 'dispatch.log');
+  const phaseId = crypto.randomUUID();
+  const phasePath = path.join(codexHome, `.ai-agent-toolkit-native-phase-${phaseId}.json`);
+  fs.writeFileSync(fakeCodex, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "fs.appendFileSync(process.env.TOOLKIT_NATIVE_DISPATCH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
+    "fs.writeFileSync(process.env.TOOLKIT_NATIVE_PHASE_PATH, 'replacement-authority');",
+    "process.stdout.write('Manage Codex plugins\\n');",
+    ''
+  ].join('\n'));
+  const previousLog = process.env.TOOLKIT_NATIVE_DISPATCH_LOG;
+  const previousPhase = process.env.TOOLKIT_NATIVE_PHASE_PATH;
+  const previousCli = process.env.CODEX_TOOLKIT_CODEX_CLI;
+  process.env.TOOLKIT_NATIVE_DISPATCH_LOG = dispatchLog;
+  process.env.TOOLKIT_NATIVE_PHASE_PATH = phasePath;
+  process.env.CODEX_TOOLKIT_CODEX_CLI = fakeCodex;
+  try {
+    const scriptPath = path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
+    const authority = {
+      contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
+      parent_invocation_id: 'phase-revocation-fixture',
+      action: 'native.cache.maintenance',
+      repository: repoRoot,
+      codex_home: codexHome,
+      setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+      source_cache_fingerprint: setup.cacheFingerprint(repoRoot, repoRoot, { normalizeWindowsSessionStart: process.platform === 'win32' }),
+      verified_source: {
+        receipt_id: sha256('phase-revocation-receipt'),
+        commit: '3'.repeat(40),
+        tree: '4'.repeat(40),
+        setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+        source_manifest_digest: sha256('phase-revocation-manifest')
+      },
+      mutation_phase_id: phaseId,
+      mutation_phase_lock_path: phasePath,
+      executable: path.resolve(process.execPath),
+      expected_version: setup.EXPECTED_TOOLKIT_VERSION,
+      env_digest: sha256(canonicalJson({ ...process.env })),
+      allowed_effects: [
+        'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
+        'codex.plugin.add', 'codex.session-start.write', 'toml.structural.check'
+      ]
+    };
+    const encoded = Buffer.from(canonicalJson(authority), 'utf8').toString('base64url');
+    await assert.rejects(() => setup.main([
+      '--write', '--json', '--repo-root', repoRoot, '--codex-home', codexHome,
+      '--delegated-invocation-authority', encoded
+    ]), /mutation phase lock was replaced/);
+    const dispatches = fs.readFileSync(dispatchLog, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+    assert.equal(dispatches.length, 1, 'phase revocation must prevent the plugin-list continuation from dispatching');
+    assert.equal(fs.readFileSync(phasePath, 'utf8'), 'replacement-authority', 'replacement phase evidence must not be cleaned up');
+  } finally {
+    if (previousLog === undefined) delete process.env.TOOLKIT_NATIVE_DISPATCH_LOG;
+    else process.env.TOOLKIT_NATIVE_DISPATCH_LOG = previousLog;
+    if (previousPhase === undefined) delete process.env.TOOLKIT_NATIVE_PHASE_PATH;
+    else process.env.TOOLKIT_NATIVE_PHASE_PATH = previousPhase;
+    if (previousCli === undefined) delete process.env.CODEX_TOOLKIT_CODEX_CLI;
+    else process.env.CODEX_TOOLKIT_CODEX_CLI = previousCli;
+    fs.rmSync(phasePath, { force: true });
+  }
 });
 
 test('Codex SessionStart verifier rejects the old direct bridge command and incomplete matchers', () => {

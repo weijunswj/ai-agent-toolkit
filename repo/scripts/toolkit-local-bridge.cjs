@@ -102,10 +102,38 @@ globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT=root;
 const originalResolve=Module._resolveFilename;
 const originalJs=Module._extensions['.js'];
 const originalJson=Module._extensions['.json'];
+const localResolutionMap=new Map();
+const localPattern=/require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+for(const [filename,bytes] of buffers){
+  if(!/\.(?:c?js)$/i.test(filename))continue;
+  const parent=new Module(filename,null);parent.filename=filename;parent.paths=Module._nodeModulePaths(path.dirname(filename));
+  const source=bytes.toString('utf8');
+  let match;
+  while((match=localPattern.exec(source))){
+    const request=match[1];
+    let resolved;
+    try{resolved=path.resolve(originalResolve.call(Module,request,parent,false));}
+    catch(error){throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);}
+    if(!buffers.has(resolved))throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+    localResolutionMap.set(filename+'\0'+request,resolved);
+  }
+}
 Module._resolveFilename=function(request,parent,isMain,options){
-  const resolved=originalResolve.call(this,request,parent,isMain,options);
-  if(typeof resolved==='string'&&path.isAbsolute(resolved)&&path.relative(root,resolved).split(path.sep)[0]!=='..'&&!buffers.has(path.resolve(resolved))){
-    throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+  const local=typeof request==='string'&&(request.startsWith('./')||request.startsWith('../')||path.isAbsolute(request));
+  let resolved;
+  try{resolved=originalResolve.call(this,request,parent,isMain,options);}
+  catch(error){if(local)throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);throw error;}
+  if(local){
+    const exact=path.resolve(resolved);
+    const expected=localResolutionMap.get(path.resolve(parent&&parent.filename||entry)+'\0'+request);
+    if(!expected||expected!==exact||!buffers.has(expected)){
+      throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+    }
+    try{
+      const stat=fs.lstatSync(expected);
+      if(!stat.isFile()||stat.isSymbolicLink()||!fs.readFileSync(expected).equals(buffers.get(expected)))throw new Error('changed');
+    }catch(error){throw new Error('receipt-backed child rejected changed local resolution target: '+expected);}
+    return expected;
   }
   return resolved;
 };
@@ -561,6 +589,30 @@ function createVerifiedSourceReceipt({ repoPath, branch, remote, validation }) {
   const manifestDigest = sha256(canonicalJson(manifest));
   const entry = manifest.find((item) => item.relative_path === BRIDGE_ENTRY_RELATIVE_PATH);
   if (!entry) throw new Error('verified source closure omitted the Bridge entry');
+  const nativeSetupRelativePath = 'repo/scripts/setup-codex-toolkit-plugin.cjs';
+  let nativeSetupEntry = null;
+  let nativeSetupBytes = null;
+  const nativeSetupPath = path.join(root, nativeSetupRelativePath);
+  if (fs.existsSync(nativeSetupPath)) {
+    const stat = fs.lstatSync(nativeSetupPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('verified native setup source is not an ordinary file');
+    const workingBytes = fs.readFileSync(nativeSetupPath);
+    const objectBytes = gitObjectBytes(root, commit, nativeSetupRelativePath);
+    if (!workingBytes.equals(objectBytes)) throw new Error(`verified source bytes differ from Git object: ${nativeSetupRelativePath}`);
+    const nativeEntry = gitTreeEntry(root, commit, nativeSetupRelativePath);
+    nativeSetupBytes = Buffer.from(objectBytes);
+    nativeSetupEntry = {
+      relative_path: nativeSetupRelativePath,
+      git_mode: nativeEntry.mode,
+      git_blob: nativeEntry.blob,
+      byte_length: objectBytes.length,
+      sha256: sha256(objectBytes)
+    };
+  }
+  const nativeCacheFingerprint = nativeSetupEntry ? cacheFingerprint(root, root, {
+    normalizeWindowsSessionStart: process.platform === 'win32'
+  }) : '';
+  if (nativeSetupEntry && !/^[a-f0-9]{64}$/.test(nativeCacheFingerprint)) throw new Error('verified native setup source fingerprint is invalid');
   const node = executableIdentity(process.execPath, ['--version']);
   const git = executableIdentity('git', ['--version']);
   const base = {
@@ -576,6 +628,13 @@ function createVerifiedSourceReceipt({ repoPath, branch, remote, validation }) {
     arch: process.arch,
     executables: { node, git },
     entry: { relative_path: entry.relative_path, git_blob: entry.git_blob, byte_length: entry.byte_length, sha256: entry.sha256 },
+    native_setup: nativeSetupEntry ? {
+      entry_relative_path: nativeSetupEntry.relative_path,
+      entry_git_blob: nativeSetupEntry.git_blob,
+      entry_byte_length: nativeSetupEntry.byte_length,
+      entry_sha256: nativeSetupEntry.sha256,
+      cache_fingerprint: nativeCacheFingerprint
+    } : null,
     source_manifest: manifest,
     source_manifest_digest: manifestDigest,
     validation: detachedFrozen(validation || { status: 'passed', commands: [] }),
@@ -585,6 +644,7 @@ function createVerifiedSourceReceipt({ repoPath, branch, remote, validation }) {
   const receipt = deepFreeze({ ...base, receipt_id: receiptId });
   verifiedSourcePrivate.set(receipt, {
     buffers,
+    nativeSetupBytes,
     observations: new Map([['repository-verification', timestamp()]])
   });
   return receipt;
@@ -608,6 +668,21 @@ function verifySourceReceiptContinuity(receipt, checkpoint) {
     const admitted = privateState.buffers.get(item.relative_path);
     if (!admitted || !bytes.equals(admitted) || sha256(bytes) !== item.sha256) {
       throw new Error(`verified source continuity failed at ${checkpoint}: ${item.relative_path} changed`);
+    }
+  }
+  if (receipt.native_setup) {
+    const nativeSetupPath = path.join(root, receipt.native_setup.entry_relative_path);
+    const nativeStat = fs.lstatSync(nativeSetupPath);
+    const nativeBytes = fs.readFileSync(nativeSetupPath);
+    if (!nativeStat.isFile() || nativeStat.isSymbolicLink() || !privateState.nativeSetupBytes
+      || !nativeBytes.equals(privateState.nativeSetupBytes) || sha256(nativeBytes) !== receipt.native_setup.entry_sha256) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: native setup source changed`);
+    }
+    const nativeFingerprint = cacheFingerprint(root, root, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    });
+    if (nativeFingerprint !== receipt.native_setup.cache_fingerprint) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: native setup source closure changed`);
     }
   }
   privateState.observations.set(checkpoint, timestamp());
@@ -743,6 +818,7 @@ function removeReceiptSourceStage({ args, receipt, expectedState, stage }) {
 
 function launchVerifiedDelegatedChild({ args, receipt, expectedState, delegatedAuthority }) {
   const stage = createReceiptSourceStage({ args, receipt, expectedState });
+  if (args.testHooks?.afterReceiptSourceStage) args.testHooks.afterReceiptSourceStage(detachedFrozen({ stageRoot: stage.stageRoot }));
   const wrapper = {
     contract: RECEIPT_CHILD_CAPSULE_CONTRACT,
     stage_root: stage.stageRoot,
@@ -1790,7 +1866,7 @@ function fetchRepositoryBranch(args, repoPath, branch, expectedRemote) {
 
 function fastForwardRepository(args, repoPath, branch, expectedRemote, fromCommit, fetchedCommit) {
   const resolvedRepo = path.resolve(repoPath);
-  const commandArgs = ['merge', '--ff-only', 'FETCH_HEAD'];
+  const commandArgs = ['merge', '--ff-only', fetchedCommit];
   admitActionSpecificEffect(args, 'repository.fast-forward-merge', {
     details: { repoPath: resolvedRepo, branch, remote: expectedRemote, fromCommit, fetchedCommit, executable: 'git', arguments: commandArgs }
   });
@@ -5849,21 +5925,37 @@ function applyNativeHookRepairFile(args, codexHome, plannedWrite) {
   return detachedFrozen({ action: 'applyNativeHookRepairFile', path: filePath, before_sha256: plannedWrite.before_sha256, after_sha256: plannedWrite.after_sha256 });
 }
 
-function launchVerifiedNativeSetupChild(args, repoPath, setupScript) {
-  const resolvedRepo = path.resolve(repoPath);
-  const resolvedScript = path.resolve(setupScript);
+function launchVerifiedNativeSetupChild(args, receipt) {
+  if (!receipt || receipt.contract !== VERIFIED_SOURCE_RECEIPT_CONTRACT) throw new Error('native setup requires the verifier-owned source receipt');
+  if (!receipt.native_setup) throw new Error('verifier-owned source receipt omitted native setup identity');
+  verifySourceReceiptContinuity(receipt, 'pre-launch');
+  const resolvedRepo = path.resolve(receipt.repository.root);
+  const resolvedScript = path.resolve(resolvedRepo, receipt.native_setup.entry_relative_path);
   if (resolvedScript !== path.join(resolvedRepo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')) {
     throw new Error('native setup child path does not match the verified repository');
   }
   const environment = { ...process.env };
   const sourceBytes = fs.readFileSync(resolvedScript);
+  if (sha256(sourceBytes) !== receipt.native_setup.entry_sha256) throw new Error('native setup source differs from the verifier-owned receipt');
+  const nativePhaseId = crypto.randomUUID();
+  const nativePhaseLockPath = path.join(path.resolve(defaultCodexHome()), `.ai-agent-toolkit-native-phase-${nativePhaseId}.json`);
   const delegatedAuthority = deepFreeze({
     contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
     parent_invocation_id: args.executionAuthority.invocation_id,
     action: 'native.cache.maintenance',
     repository: resolvedRepo,
     codex_home: path.resolve(defaultCodexHome()),
-    setup_source_sha256: sha256(sourceBytes),
+    setup_source_sha256: receipt.native_setup.entry_sha256,
+    source_cache_fingerprint: receipt.native_setup.cache_fingerprint,
+    verified_source: {
+      receipt_id: receipt.receipt_id,
+      commit: receipt.commit,
+      tree: receipt.tree,
+      setup_source_sha256: receipt.native_setup.entry_sha256,
+      source_manifest_digest: receipt.source_manifest_digest
+    },
+    mutation_phase_id: nativePhaseId,
+    mutation_phase_lock_path: nativePhaseLockPath,
     executable: path.resolve(process.execPath),
     expected_version: EXPECTED_TOOLKIT_VERSION,
     env_digest: sha256(canonicalJson(environment)),
@@ -5884,13 +5976,16 @@ function launchVerifiedNativeSetupChild(args, repoPath, setupScript) {
       path: path.resolve(defaultCodexHome()),
       repoPath: resolvedRepo,
       executable: process.execPath,
-      source_sha256: sha256(sourceBytes),
+      source_sha256: receipt.native_setup.entry_sha256,
+      receipt_id: receipt.receipt_id,
+      source_cache_fingerprint: receipt.native_setup.cache_fingerprint,
       arguments: commandArgs,
       cwd: resolvedRepo,
       env_digest: sha256(canonicalJson(environment))
     }
   };
   admitActionSpecificEffect(args, 'native.cache.maintenance', mutationOptions);
+  verifySourceReceiptContinuity(receipt, 'pre-launch');
   if (sha256(fs.readFileSync(resolvedScript)) !== mutationOptions.details.source_sha256) throw new Error('native setup child source changed before launch');
   const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
     cwd: resolvedRepo,
@@ -6029,14 +6124,22 @@ function maybeRepairThirdPartyCodexPluginHooks(args, state) {
   });
 }
 
-function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
+function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false, verifiedSourceReceipt = null }) {
   const before = codexNativePluginCacheStatus(args, state);
   if (!['stale', 'missing'].includes(before.status)) return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
   const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
+  let receipt = verifiedSourceReceipt;
   if (validateRepo) {
     try {
-      runNativeRepositoryValidation(args, resolvedRepoPath, { hookMode: true });
+      const validation = runNativeRepositoryValidation(args, resolvedRepoPath, { hookMode: true });
+      receipt = createVerifiedSourceReceipt({
+        repoPath: resolvedRepoPath,
+        branch: state.repo_branch || DEFAULT_REPO_BRANCH,
+        remote: state.repo_remote || DEFAULT_REPO_REMOTE,
+        validation
+      });
+      verifySourceReceiptContinuity(receipt, 'post-verification');
     } catch (error) {
       return {
         ...before,
@@ -6044,6 +6147,20 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
         errors: [`Codex plugin cache auto-refresh skipped because trusted repo validation failed: ${error.message}`]
       };
     }
+  }
+  if (!receipt) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: ['Codex plugin cache auto-refresh has no verifier-owned source receipt']
+    };
+  }
+  if (args.testHooks?.afterNativeSourceReceipt) args.testHooks.afterNativeSourceReceipt(detachedFrozen({ receipt: verifiedSourceEvidence(receipt) }));
+  try {
+    verifySourceReceiptContinuity(receipt, 'refresh-relock');
+  } catch (error) {
+    error.sourceContinuityFailure = true;
+    throw error;
   }
   const setupScript = path.join(resolvedRepoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
   if (!fs.existsSync(setupScript)) {
@@ -6061,18 +6178,7 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
       errors: sourceErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
     };
   }
-  let sourceFingerprint;
-  try {
-    sourceFingerprint = cacheFingerprint(resolvedRepoPath, resolvedRepoPath, {
-      normalizeWindowsSessionStart: process.platform === 'win32'
-    });
-  } catch (error) {
-    return {
-      ...before,
-      status: 'refresh-failed',
-      errors: [`Codex plugin cache auto-refresh could not fingerprint the trusted repo: ${error.message}`]
-    };
-  }
+  const sourceFingerprint = receipt.native_setup.cache_fingerprint;
   if (!/^[a-f0-9]{64}$/.test(sourceFingerprint)) {
     return {
       ...before,
@@ -6099,7 +6205,8 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
     source_proof: sourceProof,
     configuration_proof: configurationProof,
     refreshSupported: () => {
-      const launched = launchVerifiedNativeSetupChild(args, resolvedRepoPath, setupScript);
+      verifySourceReceiptContinuity(receipt, 'refresh-relock');
+      const launched = launchVerifiedNativeSetupChild(args, receipt);
       refreshResult = launched.result;
       return refreshResult.ok;
     },
@@ -6159,7 +6266,8 @@ function nativePluginCacheStatusForReport(args, state, options = {}) {
       args,
       state,
       repoPath: options.repoPath || state.repo_path,
-      validateRepo: options.validateRepo === true
+      validateRepo: options.validateRepo === true,
+      verifiedSourceReceipt: options.verifiedSourceReceipt || null
     });
   }
   return nativePluginCacheStatus(args, state);
@@ -6306,6 +6414,13 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     try {
       updateResult = validateAndUpdateRepo(state, args);
       verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'post-verification');
+      if (testHooks.afterRepositoryVerification) testHooks.afterRepositoryVerification({ receipt: verifiedSourceEvidence(updateResult.verifiedSourceReceipt) });
+      try {
+        verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'post-verification');
+      } catch (error) {
+        error.sourceContinuityFailure = true;
+        throw error;
+      }
       statusState = applyRepoUpdateStatus(state, updateResult.status, {
         fromCommit: updateResult.fromCommit,
         toCommit: updateResult.toCommit
@@ -6314,6 +6429,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       statusState = snapshot.state;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     } catch (error) {
+      if (error.sourceContinuityFailure) throw error;
       const details = error.repoUpdateDetails || {};
       statusState = persistFailureStatus(args, state, error.repoUpdateStatus || 'skipped', {
         fromCommit: details.fromCommit || '',
@@ -6369,11 +6485,13 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       assertSourceDowngradeAllowed(statusState, args);
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       beginMutationPhase(args, { lock: refreshLock, hubPath, rawState: refreshRawState, discoveries: snapshot.discoveries, testHooks });
+      verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'refresh-relock');
       statusState = snapshot.state;
       plannedTargetSyncs = snapshot.plannedTargetSyncs;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
-        repoPath: updateResult.repoPath
+        repoPath: updateResult.repoPath,
+        verifiedSourceReceipt: updateResult.verifiedSourceReceipt
       });
       thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
     }
@@ -6891,6 +7009,7 @@ module.exports = {
   AG2_PROOF_CONTRACT_VERSION,
   ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
+  RECEIPT_CHILD_BOOTSTRAP,
   canonicalJson,
   sha256,
   acquireLock,
