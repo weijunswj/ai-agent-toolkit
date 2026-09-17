@@ -162,6 +162,12 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 - Durable per-lane state must distinguish at least queued/ready, active, hold, gate-complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
 - Authority-bearing terminal packets must survive unchanged through consumption by every later consumer required by the accepted contract, including Loop, Web, and G4 where applicable, under the existing authorised retention and disclosure policy.
+- Executors/workers do not publish authoritative gate, transition, repair, ownership, or finality comments by default. They return complete authority-bearing packets to the Loop Manager; explicit task-scoped publication authority may allow a non-governance work product without granting governance authority.
+- A worker result is not an accepted transition until the Loop Manager independently reconciles the required live state.
+- Routine Loop chronology must be a deterministic projection of reconciled typed durable state, not a free-form model summary of worker output. The renderer must use a stable machine identity/digest so the same state produces the same receipt.
+- After posting a routine chronology mutation, the Loop must read back and verify the intended comment/object before any consequential continuation. Mismatch or unverifiable publication fails closed under a typed HOLD.
+- Ambiguous chronology outcomes must be recovered idempotently from durable identity/readback; never blindly replay a possibly completed comment or transition.
+- Web Controller alone publishes Web-owned authority decisions such as architecture/Lock changes, material scope/risk/authority changes, owner decisions, waivers, non-convergence adjudication, assurance/risk decisions, finality, and programme closure.
 - For any substantive terminal worker result, including accepted gate packets, implementation/validation results, non-convergence decisions, controller-required returns, or evidence-availability failures, the Loop Manager must forward the complete authority-bearing worker packet to Web Controller for independent adjudication. It may prepend a concise manager synopsis, but the synopsis cannot replace or materially compress the packet.
 - Admission-only stops may be compact when no substantive gate work occurred, provided the exact admission conflict and controlling state are preserved.
 - A summary may accompany a packet but must never replace, truncate, compress, reinterpret, or discard the canonical packet.
