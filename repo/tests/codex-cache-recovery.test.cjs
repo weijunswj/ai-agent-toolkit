@@ -379,7 +379,7 @@ test('bounded transient retry and one repair remain enforced', () => {
 
 test('newer installed cache is protected from downgrade or generic reset', () => {
   const cacheRoot = path.join(tmpRoot(), 'cache');
-  const newerVersion = '2.13.0';
+  const newerVersion = '2.14.0';
   const result = cache.recoverCodexCache(recoveryOptions(cacheRoot, {
     cache: {
       ...cacheObject(cacheRoot, newerVersion, installedProof(cacheRoot, newerVersion)),
