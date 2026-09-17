@@ -13,7 +13,7 @@
 - User/Web owns consent, architecture/Design Locks, material scope/risk/authority changes, topology changes, waivers, consequential mutation authority, and finality. Never infer grants.
 - Re-ask only for a material expansion or genuine owner decision; do not re-ask for already-authorised execution mechanics.
 - Before material work in a managed repository, read the Toolkit bootstrap/entry guidance and reconcile the programme parent, current children, PRs, native relationships, chronology, current authority, Locks, holds, and exact candidate state.
-- If required managed state is missing, stale, conflicting, concurrent, or unverifiable, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition.
+- If required managed state is missing, stale, conflicting or unverifiable, including an unreconciled concurrent write or competing authority, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition. Authorised compatible concurrency is not itself a reconciliation failure.
 - Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, reject it without analysing or acting on it.
 
 ## Public, private, and secrets
@@ -34,6 +34,10 @@
 - The Loop Manager continuously executes already-authorised work and may select among compatible authorised lanes, but it cannot silently widen scope, rewrite a Lock, waive a blocker, transfer human ownership, or cross a User/Web decision barrier.
 - Executors/workers carry no ownership or finality authority. Worker replacement never transfers task ownership.
 - GitHub assignment represents human ownership. Labels/status are state/visibility markers, not distributed mutexes.
+- Resolve one durable Toolkit owner in the existing issue/pipeline record before activation. Ambiguous ownership or competing authority requires `USER_DECISION_REQUIRED`; an active marker does not acquire ownership.
+- Human/task ownership does not expire through timeout or heartbeat loss.
+- A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
+- Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
 - Loop Manager -> executor -> optional isolated depth-1 children only when work is separable and materially faster.
 - Depth-1 children receive the minimum task packet only; no inherited chat/scratchpad.
 - No nested agent delegation.
@@ -70,9 +74,15 @@ Routing rules:
 - Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
 - Depth-1 children resolve their own route/speed under current policy and never inherit root Priority automatically unless explicitly authorised.
 
-## Gates
+## Assurance paths and gates
 
-- Start at the earliest unresolved gate.
+- Follow the Web-selected assurance path, then start at its earliest unresolved required gate.
+- LIGHT administrative work uses deterministic operation/readback.
+- LIGHT low-risk mutation uses focused validation without mandatory G4.
+- ASSURED uses the required implementation and independent assurance evidence.
+- Web-selected STRICT adds the required explicit Lock and adversarial obligations.
+- The Loop Manager cannot select or downgrade the assurance path.
+- Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
 - G1 = architecture/authority.
 - G2 = executable implementation contract.
 - G3 = implement/validate within the accepted contract.
@@ -89,12 +99,12 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 - Enumerate materially equivalent consumers/call sites.
 - Classify direct, indirect, generated, test, documentation, migration/compatibility, and external/public consumers where relevant.
-- Update/validate affected tests first where practical.
+- Update/validate affected tests first.
 - If required consumers are outside authorised scope, escalate rather than silently breaking them or widening scope.
 
-## Repair and non-convergence
+## Repair, convergence, and recovery
 
-- A G4 blocker must identify the violated invariant and inspect materially equivalent in-Lock paths so G3 closes a defect family rather than isolated examples.
+- After an accepted G4 material implementation blocker, the next authorised G3 correction must identify the violated invariant, inspect materially equivalent in-Lock paths, close the defect family, and retain deterministic regressions for accepted same-family reproducers.
 - Same implementation lineage has a maximum of 2 corrections regardless of run, head, branch, or renamed repair label.
 - After 2/2, a same-lineage material defect => `NON_CONVERGENCE_DECISION_REQUIRED`; no Repair-3 alias/reset.
 - External/provider/auth/transport/check/evidence-availability failures consume no repair budget unless they expose a candidate defect.
@@ -103,6 +113,10 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Required work may not be parked, demoted, skipped, or marked complete merely because a lineage exhausted its correction budget.
 - If the objective remains required, hold and adjudicate; continue only through the smallest evidence-backed materially new authority boundary.
 - Independent authorised non-conflicting lanes may continue while one lineage is held for non-convergence.
+- Loop recovery requires evidence-backed progress; repeating an unchanged action without new evidence is prohibited.
+- Autonomous execution remains within a durable owner-authorised whole-episode budget independent of lineage repair counts and advisory telemetry. Whole-episode budget exhaustion holds the affected objective for User/Web rather than silently continuing.
+- Before genuine Web escalation, perform bounded read-only lineage/root-cause adjudication. An independently evidenced in-scope root does not reset an exhausted implementation lineage.
+- After interruption or an ambiguous consequential outcome, consume durable receipts and establish the outcome through readback/idempotency before retrying; never replay a completed side effect.
 
 ## Evidence survivability
 
@@ -123,13 +137,15 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Programme parent and child carriers
 
-- The programme parent owns programme topology, lifecycle, dependencies, concurrency, and finality only.
+- The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
 - Keep the parent minimal; child-local operational changes must not churn the parent.
 - Children use `QUEUED`, `CURRENT`, `COMPLETED`, `RETIRED`.
 - `CURRENT` means live work. Multiple CURRENT children/lanes may exist only under current authority.
 - Historical comments/prompts are evidence/chronology, not automatically current authority.
-- Material `POST_SHIP` decisions retain exactly one durable future owner without becoming current implementation scope or mandatory immediate work.
+- Every retained material `POST_SHIP` decision has one stable canonical deferred record and exactly one verified continuing owner. Ownership grants no implementation authority.
+- Before a deferred-record owner terminates, each retained record must be implemented, discarded with reason, superseded with evidence, or transferred with verified readback.
+- Prefer a suitable future child as deferred owner; otherwise use the accepted lazy-created standing Improvement Queue, which is non-executing and never CURRENT.
 
 ## Parallel operation and liveness
 
@@ -139,13 +155,13 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Read-only G1/G2/G4 work may continue beside unrelated mutating work.
 - Concurrent G3 mutation requires disjoint mutation scopes.
 - Integration is serialised and revalidates current base/main immediately before consequential integration.
-- Same-child overlapping pipelines require explicit authority.
+- Same-child concurrent pipelines require explicit authority, including when their mutation scopes are disjoint.
 - Repeated suppression/starvation must become a durable capacity/order signal rather than an invisible scheduler preference; otherwise aging/fairness must eventually win.
 
 ## Durable lane state and packet discipline
 
 - Durable per-lane state must distinguish at least queued/ready, active, hold, gate-complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
-- Authority-bearing terminal packets must survive unchanged until Web/controller consumption.
+- Authority-bearing terminal packets must survive unchanged through consumption by every later consumer required by the accepted contract, including Loop, Web, and G4 where applicable, under the existing authorised retention and disclosure policy.
 - A summary may accompany a packet but must never replace, truncate, compress, reinterpret, or discard the canonical packet.
 - Crash/restart recovery must reconstruct lane state and the complete authority-bearing packet from durable state rather than chat memory.
 
@@ -176,17 +192,19 @@ Candidate/PR finality requires:
 
 - Exact current authority and scope.
 - Required checks complete and green/accepted under current policy.
-- Required G4 complete for the exact candidate.
+- Required G4 complete for the exact candidate when the Web-selected assurance path requires it.
 - Mergeable non-draft PR state where merge is intended.
 - Complete review/thread/finding inventory.
 - No unresolved blocker/HOLD preventing that transition.
 - Independent verification/readback of the result.
+- Apply the canonical [Shipping Law](repo/contracts/agent-rules/ai-coding-agent-execution.md#shipping-law): independently verify the applicable minimum floor, locked acceptance criteria, and evidence-backed finding classifications. A concrete material invariant violation may block merge. Properly owned non-blocking `FOLLOW_UP_REQUIRED` or `OBSERVE` work must not delay candidate finality, broaden current scope, or consume implementation repair budget.
 
 Whole-programme closure additionally requires:
 
 - All required children/tasks/lanes terminal or explicitly resolved.
 - Intended integrations/merges complete and canonical readback verified.
 - No mandatory blocker/HOLD/non-convergence/owner decision remains.
+- No unresolved deferred record remains owned by the terminating programme; retained items have verified durable successor owners.
 - Final Audit complete when required by the programme contract.
 - Web terminal acceptance/finality.
 
