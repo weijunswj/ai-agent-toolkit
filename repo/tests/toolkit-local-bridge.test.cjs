@@ -50,7 +50,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.12.2';
+const expectedBridgeVersion = '2.12.3';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const testTomlPython = (() => {
   const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
@@ -1358,6 +1358,151 @@ test('repo-update admission failure releases the exact owned lock', () => {
     }
   }), /deterministic admission rejection/);
   assert.equal(fs.existsSync(path.join(path.dirname(hub), 'update.lock')), false, 'failed admission must release its owned lock');
+});
+
+test('lower-level hub payload primitive revalidates live lock ownership after the outer guard', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    beforeHubPayloadWrite() {
+      writeJson(path.join(path.dirname(hub), 'update.lock'), {
+        created_at: new Date().toISOString(), pid: process.pid, token: 'replacement-owner'
+      });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+  fs.rmSync(path.join(path.dirname(hub), 'update.lock'), { force: true });
+});
+
+test('hub staging trust requires the exact intended payload bytes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    afterHubPayloadWrite({ stagePath }) {
+      fs.writeFileSync(path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md'), '# corrupted staged bytes\n');
+    }
+  }), /content checksum mismatch/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+});
+
+test('installed target trust requires the exact intended payload bytes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    afterTargetPayloadWrite({ targetPath }) {
+      fs.writeFileSync(path.join(targetPath, 'ai-agent-toolkit', 'SKILL.md'), '# corrupted installed bytes\n');
+    }
+  }), /target sync postcondition verification failed/);
+});
+
+test('delegated handoff rejects HEAD movement after the verified repository result', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    beforeDelegatedChildLaunch() {
+      fs.writeFileSync(path.join(fixture.repo, 'late-head-movement.txt'), 'later commit\n');
+      commitAll(fixture.repo, 'late head movement');
+    }
+  }), /repository commit changed after verified update result|repository result changed before child launch/);
+});
+
+test('staging reconciliation validates the actual deletion operand after its callback boundary', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const parent = path.dirname(hub);
+  fs.mkdirSync(parent, { recursive: true });
+  const generation = createOwnedStagingGeneration({
+    parent,
+    target: hub,
+    operation: 'hub-snapshot-replacement',
+    sourceType: 'repo',
+    bridgeVersion: expectedBridgeVersion,
+    pid: deadTestPid()
+  });
+  fs.writeFileSync(path.join(generation.stagePath, 'partial.txt'), 'preserve selected generation\n');
+  const substitute = path.join(parent, '.staging-substitute');
+  fs.mkdirSync(substitute);
+  fs.writeFileSync(path.join(substitute, 'keep.txt'), 'keep substitute\n');
+
+  const previousOpenCodeConfig = process.env.OPENCODE_CONFIG_DIR;
+  process.env.OPENCODE_CONFIG_DIR = path.join(root, 'opencode-config');
+  try {
+    assert.throws(() => runBridge([
+      '--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write'
+    ], {
+      stagingLiveness: () => 'dead',
+      beforeStagingReconciliationDelete({ generation: actual }) {
+        actual.stagePath = substitute;
+      }
+    }), /deletion operand changed before delete/);
+  } finally {
+    if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousOpenCodeConfig;
+  }
+  assert.equal(fs.existsSync(generation.stagePath), true);
+  assert.equal(fs.readFileSync(path.join(substitute, 'keep.txt'), 'utf8'), 'keep substitute\n');
+});
+
+test('report creation binds identity to the exclusive handle and expected bytes before trust', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: true,
+    targets: {}
+  });
+  let attackedPath = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target,
+    '--open-update-report', '--write', ...offline
+  ], {
+    afterExclusiveReportWrite({ reportPath }) {
+      attackedPath = reportPath;
+      fs.writeFileSync(reportPath, '# changed through competing handle\n');
+    }
+  }), /content verification failed|creation identity does not match expected contents/);
+  assert.notEqual(attackedPath, '');
+  fs.rmSync(attackedPath, { force: true });
 });
 
 test('fixed delegated payload accepts exact authority and rejects added actions, wrong source, and wrong repository result', () => {
