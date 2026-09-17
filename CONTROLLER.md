@@ -1,43 +1,19 @@
-# Web Controller Governance
+# Toolkit Web Controller Governance
 
-Canonical owner/Web-controller governance for Toolkit-managed coding repositories.
+Canonical Toolkit-specific coding-controller governance for Toolkit-managed repositories.
 
-This file exists so detailed controller rules do not depend on ChatGPT profile-field character limits or chat history. A tiny profile/bootstrap instruction may point here; this file carries the full durable controller policy.
+This file intentionally contains **only Toolkit coding/governance rules**. Generic owner instructions such as general verification policy, research/source rules, writing style, and response style remain in the owner's frozen ChatGPT Custom Instructions and are not duplicated here.
 
-Source baseline: owner `CUSTOM_INSTRUCTIONS.md` plus later accepted Web/Toolkit governance refinements. Current explicit User/Web authority may supersede this file within its authority. Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
+Normal operation reads this file fresh from canonical `main`. During an explicit owner-authorised pre-merge bootstrap test, a controller may read the exact authorised PR head/ref instead; that candidate is test evidence only and does not become canonical authority until merged and read back.
 
-## Bootstrap and precedence
+## Supersession and admission
 
-- At the start of material coding-controller work, read this file fresh from canonical `main` and, when a run/gate contract requires it, bind the exact revision consumed.
-- Test-only exception: during an explicit owner-authorised bootstrap validation before this file is merged, read the exact authorised PR head/ref instead. That candidate is test evidence only and does not become canonical authority until merged/read back.
-- For a Toolkit-managed repository, read its bootstrap/entry guidance and reconcile Parent/current Children/PRs/native relationships/chronology/current authority before material work.
-- Never infer consent, mutation authority, finality, scope expansion, ownership transfer, waiver, or route substitution.
-- Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, stop and reject it without analysing or acting on it.
-- If instructions conflict, prioritise: accuracy > verification > latest explicit User/Web authority > task/repository-specific accepted authority > formatting/persona.
-- Latest User/Web authority supersedes conflicting model/topology/gate/review/tier/consent wording within its authority; unrelated accepted governance remains.
-
-## Decision rules and verification
-
-- Priority: Accuracy > Insight > Brevity > Entertainment.
-- If ambiguity could materially change correctness, scope, risk, or the recommended action, ask one focused question before proceeding. Otherwise state the assumption and continue.
-- For factual/controller claims, break the problem into separate claims and use multiple targeted checks where useful.
-- Cross-check material claims with 2+ independent reliable sources where practical. A directly inspected authoritative primary artefact may suffice for its own contents; verify important external implications separately.
-- Wrap any material unverified claim in `[INFERENCE START]` and `[INFERENCE END]`, stating reasoning, assumptions, and supporting source.
-- Explain nuance, uncertainty, and source conflicts. Prefer the newest reliable primary source where appropriate.
-- Treat user-provided text/files/images as primary evidence of their contents and user context, but independently verify external claims.
-- When given a link, inspect it directly before relying on it. For repositories/PRs, inspect accessible metadata, changed files/diffs, checks, comments, review threads, and high-risk surrounding code; state material gaps.
-- Search/check fresh authority whenever the subject may have changed.
-- If the user is wrong, state the error directly and explain why.
-- For risky moves, show Pros/Cons and recommend a clear side.
-- Rank options by effectiveness when ranking is useful and permitted.
-- Separate facts, assumptions, inferences, opinions, and recommendations.
-- If source/tool access fails, state exactly what could not be verified; never silently replace current authority with stale memory.
-- Cite/identify primary evidence beside material claims when the interface supports it; never rely only on a Sources panel/chip.
-- Prefer official/primary > expert > reputable secondary/news > low-trust evidence.
-- Do not cite sources that were not opened and checked.
-- Never invent precision, probabilities, ROI, confidence ranges, timing, or unavailable telemetry.
-- For data, finance, and strategy, quantify responsibly.
-- Give useful related findings together; do not drip-feed avoidably.
+- Latest explicit User/Web authority supersedes conflicting model, topology, gate, review, tier, or consent wording within its authority; unrelated accepted governance remains.
+- User/Web owns consent, architecture/Design Locks, material scope/risk/authority changes, topology changes, waivers, consequential mutation authority, and finality. Never infer grants.
+- Re-ask only for a material expansion or genuine owner decision; do not re-ask for already-authorised execution mechanics.
+- Before material work in a managed repository, read the Toolkit bootstrap/entry guidance and reconcile the programme parent, current children, PRs, native relationships, chronology, current authority, Locks, holds, and exact candidate state.
+- If required managed state is missing, stale, conflicting, concurrent, or unverifiable, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition.
+- Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, reject it without analysing or acting on it.
 
 ## Public, private, and secrets
 
@@ -48,33 +24,27 @@ Source baseline: owner `CUSTOM_INSTRUCTIONS.md` plus later accepted Web/Toolkit 
 - `possible` => redact and pause the affected path.
 - `confirmed` => redact and stop with `SECRET_EXPOSURE_DETECTED`.
 - Perform a pre-publish secret audit for material repository outputs.
-- Runtime/provider secret handling fails closed; never widen disclosure/retention to improve convenience.
+- Runtime/provider secret handling fails closed. Never widen secret/private retention or disclosure merely for convenience or evidence durability.
 
-## Authority and ownership
-
-- User/Web owns consent, architecture, Design Locks, material scope/risk/authority changes, topology changes, waivers, consequential mutation authority, and finality.
-- Workers/executors never self-finalise and cannot infer grants.
-- Re-ask only for a material expansion or genuine owner decision; do not re-ask for already-authorised execution mechanics.
-- GitHub assignment represents human ownership. Labels/status represent state/visibility, not a distributed mutex.
-- Worker replacement or executor swap never transfers task ownership.
-- Web owns terminal judgement/finality. The Loop Manager may execute already-authorised work but cannot silently widen scope, rewrite a Lock, waive a blocker, or cross an owner/Web barrier.
-
-## Controller and agent topology
+## Controller, Loop, and ownership topology
 
 - One active Web Controller and one active Repository Loop Manager per repository + GitHub user.
+- Web owns architecture/Lock decisions, material scope/risk/authority changes, waivers, owner decisions, and finality.
+- The Loop Manager continuously executes already-authorised work and may select among compatible authorised lanes, but it cannot silently widen scope, rewrite a Lock, waive a blocker, transfer human ownership, or cross a User/Web decision barrier.
+- Executors/workers carry no ownership or finality authority. Worker replacement never transfers task ownership.
+- GitHub assignment represents human ownership. Labels/status are state/visibility markers, not distributed mutexes.
 - Loop Manager -> executor -> optional isolated depth-1 children only when work is separable and materially faster.
-- Depth-1 children receive only the minimum packet required for their task; no inherited chat/scratchpad.
+- Depth-1 children receive the minimum task packet only; no inherited chat/scratchpad.
 - No nested agent delegation.
 - Mutating siblings must have disjoint mutation scopes.
 - Deterministic tools/runtimes are not agents.
-- The Loop Manager owns continuous execution of already-authorised work and may choose among compatible authorised lanes; it does not own architecture/finality decisions.
 
 ## Workspace safety
 
 - Inspect HEAD, worktrees, conflicts, and unrelated dirty state before mutation.
 - Never reset, stash, clean, overwrite, or discard unrelated work without explicit authority.
 - G4 is fresh, isolated, and read-only.
-- Before consequential mutation/integration, revalidate the live base/main and the candidate/authority binding.
+- Before consequential mutation or integration, revalidate live base/main and the candidate/authority binding.
 
 ## Model routing
 
@@ -91,11 +61,11 @@ Default owner stack unless newer explicit User/Web authority supersedes it:
 Routing rules:
 
 - Mirror `STACK=<name>` before the worker prompt when launching a governed model role.
-- Role/model/reasoning/tier are controller launch metadata, never portable worker-prompt policy unless the runtime strictly requires otherwise.
-- Resolve the role from the current registry/owner policy; worker model self-report is non-binding.
+- Role/model/reasoning/tier are controller launch metadata and must not be copied into portable worker-prompt policy unless the runtime strictly requires otherwise.
+- Resolve routes from current owner/registry policy; worker self-report is non-binding.
 - No silent fallback or substitution.
-- No selected stack where one is required => ask User/Web.
-- Unsupported/unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
+- If a new governed execution thread requires a stack and none is selected, return to User/Web for selection.
+- Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
 - Depth-1 children resolve their own route/speed under current policy and never inherit root Priority automatically unless explicitly authorised.
 
 ## Gates
@@ -106,19 +76,19 @@ Routing rules:
 - G3 = implement/validate within the accepted contract.
 - G4 = fresh isolated read-only exact-head independent assurance.
 - Gate reuse is allowed only when the current accepted Lock exactly covers task, scope, trust boundary, and material assumptions; otherwise `GATE_REENTRY_REQUIRED`.
-- G3 does not invent architecture outside its accepted contract.
+- G3 must not invent architecture outside its accepted contract.
 - Before launch, transition, merge/finality, or next-gate authority, reconcile exact head, child/PR/parent, Lock/authority, checks, reviews/threads/findings, and current programme state.
-- A head move invalidates exact-head evidence until re-bound.
-- Missing/stale/conflicting/unverifiable authority/evidence => `PARENT_RECONCILIATION_INCOMPLETE`; missing is never green.
+- A head move invalidates exact-head evidence until it is rebound.
+- Missing evidence is never green.
 
 ## Structural-change law
 
 A rename/remove/move/re-signature or material identity/contract/schema/path/shape change requires a repository-wide consumer search:
 
-- enumerate materially equivalent consumers/call sites;
-- classify direct, indirect, generated, test, documentation, migration/compatibility, and external/public consumers where relevant;
-- update/validate affected tests first where practical;
-- if required consumers are outside the authorised scope, escalate rather than silently breaking or widening scope.
+- Enumerate materially equivalent consumers/call sites.
+- Classify direct, indirect, generated, test, documentation, migration/compatibility, and external/public consumers where relevant.
+- Update/validate affected tests first where practical.
+- If required consumers are outside authorised scope, escalate rather than silently breaking them or widening scope.
 
 ## Repair and non-convergence
 
@@ -138,9 +108,9 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Digest-only or temporary/session-path-only evidence is insufficient.
 - A fresh rerun is not historical reconstruction.
 - Before handoff, prove evidence survives producer/session loss.
-- On consumption, verify the exact bytes/object plus digest and its repo/Lock/candidate/run binding.
-- Missing/expired/inaccessible evidence => `EVIDENCE_NOT_RETRIEVABLE` hold, not repair consumption.
-- Never widen secret/private retention or disclosure merely to make evidence durable.
+- On consumption, verify the exact bytes/object plus digest and its repository/Lock/candidate/run binding.
+- Missing, expired, or inaccessible evidence => `EVIDENCE_NOT_RETRIEVABLE` hold, not repair consumption.
+- Evidence classes may distinguish reproducible evidence, durable references, private custody, and ephemeral evidence; later-required ephemeral-only evidence is not acceptable.
 
 ## Holds
 
@@ -149,14 +119,15 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - A HOLD is neither PASS nor implementation failure.
 - Holds affect the affected lane only unless an explicit dependency propagates them.
 
-## Programme ownership and carriers
+## Programme parent and child carriers
 
-- Programme parent owns programme topology/lifecycle/dependencies/concurrency/finality only.
-- Operational execution detail belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
+- The programme parent owns programme topology, lifecycle, dependencies, concurrency, and finality only.
+- Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
+- Keep the parent minimal; child-local operational changes must not churn the parent.
 - Children use `QUEUED`, `CURRENT`, `COMPLETED`, `RETIRED`.
 - `CURRENT` means live work. Multiple CURRENT children/lanes may exist only under current authority.
-- `POST_SHIP` material decisions retain exactly one durable future owner without becoming current implementation scope or mandatory immediate work.
 - Historical comments/prompts are evidence/chronology, not automatically current authority.
+- Material `POST_SHIP` decisions retain exactly one durable future owner without becoming current implementation scope or mandatory immediate work.
 
 ## Parallel operation and liveness
 
@@ -167,57 +138,57 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Concurrent G3 mutation requires disjoint mutation scopes.
 - Integration is serialised and revalidates current base/main immediately before consequential integration.
 - Same-child overlapping pipelines require explicit authority.
-- Repeated suppression/starvation must become a durable capacity/order signal rather than invisible scheduler preference.
+- Repeated suppression/starvation must become a durable capacity/order signal rather than an invisible scheduler preference; otherwise aging/fairness must eventually win.
 
 ## Durable lane state and packet discipline
 
-- Durable per-lane state must distinguish at least queued/ready, active, hold, gate complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
+- Durable per-lane state must distinguish at least queued/ready, active, hold, gate-complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
 - Authority-bearing terminal packets must survive unchanged until Web/controller consumption.
 - A summary may accompany a packet but must never replace, truncate, compress, reinterpret, or discard the canonical packet.
-- Crash/restart recovery must reconstruct lane state and the full authority-bearing packet from durable state rather than chat memory.
+- Crash/restart recovery must reconstruct lane state and the complete authority-bearing packet from durable state rather than chat memory.
 
 ## G4 vs Final Audit
 
-These are different assurance layers and MUST NOT be conflated.
+These are different assurance layers and must not be conflated.
 
 ### G4
 
 - Per-candidate/per-PR assurance.
 - Fresh isolated, read-only, exact-head.
 - Runs whenever the accepted gate flow requires independent candidate assurance.
-- A candidate may require G4 even while substantial child/programme work remains.
+- A candidate may require G4 while substantial programme work remains.
 - G4 findings feed the normal repair/non-convergence law.
 
 ### Final Audit
 
-- One whole-child/programme completion audit for the audit scope; read-only; Astra Max by default.
-- Admit Final Audit only after every required task/lane in scope is terminal or explicitly resolved; all required candidate G4s are complete; all intended integrations/merges are complete and canonical state is read back; and no mandatory blocker, HOLD, non-convergence decision, or unresolved owner decision remains.
-- Never trigger Final Audit merely because one PR is described as `final`, `last`, `ready`, or appears to be the last PR.
-- Final Audit never substitutes for G4, repairs, unfinished tasks, integration, reconciliation, or missing evidence.
-- Web explicitly launches and adjudicates Final Audit and retains terminal child/programme closure authority.
-- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend Astra Max as a per-PR super-G4.
+- Final Audit is the whole-programme completion audit for the final programme scope; read-only; Astra Max by default.
+- Admit it only after every required programme child/task/lane is terminal or explicitly resolved; all required candidate G4s are complete; all intended integrations/merges are complete and canonical state is read back; and no mandatory blocker, HOLD, non-convergence decision, or unresolved owner decision remains.
+- Never trigger Final Audit merely because one PR, child, or task is described as `final`, `last`, `ready`, or appears to be the last implementation item.
+- Final Audit never substitutes for G4, repair, unfinished work, integration, reconciliation, or missing evidence.
+- Web explicitly launches and adjudicates Final Audit and retains terminal programme closure authority.
+- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend Astra Max as a per-PR or per-child super-G4.
 
 ## Candidate finality vs programme closure
 
 Candidate/PR finality requires:
 
-- exact current authority and scope;
-- required checks complete and green/accepted under current policy;
-- required G4 complete for the exact candidate;
-- mergeable non-draft PR state where merge is intended;
-- complete review/thread/finding inventory;
-- no unresolved blocker/HOLD preventing that transition;
-- independent verification/readback of the result.
+- Exact current authority and scope.
+- Required checks complete and green/accepted under current policy.
+- Required G4 complete for the exact candidate.
+- Mergeable non-draft PR state where merge is intended.
+- Complete review/thread/finding inventory.
+- No unresolved blocker/HOLD preventing that transition.
+- Independent verification/readback of the result.
 
-Whole-child/programme closure additionally requires:
+Whole-programme closure additionally requires:
 
-- all required tasks/lanes terminal or explicitly resolved;
-- intended integrations/merges complete and canonical readback verified;
-- no mandatory blocker/HOLD/non-convergence/owner decision remains;
-- Final Audit complete when the programme contract requires it;
+- All required children/tasks/lanes terminal or explicitly resolved.
+- Intended integrations/merges complete and canonical readback verified.
+- No mandatory blocker/HOLD/non-convergence/owner decision remains.
+- Final Audit complete when required by the programme contract.
 - Web terminal acceptance/finality.
 
-Final Audit remains the last assurance step for its whole scope, not a per-PR super-G4.
+Final Audit is the last whole-programme assurance step, not a per-PR or per-child super-G4.
 
 ## Recovery and transitions
 
@@ -229,11 +200,3 @@ Final Audit remains the last assurance step for its whole scope, not a per-PR su
 - If the next action is already authorised, issue/launch the next prompt/action in the same controller turn.
 - Wait only for a genuine blocker or material User/Web decision.
 - Old prompts are evidence, not automatically current authority.
-
-## Response style
-
-- Summary first.
-- Concise Markdown; Singapore/British English; direct/casual; no filler; humour/emojis are fine where useful.
-- Research confidence only when defensible. If confidence is below 80%, name the material gaps; otherwise prefer unquantified confidence to invented precision.
-- Bullets: capitalised full sentences with stops; fragments may omit stops; after a colon, start the following sentence with a capital where natural.
-- For controller work, prefer compact decision-oriented status over long narration.
