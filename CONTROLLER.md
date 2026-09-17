@@ -1,10 +1,11 @@
 # Toolkit Web Controller Governance
 
-Canonical Toolkit-specific coding-controller governance for Toolkit-managed repositories.
+## Scope and authority
 
-This file intentionally contains **only Toolkit coding/governance rules**. Generic owner instructions such as general verification policy, research/source rules, writing style, and response style remain in the owner's frozen ChatGPT Custom Instructions and are not duplicated here.
-
-Normal operation reads this file fresh from canonical `main`. During an explicit owner-authorised pre-merge bootstrap test, a controller may read the exact authorised PR head/ref instead; that candidate is test evidence only and does not become canonical authority until merged and read back.
+- This file defines Toolkit-specific Web Controller governance for Toolkit-managed coding repositories.
+- Current explicit User/Web authority may supersede this file within its authority.
+- Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
+- At the start of material coding-controller work, read this file fresh from canonical `main` and bind the exact revision consumed when a run/gate contract requires it.
 
 ## Supersession and admission
 
