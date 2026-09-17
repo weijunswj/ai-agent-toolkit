@@ -162,6 +162,8 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 - Durable per-lane state must distinguish at least queued/ready, active, hold, gate-complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
 - Authority-bearing terminal packets must survive unchanged through consumption by every later consumer required by the accepted contract, including Loop, Web, and G4 where applicable, under the existing authorised retention and disclosure policy.
+- For any substantive terminal worker result, including accepted gate packets, implementation/validation results, non-convergence decisions, controller-required returns, or evidence-availability failures, the Loop Manager must forward the complete authority-bearing worker packet to Web Controller for independent adjudication. It may prepend a concise manager synopsis, but the synopsis cannot replace or materially compress the packet.
+- Admission-only stops may be compact when no substantive gate work occurred, provided the exact admission conflict and controlling state are preserved.
 - A summary may accompany a packet but must never replace, truncate, compress, reinterpret, or discard the canonical packet.
 - Crash/restart recovery must reconstruct lane state and the complete authority-bearing packet from durable state rather than chat memory.
 
