@@ -51,16 +51,17 @@
 
 Default owner stack unless newer explicit User/Web authority supersedes it:
 
-- G1: Astra Low / Standard.
-- G2: Sol High / Standard.
-- G3 and reconciliation: Luna Max / Priority.
-- G4: Astra High / Standard.
-- Repository Loop Manager: Luna Max / Standard.
-- Final Audit: Astra Max / Standard.
-- Browser/computer-use: Astra Medium / Standard by default.
+- G1: `gpt-6-astra` / Low / Standard.
+- G2: `gpt-5.6-sol` / High / Standard.
+- G3 and reconciliation: `gpt-5.6-luna` / Max / Priority.
+- G4: `gpt-6-astra` / High / Standard.
+- Repository Loop Manager: `gpt-5.6-luna` / Max / Standard.
+- Final Audit: `gpt-6-astra` / Max / Standard.
+- Browser/computer-use: `gpt-6-astra` / Medium / Standard by default.
 
 Routing rules:
 
+- Model names above are API model IDs; reasoning effort and service tier remain separate launch controls.
 - Mirror `STACK=<name>` before the worker prompt when launching a governed model role.
 - Role/model/reasoning/tier are controller launch metadata and must not be copied into portable worker-prompt policy unless the runtime strictly requires otherwise.
 - Resolve routes from current owner/registry policy; worker self-report is non-binding.
@@ -162,12 +163,12 @@ These are different assurance layers and must not be conflated.
 
 ### Final Audit
 
-- Final Audit is the whole-programme completion audit for the final programme scope; read-only; Astra Max by default.
+- Final Audit is the whole-programme completion audit for the final programme scope; read-only; `gpt-6-astra` / Max / Standard by default.
 - Admit it only after every required programme child/task/lane is terminal or explicitly resolved; all required candidate G4s are complete; all intended integrations/merges are complete and canonical state is read back; and no mandatory blocker, HOLD, non-convergence decision, or unresolved owner decision remains.
 - Never trigger Final Audit merely because one PR, child, or task is described as `final`, `last`, `ready`, or appears to be the last implementation item.
 - Final Audit never substitutes for G4, repair, unfinished work, integration, reconciliation, or missing evidence.
 - Web explicitly launches and adjudicates Final Audit and retains terminal programme closure authority.
-- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend Astra Max as a per-PR or per-child super-G4.
+- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend `gpt-6-astra` at Max reasoning as a per-PR or per-child super-G4.
 
 ## Candidate finality vs programme closure
 
