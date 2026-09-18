@@ -225,7 +225,8 @@ Final Audit is the last whole-programme assurance step, not a per-PR or per-chil
 - Persist material receipts needed for restart/reconstruction.
 - G4 remains read-only; Loop converges authorised work; Web retains judgement/finality.
 - Pre-S3 `RETURN_TO_WEB` behaviour is transitional and must not be reproduced as routine Loop architecture.
+- On takeover/continuation, if the user states or live state indicates that a prompt/run/worker may already be in flight, reconcile/adopt that existing execution and do not emit, relaunch, duplicate, or switch worker transport. If launch outcome is ambiguous, hold for launch-outcome reconciliation rather than starting another worker.
 - After a terminal packet, reconcile live state.
-- If the next action is already authorised, issue/launch the next prompt/action in the same controller turn.
+- Only after that terminal-packet reconciliation, if the next action is already authorised and no worker for that action is already active or ambiguously launched, issue/launch the next prompt/action in the same controller turn.
 - Wait only for a genuine blocker or material User/Web decision.
 - Old prompts are evidence, not automatically current authority.
