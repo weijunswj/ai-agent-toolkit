@@ -162,11 +162,57 @@ function delegatedNativeStaticState(authority) {
   });
 }
 
+function assertDelegatedNativeSourceContinuity(authority) {
+  const actual = cacheFingerprint(authority.repository, authority.repository, {
+    normalizeWindowsSessionStart: process.platform === 'win32'
+  });
+  if (actual !== authority.source_cache_fingerprint) {
+    throw new Error('delegated native verifier-owned source closure changed before effect');
+  }
+}
+
+function assertDelegatedDestinationContinuity(operands, options = {}) {
+  for (const expected of operands.destination_ancestor_chain || []) {
+    assertStableIdentity(stableFilesystemIdentity(expected.path, 'directory'), expected, 'destination ancestor');
+  }
+  if (!options.postcondition && operands.source_identity) {
+    assertStableIdentity(stableFilesystemIdentity(operands.source_identity.path, 'file'), operands.source_identity, 'source operand');
+  }
+  if (!options.postcondition && operands.destination_state) {
+    const expected = operands.destination_state;
+    const exists = fs.existsSync(expected.path);
+    if (exists !== expected.exists) throw new Error('delegated native destination object changed');
+    if (exists) assertStableIdentity(stableFilesystemIdentity(expected.path, 'file'), expected.identity, 'destination object');
+  }
+}
+
+function captureDestinationState(targetPath) {
+  const exactPath = path.resolve(targetPath);
+  if (!fs.existsSync(exactPath)) return Object.freeze({ path: exactPath, exists: false });
+  return Object.freeze({ path: exactPath, exists: true, identity: stableFilesystemIdentity(exactPath, 'file') });
+}
+
+function captureExistingDestinationChain(rootPath, destinationPath) {
+  const root = path.resolve(rootPath);
+  const destination = path.resolve(destinationPath);
+  const relative = path.relative(root, destination);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('delegated native destination chain escaped its admitted root');
+  const chain = [stableFilesystemIdentity(root, 'directory')];
+  let current = root;
+  for (const part of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) break;
+    chain.push(stableFilesystemIdentity(current, 'directory'));
+  }
+  return chain;
+}
+
 function establishDelegatedNativeMutationPhase(options, testHooks = {}) {
   const authority = activeDelegatedNativeAuthority;
   activeDelegatedNativePhase = null;
   delegatedNativeTestHooks = testHooks || null;
   if (!authority) return null;
+  assertDelegatedNativeSourceContinuity(authority);
   const lockPath = path.resolve(authority.mutation_phase_lock_path);
   const boundState = delegatedNativeStaticState(authority);
   const record = Object.freeze({
@@ -201,6 +247,7 @@ function verifyDelegatedNativeContinuity(action, operands = {}, options = {}) {
   if (!phase) throw new Error('delegated native mutation phase is not established');
   if (!options.postcondition && delegatedNativeTestHooks?.beforeEffect) delegatedNativeTestHooks.beforeEffect(Object.freeze({ action, operands: JSON.parse(JSON.stringify(operands)), sequence: phase.sequence }));
   if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source changed before effect');
+  assertDelegatedNativeSourceContinuity(authority);
   if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before effect');
   if (path.resolve(authority.executable) !== path.resolve(process.execPath)) throw new Error('delegated native executable changed before effect');
   assertStableIdentity(stableFilesystemIdentity(authority.repository, 'directory'), phase.boundState.repository, 'repository');
@@ -212,6 +259,7 @@ function verifyDelegatedNativeContinuity(action, operands = {}, options = {}) {
   if (sha256(canonicalJson(delegatedNativeStaticState(authority))) !== sha256(canonicalJson(phase.boundState))) {
     throw new Error('delegated native mutation phase bound state changed');
   }
+  assertDelegatedDestinationContinuity(operands, options);
   canonicalJson(operands);
   return null;
 }
@@ -230,6 +278,10 @@ function releaseDelegatedNativeMutationPhase() {
   activeDelegatedNativeAuthority = null;
   if (!phase) return;
   try {
+    assertDelegatedNativeSourceContinuity(phase.boundState ? {
+      repository: phase.boundState.repository.path,
+      source_cache_fingerprint: phase.boundState.source_cache_fingerprint
+    } : {});
     assertStableIdentity(stableFilesystemIdentity(phase.lockPath, 'file'), phase.identity, 'phase lock');
     if (!fs.readFileSync(phase.lockPath).equals(phase.bytes)) return;
     fs.unlinkSync(phase.lockPath);
@@ -306,34 +358,58 @@ function writeCodexSessionStart(filePath, bytes) {
   }
   const value = Buffer.from(bytes);
   const tempPath = `${exactPath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  const destinationState = captureDestinationState(exactPath);
+  const destinationChain = captureExistingDestinationChain(codexHome, path.dirname(exactPath));
   try {
     const relativeParent = path.relative(codexHome, path.dirname(exactPath));
     let current = codexHome;
     for (const part of relativeParent.split(path.sep).filter(Boolean)) {
       current = path.join(current, part);
       if (fs.existsSync(current)) {
-        stableFilesystemIdentity(current, 'directory');
+        const identity = stableFilesystemIdentity(current, 'directory');
+        if (!destinationChain.some((expected) => expected.path === identity.path)) destinationChain.push(identity);
         continue;
       }
-      const mkdirOperands = { kind: 'mkdir', path: current };
+      const mkdirOperands = { kind: 'mkdir', path: current, destination_ancestor_chain: [...destinationChain] };
       verifyDelegatedNativeContinuity('codex.session-start.write', mkdirOperands);
       fs.mkdirSync(current);
-      stableFilesystemIdentity(current, 'directory');
+      const createdIdentity = stableFilesystemIdentity(current, 'directory');
       completeDelegatedNativeEffect('codex.session-start.write', mkdirOperands);
+      destinationChain.push(createdIdentity);
     }
-    const writeOperands = { kind: 'exclusive-write', path: tempPath, sha256: sha256(value), byte_length: value.length };
+    const writeOperands = {
+      kind: 'exclusive-write',
+      path: tempPath,
+      sha256: sha256(value),
+      byte_length: value.length,
+      destination_ancestor_chain: [...destinationChain]
+    };
     verifyDelegatedNativeContinuity('codex.session-start.write', writeOperands);
     fs.writeFileSync(tempPath, value, { flag: 'wx', mode: 0o600 });
     if (!fs.readFileSync(tempPath).equals(value)) throw new Error('delegated native temporary write postcondition failed');
     completeDelegatedNativeEffect('codex.session-start.write', writeOperands);
-    const renameOperands = { kind: 'rename', source: tempPath, destination: exactPath, sha256: sha256(value) };
+    const tempIdentity = stableFilesystemIdentity(tempPath, 'file');
+    const renameOperands = {
+      kind: 'rename',
+      source: tempPath,
+      destination: exactPath,
+      sha256: sha256(value),
+      destination_ancestor_chain: [...destinationChain],
+      source_identity: tempIdentity,
+      destination_state: destinationState
+    };
     verifyDelegatedNativeContinuity('codex.session-start.write', renameOperands);
     fs.renameSync(tempPath, exactPath);
     if (!fs.readFileSync(exactPath).equals(value)) throw new Error('delegated native session-start write postcondition failed');
     completeDelegatedNativeEffect('codex.session-start.write', renameOperands);
   } finally {
     if (fs.existsSync(tempPath)) {
-      const cleanupOperands = { kind: 'cleanup', path: tempPath };
+      const cleanupOperands = {
+        kind: 'cleanup',
+        path: tempPath,
+        destination_ancestor_chain: [...destinationChain],
+        source_identity: stableFilesystemIdentity(tempPath, 'file')
+      };
       verifyDelegatedNativeContinuity('codex.session-start.write', cleanupOperands);
       fs.rmSync(tempPath, { force: true });
       if (fs.existsSync(tempPath)) throw new Error('delegated native temporary cleanup postcondition failed');
@@ -1675,11 +1751,15 @@ function sleep(ms) {
 
 function terminateChild(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null || child.killed) return;
+  const operands = { kind: 'terminate', pid: child.pid };
+  if (activeDelegatedNativeAuthority) verifyDelegatedNativeContinuity('codex.plugin.add', operands);
   try {
     child.kill();
   } catch {
     // The child may already be gone; verification state is the source of truth here.
+    return;
   }
+  if (activeDelegatedNativeAuthority) completeDelegatedNativeEffect('codex.plugin.add', operands);
 }
 
 function formatStateErrors(state, listError) {
@@ -1737,7 +1817,8 @@ async function runCodexAddAndVerify(command, addArgs, options) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent(options);
         hookChanged = hookChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // Installed-state verification below reports an unsafe or incomplete cache.
       }
       lastState = evaluateCodexToolkitPluginState(pluginList, {
@@ -1871,7 +1952,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
         pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // A stale unsupported cache is handled by the supported reinstall path.
       }
     }
@@ -1892,7 +1974,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
         pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // Verification decides whether reinstall is required.
       }
       state = evaluateCodexToolkitPluginState(pluginList, {

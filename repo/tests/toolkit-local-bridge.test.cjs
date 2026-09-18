@@ -1100,7 +1100,8 @@ test('executor-ownership source inventory classifies every semantic filesystem m
     'setup-codex-toolkit-plugin.cjs': {
       executor: new Set([
         'establishDelegatedNativeMutationPhase', 'releaseDelegatedNativeMutationPhase',
-        'writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess'
+        'writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess',
+        'terminateChild'
       ]),
       verifiedReadOrStandalone: new Set(['writeFileAtomicallyStandalone'])
     },
@@ -1109,7 +1110,7 @@ test('executor-ownership source inventory classifies every semantic filesystem m
       verifiedReadOrStandalone: new Set(['validateToml'])
     }
   };
-  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|openSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(/g;
+  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|openSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(|\.kill\(/g;
   const inventory = [];
   for (const name of files) {
     const source = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
@@ -1122,7 +1123,7 @@ test('executor-ownership source inventory classifies every semantic filesystem m
       inventory.push({ name, owner, call: match[0], classification });
     }
   }
-  assert.equal(inventory.length, 92, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
+  assert.equal(inventory.length, 93, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
   assert.deepEqual(inventory.filter((entry) => entry.classification === 'UNCLASSIFIED'), []);
   const bridgeSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'utf8');
   const setupSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
@@ -1136,25 +1137,54 @@ test('executor-ownership source inventory classifies every semantic filesystem m
   assert.match(functionBody(bridgeSource, 'launchVerifiedNativeSetupChild'), /verifySourceReceiptContinuity\(receipt, 'pre-launch'\)[\s\S]*admitActionSpecificEffect[\s\S]*spawnSync\(process\.execPath, commandArgs/);
   assert.match(functionBody(bridgeSource, 'createRunReport'), /admitActionSpecificEffect[\s\S]*fs\.writeFileSync\(candidate, bytes, \{ flag: 'wx'/);
   assert.match(functionBody(setupSource, 'establishDelegatedNativeMutationPhase'), /authority_digest[\s\S]*bound_state_digest[\s\S]*fs\.writeFileSync\(lockPath, bytes, \{ flag: 'wx'/);
-  assert.match(functionBody(setupSource, 'writeCodexSessionStart'), /verifyDelegatedNativeContinuity[\s\S]*fs\.mkdirSync\(current\)[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.writeFileSync\(tempPath[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.renameSync\(tempPath, exactPath\)/);
+  assert.match(functionBody(setupSource, 'verifyDelegatedNativeContinuity'), /beforeEffect[\s\S]*assertDelegatedNativeSourceContinuity[\s\S]*phase\.lockPath[\s\S]*bound state changed[\s\S]*assertDelegatedDestinationContinuity/);
+  assert.match(functionBody(setupSource, 'completeDelegatedNativeEffect'), /verifyDelegatedNativeContinuity\(action, operands, \{ postcondition: true \}\)[\s\S]*sequence \+= 1[\s\S]*afterEffect/);
+  assert.match(functionBody(setupSource, 'releaseDelegatedNativeMutationPhase'), /assertDelegatedNativeSourceContinuity[\s\S]*phase\.lockPath[\s\S]*fs\.unlinkSync\(phase\.lockPath\)/);
+  assert.match(functionBody(setupSource, 'writeCodexSessionStart'), /destination_ancestor_chain[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.mkdirSync\(current\)[\s\S]*destination_ancestor_chain[\s\S]*fs\.writeFileSync\(tempPath[\s\S]*source_identity[\s\S]*destination_state[\s\S]*fs\.renameSync\(tempPath, exactPath\)[\s\S]*kind: 'cleanup'/);
   assert.match(functionBody(setupSource, 'spawnCodex'), /verifyDelegatedNativeContinuity[\s\S]*spawnSync\(parts\.command, parts\.args/);
   assert.match(functionBody(setupSource, 'spawnCodexProcess'), /verifyDelegatedNativeContinuity[\s\S]*spawn\(parts\.command, parts\.args/);
+  assert.match(functionBody(setupSource, 'terminateChild'), /verifyDelegatedNativeContinuity\('codex\.plugin\.add'[\s\S]*child\.kill\(\)[\s\S]*completeDelegatedNativeEffect\('codex\.plugin\.add'/);
+  assert.match(setupSource, /catch \(error\) \{\s*if \(activeDelegatedNativeAuthority\) throw error;\s*\/\/ Installed-state verification/s);
+  assert.equal(
+    RECEIPT_CHILD_BOOTSTRAP.includes("const isLocalRequest=(request)=>typeof request==='string'&&(/^\\.{1,2}[\\\\/]/.test(request)||path.posix.isAbsolute(request)||path.win32.isAbsolute(request));"),
+    true,
+    'bootstrap must classify POSIX, Windows, and absolute local requests before loader dispatch'
+  );
   assert.doesNotMatch(bridgeSource, /runAuthorisedMutation|execute\s*\(\s*kind\s*,\s*callback/);
   const repairSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs'), 'utf8');
   assert.doesNotMatch(repairSource, /auditPluginRoot\([^)]*verifyOutput\s*:\s*true/s, 'managed repair must not enable the n8n runtime audit subprocess');
 });
 
-test('receipt bootstrap rejects relative JavaScript and JSON loads that resolve outside the admitted manifest', () => {
+test('receipt bootstrap classifies POSIX and Windows relative JavaScript and JSON loads through the immutable manifest', () => {
   for (const extension of ['cjs', 'json']) {
-    const relativeRequest = `../../../outside.${extension}`;
-    const source = `'use strict';\nrequire(${JSON.stringify(relativeRequest)});\n`;
-    const fixture = runReceiptBootstrapFixture({ 'repo/scripts/main.cjs': source }, 'repo/scripts/main.cjs', {
-      prepare({ root }) {
-        writeFile(path.join(root, `outside.${extension}`), extension === 'json' ? '{"escaped":true}\n' : "throw new Error('outside module executed');\n");
+    for (const separator of ['/', '\\']) {
+      const admittedRequest = `.${separator}dep.${extension}`;
+      const output = extension === 'json'
+        ? `process.stdout.write(String(require(${JSON.stringify(admittedRequest)}).admitted));\n`
+        : `process.stdout.write(require(${JSON.stringify(admittedRequest)}));\n`;
+      const admitted = runReceiptBootstrapFixture({
+        'repo/scripts/main.cjs': output,
+        [`repo/scripts/dep.${extension}`]: extension === 'json' ? '{"admitted":true}\n' : "module.exports = 'true';\n"
+      }, 'repo/scripts/main.cjs');
+      if (separator === '/' || process.platform === 'win32') {
+        assert.equal(admitted.result.status, 0, admitted.result.stderr);
+        assert.equal(admitted.result.stdout, 'true');
+      } else {
+        assert.notEqual(admitted.result.status, 0);
+        assert.match(admitted.result.stderr, /rejected executable relative load outside manifest/);
       }
-    });
-    assert.notEqual(fixture.result.status, 0);
-    assert.match(fixture.result.stderr, /rejected executable relative load outside manifest/);
+
+      const outsideRequest = `..${separator}..${separator}..${separator}outside.${extension}`;
+      const outside = runReceiptBootstrapFixture({
+        'repo/scripts/main.cjs': `'use strict';\nrequire(${JSON.stringify(outsideRequest)});\n`
+      }, 'repo/scripts/main.cjs', {
+        prepare({ root }) {
+          writeFile(path.join(root, `outside.${extension}`), extension === 'json' ? '{"escaped":true}\n' : "throw new Error('outside module executed');\n");
+        }
+      });
+      assert.notEqual(outside.result.status, 0);
+      assert.match(outside.result.stderr, /rejected executable relative load outside manifest/);
+    }
   }
 });
 

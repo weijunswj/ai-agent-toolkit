@@ -367,6 +367,84 @@ function assertFilesUnchanged(snapshot) {
   }
 }
 
+function createDelegatedNativeFixture(options = {}) {
+  const root = tmpRoot();
+  const sourceRoot = path.join(root, 'source');
+  const codexHome = path.join(root, 'codex-home');
+  copyPackageFingerprint(repoRoot, sourceRoot);
+  copyPath(
+    path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'),
+    path.join(sourceRoot, '.agents', 'plugins', 'marketplace.json')
+  );
+  fs.mkdirSync(codexHome, { recursive: true });
+  const fakeCodex = path.join(root, 'fake-codex.cjs');
+  const dispatchLog = path.join(root, 'dispatch.log');
+  const pluginList = options.pluginList || { installed: [], available: [] };
+  fs.writeFileSync(fakeCodex, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "fs.appendFileSync(process.env.TOOLKIT_NATIVE_DISPATCH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
+    `const pluginList = ${JSON.stringify(pluginList)};`,
+    "if (process.argv.slice(2).join(' ') === 'plugin list --json --available') process.stdout.write(JSON.stringify(pluginList));",
+    "else process.stdout.write(JSON.stringify({ ok: true }));",
+    ''
+  ].join('\n'));
+  const phaseId = crypto.randomUUID();
+  const phasePath = path.join(codexHome, `.ai-agent-toolkit-native-phase-${phaseId}.json`);
+  const scriptPath = path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
+  const authority = {
+    contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
+    parent_invocation_id: options.parentInvocationId || 'delegated-native-fixture',
+    action: 'native.cache.maintenance',
+    repository: sourceRoot,
+    codex_home: codexHome,
+    setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+    source_cache_fingerprint: setup.cacheFingerprint(sourceRoot, sourceRoot, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    }),
+    verified_source: {
+      receipt_id: sha256('delegated-native-fixture-receipt'),
+      commit: '5'.repeat(40),
+      tree: '6'.repeat(40),
+      setup_source_sha256: sha256(fs.readFileSync(scriptPath)),
+      source_manifest_digest: sha256('delegated-native-fixture-manifest')
+    },
+    mutation_phase_id: phaseId,
+    mutation_phase_lock_path: phasePath,
+    executable: path.resolve(process.execPath),
+    expected_version: setup.EXPECTED_TOOLKIT_VERSION,
+    env_digest: sha256(canonicalJson({ ...process.env, TOOLKIT_NATIVE_DISPATCH_LOG: dispatchLog })),
+    allowed_effects: [
+      'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
+      'codex.plugin.add', 'codex.session-start.write', 'toml.structural.check'
+    ]
+  };
+  return { root, sourceRoot, codexHome, fakeCodex, dispatchLog, phasePath, authority };
+}
+
+async function runDelegatedNativeFixture(fixture, hooks = {}) {
+  const previousLog = process.env.TOOLKIT_NATIVE_DISPATCH_LOG;
+  const previousCli = process.env.CODEX_TOOLKIT_CODEX_CLI;
+  process.env.TOOLKIT_NATIVE_DISPATCH_LOG = fixture.dispatchLog;
+  process.env.CODEX_TOOLKIT_CODEX_CLI = fixture.fakeCodex;
+  fixture.authority.env_digest = sha256(canonicalJson({ ...process.env }));
+  const encoded = Buffer.from(canonicalJson(fixture.authority), 'utf8').toString('base64url');
+  try {
+    return await setup.main([
+      '--write', '--json', '--repo-root', fixture.sourceRoot, '--codex-home', fixture.codexHome,
+      '--delegated-invocation-authority', encoded
+    ], {
+      resolveCodexCommand: () => ({ command: fixture.fakeCodex, failures: [] }),
+      nativePhaseTestHooks: hooks
+    });
+  } finally {
+    if (previousLog === undefined) delete process.env.TOOLKIT_NATIVE_DISPATCH_LOG;
+    else process.env.TOOLKIT_NATIVE_DISPATCH_LOG = previousLog;
+    if (previousCli === undefined) delete process.env.CODEX_TOOLKIT_CODEX_CLI;
+    else process.env.CODEX_TOOLKIT_CODEX_CLI = previousCli;
+  }
+}
+
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
 });
@@ -494,6 +572,86 @@ test('delegated native child phase revocation after one command blocks every lat
     if (previousCli === undefined) delete process.env.CODEX_TOOLKIT_CODEX_CLI;
     else process.env.CODEX_TOOLKIT_CODEX_CLI = previousCli;
     fs.rmSync(phasePath, { force: true });
+  }
+});
+
+test('delegated native source closure drift rejects the next marketplace effect and preserves phase evidence', async () => {
+  const fixture = createDelegatedNativeFixture();
+  const dependency = path.join(fixture.sourceRoot, ...setup.SESSION_START_LAUNCHER_REL_PATH.split('/'));
+  let changed = false;
+  const code = await runDelegatedNativeFixture(fixture, {
+    afterEffect({ action }) {
+      if (!changed && action === 'codex.plugin.list') {
+        fs.appendFileSync(dependency, '\n// source drift after launch\n');
+        changed = true;
+      }
+    }
+  });
+  assert.equal(code, 1);
+  assert.equal(changed, true);
+  const dispatches = fs.readFileSync(fixture.dispatchLog, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(dispatches.length, 1, 'source drift must reject marketplace add before dispatch');
+  assert.deepEqual(JSON.parse(dispatches[0]), ['plugin', 'list', '--json', '--available']);
+  assert.equal(fs.existsSync(fixture.phasePath), true, 'source drift must preserve phase evidence instead of releasing it');
+  fs.rmSync(fixture.root, { recursive: true, force: true });
+});
+
+test('delegated SessionStart publication rejects intermediate ancestor replacement before write, rename, and cleanup', { skip: process.platform !== 'win32' }, async (t) => {
+  for (const effectKind of ['exclusive-write', 'rename', 'cleanup']) {
+    await t.test(effectKind, async () => {
+      const fixture = createDelegatedNativeFixture();
+      const cacheRoot = setup.cacheRootFor(fixture.codexHome);
+      copyPackageFingerprint(fixture.sourceRoot, cacheRoot);
+      const pluginList = {
+        installed: [{
+          pluginId: setup.pluginId(),
+          name: setup.TOOLKIT_PLUGIN_NAME,
+          marketplaceName: setup.TOOLKIT_MARKETPLACE_NAME,
+          version: setup.EXPECTED_TOOLKIT_VERSION,
+          installed: true,
+          enabled: true,
+          authPolicy: 'ON_USE',
+          source: { source: 'local', path: fixture.sourceRoot }
+        }],
+        available: []
+      };
+      fs.writeFileSync(fixture.fakeCodex, fs.readFileSync(fixture.fakeCodex, 'utf8').replace(
+        /const pluginList = .*?;/,
+        `const pluginList = ${JSON.stringify(pluginList)};`
+      ));
+      const ancestor = path.join(cacheRoot, '.codex-plugin');
+      const displaced = path.join(cacheRoot, '.codex-plugin-admitted');
+      const redirected = path.join(fixture.root, `redirected-${effectKind}`);
+      fs.mkdirSync(redirected, { recursive: true });
+      let replaced = false;
+      const code = await runDelegatedNativeFixture(fixture, {
+        beforeEffect({ action, operands }) {
+          if (!replaced && action === 'codex.session-start.write' && operands.kind === effectKind) {
+            fs.renameSync(ancestor, displaced);
+            fs.symlinkSync(redirected, ancestor, 'junction');
+            replaced = true;
+          }
+        },
+        afterEffect({ action, operands }) {
+          if (effectKind === 'cleanup' && action === 'codex.session-start.write' && operands.kind === 'exclusive-write') {
+            throw new Error('synthetic publication failure before cleanup admission');
+          }
+        }
+      });
+      assert.equal(code, 1);
+      assert.equal(replaced, true);
+      assert.deepEqual(fs.readdirSync(redirected), [], `${effectKind} must be rejected before redirected dispatch`);
+      fs.unlinkSync(ancestor);
+      fs.renameSync(displaced, ancestor);
+      if (effectKind === 'rename' || effectKind === 'cleanup') {
+        assert.equal(
+          fs.readdirSync(ancestor).some((name) => name.includes('.tmp-')),
+          true,
+          'revoked rename cleanup must preserve the admitted temporary evidence'
+        );
+      }
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    });
   }
 });
 

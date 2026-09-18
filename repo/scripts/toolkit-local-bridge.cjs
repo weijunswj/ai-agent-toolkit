@@ -102,8 +102,8 @@ globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT=root;
 const originalResolve=Module._resolveFilename;
 const originalJs=Module._extensions['.js'];
 const originalJson=Module._extensions['.json'];
-const localResolutionMap=new Map();
-const localPattern=/require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+const isLocalRequest=(request)=>typeof request==='string'&&(/^\.{1,2}[\\/]/.test(request)||path.posix.isAbsolute(request)||path.win32.isAbsolute(request));
+const localPattern=/require\(\s*['"]([^'"]+)['"]\s*\)/g;
 for(const [filename,bytes] of buffers){
   if(!/\.(?:c?js)$/i.test(filename))continue;
   const parent=new Module(filename,null);parent.filename=filename;parent.paths=Module._nodeModulePaths(path.dirname(filename));
@@ -111,22 +111,22 @@ for(const [filename,bytes] of buffers){
   let match;
   while((match=localPattern.exec(source))){
     const request=match[1];
+    if(!isLocalRequest(request))continue;
     let resolved;
     try{resolved=path.resolve(originalResolve.call(Module,request,parent,false));}
     catch(error){throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);}
     if(!buffers.has(resolved))throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
-    localResolutionMap.set(filename+'\0'+request,resolved);
   }
 }
 Module._resolveFilename=function(request,parent,isMain,options){
-  const local=typeof request==='string'&&(request.startsWith('./')||request.startsWith('../')||path.isAbsolute(request));
+  const local=isLocalRequest(request);
   let resolved;
   try{resolved=originalResolve.call(this,request,parent,isMain,options);}
   catch(error){if(local)throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);throw error;}
   if(local){
     const exact=path.resolve(resolved);
-    const expected=localResolutionMap.get(path.resolve(parent&&parent.filename||entry)+'\0'+request);
-    if(!expected||expected!==exact||!buffers.has(expected)){
+    const expected=exact;
+    if(!buffers.has(expected)){
       throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
     }
     try{
