@@ -35,7 +35,7 @@ test('terminal receipt law does not require replaying historical terminal operat
 test('takeover retrieval stays narrow and progressively discloses evidence', () => {
   assert.match(controller, /## Takeover I\/O discipline/);
   assert.match(controller, /narrow-to-deep retrieval/);
-  assert.match(controller, /lightweight metadata such as number\/state\/draft\/head\/base\/mergeability/);
+  assert.match(controller, /decision-relevant metadata such as number\/state\/draft\/head\/base\/mergeability/);
   assert.match(controller, /Do not place a connector's full PR object, body, diff, patch or unrelated ancillary fields into model-visible context/);
   assert.match(controller, /Tool orchestration must project large responses to the minimum sufficient decision fields/);
   assert.match(controller, /Progressive disclosure is mandatory/);
