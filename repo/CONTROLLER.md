@@ -123,6 +123,9 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 - Later-required non-repository evidence must be deterministically reproducible from retained immutable inputs or durably retrievable by the intended consumer.
 - Digest-only or temporary/session-path-only evidence is insufficient.
+- Executor/worker terminal packets must be self-sufficient for the receiving Loop/Web decision: include every decision-relevant finding, exact identity/value, material observation, qualification, blocker, verdict rationale, and next-state fact needed to adjudicate the result. Do not assume the receiver has the producer's filesystem, shell, process/session state, hidden logs, private host tools, or ability to refetch/recompute missing facts.
+- Pointers, commands, digests, URLs, or retrieval instructions may supplement a terminal packet but must not replace decision-relevant content needed for immediate adjudication.
+- Bulky supporting evidence may remain external only when the accepted contract guarantees durable access by the intended consumer and the packet contains the exact evidence identity/binding/retrieval manifest. If that access is unavailable or uncertain, deliver the required material with the packet/authorised attachment or return `EVIDENCE_NOT_RETRIEVABLE`.
 - A fresh rerun is not historical reconstruction.
 - Before handoff, prove evidence survives producer/session loss.
 - On consumption, verify the exact bytes/object plus digest and its repository/Lock/candidate/run binding.
@@ -162,8 +165,8 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 ## Durable lane state and packet discipline
 
 - Durable per-lane state must distinguish at least queued/ready, active, hold, gate-complete/terminal, and next-gate/decision state with RUN/LOCK/head/scope bindings where applicable.
-- Authority-bearing terminal packets must survive unchanged through consumption by every later consumer required by the accepted contract, including Loop, Web, and G4 where applicable, under the existing authorised retention and disclosure policy.
-- Executors/workers do not publish authoritative gate, transition, repair, ownership, or finality comments by default. They return complete authority-bearing packets to the Loop Manager; explicit task-scoped publication authority may allow a non-governance work product without granting governance authority.
+- Authority-bearing terminal decision records and their evidence manifests must survive unchanged through consumption by every later consumer required by the accepted contract, including Loop, Web, and G4 where applicable, under the existing authorised retention and disclosure policy.
+- Executors/workers do not publish authoritative gate, transition, repair, ownership, or finality comments by default. They return self-sufficient authority-bearing terminal packets to the Loop Manager; explicit task-scoped publication authority may allow a non-governance work product without granting governance authority.
 - A worker result is not an accepted transition until the Loop Manager independently reconciles the required live state.
 - Routine Loop chronology must be a deterministic projection of reconciled typed durable state, not a free-form model summary of worker output. The renderer must use a stable machine identity/digest so the same state produces the same receipt.
 - After posting a routine chronology mutation, the Loop must read back and verify the intended comment/object before any consequential continuation. Mismatch or unverifiable publication fails closed under a typed HOLD.

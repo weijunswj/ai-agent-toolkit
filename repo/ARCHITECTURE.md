@@ -205,9 +205,13 @@ Durability must not require repeatedly copying large evidence through model-visi
 
 The target terminal shape is:
 
-- compact typed decision record containing every material finding, qualification, unresolved risk and disposition;
+- compact typed decision record containing every material finding, qualification, unresolved risk, disposition, exact identity and other fact needed for the receiving Loop/Web decision;
 - immutable evidence manifest containing identity, binding, custody/retrieval information and required consumers;
-- supporting evidence retained under the authorised policy and fetched by consumers that actually require it.
+- supporting evidence retained under the authorised policy, with external retrieval used only where the accepted contract guarantees access by the intended consumer.
+
+A producer must not assume that Web, Loop or another later consumer has its filesystem, shell, session/process state, hidden logs, host-only tools, or independent ability to refetch/recompute missing facts. Decision-relevant content required for immediate adjudication travels in the terminal packet. Pointers and retrieval instructions are supplementary, not substitutes.
+
+If required supporting evidence cannot be durably and verifiably retrieved by the intended consumer, deliver the relevant material with the packet/authorised attachment or hold with `EVIDENCE_NOT_RETRIEVABLE`.
 
 Retained, retrievable, delivered and consumed are distinct states.
 
