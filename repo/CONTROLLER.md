@@ -144,12 +144,17 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
 - Keep the parent minimal; child-local operational changes must not churn the parent.
+- Managed programme parent/child titles and bodies are renderer-owned projections, not free-form Web/worker Markdown. Mutate typed source state, render through the canonical programme-surface renderer, publish the exact artifact, and exact-read it back. If the renderer cannot represent the accepted state/architecture, stop the affected transition with `PARENT_RECONCILIATION_INCOMPLETE` rather than hand-editing a managed surface.
+- Generated naming/presentation is stable: parent titles use the `[ PARENT THREAD ]` prefix; each registered required outcome has one monotonic programme display ordinal `S<n>`; materialized Delivery Child titles render as `S<n> — <Outcome name>`. `S<n>` is navigation/order metadata only and never an executable Stage/gate/lineage.
+- The renderer must show all registered required outcomes in stable `S<n>` order even before issue materialization, with truthful `PLANNED`/parent-owned versus materialized state. Internal migration IDs may coexist but never replace `S<n>` in the human programme surface.
+- Supporting/investigation/acceptance sub-issues may show the owning `S<n>` reference but do not consume a programme ordinal or gain an independent gate lifecycle.
 - Children use `QUEUED`, `CURRENT`, `COMPLETED`, `RETIRED`.
 - `CURRENT` means live work. Multiple CURRENT children/lanes may exist only under current authority.
 - Historical comments/prompts are evidence/chronology, not automatically current authority.
 - Every retained material `POST_SHIP` decision has one stable canonical deferred record and exactly one verified continuing owner. Ownership grants no implementation authority.
 - Before a deferred-record owner terminates, each retained record must be implemented, discarded with reason, superseded with evidence, or transferred with verified readback.
-- Prefer a suitable future child as deferred owner; otherwise use the accepted lazy-created standing Improvement Queue, which is non-executing and never CURRENT.
+- Prefer a suitable future child as deferred owner; otherwise use the accepted standing Improvement Queue `Q`, which is non-executing and never CURRENT. Render Q in the programme queue immediately before Whole-Programme Final Audit with a `deferred`-style metadata label; finality checks continuing ownership/disposition, not queue emptiness.
+- Labels remain metadata only. Prefer `programme-parent`, `delivery-child`, `current`, `queued`, `blocked`, `deferred`, and add `supporting`/`acceptance`/`investigation` only when such sub-issues exist. Labels never grant authority, ownership, gate state or finality.
 
 ## Parallel operation and liveness
 
