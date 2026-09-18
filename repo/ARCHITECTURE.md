@@ -64,22 +64,17 @@ Labels are lightweight discovery/filtering metadata only. They may describe type
 
 ### Managed programme human surface
 
-Managed programme issue titles and bodies are deterministic rendered projections of canonical programme/child state. Once a surface is managed, User/Web, Loop, workers and migration executors must not free-form edit its title/body. Change the typed source state, render through the canonical programme-surface renderer, publish the rendered artifact, then exact-read it back. If the current renderer cannot represent the accepted architecture, hold the cutover/mutation until the renderer is extended; do not bypass it with hand-authored Markdown.
+Managed programme issue titles/bodies are deterministic projections produced by the canonical programme-surface automation, not free-form operational state.
 
-Human-facing programme navigation is a stable contract:
+The architecture requires only these invariants:
 
-- the programme parent title begins `[ PARENT THREAD ]`;
-- every required programme outcome receives one deterministic, monotonic display ordinal `S<n>` when registered in the programme;
-- `S<n>` is navigation/order only, not a Stage, gate, lineage, repair identity or nested executable hierarchy;
-- an assigned `S<n>` is stable for the programme lifetime and is never reused or renumbered because another outcome completes, retires, splits or is renamed;
-- internal semantic identifiers may coexist for machine mapping/migration, but managed human surfaces always show the stable `S<n>` identity;
-- the parent dashboard renders the complete required outcome queue in `S<n>` order, including parent-owned planned outcomes that do not yet have an issue;
-- when an outcome materialises, its Delivery Child title is `S<n> — <Outcome name>`;
-- supporting/investigation/acceptance sub-issues reference their owning `S<n>` but do not consume another programme `S<n>`.
+- the programme surface remains human-readable and preserves stable ordered outcome identity across the life of a programme;
+- planned, materialised, current, blocked, completed, deferred and final-assurance work are represented truthfully;
+- programme navigation/order does not create another executable gate hierarchy;
+- the standing deferred-work owner remains visible without becoming current implementation scope;
+- a programme reset/cutover must not activate a state that the current canonical renderer/state model cannot represent and read back deterministically.
 
-The standing Continuing Improvement Queue uses the stable display identity `Q`, remains non-executing, and is rendered in the parent queue immediately before Whole-Programme Final Audit. It carries a `deferred`-style metadata label, not `current` or delivery authority. Unresolved Q records do not block ordinary delivery; programme finality verifies continuing ownership/disposition rather than requiring the queue to be empty.
-
-The default managed parent/child surface remains operator-readable: status/summary, objective, scope/boundaries, completion criteria, current candidate/gate where applicable, supporting relationships, and immediate next action are rendered from typed state. Human-readable presentation is part of the product contract, not an optional manual cleanup step.
+Exact title prefixes, ordinal syntax, section/table layout, queue placement, labels and serialization belong to the canonical renderer contract and its tests. Change those through the renderer/state implementation, not ad-hoc issue editing.
 
 Epoch may survive as a historical/grouping term, but must not create another independent gate lifecycle.
 
