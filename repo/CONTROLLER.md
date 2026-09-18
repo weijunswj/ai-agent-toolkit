@@ -66,7 +66,7 @@
 
 - Governance refers to symbolic execution stages/roles, not concrete model families: `G0`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `FINAL_AUDIT`, and `BROWSER`.
 - Concrete provider/model/reasoning/service-tier choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v1.json`; they are configuration, not Controller law.
-- Before launch, resolve the requested stage against one selected registered stack and record the stack ID plus resolved route in trusted launch metadata.
+- Before launch, resolve the requested stage against one selected registered stack and record the stack ID, exact stack-registry revision/digest, and resolved route in trusted launch metadata.
 - `G0` and `G3` subagent launches resolve through the selected stack's corresponding subagent route. Other stages must not resolve a semantic subagent route.
 - Current explicit User/Web authority may select another registered stack for a run. Changing only stack bindings does not change stage semantics or grant new topology authority.
 - Missing stack, missing required stage route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
