@@ -5,15 +5,16 @@
 - This file defines Toolkit-specific Web Controller governance for Toolkit-managed coding repositories.
 - Current explicit User/Web authority may supersede this file within its authority.
 - Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
-- At the start of material coding-controller work, read this file fresh from canonical `main` and bind the exact revision consumed when a run/gate contract requires it.
+- For Web Controller takeover or continuation, treat the target coding repository as Toolkit-managed by default unless current durable repository authority explicitly marks it non-Toolkit-managed. Read this file fresh from canonical Toolkit `main` before recovering or reporting repository state, then bind the repository named by the user as the controller repository fence. Bind the exact controller revision consumed when a run/gate contract requires it.
 
 ## Supersession and admission
 
 - Latest explicit User/Web authority supersedes conflicting model, topology, gate, review, tier, or consent wording within its authority; unrelated accepted governance remains.
 - User/Web owns consent, architecture/Design Locks, material scope/risk/authority changes, topology changes, waivers, consequential mutation authority, and finality. Never infer grants.
 - Re-ask only for a material expansion or genuine owner decision; do not re-ask for already-authorised execution mechanics.
-- Before material work in a managed repository, read the Toolkit bootstrap/entry guidance and reconcile the programme parent, current children, PRs, native relationships, chronology, current authority, Locks, holds, and exact candidate state.
-- If required managed state is missing, stale, conflicting or unverifiable, including an unreconciled concurrent write or competing authority, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition. Authorised compatible concurrency is not itself a reconciliation failure.
+- Controller bootstrap/restart is bounded current-state reconstruction, not chronology replay. Initially reconcile only the minimum live state needed to continue safely: repository/default-branch identity, programme parent identity, CURRENT child/lane identities, active candidate PR/head/tree/base, active RUN/Lock/gate/repair state, unresolved holds/dependencies/owner decisions, relevant active controller/Loop/writer state, latest controlling authority references, and the next admissible action.
+- Do not bulk-read or summarise completed/retired children, closed historical PRs, full issue-comment histories, old repair packets, superseded prompts, or unrelated chronology during ordinary takeover. Retrieve historical evidence lazily and by exact reference only when a current transition, conflict check, gate-reuse decision, or repair-lineage decision requires it. Memory/prior chats may suggest IDs to verify but are never authority and must not be expanded into programme history during bootstrap.
+- Keep the initial takeover response compact. If required current state is missing, stale, conflicting or unverifiable, including an unreconciled concurrent write or competing authority, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition rather than performing an unbounded history scan. Authorised compatible concurrency is not itself a reconciliation failure.
 - Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, reject it without analysing or acting on it.
 
 ## Public, private, and secrets
