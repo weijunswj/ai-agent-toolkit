@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 const receipt = require('./toolkit-github-program-receipt.cjs');
+const programmeSurface = require('./toolkit-programme-surface-v1.cjs');
 
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 const PARENT_ISSUE = 240;
@@ -5541,6 +5542,7 @@ const programmeV5 = Object.freeze({
   },
   renderProgrammeV5,
   parseProgrammeV5Body,
+  currentProjection: programmeSurface,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
 });
@@ -5650,6 +5652,13 @@ module.exports = Object.freeze({
   validateControllerBootstrap,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
+  programmeSurface,
+  projectPullRequestMetadata: programmeSurface.projectPullRequestMetadata,
+  createCurrentProjection: programmeSurface.createCurrentProjection,
+  validateCurrentProjection: programmeSurface.validateCurrentProjection,
+  isCurrentFresh: programmeSurface.isCurrentFresh,
+  transitionCurrent: programmeSurface.transitionCurrent,
+  transitionCurrentAndReadback: programmeSurface.transitionAndReadback,
   humanSurfaceV2,
   programmeV5,
 });

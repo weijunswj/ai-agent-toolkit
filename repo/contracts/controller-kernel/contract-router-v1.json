@@ -1,0 +1,35 @@
+{
+  "schema": "toolkit.controller.contract-router.v1",
+  "version": 1,
+  "route_identity": ["provider", "model", "reasoning"],
+  "selection_precedence": [
+    "explicit-current-thread-user-web-selection",
+    "owner-authorised-verified-harness-policy",
+    "USER_DECISION_REQUIRED"
+  ],
+  "harness_policy": {
+    "claude-code": "owner-claude",
+    "codex": "owner-openai",
+    "opencode": "owner-openai",
+    "unknown": "USER_DECISION_REQUIRED",
+    "unverifiable": "USER_DECISION_REQUIRED"
+  },
+  "unavailable_route": {
+    "status": "ROUTE_UNAVAILABLE",
+    "silent_substitution": false,
+    "repair_budget_consumed": false
+  },
+  "execution": {
+    "before_a2_acceptance": "direct-web-executor-web-reconciliation",
+    "after_a2_acceptance": "already-authorised-equivalent-reconciliation",
+    "loop_manager_required_for_c1": false
+  },
+  "ownership": {
+    "active_overlap_scope": "repository-and-overlapping-toolkit-work",
+    "timeout_transfers_owner": false,
+    "heartbeat_transfers_owner": false,
+    "labels_are_authority": false,
+    "executor_replacement_transfers_owner": false,
+    "ambiguous_owner_status": "USER_DECISION_REQUIRED"
+  }
+}

@@ -104,7 +104,7 @@ Governance stage semantics are provider/model agnostic.
 
 Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only discovery; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
-Concrete provider/model/reasoning/service-tier choices are selected through a stack registry and are configuration, not architecture law. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+Concrete provider/model/reasoning choices are selected through a stack registry and are configuration, not architecture law. The authoritative route identity is `provider + model + reasoning`, plus only controls the runtime can enforce and verify. Service treatment, latency, and usage are observational metadata only; unavailable observation is never inferred. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
 
 ## Gate lifecycle
 
@@ -199,7 +199,8 @@ Renaming a child, branch, PR, contract or lineage label does not reset exhausted
 ## Roles
 
 - **User/Web** — architecture, material scope/risk/authority changes, topology decisions, waivers, consequential authority and finality.
-- **Loop Manager** — deterministic/reconciled progression of already-authorised work; no silent scope or authority expansion.
+- **Direct executor path** — before accepted A2, executes an already-authorised bounded task and returns to Web for reconciliation; it does not acquire authority.
+- **Loop Manager** — after accepted A2, may provide deterministic/reconciled progression of already-authorised work; it is not required by C1 and has no silent scope or authority expansion.
 - **Worker/executor** — implementation or bounded analysis; no ownership/finality authority.
 - **Deterministic runtime** — state, admission, routing, identity, recovery, publication/readback and safety enforcement.
 
@@ -233,6 +234,10 @@ The target terminal shape is:
 - supporting evidence retained under the authorised policy, with external retrieval used only where the accepted contract guarantees access by the intended consumer.
 
 A producer must not assume that Web, Loop or another later consumer has its filesystem, shell, session/process state, hidden logs, host-only tools, or independent ability to refetch/recompute missing facts. Decision-relevant content required for immediate adjudication travels in the terminal packet. Pointers and retrieval instructions are supplementary, not substitutes.
+
+Worker process success is not terminal completion. A terminal or gate-complete decision requires a validated self-sufficient terminal packet with stable identity, digest, and durable retrieval/reference evidence. Missing, truncated, malformed, or unverifiable packets fail closed as `TERMINAL_PACKET_INCOMPLETE`; lost model/chat delivery is recovered by exact packet replay without rerunning the worker.
+
+Active overlapping Toolkit work remains durably human-owned across GitHub users and controllers. An overlapping newcomer is read-only until explicit handover or explicitly authorised concurrency. Timeout, heartbeat loss, inactivity, labels, status, and executor replacement never transfer ownership; ambiguous or competing ownership requires `USER_DECISION_REQUIRED`.
 
 If required supporting evidence cannot be durably and verifiably retrieved by the intended consumer, deliver the relevant material with the packet/authorised attachment or hold with `EVIDENCE_NOT_RETRIEVABLE`.
 
