@@ -46,11 +46,14 @@
 - Human/task ownership does not expire through timeout or heartbeat loss.
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
-- Semantic workers are leaf roles. G1/G2/G3/G4, crawler/research, executor and reviewer sessions must not launch, poll, wait on, or supervise another semantic agent.
-- Parallel semantic work is Loop/runtime-owned sibling fan-out from durable task state. Workers receive the minimum bounded packet, return one terminal packet, and exit; they do not inherit another worker's chat/scratchpad.
-- A deterministic orchestration runtime owns scheduling, waiting, polling, retries, cancellation and result collection. Do not keep a model session alive merely to busy-poll another model.
-- The Loop/runtime may launch bounded sibling workers only when the accepted authority permits the work and the split is genuinely separable. Mutating siblings require disjoint mutation scopes; read-only siblings may overlap.
-- No nested semantic-agent delegation. Deterministic tools/runtimes are not agents.
+- Semantic subagent delegation is allowed only from two roles: the Repository Loop Manager and G3. All other semantic roles, including G1, G2, G4, Final Audit, browser/computer-use and any spawned subagent, are leaf-only.
+- Any semantic subagent launched by the Loop Manager or G3 must use `gpt-5.6-luna` with Max reasoning; governed execution/subagent work uses Priority tier unless current explicit User/Web authority says otherwise.
+- Delegation is one hop below the authorised spawner only. A spawned subagent must not launch another semantic agent.
+- The Loop Manager may use Luna Max subagents for bounded read-only discovery/research/reconciliation or other already-authorised separable work.
+- G3 may use Luna Max subagents only when the accepted G2 contract makes the work genuinely separable and materially faster. Mutating G3 siblings/subagents require disjoint mutation scopes and deterministic integration/revalidation.
+- G1/G2/G4 and other leaf roles consume completed durable subagent packets as static inputs; they must not launch or wait on semantic children.
+- Prefer deterministic/runtime scheduling, waiting, retry, cancellation and result collection where the host exposes it; Luna spawners may coordinate their authorised Luna children without expanding authority.
+- Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
 
@@ -81,7 +84,7 @@ Routing rules:
 - No silent fallback or substitution.
 - If a new governed execution thread requires a stack and none is selected, return to User/Web for selection.
 - Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
-- Semantic workers do not inherit or choose child-agent routes because they cannot spawn semantic children. Each Loop-launched sibling receives its own explicit role/model/reasoning/tier binding before launch.
+- Only the Repository Loop Manager and G3 may resolve a semantic child route, and that route is Luna Max only. Every child launch receives an explicit model/reasoning/tier binding; no implicit inheritance or silent substitution.
 
 ## Assurance paths and gates
 
@@ -89,9 +92,10 @@ Routing rules:
 - LIGHT administrative work uses deterministic operation/readback.
 - LIGHT low-risk mutation uses focused validation without mandatory G4.
 - ASSURED/STRICT material work uses the standard sequence `DISCOVERY -> G1 -> G2 -> G3 -> G4` where the applicable gates are required. `DISCOVERY` is evidence preparation, not an authority gate and does not produce PASS/FAIL.
-- Pre-G1 DISCOVERY is performed by one or more bounded read-only Loop-launched Luna Max crawler siblings. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
-- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on crawler/subagent work.
-- G2/G3/G4 are likewise leaf semantic workers. If an accepted G2 contract explicitly permits parallel G3 implementation, the Loop/runtime launches disjoint sibling G3 workers and performs deterministic integration/revalidation; no G3 executor spawns semantic subagents.
+- Pre-G1 DISCOVERY is performed by one or more bounded read-only Luna Max crawler subagents launched by the Repository Loop Manager. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
+- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on semantic children.
+- G2 and G4 are leaf semantic workers.
+- G3 is the only gate role allowed to launch semantic subagents. When the accepted G2 contract explicitly permits a separable parallel implementation, G3 may launch bounded Luna Max subagents, collect their terminal packets, integrate only authorised disjoint changes, and revalidate the combined exact head.
 - Web-selected STRICT adds the required explicit Lock and adversarial obligations.
 - The Loop Manager cannot select or downgrade the assurance path.
 - Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
@@ -102,6 +106,8 @@ Routing rules:
 - Gate reuse is allowed only when the current accepted Lock exactly covers task, scope, trust boundary, and material assumptions; otherwise `GATE_REENTRY_REQUIRED`.
 - G3 must not invent architecture outside its accepted contract.
 - Before launch, transition, merge/finality, or next-gate authority, reconcile exact head, child/PR/parent, Lock/authority, checks, reviews/threads/findings, and current programme state.
+- Before merge/finality, every repository-defined validation/check relevant to the accepted candidate validation floor must be terminal and non-red. A pending/in-progress relevant validation is not green merely because branch protection does not require it.
+- A relevant failing check blocks merge unless current Web explicitly adjudicates it as external/non-candidate evidence and records why it is non-gating under the accepted contract.
 - A head move invalidates exact-head evidence until it is rebound.
 - Missing evidence is never green.
 
