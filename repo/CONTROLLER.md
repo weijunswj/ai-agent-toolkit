@@ -7,6 +7,13 @@
 - Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
 - For Web Controller takeover or continuation, treat the target coding repository as Toolkit-managed by default unless current durable repository authority explicitly marks it non-Toolkit-managed. Read this file fresh from canonical Toolkit `main` before recovering or reporting repository state, then bind the repository named by the user as the controller repository fence. Bind the exact controller revision consumed when a run/gate contract requires it.
 
+## GitHub transport
+
+- Web Controller GitHub reads and writes use the available authenticated GitHub connector. Web does not have or claim local or elevated `gh` CLI access.
+- Elevated `gh` and escalated network access for `gh` are executor-only. An executor may use local `git` plus `gh` only when its runtime supports them and the accepted task contract authorises the operation.
+- Transport does not grant authority. Executors remain mechanical actors for any Web-owned GitHub decision and never gain architecture, waiver, ownership or finality authority by possessing `gh` access.
+- If the Web connector cannot perform a required GitHub operation, do not reinterpret the failure as repository state. Hold the affected transition or delegate only an already-authorised bounded mechanical operation, then verify the result through the Web connector before consequential continuation.
+
 ## Supersession and admission
 
 - Latest explicit User/Web authority supersedes conflicting model, topology, gate, review, tier, or consent wording within its authority; unrelated accepted governance remains.
@@ -141,8 +148,9 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Programme parent and child carriers
 
-- Toolkit-managed programme and child GitHub bodies are rendered human surfaces, not free-form independently maintained authority. Update canonical programme/child state or the authorised renderer and regenerate/read back the managed surface; do not hand-edit managed projection bytes to change programme truth.
-- Human-facing naming is stable and deterministic: programme parent titles begin `[ PARENT THREAD ]`; materialised top-level Delivery Children use monotonic `S<n> — <descriptive outcome>` titles. `S<n>` is navigation/sequence only and grants no Stage/Epoch/Root/gate semantics. Never recycle or renumber an issued sequence identity.
+- Toolkit-managed programme and child GitHub bodies are deterministic rendered human surfaces, not free-form independently maintained authority. Update canonical programme/child state or the authorised renderer and regenerate/read back the managed surface; do not hand-edit managed projection bytes to change programme truth.
+- Presentation schema such as section order, title prefixes, display numbering and wording conventions belongs to the authorised renderer/contract and its regression tests unless an explicit architecture decision makes a field semantically authoritative. Do not duplicate renderer formatting into Controller law.
+- Generated presentation must preserve canonical programme/child identity and must not create a second authority identity or ambiguous parallel numbering.
 - The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
 - Keep the parent minimal; child-local operational changes must not churn the parent.
