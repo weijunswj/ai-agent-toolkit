@@ -46,14 +46,13 @@
 - Human/task ownership does not expire through timeout or heartbeat loss.
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
-- Semantic subagent delegation is allowed only from two roles: the Repository Loop Manager and G3. All other semantic roles, including G1, G2, G4, Final Audit, browser/computer-use and any spawned subagent, are leaf-only.
-- Delegation permission requires both an authorised role and a Luna spawner: the Repository Loop Manager or G3 may launch semantic subagents only while that spawning session itself resolves to `gpt-5.6-luna`. If its current route is overridden to a non-Luna model, that session is leaf-only.
-- Any semantic subagent launched by the Loop Manager or G3 must use `gpt-5.6-luna` with Max reasoning; governed execution/subagent work uses Priority tier unless current explicit User/Web authority says otherwise.
-- Delegation is one hop below the authorised spawner only. A spawned subagent must not launch another semantic agent.
-- The Loop Manager may use Luna Max subagents for bounded read-only discovery/research/reconciliation or other already-authorised separable work.
-- G3 may use Luna Max subagents only when the accepted G2 contract makes the work genuinely separable and materially faster. Mutating G3 siblings/subagents require disjoint mutation scopes and deterministic integration/revalidation.
-- G1/G2/G4 and other leaf roles consume completed durable subagent packets as static inputs; they must not launch or wait on semantic children.
-- Prefer deterministic/runtime scheduling, waiting, retry, cancellation and result collection where the host exposes it; Luna spawners may coordinate their authorised Luna children without expanding authority.
+- Semantic delegation authority is stage-based, not model-based.
+- `G0` and `G3` are the only subagent-capable stages.
+- `G0` is Loop-owned pre-G1 discovery/evidence preparation. A G0 worker may fan out bounded depth-1 read-only discovery subagents only when the split is genuinely separable and materially faster.
+- `G3` may fan out bounded depth-1 subagents only inside the accepted G2 contract. Mutating G3 subagents require disjoint mutation scopes and deterministic integration/revalidation.
+- All other semantic stages/roles are leaf-only, including G1, G2, G4, Final Audit, Browser/computer-use, and every spawned subagent.
+- Delegation depth is one. A spawned subagent must not launch another semantic agent.
+- Concrete parent/child model, reasoning and service-tier bindings come from the selected stack registry; model identity never grants delegation authority by itself.
 - Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
@@ -63,40 +62,27 @@
 - G4 is fresh, isolated, and read-only.
 - Before consequential mutation or integration, revalidate live base/main and the candidate/authority binding.
 
-## Model routing
+## Stage and stack routing
 
-Default owner stack unless newer explicit User/Web authority supersedes it:
-
-- Pre-G1 discovery/crawlers: `gpt-5.6-luna` / Max / Priority.
-- G1: `gpt-6-astra` / Low / Standard.
-- G2: `gpt-5.6-sol` / High / Standard.
-- G3 and reconciliation: `gpt-5.6-luna` / Max / Priority.
-- G4: `gpt-6-astra` / High / Standard.
-- Repository Loop Manager semantic decisions: `gpt-5.6-luna` / Max / Standard.
-- Final Audit: `gpt-6-astra` / Max / Standard.
-- Browser/computer-use: `gpt-6-astra` / Medium / Standard by default.
-
-Routing rules:
-
-- Model names above are API model IDs; reasoning effort and service tier remain separate launch controls.
-- Mirror `STACK=<name>` before the worker prompt when launching a governed model role.
-- Role/model/reasoning/tier are controller launch metadata and must not be copied into portable worker-prompt policy unless the runtime strictly requires otherwise.
-- Resolve routes from current owner/registry policy; worker self-report is non-binding.
-- No silent fallback or substitution.
-- If a new governed execution thread requires a stack and none is selected, return to User/Web for selection.
-- Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
-- Only the Repository Loop Manager and G3 may resolve a semantic child route, and that route is Luna Max only. Every child launch receives an explicit model/reasoning/tier binding; no implicit inheritance or silent substitution.
+- Governance refers to symbolic execution stages/roles, not concrete model families: `G0`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `FINAL_AUDIT`, and `BROWSER`.
+- Concrete provider/model/reasoning/service-tier choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v1.json` in canonical Toolkit; they are configuration, not Controller law. Managed consumer repositories resolve that registry from the exact Toolkit controller revision they bind rather than copying it locally by default.
+- Before launch, resolve the requested stage against one selected registered stack from the bound canonical Toolkit revision and record the stack ID, exact stack-registry revision/digest, and resolved route in trusted launch metadata.
+- `G0` and `G3` subagent launches resolve through the selected stack's corresponding subagent route. Other stages must not resolve a semantic subagent route.
+- Current explicit User/Web authority may select another registered stack for a run. Changing only stack bindings does not change stage semantics or grant new topology authority.
+- Missing stack, missing required stage route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
+- Worker self-report of model/route is non-binding. The launcher/runtime must verify the resolved route where the host exposes that capability.
+- Prompts should remain portable and stage-oriented; include concrete routing metadata in prompt text only when a runtime strictly requires it.
 
 ## Assurance paths and gates
 
 - Follow the Web-selected assurance path, then start at its earliest unresolved required gate.
 - LIGHT administrative work uses deterministic operation/readback.
 - LIGHT low-risk mutation uses focused validation without mandatory G4.
-- ASSURED/STRICT material work uses the standard sequence `DISCOVERY -> G1 -> G2 -> G3 -> G4` where the applicable gates are required. `DISCOVERY` is evidence preparation, not an authority gate and does not produce PASS/FAIL.
-- Pre-G1 DISCOVERY is performed by one or more bounded read-only Luna Max crawler subagents launched by the Repository Loop Manager. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
-- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on semantic children.
-- G2 and G4 are leaf semantic workers.
-- G3 is the only gate role allowed to launch semantic subagents. When the accepted G2 contract explicitly permits a separable parallel implementation, G3 may launch bounded Luna Max subagents, collect their terminal packets, integrate only authorised disjoint changes, and revalidate the combined exact head.
+- ASSURED/STRICT material work uses the standard sequence `G0 -> G1 -> G2 -> G3 -> G4` where the applicable stages/gates are required.
+- `G0` is bounded pre-G1 discovery/evidence preparation, not an authority gate and does not produce PASS/FAIL. G0 publishes durable self-sufficient discovery packets before G1 starts.
+- G1 consumes completed G0 packets and current authority as static inputs. G1 is leaf-only.
+- G2 and G4 are leaf-only.
+- G3 is the only decision/implementation gate that may launch semantic subagents, and only under the accepted G2 separation/mutation contract.
 - Web-selected STRICT adds the required explicit Lock and adversarial obligations.
 - The Loop Manager cannot select or downgrade the assurance path.
 - Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
@@ -160,21 +146,19 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Programme parent and child carriers
 
-- Toolkit-managed programme and child GitHub titles, bodies, labels and parent-registry entries are one deterministic human-facing projection of canonical programme/child state, not independently maintained authority surfaces. Update canonical state or the authorised renderer and regenerate/read back all affected surfaces together; do not hand-edit one projection surface to change programme truth.
-- Canonical identity presentation is structural law: a programme parent title uses `[ PARENT THREAD ] <descriptive programme title>`; every registered programme child title uses `<canonical child ID> — <descriptive outcome>`. Display-only numbering must not create a second child identity.
-- Every registered programme child must carry exactly one lifecycle visibility label derived from canonical lifecycle and exactly one canonical child-classification label where the repository vocabulary defines one. Executable Delivery Children use `delivery-child`; the standing deferred programme child uses a distinct deferred-child classification rather than masquerading as a Delivery Child. Label state must be reconciled from canonical state, not edited as separate authority.
-- The parent body must contain one deterministic programme-child registry covering every registered child, including standing deferred/non-executing children. The registry preserves canonical child ID, outcome, classification/lifecycle and the minimum dependency/PR/gate state that is applicable; deferred children must not be hidden in a separate ad-hoc section that bypasses child lifecycle visibility.
-- Child bodies must expose the semantic operator sections required by the governing renderer contract: current status/summary, objective, owned scope or retained records, boundaries/holds, completion or continuity criteria, applicable child/PR/gate state, concise ELI5, and one obvious immediate next action. Exact Markdown layout, ordering, wording, escaping and column presentation remain renderer/schema implementation details with regression tests.
-- Generated presentation must preserve canonical programme/child identity and must not create a second authority identity or ambiguous parallel numbering.
-- The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
+- Toolkit-managed GitHub programme/child surfaces are deterministic projections of canonical programme/child state, not independent authority.
+- Canonical state must preserve one programme identity and one identity/classification/lifecycle record per registered child. Generated presentation must not invent a second authority identity or omit a registered child.
+- The authorised renderer/schema owns concrete presentation mechanics such as title syntax, Markdown sections/order, label names, parent-list layout, escaping and wording. Change those through the renderer contract and regression tests, not by expanding Controller law.
+- Title, body, labels and parent-list output that are renderer-managed must reconcile from the same canonical snapshot and be read back together so one surface cannot silently drift from the others.
+- Labels and other presentation metadata are visibility/discovery aids only; they do not grant ownership, authority, gate status, completion or finality.
+- The programme parent owns programme identity/objective/material boundaries, the registered-child catalogue and order/lifecycle, cross-child dependencies/authorised concurrency, programme-wide holds, terminal child dispositions, deferred-owner relationships, Web acceptance references and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
-- Keep the parent minimal; child-local operational changes must not churn the parent.
-- Children use `QUEUED`, `CURRENT`, `COMPLETED`, `RETIRED`.
-- `CURRENT` means live work. Multiple CURRENT children/lanes may exist only under current authority.
+- Keep the parent minimal; child-local operational changes must not churn the parent except where the canonical parent projection itself changes.
+- Children use `QUEUED`, `CURRENT`, `COMPLETED`, `RETIRED`; `CURRENT` means live work. Multiple CURRENT children/lanes may exist only under current authority.
 - Historical comments/prompts are evidence/chronology, not automatically current authority.
 - Every retained material `POST_SHIP` decision has one stable canonical deferred record and exactly one verified continuing owner. Ownership grants no implementation authority.
 - Before a deferred-record owner terminates, each retained record must be implemented, discarded with reason, superseded with evidence, or transferred with verified readback.
-- Prefer a suitable future child as deferred owner; otherwise use the accepted lazy-created standing Improvement Queue, which is non-executing and never CURRENT.
+- Prefer a suitable future child as deferred owner; otherwise use the accepted standing Improvement Queue, which is non-executing and never CURRENT merely because it contains records.
 
 ## Parallel operation and liveness
 
@@ -216,12 +200,12 @@ These are different assurance layers and must not be conflated.
 
 ### Final Audit
 
-- Final Audit is the whole-programme completion audit for the final programme scope; read-only; `gpt-6-astra` / Max / Standard by default.
+- Final Audit is the whole-programme completion audit for the final programme scope and is read-only. Its concrete route resolves from the selected stack registry.
 - Admit it only after every required programme child/task/lane is terminal or explicitly resolved; all required candidate G4s are complete; all intended integrations/merges are complete and canonical state is read back; and no mandatory blocker, HOLD, non-convergence decision, or unresolved owner decision remains.
 - Never trigger Final Audit merely because one PR, child, or task is described as `final`, `last`, `ready`, or appears to be the last implementation item.
 - Final Audit never substitutes for G4, repair, unfinished work, integration, reconciliation, or missing evidence.
 - Web explicitly launches and adjudicates Final Audit and retains terminal programme closure authority.
-- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend `gpt-6-astra` at Max reasoning as a per-PR or per-child super-G4.
+- If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend the selected Final Audit route as a per-PR or per-child super-G4.
 
 ## Candidate finality vs programme closure
 
