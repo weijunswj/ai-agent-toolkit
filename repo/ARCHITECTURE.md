@@ -91,6 +91,21 @@ If an increment deserves its own independent merge and reversal boundary, it nor
 
 A technically necessary replacement PR may preserve the same child only when identity, evidence and correction accounting remain continuous. Replacement never resets correction budget.
 
+## Stage topology and stack routing
+
+Governance stage semantics are provider/model agnostic.
+
+- `G0` = bounded pre-G1 discovery/evidence preparation. It is not an authority gate.
+- `G1` = architecture/authority.
+- `G2` = executable implementation contract.
+- `G3` = implementation/validation.
+- `G4` = fresh isolated exact-head independent assurance.
+- `LOOP`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence.
+
+Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only discovery; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
+
+Concrete provider/model/reasoning/service-tier choices are selected through a stack registry and are configuration, not architecture law. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+
 ## Gate lifecycle
 
 ### G1 — Architecture and authority
