@@ -46,11 +46,11 @@
 - Human/task ownership does not expire through timeout or heartbeat loss.
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
-- Loop Manager -> executor -> optional isolated depth-1 children only when work is separable and materially faster.
-- Depth-1 children receive the minimum task packet only; no inherited chat/scratchpad.
-- No nested agent delegation.
-- Mutating siblings must have disjoint mutation scopes.
-- Deterministic tools/runtimes are not agents.
+- Semantic workers are leaf roles. G1/G2/G3/G4, crawler/research, executor and reviewer sessions must not launch, poll, wait on, or supervise another semantic agent.
+- Parallel semantic work is Loop/runtime-owned sibling fan-out from durable task state. Workers receive the minimum bounded packet, return one terminal packet, and exit; they do not inherit another worker's chat/scratchpad.
+- A deterministic orchestration runtime owns scheduling, waiting, polling, retries, cancellation and result collection. Do not keep a model session alive merely to busy-poll another model.
+- The Loop/runtime may launch bounded sibling workers only when the accepted authority permits the work and the split is genuinely separable. Mutating siblings require disjoint mutation scopes; read-only siblings may overlap.
+- No nested semantic-agent delegation. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
 
@@ -63,11 +63,12 @@
 
 Default owner stack unless newer explicit User/Web authority supersedes it:
 
+- Pre-G1 discovery/crawlers: `gpt-5.6-luna` / Max / Priority.
 - G1: `gpt-6-astra` / Low / Standard.
 - G2: `gpt-5.6-sol` / High / Standard.
 - G3 and reconciliation: `gpt-5.6-luna` / Max / Priority.
 - G4: `gpt-6-astra` / High / Standard.
-- Repository Loop Manager: `gpt-5.6-luna` / Max / Standard.
+- Repository Loop Manager semantic decisions: `gpt-5.6-luna` / Max / Standard.
 - Final Audit: `gpt-6-astra` / Max / Standard.
 - Browser/computer-use: `gpt-6-astra` / Medium / Standard by default.
 
@@ -80,14 +81,17 @@ Routing rules:
 - No silent fallback or substitution.
 - If a new governed execution thread requires a stack and none is selected, return to User/Web for selection.
 - Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
-- Depth-1 children resolve their own route/speed under current policy and never inherit root Priority automatically unless explicitly authorised.
+- Semantic workers do not inherit or choose child-agent routes because they cannot spawn semantic children. Each Loop-launched sibling receives its own explicit role/model/reasoning/tier binding before launch.
 
 ## Assurance paths and gates
 
 - Follow the Web-selected assurance path, then start at its earliest unresolved required gate.
 - LIGHT administrative work uses deterministic operation/readback.
 - LIGHT low-risk mutation uses focused validation without mandatory G4.
-- ASSURED uses the required implementation and independent assurance evidence.
+- ASSURED/STRICT material work uses the standard sequence `DISCOVERY -> G1 -> G2 -> G3 -> G4` where the applicable gates are required. `DISCOVERY` is evidence preparation, not an authority gate and does not produce PASS/FAIL.
+- Pre-G1 DISCOVERY is performed by one or more bounded read-only Loop-launched Luna Max crawler siblings. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
+- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on crawler/subagent work.
+- G2/G3/G4 are likewise leaf semantic workers. If an accepted G2 contract explicitly permits parallel G3 implementation, the Loop/runtime launches disjoint sibling G3 workers and performs deterministic integration/revalidation; no G3 executor spawns semantic subagents.
 - Web-selected STRICT adds the required explicit Lock and adversarial obligations.
 - The Loop Manager cannot select or downgrade the assurance path.
 - Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
