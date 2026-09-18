@@ -47,6 +47,7 @@
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
 - Semantic subagent delegation is allowed only from two roles: the Repository Loop Manager and G3. All other semantic roles, including G1, G2, G4, Final Audit, browser/computer-use and any spawned subagent, are leaf-only.
+- Delegation permission requires both an authorised role and a Luna spawner: the Repository Loop Manager or G3 may launch semantic subagents only while that spawning session itself resolves to `gpt-5.6-luna`. If its current route is overridden to a non-Luna model, that session is leaf-only.
 - Any semantic subagent launched by the Loop Manager or G3 must use `gpt-5.6-luna` with Max reasoning; governed execution/subagent work uses Priority tier unless current explicit User/Web authority says otherwise.
 - Delegation is one hop below the authorised spawner only. A spawned subagent must not launch another semantic agent.
 - The Loop Manager may use Luna Max subagents for bounded read-only discovery/research/reconciliation or other already-authorised separable work.
