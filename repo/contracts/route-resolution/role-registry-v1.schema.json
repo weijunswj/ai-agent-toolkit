@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.route-resolution.role-registry.v1",
+  "title": "Toolkit versioned role registry",
+  "description": "The only source of model, reasoning, service-tier, and speed defaults for a resolved launch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "schema_version", "registry_id", "registry_version", "roles"],
+  "properties": {
+    "contract_version": { "const": "toolkit.route-resolution.role-registry.v1" },
+    "schema_version": { "const": 1 },
+    "registry_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$" },
+    "registry_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "roles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]{0,63}$": { "$ref": "#/$defs/role" }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "reasoning", "service_tier", "speed", "allowed_hosts"],
+      "properties": {
+        "provider": { "const": "openai" },
+        "model": { "type": "string", "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] },
+        "reasoning": { "type": "string", "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
+        "service_tier": { "const": "standard" },
+        "speed": { "type": "string", "enum": ["standard", "priority"] },
+        "allowed_hosts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["codex", "claude-code", "opencode"] }
+        }
+      }
+    }
+  }
+}

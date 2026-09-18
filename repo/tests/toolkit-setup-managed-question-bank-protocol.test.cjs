@@ -303,7 +303,7 @@ test('Claude plan and JSON plan are observational and report launch verification
       '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
     ], { env, timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /root-only|root agent/i);
+    assert.match(result.stdout, /versioned-role-registry|exact-launch-record|capability-proven-host-adapter/i);
     assert.deepEqual(snapshotOwned(fixture.root), before);
     assert.equal(fs.existsSync(staleSessionStart), false);
   }
@@ -385,7 +385,7 @@ test('real partial piped answers still show one complete effective bank before p
 
 test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
   const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', ''].join('\n');
+  const input = ['default', 'enable', 'enable', 'default', 'instructions', ''].join('\n');
   const result = runRealManaged(fixture, [], input);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);

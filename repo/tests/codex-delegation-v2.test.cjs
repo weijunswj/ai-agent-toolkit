@@ -346,7 +346,7 @@ test('approved migrate remains guarded when no exact legacy state exists', async
     ...approvedOptions(preview),
   });
   assert.equal(result.changed, false);
-  assert.match(result.detail, /No exact Toolkit-managed legacy setting is available to migrate/);
+  assert.match(result.detail, /No exact removable legacy policy block was found/);
   assert.equal(editorCalls, 0);
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
   assert.equal(fs.existsSync(backupRootFor(filePath)), false);

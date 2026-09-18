@@ -4,20 +4,9 @@
     "cursor_advancement": "human_advanced_only",
     "runtime_updates": "forbidden",
     "adoption_and_review_are_distinct": true,
-    "description": "A reviewed-through cursor records the exact upstream state that a human reviewed and dispositioned. It does not adopt that state into Toolkit, change a SOURCE-LOCK pin, change an advisory baseline, or record the latest observed commit."
+    "description": "A reviewed-through cursor records the exact upstream state that a human reviewed and dispositioned. It does not adopt that state into Toolkit, change a SOURCE-LOCK pin, or record the latest observed commit."
   },
   "records": [
-    {
-      "target_key": "advisory:n8n-skills-hook-compatibility",
-      "target_kind": "advisory",
-      "repository": "n8n-io/skills",
-      "ref": "main",
-      "advisory_target_id": "n8n-skills-hook-compatibility",
-      "reviewed_through_sha": "046c330c9308bbfc54ceab1adbe3d8fc6bebc8fa",
-      "reviewed_at": "2026-07-30",
-      "disposition": "READ_ONLY_REVIEW_REQUIRED",
-      "owning_tracker": "#244"
-    },
     {
       "target_key": "source-lock:repo/source-watch/provenance/google-design-md",
       "target_kind": "source_lock",
@@ -35,9 +24,9 @@
       "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json",
-      "reviewed_through_sha": "4857a2c5ef989794751a0f66b8545a4a49566286",
-      "reviewed_at": "2026-07-30",
-      "disposition": "READ_ONLY_REVIEW_REQUIRED",
+      "reviewed_through_sha": "10d6ca310541d3ffeee6dceda0a29e373796f321",
+      "reviewed_at": "2026-09-14",
+      "disposition": "NO_ACTION",
       "owning_tracker": "#323"
     }
   ]

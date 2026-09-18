@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
 
 const common = {
   task: { id: 'task-run162-red', digest: 'a'.repeat(64) },
@@ -15,6 +16,57 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
 };
 const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+
+function exactAuthority(entries = [['worker-a', 'g1'], ['worker-b', 'g2']]) {
+  const requestedLanes = entries.map(([launchId]) => launchId);
+  const scopeDigest = runtime.digestValue({
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    task_digest: common.task.digest,
+    delegated: true,
+    requested_lanes: requestedLanes,
+  });
+  const treeDigest = route.digestValue({ tree: 'run162' });
+  const parent = route.resolveRoleRoute({ role: 'g3', host: 'codex', launch_id: 'run162-parent' });
+  return {
+    delegated: true,
+    parent_launch: parent,
+    tree_digest: treeDigest,
+    scope_digest: scopeDigest,
+    launches: entries.map(([launchId, role]) => {
+      const launch = route.resolveDepthOneLaunch({ role, host: 'codex', parent, tree_digest: treeDigest, scope_digest: scopeDigest, launch_id: launchId });
+      return {
+        ...launch,
+        capability: {
+          available: true,
+          trusted: true,
+          metadata_verified: true,
+          launch_id: launch.launch_id,
+          role: launch.role,
+          provider: launch.provider,
+          model: launch.model,
+          reasoning: launch.reasoning,
+          service_tier: launch.service_tier,
+          speed: launch.speed,
+          host: launch.host,
+          backend: launch.backend,
+          launch_record_digest: launch.route_digest,
+        }
+      };
+    })
+  };
+}
+
+function batchAcknowledgement(routePlan, launchLeases) {
+  return {
+    atomic: true,
+    acknowledged: true,
+    accepted: true,
+    route_digest: routePlan.route_digest,
+    launch_record_digests: routePlan.exact_launches.map((item) => item.launch_record.route_digest),
+    started_lane_ids: launchLeases.map((item) => item.lane_id),
+  };
+}
 
 function enabledConsent() {
   return { status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } };
@@ -315,11 +367,7 @@ function delegatedAdmissionWithConsent(runId, consentProvider) {
     ...common,
     run_id: runId,
     consentProvider,
-    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
-    adapters: {
-      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
-    },
+    authority: exactAuthority(),
   });
   const workspace = runtime.admitWorkspace({
     run: admitted.run,
@@ -355,13 +403,14 @@ function startOptions(admission, consentProvider, counters) {
     run: admission.workspace.run,
     workspace_receipt: admission.workspace.workspace_receipt,
     liveRefProvider: { read: () => live },
-    prepareLaunch(lane) {
+    prepareLaunch(input) {
+      const lane = input.lane || input.launch_record;
       counters.prepared += 1;
-      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+      return { lane_id: lane.lane_id || lane.launch_id, launch_lease: 'lease-' + (lane.lane_id || lane.launch_id), inert: true };
     },
-    commitLaunchBatch({ reservations }) {
+    commitLaunchBatch({ route_plan, launch_leases }) {
       counters.committed += 1;
-      return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) };
+      return batchAcknowledgement(route_plan, launch_leases);
     },
   };
 }

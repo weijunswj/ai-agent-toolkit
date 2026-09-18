@@ -23,20 +23,31 @@
   "routing": {
     "delegation_requires_current_authority": true,
     "complete_route_required_before_launch": true,
+    "delegated_admission": {
+      "maximum_child_depth": 1,
+      "parent_launch_identity_required": true,
+      "parent_launch_role_required": true,
+      "omitted_child_speed": "standard",
+      "root_priority_inheritance": false,
+      "priority_child_requires_explicit_accepted_authority": true,
+      "priority_child_authority_binds": ["child_launch_id", "parent_launch_id", "parent_route_digest", "tree_digest", "scope_digest", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend"],
+      "nested_delegation": "block"
+    },
+    "route_evidence_binding": ["launch_id", "role", "provider", "model", "reasoning", "service_tier", "speed", "host", "backend", "tree_digest", "scope_digest", "route_digest"],
     "workspace_receipt_required_before_substantive_start": true,
     "substantive_start_state": "workspace-ready",
     "exact_start_binding": ["run_id", "repository_id", "authorized_ref_digest", "current_authority_digest", "route_plan", "workspace_receipt", "snapshot_commit", "snapshot_tree"],
     "partial_launch": false,
     "launch_atomicity": {
-      "prepare_phase": "inert_reservations_only",
+      "prepare_phase": "inert_launch_leases_only",
       "commit_phase": "one_atomic_batch",
       "complete_lane_set_required": true,
       "per_lane_substantive_start": false,
       "unsupported_async": "block",
       "rollback_is_not_zero_launch": true
     },
-    "missing_route": "WORKER_ROUTE_UNAVAILABLE",
-    "model_mismatch": "WORKER_MODEL_MISMATCH",
+    "missing_route": "EXACT_ROUTE_AUTHORITY_REQUIRED",
+    "model_mismatch": "ROUTE_SUBSTITUTION_FORBIDDEN",
     "metadata_unverified": "MODEL_METADATA_UNVERIFIED",
     "root_only_default": true,
     "host_classifications": [
@@ -63,7 +74,7 @@
     "terminal_cannot_return_to_running": true,
     "missing_terminal_never_success": true,
     "publication_uncertainty_terminal": true,
-    "worker_loss_preserves": true,
+    "host_adapter_loss_preserves": true,
     "stale_lease_no_takeover": true,
     "substantive_start_requires_workspace_ready": true,
     "retry_requires_fresh_run_and_admission": true

@@ -670,8 +670,88 @@
     "extensions": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "maxProperties": 0
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "child_issue",
+              "current_epoch",
+              "epoch_state",
+              "current_work_item",
+              "current_gate",
+              "repair",
+              "next_transition",
+              "parked_backlog"
+            ],
+            "properties": {
+              "schema": {
+                "const": "toolkit.github-program.current-execution.v1"
+              },
+              "child_issue": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "current_epoch": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "epoch_state": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "current_work_item": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["issue", "title", "state"],
+                "properties": {
+                  "issue": { "type": "integer", "minimum": 1 },
+                  "title": { "type": "string", "minLength": 1 },
+                  "state": { "type": "string", "minLength": 1, "maxLength": 128 }
+                }
+              },
+              "current_gate": {
+                "type": "string",
+                "pattern": "^G[1-4](?:\\s|$)",
+                "minLength": 2,
+                "maxLength": 256
+              },
+              "repair": {
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^\\d+/\\d+$", "maxLength": 32 }
+                ]
+              },
+              "next_transition": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "parked_backlog": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["issue", "title", "status", "blocking"],
+                  "properties": {
+                    "issue": { "type": "integer", "minimum": 1 },
+                    "title": { "type": "string", "minLength": 1 },
+                    "status": { "const": "PARKED / NON-BLOCKING" },
+                    "blocking": { "const": false }
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "recovery": {

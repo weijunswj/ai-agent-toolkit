@@ -23,10 +23,17 @@ const {
   payloadChecksum,
   updateReportSignature,
   classifyUpdateReport,
-  maybeWriteUpdateReport
+  maybeWriteUpdateReport,
+  canonicalJson,
+  sha256,
+  RECEIPT_CHILD_BOOTSTRAP,
+  assertActualMutationInput,
+  validatePhaseContext
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
+  CACHE_FINGERPRINT_DIRS,
+  cacheRootFor,
   prepareInstalledSessionStart,
   sourceSessionStartCommand,
   windowsSessionStartCommand,
@@ -44,8 +51,12 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.10.9';
+const expectedBridgeVersion = '2.13.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
+const testTomlPython = (() => {
+  const result = spawnSync('python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true });
+  return result.status === 0 ? String(result.stdout || '').trim() : '';
+})();
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -58,6 +69,48 @@ function tmpBaseDir() {
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(tmpBaseDir(), 'toolkit-bridge-'));
+}
+
+function runReceiptBootstrapFixture(files, entryRelativePath, options = {}) {
+  const root = tmpRoot();
+  const stageRoot = path.join(root, 'stage');
+  for (const [relativePath, bytes] of Object.entries(files)) writeFile(path.join(stageRoot, ...relativePath.split('/')), bytes);
+  if (options.prepare) options.prepare({ root, stageRoot });
+  const sourceManifest = Object.entries(files).map(([relativePath, bytes]) => {
+    const buffer = Buffer.from(bytes);
+    return { relative_path: relativePath, git_mode: '100644', git_blob: '1'.repeat(40), byte_length: buffer.length, sha256: sha256(buffer) };
+  }).sort((left, right) => left.relative_path.localeCompare(right.relative_path));
+  const entry = sourceManifest.find((item) => item.relative_path === entryRelativePath);
+  const receipt = {
+    receipt_id: sha256('bootstrap-fixture-receipt'),
+    commit: '2'.repeat(40),
+    tree: '3'.repeat(40),
+    entry,
+    source_manifest: sourceManifest,
+    source_manifest_digest: sha256(canonicalJson(sourceManifest))
+  };
+  const verifiedSource = {
+    receipt_id: receipt.receipt_id,
+    commit: receipt.commit,
+    tree: receipt.tree,
+    entry_digest: entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest
+  };
+  const wrapper = {
+    contract: 'toolkit.local-bridge.receipt-backed-child-capsule.v1',
+    stage_root: stageRoot,
+    argv: [],
+    receipt,
+    delegated_authority: { verified_source: verifiedSource }
+  };
+  const result = spawnSync(process.execPath, ['-e', RECEIPT_CHILD_BOOTSTRAP], {
+    cwd: root,
+    input: `${JSON.stringify(wrapper)}\n`,
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, ...(options.env || {}) }
+  });
+  return { root, stageRoot, result };
 }
 
 function run(args, options = {}) {
@@ -78,6 +131,7 @@ function isolatedHomeEnv(root, extra = {}) {
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
     UV_PYTHON: '',
+    ...(testTomlPython ? { AI_AGENT_TOOLKIT_PYTHON: testTomlPython } : {}),
     ...extra
   };
 }
@@ -125,7 +179,8 @@ function writeJson(filePath, value) {
 }
 
 function parseLastJson(stdout) {
-  const start = stdout.indexOf('{');
+  const boundary = stdout.lastIndexOf('\n{');
+  const start = boundary >= 0 ? boundary + 1 : stdout.indexOf('{');
   assert.notEqual(start, -1, stdout);
   return JSON.parse(stdout.slice(start));
 }
@@ -192,6 +247,8 @@ function writeDisabledHookHub(hub) {
 function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  const codexHome = path.join(root, 'codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha no-target fixture\n' });
   for (const relPath of CACHE_FINGERPRINT_PATHS) {
     const sourcePath = path.join(repoRoot, ...relPath.split('/'));
@@ -222,22 +279,26 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     '--hub', hub,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--repo-path', sourceRepo,
     '--sync-source', initialSource
   ], { env });
   assert.equal(setup.status, 0, setup.stderr);
-  return { root, hub, sourceRepo, pluginRoot, temp, env };
+  return { root, hub, sourceRepo, pluginRoot, codexHome, temp, env };
 }
 
 function runFixtureBridge(fixture, args) {
   const originalPluginRoot = process.env.PLUGIN_ROOT;
+  const originalCodexHome = process.env.CODEX_HOME;
   if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.pluginRoot;
+  process.env.CODEX_HOME = fixture.codexHome;
   try {
     return runBridge(args);
   } finally {
     if (originalPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
     else process.env.PLUGIN_ROOT = originalPluginRoot;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
   }
 }
 
@@ -366,6 +427,11 @@ function writeHookLightSmokeFixture(repoPath) {
 
 function writeRepoToolkitFixture(repoPath, label) {
   writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
+  writeJson(path.join(repoPath, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), {
+    version: expectedBridgeVersion,
+    version_policy: 'semver',
+    version_notes: 'Toolkit Local Bridge test fixture version.'
+  });
   writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'SKILL.md'), [
     '---',
     'name: fixture-skill',
@@ -398,7 +464,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     "'use strict';",
     "const fs = require('node:fs');",
     "const marker = process.env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER;",
-    "if (marker) fs.appendFileSync(marker, `${JSON.stringify(process.argv.slice(2))}\\n`, 'utf8');",
+    "const input = String(globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON || fs.readFileSync(0, 'utf8')).trim();",
+    "if (marker) fs.appendFileSync(marker, `${JSON.stringify({ args: process.argv.slice(2), envelope: input ? JSON.parse(input) : null })}\\n`, 'utf8');",
     "if (!process.argv.includes('--skip-repo-auto-update')) {",
     "  console.error('missing recursion guard');",
     '  process.exit(43);',
@@ -423,11 +490,15 @@ function writeRepoToolkitFixture(repoPath, label) {
 }
 
 function writeCodexPluginRefreshFixture(repoPath) {
-  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit',
-    version: expectedBridgeVersion,
-    hooks: './.codex-plugin/hooks/hooks.json'
-  }, null, 2));
+  const manifest = readJson(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
+  manifest.version = expectedBridgeVersion;
+  manifest.hooks = './.codex-plugin/hooks/hooks.json';
+  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify(manifest, null, 2));
+  fs.cpSync(
+    path.join(repoRoot, '.codex-plugin', 'assets'),
+    path.join(repoPath, '.codex-plugin', 'assets'),
+    { recursive: true }
+  );
   writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
   writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
@@ -444,16 +515,31 @@ function writeCodexPluginRefreshFixture(repoPath) {
       ]
     }
   }, null, 2)}\n`);
+  fs.mkdirSync(path.join(repoPath, '.agents', 'plugins'), { recursive: true });
+  fs.copyFileSync(
+    path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'),
+    path.join(repoPath, '.agents', 'plugins', 'marketplace.json')
+  );
   for (const relPath of [
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
+    'repo/scripts/setup-opencode-toolkit-plugin.cjs',
+    'repo/scripts/toolkit-host-route-adapters.cjs',
+    'repo/scripts/toolkit-public-exposure.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs',
+    'repo/scripts/toolkit-toml-structural.cjs'
   ]) {
     const target = path.join(repoPath, ...relPath.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
   }
+  fs.cpSync(
+    path.join(repoRoot, 'skills', 'repository-agent-rules'),
+    path.join(repoPath, 'skills', 'repository-agent-rules'),
+    { recursive: true }
+  );
   writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -465,8 +551,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const source = process.cwd();",
-    "const target = process.env.PLUGIN_ROOT;",
-    "if (!target) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    `const expectedVersion = ${JSON.stringify(expectedBridgeVersion)};`,
+    "const codexHome = process.env.CODEX_HOME;",
+    "if (!codexHome) { console.error('missing CODEX_HOME'); process.exit(9); }",
+    "const target = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedVersion);",
     "fs.rmSync(target, { recursive: true, force: true });",
     "fs.mkdirSync(path.dirname(target), { recursive: true });",
     "fs.cpSync(source, target, {",
@@ -481,28 +569,50 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
     "}",
+    "const pluginStatePath = process.env.CODEX_TOOLKIT_TEST_PLUGIN_STATE;",
+    "const rediscoveryMode = process.env.CODEX_TOOLKIT_TEST_REDISCOVERY_MODE || 'current';",
+    "if (pluginStatePath && fs.existsSync(pluginStatePath)) {",
+    "  const pluginState = JSON.parse(fs.readFileSync(pluginStatePath, 'utf8'));",
+    "  if (rediscoveryMode === 'missing') pluginState.installed = [];",
+    "  else if (rediscoveryMode === 'ambiguous') pluginState.installed = [...(pluginState.installed || []), ...(pluginState.installed || [])];",
+    "  else if (rediscoveryMode !== 'stale') for (const entry of pluginState.installed || []) if (entry.pluginId === 'ai-agent-toolkit@ai-agent-toolkit-local') entry.version = expectedVersion;",
+    "  fs.writeFileSync(pluginStatePath, JSON.stringify(pluginState, null, 2) + '\\n');",
+    "}",
+    "if (process.env.CODEX_TOOLKIT_TEST_CORRUPT_REFRESHED_CACHE === '1') fs.appendFileSync(path.join(target, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '\\n// corrupted refreshed cache\\n');",
     "process.stdout.write(JSON.stringify({ ok: true }));",
     ''
   ].join('\n'));
 }
 
 function writeRealBridgeDelegator(repoPath) {
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    "const { spawnSync } = require('node:child_process');",
-    `const script = ${JSON.stringify(script)};`,
-    "const result = spawnSync(process.execPath, [script, ...process.argv.slice(2)], {",
-    "  cwd: process.cwd(),",
-    "  encoding: 'utf8',",
-    "  env: process.env,",
-    "  timeout: 15000",
-    "});",
-    "if (result.stdout) process.stdout.write(result.stdout);",
-    "if (result.stderr) process.stderr.write(result.stderr);",
-    "process.exit(result.status || 0);",
-    ''
-  ].join('\n'));
+  for (const name of [
+    'toolkit-local-bridge.cjs',
+    'setup-codex-toolkit-plugin.cjs',
+    'repair-codex-plugin-windows-hooks.cjs',
+    'audit-n8n-skills-plugin-hooks.cjs',
+    'toolkit-toml-structural.cjs',
+    'toolkit-staging-generations.cjs'
+  ]) {
+    fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', name), path.join(repoPath, 'repo', 'scripts', name));
+  }
+}
+
+function writeDriftingRealBridge(repoPath) {
+  writeRealBridgeDelegator(repoPath);
+  const bridgePath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+  const source = fs.readFileSync(bridgePath, 'utf8');
+  const marker = "  const existingRawState = readJsonIfExists(path.join(hubPath, 'state.json'));";
+  assert.equal(source.includes(marker), true, 'delegated discovery seam marker must exist');
+  const seam = [
+    "  if (args.delegatedAuthority && process.env.TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B) {",
+    "    const fixtureStatePath = path.join(hubPath, 'state.json');",
+    "    const fixtureState = readJsonIfExists(fixtureStatePath);",
+    "    fixtureState.targets.opencode.target_path = process.env.TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B;",
+    "    fs.writeFileSync(fixtureStatePath, `${JSON.stringify(fixtureState, null, 2)}\\n`, 'utf8');",
+    "  }",
+    marker
+  ].join('\n');
+  fs.writeFileSync(bridgePath, source.replace(marker, seam), 'utf8');
 }
 
 function commitAll(repoPath, message) {
@@ -749,6 +859,127 @@ function writeFakeCodexPluginList(root, pluginList) {
   return { commandPath, statePath };
 }
 
+function copyCachePath(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) return;
+  const stat = fs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    if (path.basename(sourcePath) === 'skills') {
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    }
+    fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+    return;
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function writeCodexCacheFromSource(codexHome, sourceRepo, version = expectedBridgeVersion) {
+  const cacheRoot = cacheRootFor(codexHome, version);
+  for (const relPath of CACHE_FINGERPRINT_PATHS) {
+    copyCachePath(path.join(sourceRepo, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
+  }
+  for (const relDir of CACHE_FINGERPRINT_DIRS) {
+    copyCachePath(path.join(sourceRepo, ...relDir.split('/')), path.join(cacheRoot, ...relDir.split('/')));
+  }
+  if (process.platform === 'win32') prepareInstalledSessionStart(cacheRoot);
+  if (version !== expectedBridgeVersion) {
+    const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+    const manifest = readJson(manifestPath);
+    manifest.version = version;
+    writeJson(manifestPath, manifest);
+  }
+  return cacheRoot;
+}
+
+function writeCodexConfiguration(codexHome, sourceRepo, enabled = true, extra = '') {
+  fs.mkdirSync(codexHome, { recursive: true });
+  writeFile(path.join(codexHome, 'config.toml'), [
+    '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]',
+    `enabled = ${enabled ? 'true' : 'false'}`,
+    '',
+    '[marketplaces.ai-agent-toolkit-local]',
+    `path = ${JSON.stringify(path.resolve(sourceRepo))}`,
+    extra,
+    ''
+  ].join('\n'));
+}
+
+function setupCodexEvidence(root, sourceRepo, options = {}) {
+  const codexHome = options.codexHome || path.join(root, 'codex-home');
+  const version = options.version || expectedBridgeVersion;
+  const cacheRoot = writeCodexCacheFromSource(codexHome, options.cacheSourceRepo || sourceRepo, version);
+  if (options.cacheMutation) options.cacheMutation(cacheRoot);
+  writeCodexConfiguration(codexHome, sourceRepo, options.enabled !== false, options.configExtra || '');
+  const fake = writeFakeCodexPluginList(root, codexPluginList([{
+    pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
+    name: 'ai-agent-toolkit',
+    marketplaceName: 'ai-agent-toolkit-local',
+    version,
+    installed: true,
+    enabled: options.enabled !== false,
+    authPolicy: 'ON_USE',
+    source: { source: 'local', path: path.resolve(sourceRepo) }
+  }, ...(options.additionalEntries || [])]));
+  return { codexHome, cacheRoot, fake };
+}
+
+function codexEvidenceEnv(root, evidence, extra = {}) {
+  return isolatedHomeEnv(root, {
+    CODEX_HOME: evidence.codexHome,
+    CODEX_TOOLKIT_CODEX_CLI: evidence.fake.commandPath,
+    CODEX_TOOLKIT_TEST_PLUGIN_STATE: evidence.fake.statePath,
+    ...extra
+  });
+}
+
+function createCodexRefreshScenario(options = {}) {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex refresh source\n' });
+  writeRepoToolkitFixture(sourceRepo, 'codex refresh source');
+  writeCodexPluginRefreshFixture(sourceRepo);
+  commitAll(sourceRepo, 'add codex plugin refresh fixture');
+  git(sourceRepo, ['remote', 'add', 'origin', sourceRepo]);
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: options.initialVersion || '2.11.1',
+    enabled: options.enabled !== false,
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache A\n');
+      if (options.cacheMutation) options.cacheMutation(cacheRoot);
+    }
+  });
+  const hub = path.join(root, 'hub', 'current');
+  const initial = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--repo-branch', 'main',
+    '--repo-remote', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh',
+    '--enable-target', 'opencode',
+    '--sync-source', 'repo'
+  ], { env: codexEvidenceEnv(root, evidence) });
+  assert.equal(initial.status, 0, initial.stderr);
+  return { root, sourceRepo, evidence, hub, options };
+}
+
+function runCodexRefreshScenario(scenario, extra = {}) {
+  return run(['--hub', scenario.hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: codexEvidenceEnv(scenario.root, scenario.evidence, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: scenario.evidence.cacheRoot,
+      ...(scenario.options.rediscoveryMode ? { CODEX_TOOLKIT_TEST_REDISCOVERY_MODE: scenario.options.rediscoveryMode } : {}),
+      ...extra
+    })
+  });
+}
+
 function pushRepoToolkitUpdate(fixture, label) {
   writeRepoToolkitFixture(fixture.upstream, label);
   const commit = commitAll(fixture.upstream, `update ${label}`);
@@ -803,7 +1034,7 @@ function createLegacyDelegatedSyncFixture() {
     last_repo_update_from_commit: fromCommit,
     last_repo_update_to_commit: toCommit,
     targets: {
-      ag2: {
+      opencode: {
         enabled: true,
         explicitly_disabled: false,
         synced_version: '1.0.0',
@@ -829,6 +1060,1154 @@ test('dry-run audit performs no writes and reports planned targets', () => {
   assert.equal(audit.targets.opencode.enabled, true);
   assert.equal(audit.targets.opencode.would_write, true);
   assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills$/);
+});
+
+test('executor-ownership source inventory classifies every semantic filesystem mutation and process launch', () => {
+  const files = [
+    'toolkit-local-bridge.cjs',
+    'toolkit-staging-generations.cjs',
+    'repair-codex-plugin-windows-hooks.cjs',
+    'setup-codex-toolkit-plugin.cjs',
+    'toolkit-toml-structural.cjs'
+  ];
+  const classifications = {
+    'toolkit-local-bridge.cjs': {
+      executor: new Set([
+        'createReceiptSourceStage', 'removeReceiptSourceStage', 'launchVerifiedDelegatedChild',
+        'switchRepositoryBranch', 'fetchRepositoryBranch', 'fastForwardRepository',
+        'runRepositoryValidation', 'runNativeRepositoryValidation', 'runAuthorisedUpdateReportCleanup',
+        'createRunReport', 'openRunReport', 'createOwnedGenerationEntry', 'removeOwnedGenerationEntry',
+        'writeTargetManagedFile', 'renameManagedEntry', 'renameManagedFile', 'removeTargetManagedEntry',
+        'applyNativeHookRepairFile', 'launchVerifiedNativeSetupChild',
+        'cleanupSpentLockArtifacts', 'retireDisplacedEvidence', 'claimRecoveryMarker',
+        'releaseRecoveryMarker', 'acquireLock', 'releaseLock'
+      ]),
+      verifiedReadOrStandalone: new Set([
+        'gitBuffer', 'resolveExecutablePath', 'executableIdentity', 'writeJson', 'commandProbe',
+        'runCommand', 'currentToolkitCommit', 'cleanupUpdateReports', 'writeUpdateReportFile',
+        'renameSyncWithRetry', 'replaceDirectoryAtomically', 'copyDirectoryAtomically',
+        'writeFileAtomically', 'removeStaleManagedSkills', 'syncTargetPayload'
+      ])
+    },
+    'toolkit-staging-generations.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['writeExclusiveJson', 'createOwnedStagingGeneration', 'cleanupOwnedGeneration'])
+    },
+    'repair-codex-plugin-windows-hooks.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['writeJsonFile', 'ensureWrapper', 'patchFile'])
+    },
+    'setup-codex-toolkit-plugin.cjs': {
+      executor: new Set([
+        'establishDelegatedNativeMutationPhase', 'releaseDelegatedNativeMutationPhase',
+        'writeCodexSessionStart', 'inspectConfiguredPluginState', 'spawnCodex', 'spawnCodexProcess',
+        'terminateChild'
+      ]),
+      verifiedReadOrStandalone: new Set(['writeFileAtomicallyStandalone'])
+    },
+    'toolkit-toml-structural.cjs': {
+      executor: new Set(),
+      verifiedReadOrStandalone: new Set(['validateToml'])
+    }
+  };
+  const callPattern = /\bfs\.(?:appendFileSync|chmodSync|copyFileSync|cpSync|mkdirSync|openSync|renameSync|rmSync|rmdirSync|truncateSync|unlinkSync|writeFileSync)\b|\b(?:spawn|spawnSync)\(|\.kill\(/g;
+  const inventory = [];
+  for (const name of files) {
+    const source = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
+    const functions = [...source.matchAll(/(?:^|\n)function\s+([A-Za-z0-9_$]+)\s*\(/g)].map((match) => ({ name: match[1], index: match.index }));
+    for (const match of source.matchAll(callPattern)) {
+      const owner = functions.filter((candidate) => candidate.index < match.index).at(-1)?.name || '<top-level>';
+      const classification = classifications[name].executor.has(owner)
+        ? 'accepted-executor'
+        : (classifications[name].verifiedReadOrStandalone.has(owner) ? 'verified-read-or-structurally-non-managed' : 'UNCLASSIFIED');
+      inventory.push({ name, owner, call: match[0], classification });
+    }
+  }
+  assert.equal(inventory.length, 93, 'semantic effect inventory changed; classify every added or removed callsite explicitly');
+  assert.deepEqual(inventory.filter((entry) => entry.classification === 'UNCLASSIFIED'), []);
+  const bridgeSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'utf8');
+  const setupSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
+  const functionBody = (source, name) => {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `missing structural executor ${name}`);
+    const next = source.indexOf('\nfunction ', start + 1);
+    return source.slice(start, next === -1 ? source.length : next);
+  };
+  assert.match(functionBody(bridgeSource, 'fastForwardRepository'), /commandArgs = \['merge', '--ff-only', fetchedCommit\][\s\S]*admitActionSpecificEffect[\s\S]*spawnSync\('git', commandArgs/);
+  assert.match(functionBody(bridgeSource, 'launchVerifiedNativeSetupChild'), /verifySourceReceiptContinuity\(receipt, 'pre-launch'\)[\s\S]*admitActionSpecificEffect[\s\S]*spawnSync\(process\.execPath, commandArgs/);
+  assert.match(functionBody(bridgeSource, 'createRunReport'), /admitActionSpecificEffect[\s\S]*fs\.writeFileSync\(candidate, bytes, \{ flag: 'wx'/);
+  assert.match(functionBody(setupSource, 'establishDelegatedNativeMutationPhase'), /authority_digest[\s\S]*bound_state_digest[\s\S]*fs\.writeFileSync\(lockPath, bytes, \{ flag: 'wx'/);
+  assert.match(functionBody(setupSource, 'verifyDelegatedNativeContinuity'), /beforeEffect[\s\S]*assertDelegatedNativeSourceContinuity[\s\S]*phase\.lockPath[\s\S]*bound state changed[\s\S]*assertDelegatedDestinationContinuity/);
+  assert.match(functionBody(setupSource, 'completeDelegatedNativeEffect'), /verifyDelegatedNativeContinuity\(action, operands, \{ postcondition: true \}\)[\s\S]*sequence \+= 1[\s\S]*afterEffect/);
+  assert.match(functionBody(setupSource, 'releaseDelegatedNativeMutationPhase'), /assertDelegatedNativeSourceContinuity[\s\S]*phase\.lockPath[\s\S]*fs\.unlinkSync\(phase\.lockPath\)/);
+  assert.match(functionBody(setupSource, 'writeCodexSessionStart'), /destination_ancestor_chain[\s\S]*verifyDelegatedNativeContinuity[\s\S]*fs\.mkdirSync\(current\)[\s\S]*destination_ancestor_chain[\s\S]*fs\.writeFileSync\(tempPath[\s\S]*source_identity[\s\S]*destination_state[\s\S]*fs\.renameSync\(tempPath, exactPath\)[\s\S]*kind: 'cleanup'/);
+  assert.match(functionBody(setupSource, 'spawnCodex'), /verifyDelegatedNativeContinuity[\s\S]*spawnSync\(parts\.command, parts\.args/);
+  assert.match(functionBody(setupSource, 'spawnCodexProcess'), /verifyDelegatedNativeContinuity[\s\S]*spawn\(parts\.command, parts\.args/);
+  assert.match(functionBody(setupSource, 'terminateChild'), /verifyDelegatedNativeContinuity\('codex\.plugin\.add'[\s\S]*child\.kill\(\)[\s\S]*completeDelegatedNativeEffect\('codex\.plugin\.add'/);
+  assert.match(setupSource, /catch \(error\) \{\s*if \(activeDelegatedNativeAuthority\) throw error;\s*\/\/ Installed-state verification/s);
+  assert.equal(
+    RECEIPT_CHILD_BOOTSTRAP.includes("const isLocalRequest=(request)=>typeof request==='string'&&(/^\\.{1,2}[\\\\/]/.test(request)||path.posix.isAbsolute(request)||path.win32.isAbsolute(request));"),
+    true,
+    'bootstrap must classify POSIX, Windows, and absolute local requests before loader dispatch'
+  );
+  assert.doesNotMatch(bridgeSource, /runAuthorisedMutation|execute\s*\(\s*kind\s*,\s*callback/);
+  const repairSource = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs'), 'utf8');
+  assert.doesNotMatch(repairSource, /auditPluginRoot\([^)]*verifyOutput\s*:\s*true/s, 'managed repair must not enable the n8n runtime audit subprocess');
+});
+
+test('receipt bootstrap classifies POSIX and Windows relative JavaScript and JSON loads through the immutable manifest', () => {
+  for (const extension of ['cjs', 'json']) {
+    for (const separator of ['/', '\\']) {
+      const admittedRequest = `.${separator}dep.${extension}`;
+      const output = extension === 'json'
+        ? `process.stdout.write(String(require(${JSON.stringify(admittedRequest)}).admitted));\n`
+        : `process.stdout.write(require(${JSON.stringify(admittedRequest)}));\n`;
+      const admitted = runReceiptBootstrapFixture({
+        'repo/scripts/main.cjs': output,
+        [`repo/scripts/dep.${extension}`]: extension === 'json' ? '{"admitted":true}\n' : "module.exports = 'true';\n"
+      }, 'repo/scripts/main.cjs');
+      if (separator === '/' || process.platform === 'win32') {
+        assert.equal(admitted.result.status, 0, admitted.result.stderr);
+        assert.equal(admitted.result.stdout, 'true');
+      } else {
+        assert.notEqual(admitted.result.status, 0);
+        assert.match(admitted.result.stderr, /rejected executable relative load outside manifest/);
+      }
+
+      const outsideRequest = `..${separator}..${separator}..${separator}outside.${extension}`;
+      const outside = runReceiptBootstrapFixture({
+        'repo/scripts/main.cjs': `'use strict';\nrequire(${JSON.stringify(outsideRequest)});\n`
+      }, 'repo/scripts/main.cjs', {
+        prepare({ root }) {
+          writeFile(path.join(root, `outside.${extension}`), extension === 'json' ? '{"escaped":true}\n' : "throw new Error('outside module executed');\n");
+        }
+      });
+      assert.notEqual(outside.result.status, 0);
+      assert.match(outside.result.stderr, /rejected executable relative load outside manifest/);
+    }
+  }
+});
+
+test('receipt bootstrap detects directory resolution redirection after admitted buffers were captured', () => {
+  const marker = path.join(tmpRoot(), 'outside-module-executed.txt');
+  const main = [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const target = path.join(__dirname, 'dep.js');",
+    "fs.rmSync(target);",
+    "fs.mkdirSync(path.join(__dirname, 'dep'));",
+    "fs.writeFileSync(path.join(__dirname, 'dep', 'index.js'), `require('node:fs').writeFileSync(process.env.TOOLKIT_BOOTSTRAP_MARKER, 'executed')`);",
+    "require('./dep');",
+    ''
+  ].join('\n');
+  const fixture = runReceiptBootstrapFixture({
+    'repo/scripts/main.cjs': main,
+    'repo/scripts/dep.js': "module.exports = 'admitted';\n"
+  }, 'repo/scripts/main.cjs', { env: { TOOLKIT_BOOTSTRAP_MARKER: marker } });
+  assert.notEqual(fixture.result.status, 0);
+  assert.match(fixture.result.stderr, /rejected changed local resolution target|rejected executable relative load outside manifest/);
+  assert.equal(fs.existsSync(marker), false, 'redirected unlisted module must not execute');
+});
+
+test('risk-first OpenCode managed-write phase binds the lock, fresh destination, and short-lived context', async (t) => {
+  const fixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const targetA = path.join(root, 'target-a', 'skills');
+    const targetB = path.join(root, 'target-b', 'skills');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      auto_sync_enabled: true,
+      update_report_enabled: false,
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: targetA,
+          synced_version: '1.0.0',
+          synced_checksum: 'stale'
+        }
+      }
+    });
+    return { root, hub, targetA, targetB };
+  };
+  const invoke = (item, hooks = {}) => runBridge([
+    '--hub', item.hub,
+    '--sync-enabled',
+    '--write',
+    '--suppress-update-report'
+  ], hooks);
+
+  await t.test('exact destination A succeeds and the context expires on release', () => {
+    const item = fixture();
+    let captured = null;
+    const result = invoke(item, { afterPhaseContextCreated({ context }) { captured = context; } });
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(path.join(item.targetA, 'ai-agent-toolkit', 'SKILL.md')), true);
+    assert.ok(captured);
+    assert.throws(() => validatePhaseContext(captured), /expired|lock was lost/);
+  });
+
+  await t.test('A to B drift after acquisition rejects before Bridge-managed writes', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      afterLockAcquired() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.targets.opencode.target_path = item.targetB;
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    }), /destination changed|authority-relevant state changed/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(item.targetB), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('A to B drift at the last boundary rejects before the first mutating helper', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      beforeFirstManagedEffect() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.targets.opencode.target_path = item.targetB;
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    }), /destination changed|authority-relevant state changed/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(item.targetB), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('lock replacement invalidates the context before the first mutating helper', () => {
+    const item = fixture();
+    assert.throws(() => invoke(item, {
+      beforeFirstManagedEffect() {
+        writeJson(path.join(path.dirname(item.hub), 'update.lock'), {
+          created_at: new Date().toISOString(),
+          pid: process.pid,
+          token: 'replacement-token'
+        });
+      }
+    }), /expired|lock was lost/);
+    assert.equal(fs.existsSync(item.targetA), false);
+    assert.equal(fs.existsSync(path.join(item.hub, 'adapters', 'opencode')), false);
+  });
+
+  await t.test('unrelated metadata survives and does not reject authority', () => {
+    const item = fixture();
+    const result = invoke(item, {
+      afterLockAcquired() {
+        const state = readJson(path.join(item.hub, 'state.json'));
+        state.future_unrelated_metadata = { retained: true };
+        writeJson(path.join(item.hub, 'state.json'), state);
+      }
+    });
+    assert.equal(result.status, 0);
+    assert.deepEqual(readJson(path.join(item.hub, 'state.json')).future_unrelated_metadata, { retained: true });
+  });
+});
+
+test('actual helper inputs cannot substitute target, hub, repository, or native destinations', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const repo = path.join(root, 'repo');
+  const args = {
+    executionAuthority: {
+      actions: {
+        targets: { opencode: 'sync' },
+        hub: { state_write: true, manifest_write: true },
+        repository: { update: true, delegate_sync: true },
+        native: { cache_maintenance: true, hook_repair: true },
+        reports: {},
+        staging: { reconcile: true, generation: 'fixture-generation' }
+      },
+      bindings: {
+        hub,
+        state_path: path.join(hub, 'state.json'),
+        manifest_path: path.join(hub, 'manifest.json'),
+        target_destinations: { opencode: target },
+        repository: { path: repo, branch: 'main', remote: 'origin-a' },
+        native_source_repository: repo,
+        staging_parents: [path.join(root, 'staging-a')],
+        report_directory: updateReportDir()
+      }
+    }
+  };
+  assert.throws(() => assertActualMutationInput(args, 'target.destination.write', {
+    target: 'opencode', details: { path: path.join(root, 'target-b') }
+  }), /target writer input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'hub.state.write', {
+    details: { path: path.join(root, 'other-state.json') }
+  }), /hub state writer input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: path.join(root, 'other-repo'), branch: 'main', remote: 'origin-a' }
+  }), /repository helper input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: repo, branch: 'other', remote: 'origin-a' }
+  }), /repository branch input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'repository.fetch', {
+    details: { repoPath: repo, branch: 'main', remote: 'origin-b' }
+  }), /repository remote input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'hub.state.write', {
+    details: { path: path.join(hub, 'state.json'), hubPath: path.join(root, 'other-hub') }
+  }), /hub input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'native.cache.maintenance', {
+    details: { path: path.join(root, 'other-native-cache'), repoPath: repo }
+  }), /native helper input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'native.cache.maintenance', {
+    details: { path: path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')), repoPath: path.join(root, 'other-source') }
+  }), /native source repository input does not match/);
+  assert.throws(() => assertActualMutationInput(args, 'staging.reconcile', {
+    details: { generation_id: 'fixture-generation', parents: [path.join(root, 'staging-b')] }
+  }), /staging parent input does not match/);
+});
+
+test('expired phase context leaves no pre-guard adapter directory and lock loss blocks hub replacement', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', target,
+    '--write'
+  ], {
+    afterPhaseContextCreated({ lock }) {
+      writeJson(lock.lockPath, { created_at: new Date().toISOString(), pid: process.pid, token: 'replacement' });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters')), false, 'rejected context must not create adapters/ before its guard');
+  fs.rmSync(path.join(path.dirname(hub), 'update.lock'), { force: true });
+
+  const existingAdapter = path.join(hub, 'adapters', 'opencode');
+  writeFile(path.join(existingAdapter, 'sentinel.txt'), 'existing adapter\n');
+  const before = snapshotTree(existingAdapter);
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', target,
+    '--write'
+  ], {
+    beforeHubReplacement({ generation }) {
+      writeJson(path.join(path.dirname(hub), 'update.lock'), {
+        created_at: new Date().toISOString(), pid: process.pid, token: `replacement-${generation.record.generation_id}`
+      });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.deepEqual(snapshotTree(existingAdapter), before, 'lock replacement must be detected before adapter replacement');
+});
+
+test('authority drift during hub staging is rejected and cannot become a verified own result', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const targetA = path.join(root, 'target-a', 'skills');
+  const targetB = path.join(root, 'target-b', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub,
+    '--enable-target', 'opencode',
+    '--opencode-target', targetA,
+    '--write'
+  ], {
+    beforeHubReplacement() {
+      const state = readJson(path.join(hub, 'state.json'));
+      state.targets.opencode = { enabled: true, explicitly_disabled: false, target_path: targetB };
+      writeJson(path.join(hub, 'state.json'), state);
+    }
+  }), /authority-relevant state changed|destination changed/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+  assert.equal(path.resolve(readJson(path.join(hub, 'state.json')).targets.opencode.target_path), path.resolve(targetB));
+});
+
+test('delegated child cannot widen payload actions through CLI flags or mutate reports', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const opencodeTarget = path.join(root, 'opencode', 'skills');
+  const ag2Target = path.join(root, 'ag2', 'skills');
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const payload = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-narrowing-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(opencodeTarget) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: { script_path: script, source_identity: sha256(fs.readFileSync(script)), source_repository: repoRoot, source_commit: commit }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    auto_sync_enabled: true,
+    update_report_enabled: true,
+    update_report_retention_days: 1,
+    targets: {
+      opencode: { enabled: true, explicitly_disabled: false, target_path: opencodeTarget, synced_checksum: 'stale' },
+      ag2: { enabled: true, explicitly_disabled: false, target_path: ag2Target, synced_checksum: 'stale' }
+    }
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--delegated-invocation-authority', '--opencode-target', opencodeTarget,
+    '--enable-target', 'ag2', '--enable-auto-sync'
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) }), /delegated.*ordinary|delegated.*CLI|payload authority/i);
+  assert.equal(fs.existsSync(ag2Target), false);
+
+  let inventoryCalled = false;
+  const result = runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--delegated-invocation-authority', '--opencode-target', opencodeTarget
+  ], {
+    delegatedEnvelopeRaw: JSON.stringify(payload),
+    listUpdateReportCandidates() {
+      inventoryCalled = true;
+      return [];
+    }
+  });
+  assert.equal(result.status, 0);
+  assert.equal(inventoryCalled, false, 'delegated mode has zero report cleanup authority even without suppression');
+});
+
+test('delegated payload source A cannot be replaced by state-selected source B', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const foreignRepo = createMinimalToolkitSource(path.join(root, 'foreign'), { 'foreign-skill': 'foreign source B\n' });
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const payload = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-source-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(target) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: { script_path: script, source_identity: sha256(fs.readFileSync(script)), source_repository: repoRoot, source_commit: commit }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    repo_path: foreignRepo,
+    update_report_enabled: false,
+    targets: { opencode: { enabled: true, explicitly_disabled: false, target_path: target, synced_checksum: 'stale' } }
+  });
+  const result = runBridge([
+    '--hub', hub, '--write', '--sync-source', 'repo', '--skip-repo-auto-update',
+    '--suppress-update-report', '--delegated-invocation-authority', '--opencode-target', target
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) });
+  assert.equal(result.status, 0);
+  assert.equal(fs.existsSync(path.join(target, 'foreign-skill')), false);
+  assert.equal(fs.existsSync(path.join(target, 'toolkit-setup', 'SKILL.md')), true);
+});
+
+test('report open rejects replacement at the same pathname after exclusive creation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: true,
+    targets: {}
+  });
+  let replacedPath = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target,
+    '--open-update-report', '--write'
+  ], {
+    beforeReportOpen({ reportPath }) {
+      replacedPath = reportPath;
+      fs.rmSync(reportPath, { force: true });
+      fs.writeFileSync(reportPath, '# competing replacement\n', 'utf8');
+    }
+  }), /report was replaced or changed before open/);
+  assert.notEqual(replacedPath, '');
+  assert.equal(fs.readFileSync(replacedPath, 'utf8'), '# competing replacement\n');
+  fs.rmSync(replacedPath, { force: true });
+});
+
+test('repo-update admission failure releases the exact owned lock', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report'
+  ]);
+  assert.equal(configured.status, 0);
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report'
+  ], {
+    afterLockedStateRead({ route }) {
+      if (route === 'repo-update') throw new Error('deterministic admission rejection');
+    }
+  }), /deterministic admission rejection/);
+  assert.equal(fs.existsSync(path.join(path.dirname(hub), 'update.lock')), false, 'failed admission must release its owned lock');
+});
+
+test('lower-level hub payload primitive revalidates live lock ownership after the outer guard', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    beforeHubPayloadWrite() {
+      writeJson(path.join(path.dirname(hub), 'update.lock'), {
+        created_at: new Date().toISOString(), pid: process.pid, token: 'replacement-owner'
+      });
+    }
+  }), /phase context is expired|lock was lost/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+  fs.rmSync(path.join(path.dirname(hub), 'update.lock'), { force: true });
+});
+
+test('hub staging trust requires the exact intended payload bytes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    afterHubPayloadWrite({ stagePath }) {
+      fs.writeFileSync(path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md'), '# corrupted staged bytes\n');
+    }
+  }), /content checksum mismatch/);
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')), false);
+});
+
+test('installed target trust requires the exact intended payload bytes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: false,
+    targets: {}
+  });
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target, '--write', ...offline
+  ], {
+    afterTargetPayloadWrite({ targetPath }) {
+      fs.writeFileSync(path.join(targetPath, 'ai-agent-toolkit', 'SKILL.md'), '# corrupted installed bytes\n');
+    }
+  }), /target sync postcondition verification failed/);
+});
+
+test('delegated handoff rejects HEAD movement after the verified repository result', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    beforeDelegatedChildLaunch() {
+      fs.writeFileSync(path.join(fixture.repo, 'late-head-movement.txt'), 'later commit\n');
+      commitAll(fixture.repo, 'late head movement');
+    }
+  }), /repository commit changed after verified update result|repository result changed before child launch|verified source continuity failed at refresh-relock: commit changed/);
+});
+
+test('verifier-owned source identity rejects setup-source replacement before hub or native publication', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.equal(configured.status, 0);
+  writeRealBridgeDelegator(fixture.upstream);
+  commitAll(fixture.upstream, 'publish verifier-owned native setup fixture');
+  git(fixture.upstream, ['push', 'origin', 'main']);
+  const beforeHubState = fs.readFileSync(path.join(hub, 'state.json'));
+  let admittedSetupDigest = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    afterRepositoryVerification({ receipt }) {
+      admittedSetupDigest = receipt.native_setup.entry_sha256;
+      fs.appendFileSync(path.join(fixture.repo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), '\n// replacement after verifier ownership\n');
+    }
+  }), /verified source continuity failed at post-verification: (?:worktree changed|.*setup-codex-toolkit-plugin\.cjs changed|native setup source closure changed)/);
+  assert.match(admittedSetupDigest, /^[a-f0-9]{64}$/);
+  assert.notEqual(sha256(fs.readFileSync(path.join(fixture.repo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'))), admittedSetupDigest);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), beforeHubState, 'replacement source must fail before hub publication');
+});
+
+test('staging reconciliation validates the actual deletion operand after its callback boundary', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const parent = path.dirname(hub);
+  fs.mkdirSync(parent, { recursive: true });
+  const generation = createOwnedStagingGeneration({
+    parent,
+    target: hub,
+    operation: 'hub-snapshot-replacement',
+    sourceType: 'repo',
+    bridgeVersion: expectedBridgeVersion,
+    pid: deadTestPid()
+  });
+  fs.writeFileSync(path.join(generation.stagePath, 'partial.txt'), 'preserve selected generation\n');
+  const substitute = path.join(parent, '.staging-substitute');
+  fs.mkdirSync(substitute);
+  fs.writeFileSync(path.join(substitute, 'keep.txt'), 'keep substitute\n');
+
+  const previousOpenCodeConfig = process.env.OPENCODE_CONFIG_DIR;
+  process.env.OPENCODE_CONFIG_DIR = path.join(root, 'opencode-config');
+  try {
+    assert.throws(() => runBridge([
+      '--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write'
+    ], {
+      stagingLiveness: () => 'dead',
+      beforeStagingReconciliationDelete({ generation: actual }) {
+        actual.stagePath = substitute;
+      }
+    }), /deletion operand changed before delete|Cannot assign to read only property/);
+  } finally {
+    if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousOpenCodeConfig;
+  }
+  assert.equal(fs.existsSync(generation.stagePath), true);
+  assert.equal(fs.readFileSync(path.join(substitute, 'keep.txt'), 'utf8'), 'keep substitute\n');
+});
+
+test('report creation binds identity to the exclusive handle and expected bytes before trust', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const offline = ['--opencode-command', path.join(root, 'missing-opencode.exe'), '--python-command', path.join(root, 'missing-python.exe')];
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    update_report_enabled: true,
+    targets: {}
+  });
+  let attackedPath = '';
+  assert.throws(() => runBridge([
+    '--hub', hub, '--enable-target', 'opencode', '--opencode-target', target,
+    '--open-update-report', '--write', ...offline
+  ], {
+    afterExclusiveReportWrite({ reportPath }) {
+      attackedPath = reportPath;
+      fs.writeFileSync(reportPath, '# changed through competing handle\n');
+    }
+  }), /content verification failed|creation identity does not match expected contents/);
+  assert.notEqual(attackedPath, '');
+  fs.rmSync(attackedPath, { force: true });
+});
+
+test('fixed delegated payload accepts exact authority and rejects added actions, wrong source, and wrong repository result', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const target = path.join(root, 'opencode', 'skills');
+  const commit = git(repoRoot, ['rev-parse', 'HEAD']);
+  const branch = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = git(repoRoot, ['remote', 'get-url', 'origin']);
+  const base = {
+    contract: 'toolkit.local-bridge.delegated-invocation-authority.v1',
+    parent_invocation_id: 'parent-fixture',
+    actions: { targets: { opencode: 'sync' } },
+    destinations: { targets: { opencode: path.resolve(target) } },
+    hub: { path: path.resolve(hub) },
+    repository_result: { path: repoRoot, branch, remote, commit },
+    child: {
+      script_path: script,
+      source_identity: sha256(fs.readFileSync(script)),
+      source_repository: repoRoot,
+      source_commit: commit
+    }
+  };
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    auto_sync_enabled: true,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: target,
+        synced_version: '1.0.0',
+        synced_checksum: 'stale'
+      }
+    }
+  });
+  const invoke = (payload) => runBridge([
+    '--hub', hub,
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update',
+    '--suppress-update-report',
+    '--delegated-invocation-authority',
+    '--opencode-target', target
+  ], { delegatedEnvelopeRaw: JSON.stringify(payload) });
+
+  const success = invoke(base);
+  assert.equal(success.status, 0);
+  assert.equal(fs.existsSync(path.join(target, 'ai-agent-toolkit', 'SKILL.md')), true);
+
+  const addedAction = JSON.parse(JSON.stringify(base));
+  addedAction.actions.repository = { update: true };
+  assert.throws(() => invoke(addedAction), /invalid actions/);
+
+  const wrongSource = JSON.parse(JSON.stringify(base));
+  wrongSource.child.source_identity = '0'.repeat(64);
+  assert.throws(() => invoke(wrongSource), /child source identity mismatch/);
+
+  const wrongResult = JSON.parse(JSON.stringify(base));
+  wrongResult.repository_result.commit = '0'.repeat(40);
+  assert.throws(() => invoke(wrongResult), /repository result commit mismatch/);
+});
+
+test('invocation authority preserves the 16-case target-consent regression matrix', async (t) => {
+  const staleState = (root, overrides = {}) => ({
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    bridge_versions_by_source: { repo: expectedBridgeVersion },
+    auto_sync_enabled: true,
+    update_report_enabled: false,
+    codex_plugin_auto_refresh_enabled: false,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: path.join(root, 'opencode', 'skills'),
+        synced_version: '1.0.0',
+        synced_checksum: 'stale',
+        future_target_field: 'preserve-opencode'
+      },
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: path.join(root, 'ag2', 'skills'),
+        synced_version: '1.0.0',
+        synced_checksum: 'stale',
+        future_target_field: 'preserve-ag2'
+      }
+    },
+    ...overrides
+  });
+
+  await t.test('01 --write alone grants zero mutation authority', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(hub), false);
+    assert.deepEqual(parseLastJson(result.stdout).planned_writes, []);
+  });
+
+  await t.test('02 preference-only changes named globals and preserves stale target state and bytes', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const target = path.join(root, 'opencode', 'skills');
+    const adapter = path.join(hub, 'adapters', 'opencode');
+    const state = staleState(root);
+    writeJson(path.join(hub, 'state.json'), state);
+    writeFile(path.join(target, 'sentinel.txt'), 'target bytes\n');
+    writeFile(path.join(adapter, 'sentinel.txt'), 'adapter bytes\n');
+    const targetBefore = snapshotTree(target);
+    const adapterBefore = snapshotTree(adapter);
+    const result = run(['--hub', hub, '--disable-update-reports', '--preference-only', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const after = readJson(path.join(hub, 'state.json'));
+    assert.equal(after.update_report_enabled, false);
+    assert.deepEqual(after.targets, state.targets);
+    assert.deepEqual(snapshotTree(target), targetBefore);
+    assert.deepEqual(snapshotTree(adapter), adapterBefore);
+  });
+
+  await t.test('03 preference-only dry-run enumerates only the named state field', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--enable-update-reports', '--preference-only'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const audit = parseLastJson(result.stdout);
+    assert.deepEqual(audit.authorised_actions.preferences, ['update_report_enabled']);
+    assert.deepEqual(audit.out_of_scope_stale_targets, []);
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('04 preference-only rejects target authority mixing', () => {
+    const root = tmpRoot();
+    const result = run(['--hub', path.join(root, 'hub', 'current'), '--preference-only', '--enable-update-reports', '--enable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--preference-only cannot be combined with: --enable-target/);
+  });
+
+  await t.test('05 contradictory target actions fail before mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const result = run(['--hub', hub, '--enable-target', 'opencode', '--disable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('06 observed stale excluded targets report needs_sync without executable write', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.targets.opencode.needs_sync, true);
+    assert.equal(audit.targets.opencode.authorised_would_write, false);
+    assert.equal(audit.targets.opencode.would_write, false);
+    assert.ok(audit.out_of_scope_stale_targets.includes('opencode'));
+  });
+
+  await t.test('07 explicit enable-sync writes only OpenCode hub and destination', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const ag2Adapter = path.join(hub, 'adapters', 'ag2');
+    const ag2Target = path.join(root, 'ag2', 'skills');
+    const state = staleState(root);
+    state.targets.opencode.enabled = false;
+    state.targets.opencode.explicitly_disabled = true;
+    writeJson(path.join(hub, 'state.json'), state);
+    writeFile(path.join(ag2Adapter, 'sentinel.txt'), 'ag2 hub bytes\n');
+    writeFile(path.join(ag2Target, 'sentinel.txt'), 'ag2 target bytes\n');
+    const ag2AdapterBefore = snapshotTree(ag2Adapter);
+    const ag2TargetBefore = snapshotTree(ag2Target);
+    const result = run(['--hub', hub, '--enable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(snapshotTree(ag2Adapter), ag2AdapterBefore);
+    assert.deepEqual(snapshotTree(ag2Target), ag2TargetBefore);
+    assert.equal(readJson(path.join(hub, 'state.json')).targets.ag2.future_target_field, 'preserve-ag2');
+  });
+
+  await t.test('08 disable changes only selected target state and leaves delivered bytes', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const target = path.join(root, 'opencode', 'skills');
+    const adapter = path.join(hub, 'adapters', 'opencode');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    writeFile(path.join(target, 'sentinel.txt'), 'delivered bytes\n');
+    writeFile(path.join(adapter, 'sentinel.txt'), 'hub bytes\n');
+    const targetBefore = snapshotTree(target);
+    const adapterBefore = snapshotTree(adapter);
+    const result = run(['--hub', hub, '--disable-target', 'opencode', '--write'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const after = readJson(path.join(hub, 'state.json'));
+    assert.equal(after.targets.opencode.enabled, false);
+    assert.equal(after.targets.opencode.explicitly_disabled, true);
+    assert.deepEqual(snapshotTree(target), targetBefore);
+    assert.deepEqual(snapshotTree(adapter), adapterBefore);
+  });
+
+  await t.test('09 manual sync-enabled derives only initially enabled targets', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    state.targets.ag2.enabled = false;
+    state.targets.ag2.explicitly_disabled = true;
+    writeJson(path.join(hub, 'state.json'), state);
+    const audit = parseLastJson(run(['--hub', hub, '--sync-enabled'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.deepEqual(audit.authorised_actions.targets, { opencode: 'sync' });
+    assert.equal(audit.targets.ag2.authorised_would_write, false);
+  });
+
+  await t.test('10 hook maintenance derives bounded durable target authority', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root, { repo_auto_update_enabled: false });
+    state.targets.ag2.enabled = false;
+    writeJson(path.join(hub, 'state.json'), state);
+    const result = run(['--hub', hub, '--hook', '--sync-enabled', '--sync-source', 'claude-plugin'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    const audit = parseLastJson(result.stdout);
+    assert.deepEqual(audit.authorised_actions.targets, { opencode: 'sync' });
+    assert.equal(audit.authorised_actions.repo_maintenance, false);
+  });
+
+  await t.test('11 explicit target dry-run binds destination and exact planned writes without mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const config = path.join(root, 'opencode-config');
+    const audit = parseLastJson(run(['--hub', hub, '--enable-target', 'opencode', '--opencode-config-dir', config], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.execution_authority.bindings.target_destinations.opencode, path.resolve(config, 'skills'));
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'hub-adapter-subtree' && entry.target === 'opencode'));
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'managed-target-destination' && entry.target === 'opencode'));
+    assert.equal(fs.existsSync(hub), false);
+  });
+
+  await t.test('12 one fixed-shape authority carries exact actions and destinations', () => {
+    const root = tmpRoot();
+    const audit = parseLastJson(run(['--hub', path.join(root, 'hub', 'current'), '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) }).stdout);
+    assert.equal(audit.execution_authority.contract, 'toolkit.local-bridge.invocation-authority.v1');
+    assert.deepEqual(audit.execution_authority.actions.targets, { opencode: 'enable-sync' });
+    assert.equal(audit.execution_authority.bindings.target_destinations.opencode, path.resolve(root, '.config', 'opencode', 'skills'));
+  });
+
+  await t.test('13 legacy write-mode delegated scope flags are rejected', () => {
+    const root = tmpRoot();
+    const result = run(['--hub', path.join(root, 'hub', 'current'), '--scope-target-sync', 'opencode', '--parent-scope-digest', 'bad', '--write'], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--parent-scope-digest requires one SHA-256 digest|delegated writes require --delegated-invocation-authority/);
+  });
+
+  await t.test('14 report status collection is read-only', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), staleState(root));
+    const before = snapshotTree(hub);
+    const result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(snapshotTree(hub), before);
+  });
+
+  await t.test('15 locked revalidation may fail but never widens destination scope', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    writeJson(path.join(hub, 'state.json'), state);
+    assert.throws(() => runBridge(['--hub', hub, '--sync-enabled', '--write'], {
+      afterInitialSnapshotDerivation() {
+        const changed = readJson(path.join(hub, 'state.json'));
+        changed.targets.opencode.target_path = path.join(root, 'different', 'skills');
+        writeJson(path.join(hub, 'state.json'), changed);
+      }
+    }), /destination changed while waiting for the lock: opencode/);
+  });
+
+  await t.test('16 target failure never falls back to excluded target mutation', () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const state = staleState(root);
+    state.targets.ag2.enabled = false;
+    writeJson(path.join(hub, 'state.json'), state);
+    const ag2Adapter = path.join(hub, 'adapters', 'ag2');
+    writeFile(path.join(ag2Adapter, 'sentinel.txt'), 'excluded bytes\n');
+    const before = snapshotTree(ag2Adapter);
+    assert.throws(() => runBridge(['--hub', hub, '--enable-target', 'opencode', '--write'], {
+      beforeHubPayloadWrite() { throw new Error('selected target failure'); }
+    }), /selected target failure/);
+    assert.deepEqual(snapshotTree(ag2Adapter), before);
+  });
+});
+
+test('report cleanup follows immutable report-maintenance authority inside the write path', async (t) => {
+  const createFixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const reportDir = path.join(root, 'ai-agent-toolkit', 'update-reports');
+    const reportPath = path.join(reportDir, 'toolkit-update-20200101-010101.md');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      update_report_enabled: false,
+      update_report_retention_days: 7,
+      last_update_report_cleanup: {
+        retention_days: 7,
+        report_log_directory: reportDir,
+        max_report_files: 20,
+        deleted_count: 0,
+        skipped_count: 1,
+        error_count: 0,
+        errors: []
+      },
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: path.join(root, 'opencode', 'skills')
+        }
+      }
+    });
+    writeFile(reportPath, '# expired synthetic report\n');
+    const expired = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(reportPath, expired, expired);
+    return {
+      root,
+      hub,
+      reportDir,
+      reportPath,
+      env: isolatedHomeEnv(root, { TMP: root, TEMP: root, TMPDIR: root })
+    };
+  };
+
+  await t.test('suppression preserves report bytes while the selected target action succeeds', () => {
+    const fixture = createFixture();
+    const before = snapshotTree(fixture.reportDir);
+    const result = run([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--suppress-update-report',
+      '--write',
+      '--audit'
+    ], { env: fixture.env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(fixture.reportPath), true);
+    assert.deepEqual(snapshotTree(fixture.reportDir), before);
+    const state = readJson(path.join(fixture.hub, 'state.json'));
+    assert.equal(state.targets.opencode.enabled, false);
+    assert.equal(state.targets.opencode.explicitly_disabled, true);
+    assert.equal(state.last_update_report_cleanup.skipped_count, 1);
+    const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
+    assert.equal(audit.authorised_actions.report_maintenance, false);
+    assert.equal(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'), false);
+    assert.equal(audit.update_report_cleanup.skipped_count, 1);
+  });
+
+  await t.test('authorised report maintenance removes the expired report', () => {
+    const fixture = createFixture();
+    const result = run([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write',
+      '--audit'
+    ], { env: fixture.env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(fixture.reportPath), false);
+    const audit = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n{') + 1));
+    assert.equal(audit.authorised_actions.report_maintenance, true);
+    assert.ok(audit.planned_writes.some((entry) => entry.kind === 'update-report-maintenance'));
+    assert.equal(audit.update_report_cleanup.deleted_count, 1);
+  });
+
+  await t.test('cleanup inventory failure performs no cleanup and never rescans', () => {
+    const fixture = createFixture();
+    const protectedReport = path.join(updateReportDir(), `toolkit-update-20000101-000001-${process.pid}.md`);
+    writeFile(protectedReport, '# protected report\n');
+    const result = runBridge([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write'
+    ], {
+      listUpdateReportCandidates() { throw new Error('synthetic inventory failure'); }
+    });
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(protectedReport), true);
+    fs.rmSync(protectedReport, { force: true });
+  });
+
+  await t.test('a report injected after the bounded inventory is never deleted', () => {
+    const fixture = createFixture();
+    const inventoried = path.join(updateReportDir(), `toolkit-update-20000101-000002-${process.pid}.md`);
+    const injected = path.join(updateReportDir(), `toolkit-update-20000101-000003-${process.pid}.md`);
+    writeFile(inventoried, '# inventoried report\n');
+    const expired = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(inventoried, expired, expired);
+    runBridge([
+      '--hub', fixture.hub,
+      '--disable-target', 'opencode',
+      '--write'
+    ], {
+      listUpdateReportCandidates() { return [inventoried]; },
+      beforeFirstManagedEffect() {
+        writeFile(injected, '# late report\n');
+        fs.utimesSync(injected, expired, expired);
+      }
+    });
+    assert.equal(fs.existsSync(inventoried), false);
+    assert.equal(fs.existsSync(injected), true);
+    fs.rmSync(injected, { force: true });
+  });
+});
+
+test('report creation is exclusive, bounded, and never clobbers a collision', async (t) => {
+  const fixture = () => {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    writeJson(path.join(hub, 'state.json'), {
+      schema_version: 1,
+      architecture_version: 2,
+      hub_version: expectedBridgeVersion,
+      bridge_versions_by_source: { repo: expectedBridgeVersion },
+      auto_sync_enabled: true,
+      update_report_enabled: true,
+      targets: {
+        opencode: {
+          enabled: true,
+          explicitly_disabled: false,
+          target_path: path.join(root, 'opencode', 'skills'),
+          synced_version: '1.0.0',
+          synced_checksum: 'stale'
+        }
+      }
+    });
+    return { root, hub };
+  };
+  const invoke = (item, hooks) => runBridge([
+    '--hub', item.hub,
+    '--hook',
+    '--sync-enabled',
+    '--sync-source', 'repo',
+    '--write'
+  ], { listUpdateReportCandidates() { return []; }, ...hooks });
+
+  await t.test('one occupied candidate is preserved and a later exclusive candidate succeeds', () => {
+    const item = fixture();
+    let occupied = '';
+    const result = invoke(item, {
+      beforeReportCreation({ reportPath, attempt }) {
+        if (attempt === 0) {
+          occupied = reportPath;
+          writeFile(reportPath, '# existing report\n');
+        }
+      }
+    });
+    assert.equal(result.status, 0);
+    const created = readJson(path.join(item.hub, 'state.json')).last_update_report_path;
+    assert.ok(created);
+    assert.notEqual(path.resolve(created), path.resolve(occupied));
+    assert.equal(fs.readFileSync(occupied, 'utf8'), '# existing report\n');
+    fs.rmSync(occupied, { force: true });
+    fs.rmSync(created, { force: true });
+  });
+
+  await t.test('bounded collision exhaustion fails without clobbering any occupied candidate', () => {
+    const item = fixture();
+    const occupied = [];
+    assert.throws(() => invoke(item, {
+      beforeReportCreation({ reportPath }) {
+        occupied.push(reportPath);
+        writeFile(reportPath, '# existing report\n');
+      }
+    }), /exclusive update report creation exhausted bounded attempts/);
+    assert.equal(occupied.length, 20);
+    for (const reportPath of occupied) {
+      assert.equal(fs.readFileSync(reportPath, 'utf8'), '# existing report\n');
+      fs.rmSync(reportPath, { force: true });
+    }
+  });
 });
 
 test('explicit OpenCode setup writes only managed hub and OpenCode target paths', () => {
@@ -879,7 +2258,7 @@ test('explicit OpenCode setup infers the user OpenCode skill location', () => {
   assert.equal(audit.targets.opencode.synced, true);
 });
 
-test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini config without package installs', () => {
+test('explicit AG2 setup remains blocked until a supported skills-only destination is proven', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
@@ -889,26 +2268,19 @@ test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini con
 
   const state = readJson(path.join(hub, 'state.json'));
   const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  const pluginJson = readJson(path.join(pluginRoot, 'plugin.json'));
-  const versionMarker = readJson(path.join(pluginRoot, 'installed_version.json'));
-  const targetSkill = path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md');
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
 
   assert.equal(state.targets.ag2.enabled, true);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
-  assert.equal(pluginJson.name, 'ai-agent-toolkit');
-  assert.equal(versionMarker.version, expectedBridgeVersion);
-  assert.ok(fs.existsSync(targetSkill), 'Antigravity target skill should be installed into the plugin-scoped skills folder');
-  assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.deepEqual(targetSkillDirs(path.join(pluginRoot, 'skills')), expectedManagedSkillNames());
-  assert.deepEqual(
-    readJson(path.join(pluginRoot, '.ai-agent-toolkit-managed.json')).managed_skill_names,
-    expectedManagedSkillNames()
-  );
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(pluginRoot));
-  assert.equal(audit.targets.ag2.target_exists, true);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.ok(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), 'hub should keep internal AG2 adapter metadata');
+  assert.equal(state.targets.ag2.synced_version, '');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(fs.existsSync(pluginRoot), false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.target_path, '');
+  assert.equal(audit.targets.ag2.target_exists, false);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), false, 'AG2 adapter metadata must not become plugin authority');
 });
 
 test('detected but not enabled OpenCode target receives no writes', () => {
@@ -957,7 +2329,7 @@ test('OpenCode audit detects persisted bridge target state without enabling writ
   assert.equal(audit.targets.opencode.signals.migrated_target_path, true);
 });
 
-test('AG2 Python command can be persisted and reused without installing packages', () => {
+test('AG2 Python command can be persisted without installing packages or bypassing the proof gate', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const fakePython = writeFakePython(root);
@@ -974,7 +2346,8 @@ test('AG2 Python command can be persisted and reused without installing packages
   assert.equal(state.targets.ag2.enabled, true);
   assert.equal(state.targets.ag2.detected, true);
   assert.equal(state.targets.ag2.python_command, fakePython.command);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
 
   let invocations = fs.readFileSync(fakePython.logPath, 'utf8');
   assert.match(invocations, /--version/);
@@ -985,16 +2358,18 @@ test('AG2 Python command can be persisted and reused without installing packages
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'enabled');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.python_command, fakePython.command);
   assert.equal(audit.targets.ag2.ag2_package_detected, true);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(audit.targets.ag2.would_write, false);
   assert.equal(audit.targets.ag2.signals.selected_python_command, fakePython.command);
 
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.ag2.python_command, fakePython.command);
 });
 
-test('AG2 audit detects Antigravity config without requiring the Python ag2 package', () => {
+test('AG2 audit records Antigravity config without treating it as skills-only proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const antigravityConfig = path.join(root, '.antigravity');
@@ -1017,17 +2392,18 @@ test('AG2 audit detects Antigravity config without requiring the Python ag2 pack
 
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.ag2_package_detected, false);
   assert.equal(audit.targets.ag2.python_command, '');
   assert.equal(audit.targets.ag2.would_write, false);
-  assert.equal(path.resolve(audit.targets.ag2.signals.antigravity_config_dir), path.resolve(antigravityConfig));
-  assert.equal(audit.targets.ag2.signals.antigravity_config_exists, true);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
+  assert.equal(path.resolve(audit.targets.ag2.signals.ag2_config_dir), path.resolve(antigravityConfig));
+  assert.equal(audit.targets.ag2.signals.ag2_config_exists, true);
   assert.equal(audit.targets.ag2.signals.selected_python_command, '');
   assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
 });
 
-test('AG2 audit detects Gemini plugin config without requiring the Python ag2 package', () => {
+test('AG2 audit records Gemini config without treating it as skills-only proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const geminiConfig = path.join(root, '.gemini', 'config');
@@ -1051,14 +2427,13 @@ test('AG2 audit detects Gemini plugin config without requiring the Python ag2 pa
 
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
   assert.equal(audit.targets.ag2.ag2_package_detected, false);
   assert.equal(audit.targets.ag2.python_command, '');
   assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(path.resolve(audit.targets.ag2.signals.gemini_config_dir), path.resolve(geminiConfig));
   assert.equal(audit.targets.ag2.signals.gemini_config_exists, true);
-  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_plugins_dir), path.resolve(geminiPlugins));
-  assert.equal(audit.targets.ag2.signals.gemini_plugins_dir_exists, true);
   assert.equal(audit.targets.ag2.signals.selected_python_command, '');
   assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
 });
@@ -1092,7 +2467,8 @@ test('AG2 audit records exactly which Python commands were tried when not detect
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, false);
-  assert.equal(audit.targets.ag2.status, 'not detected');
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.ag2.python_command, '');
   const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => entry.command);
   assert.deepEqual(tried.slice(0, 2), ['missing-saved-python', 'missing-explicit-python']);
@@ -1177,7 +2553,7 @@ test('sync-enabled command does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
-test('sync-enabled updates enabled OpenCode and Antigravity app outputs after Toolkit changes', () => {
+test('sync-enabled updates enabled OpenCode while AG2 remains migration-safe without proof', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
@@ -1195,22 +2571,24 @@ test('sync-enabled updates enabled OpenCode and Antigravity app outputs after To
   state.targets.opencode.synced_version = '1.0.0';
   state.targets.opencode.synced_checksum = 'old';
   state.targets.ag2.synced_version = '1.0.0';
-  state.targets.ag2.synced_checksum = 'old';
+  state.targets.opencode.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   assert.match(fs.readFileSync(opencodeSkill, 'utf8'), /AI Agent Toolkit Bridge/);
-  assert.match(fs.readFileSync(ag2Skill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.equal(fs.readFileSync(ag2Skill, 'utf8'), 'stale ag2 skill\n');
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
   assert.equal(audit.targets.opencode.synced, true);
-  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.opencode.would_write, false);
   assert.equal(audit.targets.ag2.would_write, false);
 });
 
-test('skill payload checksum includes Toolkit repo skill files and marks enabled targets stale', () => {
+test('skill payload checksum includes Toolkit repo skill files and marks enabled OpenCode stale', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root);
   const hub = path.join(root, 'hub', 'current');
@@ -1218,15 +2596,15 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   let audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
   const beforeChecksum = audit.checksum;
 
   writeFile(path.join(sourceRepo, 'skills', 'alpha', 'README.md'), 'alpha changed\n');
@@ -1234,8 +2612,11 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
   assert.notEqual(audit.checksum, beforeChecksum);
-  assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(audit.targets.opencode.synced, false);
+  assert.equal(audit.targets.opencode.needs_sync, true);
+  assert.equal(audit.targets.opencode.authorised_would_write, false);
+  assert.equal(audit.targets.opencode.would_write, false);
+  assert.deepEqual(audit.out_of_scope_stale_targets, ['opencode']);
 });
 
 test('sync-enabled updates changed Toolkit skill contents from the configured repo source', () => {
@@ -1246,8 +2627,7 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
@@ -1270,10 +2650,6 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
     /alpha v2 from source repo/
   );
-  assert.match(
-    fs.readFileSync(path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
-    /alpha v2 from source repo/
-  );
 });
 
 test('removed managed Toolkit skills are cleaned up without deleting unrelated user skills or files', () => {
@@ -1284,16 +2660,12 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   const opencodeSkillsRoot = path.join(root, '.config', 'opencode', 'skills');
-  const ag2PluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   writeFile(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md'), 'user opencode skill\n');
-  writeFile(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md'), 'user ag2 skill\n');
-  writeFile(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'keep this note\n');
 
   fs.rmSync(path.join(sourceRepo, 'skills', 'beta'), { recursive: true, force: true });
   git(sourceRepo, ['add', '.']);
@@ -1305,13 +2677,10 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
   assert.equal(result.status, 0, result.stderr);
 
   assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'beta')), false);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'beta')), false);
   assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.readFileSync(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'utf8'), 'keep this note\n');
 });
 
-test('old single-adapter AG2 target migrates to the full managed Toolkit skill set', () => {
+test('old single-adapter AG2 target remains untouched until skills-only proof is available', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -1337,13 +2706,15 @@ test('old single-adapter AG2 target migrates to the full managed Toolkit skill s
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md'), 'utf8'), /alpha v1/);
+  assert.equal(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), 'old adapter only\n');
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md')), false);
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(audit.targets.ag2.would_write, false);
 });
 
@@ -1366,44 +2737,42 @@ test('audit separates hub adapter metadata from app-facing target sync', () => {
   assert.equal(audit.targets.opencode.internal_adapter_exists, true);
   assert.equal(audit.targets.opencode.target_exists, false);
   assert.equal(audit.targets.opencode.synced, false);
-  assert.equal(audit.targets.opencode.would_write, true);
+  assert.equal(audit.targets.opencode.needs_sync, true);
+  assert.equal(audit.targets.opencode.would_write, false);
   assert.equal(path.resolve(audit.targets.opencode.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'opencode')));
   assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(opencodeTarget));
 
-  assert.equal(audit.targets.ag2.internal_adapter_exists, true);
+  assert.equal(audit.targets.ag2.internal_adapter_exists, false, 'blocked excluded AG2 payload is not generated');
   assert.equal(audit.targets.ag2.target_exists, false);
   assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.ag2.status, 'blocked-proof');
+  assert.equal(audit.targets.ag2.projection_proof.status, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(path.resolve(audit.targets.ag2.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'ag2')));
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(ag2Target));
+  assert.equal(audit.targets.ag2.target_path, '');
 });
 
-test('disabled target is not overwritten during later sync', () => {
+test('disabled OpenCode target is not overwritten during later sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
 
   const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills');
-  const ag2TargetDir = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   const opencodeMarker = path.join(opencodeTargetDir, 'USER-MARKER.txt');
-  const ag2Marker = path.join(ag2TargetDir, 'USER-MARKER.txt');
   fs.writeFileSync(opencodeMarker, 'keep opencode\n', 'utf8');
-  fs.writeFileSync(ag2Marker, 'keep ag2\n', 'utf8');
 
-  result = run(['--hub', hub, '--write', '--disable-target', 'opencode', '--disable-target', 'ag2'], {
+  result = run(['--hub', hub, '--write', '--disable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n');
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n', 'disabled OpenCode target must not be overwritten');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n', 'disabled Antigravity target must not be overwritten');
 });
 
 test('cross-source versions do not block native hosts or repo target sync', () => {
@@ -1421,7 +2790,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1431,7 +2800,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     'codex-plugin': '9.8.0',
     'claude-plugin': expectedBridgeVersion
   });
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(state.hub_version, '9.9.9');
 
   state.bridge_versions_by_source['claude-plugin'] = '9.7.0';
@@ -1443,7 +2812,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
   assert.equal(result.status, 0, result.stderr);
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.bridge_versions_by_source['claude-plugin'], '9.7.0');
-  assert.equal(state.bridge_versions_by_source['codex-plugin'], expectedBridgeVersion);
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], undefined, 'preference-only writes do not persist source maintenance state');
   assert.equal(state.hub_version, '9.9.9');
 });
 
@@ -1591,7 +2960,7 @@ test('repo same-source downgrade names managed source remediation', () => {
     bridge_versions_by_source: { repo: '9.9.9' },
     targets: {}
   });
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'repo'], {
+  const result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'repo'], {
     env: isolatedHomeEnv(root)
   });
   assert.notEqual(result.status, 0);
@@ -1611,7 +2980,7 @@ test('legacy migration seeds only an attributable recognized source', () => {
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1623,7 +2992,7 @@ test('legacy migration seeds only an attributable recognized source', () => {
   assert.equal(state.bridge_versions_by_source.repo, undefined);
   assert.equal(state.preserved_setting, 'keep');
 
-  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1643,7 +3012,7 @@ test('attributable legacy same-source history still refuses a genuine downgrade'
     last_sync_source: 'claude-plugin',
     targets: {}
   });
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  const result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.notEqual(result.status, 0);
@@ -1662,7 +3031,7 @@ test('unattributed legacy hub versions do not cross-block and establish the runn
     if (lastSyncSource) legacy.last_sync_source = lastSyncSource;
     writeJson(path.join(hub, 'state.json'), legacy);
 
-    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    const result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
       env: isolatedHomeEnv(root)
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1683,7 +3052,7 @@ test('partially migrated state never attributes the reporting watermark to a mis
     targets: {}
   });
 
-  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  const result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1705,7 +3074,7 @@ test('malformed and attacker-controlled version maps follow the safe normalizati
     bridge_versions_by_source: ['repo', '9.9.9'],
     targets: {}
   });
-  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1724,7 +3093,7 @@ test('malformed and attacker-controlled version maps follow the safe normalizati
     },
     targets: {}
   }, null, 2).replace('"constructor": "99.0.0"', '"__proto__": "99.0.0",\n      "constructor": "99.0.0"')}\n`, 'utf8');
-  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+  result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1779,8 +3148,12 @@ test('unsupported running sync sources fail closed without writing state', () =>
 test('alternating source writes preserve all source entries and stable state', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--enable-target', 'opencode', '--sync-source', 'repo'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
   for (const source of ['codex-plugin', 'claude-plugin', 'repo', 'codex-plugin']) {
-    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {
+    result = run(['--hub', hub, '--write', '--sync-enabled', '--sync-source', source], {
       env: isolatedHomeEnv(root)
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1797,12 +3170,16 @@ test('alternating source writes preserve all source entries and stable state', (
 test('concurrent source writers retry lock contention and preserve every source entry', async () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  const setup = run(['--hub', hub, '--write', '--enable-auto-sync', '--enable-target', 'opencode', '--sync-source', 'repo'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(setup.status, 0, setup.stderr);
   const worker = [
     "'use strict';",
     "const { spawnSync } = require('node:child_process');",
     'const [script, hub, source, cwd, home] = process.argv.slice(1);',
     'for (let attempt = 0; attempt < 500; attempt += 1) {',
-    "  const result = spawnSync(process.execPath, [script, '--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {",
+    "  const result = spawnSync(process.execPath, [script, '--hub', hub, '--write', '--sync-enabled', '--sync-source', source], {",
     "    cwd, encoding: 'utf8', env: { ...process.env, PATH: '', USERPROFILE: home, HOME: home, LOCALAPPDATA: home }",
     '  });',
     '  if (result.status === 0) process.exit(0);',
@@ -1830,7 +3207,7 @@ test('concurrent source writers retry lock contention and preserve every source 
   });
 });
 
-test('writer recomputes its complete snapshot from state committed before lock acquisition', () => {
+test('writer rejects lock-time target destination widening from a concurrent commit', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const sourceA = createMinimalToolkitSource(path.join(root, 'source-a'), { alpha: 'source A\n' });
@@ -1864,13 +3241,13 @@ test('writer recomputes its complete snapshot from state committed before lock a
   writeJson(path.join(hub, 'state.json'), state);
 
   let writerBResult = null;
-  const writerAResult = runBridge([
-    '--hub', hub,
-    '--sync-enabled',
-    '--write',
-    '--sync-source', 'repo'
-  ], {
-    afterInitialSnapshotDerivation(initialSnapshot) {
+  assert.throws(() => runBridge([
+      '--hub', hub,
+      '--sync-enabled',
+      '--write',
+      '--sync-source', 'repo'
+    ], {
+      afterInitialSnapshotDerivation(initialSnapshot) {
       assert.equal(initialSnapshot.sourceRoot, path.resolve(sourceA));
       assert.deepEqual(initialSnapshot.plannedTargetSyncs, []);
       assert.match(initialSnapshot.payloads.opencode['skills/alpha/SKILL.md'].toString('utf8'), /source A/);
@@ -1894,11 +3271,10 @@ test('writer recomputes its complete snapshot from state committed before lock a
       ].join('\n'));
       git(sourceB, ['add', '.']);
       git(sourceB, ['commit', '-m', 'advance source B after writer B snapshot']);
-    }
-  });
+      }
+  }), /Execution authority destination changed while waiting for the lock: opencode/);
 
   assert.ok(writerBResult, 'writer B must commit while writer A is paused before lock acquisition');
-  assert.equal(writerAResult.status, 0);
   const finalState = readJson(path.join(hub, 'state.json'));
   const manifest = readJson(path.join(hub, 'manifest.json'));
   const expectedPayloads = adapterPayloads({ repo_path: sourceB });
@@ -1909,14 +3285,14 @@ test('writer recomputes its complete snapshot from state committed before lock a
     'claude-plugin': expectedBridgeVersion
   });
   assert.deepEqual(finalState.future_bridge_metadata, { owner: 'future-version', preserve: true });
-  assert.equal(manifest.checksum, payloadChecksum(expectedPayloads));
-  assert.equal(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']));
+  assert.notEqual(manifest.checksum, payloadChecksum(expectedPayloads), 'rejected writer does not adopt source bytes committed after the authorized snapshot');
+  assert.notEqual(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']), 'rejected writer does not adopt a later source commit');
   assert.equal(path.resolve(finalState.targets.opencode.target_path), path.resolve(sourceBTarget));
   assert.equal(path.resolve(manifest.targets.opencode.target_path), path.resolve(sourceBTarget));
   assert.equal(finalState.targets.opencode.synced_checksum, manifest.checksum);
-  assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B/);
   assert.doesNotMatch(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source A/);
-  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B/);
 
   const hubRoot = path.dirname(hub);
   const residuePattern = /^(?:update\.lock(?:$|\.recovery(?:$|\.)|\.displaced\.)|\.staging-)/;
@@ -1938,22 +3314,22 @@ test('writer recomputes its complete snapshot from state committed before lock a
   const rerunManifest = readJson(path.join(hub, 'manifest.json'));
   assert.equal(rerunState.repo_path, path.resolve(sourceB));
   assert.equal(path.resolve(rerunState.targets.opencode.target_path), path.resolve(sourceBTarget));
-  assert.equal(rerunManifest.checksum, firstChecksum);
+  assert.notEqual(rerunManifest.checksum, firstChecksum);
   assert.deepEqual(rerunState.bridge_versions_by_source, firstVersions);
   assert.deepEqual(rerunState.future_bridge_metadata, { owner: 'future-version', preserve: true });
-  assert.equal(rerunState.targets.opencode.synced_checksum, firstChecksum);
+  assert.equal(rerunState.targets.opencode.synced_checksum, rerunManifest.checksum);
   assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
   assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
 
   const rerunAudit = run(['--hub', hub, '--audit', '--sync-source', 'repo'], { env });
   assert.equal(rerunAudit.status, 0, rerunAudit.stderr);
   const audit = parseLastJson(rerunAudit.stdout);
-  assert.equal(audit.checksum, firstChecksum);
+  assert.equal(audit.checksum, rerunManifest.checksum);
   assert.equal(audit.targets.opencode.synced, true);
   assert.equal(audit.targets.opencode.would_write, false);
 });
 
-test('owned hub snapshot success and handled payload, validation, and replacement failures leave no generation residue', () => {
+test('owned scoped hub target success and handled payload, validation, and replacement failures leave no generation residue', () => {
   const cases = [
     { name: 'success', hooks: {}, succeeds: true },
     {
@@ -1963,7 +3339,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
     },
     {
       name: 'validation',
-      hooks: { afterHubPayloadWrite({ stagePath }) { fs.rmSync(path.join(stagePath, 'state.json')); } },
+      hooks: { afterHubPayloadWrite({ stagePath }) { fs.rmSync(path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md')); } },
       succeeds: false
     },
     {
@@ -1979,6 +3355,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
     const args = [
       '--hub', hub,
       '--enable-auto-sync',
+      '--enable-target', 'opencode',
       '--write',
       '--sync-source', 'repo'
     ];
@@ -1998,7 +3375,7 @@ test('owned hub snapshot success and handled payload, validation, and replacemen
         else process.env[key] = value;
       }
     }
-    assert.deepEqual(ownedStagingArtifacts(path.dirname(hub)), [], `${fixture.name} hub staging must be cleaned`);
+    assert.deepEqual(ownedStagingArtifacts(path.join(hub, 'adapters')), [], `${fixture.name} target staging must be cleaned`);
   }
 });
 
@@ -2159,7 +3536,7 @@ test('isolated reconciliation bypasses reports, state, targets, repo update, and
   assert.equal(rerun.status, 0, rerun.stderr);
   const rerunOutput = parseLastJson(rerun.stdout);
   assert.equal(rerunOutput.staging_reconciliation.status, 'already-absent');
-  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 3);
+  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 2);
   assert.deepEqual(snapshotTree(reportDir), reportBefore);
 });
 
@@ -3373,7 +4750,7 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
 
   let result = run(['--hub', hub, '--enable-auto-sync', '--write'], { env });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
+  assert.equal(result.stdout, 'Toolkit local bridge preferences updated.\n');
 
   result = run(['--hub', hub, '--audit'], { env });
   assert.equal(result.status, 0, result.stderr);
@@ -3401,8 +4778,10 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
   assert.match(result.stderr, /must stay under the current user home or temp directory/);
 
   const lockState = readJson(path.join(hub, 'state.json'));
-  lockState.targets.opencode.enabled = true;
-  lockState.targets.opencode.explicitly_disabled = false;
+  lockState.targets = {
+    ...(lockState.targets || {}),
+    opencode: { ...(lockState.targets?.opencode || {}), enabled: true, explicitly_disabled: false }
+  };
   writeJson(path.join(hub, 'state.json'), lockState);
   const lockPath = path.join(path.dirname(hub), 'update.lock');
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
@@ -3415,7 +4794,7 @@ test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warn
   const blockedReportDir = path.join(tempRoot, 'ai-agent-toolkit', 'update-reports');
   writeFile(blockedReportDir, 'synthetic directory blocker\n');
   const cleanupHub = path.join(root, 'cleanup warning hub', 'current');
-  result = run(['--hub', cleanupHub, '--enable-auto-sync', '--write'], { env });
+  result = run(['--hub', cleanupHub, '--disable-target', 'opencode', '--write'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /Toolkit update report cleanup warning: .*<private-path>/);
   assert.equal(result.stderr.includes(blockedReportDir), false);
@@ -3446,7 +4825,8 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.hub_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '1.0.0');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
   assert.equal(state.last_sync_source, 'claude-plugin');
 });
 
@@ -3778,7 +5158,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
-test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets and does not reuse stale repo status', () => {
+test('startup hook mode syncs stale enabled OpenCode and preserves AG2 without proof', () => {
   const root = tmpRoot();
   createMinimalToolkitSource(root, { alpha: 'alpha startup source\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -3813,13 +5193,14 @@ test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets a
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
   assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.doesNotMatch(report.text, /Antigravity 2|AG2/);
   assert.match(report.text, /repo update status: `not run`/);
   assert.match(report.text, /hook-light validation: `not run`/);
   assert.match(report.text, /target sync status: `synced`/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, '1.0.0');
+  assert.equal(state.targets.ag2.skip_reason, 'AG2_PROOF_UNAVAILABLE');
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
@@ -3939,7 +5320,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   assert.match(report.text, /target sync status: `not needed`/);
 });
 
-test('hook report includes both external repo advance and Antigravity 2 target sync', () => {
+test('hook report includes external repo advance and OpenCode target sync', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   writeRealBridgeDelegator(fixture.repo);
@@ -3956,7 +5337,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -3967,7 +5348,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
 
-  pushRepoToolkitUpdate(fixture, 'already-advanced-ag2-sync');
+  pushRepoToolkitUpdate(fixture, 'already-advanced-opencode-sync');
   writeRealBridgeDelegator(fixture.upstream);
   const updatedCommit = commitAll(fixture.upstream, 'delegate updated bridge target sync');
   git(fixture.upstream, ['push', 'origin', 'main']);
@@ -3975,16 +5356,65 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   git(fixture.repo, ['merge', '--ff-only', 'FETCH_HEAD']);
   assert.equal(currentCommit(fixture.repo), updatedCommit);
 
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin', '--audit'], {
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./, `${result.stdout}\n${result.stderr}`);
   const report = readLatestReport(hub);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `up-to-date`/);
   assert.match(report.text, /target sync status: `synced`/);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.delegated_receipt.exit_status, 0);
+  assert.match(audit.delegated_receipt.child_source_identity, /^[0-9a-f]{64}$/);
+});
+
+test('fixed delegated child rejects parent destination A versus child discovery B before target writes', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const targetA = path.join(fixture.root, 'target-a', 'skills');
+  const targetB = path.join(fixture.root, 'target-b', 'skills');
+  writeRealBridgeDelegator(fixture.repo);
+  commitAll(fixture.repo, 'install exact delegated child');
+  git(fixture.repo, ['push', 'origin', 'main']);
+  fixture.initialCommit = currentCommit(fixture.repo);
+  git(fixture.upstream, ['fetch', 'origin', 'main']);
+  git(fixture.upstream, ['reset', '--hard', 'origin/main']);
+
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'opencode',
+    '--opencode-target', targetA,
+    '--write',
+    '--suppress-update-report'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+  const targetABefore = snapshotTree(targetA);
+
+  pushRepoToolkitUpdate(fixture, 'delegated-destination-drift');
+  writeDriftingRealBridge(fixture.upstream);
+  commitAll(fixture.upstream, 'inject deterministic delegated discovery drift');
+  git(fixture.upstream, ['push', 'origin', 'main']);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin', '--suppress-update-report'], {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATED_DESTINATION_B: targetB
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /delegated target destination binding mismatch|Execution authority destination changed|authority-relevant state changed/);
+  assert.deepEqual(snapshotTree(targetA), targetABefore);
+  assert.equal(fs.existsSync(targetB), false);
+  assert.notEqual(readJson(path.join(hub, 'state.json')).last_repo_update_status, 'sync-delegation-failed', 'drift blocks even failure-status persistence');
 });
 
 test('final report relock uses final target enablement for skipped targets and signature', () => {
@@ -4040,7 +5470,7 @@ test('final report relock uses final target enablement for skipped targets and s
 
   const report = readLatestReport(hub);
   assert.doesNotMatch(report.text, /Skipped OpenCode because target is disabled/);
-  assert.match(report.text, /Skipped Antigravity 2 because target is disabled/);
+  assert.match(report.text, /Skipped AG2 skills projection because target is disabled/);
   const persisted = readJson(path.join(hub, 'state.json'));
   const signatureContext = {
     cleanup: capturedReport.reportSnapshot.state.last_update_report_cleanup || {},
@@ -4098,25 +5528,27 @@ test('hook report is generated when target sync happens without a repo commit ch
 test('hook report tells user to run setup toolkit when Codex native plugin cache is stale', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex cache source\n' });
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
+  writeCodexPluginRefreshFixture(sourceRepo);
   const hub = path.join(root, 'hub', 'current');
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: '2.11.1',
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache\n');
+    }
+  });
 
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4126,14 +5558,11 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.text, /Action needed: enable Codex plugin auto-refresh in setup, or run `setup toolkit`\./);
   assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
-  assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(report.state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4146,27 +5575,31 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   const fixture = createRepoAutoUpdateFixture();
   const root = fixture.root;
   const sourceRepo = fixture.repo;
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(sourceRepo);
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  commitAll(sourceRepo, 'record verified codex plugin refresh fixture');
+  const evidence = setupCodexEvidence(root, sourceRepo, {
+    version: '2.11.1',
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), '// stale cache\n');
+    }
+  });
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
+    env: codexEvidenceEnv(root, evidence, { PATH: process.env.PATH, PLUGIN_ROOT: evidence.cacheRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
@@ -4177,6 +5610,59 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
   assert.doesNotMatch(report.text, /run `setup toolkit`/);
+});
+
+test('production bridge refresh starts from cache A, installs observed cache B, and verifies B as final proof', () => {
+  const scenario = createCodexRefreshScenario();
+  const result = runCodexRefreshScenario(scenario);
+  assert.equal(result.status, 0, result.stderr);
+
+  const cacheA = scenario.evidence.cacheRoot;
+  const cacheB = cacheRootFor(scenario.evidence.codexHome, expectedBridgeVersion);
+  assert.notEqual(path.resolve(cacheA), path.resolve(cacheB));
+  assert.deepEqual(verifyInstalledCacheFreshness(cacheB, scenario.sourceRepo), []);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(cacheA, scenario.sourceRepo), []);
+  assert.equal(readJson(scenario.evidence.fake.statePath).installed[0].version, expectedBridgeVersion);
+
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+});
+
+test('production bridge rejects a claimed refresh when fresh rediscovery is missing or ambiguous', () => {
+  for (const rediscoveryMode of ['missing', 'ambiguous']) {
+    const scenario = createCodexRefreshScenario({ rediscoveryMode });
+    const result = runCodexRefreshScenario(scenario);
+    assert.equal(result.status, 0, `${rediscoveryMode}: ${result.stderr}`);
+    const report = readLatestReport(scenario.hub);
+    assert.match(report.text, /Codex native plugin cache auto-refresh failed/);
+    assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+    const installed = readJson(scenario.evidence.fake.statePath).installed;
+    assert.equal(installed.length, rediscoveryMode === 'missing' ? 0 : 2);
+  }
+});
+
+test('production bridge rejects bytes and fingerprint mismatch on rediscovered cache B', () => {
+  const scenario = createCodexRefreshScenario();
+  const result = runCodexRefreshScenario(scenario, { CODEX_TOOLKIT_TEST_CORRUPT_REFRESHED_CACHE: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  const cacheB = cacheRootFor(scenario.evidence.codexHome, expectedBridgeVersion);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(cacheB, scenario.sourceRepo), []);
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /Codex native plugin cache auto-refresh failed/);
+  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+});
+
+test('production bridge preserves explicit user-disabled config and does not refresh', () => {
+  const scenario = createCodexRefreshScenario({ enabled: false });
+  const result = runCodexRefreshScenario(scenario);
+  assert.equal(result.status, 0, result.stderr);
+  assert.notDeepEqual(verifyInstalledCacheFreshness(scenario.evidence.cacheRoot, scenario.sourceRepo), []);
+  assert.equal(readJson(scenario.evidence.fake.statePath).installed[0].version, '2.11.1');
+  const report = readLatestReport(scenario.hub);
+  assert.match(report.text, /user-disabled/);
+  assert.match(report.text, /no refresh was attempted/i);
+  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
 });
 
 test('Claude hook reports host-local manual native cache action and never runs Codex refresh', () => {
@@ -4190,13 +5676,13 @@ test('Claude hook reports host-local manual native cache action and never runs C
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'claude-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   const statePath = path.join(hub, 'state.json');
   const state = readJson(statePath);
-  state.targets.ag2.synced_checksum = 'old';
+  state.targets.opencode.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
@@ -4215,11 +5701,14 @@ test('Claude hook reports host-local manual native cache action and never runs C
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
   writeCodexPluginRefreshFixture(fixture.repo);
   const refreshedCommit = commitAll(fixture.repo, 'add codex plugin refresh fixture');
   git(fixture.repo, ['push', 'origin', 'main']);
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+  const evidence = setupCodexEvidence(fixture.root, fixture.repo, {
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+    }
+  });
 
   let result = run([
     '--hub', hub,
@@ -4230,20 +5719,20 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
     '--write'
-  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  ], { env: codexEvidenceEnv(fixture.root, evidence) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
+    env: codexEvidenceEnv(fixture.root, evidence, {
       PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
+      PLUGIN_ROOT: path.join(fixture.root, 'stale-cache-A')
     })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(currentCommit(fixture.repo), refreshedCommit);
   assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    verifyInstalledCacheFreshness(cacheRootFor(evidence.codexHome, expectedBridgeVersion), fixture.repo),
     [],
     'auto-refresh should leave the installed plugin cache matching the trusted repo'
   );
@@ -4258,8 +5747,6 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
 test('Codex auto-refresh runs before delegated target sync failure', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
 
   let result = run([
     '--hub', hub,
@@ -4284,18 +5771,24 @@ test('Codex auto-refresh runs before delegated target sync failure', () => {
   git(fixture.upstream, ['add', '.']);
   git(fixture.upstream, ['commit', '-m', 'refresh codex cache but fail delegated sync']);
   git(fixture.upstream, ['push', 'origin', 'main']);
+  const evidence = setupCodexEvidence(fixture.root, fixture.repo, {
+    cacheSourceRepo: fixture.upstream,
+    cacheMutation(cacheRoot) {
+      writeFile(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+    }
+  });
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
+    env: codexEvidenceEnv(fixture.root, evidence, {
       PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
+      PLUGIN_ROOT: path.join(fixture.root, 'stale-cache-A')
     })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(result.stdout, /delegated repo sync failed/);
   assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    verifyInstalledCacheFreshness(cacheRootFor(evidence.codexHome, expectedBridgeVersion), fixture.repo),
     [],
     'auto-refresh should still update the Codex plugin cache before delegated sync failure is reported'
   );
@@ -4548,16 +6041,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
-  const targetSkill = path.join(
-    fixture.root,
-    '.gemini',
-    'config',
-    'plugins',
-    'ai-agent-toolkit',
-    'skills',
-    'alpha',
-    'SKILL.md'
-  );
+  const targetSkill = path.join(fixture.root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md');
   assert.match(fs.readFileSync(targetSkill, 'utf8'), /alpha legacy v2/);
 
   const report = readLatestReport(fixture.hub);
@@ -4569,10 +6053,10 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /Time \(SGT\): `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} SGT`/);
   assert.doesNotMatch(report.text, /Timestamp: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`/);
   assert.match(report.text, /Repo: updated from [0-9a-f]{8} to [0-9a-f]{8}\./);
-  assert.match(report.text, /Targets: synced Antigravity 2 \(2 skills\)\./);
+  assert.match(report.text, /Targets: synced OpenCode \(2 skills\)\./);
   assert.match(report.text, /Action needed: none\./);
   assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /target sync status: `synced`/);
@@ -4596,16 +6080,7 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
   assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
   assert.match(
-    fs.readFileSync(path.join(
-      fixture.root,
-      '.gemini',
-      'config',
-      'plugins',
-      'ai-agent-toolkit',
-      'skills',
-      'alpha',
-      'SKILL.md'
-    ), 'utf8'),
+    fs.readFileSync(path.join(fixture.root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
     /alpha legacy v2/
   );
 });
@@ -4792,18 +6267,22 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), updatedCommit);
 
-  const delegateArgs = fs.readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
-  assert.equal(delegateArgs.length, 1);
-  assert.deepEqual(delegateArgs[0], [
-    '--sync-enabled',
+  const delegateReceipts = fs.readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(delegateReceipts.length, 1);
+  assert.deepEqual(delegateReceipts[0].args, [
     '--write',
     '--sync-source',
     'repo',
     '--hub',
     hub,
     '--skip-repo-auto-update',
-    '--suppress-update-report'
+    '--suppress-update-report',
+    '--delegated-invocation-authority',
+    '--audit'
   ]);
+  assert.equal(delegateReceipts[0].envelope.contract, 'toolkit.local-bridge.delegated-invocation-authority.v1');
+  assert.equal(delegateReceipts[0].envelope.repository_result.commit, updatedCommit);
+  assert.equal(delegateReceipts[0].envelope.actions.targets.ag2, 'sync');
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'updated');
   assert.equal(state.bridge_versions_by_source.repo, '9.9.9');
@@ -4811,6 +6290,31 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   assert.equal(state.hub_version, '9.9.9');
   assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
+});
+
+test('fast-forward dispatch uses the admitted immutable commit when FETCH_HEAD is replaced before launch', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const offline = ['--opencode-command', path.join(fixture.root, 'missing-opencode.exe'), '--python-command', path.join(fixture.root, 'missing-python.exe')];
+  const configured = runBridge([
+    '--hub', hub, '--enable-repo-auto-update', '--repo-path', fixture.repo,
+    '--repo-branch', 'main', '--repo-remote', fixture.origin, '--write', '--suppress-update-report', ...offline
+  ]);
+  assert.equal(configured.status, 0);
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'immutable-fast-forward-operand');
+  let replaced = false;
+  const result = runBridge([
+    '--hub', hub, '--repo-update-now', '--write', '--suppress-update-report', ...offline
+  ], {
+    beforeManagedEffectAdmission({ kind }) {
+      if (kind !== 'repository.fast-forward-merge' || replaced) return;
+      replaced = true;
+      fs.writeFileSync(path.join(fixture.repo, '.git', 'FETCH_HEAD'), `${fixture.initialCommit}\t\tbranch 'main' of ${fixture.origin}\n`);
+    }
+  });
+  assert.equal(result.status, 0);
+  assert.equal(replaced, true);
+  assert.equal(currentCommit(fixture.repo), updatedCommit, 'mutable FETCH_HEAD must not substitute for the admitted commit SHA');
 });
 
 test('repo update failure does not sync targets', () => {
@@ -5007,7 +6511,7 @@ test('legacy update-report open flags retain failure-only behavior', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
 });
 
-test('legacy persisted all-report opening migrates while retention is preserved', () => {
+test('preference-only report enable preserves unrelated legacy opening bytes while audit normalizes read-only', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), {
@@ -5023,8 +6527,8 @@ test('legacy persisted all-report opening migrates while retention is preserved'
   });
   assert.equal(result.status, 0, result.stderr);
   let state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.update_report_open_enabled, false);
-  assert.equal(state.legacy_update_report_open_migrated, true);
+  assert.equal(state.update_report_open_enabled, true);
+  assert.equal(state.legacy_update_report_open_migrated, undefined);
   assert.equal(state.update_report_retention_days, 14);
 
   result = run(['--hub', hub, '--audit'], {
@@ -5050,25 +6554,6 @@ test('central report classification opens only actionable reports', () => {
   assert.equal(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'partial-failed' } }).actionable, true);
   assert.equal(classifyUpdateReport({ ...base, targetSyncStatus: 'failed' }).actionable, true);
 
-  const writes = [];
-  const opens = [];
-  const invoke = (context) => maybeWriteUpdateReport({
-    args: { hook: true, repoUpdateNow: false, openUpdateReport: false, suppressUpdateReport: false, syncSource: 'repo' },
-    hubPath: 'unused',
-    state: { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 },
-    checksum: 'fixture',
-    context,
-    writeReport(markdown) { writes.push(markdown); return `fixture-${writes.length}.md`; },
-    openReport(reportPath) { opens.push(reportPath); return { ok: true }; },
-  });
-  invoke({ ...base, repo: { status: 'updated' } });
-  assert.equal(writes.length, 1);
-  assert.equal(opens.length, 0);
-  invoke({ ...base, repo: { status: 'validation-failed' } });
-  assert.equal(writes.length, 2);
-  assert.deepEqual(opens, ['fixture-2.md']);
-  invoke(base);
-  assert.equal(writes.length, 2);
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
@@ -5308,7 +6793,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
-    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
+    assert.match(text, /AG2.*omit|Omit OpenCode or AG2/i, relPath);
     assert.match(text, /Allowed later blockers include dirty managed checkout, unexpected remote, fetch\/auth failure, non-fast-forward update, validation failure/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
     const setupValidationBlock = text.match(/For bridge or setup-surface changes, prefer targeted checks first:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
@@ -5325,26 +6810,26 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /fail with the repair error/i, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2/i, relPath);
+    assert.match(text, /OpenCode.*AG2/i, relPath);
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
     assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
-    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
+    assert.match(text, /AG2.*omit|Omit OpenCode or AG2/i, relPath);
+    assert.match(text, /OpenCode uses the required native Toolkit plugin migration path.*AG2 is skills-only and opt-in only/is, relPath);
     assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
     assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
-    assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /does not prove worker\/checker launch capability/i, relPath);
-    assert.match(text, /root-only is the conservative recommendation while strict capability is unverified/i, relPath);
-    assert.match(text, /direct.*(?:visible|displayed).*request/i, relPath);
-    assert.match(text, /selecting it does not mean it is (?:already )?(?:active|enabled)/i, relPath);
-    assert.match(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
-    assert.match(text, /verified-current no-maintenance SessionStart identity/i, relPath);
-    assert.match(text, /stale installed Toolkit code is never trusted/i, relPath);
-    assert.match(text, /Restart-pending, stale, or failed verification leaves root-only active/i, relPath);
+    assert.match(text, /Pre-approval setup and plan discovery do not launch a native child/i, relPath);
+    assert.match(text, /does not select .*worker\/checker mapping|No native child controller/i, relPath);
+    assert.match(text, /Root-only is the safe unapplied result when an exact route or host proof is unavailable/i, relPath);
+    assert.match(text, /exact route records and capability proofs fail closed/i, relPath);
+    assert.match(text, /capability evidence never becomes scheduling authority/i, relPath);
+    assert.doesNotMatch(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
+    assert.match(text, /native plugin metadata|native Toolkit plugin flow/i, relPath);
+    assert.match(text, /stale.*plugin|plugin cache.*refresh/i, relPath);
+    assert.match(text, /plugin cache verification failure|Root-only is the safe unapplied result/i, relPath);
     assert.doesNotMatch(text, /offers .* only when the detected CLI supports their real effects/i, relPath);
   }
 });

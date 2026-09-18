@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program-reconciler.bounded-continuation-envelope.v1",
+  "title": "Toolkit bounded continuation envelope",
+  "description": "A narrow mechanics envelope that cannot widen authority, scope, topology, or gate ownership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "root", "lock", "gate", "authority_digest", "scope_digest", "allowed_mechanics", "return_conditions"],
+  "properties": {
+    "contract_version": { "const": "toolkit.github-program-reconciler.bounded-continuation-envelope.v1" },
+    "root": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._:-]{0,127}$" },
+    "lock": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._:-]{0,127}$" },
+    "gate": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._:-]{0,63}$" },
+    "authority_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "scope_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "allowed_mechanics": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9._:-]{0,127}$" } },
+    "return_conditions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" } }
+  }
+}

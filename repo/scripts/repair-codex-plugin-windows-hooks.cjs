@@ -120,6 +120,21 @@ function writeJsonFile(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+function recordPlannedWrite(options, filePath, before, after) {
+  if (!Array.isArray(options.planWrites)) return;
+  const beforeBytes = before === null ? null : Buffer.from(before, 'utf8');
+  const afterBytes = Buffer.from(after, 'utf8');
+  options.planWrites.push(Object.freeze({
+    path: path.resolve(filePath),
+    before_exists: beforeBytes !== null,
+    before_sha256: beforeBytes === null ? '' : crypto.createHash('sha256').update(beforeBytes).digest('hex'),
+    before_byte_length: beforeBytes === null ? 0 : beforeBytes.length,
+    after_sha256: crypto.createHash('sha256').update(afterBytes).digest('hex'),
+    after_byte_length: afterBytes.length,
+    after_base64: afterBytes.toString('base64')
+  }));
+}
+
 function collectHookCommandEntries(hooksJson) {
   const entries = [];
 
@@ -403,8 +418,9 @@ function wrapperText() {
 function ensureWrapper(pluginRoot, actions, options) {
   const wrapperPath = path.join(pluginRoot, 'hooks', 'run-hook.ps1');
   const desired = wrapperText();
+  let existing = null;
   if (fs.existsSync(wrapperPath)) {
-    const existing = fs.readFileSync(wrapperPath, 'utf8');
+    existing = fs.readFileSync(wrapperPath, 'utf8');
     if (!existing.includes(WRAPPER_MARKER)) {
       throw new Error(`hooks/run-hook.ps1 already exists but is not Toolkit-managed; refusing to overwrite it`);
     }
@@ -412,6 +428,7 @@ function ensureWrapper(pluginRoot, actions, options) {
   }
 
   actions.push('write hooks/run-hook.ps1');
+  recordPlannedWrite(options, wrapperPath, existing, desired);
   if (options.write) fs.writeFileSync(wrapperPath, desired, 'utf8');
 }
 
@@ -717,6 +734,7 @@ function patchFile(pluginRoot, relPath, transform, actions, options, required = 
   const after = transform(before);
   if (after === before) return;
   actions.push(`patch ${relPath}`);
+  recordPlannedWrite(options, filePath, before, after);
   if (options.write) fs.writeFileSync(filePath, after, 'utf8');
 }
 
@@ -731,7 +749,8 @@ function repairPluginRoot(pluginRoot, options = {}) {
   const effectiveOptions = {
     windows: options.windows ?? process.platform === 'win32',
     write: Boolean(options.write),
-    n8n: Boolean(options.n8n)
+    n8n: Boolean(options.n8n),
+    planWrites: options.planWrites
   };
   const actions = [];
   const errors = [];
@@ -791,7 +810,12 @@ function repairPluginRoot(pluginRoot, options = {}) {
     patchN8nHookInternals(pluginRoot, actions, effectiveOptions);
   }
 
-  if (changedHooksJson && effectiveOptions.write) writeJsonFile(hooksJsonPath, hooksJson);
+  if (changedHooksJson) {
+    const before = fs.readFileSync(hooksJsonPath, 'utf8');
+    const after = `${JSON.stringify(hooksJson, null, 2)}\n`;
+    recordPlannedWrite(effectiveOptions, hooksJsonPath, before, after);
+    if (effectiveOptions.write) writeJsonFile(hooksJsonPath, hooksJson);
+  }
 
   if (!effectiveOptions.write && actions.length > 0) {
     return {
@@ -837,7 +861,8 @@ function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
     windows: true,
     write,
     n8n: true,
-    skipN8nCompatibilityCheck: true
+    skipN8nCompatibilityCheck: true,
+    planWrites: options.planWrites
   });
   if (!write) return { ...before, repaired: false, actions: repair.actions || [] };
 
@@ -846,6 +871,21 @@ function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
     throw new Error(`n8n Skills repair verification failed: ${after.reason || after.status}`);
   }
   return { ...after, status: 'repaired', repaired: true, actions: repair.actions || [] };
+}
+
+function planN8nSkillsPluginRepair(pluginRoot, options = {}) {
+  const writes = [];
+  const result = reconcileN8nSkillsPlugin(pluginRoot, {
+    windows: options.windows ?? process.platform === 'win32',
+    write: false,
+    planWrites: writes
+  });
+  return Object.freeze({
+    plugin_root: path.resolve(pluginRoot),
+    status: result.status,
+    actions: Object.freeze([...(result.actions || [])]),
+    writes: Object.freeze(writes)
+  });
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -938,6 +978,7 @@ module.exports = {
   collectHookCommandEntries,
   classifyN8nSkillsCompatibility,
   n8nSkillsCompatibilityFingerprints,
+  planN8nSkillsPluginRepair,
   reconcileN8nSkillsPlugin,
   repairPluginRoot,
   tokenizeCommand

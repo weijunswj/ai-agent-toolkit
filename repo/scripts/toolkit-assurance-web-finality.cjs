@@ -1,10 +1,13 @@
 'use strict';
 
+const routeResolution = require('./toolkit-route-resolution.cjs');
+const hostRouteAdapters = require('./toolkit-host-route-adapters.cjs');
+
 const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
 const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
-const G4_MODEL = 'GPT-5.6 Sol High';
-const G4A_MODEL = 'GPT-5.6 Sol Max';
+const G4_ROLE = 'g4';
+const G4A_ROLE = 'final-audit';
 
 const MATERIAL_PREDICATES = Object.freeze([
   'applies_to_current_candidate',
@@ -187,7 +190,28 @@ function g4AdmissionFailures(input) {
   const { candidate, lock, scope, g4 } = input;
   if (!isRecord(g4)) return ['g4-admission-missing'];
   if (g4.status !== 'PASS') failures.push('g4-status-not-pass');
-  if (g4.provider !== 'OpenAI' || g4.model_class !== G4_MODEL || g4.reasoning !== 'high' || g4.mode !== 'standard') failures.push('g4-model-binding-invalid');
+  if (g4.role !== G4_ROLE) failures.push('g4-route-evidence-missing');
+  if (!isDigest(g4.route_digest) || !isDigest(g4.capability_proof_digest)) failures.push('g4-route-evidence-unverified');
+  const launchRecord = g4.launch_record;
+  const capabilityProof = g4.capability_proof;
+  if (!isRecord(launchRecord) || !isRecord(capabilityProof)) {
+    failures.push('g4-exact-launch-evidence-missing');
+  } else {
+    try {
+      const checkedRecord = routeResolution.validateResolvedLaunchRecord(launchRecord);
+      const checkedProof = hostRouteAdapters.verifyProofForRecord(checkedRecord, capabilityProof);
+      if (checkedRecord.depth !== 0 || checkedRecord.parent_launch_id !== null || checkedRecord.role !== G4_ROLE
+        || checkedRecord.route_digest !== g4.route_digest || checkedRecord.provider !== g4.provider
+        || checkedRecord.model !== g4.model || checkedRecord.reasoning !== g4.reasoning
+        || checkedRecord.service_tier !== g4.service_tier || checkedRecord.speed !== g4.speed
+        || checkedProof.status !== 'available' || checkedProof.trusted !== true || checkedProof.metadata_verified !== true
+        || routeResolution.digestValue(checkedProof) !== g4.capability_proof_digest) {
+        failures.push('g4-exact-launch-evidence-conflict');
+      }
+    } catch (_error) {
+      failures.push('g4-exact-launch-evidence-invalid');
+    }
+  }
   for (const key of ['fresh', 'isolated', 'read_only', 'complete_candidate', 'current', 'complete', 'server_authoritative', 'verifiable']) {
     if (!hasTrue(g4, key)) failures.push('g4-' + key + '-failed');
   }
@@ -219,7 +243,8 @@ function admitG4(input) {
     admitted: true,
     contract_version: CONTRACT_VERSION,
     authority: G4_AUTHORITY,
-    model_class: G4_MODEL,
+    role: G4_ROLE,
+    route_digest: input.g4.route_digest,
     fresh: true,
     isolated: true,
     read_only: true,
@@ -481,9 +506,22 @@ function evaluateG4A(input = {}) {
       next_action: 'CONTROLLER_REQUIRED',
     });
   }
+  if (input.route_evidence) {
+    const evidence = input.route_evidence;
+    if (!isRecord(evidence) || !isRecord(evidence.launch_record) || !isRecord(evidence.capability_proof)) return fail('G4A_NOT_PERMITTED', { allowed: false });
+    try {
+      const record = routeResolution.validateResolvedLaunchRecord(evidence.launch_record);
+      const proof = hostRouteAdapters.verifyProofForRecord(record, evidence.capability_proof);
+      if (record.role !== G4A_ROLE || record.depth !== 0 || evidence.route_digest !== record.route_digest
+        || evidence.capability_proof_digest !== routeResolution.digestValue(proof)) return fail('G4A_NOT_PERMITTED', { allowed: false });
+    } catch (_error) {
+      return fail('G4A_NOT_PERMITTED', { allowed: false });
+    }
+  }
   return valid('G4A_ELIGIBLE', {
     allowed: true,
-    model_class: G4A_MODEL,
+    role: G4A_ROLE,
+    route_digest: input.route_evidence?.route_digest || null,
     fresh: true,
     isolated: true,
     read_only: true,
@@ -703,8 +741,8 @@ module.exports = Object.freeze({
   DESIGN_LOCK_ID,
   CONTRACT_VERSION,
   G4_AUTHORITY,
-  G4_MODEL,
-  G4A_MODEL,
+  G4_ROLE,
+  G4A_ROLE,
   MATERIAL_PREDICATES,
   EXCLUSION_FLAGS,
   admitG4,

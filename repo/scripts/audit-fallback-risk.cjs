@@ -33,8 +33,6 @@ const skippedDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage'
 const defaultScanTargets = [
   'AGENTS.md',
   'CLAUDE.md',
-  'GEMINI.md',
-  '.agents/rules/00-agent-toolkit-bootstrap.md',
   'repo/contracts/agent-rules',
   'repo/docs/agent-playbooks',
   'skills'

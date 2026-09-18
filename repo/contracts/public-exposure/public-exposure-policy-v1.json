@@ -1,0 +1,26 @@
+{
+  "contract_version": "toolkit.public-exposure.policy.v1",
+  "schema_version": 1,
+  "default": "public-by-default",
+  "secret_handling": {
+    "placeholder": "[REDACTED]",
+    "values_are_never_published": true,
+    "secret_field_names": ["api_key", "apikey", "authorization", "cookie", "credential", "password", "private_key", "secret", "token"],
+    "known_secret_patterns": ["openai-key", "google-api-key", "bearer-token", "jwt", "private-key"],
+    "generic_credential_patterns": ["github-token", "gitlab-token", "npm-token", "slack-token", "stripe-key"]
+  },
+  "classification": {
+    "content_value_checks_precede_metadata_exemptions": true,
+    "classification_order": ["confirmed-exposure", "whole-value-placeholder", "recognised-secret-pattern", "credential-assignment", "inherited-secret-field", "generic-credential-content", "proven-safe-metadata"],
+    "none": { "publish": "as-observed", "action": "none" },
+    "possible": { "publish": "redacted", "action": "pause", "report": "type-name-place-action" },
+    "confirmed": { "publish": "redacted", "action": "stop", "code": "SECRET_EXPOSURE_DETECTED", "report": "type-name-place-action" }
+  },
+  "safe_auth_metadata": ["host", "login", "account", "token_present", "token_scopes", "masked_token", "authentication_method"],
+  "deployment": {
+    "required_configuration": "fail-closed",
+    "literal_real_value_fallback": false,
+    "missing_code": "REQUIRED_CONFIGURATION_MISSING"
+  },
+  "public_exception_fields": ["category", "name", "surface", "reason", "scope", "authority", "expires_at"]
+}

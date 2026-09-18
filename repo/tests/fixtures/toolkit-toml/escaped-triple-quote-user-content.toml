@@ -1,0 +1,19 @@
+title = "user config"
+literal = 'literal # content'
+basic = "escaped quote: \""
+note = """
+user escaped \"""
+# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3
+max_concurrent_threads_per_session = 2
+# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY
+[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]
+enabled = true
+""" # """
+literal_note = '''
+[plugins.'ai-agent-toolkit@ai-agent-toolkit-local']
+enabled = false
+'''
+values = ["one", 'two', { enabled = true }]
+
+["quoted.table".'segment']
+value = "kept"

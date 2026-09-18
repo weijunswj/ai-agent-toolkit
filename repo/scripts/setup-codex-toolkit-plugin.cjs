@@ -6,10 +6,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const tomlStructural = require('./toolkit-toml-structural.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.10.9';
+const EXPECTED_TOOLKIT_VERSION = '2.13.0';
+const CODEX_JSON_MAX_BUFFER_BYTES = 8388608;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -26,11 +28,15 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/toolkit-toml-structural.cjs',
   'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
   'repo/scripts/repo-ignore-hygiene.cjs',
   'repo/scripts/repo-local-backup.cjs',
   'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
-  'repo/scripts/toolkit-agent-control.cjs',
+  'repo/scripts/toolkit-route-resolution.cjs',
+  'repo/scripts/toolkit-host-route-adapters.cjs',
+  'repo/scripts/toolkit-public-exposure.cjs',
+  'repo/scripts/setup-opencode-toolkit-plugin.cjs',
   'repo/scripts/claude-process-launch.cjs',
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
@@ -59,6 +65,230 @@ const CODEX_PLUGIN_ICON_SPECS = [
     height: 512
   }
 ];
+const DELEGATED_NATIVE_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-native-setup-authority.v1';
+let activeDelegatedNativeAuthority = null;
+let activeDelegatedNativePhase = null;
+let delegatedNativeTestHooks = null;
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function decodeDelegatedNativeAuthority(encoded) {
+  if (!encoded) return null;
+  let value;
+  try {
+    value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('delegated native authority is not valid canonical base64url JSON');
+  }
+  if (canonicalJson(value) !== Buffer.from(encoded, 'base64url').toString('utf8')) {
+    throw new Error('delegated native authority is not canonical');
+  }
+  return value;
+}
+
+function establishDelegatedNativeAuthority(options) {
+  const authority = options.delegatedInvocationAuthority;
+  activeDelegatedNativeAuthority = null;
+  if (!authority) return null;
+  if (!options.write) throw new Error('delegated native authority requires --write');
+  if (authority.contract !== DELEGATED_NATIVE_AUTHORITY_CONTRACT || authority.action !== 'native.cache.maintenance') {
+    throw new Error('delegated native authority contract is invalid');
+  }
+  if (!/^[a-f0-9]{64}$/.test(String(authority.setup_source_sha256 || ''))) throw new Error('delegated native authority source identity is invalid');
+  if (path.resolve(authority.repository || '') !== options.repoRoot) throw new Error('delegated native repository does not match --repo-root');
+  if (path.resolve(authority.codex_home || '') !== options.codexHome) throw new Error('delegated native Codex home does not match the child operand');
+  if (path.resolve(authority.executable || '') !== path.resolve(process.execPath)) throw new Error('delegated native executable identity does not match the child runtime');
+  if (authority.expected_version !== EXPECTED_TOOLKIT_VERSION) throw new Error('delegated native Toolkit version does not match the child');
+  if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source identity changed before child start');
+  if (!/^[a-f0-9]{64}$/.test(String(authority.source_cache_fingerprint || ''))) throw new Error('delegated native source fingerprint is invalid');
+  if (!authority.verified_source || authority.verified_source.setup_source_sha256 !== authority.setup_source_sha256
+    || !/^[a-f0-9]{64}$/.test(String(authority.verified_source.receipt_id || ''))
+    || !/^[a-f0-9]{40,64}$/.test(String(authority.verified_source.commit || ''))
+    || !/^[a-f0-9]{40,64}$/.test(String(authority.verified_source.tree || ''))
+    || !/^[a-f0-9]{64}$/.test(String(authority.verified_source.source_manifest_digest || ''))) {
+    throw new Error('delegated native verifier-owned source receipt is invalid');
+  }
+  if (!/^[0-9a-f-]{36}$/.test(String(authority.mutation_phase_id || ''))) throw new Error('delegated native mutation phase identity is invalid');
+  const expectedPhasePath = path.join(options.codexHome, `.ai-agent-toolkit-native-phase-${authority.mutation_phase_id}.json`);
+  if (path.resolve(authority.mutation_phase_lock_path || '') !== expectedPhasePath) throw new Error('delegated native mutation phase path is invalid');
+  if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before child start');
+  const required = [
+    'codex.command.probe', 'codex.plugin.list', 'codex.marketplace.add', 'codex.plugin.remove',
+    'codex.plugin.add', 'codex.session-start.write', 'toml.structural.check'
+  ].sort();
+  if (canonicalJson([...(authority.allowed_effects || [])].sort()) !== canonicalJson(required)) {
+    throw new Error('delegated native effect ceiling is invalid');
+  }
+  activeDelegatedNativeAuthority = Object.freeze(JSON.parse(JSON.stringify(authority)));
+  return activeDelegatedNativeAuthority;
+}
+
+function stableFilesystemIdentity(targetPath, expectedType) {
+  const exactPath = path.resolve(targetPath);
+  const stat = fs.lstatSync(exactPath);
+  if (stat.isSymbolicLink()) throw new Error(`delegated native ${expectedType} identity is a symbolic link`);
+  if (expectedType === 'directory' && !stat.isDirectory()) throw new Error('delegated native directory identity changed');
+  if (expectedType === 'file' && !stat.isFile()) throw new Error('delegated native file identity changed');
+  return Object.freeze({
+    path: exactPath,
+    realpath: path.resolve(fs.realpathSync.native(exactPath)),
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    type: expectedType
+  });
+}
+
+function delegatedNativeStaticState(authority) {
+  return Object.freeze({
+    authority_digest: sha256(canonicalJson(authority)),
+    repository: stableFilesystemIdentity(authority.repository, 'directory'),
+    codex_home: stableFilesystemIdentity(authority.codex_home, 'directory'),
+    setup_source: stableFilesystemIdentity(__filename, 'file'),
+    executable: stableFilesystemIdentity(process.execPath, 'file'),
+    setup_source_sha256: authority.setup_source_sha256,
+    source_cache_fingerprint: authority.source_cache_fingerprint,
+    verified_source: authority.verified_source,
+    env_digest: authority.env_digest
+  });
+}
+
+function assertDelegatedNativeSourceContinuity(authority) {
+  const actual = cacheFingerprint(authority.repository, authority.repository, {
+    normalizeWindowsSessionStart: process.platform === 'win32'
+  });
+  if (actual !== authority.source_cache_fingerprint) {
+    throw new Error('delegated native verifier-owned source closure changed before effect');
+  }
+}
+
+function assertDelegatedDestinationContinuity(operands, options = {}) {
+  for (const expected of operands.destination_ancestor_chain || []) {
+    assertStableIdentity(stableFilesystemIdentity(expected.path, 'directory'), expected, 'destination ancestor');
+  }
+  if (!options.postcondition && operands.source_identity) {
+    assertStableIdentity(stableFilesystemIdentity(operands.source_identity.path, 'file'), operands.source_identity, 'source operand');
+  }
+  if (!options.postcondition && operands.destination_state) {
+    const expected = operands.destination_state;
+    const exists = fs.existsSync(expected.path);
+    if (exists !== expected.exists) throw new Error('delegated native destination object changed');
+    if (exists) assertStableIdentity(stableFilesystemIdentity(expected.path, 'file'), expected.identity, 'destination object');
+  }
+}
+
+function captureDestinationState(targetPath) {
+  const exactPath = path.resolve(targetPath);
+  if (!fs.existsSync(exactPath)) return Object.freeze({ path: exactPath, exists: false });
+  return Object.freeze({ path: exactPath, exists: true, identity: stableFilesystemIdentity(exactPath, 'file') });
+}
+
+function captureExistingDestinationChain(rootPath, destinationPath) {
+  const root = path.resolve(rootPath);
+  const destination = path.resolve(destinationPath);
+  const relative = path.relative(root, destination);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('delegated native destination chain escaped its admitted root');
+  const chain = [stableFilesystemIdentity(root, 'directory')];
+  let current = root;
+  for (const part of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) break;
+    chain.push(stableFilesystemIdentity(current, 'directory'));
+  }
+  return chain;
+}
+
+function establishDelegatedNativeMutationPhase(options, testHooks = {}) {
+  const authority = activeDelegatedNativeAuthority;
+  activeDelegatedNativePhase = null;
+  delegatedNativeTestHooks = testHooks || null;
+  if (!authority) return null;
+  assertDelegatedNativeSourceContinuity(authority);
+  const lockPath = path.resolve(authority.mutation_phase_lock_path);
+  const boundState = delegatedNativeStaticState(authority);
+  const record = Object.freeze({
+    contract: 'toolkit.local-bridge.delegated-native-mutation-phase.v1',
+    phase_id: authority.mutation_phase_id,
+    parent_invocation_id: authority.parent_invocation_id,
+    authority_digest: boundState.authority_digest,
+    bound_state_digest: sha256(canonicalJson(boundState))
+  });
+  const bytes = Buffer.from(canonicalJson(record), 'utf8');
+  fs.writeFileSync(lockPath, bytes, { flag: 'wx', mode: 0o600 });
+  const identity = stableFilesystemIdentity(lockPath, 'file');
+  activeDelegatedNativePhase = {
+    lockPath,
+    bytes,
+    identity,
+    boundState,
+    sequence: 0
+  };
+  return Object.freeze({ phase_id: authority.mutation_phase_id, lock_path: lockPath, bound_state_digest: record.bound_state_digest });
+}
+
+function assertStableIdentity(actual, expected, label) {
+  if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error(`delegated native ${label} identity changed`);
+}
+
+function verifyDelegatedNativeContinuity(action, operands = {}, options = {}) {
+  const authority = activeDelegatedNativeAuthority;
+  if (!authority) return null;
+  if (!authority.allowed_effects.includes(action)) throw new Error(`delegated native action is not authorised: ${action}`);
+  const phase = activeDelegatedNativePhase;
+  if (!phase) throw new Error('delegated native mutation phase is not established');
+  if (!options.postcondition && delegatedNativeTestHooks?.beforeEffect) delegatedNativeTestHooks.beforeEffect(Object.freeze({ action, operands: JSON.parse(JSON.stringify(operands)), sequence: phase.sequence }));
+  if (authority.setup_source_sha256 !== sha256(fs.readFileSync(__filename))) throw new Error('delegated native setup source changed before effect');
+  assertDelegatedNativeSourceContinuity(authority);
+  if (authority.env_digest !== sha256(canonicalJson({ ...process.env }))) throw new Error('delegated native environment changed before effect');
+  if (path.resolve(authority.executable) !== path.resolve(process.execPath)) throw new Error('delegated native executable changed before effect');
+  assertStableIdentity(stableFilesystemIdentity(authority.repository, 'directory'), phase.boundState.repository, 'repository');
+  assertStableIdentity(stableFilesystemIdentity(authority.codex_home, 'directory'), phase.boundState.codex_home, 'Codex home');
+  assertStableIdentity(stableFilesystemIdentity(__filename, 'file'), phase.boundState.setup_source, 'setup source');
+  assertStableIdentity(stableFilesystemIdentity(process.execPath, 'file'), phase.boundState.executable, 'executable');
+  assertStableIdentity(stableFilesystemIdentity(phase.lockPath, 'file'), phase.identity, 'phase lock');
+  if (!fs.readFileSync(phase.lockPath).equals(phase.bytes)) throw new Error('delegated native mutation phase lock was replaced');
+  if (sha256(canonicalJson(delegatedNativeStaticState(authority))) !== sha256(canonicalJson(phase.boundState))) {
+    throw new Error('delegated native mutation phase bound state changed');
+  }
+  assertDelegatedDestinationContinuity(operands, options);
+  canonicalJson(operands);
+  return null;
+}
+
+function completeDelegatedNativeEffect(action, operands = {}) {
+  if (!activeDelegatedNativeAuthority) return;
+  verifyDelegatedNativeContinuity(action, operands, { postcondition: true });
+  activeDelegatedNativePhase.sequence += 1;
+  if (delegatedNativeTestHooks?.afterEffect) delegatedNativeTestHooks.afterEffect(Object.freeze({ action, operands: JSON.parse(JSON.stringify(operands)), sequence: activeDelegatedNativePhase.sequence }));
+}
+
+function releaseDelegatedNativeMutationPhase() {
+  const phase = activeDelegatedNativePhase;
+  activeDelegatedNativePhase = null;
+  delegatedNativeTestHooks = null;
+  activeDelegatedNativeAuthority = null;
+  if (!phase) return;
+  try {
+    assertDelegatedNativeSourceContinuity(phase.boundState ? {
+      repository: phase.boundState.repository.path,
+      source_cache_fingerprint: phase.boundState.source_cache_fingerprint
+    } : {});
+    assertStableIdentity(stableFilesystemIdentity(phase.lockPath, 'file'), phase.identity, 'phase lock');
+    if (!fs.readFileSync(phase.lockPath).equals(phase.bytes)) return;
+    fs.unlinkSync(phase.lockPath);
+  } catch {
+    // Revoked or replaced phase evidence is intentionally preserved.
+  }
+}
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -74,6 +304,14 @@ function compareSemver(left, right) {
     if (leftPart < rightPart) return -1;
   }
   return 0;
+}
+
+function isSupportedCacheVersion(value) {
+  return typeof value === 'string' && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(value);
+}
+
+function isSha256Fingerprint(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }
 
 function readJson(filePath) {
@@ -97,7 +335,7 @@ function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPat
   return `& ${powershellSingleQuoted(powershellPath)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/${SESSION_START_POWERSHELL_REL_PATH}"`;
 }
 
-function writeFileAtomically(filePath, bytes) {
+function writeFileAtomicallyStandalone(filePath, bytes) {
   const tempPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   try {
@@ -106,6 +344,79 @@ function writeFileAtomically(filePath, bytes) {
   } finally {
     fs.rmSync(tempPath, { force: true });
   }
+}
+
+function writeCodexSessionStart(filePath, bytes) {
+  const authority = activeDelegatedNativeAuthority;
+  if (!authority) return writeFileAtomicallyStandalone(filePath, bytes);
+  const exactPath = path.resolve(filePath);
+  const codexHome = path.resolve(authority.codex_home);
+  const relative = path.relative(codexHome, exactPath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('delegated native session-start write escaped the Codex home');
+  if (!exactPath.endsWith(path.join('.codex-plugin', 'hooks', 'hooks.json')) && !exactPath.endsWith(SESSION_START_RUNTIME_REL_PATH.split('/').join(path.sep))) {
+    throw new Error('delegated native session-start write target is not an accepted managed file');
+  }
+  const value = Buffer.from(bytes);
+  const tempPath = `${exactPath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  const destinationState = captureDestinationState(exactPath);
+  const destinationChain = captureExistingDestinationChain(codexHome, path.dirname(exactPath));
+  try {
+    const relativeParent = path.relative(codexHome, path.dirname(exactPath));
+    let current = codexHome;
+    for (const part of relativeParent.split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      if (fs.existsSync(current)) {
+        const identity = stableFilesystemIdentity(current, 'directory');
+        if (!destinationChain.some((expected) => expected.path === identity.path)) destinationChain.push(identity);
+        continue;
+      }
+      const mkdirOperands = { kind: 'mkdir', path: current, destination_ancestor_chain: [...destinationChain] };
+      verifyDelegatedNativeContinuity('codex.session-start.write', mkdirOperands);
+      fs.mkdirSync(current);
+      const createdIdentity = stableFilesystemIdentity(current, 'directory');
+      completeDelegatedNativeEffect('codex.session-start.write', mkdirOperands);
+      destinationChain.push(createdIdentity);
+    }
+    const writeOperands = {
+      kind: 'exclusive-write',
+      path: tempPath,
+      sha256: sha256(value),
+      byte_length: value.length,
+      destination_ancestor_chain: [...destinationChain]
+    };
+    verifyDelegatedNativeContinuity('codex.session-start.write', writeOperands);
+    fs.writeFileSync(tempPath, value, { flag: 'wx', mode: 0o600 });
+    if (!fs.readFileSync(tempPath).equals(value)) throw new Error('delegated native temporary write postcondition failed');
+    completeDelegatedNativeEffect('codex.session-start.write', writeOperands);
+    const tempIdentity = stableFilesystemIdentity(tempPath, 'file');
+    const renameOperands = {
+      kind: 'rename',
+      source: tempPath,
+      destination: exactPath,
+      sha256: sha256(value),
+      destination_ancestor_chain: [...destinationChain],
+      source_identity: tempIdentity,
+      destination_state: destinationState
+    };
+    verifyDelegatedNativeContinuity('codex.session-start.write', renameOperands);
+    fs.renameSync(tempPath, exactPath);
+    if (!fs.readFileSync(exactPath).equals(value)) throw new Error('delegated native session-start write postcondition failed');
+    completeDelegatedNativeEffect('codex.session-start.write', renameOperands);
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      const cleanupOperands = {
+        kind: 'cleanup',
+        path: tempPath,
+        destination_ancestor_chain: [...destinationChain],
+        source_identity: stableFilesystemIdentity(tempPath, 'file')
+      };
+      verifyDelegatedNativeContinuity('codex.session-start.write', cleanupOperands);
+      fs.rmSync(tempPath, { force: true });
+      if (fs.existsSync(tempPath)) throw new Error('delegated native temporary cleanup postcondition failed');
+      completeDelegatedNativeEffect('codex.session-start.write', cleanupOperands);
+    }
+  }
+  return Object.freeze({ action: 'writeCodexSessionStart', path: exactPath, sha256: sha256(value), byte_length: value.length });
 }
 
 function pngSize(filePath) {
@@ -301,7 +612,7 @@ function prepareInstalledSessionStart(cacheRoot, options = {}) {
   const runtimeBytes = Buffer.from(`${JSON.stringify({ schema: 1, node_path: nodePath }, null, 2)}\n`, 'utf8');
   const hooksChanged = !fs.readFileSync(hooksPath).equals(hooksBytes);
   const runtimeChanged = !fs.existsSync(runtimePath) || !fs.readFileSync(runtimePath).equals(runtimeBytes);
-  const writeAtomic = options.writeFileAtomically || writeFileAtomically;
+  const writeAtomic = options.writeFileAtomically || writeCodexSessionStart;
   if (runtimeChanged) writeAtomic(runtimePath, runtimeBytes);
   const runtimeErrors = verifySessionStartRuntime(cacheRoot, { ...options, platform: 'win32', nodePath });
   if (runtimeErrors.length) throw new Error(runtimeErrors.join('; '));
@@ -322,6 +633,43 @@ function codexToolkitInstallCommands(repoRoot) {
 
 function cacheRootFor(codexHome, version = EXPECTED_TOOLKIT_VERSION) {
   return path.join(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME, version);
+}
+
+function discoverInstalledCacheRoot(codexHome, observedVersion) {
+  const errors = [];
+  const version = typeof observedVersion === 'string' ? observedVersion.trim() : '';
+  if (!isSupportedCacheVersion(version)) {
+    return { cacheRoot: '', errors: [`${pluginId()} reported an invalid installed version; its cache root cannot be resolved`] };
+  }
+
+  const pluginCacheRoot = path.resolve(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME);
+  if (!fs.existsSync(pluginCacheRoot)) {
+    return {
+      cacheRoot: '',
+      errors: [`${pluginId()} reported installed version ${version}, but its plugin cache directory is missing: ${pluginCacheRoot}`]
+    };
+  }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(pluginCacheRoot, { withFileTypes: true });
+  } catch {
+    return {
+      cacheRoot: '',
+      errors: [`${pluginId()} installed cache directory could not be read: ${pluginCacheRoot}`]
+    };
+  }
+
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && entry.name === version)
+    .map((entry) => path.resolve(pluginCacheRoot, entry.name));
+  if (candidates.length !== 1) {
+    errors.push(candidates.length === 0
+      ? `${pluginId()} reported installed version ${version}, but its exact cache root is missing`
+      : `${pluginId()} reported installed version ${version}, but its cache root is ambiguous`);
+    return { cacheRoot: '', errors };
+  }
+  return { cacheRoot: candidates[0], errors };
 }
 
 function listFingerprintFiles(root) {
@@ -358,6 +706,45 @@ function fileFingerprint(filePath) {
     size: stat.size,
     hash: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')
   };
+}
+
+function fingerprintForMaterial(root, relPath, options = {}) {
+  const filePath = path.join(root, ...relPath.split('/'));
+  if (options.normalizeWindowsSessionStart === true
+    && relPath === '.codex-plugin/hooks/hooks.json'
+    && fs.existsSync(filePath)) {
+    try {
+      const hooks = readJson(filePath);
+      if (hooks.hooks?.SessionStart?.[0]?.hooks?.[0]) {
+        hooks.hooks.SessionStart[0].hooks[0].command = sourceSessionStartCommand();
+        const bytes = Buffer.from(`${JSON.stringify(hooks, null, 2)}\n`, 'utf8');
+        return {
+          exists: true,
+          size: bytes.length,
+          hash: crypto.createHash('sha256').update(bytes).digest('hex')
+        };
+      }
+    } catch {
+      // The ordinary file fingerprint below records malformed/unreadable bytes.
+    }
+  }
+  return fileFingerprint(filePath);
+}
+
+function cacheFingerprint(cacheRoot, repoRoot = '', options = {}) {
+  const installedRoot = path.resolve(cacheRoot);
+  const sourceRoot = repoRoot ? path.resolve(repoRoot) : null;
+  const relFiles = new Set(listFingerprintFiles(installedRoot));
+  if (sourceRoot) for (const relPath of listFingerprintFiles(sourceRoot)) relFiles.add(relPath);
+  const material = [...relFiles].sort((left, right) => left.localeCompare(right)).map((relPath) => {
+    if (relPath.endsWith('/')) {
+      const installedDir = path.join(installedRoot, ...relPath.slice(0, -1).split('/'));
+      return `${relPath}\tDIR\t${fs.existsSync(installedDir) ? 'present' : 'missing'}`;
+    }
+    const installed = fingerprintForMaterial(installedRoot, relPath, options);
+    return `${relPath}\t${installed.exists ? installed.size : 0}\t${installed.hash}`;
+  }).join('\n');
+  return crypto.createHash('sha256').update(material, 'utf8').digest('hex');
 }
 
 function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
@@ -415,6 +802,171 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
   return errors;
 }
 
+function isTrustedRecoveryProof(proof) {
+  return Boolean(proof && typeof proof === 'object' && !Array.isArray(proof)
+    && proof.trusted === true && proof.ambiguous !== true);
+}
+
+function validSourceRecoveryProof(proof, expectedVersion) {
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && typeof proof.source_root === 'string'
+    && proof.source_root.length > 0
+    && proof.version === expectedVersion
+    && proof.fingerprint_verified === true
+    && proof.evidence_source === 'trusted-repo-validation'
+    && isSha256Fingerprint(proof.fingerprint);
+}
+
+function validConfigurationRecoveryProof(proof) {
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && proof.evidence_source === 'codex-config-inspection'
+    && typeof proof.enabled === 'boolean'
+    && typeof proof.user_disabled === 'boolean'
+    && (proof.enabled === true ? proof.user_disabled === false : proof.user_disabled === true);
+}
+
+function validInstalledRecoveryProof(proof, cache, expectedVersion, sourceProof) {
+  const cacheRoot = typeof cache?.cache_root === 'string' ? path.resolve(cache.cache_root) : '';
+  const proofRoot = typeof proof?.cache_root === 'string' ? path.resolve(proof.cache_root) : '';
+  const sourceRoot = typeof sourceProof?.source_root === 'string' ? path.resolve(sourceProof.source_root) : '';
+  return isTrustedRecoveryProof(proof)
+    && proof.plugin_id === pluginId()
+    && proof.plugin_name === TOOLKIT_PLUGIN_NAME
+    && proof.marketplace_name === TOOLKIT_MARKETPLACE_NAME
+    && proof.evidence_source === 'codex-plugin-list+cache'
+    && proof.installed === true
+    && proof.enabled === true
+    && proof.active === true
+    && proof.current === true
+    && proof.reported_version === expectedVersion
+    && proof.active_version === expectedVersion
+    && proof.version === expectedVersion
+    && proof.cache_manifest_version === expectedVersion
+    && proof.bytes_verified === true
+    && proof.fingerprint_verified === true
+    && isSha256Fingerprint(proof.source_fingerprint)
+    && isSha256Fingerprint(proof.cache_fingerprint)
+    && isSha256Fingerprint(proof.fingerprint)
+    && isSha256Fingerprint(sourceProof?.fingerprint)
+    && proof.source_fingerprint === sourceProof.fingerprint
+    && proof.source_fingerprint === proof.cache_fingerprint
+    && proof.fingerprint === proof.cache_fingerprint
+    && proofRoot.length > 0
+    && proofRoot === cacheRoot
+    && sourceRoot.length > 0
+    && typeof proof.source_root === 'string'
+    && path.resolve(proof.source_root) === sourceRoot;
+}
+
+function cacheRecoveryResult(state, healthy, manualAction, attempts, reasonCode, cache = null, proofs = {}) {
+  const sourceProof = isTrustedRecoveryProof(proofs.source_proof) ? proofs.source_proof : null;
+  const configurationProof = isTrustedRecoveryProof(proofs.configuration_proof) ? proofs.configuration_proof : null;
+  const installedStateProof = isTrustedRecoveryProof(proofs.installed_state_proof)
+    ? proofs.installed_state_proof
+    : (isTrustedRecoveryProof(cache?.installed_state_proof) ? cache.installed_state_proof : null);
+  return Object.freeze({
+    contract_version: 'toolkit.local-bridge.codex-cache-recovery.v1',
+    state,
+    healthy: healthy === true,
+    manual_action: manualAction === true,
+    attempts: Math.max(0, Math.min(3, attempts)),
+    reason_code: String(reasonCode),
+    cache_version: cache?.version || null,
+    cache_root: cache?.cache_root || null,
+    cache_fingerprint: cache?.fingerprint || null,
+    source_proof: sourceProof,
+    configuration_proof: configurationProof,
+    installed_state_proof: installedStateProof
+  });
+}
+
+function recoverCodexCache(options = {}) {
+  let attempts = 0;
+  const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
+  const sourceProof = options.source_proof;
+  const configurationProof = options.configuration_proof;
+  let sourceVerified = validSourceRecoveryProof(sourceProof, expectedVersion);
+  if (typeof options.verifySource === 'function') {
+    try { sourceVerified = sourceVerified && options.verifySource() === true; } catch (_error) { sourceVerified = false; }
+  }
+  if (!sourceVerified) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  if (!validConfigurationRecoveryProof(configurationProof)) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'TRUST_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  if (configurationProof.enabled === false || configurationProof.user_disabled === true) {
+    return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
+
+  let state = 'SOURCE_VERIFIED';
+  const refreshRequired = options.refresh_required === true;
+  if (refreshRequired) {
+    state = 'REFRESHING';
+    if (typeof options.refreshSupported !== 'function' || typeof options.rediscover !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+    try {
+      if (options.refreshSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'CONFIGURATION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+    } catch (_error) {
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', null, { source_proof: sourceProof, configuration_proof: configurationProof });
+    }
+  }
+
+  const rediscover = () => {
+    state = 'REDISCOVERING';
+    try {
+      if (typeof options.rediscover === 'function') return options.rediscover();
+      return refreshRequired ? null : (options.cache || null);
+    } catch (_error) {
+      return { structural_failure: true };
+    }
+  };
+  const verify = (cache) => {
+    state = 'VERIFYING';
+    const installedProof = cache?.installed_state_proof || options.installed_state_proof;
+    return cache && cache.present === true
+      && cache.version === expectedVersion
+      && cache.bytes_verified === true
+      && cache.trusted === true
+      && cache.fingerprint_verified === true
+      && isSha256Fingerprint(cache.fingerprint)
+      && validInstalledRecoveryProof(installedProof, cache, expectedVersion, sourceProof)
+      && cache.fingerprint === installedProof.fingerprint
+      && cache.executing !== true
+      && cache.status !== 'executing'
+      && cache.status !== 'stale-executing';
+  };
+  let cache = rediscover();
+  if (cache?.version && compareSemver(cache.version, expectedVersion) > 0 && options.allow_downgrade !== true) {
+    return cacheRecoveryResult('TERMINAL', false, true, attempts, 'DOWNGRADE_PROTECTION', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
+  if (verify(cache)) return cacheRecoveryResult(refreshRequired ? 'VERIFYING' : 'NOOP', true, false, attempts, refreshRequired ? 'CACHE_REFRESHED' : 'CACHE_CURRENT', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+
+  const transientLimit = Number.isInteger(options.transient_retries) ? Math.max(0, Math.min(1, options.transient_retries)) : 1;
+  while (cache?.transient === true && attempts < transientLimit) {
+    attempts += 1;
+    state = 'RETRYING_TRANSIENT';
+    if (typeof options.retryTransient !== 'function' || options.retryTransient(attempts) !== true) break;
+    cache = rediscover();
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REFRESHED', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
+  if (cache?.repairable === true) {
+    state = 'REPAIRING_ONCE';
+    if (typeof options.repairSupported !== 'function') return cacheRecoveryResult('TERMINAL', false, true, attempts, 'UNSUPPORTED_TOOL', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+    try {
+      if (options.repairSupported() !== true) return cacheRecoveryResult('TERMINAL', false, true, attempts, 'STRUCTURAL_FAILURE', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+    } catch (_error) {
+      return cacheRecoveryResult('TERMINAL', false, true, attempts, 'PERMISSION_FAILURE', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+    }
+    cache = rediscover();
+    if (verify(cache)) return cacheRecoveryResult('VERIFYING', true, false, attempts, 'CACHE_REPAIRED', cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+  }
+  const reason = cache?.trust_failure ? 'TRUST_FAILURE'
+    : cache?.ownership_failure ? 'OWNERSHIP_FAILURE'
+      : cache?.configuration_failure ? 'CONFIGURATION_FAILURE'
+        : cache?.structural_failure ? 'STRUCTURAL_FAILURE'
+          : cache?.transient === true ? 'TRANSIENT_UNRESOLVED' : 'CACHE_VERSION_OR_BYTES_UNVERIFIED';
+  const manual = ['STRUCTURAL_FAILURE', 'CONFIGURATION_FAILURE', 'PERMISSION_FAILURE', 'TRUST_FAILURE', 'OWNERSHIP_FAILURE', 'UNSUPPORTED_TOOL'].includes(reason);
+  return cacheRecoveryResult('TERMINAL', false, manual, attempts, reason, cache, { source_proof: sourceProof, configuration_proof: configurationProof });
+}
+
 function codexConfigPath(codexHome) {
   return path.join(codexHome, 'config.toml');
 }
@@ -463,23 +1015,84 @@ function configHasEnabledPlugin(configText) {
   return inspectConfiguredPluginState(configText, pluginId()).status === 'enabled';
 }
 
-function inspectConfiguredPluginState(configText, identity) {
-  const id = escapeRegex(identity);
-  const sectionPattern = new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`);
-  const lines = String(configText || '').split(/\r?\n/);
-  const sections = [];
-  let body = null;
-  for (const line of lines) {
-    const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
-    if (section) {
-      if (body) sections.push(body);
-      body = sectionPattern.test(section[1].trim()) ? [] : null;
-      continue;
+function scanConfigTomlLexicalLines(text) {
+  const lines = [];
+  let multiline = null;
+  let squareDepth = 0;
+  let braceDepth = 0;
+  let unsafe = false;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const startsInMultiline = multiline !== null;
+    const startsAtTopLevel = !startsInMultiline && squareDepth === 0 && braceDepth === 0;
+    let quote = multiline;
+    let index = 0;
+    let visibleText = '';
+    while (index < line.length) {
+      if (quote === 'multiline-basic' || quote === 'multiline-literal') {
+        const delimiter = quote === 'multiline-basic' ? '\"\"\"' : "'''";
+        const close = line.indexOf(delimiter, index);
+        if (close === -1) { index = line.length; continue; }
+        quote = null;
+        multiline = null;
+        index = close + 3;
+        continue;
+      }
+      const char = line[index];
+      if (char === '#') { visibleText += line.slice(index); break; }
+      if (line.startsWith('\"\"\"', index)) { quote = 'multiline-basic'; multiline = quote; index += 3; continue; }
+      if (line.startsWith("'''", index)) { quote = 'multiline-literal'; multiline = quote; index += 3; continue; }
+      if (char === '"' || char === "'") {
+        const delimiter = char;
+        index += 1;
+        let closed = false;
+        while (index < line.length) {
+          if (delimiter === '"' && line[index] === '\\') { index += 2; continue; }
+          if (line[index] === delimiter) { closed = true; index += 1; break; }
+          index += 1;
+        }
+        if (!closed) unsafe = true;
+        continue;
+      }
+      visibleText += char;
+      if (char === '[') squareDepth += 1;
+      else if (char === ']') { squareDepth -= 1; if (squareDepth < 0) unsafe = true; }
+      else if (char === '{') braceDepth += 1;
+      else if (char === '}') { braceDepth -= 1; if (braceDepth < 0) unsafe = true; }
+      index += 1;
     }
-    if (body) body.push(line);
+    lines.push({ text: line, visible_text: visibleText, top_level: startsAtTopLevel, inside_multiline: startsInMultiline });
   }
-  if (body) sections.push(body);
+  if (multiline !== null || squareDepth !== 0 || braceDepth !== 0) unsafe = true;
+  return { lines, unsafe };
+}
 
+function inspectConfiguredPluginState(configText, identity) {
+  const analysis = tomlStructural.analyseToml(configText, activeDelegatedNativeAuthority ? {
+    launchParser(candidate, input) {
+      const command = String(candidate.command || '');
+      const args = [...(candidate.args || []), '-c', String(candidate.script || '')];
+      if (!command || !String(candidate.script || '').includes('tomllib.loads')) throw new Error('delegated TOML parser operands are invalid');
+      const operands = {
+        kind: 'toml-parser-launch',
+        executable: path.resolve(command),
+        argv_digest: sha256(canonicalJson(args)),
+        input_sha256: sha256(Buffer.from(input))
+      };
+      verifyDelegatedNativeContinuity('toml.structural.check', operands);
+      const result = spawnSync(command, args, {
+        input: Buffer.from(input),
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 60000,
+        maxBuffer: 1024 * 1024
+      });
+      completeDelegatedNativeEffect('toml.structural.check', operands);
+      return result;
+    }
+  } : {});
+  if (analysis.validity.ok !== true) return { status: 'unprovable', reason: 'Codex config TOML structure is multiple, malformed, or ambiguous' };
+  const sections = analysis.tables.filter((table) => table.array !== true
+    && table.path.length === 2 && table.path[0] === 'plugins' && table.path[1] === identity);
   if (sections.length !== 1) {
     return {
       status: 'unprovable',
@@ -488,10 +1101,10 @@ function inspectConfiguredPluginState(configText, identity) {
         : `Codex config has multiple [plugins."${identity}"] sections`
     };
   }
-  const enabledValues = sections[0]
-    .map((line) => line.match(/^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/))
-    .filter(Boolean)
-    .map((match) => match[1].toLowerCase());
+  const enabledValues = analysis.assignments.filter((assignment) => assignment.table_path.length === 2
+    && assignment.table_path[0] === 'plugins' && assignment.table_path[1] === identity
+    && assignment.key_path.length === 1 && assignment.key_path[0] === 'enabled'
+    && assignment.value_kind === 'boolean').map((assignment) => assignment.value);
   if (enabledValues.length !== 1) {
     return {
       status: 'unprovable',
@@ -499,7 +1112,7 @@ function inspectConfiguredPluginState(configText, identity) {
     };
   }
   return {
-    status: enabledValues[0] === 'true' ? 'enabled' : 'disabled',
+    status: enabledValues[0] === true ? 'enabled' : 'disabled',
     reason: `Codex config explicitly reports [plugins."${identity}"] as ${enabledValues[0]}`
   };
 }
@@ -517,6 +1130,45 @@ function inspectCodexConfiguredPluginState(options = {}) {
   } catch {
     return { status: 'unprovable', reason: `Codex config state for ${identity} could not be read` };
   }
+}
+
+function inspectCodexToolkitConfigurationProof(options = {}) {
+  const identity = pluginId();
+  const inspection = inspectCodexConfiguredPluginState({
+    codexHome: options.codexHome || defaultCodexHome(),
+    identity
+  });
+  const base = {
+    trusted: false,
+    ambiguous: true,
+    plugin_id: identity,
+    plugin_name: TOOLKIT_PLUGIN_NAME,
+    marketplace_name: TOOLKIT_MARKETPLACE_NAME,
+    enabled: null,
+    user_disabled: null,
+    status: inspection.status,
+    evidence_source: 'codex-config-inspection',
+    reason: inspection.reason
+  };
+  if (inspection.status === 'enabled') {
+    return {
+      ...base,
+      trusted: true,
+      ambiguous: false,
+      enabled: true,
+      user_disabled: false
+    };
+  }
+  if (inspection.status === 'disabled') {
+    return {
+      ...base,
+      trusted: true,
+      ambiguous: false,
+      enabled: false,
+      user_disabled: true
+    };
+  }
+  return base;
 }
 
 function localMarketplaceSection(configText) {
@@ -613,6 +1265,212 @@ function findInstalledEntry(pluginList) {
   })[0] || null;
 }
 
+function deriveCodexInstalledStateProof(pluginList, options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = String(options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
+  const identity = {
+    pluginId: pluginId(),
+    name: TOOLKIT_PLUGIN_NAME,
+    marketplaceName: TOOLKIT_MARKETPLACE_NAME
+  };
+  const errors = [];
+  let ambiguous = false;
+  const installedEntries = Array.isArray(pluginList?.installed) ? pluginList.installed : null;
+  if (!installedEntries) {
+    errors.push('Codex plugin list did not contain a valid installed array');
+    ambiguous = true;
+  }
+  const matches = installedEntries ? findInstalledPluginEntries(pluginList, identity) : [];
+  if (matches.length === 0) {
+    errors.push(`${pluginId()} is not installed`);
+    ambiguous = true;
+  } else if (matches.length !== 1) {
+    errors.push(`${pluginId()} has ambiguous installed state: Codex reported ${matches.length} matching entries`);
+    ambiguous = true;
+  }
+
+  const entry = matches.length === 1 ? matches[0] : null;
+  let observedVersion = '';
+  let activeVersion = '';
+  let cacheRoot = '';
+  if (entry) {
+    if (entry.pluginId !== identity.pluginId) errors.push(`${pluginId()} installed entry did not report the exact plugin identity`);
+    if (entry.name !== identity.name || entry.marketplaceName !== identity.marketplaceName) {
+      errors.push(`${pluginId()} installed entry name or marketplace identity is malformed`);
+    }
+    if (entry.installed !== true) errors.push(`${pluginId()} is not reported as installed`);
+    if (typeof entry.enabled !== 'boolean') errors.push(`${pluginId()} installed entry did not report an explicit enabled boolean`);
+    else if (!entry.enabled) errors.push(`${pluginId()} is installed but not enabled`);
+    if (entry.authPolicy !== 'ON_USE') {
+      errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${entry.authPolicy || '<missing>'}`);
+    }
+    const sourcePath = entry.source?.path;
+    if (sourcePath !== undefined && sourcePath !== null && typeof sourcePath !== 'string') {
+      errors.push(`${pluginId()} installed entry reported a malformed source path`);
+    } else if (typeof sourcePath === 'string' && sourcePath.trim() && comparablePath(sourcePath) !== comparablePath(repoRoot)) {
+      errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
+    }
+
+    observedVersion = typeof entry.version === 'string' ? entry.version.trim() : '';
+    if (!isSupportedCacheVersion(observedVersion)) {
+      errors.push(`${pluginId()} installed entry did not report a valid active version`);
+    }
+    const activeVersionKey = Object.prototype.hasOwnProperty.call(entry, 'activeVersion')
+      ? 'activeVersion'
+      : (Object.prototype.hasOwnProperty.call(entry, 'active_version') ? 'active_version' : 'version');
+    activeVersion = typeof entry[activeVersionKey] === 'string' ? entry[activeVersionKey].trim() : '';
+    if (!isSupportedCacheVersion(activeVersion)) {
+      errors.push(`${pluginId()} installed entry did not report a valid active version`);
+    } else if (observedVersion && activeVersion !== observedVersion) {
+      errors.push(`${pluginId()} reported installed version ${observedVersion} but active version ${activeVersion}`);
+    }
+    if (isSupportedCacheVersion(observedVersion) && observedVersion !== expectedVersion) {
+      errors.push(`${pluginId()} expected version ${expectedVersion}: ${observedVersion}`);
+    }
+  }
+
+  if (isSupportedCacheVersion(observedVersion)) {
+    const discovered = discoverInstalledCacheRoot(codexHome, observedVersion);
+    cacheRoot = discovered.cacheRoot;
+    errors.push(...discovered.errors);
+  }
+
+  let manifestVersion = '';
+  if (cacheRoot) {
+    const manifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
+    try {
+      const manifest = readJson(manifestPath);
+      manifestVersion = typeof manifest.version === 'string' ? manifest.version : '';
+      if (manifest.name !== TOOLKIT_PLUGIN_NAME) errors.push(`${pluginId()} cache manifest has wrong plugin name: ${manifest.name || '<missing>'}`);
+      if (manifestVersion !== observedVersion) errors.push(`${pluginId()} cache manifest version does not match observed installed version ${observedVersion}: ${manifestVersion || '<missing>'}`);
+    } catch {
+      errors.push(`${pluginId()} cache manifest could not be read at ${manifestPath}`);
+    }
+    const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+    try {
+      if (!fs.existsSync(hooksPath)) {
+        errors.push(`${pluginId()} installed cache SessionStart hook is missing at ${hooksPath}`);
+      } else {
+        errors.push(...verifySessionStartHook(hooksPath, {
+          windows: process.platform === 'win32'
+        }).map((error) => `${pluginId()} cache ${error}`));
+      }
+    } catch (error) {
+      errors.push(`${pluginId()} cache SessionStart hook could not be read at ${hooksPath}: ${error.message}`);
+    }
+    try {
+      errors.push(...verifyInstalledCacheFreshness(cacheRoot, repoRoot, { platform: process.platform }).map((error) => error));
+    } catch {
+      errors.push(`${pluginId()} installed cache freshness could not be verified at ${cacheRoot}`);
+    }
+  }
+
+  let sourceFingerprint = '';
+  let cacheFingerprintValue = '';
+  if (cacheRoot) {
+    try {
+      const fingerprintOptions = { normalizeWindowsSessionStart: process.platform === 'win32' };
+      sourceFingerprint = cacheFingerprint(repoRoot, repoRoot, fingerprintOptions);
+      cacheFingerprintValue = cacheFingerprint(cacheRoot, repoRoot, fingerprintOptions);
+    } catch {
+      errors.push(`${pluginId()} source/cache fingerprint could not be computed`);
+    }
+  }
+  const bytesVerified = Boolean(cacheRoot && manifestVersion === observedVersion && !errors.some((error) => /cache|freshness|manifest|missing repo file|stale for repo file/i.test(error)));
+  const fingerprintVerified = isSha256Fingerprint(sourceFingerprint)
+    && isSha256Fingerprint(cacheFingerprintValue)
+    && sourceFingerprint === cacheFingerprintValue
+    && bytesVerified;
+  if (!bytesVerified) errors.push(`${pluginId()} installed cache bytes could not be verified against the current source`);
+  if (!fingerprintVerified) errors.push(`${pluginId()} installed cache fingerprint could not be verified against the current source`);
+
+  const trusted = Boolean(entry
+    && entry.pluginId === identity.pluginId
+    && entry.name === identity.name
+    && entry.marketplaceName === identity.marketplaceName
+    && entry.installed === true
+    && entry.enabled === true
+    && entry.authPolicy === 'ON_USE'
+    && isSupportedCacheVersion(observedVersion)
+    && activeVersion === observedVersion
+    && cacheRoot
+    && manifestVersion === observedVersion
+    && bytesVerified
+    && fingerprintVerified
+    && errors.length === 0);
+  const proof = {
+    trusted,
+    ambiguous,
+    plugin_id: identity.pluginId,
+    plugin_name: identity.name,
+    marketplace_name: identity.marketplaceName,
+    installed: entry?.installed === true,
+    enabled: entry?.enabled === true,
+    active: Boolean(entry?.installed === true && entry?.enabled === true && activeVersion && activeVersion === observedVersion),
+    reported_version: observedVersion || null,
+    active_version: activeVersion || null,
+    version: observedVersion || null,
+    current: observedVersion === expectedVersion,
+    cache_root: cacheRoot || null,
+    cache_manifest_version: manifestVersion || null,
+    bytes_verified: bytesVerified,
+    source_root: repoRoot,
+    source_fingerprint: sourceFingerprint || null,
+    cache_fingerprint: cacheFingerprintValue || null,
+    fingerprint: cacheFingerprintValue || null,
+    fingerprint_verified: fingerprintVerified,
+    evidence_source: 'codex-plugin-list+cache',
+    reason: errors[0] || ''
+  };
+  const refusesDowngrade = isSupportedCacheVersion(observedVersion)
+    && compareSemver(observedVersion, expectedVersion) > 0;
+  return {
+    ok: trusted && proof.current === true,
+    installed: entry,
+    cacheRoot: cacheRoot || (isSupportedCacheVersion(observedVersion) ? cacheRootFor(codexHome, observedVersion) : ''),
+    errors: [...new Set(errors)],
+    verificationMethod: 'codex-cli-list+cache',
+    installedStateProof: proof,
+    proof,
+    refusesDowngrade
+  };
+}
+
+function inspectCodexToolkitInstalledState(options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'pluginList')) {
+    return {
+      ok: false,
+      pluginList: null,
+      proof: {
+        trusted: false,
+        ambiguous: true,
+        plugin_id: pluginId(),
+        evidence_source: 'codex-plugin-list+cache',
+        reason: 'Synthetic plugin-list input is not supported for current installed-state inspection'
+      },
+      errors: ['Current installed Toolkit state must come from supported Codex plugin inspection; synthetic plugin-list input was refused']
+    };
+  }
+  const inspection = inspectCodexPluginList(options);
+  if (!inspection.ok) {
+    return {
+      ok: false,
+      pluginList: null,
+      proof: {
+        trusted: false,
+        ambiguous: true,
+        plugin_id: pluginId(),
+        evidence_source: 'codex-plugin-list+cache',
+        reason: inspection.errors?.[0] || 'Codex plugin inspection failed'
+      },
+      errors: inspection.errors || ['Codex plugin inspection failed']
+    };
+  }
+  const derived = deriveCodexInstalledStateProof(inspection.pluginList, options);
+  return { ...derived, pluginList: inspection.pluginList };
+}
+
 function evaluateConfigCacheFallback(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
@@ -620,12 +1478,13 @@ function evaluateConfigCacheFallback(options = {}) {
   const errors = [];
   const configPath = codexConfigPath(codexHome);
   let configText = '';
+  const configurationProof = inspectCodexToolkitConfigurationProof({ codexHome });
 
   if (!fs.existsSync(configPath)) {
     errors.push(`Codex config/cache fallback requires Codex config at ${configPath}`);
   } else {
     configText = fs.readFileSync(configPath, 'utf8');
-    if (!configHasEnabledPlugin(configText)) {
+    if (configurationProof.status !== 'enabled') {
       errors.push(`Codex config must enable [plugins."${pluginId()}"]`);
     }
     errors.push(...verifyLocalMarketplaceConfig(configText, repoRoot).errors);
@@ -634,27 +1493,15 @@ function evaluateConfigCacheFallback(options = {}) {
   const cache = verifyInstalledCache(codexHome, expectedVersion, { repoRoot });
   errors.push(...cache.errors);
   const hookTrust = detectHookTrustStatus(codexHome, cache.cacheRoot);
-  const installed = errors.length === 0 ? {
-    pluginId: pluginId(),
-    name: TOOLKIT_PLUGIN_NAME,
-    marketplaceName: TOOLKIT_MARKETPLACE_NAME,
-    version: expectedVersion,
-    installed: true,
-    enabled: true,
-    authPolicy: 'ON_USE',
-    source: {
-      source: 'local',
-      path: repoRoot
-    },
-    verificationSource: 'config-cache-fallback'
-  } : null;
+  errors.unshift('Native Codex installed-plugin inventory is required; config/cache evidence is diagnostic only');
 
   return {
-    ok: errors.length === 0,
-    installed,
+    ok: false,
+    installed: null,
     cacheRoot: cache.cacheRoot,
     errors,
-    verificationMethod: 'config-cache-fallback',
+    configurationProof,
+    verificationMethod: 'config-cache-diagnostics',
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message
   };
@@ -665,54 +1512,52 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
   const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
   const errors = [];
-  const installed = findInstalledEntry(pluginList);
-  const cacheRoot = cacheRootFor(codexHome, expectedVersion);
-  const hookTrust = detectHookTrustStatus(codexHome, cacheRoot);
-  let refusesDowngrade = false;
+  const derived = deriveCodexInstalledStateProof(pluginList, {
+    codexHome,
+    repoRoot,
+    expectedVersion
+  });
+  const hookTrust = detectHookTrustStatus(codexHome, derived.cacheRoot);
 
-  if (!installed) {
+  if (!derived.installed) {
     if (options.allowConfigCacheFallback) {
-      return evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
+      const diagnostic = evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
+      return {
+        ...diagnostic,
+        errors: [...new Set([...derived.errors, ...diagnostic.errors])],
+        installed_state_proof: derived.proof,
+        refusesDowngrade: derived.refusesDowngrade
+      };
     }
-    errors.push(`${pluginId()} is not installed`);
+    errors.push(...derived.errors);
     return {
       ok: false,
       installed: null,
-      cacheRoot,
+      cacheRoot: derived.cacheRoot,
       errors,
       verificationMethod: 'codex-cli-list',
       hookTrustStatus: hookTrust.status,
       hookTrustMessage: hookTrust.message,
-      refusesDowngrade
+      installed_state_proof: derived.proof,
+      refusesDowngrade: derived.refusesDowngrade
     };
   }
-  if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
-  if (installed.version !== expectedVersion) {
-    if (compareSemver(installed.version, expectedVersion) > 0) {
-      refusesDowngrade = true;
-      errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or remove the newer plugin explicitly before retrying.`);
-    } else {
-      errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
-    }
+  if (derived.refusesDowngrade) {
+    errors.push(`Refusing downgrade: installed ${pluginId()} version ${derived.proof.reported_version} is newer than source version ${expectedVersion}. Update the managed source checkout or remove the newer plugin explicitly before retrying.`);
   }
-  if (installed.authPolicy !== 'ON_USE') {
-    errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
-  }
-  if (installed.source?.path && path.resolve(installed.source.path) !== repoRoot) {
-    errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);
-  }
-
-  errors.push(...verifyInstalledCache(codexHome, expectedVersion, { repoRoot }).errors);
+  errors.push(...derived.errors.filter((error) => !errors.includes(error)));
 
   return {
-    ok: errors.length === 0,
-    installed,
-    cacheRoot,
+    ok: derived.ok && errors.length === 0,
+    installed: derived.installed,
+    cacheRoot: derived.cacheRoot,
     errors,
-    verificationMethod: 'codex-cli-list',
+    verificationMethod: derived.verificationMethod,
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message,
-    refusesDowngrade
+    installed_state_proof: derived.proof,
+    configurationProof: inspectCodexToolkitConfigurationProof({ codexHome }),
+    refusesDowngrade: derived.refusesDowngrade
   };
 }
 
@@ -776,21 +1621,48 @@ function codexSpawnParts(command, args) {
   };
 }
 
+function delegatedCodexAction(args) {
+  const exact = canonicalJson(args);
+  if (exact === canonicalJson(['plugin', '--help'])) return 'codex.command.probe';
+  if (exact === canonicalJson(['plugin', 'list', '--json', '--available'])) return 'codex.plugin.list';
+  if (exact === canonicalJson(['plugin', 'marketplace', 'add', activeDelegatedNativeAuthority?.repository, '--json'])) return 'codex.marketplace.add';
+  if (exact === canonicalJson(['plugin', 'remove', pluginId(), '--json'])) return 'codex.plugin.remove';
+  if (exact === canonicalJson(['plugin', 'add', pluginId(), '--json'])) return 'codex.plugin.add';
+  throw new Error(`delegated native Codex argv is not admitted: ${args.join(' ')}`);
+}
+
+function delegatedCodexLaunchOperands(command, args) {
+  if (!activeDelegatedNativeAuthority) return null;
+  const action = delegatedCodexAction(args);
+  const candidates = commandCandidates('').map((value) => path.resolve(value));
+  const exactCommand = path.resolve(command);
+  if (!candidates.includes(exactCommand)) throw new Error('delegated native Codex executable was substituted');
+  return Object.freeze({ action, operands: { kind: 'codex-command', executable: exactCommand, argv_digest: sha256(canonicalJson(args)), argv: [...args] } });
+}
+
 function spawnCodex(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
-  return spawnSync(parts.command, parts.args, {
+  const admitted = delegatedCodexLaunchOperands(command, args);
+  if (admitted) verifyDelegatedNativeContinuity(admitted.action, admitted.operands);
+  const result = spawnSync(parts.command, parts.args, {
     ...options,
     windowsHide: true
   });
+  if (admitted) completeDelegatedNativeEffect(admitted.action, admitted.operands);
+  return result;
 }
 
 function spawnCodexProcess(command, args, options = {}) {
   const parts = codexSpawnParts(command, args);
-  return spawn(parts.command, parts.args, {
+  const admitted = delegatedCodexLaunchOperands(command, args);
+  if (admitted) verifyDelegatedNativeContinuity(admitted.action, admitted.operands);
+  const child = spawn(parts.command, parts.args, {
     stdio: 'ignore',
     ...options,
     windowsHide: true
   });
+  if (admitted) completeDelegatedNativeEffect(admitted.action, admitted.operands);
+  return child;
 }
 
 function commandCandidates(explicitCommand) {
@@ -821,16 +1693,27 @@ function resolveCodexCommand(explicitCommand) {
 function runCodexJson(command, args) {
   const result = spawnCodex(command, args, {
     encoding: 'utf8',
-    timeout: commandTimeoutMs()
+    timeout: commandTimeoutMs(),
+    maxBuffer: CODEX_JSON_MAX_BUFFER_BYTES
   });
+  const resultError = result.error;
+  const resultErrorCode = String(resultError?.code || '').toUpperCase();
+  const resultErrorMessage = String(resultError?.message || resultError || '');
+  if (resultError) {
+    if (resultErrorCode === 'ENOBUFS' || /\bENOBUFS\b|maxbuffer|buffer.*(?:limit|exceed)/i.test(resultErrorMessage)) {
+      throw new Error(`codex ${args.join(' ')} returned an excessive response; one captured stream exceeded ${CODEX_JSON_MAX_BUFFER_BYTES} bytes`);
+    }
+    throw new Error(`codex ${args.join(' ')} failed: ${resultErrorMessage}`);
+  }
   if (result.status !== 0) {
-    throw new Error(`codex ${args.join(' ')} failed: ${commandOutput(result)}`);
+    const stderr = String(result.stderr || '').trim();
+    throw new Error(`codex ${args.join(' ')} failed: ${stderr || `exit ${result.status}`}`);
   }
   const output = (result.stdout || '').trim();
   try {
     return output ? JSON.parse(output) : {};
-  } catch (error) {
-    throw new Error(`codex ${args.join(' ')} returned invalid JSON: ${error.message}`);
+  } catch (_error) {
+    throw new Error(`codex ${args.join(' ')} returned invalid JSON; response content was suppressed`);
   }
 }
 
@@ -868,11 +1751,15 @@ function sleep(ms) {
 
 function terminateChild(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null || child.killed) return;
+  const operands = { kind: 'terminate', pid: child.pid };
+  if (activeDelegatedNativeAuthority) verifyDelegatedNativeContinuity('codex.plugin.add', operands);
   try {
     child.kill();
   } catch {
     // The child may already be gone; verification state is the source of truth here.
+    return;
   }
+  if (activeDelegatedNativeAuthority) completeDelegatedNativeEffect('codex.plugin.add', operands);
 }
 
 function formatStateErrors(state, listError) {
@@ -930,7 +1817,8 @@ async function runCodexAddAndVerify(command, addArgs, options) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent(options);
         hookChanged = hookChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // Installed-state verification below reports an unsafe or incomplete cache.
       }
       lastState = evaluateCodexToolkitPluginState(pluginList, {
@@ -958,7 +1846,7 @@ async function runCodexAddAndVerify(command, addArgs, options) {
 
     if (childExit && childExit.code !== 0) {
       terminateChild(child);
-      throw new Error(`codex ${addArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+      throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install; exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
     }
 
     await sleep(pollMs);
@@ -973,6 +1861,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoRoot: repoRootFromScript(),
     codexHome: defaultCodexHome(),
     codexCommand: '',
+    delegatedInvocationAuthority: null,
     write: false,
     json: false
   };
@@ -985,6 +1874,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--codex-home=')) options.codexHome = arg.slice('--codex-home='.length);
     else if (arg === '--codex-cli') options.codexCommand = next();
     else if (arg.startsWith('--codex-cli=')) options.codexCommand = arg.slice('--codex-cli='.length);
+    else if (arg === '--delegated-invocation-authority') options.delegatedInvocationAuthority = decodeDelegatedNativeAuthority(next());
+    else if (arg.startsWith('--delegated-invocation-authority=')) options.delegatedInvocationAuthority = decodeDelegatedNativeAuthority(arg.slice('--delegated-invocation-authority='.length));
     else if (arg === '--write') options.write = true;
     else if (arg === '--verify') options.write = false;
     else if (arg === '--json') options.json = true;
@@ -1027,6 +1918,15 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     return 0;
   }
 
+  try {
+    establishDelegatedNativeAuthority(options);
+    establishDelegatedNativeMutationPhase(options, dependencies.nativePhaseTestHooks || {});
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    return 2;
+  }
+
+  try {
   const repoErrors = validateRepoPluginSource(options.repoRoot);
   if (repoErrors.length > 0) {
     for (const error of repoErrors) console.error(`FAIL: ${error}`);
@@ -1052,7 +1952,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
         pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // A stale unsupported cache is handled by the supported reinstall path.
       }
     }
@@ -1073,7 +1974,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       try {
         const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
         pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
+      } catch (error) {
+        if (activeDelegatedNativeAuthority) throw error;
         // Verification decides whether reinstall is required.
       }
       state = evaluateCodexToolkitPluginState(pluginList, {
@@ -1114,13 +2016,14 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     ? 'The exact current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex; the exact current Toolkit `SessionStart` hook must be reviewed and trusted. Codex skips the hook until it is trusted.'
     : state.hookTrustMessage;
   const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
+  const reportedProof = state.installed_state_proof || {};
   const summary = {
     ok: true,
     plugin_id: pluginId(),
-    version: EXPECTED_TOOLKIT_VERSION,
-    installed: true,
-    enabled: true,
-    current: true,
+    version: reportedProof.reported_version || state.installed?.version || EXPECTED_TOOLKIT_VERSION,
+    installed: state.installed?.installed === true,
+    enabled: state.installed?.enabled === true,
+    current: reportedProof.current === true || state.installed?.version === EXPECTED_TOOLKIT_VERSION,
     cache_root: state.cacheRoot,
     verification_method: state.verificationMethod,
     hook_trust_status: hookTrustStatus,
@@ -1143,6 +2046,9 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     console.log(nextStepsForState(reportedState, options).join('\n'));
   }
   return 0;
+  } finally {
+    releaseDelegatedNativeMutationPhase();
+  }
 }
 
 if (require.main === module) {
@@ -1158,6 +2064,7 @@ module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,
+  CODEX_JSON_MAX_BUFFER_BYTES,
   MARKETPLACE_REL_PATH,
   CACHE_FINGERPRINT_PATHS,
   CACHE_FINGERPRINT_DIRS,
@@ -1166,10 +2073,16 @@ module.exports = {
   SESSION_START_POWERSHELL_REL_PATH,
   SESSION_START_RUNTIME_REL_PATH,
   codexToolkitInstallCommands,
+  pluginId,
+  cacheRootFor,
+  discoverInstalledCacheRoot,
   defaultWindowsPowerShellPath,
+  deriveCodexInstalledStateProof,
   evaluateCodexToolkitPluginState,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
+  inspectCodexToolkitConfigurationProof,
+  inspectCodexToolkitInstalledState,
   inspectCodexPluginList,
   inspectConfiguredPluginState,
   prepareInstalledSessionStart,
@@ -1178,6 +2091,8 @@ module.exports = {
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
+  cacheFingerprint,
+  recoverCodexCache,
   verifySessionStartHook,
   verifySessionStartRuntime,
   windowsSessionStartCommand,
