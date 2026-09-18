@@ -5,7 +5,7 @@
 - This file defines Toolkit-specific Web Controller governance for Toolkit-managed coding repositories.
 - Current explicit User/Web authority may supersede this file within its authority.
 - Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
-- For Web Controller takeover or continuation, treat the target coding repository as Toolkit-managed by default unless current durable repository authority explicitly marks it non-Toolkit-managed. Read this file fresh from canonical Toolkit `main` before recovering or reporting repository state, then bind the repository named by the user as the controller repository fence. Bind the exact controller revision consumed when a run/gate contract requires it.
+- Treat the target coding repository as Toolkit-managed by default unless current durable repository authority explicitly marks it non-Toolkit-managed. Bootstrap/takeover/restart and Controller revision refresh follow the bounded policy below; bind the repository named by the user as the controller repository fence.
 
 ## GitHub transport
 
@@ -14,6 +14,14 @@
 - Transport does not grant authority. Executors remain mechanical actors for any Web-owned GitHub decision and never gain architecture, waiver, ownership or finality authority by possessing `gh` access.
 - If the Web connector cannot perform a required GitHub operation, do not reinterpret the failure as repository state. Hold the affected transition or delegate only an already-authorised bounded mechanical operation, then verify the result through the Web connector before consequential continuation.
 
+## Controller bootstrap and refresh
+
+- On a new Web Controller bootstrap, takeover, explicit handover, restart after lost controller state, or new chat that must reconstruct control, read `repo/CONTROLLER.md` fresh from canonical Toolkit `main` and bind the exact Controller revision plus repository fence before material continuation.
+- During the same live controller session, keep using the bound Controller revision. Do not re-read the full Controller merely because a worker/Loop packet returns, CI changes, a GitHub comment is posted, or ordinary continuation occurs.
+- Before a new material worker/stage launch or another consequential authority/finality transition after the current action has terminally reconciled, perform a lightweight canonical Controller revision check. Prefer commit/blob/digest identity that does not load the full Controller bytes into model-visible context.
+- If the canonical Controller identity is unchanged, continue from the bound revision without a full re-read. If it changed, read the new Controller once, reconcile the material impact, and bind the new revision before the next material launch/transition.
+- An in-flight run remains governed by the exact Controller/Lock revision it was admitted under; a later Controller revision does not silently rewrite an active worker contract. Apply newer law at the next safe reconciliation boundary unless current explicit User/Web authority requires an immediate hold or re-entry.
+- A packet that claims a newer/unknown Controller revision, a governance conflict, missing binding, or unverifiable Controller identity requires fresh Controller read/reconciliation before consequential continuation.
 ## Supersession and admission
 
 - Latest explicit User/Web authority supersedes conflicting model, topology, gate, review, tier, or consent wording within its authority; unrelated accepted governance remains.
@@ -207,6 +215,15 @@ These are different assurance layers and must not be conflated.
 - Web explicitly launches and adjudicates Final Audit and retains terminal programme closure authority.
 - If any required work remains after a would-be final PR, continue that work under the ordinary gate model; do not spend the selected Final Audit route as a per-PR or per-child super-G4.
 
+## Terminal GitHub object receipts
+
+- Every Toolkit-managed GitHub issue or pull request that enters a terminal state under current governance must have a durable terminal receipt on that same issue/PR for that terminal episode. Terminal states include issue closure and PR merge or close-without-merge.
+- The receipt explains why the object became terminal. It must identify the terminal disposition, controlling authority/child or Lock where applicable, the decision/evidence basis, and any continuing owner or successor for work not completed in that object.
+- A merged PR receipt also binds the exact integrated commit plus candidate head/base identities when available. A closed-unmerged PR receipt records why integration was intentionally not performed and the candidate/branch disposition. A closed issue receipt distinguishes completed, superseded/transferred, duplicate, not-planned, or other evidence-backed disposition.
+- Exact receipt wording/layout is renderer/automation policy, not Controller formatting law. The semantic receipt must remain concise, self-sufficient for later reconciliation, append-only, and secret-safe.
+- Where the terminal outcome is known before closure, publish and read back the receipt before the terminal mutation when practical. For merge or ambiguous transport where final integration identity is known only after the operation, first reconcile the terminal outcome by readback, then publish/read back the receipt immediately.
+- A terminal transition is not governance-complete until the receipt is durably read back. If the object is already terminal but the receipt is missing, stale, or unverifiable, return `TERMINAL_RECEIPT_INCOMPLETE`; do not reopen or replay the terminal operation merely to add the receipt. Backfill/repair the receipt and verify readback.
+- This requirement applies to every terminal transition performed under this revision. Historical terminal objects are not bulk-replayed solely for receipt backfill; if an older terminal object becomes decision-relevant and lacks an adequate receipt, backfill it before relying on that terminal disposition.
 ## Candidate finality vs programme closure
 
 Candidate/PR finality requires:
