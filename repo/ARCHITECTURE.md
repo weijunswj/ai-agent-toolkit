@@ -62,6 +62,25 @@ Use native issue relationships by meaning:
 
 Labels are lightweight discovery/filtering metadata only. They may describe type, stage/domain or visibility state, but they do not grant ownership, authority, gate status, completion or finality. Prefer a small stable label vocabulary over encoding process history in labels.
 
+### Managed programme human surface
+
+Managed programme issue titles and bodies are deterministic rendered projections of canonical programme/child state. Once a surface is managed, User/Web, Loop, workers and migration executors must not free-form edit its title/body. Change the typed source state, render through the canonical programme-surface renderer, publish the rendered artifact, then exact-read it back. If the current renderer cannot represent the accepted architecture, hold the cutover/mutation until the renderer is extended; do not bypass it with hand-authored Markdown.
+
+Human-facing programme navigation is a stable contract:
+
+- the programme parent title begins `[ PARENT THREAD ]`;
+- every required programme outcome receives one deterministic, monotonic display ordinal `S<n>` when registered in the programme;
+- `S<n>` is navigation/order only, not a Stage, gate, lineage, repair identity or nested executable hierarchy;
+- an assigned `S<n>` is stable for the programme lifetime and is never reused or renumbered because another outcome completes, retires, splits or is renamed;
+- internal semantic identifiers may coexist for machine mapping/migration, but managed human surfaces always show the stable `S<n>` identity;
+- the parent dashboard renders the complete required outcome queue in `S<n>` order, including parent-owned planned outcomes that do not yet have an issue;
+- when an outcome materialises, its Delivery Child title is `S<n> — <Outcome name>`;
+- supporting/investigation/acceptance sub-issues reference their owning `S<n>` but do not consume another programme `S<n>`.
+
+The standing Continuing Improvement Queue uses the stable display identity `Q`, remains non-executing, and is rendered in the parent queue immediately before Whole-Programme Final Audit. It carries a `deferred`-style metadata label, not `current` or delivery authority. Unresolved Q records do not block ordinary delivery; programme finality verifies continuing ownership/disposition rather than requiring the queue to be empty.
+
+The default managed parent/child surface remains operator-readable: status/summary, objective, scope/boundaries, completion criteria, current candidate/gate where applicable, supporting relationships, and immediate next action are rendered from typed state. Human-readable presentation is part of the product contract, not an optional manual cleanup step.
+
 Epoch may survive as a historical/grouping term, but must not create another independent gate lifecycle.
 
 Root is a diagnostic/root-cause identity where useful, not an executable programme layer.
