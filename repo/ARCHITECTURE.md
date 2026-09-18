@@ -48,6 +48,20 @@ Definitions:
 
 Delivery children remain flat under the programme. Do not create recursive executable topology merely because a stage is large.
 
+### Supporting sub-issues and labels
+
+A Delivery Child may contain nested GitHub sub-issues for bounded **supporting work** such as investigation, evidence gathering, migration proof, UAT or acceptance tasks.
+
+Supporting sub-issues do not automatically acquire their own Delivery PR, G1-G4 lifecycle, correction budget, ownership/finality authority or merge boundary. If supporting work becomes independently shippable, independently reversible, or requires its own material architecture/authority decision, promote it to a separate flat Delivery Child instead of deepening the executable hierarchy.
+
+Use native issue relationships by meaning:
+
+- parent/sub-issue = decomposition or belongs-to;
+- blocked-by/blocking = dependency or ordering;
+- Delivery PR = integration candidate for the Delivery Child.
+
+Labels are lightweight discovery/filtering metadata only. They may describe type, stage/domain or visibility state, but they do not grant ownership, authority, gate status, completion or finality. Prefer a small stable label vocabulary over encoding process history in labels.
+
 Epoch may survive as a historical/grouping term, but must not create another independent gate lifecycle.
 
 Root is a diagnostic/root-cause identity where useful, not an executable programme layer.
