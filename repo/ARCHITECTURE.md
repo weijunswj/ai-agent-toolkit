@@ -48,19 +48,13 @@ Definitions:
 
 Delivery children remain flat under the programme. Do not create recursive executable topology merely because a stage is large.
 
-### Human programme surface and stable naming
+### Human programme surface
 
 Toolkit-managed GitHub programme and Delivery-Child bodies are deterministic human-facing projections of canonical programme/child state. Do not manually maintain or hand-rewrite a managed projection as an independent authority surface. Change the canonical state/contract or authorised renderer, regenerate, and read back the managed surface. Owner-controlled text explicitly outside a managed region may remain directly maintained where the governing contract permits it.
 
-Use stable deterministic human-facing identities:
+Presentation structure, title prefixes, display ordering/numbering and wording conventions belong to the authorised renderer/schema and its regression tests unless an explicit architecture decision makes a field semantically authoritative. They are not architecture law by default.
 
-- programme parent titles begin `[ PARENT THREAD ]`;
-- each materialised top-level Delivery Child receives the next monotonic `S<n> — <descriptive outcome>` title;
-- `S<n>` is a navigation/sequence identity only, never a hidden Stage/Epoch/Root gate hierarchy;
-- issued sequence numbers are never recycled or renumbered because an earlier child completes, retires, splits, or is superseded;
-- supporting/investigation/acceptance sub-issues use their native parent relationship and descriptive titles rather than inventing another executable sequence hierarchy.
-
-Internal durable outcome IDs may coexist with `S<n>` where useful for migration or contract identity, but normal GitHub presentation preserves the stable `S<n>` categorisation.
+Generated surfaces must preserve canonical programme/child identities. Presentation metadata must not introduce a second authority identity or an ambiguous parallel numbering scheme. Supporting/investigation/acceptance sub-issues use their native relationships; their exact human-facing title format is a renderer concern.
 
 ### Supporting sub-issues and labels
 
