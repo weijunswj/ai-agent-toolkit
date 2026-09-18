@@ -46,11 +46,15 @@
 - Human/task ownership does not expire through timeout or heartbeat loss.
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
-- Semantic workers are leaf roles. G1/G2/G3/G4, crawler/research, executor and reviewer sessions must not launch, poll, wait on, or supervise another semantic agent.
-- Parallel semantic work is Loop/runtime-owned sibling fan-out from durable task state. Workers receive the minimum bounded packet, return one terminal packet, and exit; they do not inherit another worker's chat/scratchpad.
-- A deterministic orchestration runtime owns scheduling, waiting, polling, retries, cancellation and result collection. Do not keep a model session alive merely to busy-poll another model.
-- The Loop/runtime may launch bounded sibling workers only when the accepted authority permits the work and the split is genuinely separable. Mutating siblings require disjoint mutation scopes; read-only siblings may overlap.
-- No nested semantic-agent delegation. Deterministic tools/runtimes are not agents.
+- Semantic subagent delegation is allowed only from two roles: the Repository Loop Manager and G3. All other semantic roles, including G1, G2, G4, Final Audit, browser/computer-use and any spawned subagent, are leaf-only.
+- Delegation permission requires both an authorised role and a Luna spawner: the Repository Loop Manager or G3 may launch semantic subagents only while that spawning session itself resolves to `gpt-5.6-luna`. If its current route is overridden to a non-Luna model, that session is leaf-only.
+- Any semantic subagent launched by the Loop Manager or G3 must use `gpt-5.6-luna` with Max reasoning; governed execution/subagent work uses Priority tier unless current explicit User/Web authority says otherwise.
+- Delegation is one hop below the authorised spawner only. A spawned subagent must not launch another semantic agent.
+- The Loop Manager may use Luna Max subagents for bounded read-only discovery/research/reconciliation or other already-authorised separable work.
+- G3 may use Luna Max subagents only when the accepted G2 contract makes the work genuinely separable and materially faster. Mutating G3 siblings/subagents require disjoint mutation scopes and deterministic integration/revalidation.
+- G1/G2/G4 and other leaf roles consume completed durable subagent packets as static inputs; they must not launch or wait on semantic children.
+- Prefer deterministic/runtime scheduling, waiting, retry, cancellation and result collection where the host exposes it; Luna spawners may coordinate their authorised Luna children without expanding authority.
+- Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
 
@@ -81,7 +85,7 @@ Routing rules:
 - No silent fallback or substitution.
 - If a new governed execution thread requires a stack and none is selected, return to User/Web for selection.
 - Unsupported or unresolvable route => `ROUTE_UNAVAILABLE`; do not consume repair budget.
-- Semantic workers do not inherit or choose child-agent routes because they cannot spawn semantic children. Each Loop-launched sibling receives its own explicit role/model/reasoning/tier binding before launch.
+- Only the Repository Loop Manager and G3 may resolve a semantic child route, and that route is Luna Max only. Every child launch receives an explicit model/reasoning/tier binding; no implicit inheritance or silent substitution.
 
 ## Assurance paths and gates
 
@@ -89,9 +93,10 @@ Routing rules:
 - LIGHT administrative work uses deterministic operation/readback.
 - LIGHT low-risk mutation uses focused validation without mandatory G4.
 - ASSURED/STRICT material work uses the standard sequence `DISCOVERY -> G1 -> G2 -> G3 -> G4` where the applicable gates are required. `DISCOVERY` is evidence preparation, not an authority gate and does not produce PASS/FAIL.
-- Pre-G1 DISCOVERY is performed by one or more bounded read-only Loop-launched Luna Max crawler siblings. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
-- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on crawler/subagent work.
-- G2/G3/G4 are likewise leaf semantic workers. If an accepted G2 contract explicitly permits parallel G3 implementation, the Loop/runtime launches disjoint sibling G3 workers and performs deterministic integration/revalidation; no G3 executor spawns semantic subagents.
+- Pre-G1 DISCOVERY is performed by one or more bounded read-only Luna Max crawler subagents launched by the Repository Loop Manager. They inspect the current repository/authority/consumer/security surfaces required by the task, publish durable self-sufficient packets, then exit before G1 starts.
+- G1 Astra consumes the completed discovery packets and current authority as static inputs. G1 must not spawn or wait on semantic children.
+- G2 and G4 are leaf semantic workers.
+- G3 is the only gate role allowed to launch semantic subagents. When the accepted G2 contract explicitly permits a separable parallel implementation, G3 may launch bounded Luna Max subagents, collect their terminal packets, integrate only authorised disjoint changes, and revalidate the combined exact head.
 - Web-selected STRICT adds the required explicit Lock and adversarial obligations.
 - The Loop Manager cannot select or downgrade the assurance path.
 - Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
@@ -102,6 +107,9 @@ Routing rules:
 - Gate reuse is allowed only when the current accepted Lock exactly covers task, scope, trust boundary, and material assumptions; otherwise `GATE_REENTRY_REQUIRED`.
 - G3 must not invent architecture outside its accepted contract.
 - Before launch, transition, merge/finality, or next-gate authority, reconcile exact head, child/PR/parent, Lock/authority, checks, reviews/threads/findings, and current programme state.
+- Before merge/finality, every first-party repository CI/check run triggered for the exact candidate head must be terminal. Pending, queued or in-progress CI is never green and must block merge even when GitHub branch protection would technically allow it.
+- Every applicable first-party candidate-validation check must conclude success. A skipped/neutral result is acceptable only when that workflow/check is explicitly non-applicable to the candidate rather than a validation failure. A first-party red/failing candidate-validation check always blocks merge.
+- External/advisory/provider checks may be classified separately only when the accepted contract already makes them non-gating and Web records the exact reason; branch-protection permissiveness alone is never such a reason.
 - A head move invalidates exact-head evidence until it is rebound.
 - Missing evidence is never green.
 
@@ -152,8 +160,11 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Programme parent and child carriers
 
-- Toolkit-managed programme and child GitHub bodies are deterministic rendered human surfaces, not free-form independently maintained authority. Update canonical programme/child state or the authorised renderer and regenerate/read back the managed surface; do not hand-edit managed projection bytes to change programme truth.
-- Presentation schema such as section order, title prefixes, display numbering and wording conventions belongs to the authorised renderer/contract and its regression tests unless an explicit architecture decision makes a field semantically authoritative. Do not duplicate renderer formatting into Controller law.
+- Toolkit-managed programme and child GitHub titles, bodies, labels and parent-registry entries are one deterministic human-facing projection of canonical programme/child state, not independently maintained authority surfaces. Update canonical state or the authorised renderer and regenerate/read back all affected surfaces together; do not hand-edit one projection surface to change programme truth.
+- Canonical identity presentation is structural law: a programme parent title uses `[ PARENT THREAD ] <descriptive programme title>`; every registered programme child title uses `<canonical child ID> — <descriptive outcome>`. Display-only numbering must not create a second child identity.
+- Every registered programme child must carry exactly one lifecycle visibility label derived from canonical lifecycle and exactly one canonical child-classification label where the repository vocabulary defines one. Executable Delivery Children use `delivery-child`; the standing deferred programme child uses a distinct deferred-child classification rather than masquerading as a Delivery Child. Label state must be reconciled from canonical state, not edited as separate authority.
+- The parent body must contain one deterministic programme-child registry covering every registered child, including standing deferred/non-executing children. The registry preserves canonical child ID, outcome, classification/lifecycle and the minimum dependency/PR/gate state that is applicable; deferred children must not be hidden in a separate ad-hoc section that bypasses child lifecycle visibility.
+- Child bodies must expose the semantic operator sections required by the governing renderer contract: current status/summary, objective, owned scope or retained records, boundaries/holds, completion or continuity criteria, applicable child/PR/gate state, concise ELI5, and one obvious immediate next action. Exact Markdown layout, ordering, wording, escaping and column presentation remain renderer/schema implementation details with regression tests.
 - Generated presentation must preserve canonical programme/child identity and must not create a second authority identity or ambiguous parallel numbering.
 - The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
