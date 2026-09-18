@@ -141,6 +141,8 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Programme parent and child carriers
 
+- Toolkit-managed programme and child GitHub bodies are rendered human surfaces, not free-form independently maintained authority. Update canonical programme/child state or the authorised renderer and regenerate/read back the managed surface; do not hand-edit managed projection bytes to change programme truth.
+- Human-facing naming is stable and deterministic: programme parent titles begin `[ PARENT THREAD ]`; materialised top-level Delivery Children use monotonic `S<n> — <descriptive outcome>` titles. `S<n>` is navigation/sequence only and grants no Stage/Epoch/Root/gate semantics. Never recycle or renumber an issued sequence identity.
 - The programme parent owns programme identity/objective/material boundaries, registered children and their order/lifecycle, cross-child dependencies and authorised concurrency, programme-wide holds, terminal child dispositions and Web acceptance references, any standing Improvement Queue relationship, and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
 - Keep the parent minimal; child-local operational changes must not churn the parent.
