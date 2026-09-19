@@ -461,7 +461,15 @@ function repositoryTestResourceStateFromEnvironment(env = process.env) {
 
 function resourceTestSeamEnabled(options = {}) {
   if (options.test_seam === false || options.testSeam === false) return false;
-  return options.test_seam === true || options.testSeam === true || options.resourceState?.test_seam === true;
+  return options.test_seam === true || options.testSeam === true || options.resourceState?.test_seam === true
+    || globalThis.__AI_AGENT_TOOLKIT_TEST_RESOURCE_SEAM === true;
+}
+
+function resourceEvidenceSourceAccepted(resources, options = {}) {
+  if (resources?.fixture_id !== undefined && !resourceTestSeamEnabled(options)) return false;
+  return ['proc-meminfo', 'win32-operating-system'].includes(resources?.source)
+    || resources?.source === 'fixture'
+      && (resources.fixture_id === undefined || resourceTestSeamEnabled(options));
 }
 
 function inspectResources(options = {}) {
@@ -491,9 +499,7 @@ function validResourceState(resources) {
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
   const supported = Boolean(validResourceState(resources)
-    && (['proc-meminfo', 'win32-operating-system'].includes(resources.source)
-      || resourceTestSeamEnabled(options) && resources.source === 'fixture')
-    && (resources.fixture_id === undefined || resourceTestSeamEnabled(options)));
+    && resourceEvidenceSourceAccepted(resources, options));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -745,9 +751,7 @@ function admissionDecision(specInput, options = {}) {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
-  if (!validResourceState(resources)
-    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
-      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources) || !resourceEvidenceSourceAccepted(resources, options)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -759,9 +763,7 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)
-    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
-      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources) || !resourceEvidenceSourceAccepted(resources, options)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 

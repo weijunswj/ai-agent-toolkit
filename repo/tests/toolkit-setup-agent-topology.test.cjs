@@ -13,9 +13,10 @@ const { version: CURRENT_TOOLKIT_VERSION } = require('../contracts/toolkit-local
 
 function inspectResourceCapabilityInChild(env, testSeam = true) {
   const controlPath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
+  const seamOption = testSeam === null ? '' : `test_seam: ${testSeam ? 'true' : 'false'}`;
   const result = spawnSync(process.execPath, ['-e', [
     `const control = require(${JSON.stringify(controlPath)});`,
-    `process.stdout.write(JSON.stringify(control.inspectResourceCapability({ test_seam: ${testSeam ? 'true' : 'false'} })));`,
+    `process.stdout.write(JSON.stringify(control.inspectResourceCapability({ ${seamOption} })));`,
   ].join('\n')], {
     cwd: path.resolve(__dirname, '..', '..'),
     encoding: 'utf8',
@@ -177,6 +178,47 @@ test('repository-test resource fixture is explicit and isolated from runtime cou
   const fixture = setupTestSupport.REPOSITORY_TEST_RESOURCE_STATE;
   assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).supported, true);
   assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
+  assert.equal(control.inspectResourceCapability({ resourceState: fixture }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: fixture, test_seam: false }).supported, false);
+
+  const production = {
+    physical_total: 16 * control.GIB,
+    physical_available: 8 * control.GIB,
+    commit_total: 32 * control.GIB,
+    commit_available: 16 * control.GIB,
+    host_responsive: true,
+    source: 'proc-meminfo',
+  };
+  assert.deepEqual(control.inspectResourceCapability({ resourceState: production }), {
+    supported: true,
+    source: 'proc-meminfo',
+    resources: production,
+  });
+
+  for (const resourceState of [undefined, null, 'malformed', [], { ...fixture, source: 'unsupported-source' }]) {
+    assert.deepEqual(control.inspectResourceCapability({ resourceState }), {
+      supported: false,
+      source: 'unsupported-or-malformed',
+      resources: null,
+    });
+  }
+
+  const direct = {
+    topology: control.TOPOLOGIES.CLAUDE_DIRECT,
+    capacity_mode: control.CAPACITY_MODES.AUTO,
+    worker_estimate_bytes: control.DEFAULT_WORKER_COST,
+    enforcement_verified: true,
+    activation_proof: current(true).nativePlugin.activation_proof,
+    claude_cli: process.execPath,
+    resource_counter_supported: true,
+  };
+  assert.throws(() => control.configureProfile('claude-code', direct, { root: fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-resource-missing-')) }), /resource counters/i);
+  const configured = control.configureProfile('claude-code', {
+    ...direct,
+    resource_state: production,
+    resource_counter_source: 'proc-meminfo',
+  }, { root: fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-resource-production-')) });
+  assert.equal(configured.supported, true);
 
   const injected = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment());
   assert.equal(injected.supported, true);
@@ -185,6 +227,8 @@ test('repository-test resource fixture is explicit and isolated from runtime cou
 
   const ordinary = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment(), false);
   assert.notEqual(ordinary.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+  const absent = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment(), null);
+  assert.notEqual(absent.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
 
   const runtime = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment({
     [control.REPOSITORY_TEST_RESOURCE_CONTEXT_ENV]: '',

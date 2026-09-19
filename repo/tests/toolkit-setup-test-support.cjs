@@ -1,5 +1,9 @@
 'use strict';
 
+if (process.env.AI_AGENT_TOOLKIT_TEST_RESOURCE_PRELOAD === '1') {
+  globalThis.__AI_AGENT_TOOLKIT_TEST_RESOURCE_SEAM = true;
+}
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -34,6 +38,7 @@ function tmpRoot() {
 
 function isolatedHomeEnv(root) {
   const fakeCodex = createFakeCodexAppServer(root);
+  const nodeOptions = [`--require=${__filename}`, process.env.NODE_OPTIONS].filter(Boolean).join(' ');
   return {
     PATH: process.env.PATH || '',
     USERPROFILE: root,
@@ -42,6 +47,8 @@ function isolatedHomeEnv(root) {
     CODEX_TOOLKIT_CODEX_CLI: fakeCodex,
     LOCALAPPDATA: path.join(root, 'local-app-data'),
     ...repositoryTestResourceEnvironment(),
+    NODE_OPTIONS: nodeOptions,
+    AI_AGENT_TOOLKIT_TEST_RESOURCE_PRELOAD: '1',
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
     UV_PYTHON: ''
@@ -93,8 +100,7 @@ function createFakeCodexAppServer(root) {
 }
 
 function run(args, options = {}) {
-  const testArgs = options.testResourceSeam === false ? [] : ['--test-resource-seam'];
-  return spawnSync(process.execPath, [script, ...testArgs, ...args], {
+  return spawnSync(process.execPath, [script, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },

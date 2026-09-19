@@ -156,7 +156,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     skipTargets: [],
     keepTargets: [],
     yesRecommended: false,
-    testResourceSeam: false,
     codexHelperCount: null,
     claudeManualMaximum: null,
     claudeTopologyRequested: '',
@@ -214,7 +213,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
     else if (arg === '--yes-recommended') args.yesRecommended = true;
-    else if (arg === '--test-resource-seam') args.testResourceSeam = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
       const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
@@ -1341,8 +1339,7 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
       }),
       resource_counter_supported: resourceCapable,
       resource_counter_source: current.agentCapability?.resource_counter_source,
-      test_seam: args.testResourceSeam === true,
-    }, { test_seam: args.testResourceSeam === true, env: process.env });
+    });
     return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: !strict || enforceable, client_scope: 'Claude-only Toolkit profile' };
   }
   if (args.host !== 'codex') {
@@ -1403,7 +1400,7 @@ function inspectClaudeAgentCapability(args) {
   let command;
   try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
   catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability({ test_seam: args.testResourceSeam === true, env });
+    const resourceCapability = agentControl.inspectResourceCapability();
     return {
       supported: false, launch_supported: false, executable_available: false,
       launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
@@ -1412,7 +1409,7 @@ function inspectClaudeAgentCapability(args) {
       direct_only: false, medium_effort: false, non_fast_environment_override: false,
     };
   }
-  const resourceCapability = agentControl.inspectResourceCapability({ test_seam: args.testResourceSeam === true, env });
+  const resourceCapability = agentControl.inspectResourceCapability();
   return {
     supported: false, launch_supported: false, executable_available: true,
     launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
@@ -1435,7 +1432,7 @@ function probeClaudeAgentCapability(args) {
   let command;
   try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
   catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability({ test_seam: args.testResourceSeam === true, env });
+    const resourceCapability = agentControl.inspectResourceCapability();
     return {
       supported: false, launch_supported: false, resource_counter_supported: resourceCapability.supported,
       resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
@@ -1457,7 +1454,7 @@ function probeClaudeAgentCapability(args) {
   const probeOutput = probes.map((probe) => `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`).join('\n').trim();
   const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--|unknown model|model .*not (?:found|available|supported)/i.test(probeOutput);
   const launchSupported = versionResult.status === 0 && version.length > 0 && probes.every((probe) => probe.status === 0);
-  const resourceCapability = agentControl.inspectResourceCapability({ test_seam: args.testResourceSeam === true, env });
+  const resourceCapability = agentControl.inspectResourceCapability();
   const probeStatus = launchSupported ? 'supported' : (unsupportedSyntax ? 'unsupported-syntax' : 'indeterminate-runtime-failure');
   return {
     supported: launchSupported && resourceCapability.supported,
