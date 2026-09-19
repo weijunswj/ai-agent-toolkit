@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.terminal-receipt.v1",
+  "title": "Toolkit terminal GitHub object receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "receipt_id", "receipt_digest", "object", "terminal_disposition",
+    "authority", "evidence", "candidate", "successor", "created_at", "readback"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.controller.terminal-receipt.v1" },
+    "version": { "const": 1 },
+    "receipt_id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+    "receipt_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repository", "number", "terminal_state"],
+      "properties": {
+        "kind": { "enum": ["issue", "pull_request"] },
+        "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "number": { "type": "integer", "minimum": 1 },
+        "terminal_state": { "enum": ["CLOSED", "MERGED", "CLOSED_UNMERGED"] }
+      }
+    },
+    "terminal_disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "summary", "controlling_lock"],
+      "properties": {
+        "kind": { "enum": ["ISSUE_COMPLETED", "ISSUE_SUPERSEDED", "ISSUE_TRANSFERRED", "ISSUE_DUPLICATE", "ISSUE_NOT_PLANNED", "PR_MERGED", "PR_CLOSED_UNMERGED"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "controlling_lock": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "digest"],
+      "properties": {
+        "reference": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "digest"],
+      "properties": {
+        "reference": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "candidate": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["head", "base", "tree", "merge_commit"],
+      "properties": {
+        "head": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+        "base": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+        "tree": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+        "merge_commit": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" }
+      }
+    },
+    "successor": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 },
+    "created_at": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified", "reference", "digest"],
+      "properties": {
+        "verified": { "const": true },
+        "reference": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

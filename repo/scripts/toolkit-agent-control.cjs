@@ -9,7 +9,13 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.9';
+const CONTROL_VERSION = '2.10.10';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_CONTEXT';
+const REPOSITORY_TEST_RESOURCE_STATE_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_RESOURCE_STATE';
+const REPOSITORY_TEST_RESOURCE_SEAM_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_RESOURCE_SEAM';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE = 'ai-agent-toolkit-repository-test-v1';
+const REPOSITORY_TEST_RESOURCE_FIXTURE_ID = 'healthy-resource-v1';
+const REPOSITORY_TEST_RESOURCE_SOURCE = 'win32-operating-system';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -382,7 +388,10 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
+  const resourceCapability = inspectResourceCapability({
+    resourceState: selected.resource_state,
+    test_seam: options.test_seam === true || options.testSeam === true || selected.test_seam === true,
+  });
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
   if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
     || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
@@ -434,8 +443,38 @@ function windowsResources() {
   return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
 }
 
+function repositoryTestResourceStateFromEnvironment(env = process.env) {
+  if (env?.[REPOSITORY_TEST_RESOURCE_CONTEXT_ENV] !== REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE) return null;
+  const raw = String(env?.[REPOSITORY_TEST_RESOURCE_STATE_ENV] || '');
+  if (!raw || raw.length > 4096) return null;
+  try {
+    const state = JSON.parse(raw);
+    if (!state || typeof state !== 'object'
+      || state.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE_ID
+      || state.source !== REPOSITORY_TEST_RESOURCE_SOURCE) return null;
+    return { ...state };
+  } catch {
+    return null;
+  }
+}
+
+function resourceTestSeamEnabled(options = {}) {
+  if (options.test_seam === false || options.testSeam === false) return false;
+  const env = options.env || process.env;
+  return options.test_seam === true || options.testSeam === true || options.resourceState?.test_seam === true
+    || Object.prototype.hasOwnProperty.call(options, 'resourceState')
+    || options.resourceState?.source === 'fixture'
+    || env?.[REPOSITORY_TEST_RESOURCE_SEAM_ENV] === '1';
+}
+
 function inspectResources(options = {}) {
-  if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+  if (resourceTestSeamEnabled(options)) {
+    if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) {
+      return options.resourceState ? { source: options.resourceState.source || 'fixture', ...options.resourceState } : null;
+    }
+    const repositoryTestState = repositoryTestResourceStateFromEnvironment(options.env || process.env);
+    if (repositoryTestState) return repositoryTestState;
+  }
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -453,7 +492,10 @@ function validResourceState(resources) {
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  const supported = Boolean(validResourceState(resources)
+    && (['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      || resourceTestSeamEnabled(options) && resources.source === 'fixture')
+    && (resources.fixture_id === undefined || resourceTestSeamEnabled(options)));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -705,7 +747,9 @@ function admissionDecision(specInput, options = {}) {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources)
+    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -717,7 +761,9 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources)
+    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -1119,7 +1165,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, REPOSITORY_TEST_RESOURCE_CONTEXT_ENV, REPOSITORY_TEST_RESOURCE_STATE_ENV, REPOSITORY_TEST_RESOURCE_SEAM_ENV, REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE, REPOSITORY_TEST_RESOURCE_FIXTURE_ID, REPOSITORY_TEST_RESOURCE_SOURCE, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
   checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

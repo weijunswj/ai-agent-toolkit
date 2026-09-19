@@ -55,3 +55,21 @@ test('terminal packets prevent redundant broad history reconstruction', () => {
   assert.match(controller, /After a substantive terminal packet, Web should normally reconcile only live identities\/state/);
   assert.match(controller, /Do not refetch broad logs\/history merely to reconstruct information that the terminal packet was required to contain/);
 });
+
+test('C1 uses direct Web to executor reconciliation before accepted A2', () => {
+  assert.match(controller, /Before accepted A2, return through the direct `Web -> executor -> Web` path/);
+  assert.match(controller, /no unfinished Loop is a C1 prerequisite/);
+  assert.doesNotMatch(controller, /Pre-S3 `RETURN_TO_WEB`/);
+});
+
+test('C1 cross-user ownership is durable and never timeout-transferred', () => {
+  assert.match(controller, /durably human-owned across GitHub users and controllers/);
+  assert.match(controller, /remains read-only until explicit handover or explicitly authorised concurrency/);
+  assert.match(controller, /Timeout, heartbeat loss, apparent inactivity, labels, status, and executor replacement never transfer human ownership/);
+  assert.match(controller, /Ambiguous or competing ownership is `USER_DECISION_REQUIRED`/);
+});
+
+test('C1 packet loss is replay, not worker rerun', () => {
+  assert.match(controller, /Missing, truncated, malformed, or unverifiable terminal packet => `TERMINAL_PACKET_INCOMPLETE`/);
+  assert.match(controller, /retrieve and replay the exact packet by identity without rerunning the worker/);
+});

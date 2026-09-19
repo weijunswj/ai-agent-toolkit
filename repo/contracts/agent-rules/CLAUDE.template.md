@@ -65,7 +65,7 @@ Optional depth-1 subagents may be used only when work is genuinely separable and
 
 Subagents must not spawn or delegate to other subagents. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
 
-The root or parent remains responsible for integrating and validating every returned result. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
+The root or parent remains responsible for integrating and validating every returned result. The historical compatibility sentence `Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.` is non-authoritative wording only: service tier is not an authoritative route identity, admission input, finality fact, or reproducibility control.
 
 ## Deployment Branch Naming
 

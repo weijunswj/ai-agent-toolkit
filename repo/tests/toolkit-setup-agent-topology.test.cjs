@@ -2,14 +2,32 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
+const setupTestSupport = require('./toolkit-setup-test-support.cjs');
+const { version: CURRENT_TOOLKIT_VERSION } = require('../contracts/toolkit-local-bridge/version.json');
+
+function inspectResourceCapabilityInChild(env, testSeam = true) {
+  const controlPath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
+  const result = spawnSync(process.execPath, ['-e', [
+    `const control = require(${JSON.stringify(controlPath)});`,
+    `process.stdout.write(JSON.stringify(control.inspectResourceCapability({ test_seam: ${testSeam ? 'true' : 'false'} })));`,
+  ].join('\n')], {
+    cwd: path.resolve(__dirname, '..', '..'),
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.10.9', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: CURRENT_TOOLKIT_VERSION, cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -153,6 +171,30 @@ test('resource-counter loss removes direct automatic and resolves recommended se
   assert.equal(planned.args.setupChoices.claudeTopology, 'root-only');
   assert.equal(planned.args.setupChoices.claudeAgentCapacity, 'root-only');
   assert.equal(planned.specs.some((row) => row.key === 'claudeAgentCapacity'), false);
+});
+
+test('repository-test resource fixture is explicit and isolated from runtime counters', () => {
+  const fixture = setupTestSupport.REPOSITORY_TEST_RESOURCE_STATE;
+  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).supported, true);
+  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
+
+  const injected = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment());
+  assert.equal(injected.supported, true);
+  assert.equal(injected.source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
+  assert.equal(injected.resources.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+
+  const ordinary = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment(), false);
+  assert.notEqual(ordinary.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+
+  const runtime = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment({
+    [control.REPOSITORY_TEST_RESOURCE_CONTEXT_ENV]: '',
+  }));
+  assert.notEqual(runtime.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+
+  const unavailable = control.inspectResourceCapability({ test_seam: true, resourceState: null });
+  assert.deepEqual(unavailable, { supported: false, source: 'unsupported-or-malformed', resources: null });
+  const malformed = control.inspectResourceCapability({ test_seam: true, resourceState: { ...fixture, physical_available: 0 } });
+  assert.deepEqual(malformed, { supported: false, source: 'unsupported-or-malformed', resources: null });
 });
 
 test('resource-counter loss invalidates an existing automatic strict profile', async () => {
