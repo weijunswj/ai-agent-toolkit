@@ -152,9 +152,9 @@ function loadRegistry(registry = DEFAULT_REGISTRY) {
   return checked.ok ? checked : result(false, checked.code, checked);
 }
 
-function registryIdentity(registry = DEFAULT_REGISTRY, revision = 'workspace') {
+function registryIdentity(registry = DEFAULT_REGISTRY, revision = null) {
   const checked = loadRegistry(registry);
-  if (!checked.ok || !isSafeId(String(revision))) return result(false, 'REGISTRY_IDENTITY_UNAVAILABLE');
+  if (!checked.ok || !isSafeId(String(revision || '')) || revision === 'workspace') return result(false, 'REGISTRY_IDENTITY_UNAVAILABLE');
   return result(true, 'REGISTRY_IDENTITY_READY', {
     identity: { revision: String(revision), digest: checked.digest },
   });
@@ -202,7 +202,20 @@ function routeCapabilityAvailable(route, options = {}) {
   if (isRecord(options.runtime_route)) return routeSignature(options.runtime_route) === routeSignature(route);
   if (isRecord(options.capability)) return routeSignature(options.capability) === routeSignature(route);
   if (Array.isArray(options.available_routes)) return options.available_routes.includes(routeSignature(route));
-  return true;
+  return false;
+}
+
+function resolveRegistryIdentity(loaded, options = {}) {
+  const supplied = options.registry_identity || options.registryIdentity || null;
+  const revision = options.registry_revision || options.registryRevision || supplied?.revision || null;
+  if (!isSafeId(String(revision || '')) || revision === 'workspace') return result(false, 'REGISTRY_IDENTITY_UNAVAILABLE');
+  const identity = registryIdentity(loaded.registry, revision);
+  if (!identity.ok) return identity;
+  if (supplied !== null && (!isRecord(supplied) || !exactKeys(supplied, ['revision', 'digest'])
+    || supplied.revision !== identity.identity.revision || supplied.digest !== identity.identity.digest)) {
+    return result(false, 'REGISTRY_IDENTITY_MISMATCH');
+  }
+  return identity;
 }
 
 function routeDecision(stage, selectionSource, status, reasonCode, selectedStack = null) {
@@ -249,13 +262,14 @@ function resolveRoute(options = {}) {
   }
   const route = routeOnly(loaded.registry.stacks[stackId].routes[stage]);
   if (!route || !routeCapabilityAvailable(route, options)) {
+    const explicitCapabilityFailure = options.route_available === false || options.available === false;
     return result(false, 'ROUTE_UNAVAILABLE', {
-      decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', 'REQUESTED_ROUTE_UNAVAILABLE', stackId),
+      decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', route ? explicitCapabilityFailure ? 'REQUESTED_ROUTE_UNAVAILABLE' : 'ROUTE_CAPABILITY_UNVERIFIED' : 'REQUESTED_ROUTE_UNAVAILABLE', stackId),
       selected_stack: stackId,
       route: route || null,
     });
   }
-  const identity = registryIdentity(loaded.registry, options.registry_revision || options.registryRevision || 'workspace');
+  const identity = resolveRegistryIdentity(loaded, options);
   if (!identity.ok) return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', identity.code, stackId) });
   const threadId = options.thread_id || options.threadId || `thread-${digestValue({ stage, stackId, route, registry: identity.identity }).slice(0, 24)}`;
   if (!isSafeId(threadId)) return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', 'THREAD_ID_INVALID', stackId) });
@@ -279,7 +293,7 @@ function resolveRoute(options = {}) {
   return result(true, 'ROUTE_RESOLVED', { binding: deepFreeze(binding), route: clone(route), stack_id: stackId, selection_source: selectionSource });
 }
 
-function validateRouteBinding(binding) {
+function validateRouteBinding(binding, options = {}) {
   const keys = ['schema', 'version', 'thread_id', 'stage', 'stack_id', 'selection_source', 'harness_identity', 'registry_identity', 'route', 'route_digest', 'execution_path', 'a2_status', 'status', 'repair_budget_consumed'];
   if (!isRecord(binding) || !exactKeys(binding, keys)
     || binding.schema !== SCHEMAS.routeBinding || binding.version !== 1
@@ -287,15 +301,20 @@ function validateRouteBinding(binding) {
     || !['explicit_web_binding', 'verified_harness_policy'].includes(binding.selection_source)
     || !isRecord(binding.harness_identity) || typeof binding.harness_identity.name !== 'string'
     || typeof binding.harness_identity.verified !== 'boolean' || typeof binding.harness_identity.source !== 'string'
-    || !isRecord(binding.registry_identity) || !isSafeId(binding.registry_identity.revision) || !isDigest(binding.registry_identity.digest)
+    || !isRecord(binding.registry_identity) || !isSafeId(binding.registry_identity.revision) || binding.registry_identity.revision === 'workspace' || !isDigest(binding.registry_identity.digest)
     || !routeOnly(binding.route) || !isDigest(binding.route_digest) || binding.route_digest !== digestValue(binding.route)
     || !EXECUTION_PATHS.includes(binding.execution_path) || !['not-accepted', 'accepted'].includes(binding.a2_status)
     || binding.status !== 'ROUTE_RESOLVED' || binding.repair_budget_consumed !== false) return result(false, 'ROUTE_BINDING_INVALID');
+  const loaded = loadRegistry(options.registry || DEFAULT_REGISTRY);
+  if (!loaded.ok) return result(false, 'ROUTE_BINDING_REGISTRY_INVALID');
+  if (binding.registry_identity.digest !== loaded.digest) return result(false, 'ROUTE_BINDING_REGISTRY_MISMATCH');
+  const registeredRoute = routeOnly(loaded.registry.stacks[binding.stack_id]?.routes?.[binding.stage]);
+  if (!registeredRoute || canonicalSerialize(registeredRoute) !== canonicalSerialize(binding.route)) return result(false, 'ROUTE_BINDING_ROUTE_MISMATCH');
   return result(true, 'ROUTE_BINDING_VALID', { binding: clone(binding) });
 }
 
 function planExecution(options = {}) {
-  const resolved = options.binding ? validateRouteBinding(options.binding) : resolveRoute(options);
+  const resolved = options.binding ? validateRouteBinding(options.binding, options) : resolveRoute(options);
   if (!resolved.ok) return resolved;
   const binding = resolved.binding;
   const plan = {
@@ -470,7 +489,7 @@ function admitOwnership(options = {}) {
   const repository = options.repository || options.repository_id;
   const requester = normalizeIdentity(options.requester || options.requester_identity, 'requester');
   const owner = options.current_owner || options.owner || null;
-  const activeOverlap = options.active_overlap === true || options.overlap === true || (owner !== null && options.active_work !== false);
+  const activeOverlap = options.active_overlap === true || options.overlap === true || options.active_work === true || (owner !== null && options.active_work !== false);
   const base = {
     schema: SCHEMAS.ownershipDecision,
     version: 1,
@@ -481,7 +500,8 @@ function admitOwnership(options = {}) {
     concurrency_authorised: false,
   };
   if (typeof repository !== 'string' || repository.length === 0) return result(false, 'USER_DECISION_REQUIRED', { decision: { ...base, status: 'USER_DECISION_REQUIRED', decision: 'OWNERSHIP_AMBIGUOUS', mutation_allowed: false, reason_code: 'REPOSITORY_IDENTITY_UNAVAILABLE' } });
-  if (!activeOverlap || owner === null) return result(true, 'OWNER_CLEAR', { decision: { ...base, status: 'ADMITTED', decision: 'OWNER_CLEAR', mutation_allowed: true, reason_code: 'NO_ACTIVE_OVERLAP' } });
+  if (!activeOverlap) return result(true, 'OWNER_CLEAR', { decision: { ...base, status: 'ADMITTED', decision: 'OWNER_CLEAR', mutation_allowed: true, reason_code: 'NO_ACTIVE_OVERLAP' } });
+  if (owner === null) return result(false, 'USER_DECISION_REQUIRED', { decision: { ...base, status: 'USER_DECISION_REQUIRED', decision: 'OWNERSHIP_AMBIGUOUS', mutation_allowed: false, reason_code: 'ACTIVE_OVERLAP_OWNER_UNAVAILABLE' } });
   const ownerIdentity = normalizeIdentity(owner, 'owner');
   if (sameIdentity(requester, ownerIdentity)) return result(true, 'OWNER_MATCH', { decision: { ...base, status: 'ADMITTED', decision: 'OWNER_MATCH', mutation_allowed: true, reason_code: 'DURABLE_OWNER_MATCH' } });
 
@@ -572,7 +592,8 @@ function validEvidenceItem(value) {
     && boundedText(value.summary, 2048);
 }
 
-function validateTerminalPacket(packet) {
+function validateTerminalPacket(packet, options = {}) {
+  const allowDraft = options.allowDraft === true;
   const keys = ['schema', 'version', 'packet_id', 'packet_digest', 'packet_reference', 'run_id', 'repository', 'controller_revision', 'lock', 'gate', 'candidate', 'outcome', 'process', 'findings', 'observations', 'qualifications', 'blockers', 'verdict', 'next_state', 'evidence', 'replay', 'created_at'];
   if (!isRecord(packet) || !exactKeys(packet, keys) || packet.schema !== SCHEMAS.packet || packet.version !== 1
     || !isSafeId(packet.packet_id) || !isDigest(packet.packet_digest) || !isSafeId(packet.packet_reference, 512)
@@ -592,13 +613,14 @@ function validateTerminalPacket(packet) {
     || !isSafeId(packet.next_state.next_admissible_action)
     || !isRecord(packet.evidence) || !exactKeys(packet.evidence, ['complete', 'manifest_id', 'items']) || packet.evidence.complete !== true || !isSafeId(packet.evidence.manifest_id)
     || !Array.isArray(packet.evidence.items) || packet.evidence.items.length > 256 || !packet.evidence.items.every(validEvidenceItem)
-    || !isRecord(packet.replay) || !exactKeys(packet.replay, ['durable', 'retrieval_key', 'worker_rerun_required']) || packet.replay.durable !== true
-    || !isSafeId(packet.replay.retrieval_key, 512) || packet.replay.worker_rerun_required !== false
+    || !isRecord(packet.replay) || !exactKeys(packet.replay, ['durable', 'retrieval_key', 'worker_rerun_required'])
+    || (packet.replay.durable !== true && !(allowDraft && packet.replay.durable === false))
+    || !isSafeId(packet.replay.retrieval_key, 512) || packet.replay.worker_rerun_required !== (packet.replay.durable === true ? false : true)
     || !isTimestamp(packet.created_at)) return result(false, TERMINAL_PACKET_INCOMPLETE);
   if (packet.packet_reference !== packet.replay.retrieval_key) return result(false, 'TERMINAL_PACKET_IDENTITY_MISMATCH');
   if (packet.packet_digest !== digestValue(withoutKey(packet, 'packet_digest'))) return result(false, 'TERMINAL_PACKET_DIGEST_MISMATCH');
   if (packet.outcome === 'success' && packet.process.exit_code !== 0) return result(false, 'TERMINAL_PACKET_PROCESS_MISMATCH');
-  return result(true, 'TERMINAL_PACKET_VALID', { packet: deepFreeze(clone(packet)), identity: packetIdentity(packet) });
+  return result(true, allowDraft && packet.replay.durable === false ? 'TERMINAL_PACKET_DRAFT_VALID' : 'TERMINAL_PACKET_VALID', { packet: deepFreeze(clone(packet)), identity: packetIdentity(packet) });
 }
 
 function createTerminalPacket(input = {}) {
@@ -614,7 +636,8 @@ function createTerminalPacket(input = {}) {
     || !['success', 'failure', 'blocked', 'interrupted'].includes(input.outcome)
     || !['PASS', 'FAIL', 'HOLD', 'INCOMPLETE'].includes(input.verdict)
     || !Number.isSafeInteger(process.exit_code) || process.exit_code < 0 || process.exit_code > 255
-    || process.completed !== true) return result(false, TERMINAL_PACKET_INCOMPLETE);
+    || process.completed !== true
+    || !isRecord(input.evidence)) return result(false, TERMINAL_PACKET_INCOMPLETE);
   let seed;
   try {
     seed = digestValue({
@@ -654,14 +677,14 @@ function createTerminalPacket(input = {}) {
     blockers: Array.isArray(input.blockers) ? clone(input.blockers) : [],
     verdict: input.verdict,
     next_state: isRecord(input.next_state) ? clone(input.next_state) : { state: 'TERMINAL', next_admissible_action: 'WEB_RECONCILE_PACKET' },
-    evidence: isRecord(input.evidence) ? clone(input.evidence) : { complete: true, manifest_id: `manifest:${packetId}`, items: [] },
-    replay: { durable: true, retrieval_key: packetReference, worker_rerun_required: false },
+    evidence: clone(input.evidence),
+    replay: { durable: false, retrieval_key: packetReference, worker_rerun_required: true },
     created_at: input.created_at || nowIso(input.now),
   };
   let packet;
   try { packet = { ...base, packet_digest: digestValue(base) }; } catch (_error) { return result(false, TERMINAL_PACKET_INCOMPLETE); }
-  const checked = validateTerminalPacket(packet);
-  return checked.ok ? result(true, 'TERMINAL_PACKET_CREATED', { packet: checked.packet, identity: checked.identity }) : checked;
+  const checked = validateTerminalPacket(packet, { allowDraft: true });
+  return checked.ok ? result(true, 'TERMINAL_PACKET_DRAFT_CREATED', { packet: checked.packet, identity: checked.identity, terminal: false, persisted: false }) : checked;
 }
 
 function bindingMatchesPacket(packet, expected = {}) {
@@ -723,10 +746,20 @@ function storeGet(store, key) {
 }
 
 function persistTerminalPacket(options = {}) {
-  const checked = options.packet ? validateTerminalPacket(options.packet) : result(false, TERMINAL_PACKET_INCOMPLETE);
+  const checked = options.packet ? validateTerminalPacket(options.packet, { allowDraft: true }) : result(false, TERMINAL_PACKET_INCOMPLETE);
   if (!checked.ok) return checked;
-  if (!storePut(options.store, checked.packet.packet_reference, checked.packet)) return result(false, 'TERMINAL_PACKET_NOT_DURABLE', { identity: checked.identity });
-  const replayed = replayTerminalPacket({ store: options.store, identity: checked.identity, expected: options.expected });
+  let packet = checked.packet;
+  if (packet.replay.durable !== true) {
+    const durableBase = {
+      ...packet,
+      replay: { durable: true, retrieval_key: packet.packet_reference, worker_rerun_required: false },
+    };
+    packet = { ...durableBase, packet_digest: digestValue(withoutKey(durableBase, 'packet_digest')) };
+  }
+  const final = validateTerminalPacket(packet);
+  if (!final.ok) return final;
+  if (!storePut(options.store, final.packet.packet_reference, final.packet)) return result(false, 'TERMINAL_PACKET_NOT_DURABLE', { identity: final.identity });
+  const replayed = replayTerminalPacket({ store: options.store, identity: final.identity, expected: options.expected });
   if (!replayed.ok) return replayed;
   return result(true, 'TERMINAL_PACKET_DURABLE', { packet: replayed.packet, identity: replayed.identity });
 }
@@ -750,9 +783,13 @@ function admitNextGate(options = {}) {
   const checked = options.packet ? validateTerminalPacket(options.packet) : result(false, TERMINAL_PACKET_INCOMPLETE);
   if (!checked.ok) return checked;
   const identity = options.packet_identity || options.identity || {};
-  if (identity.id && identity.id !== checked.identity.id || identity.digest && identity.digest !== checked.identity.digest || identity.reference && identity.reference !== checked.identity.reference) return result(false, 'TERMINAL_PACKET_IDENTITY_MISMATCH');
+  if (!isRecord(identity) || !exactKeys(identity, ['id', 'digest', 'reference'])
+    || !isSafeId(identity.id) || !isDigest(identity.digest) || !isSafeId(identity.reference, 512)
+    || identity.id !== checked.identity.id || identity.digest !== checked.identity.digest || identity.reference !== checked.identity.reference) return result(false, 'TERMINAL_PACKET_IDENTITY_MISMATCH');
   const live = options.live;
-  if (!isRecord(live) || !bindingMatchesPacket(checked.packet, live)) return result(false, 'LIVE_APPLICABILITY_UNAVAILABLE');
+  const liveKeys = ['run_id', 'repository', 'controller_revision', 'lock', 'gate', 'candidate'];
+  if (!isRecord(live) || !liveKeys.every((key) => hasOwn(live, key)) || !validPacketCandidate(live.candidate)
+    || !bindingMatchesPacket(checked.packet, live)) return result(false, 'LIVE_APPLICABILITY_UNAVAILABLE');
   if (typeof options.verify_applicability === 'function') {
     let applicable;
     try { applicable = options.verify_applicability(checked.packet, live); } catch (_error) { return result(false, 'LIVE_APPLICABILITY_UNAVAILABLE'); }
@@ -804,11 +841,12 @@ function createTerminalReceipt(input = {}) {
     || (object.terminal_state !== undefined && !['CLOSED', 'MERGED', 'CLOSED_UNMERGED'].includes(object.terminal_state))) {
     return result(false, TERMINAL_RECEIPT_INCOMPLETE);
   }
+  if (!isRecord(input.authority) || !isRecord(input.evidence) || !isRecord(input.readback)) {
+    return result(false, TERMINAL_RECEIPT_INCOMPLETE);
+  }
   const kind = object.kind === 'pull_request' ? 'pull_request' : 'issue';
   const terminalState = object.terminal_state || (kind === 'pull_request' ? 'CLOSED_UNMERGED' : 'CLOSED');
   const dispositionKind = input.terminal_disposition?.kind || (kind === 'pull_request' && terminalState === 'MERGED' ? 'PR_MERGED' : kind === 'pull_request' ? 'PR_CLOSED_UNMERGED' : 'ISSUE_COMPLETED');
-  const authority = isRecord(input.authority) ? clone(input.authority) : { reference: 'authority:unavailable', digest: digestValue({ kind, number: object.number, type: 'authority' }) };
-  const evidence = isRecord(input.evidence) ? clone(input.evidence) : { reference: 'evidence:unavailable', digest: digestValue({ kind, number: object.number, type: 'evidence' }) };
   const base = {
     schema: SCHEMAS.receipt,
     version: 1,
@@ -818,16 +856,12 @@ function createTerminalReceipt(input = {}) {
       summary: input.terminal_disposition?.summary || 'Terminal outcome reconciled from the controlling authority.',
       controlling_lock: input.terminal_disposition?.controlling_lock ?? null,
     },
-    authority,
-    evidence,
+    authority: clone(input.authority),
+    evidence: clone(input.evidence),
     candidate: normalizeReceiptCandidate(input.candidate, kind),
     successor: input.successor ?? null,
     created_at: input.created_at || nowIso(input.now),
-    readback: {
-      verified: true,
-      reference: input.readback?.reference || `receipt:${kind}:${object.repository}:${object.number}`,
-      digest: input.readback?.digest || digestValue({ kind, number: object.number, terminalState, evidence: evidence.digest }),
-    },
+    readback: clone(input.readback),
   };
   let seed;
   try { seed = digestValue(base); } catch (_error) { return result(false, TERMINAL_RECEIPT_INCOMPLETE); }
@@ -837,6 +871,25 @@ function createTerminalReceipt(input = {}) {
   return checked.ok ? result(true, 'TERMINAL_RECEIPT_CREATED', { receipt: checked.receipt, identity: checked.identity }) : checked;
 }
 
+function sameTerminalObject(left, right) {
+  return isRecord(left) && isRecord(right)
+    && left.kind === right.kind
+    && left.repository === right.repository
+    && left.number === right.number
+    && left.terminal_state === right.terminal_state;
+}
+
+function independentReadbackMatches(observed, object, readback) {
+  if (!isRecord(observed) || observed.verified !== true
+    || observed.reference !== readback.reference || observed.digest !== readback.digest) return false;
+  const observedObject = observed.object || observed.terminal_object || observed.observed_object;
+  if (observedObject) return sameTerminalObject(observedObject, object);
+  return observed.kind === object.kind
+    && observed.repository === object.repository
+    && observed.number === object.number
+    && observed.terminal_state === object.terminal_state;
+}
+
 function reconcileTerminalReceipt(options = {}) {
   const object = options.object;
   const terminal = isRecord(object) && ['CLOSED', 'MERGED', 'CLOSED_UNMERGED'].includes(object.terminal_state);
@@ -844,7 +897,12 @@ function reconcileTerminalReceipt(options = {}) {
   if (!options.receipt) return result(true, 'TERMINAL_RECEIPT_NOT_YET_REQUIRED', { terminal: false });
   const checked = validateTerminalReceipt(options.receipt);
   if (!checked.ok) return checked;
-  if (isRecord(object) && (checked.receipt.object.kind !== object.kind || checked.receipt.object.repository !== object.repository || checked.receipt.object.number !== object.number || checked.receipt.object.terminal_state !== object.terminal_state)) return result(false, 'TERMINAL_RECEIPT_IDENTITY_MISMATCH', { replay_allowed: false, reopen_allowed: false });
+  const observedObject = isRecord(object) ? object : checked.receipt.object;
+  if (isRecord(object) && !sameTerminalObject(checked.receipt.object, object)) return result(false, 'TERMINAL_RECEIPT_IDENTITY_MISMATCH', { replay_allowed: false, reopen_allowed: false });
+  const observed = options.observed_readback || options.observedReadback || options.readback_observation || null;
+  if (!independentReadbackMatches(observed, observedObject, checked.receipt.readback)) {
+    return result(false, 'TERMINAL_RECEIPT_READBACK_UNVERIFIED', { replay_allowed: false, reopen_allowed: false });
+  }
   return result(true, options.transport_ambiguous === true ? 'TERMINAL_RECEIPT_AMBIGUOUS_OUTCOME_RECONCILED' : 'TERMINAL_RECEIPT_READBACK_VERIFIED', { receipt: checked.receipt, identity: checked.identity, replay_allowed: false, reopen_allowed: false });
 }
 

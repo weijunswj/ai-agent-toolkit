@@ -93,7 +93,8 @@ function createFakeCodexAppServer(root) {
 }
 
 function run(args, options = {}) {
-  return spawnSync(process.execPath, [script, ...args], {
+  const testArgs = options.testResourceSeam === false ? [] : ['--test-resource-seam'];
+  return spawnSync(process.execPath, [script, ...testArgs, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },

@@ -2387,7 +2387,7 @@ function previewRecovery(input = {}) {
   if (!evidenceValid.ok) return evidenceValid;
   const parsed = evidenceValid.parsed;
   const targetState = parsed.target_state;
-  const rendered = renderProgrammeV5(targetState);
+  const rendered = publicRenderProgrammeV5(targetState);
   if (!rendered.ok) return failure('RECOVERY_TARGET_RENDER_INVALID');
   const parentTargetBytes = parsed.parent.canonical_digest === parsed.target_digest
     ? parsed.parent.raw_body
@@ -4573,7 +4573,7 @@ function h2LinesForArray(values, empty = 'None recorded.') {
 }
 function h2ManagedDocument(style, kind, prose, carrier) {
   const marker = style[kind];
-  h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+  h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line) && h2AuditScalar(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
   for (const line of prose) h2Require(!H2_RESERVED_STEMS.some((stem) => line.includes(stem)), true, 'RESERVED_RESIDUE', 'PUBLIC_AUDIT');
   const proseDigest = h2DigestText(prose.join('\n'));
   const finalizedCarrier = { ...carrier, public_prose_sha256: proseDigest };
@@ -5515,6 +5515,36 @@ function h2PlanMigrationPublic(input) {
   });
 }
 
+function h2ScreenLegacyRender(value) {
+  if (!isRecord(value) || value.ok !== true) return value;
+  const screened = h2Clone(value);
+  const bodies = [screened.parent, screened.child];
+  delete screened.parent;
+  delete screened.child;
+  h2Require(h2Audit(screened), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  for (const body of bodies) {
+    h2Require(typeof body === 'string' && body.split('\n').filter((line) => !line.includes('<!--')).every(h2AuditScalar), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  }
+  return value;
+}
+
+function publicRenderProgrammeV5(state) {
+  h2Require(h2Audit(state), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2ScreenLegacyRender(renderProgrammeV5(state));
+}
+
+function publicRenderProgrammeGraph(input = {}) {
+  const rendered = programmeSurface.renderProgrammeGraph(input);
+  h2Require(h2Audit(rendered), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return rendered;
+}
+
+const publicProgrammeSurface = Object.freeze({
+  ...programmeSurface,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
+});
+
 const humanSurfaceV2 = Object.freeze({
   readComplete: h2ReadCompletePublic,
   render: h2RenderPublic,
@@ -5532,7 +5562,7 @@ const projectionBootstrapRecovery = Object.freeze({
   parseParentV5Body,
   parseChildV5Body,
   parse: parseProgrammeV5Body,
-  render: renderProgrammeV5,
+  render: publicRenderProgrammeV5,
   preview: previewRecovery,
   buildTargetState: buildRecoveryTargetState,
   buildReceiptOperationDescriptor,
@@ -5560,9 +5590,9 @@ const programmeV5 = Object.freeze({
     const valid = validateCanonicalStateV5(state);
     return valid.ok ? success('V5_PROJECTION_READY', { projection: projectionPayload(state, kind), projection_digest: digestValue(projectionPayload(state, kind)) }) : valid;
   },
-  renderProgrammeV5,
-  renderProgrammeGraph: programmeSurface.renderProgrammeGraph,
-  renderProgrammeParent: programmeSurface.renderProgrammeParent,
+  renderProgrammeV5: publicRenderProgrammeV5,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
   reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
   parseProgrammeV5Body,
   currentProjection: programmeSurface,
@@ -5662,7 +5692,7 @@ module.exports = Object.freeze({
   classifyPostMergeEpochFinalisationCheckpoint,
   previewPostMergeEpochFinalisation,
   deriveProjectionV5: programmeV5.deriveProjectionV5,
-  renderProgrammeV5,
+  renderProgrammeV5: publicRenderProgrammeV5,
   parseParentV5Body,
   parseChildV5Body,
   parseProgrammeV5Body,
@@ -5675,12 +5705,12 @@ module.exports = Object.freeze({
   validateControllerBootstrap,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
-  programmeSurface,
+  programmeSurface: publicProgrammeSurface,
   projectPullRequestMetadata: programmeSurface.projectPullRequestMetadata,
   normalizeProgrammeGraphSnapshot: programmeSurface.normalizeProgrammeGraphSnapshot,
   validateProgrammeGraph: programmeSurface.validateProgrammeGraph,
-  renderProgrammeGraph: programmeSurface.renderProgrammeGraph,
-  renderProgrammeParent: programmeSurface.renderProgrammeParent,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
   reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
   reconcileProgrammeGraph: programmeSurface.reconcileProgrammeGraph,
   createBootstrapIoDiagnostic: programmeSurface.createBootstrapIoDiagnostic,

@@ -387,7 +387,10 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
+  const resourceCapability = inspectResourceCapability({
+    resourceState: selected.resource_state,
+    test_seam: options.test_seam === true || options.testSeam === true || selected.test_seam === true,
+  });
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
   if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
     || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
@@ -454,10 +457,16 @@ function repositoryTestResourceStateFromEnvironment(env = process.env) {
   }
 }
 
+function resourceTestSeamEnabled(options = {}) {
+  return options.test_seam === true || options.testSeam === true || options.resourceState?.test_seam === true;
+}
+
 function inspectResources(options = {}) {
-  if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
-  const repositoryTestState = repositoryTestResourceStateFromEnvironment();
-  if (repositoryTestState) return repositoryTestState;
+  if (resourceTestSeamEnabled(options)) {
+    if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+    const repositoryTestState = repositoryTestResourceStateFromEnvironment(options.env || process.env);
+    if (repositoryTestState) return repositoryTestState;
+  }
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -475,7 +484,10 @@ function validResourceState(resources) {
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  const supported = Boolean(validResourceState(resources)
+    && (['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      || resourceTestSeamEnabled(options) && resources.source === 'fixture')
+    && (resources.fixture_id === undefined || resourceTestSeamEnabled(options)));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -727,7 +739,9 @@ function admissionDecision(specInput, options = {}) {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources)
+    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -739,7 +753,9 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!validResourceState(resources)
+    || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)
+      && !(resourceTestSeamEnabled(options) && resources.source === 'fixture')) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 

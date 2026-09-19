@@ -396,6 +396,7 @@ function workerInputParts(input = {}) {
     terminalState,
     activeClaim,
     current,
+    active: liveness === 'active' && current && currentEvidence === 'runtime-native',
     terminal: liveness === 'terminal',
     inactive: liveness === 'inactive' && current,
     livenessUnverified: activeClaim && liveness === 'unknown',
@@ -451,7 +452,7 @@ function launchSafetyView(input = {}) {
     || ['AMBIGUOUS', 'UNKNOWN', 'UNRESOLVED'].includes(String(source.launch_outcome || '').toUpperCase())
     || inFlight.ambiguous === true
     || inFlight.launch_outcome && ['AMBIGUOUS', 'UNKNOWN', 'UNRESOLVED'].includes(String(inFlight.launch_outcome).toUpperCase());
-  const active = worker.activeClaim && worker.liveness === 'active' && worker.current;
+  const active = worker.active;
   const livenessUnverified = worker.livenessUnverified;
   const deliveryPending = inFlight.state === 'DELIVERY_PENDING';
   const terminal = source.terminal === true || source.terminal_state === true || run.state === 'TERMINAL' || worker.terminal;
@@ -650,11 +651,44 @@ function currentInput(input = {}) {
   };
 }
 
+function hasExecutableCurrentIdentity(value) {
+  return isRecord(value) && (
+    safeText(value.repository)
+    && (safeText(value.lock) || safeText(value.gate) || isRecord(value.run) && value.run.id !== 'none'
+      || isRecord(value.canonical_main) && (value.canonical_main.sha !== null || value.canonical_main.tree !== null)
+      || isRecord(value.candidate) && value.candidate.pr !== null
+      || isRecord(value.controlling_receipt) && Object.values(value.controlling_receipt).some((item) => item !== null)
+      || isRecord(value.in_flight) && (value.in_flight.worker !== null || value.in_flight.state !== 'NONE')
+  ));
+}
+
+function executableCurrentIdentityComplete(value) {
+  if (!isRecord(value)
+    || !safeText(value.repository)
+    || !safeId(value.controller_revision)
+    || !isRecord(value.canonical_main) || !isSha(value.canonical_main.sha) || !isSha(value.canonical_main.tree)
+    || !isRecord(value.run) || !safeId(value.run.id) || value.run.id === 'none'
+    || !safeText(value.lock) || !safeText(value.gate, 128)
+    || !isRecord(value.controlling_receipt)
+    || !safeText(value.controlling_receipt.id)
+    || !safeText(value.controlling_receipt.reference, 1024)
+    || !isDigest(value.controlling_receipt.digest)
+    || !safeId(value.next_admissible_action)) return false;
+  if (value.candidate?.pr !== null
+    && (!isSha(value.candidate.head) || !isSha(value.candidate.tree) || !safeText(value.candidate.base?.ref) || !isSha(value.candidate.base?.sha))) return false;
+  if (value.in_flight?.state !== 'NONE' || value.in_flight?.worker !== null || value.in_flight?.worker_liveness !== 'inactive') {
+    if (!value.in_flight || !WORKER_LIVENESS_EVIDENCE.includes(value.in_flight.worker_liveness_evidence)) return false;
+    if (value.in_flight.worker_liveness === 'active' && !safeText(value.in_flight.worker_identity)) return false;
+  }
+  return true;
+}
+
 function createCurrentProjection(input = {}) {
   const launchSafety = validateCurrentLaunchSafety(input);
   if (!launchSafety.ok) return launchSafety;
   const base = currentInput(input);
   if (!safeText(base.repository) || !safeId(base.controller_revision) || !safeId(base.next_admissible_action)) return result(false, 'CURRENT_PROJECTION_INCOMPLETE');
+  if (hasExecutableCurrentIdentity(base) && !executableCurrentIdentityComplete(base)) return result(false, 'CURRENT_EXECUTABLE_IDENTITY_INCOMPLETE');
   const projection = { ...base, projection_digest: kernel.digestValue(base) };
   const checked = validateCurrentProjection(projection);
   return checked.ok ? result(true, 'CURRENT_PROJECTION_READY', { projection: Object.freeze(projection) }) : checked;
@@ -688,6 +722,7 @@ function validateCurrentProjection(value) {
     || (value.controlling_receipt.digest !== null && !isDigest(value.controlling_receipt.digest))
     || !safeId(value.next_admissible_action) || !isDigest(value.projection_digest)
     || value.projection_digest !== kernel.digestValue(Object.fromEntries(CURRENT_DIGEST_KEYS.map((key) => [key, value[key]])))) return result(false, 'CURRENT_PROJECTION_INVALID');
+  if (hasExecutableCurrentIdentity(value) && !executableCurrentIdentityComplete(value)) return result(false, 'CURRENT_EXECUTABLE_IDENTITY_INCOMPLETE');
   const launchSafety = validateCurrentLaunchSafety(value);
   if (!launchSafety.ok) return launchSafety;
   return result(true, 'CURRENT_PROJECTION_VALID', { projection: clone(value) });
@@ -735,12 +770,12 @@ function isCurrentFresh(projection, expected = null, diagnostic = null) {
   }
   const fields = ['repository', 'controller_revision', 'canonical_main', 'programme', 'run', 'lock', 'gate', 'repair_count', 'candidate', 'hold', 'in_flight', 'controlling_receipt', 'next_admissible_action'];
   const present = fields.filter((field) => Object.prototype.hasOwnProperty.call(expected, field));
-  if (present.length === 0 && !Object.prototype.hasOwnProperty.call(expected, 'projection_digest')) {
+  if (!Object.prototype.hasOwnProperty.call(expected, 'projection_digest') && present.length !== fields.length) {
     if (io) {
       recordBootstrapIo(io, 'stale_current_projections');
       setBootstrapEscalationReason(io, 'stale_current_projection');
     }
-    return result(false, 'CURRENT_STALE', { reason: 'LIVE_CURRENT_UNAVAILABLE' });
+    return result(false, 'CURRENT_STALE', { reason: 'CURRENT_IDENTITY_INCOMPLETE' });
   }
   if (!compareFields(projection, expected, present)) {
     if (io) {
@@ -834,13 +869,16 @@ function normalizeGraphDeliveryPr(value, repository) {
 
 function normalizeGraphSections(value) {
   if (value === undefined || value === null) return [];
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) && !Array.isArray(value)) return null;
   const sections = [];
   const reserved = new Set(['children', 'current-children', 'current-programme-children', 'pr-history', 'runs', 'locks', 'ci', 'foundation', 'programme-graph']);
-  for (const id of Object.keys(value).sort(graphCompare)) {
+  const entries = Array.isArray(value)
+    ? value.map((raw) => [raw?.id, raw])
+    : Object.keys(value).sort(graphCompare).map((id) => [id, value[id]]);
+  for (const [id, raw] of entries.sort((left, right) => graphCompare(String(left[0]), String(right[0]))) ) {
+    if (!safeId(id)) return null;
     const normalizedId = id.toLowerCase().replace(/_/g, '-');
-    if (!safeId(id) || reserved.has(normalizedId)) return null;
-    const raw = value[id];
+    if (reserved.has(normalizedId)) return null;
     const source = isRecord(raw) ? raw : { items: raw };
     const title = source.title === undefined ? id : source.title;
     const items = graphStringList(source.items);

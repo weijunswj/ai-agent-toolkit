@@ -11,11 +11,11 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const setupTestSupport = require('./toolkit-setup-test-support.cjs');
 const { version: CURRENT_TOOLKIT_VERSION } = require('../contracts/toolkit-local-bridge/version.json');
 
-function inspectResourceCapabilityInChild(env) {
+function inspectResourceCapabilityInChild(env, testSeam = true) {
   const controlPath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
   const result = spawnSync(process.execPath, ['-e', [
     `const control = require(${JSON.stringify(controlPath)});`,
-    'process.stdout.write(JSON.stringify(control.inspectResourceCapability()));',
+    `process.stdout.write(JSON.stringify(control.inspectResourceCapability({ test_seam: ${testSeam ? 'true' : 'false'} })));`,
   ].join('\n')], {
     cwd: path.resolve(__dirname, '..', '..'),
     encoding: 'utf8',
@@ -175,22 +175,25 @@ test('resource-counter loss removes direct automatic and resolves recommended se
 
 test('repository-test resource fixture is explicit and isolated from runtime counters', () => {
   const fixture = setupTestSupport.REPOSITORY_TEST_RESOURCE_STATE;
-  assert.equal(control.inspectResourceCapability({ resourceState: fixture }).supported, true);
-  assert.equal(control.inspectResourceCapability({ resourceState: fixture }).source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
+  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).supported, true);
+  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
 
   const injected = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment());
   assert.equal(injected.supported, true);
   assert.equal(injected.source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
   assert.equal(injected.resources.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
 
+  const ordinary = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment(), false);
+  assert.notEqual(ordinary.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+
   const runtime = inspectResourceCapabilityInChild(setupTestSupport.repositoryTestResourceEnvironment({
     [control.REPOSITORY_TEST_RESOURCE_CONTEXT_ENV]: '',
   }));
   assert.notEqual(runtime.resources?.fixture_id, control.REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
 
-  const unavailable = control.inspectResourceCapability({ resourceState: null });
+  const unavailable = control.inspectResourceCapability({ test_seam: true, resourceState: null });
   assert.deepEqual(unavailable, { supported: false, source: 'unsupported-or-malformed', resources: null });
-  const malformed = control.inspectResourceCapability({ resourceState: { ...fixture, physical_available: 0 } });
+  const malformed = control.inspectResourceCapability({ test_seam: true, resourceState: { ...fixture, physical_available: 0 } });
   assert.deepEqual(malformed, { supported: false, source: 'unsupported-or-malformed', resources: null });
 });
 

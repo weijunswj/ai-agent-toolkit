@@ -289,6 +289,37 @@ test('CURRENT launch safety rejects duplicate launch and derives reconciliation 
   assert.equal(ready.launch_allowed, true);
 });
 
+test('CURRENT restart admission rejects stale, incomplete, and mismatched executable identity', () => {
+  const staleQueued = programme.validateCurrentLaunchSafety({
+    run: { id: 'run-stale-queued', state: 'QUEUED' },
+    in_flight: { state: 'NONE', worker: 'worker-live', worker_liveness: 'active', worker_liveness_evidence: 'runtime-native' },
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+    stage: 'G3',
+  });
+  assert.equal(staleQueued.ok, false);
+  assert.equal(staleQueued.derived_action, 'ADOPT_IN_FLIGHT');
+  assert.equal(staleQueued.reason_code, 'IN_FLIGHT_EXECUTION_PRESENT');
+
+  const incomplete = programme.createCurrentProjection({
+    repository,
+    controller_revision: revision,
+    canonical_main: { sha: base, tree },
+    run: { id: 'run-incomplete', state: 'QUEUED' },
+    lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
+    gate: 'G3',
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+  });
+  assert.equal(incomplete.ok, false);
+  assert.equal(incomplete.code, 'CURRENT_EXECUTABLE_IDENTITY_INCOMPLETE');
+
+  const complete = programme.createCurrentProjection(currentInput());
+  assert.equal(complete.ok, true, complete.code);
+  assert.equal(programme.isCurrentFresh(complete.projection, { repository }).reason, 'CURRENT_IDENTITY_INCOMPLETE');
+  const candidateMismatch = { ...complete.projection, candidate: { ...complete.projection.candidate, head: '9'.repeat(40) } };
+  const expected = { ...complete.projection, candidate: candidateMismatch.candidate };
+  assert.equal(programme.isCurrentFresh(complete.projection, expected).reason, 'CURRENT_BINDING_MISMATCH');
+});
+
 test('worker identity and admitted launch evidence do not substitute for current active liveness', () => {
   const active = {
     run: { state: 'IN_FLIGHT' },
@@ -321,7 +352,13 @@ test('verified inactive liveness clears active projection while preserving histo
   const inactive = programme.createCurrentProjection({
     repository,
     controller_revision: revision,
+    canonical_main: { sha: base, tree },
+    programme: { parent: 421, current_child: 422, lane: 'C1' },
     run: { id: 'run-stale', state: 'IN_FLIGHT' },
+    lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
+    gate: 'G3',
+    repair_count: { used: 0, limit: 2 },
+    controlling_receipt: { id: 'receipt-stale', reference: 'github:issue-comment:422:5729731423', digest: '4'.repeat(64) },
     in_flight: {
       state: 'RUNNING',
       worker: 'worker-stale',
@@ -345,7 +382,13 @@ test('verified inactive liveness clears active projection while preserving histo
 
 test('terminal evidence wins over an in-flight allegation and requires terminal reconciliation without relaunch', () => {
   const input = {
+    canonical_main: { sha: base, tree },
+    programme: { parent: 421, current_child: 422, lane: 'C1' },
     run: { id: 'run-terminal', state: 'IN_FLIGHT' },
+    lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
+    gate: 'G3',
+    repair_count: { used: 0, limit: 2 },
+    controlling_receipt: { id: 'receipt-terminal', reference: 'github:issue-comment:422:5729731423', digest: '4'.repeat(64) },
     in_flight: {
       state: 'RUNNING',
       worker: 'worker-terminal',
@@ -471,8 +514,16 @@ test('Programme Graph renderer is repository-neutral and dry-runs the current To
         delivery_pr: { repository: 'weijunswj/ai-agent-toolkit', number: 434, status: 'OPEN', role: 'DELIVERY', completes_child: false, reference: 'github:pull/434' },
       },
       {
-        id: 'outcome-423', order: 2, kind: 'OUTCOME', title: 'Future assurance outcome', materialized: false,
-        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: null, delivery_pr: null,
+        id: 'child-423', order: 2, kind: 'CHILD', title: 'Planned assurance child', materialized: false,
+        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 423 }, delivery_pr: null,
+      },
+      {
+        id: 'child-424', order: 3, kind: 'CHILD', title: 'Planned reconciliation child', materialized: false,
+        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 424 }, delivery_pr: null,
+      },
+      {
+        id: 'outcome-425', order: 4, kind: 'OUTCOME', title: 'Planned parent-owned outcome', materialized: false,
+        lifecycle: 'PLANNED', dependencies: ['child-423', 'child-424'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 425 }, delivery_pr: null,
       },
     ],
   });
@@ -481,10 +532,45 @@ test('Programme Graph renderer is repository-neutral and dry-runs the current To
   assert.match(toolkit421.body, /weijunswj\/ai-agent-toolkit/);
   assert.match(toolkit421.body, /#422/);
   assert.match(toolkit421.body, /#434 \(OPEN\)/);
-  assert.match(toolkit421.body, /outcome-423: Future assurance outcome/);
+  assert.match(toolkit421.body, /#423/);
+  assert.match(toolkit421.body, /#424/);
+  assert.match(toolkit421.body, /#425/);
+  assert.match(toolkit421.body, /outcome-425: Planned parent-owned outcome/);
   assert.doesNotMatch(toolkit421.body, /example\/neutral-repo|programme-neutral/);
   assert.doesNotMatch(toolkit421.body, /RUN|Lock|worker|detailed CI/i);
   assert.notEqual(neutral.graph.graph_digest, toolkit421.graph.graph_digest);
+
+  const regenerated = programme.renderProgrammeGraph(toolkit421.canonical_snapshot);
+  assert.equal(regenerated.ok, true, regenerated.code);
+  assert.equal(regenerated.body, toolkit421.body);
+  assert.equal(regenerated.graph_digest, toolkit421.graph_digest);
+  assert.equal(regenerated.canonical_snapshot_digest, toolkit421.canonical_snapshot_digest);
+});
+
+test('all public programme renderers apply the retained public-data screen', () => {
+  const rendered = programmeV5.renderProgrammeV5(programmeV5.FINALISATION_SOURCE_STATE);
+  assert.equal(rendered.ok, true, rendered.code);
+  const legacyRenderers = [
+    programmeV5.renderProgrammeV5,
+    programmeV5.programmeV5.renderProgrammeV5,
+    programmeV5.projectionBootstrapRecovery.render,
+  ];
+  for (const renderer of legacyRenderers) assert.equal(renderer(programmeV5.FINALISATION_SOURCE_STATE).ok, true);
+  const canary = structuredClone(programmeV5.FINALISATION_SOURCE_STATE);
+  canary.parent.title = 'token=synthetic-review-canary';
+  for (const renderer of legacyRenderers) assert.throws(() => renderer(canary), /PUBLIC_DATA_UNSAFE/);
+  const graphCanary = {
+    ...graphFixture(),
+    programme: { ...graphFixture().programme, title: 'token=synthetic-review-canary' },
+  };
+  for (const renderer of [
+    programmeV5.renderProgrammeGraph,
+    programmeV5.renderProgrammeParent,
+    programmeV5.programmeV5.renderProgrammeGraph,
+    programmeV5.programmeV5.renderProgrammeParent,
+    programmeV5.programmeSurface.renderProgrammeGraph,
+    programmeV5.programmeSurface.renderProgrammeParent,
+  ]) assert.throws(() => renderer(graphCanary), /PUBLIC_DATA_UNSAFE/);
 });
 
 test('Programme Graph excludes child-local chronology and preserves parent minimality', () => {
@@ -530,4 +616,16 @@ test('Programme Graph rejects duplicate membership and unknown dependencies', ()
   assert.equal(programme.renderProgrammeGraph(duplicate).code, 'PROGRAMME_GRAPH_DUPLICATE_NATIVE_ISSUE');
   const unknownDependency = graphFixture({ outcomes: [{ ...graphFixture().outcomes[0], dependencies: ['missing-outcome'] }] });
   assert.equal(programme.renderProgrammeGraph(unknownDependency).code, 'PROGRAMME_GRAPH_DEPENDENCY_UNKNOWN');
+});
+
+test('Programme Graph keeps only the minimum core when optional sections are empty', () => {
+  const minimal = programme.renderProgrammeGraph({
+    repository: 'example/minimal-repo',
+    programme: { id: 'programme-minimal', title: 'Minimal Programme' },
+    outcomes: [],
+  });
+  assert.equal(minimal.ok, true, minimal.code);
+  assert.match(minimal.body, /^## Programme status$/m);
+  assert.match(minimal.body, /^## Programme Graph$/m);
+  assert.doesNotMatch(minimal.body, /^## Programme (objective|labels|boundaries|holds|next action)$/m);
 });
