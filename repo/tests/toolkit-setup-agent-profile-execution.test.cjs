@@ -27,7 +27,7 @@ function runInteractive(root, args, options = {}) {
     "'use strict';",
     "Object.defineProperty(process.stdin, 'isTTY', { value: true });",
     `const setup = require(${JSON.stringify(script)});`,
-    `setup.main(${JSON.stringify(['--test-resource-seam', ...args])}).then((code) => { process.exitCode = code; }).catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });`,
+    `setup.main(${JSON.stringify(args)}).then((code) => { process.exitCode = code; }).catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });`,
     '',
   ].join('\n'));
   return spawnSync(process.execPath, [launcher], {

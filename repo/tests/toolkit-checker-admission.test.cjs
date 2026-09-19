@@ -12,7 +12,7 @@ const processLaunch = require('../scripts/claude-process-launch.cjs');
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-checker-')); }
 function resources(overrides = {}) {
   return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB,
-    commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', test_seam: true, ...overrides };
+    commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
 }
 function ready(overrides = {}) {
   return { implementation_complete: true, focused_validation_passed: true, diff_ready: true,

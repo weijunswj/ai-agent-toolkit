@@ -13,7 +13,7 @@ const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', test_seam: true, ...overrides };
+  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
 }
 function spec(overrides = {}) {
   return {
@@ -50,7 +50,7 @@ function profile(overrides = {}) {
 }
 function verifiedOptions(overrides = {}) {
   const selected = overrides.profile || profile();
-  return { claudeCli: defaultVerifier.cli, test_seam: true, ...overrides, profile: selected };
+  return { claudeCli: defaultVerifier.cli, ...overrides, profile: selected };
 }
 function verifierFixture() {
   const work = root();
@@ -156,7 +156,7 @@ test('shared resource admission rejects malformed capacity profiles before reser
     { capacity_mode: 'unverified', manual_maximum: 64, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
   ]) {
     const work = root();
-    const result = control.resourceAdmissionDecision(spec(), malformed, resources(), { root: work, test_seam: true });
+    const result = control.resourceAdmissionDecision(spec(), malformed, resources(), { root: work });
     assert.equal(result.result, control.RESULTS.REFUSE);
     assert.match(result.reason, /profile.*verified safely/i);
     assert.equal(fs.existsSync(control.statePath({ root: work })), false);
@@ -167,7 +167,6 @@ test('shared resource admission refuses Toolkit child recursion before creating 
   const work = root();
   const result = control.resourceAdmissionDecision(spec(), profile(), resources(), {
     root: work,
-    test_seam: true,
     env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' },
   });
   assert.equal(result.result, control.RESULTS.REFUSE);
@@ -319,7 +318,7 @@ test('complete profile validation rejects corrupted, partial, future, unknown an
     assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);
     assert.equal(read.supported, false);
     assert.notEqual(read.status, 'configured');
-    assert.equal(control.admissionDecision(spec(), { root: work, test_seam: true, resourceState: resources() }).result, control.RESULTS.REFUSE);
+    assert.equal(control.admissionDecision(spec(), { root: work, resourceState: resources() }).result, control.RESULTS.REFUSE);
   }
 });
 
@@ -380,16 +379,16 @@ test('schema-2 strict profiles fail closed while a correct schema-3 proof persis
 });
 
 test('resource capability rejects unsupported malformed and overflowed states', () => {
-  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: null }).supported, false);
-  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: resources({ physical_available: Infinity }) }).supported, false);
-  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: resources({ commit_available: Number.MAX_VALUE }) }).supported, false);
-  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: resources() }).supported, true);
+  assert.equal(control.inspectResourceCapability({ resourceState: null }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources({ physical_available: Infinity }) }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources({ commit_available: Number.MAX_VALUE }) }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources() }).supported, true);
 });
 
 test('oversized Unicode prompts refuse before admission or artifact creation', () => {
   const work = root();
   const result = control.launch(spec({ child_prompt: `${'a'.repeat(control.MAX_PROMPT_BYTES - 2)}€` }), {
-    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(), test_seam: true, resourceState: resources(),
+    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(), resourceState: resources(),
   });
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.notEqual(result.status, 'launched');

@@ -24,6 +24,7 @@ function repositoryTestResourceEnvironment(overrides = {}) {
   return {
     [agentControl.REPOSITORY_TEST_RESOURCE_CONTEXT_ENV]: agentControl.REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE,
     [agentControl.REPOSITORY_TEST_RESOURCE_STATE_ENV]: JSON.stringify(REPOSITORY_TEST_RESOURCE_STATE),
+    [agentControl.REPOSITORY_TEST_RESOURCE_SEAM_ENV]: '1',
     ...overrides,
   };
 }
@@ -93,8 +94,7 @@ function createFakeCodexAppServer(root) {
 }
 
 function run(args, options = {}) {
-  const testArgs = options.testResourceSeam === false ? [] : ['--test-resource-seam'];
-  return spawnSync(process.execPath, [script, ...testArgs, ...args], {
+  return spawnSync(process.execPath, [script, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
