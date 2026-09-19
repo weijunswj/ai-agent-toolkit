@@ -14,11 +14,14 @@ const SCHEMAS = Object.freeze({
   routeDecision: 'toolkit.controller.route-decision.v1',
   ownershipDecision: 'toolkit.controller.ownership-decision.v1',
   executionPlan: 'toolkit.controller.execution-plan.v1',
+  repositoryFence: 'toolkit.controller.repository-fence.v1',
+  mutationAdmission: 'toolkit.controller.mutation-admission.v1',
   packet: 'toolkit.controller.terminal-packet.v1',
   receipt: 'toolkit.controller.terminal-receipt.v1',
 });
 const STAGES = Object.freeze(['G0', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'FINAL_AUDIT', 'BROWSER']);
 const STACK_IDS = Object.freeze(['owner-openai', 'owner-claude']);
+const CONTROLLER_MODES = Object.freeze(['OWNER', 'OBSERVER', 'READ_ONLY', 'RECONCILING']);
 const HARNESS_POLICY = Object.freeze({
   'claude-code': 'owner-claude',
   codex: 'owner-openai',
@@ -306,6 +309,148 @@ function planExecution(options = {}) {
     web_reconciliation_required: true,
   };
   return result(true, 'EXECUTION_PLAN_READY', { plan: deepFreeze(plan) });
+}
+
+function normalizeControllerMode(value, fallback = 'OBSERVER') {
+  const mode = typeof value === 'string' ? value.toUpperCase() : '';
+  return CONTROLLER_MODES.includes(mode) ? mode : fallback;
+}
+
+function repositoryFenceInput(value) {
+  if (typeof value === 'string') return { repository: value, mode: 'OWNER' };
+  if (!isRecord(value)) return { repository: null, mode: 'OBSERVER' };
+  return {
+    repository: value.controller_repository_fence || value.repository || value.repository_id || null,
+    mode: normalizeControllerMode(value.controller_mode || value.mode, 'OBSERVER'),
+  };
+}
+
+function validateRepositoryFence(fence) {
+  const keys = ['schema', 'version', 'controller_repository_fence', 'controller_mode', 'binding_digest'];
+  if (!isRecord(fence) || !exactKeys(fence, keys)
+    || fence.schema !== SCHEMAS.repositoryFence || fence.version !== 1
+    || !isSafeId(fence.controller_repository_fence)
+    || !CONTROLLER_MODES.includes(fence.controller_mode)
+    || !isDigest(fence.binding_digest)) return result(false, 'REPOSITORY_FENCE_INVALID');
+  const base = { ...fence };
+  delete base.binding_digest;
+  if (fence.binding_digest !== digestValue(base)) return result(false, 'REPOSITORY_FENCE_DIGEST_MISMATCH');
+  return result(true, 'REPOSITORY_FENCE_VALID', { fence: clone(fence) });
+}
+
+function bindRepositoryFence(input = {}) {
+  const source = typeof input === 'string' ? { repository: input } : (isRecord(input) ? input : {});
+  const repository = source.controller_repository_fence || source.repository || source.repository_id;
+  if (!isSafeId(repository)) return result(false, 'REPOSITORY_FENCE_UNAVAILABLE');
+  const base = {
+    schema: SCHEMAS.repositoryFence,
+    version: 1,
+    controller_repository_fence: repository,
+    controller_mode: normalizeControllerMode(source.controller_mode || source.mode, 'OWNER'),
+  };
+  const fence = { ...base, binding_digest: digestValue(base) };
+  return result(true, 'REPOSITORY_FENCE_BOUND', { fence: deepFreeze(fence), repository, controller_mode: fence.controller_mode });
+}
+
+function mutationAuthorityPresent(options = {}) {
+  const authority = options.mutation_authority || options.authority || options.scope || null;
+  if (options.mutation_authorised === true || options.mutation_authorized === true
+    || options.scope_authorised === true || options.scope_authorized === true
+    || options.lock_authorised === true || options.lock_authorized === true) return true;
+  return isRecord(authority) && (authority.mutation_allowed === true || authority.authorised === true || authority.authorized === true);
+}
+
+function priorControllerReconciled(options = {}) {
+  if (options.prior_state_reconciled === true || options.reconciled === true) return true;
+  if (options.in_flight_reconciled === true && options.admission_reconciled === true) return true;
+  const reconciliation = options.reconciliation || options.prior_reconciliation;
+  return isRecord(reconciliation) && reconciliation.in_flight === true && reconciliation.admission === true;
+}
+
+function explicitTakeoverAuthority(options = {}) {
+  return options.explicit_user_web_authority === true
+    || options.user_web_authority === true
+    || options.takeover_authorised === true
+    || options.takeover_authorized === true
+    || (isRecord(options.takeover_authority) && (options.takeover_authority.authorised === true || options.takeover_authority.authorized === true));
+}
+
+function mutationDecision(options, fence, target, mode, operation, allowed, reasonCode, extra = {}) {
+  return {
+    schema: SCHEMAS.mutationAdmission,
+    version: 1,
+    target_repository: target,
+    controller_repository_fence: fence,
+    controller_mode: mode,
+    operation,
+    mutation_allowed: allowed,
+    read_allowed: operation === 'read' || allowed === false && reasonCode === 'CROSS_REPOSITORY_READ_ALLOWED',
+    reason_code: reasonCode,
+    ...extra,
+  };
+}
+
+function admitRepositoryMutation(options = {}) {
+  const rawFence = options.fence || options.repository_fence || options.controller_repository_fence;
+  const bound = repositoryFenceInput(rawFence);
+  const target = options.target_repository || options.targetRepository || options.repository || options.repository_id;
+  const operation = options.mutation === false || ['read', 'observe', 'evidence'].includes(options.operation) ? 'read' : 'mutation';
+  if (!isSafeId(bound.repository) || !isSafeId(target)) {
+    return result(false, 'REPOSITORY_FENCE_UNAVAILABLE', {
+      decision: mutationDecision(options, bound.repository || 'unknown', target || 'unknown', bound.mode, operation, false, 'REPOSITORY_FENCE_UNAVAILABLE'),
+    });
+  }
+
+  if (operation === 'read' && target !== bound.repository) {
+    return result(true, 'CROSS_REPOSITORY_READ_ALLOWED', {
+      decision: mutationDecision(options, bound.repository, target, bound.mode, operation, false, 'CROSS_REPOSITORY_READ_ALLOWED'),
+      evidence_allowed: true,
+    });
+  }
+
+  if (target !== bound.repository) {
+    return result(false, 'CROSS_REPOSITORY_MUTATION_DENIED', {
+      decision: mutationDecision(options, bound.repository, target, bound.mode, operation, false, 'CROSS_REPOSITORY_MUTATION_DENIED'),
+    });
+  }
+
+  const takeover = options.takeover === true || options.rebind === true || options.explicit_takeover === true;
+  if (takeover) {
+    if (!explicitTakeoverAuthority(options)) {
+      return result(false, 'TAKEOVER_AUTHORITY_REQUIRED', {
+        decision: mutationDecision(options, bound.repository, target, bound.mode, operation, false, 'TAKEOVER_AUTHORITY_REQUIRED'),
+      });
+    }
+    if (!priorControllerReconciled(options)) {
+      return result(false, 'PRIOR_CONTROLLER_RECONCILIATION_REQUIRED', {
+        decision: mutationDecision(options, bound.repository, target, bound.mode, operation, false, 'PRIOR_CONTROLLER_RECONCILIATION_REQUIRED'),
+      });
+    }
+  }
+
+  const effectiveMode = takeover ? 'OWNER' : bound.mode;
+  if (effectiveMode !== 'OWNER') {
+    return result(false, 'OBSERVER_MUTATION_DENIED', {
+      decision: mutationDecision(options, bound.repository, target, effectiveMode, operation, false, 'OBSERVER_MUTATION_DENIED'),
+    });
+  }
+  if (!mutationAuthorityPresent(options)) {
+    return result(false, 'MUTATION_AUTHORITY_REQUIRED', {
+      decision: mutationDecision(options, bound.repository, target, effectiveMode, operation, false, 'MUTATION_AUTHORITY_REQUIRED'),
+    });
+  }
+  const ownership = options.ownership_decision || options.ownership || options.owner_decision;
+  if (isRecord(ownership) && ownership.mutation_allowed !== true) {
+    return result(false, ownership.reason_code || 'OWNERSHIP_MUTATION_DENIED', {
+      decision: mutationDecision(options, bound.repository, target, effectiveMode, operation, false, ownership.reason_code || 'OWNERSHIP_MUTATION_DENIED'),
+    });
+  }
+  return result(true, 'MUTATION_ADMITTED', {
+    decision: mutationDecision(options, bound.repository, target, effectiveMode, operation, true, 'MUTATION_ADMITTED', { rebound: takeover }),
+    controller_repository_fence: bound.repository,
+    controller_mode: effectiveMode,
+    rebound: takeover,
+  });
 }
 
 function normalizeIdentity(value, fallback = 'unknown') {
@@ -708,6 +853,7 @@ module.exports = Object.freeze({
   SCHEMAS,
   STAGES,
   STACK_IDS,
+  CONTROLLER_MODES,
   HARNESS_POLICY,
   ROUTE_STATUSES,
   EXECUTION_PATHS,
@@ -722,6 +868,11 @@ module.exports = Object.freeze({
   resolveRoute,
   validateRouteBinding,
   planExecution,
+  bindRepositoryFence,
+  validateRepositoryFence,
+  admitRepositoryMutation,
+  admitMutation: admitRepositoryMutation,
+  admitRepositoryAccess: admitRepositoryMutation,
   admitOwnership,
   evaluateOwnership: admitOwnership,
   replaceExecutorOwnership,

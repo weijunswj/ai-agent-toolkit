@@ -10,6 +10,11 @@ const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
 const CONTROL_VERSION = '2.10.10';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_CONTEXT';
+const REPOSITORY_TEST_RESOURCE_STATE_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_RESOURCE_STATE';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE = 'ai-agent-toolkit-repository-test-v1';
+const REPOSITORY_TEST_RESOURCE_FIXTURE_ID = 'healthy-resource-v1';
+const REPOSITORY_TEST_RESOURCE_SOURCE = 'win32-operating-system';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -434,8 +439,25 @@ function windowsResources() {
   return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
 }
 
+function repositoryTestResourceStateFromEnvironment(env = process.env) {
+  if (env?.[REPOSITORY_TEST_RESOURCE_CONTEXT_ENV] !== REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE) return null;
+  const raw = String(env?.[REPOSITORY_TEST_RESOURCE_STATE_ENV] || '');
+  if (!raw || raw.length > 4096) return null;
+  try {
+    const state = JSON.parse(raw);
+    if (!state || typeof state !== 'object'
+      || state.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE_ID
+      || state.source !== REPOSITORY_TEST_RESOURCE_SOURCE) return null;
+    return { ...state };
+  } catch {
+    return null;
+  }
+}
+
 function inspectResources(options = {}) {
   if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+  const repositoryTestState = repositoryTestResourceStateFromEnvironment();
+  if (repositoryTestState) return repositoryTestState;
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -1119,7 +1141,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, REPOSITORY_TEST_RESOURCE_CONTEXT_ENV, REPOSITORY_TEST_RESOURCE_STATE_ENV, REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE, REPOSITORY_TEST_RESOURCE_FIXTURE_ID, REPOSITORY_TEST_RESOURCE_SOURCE, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
   checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

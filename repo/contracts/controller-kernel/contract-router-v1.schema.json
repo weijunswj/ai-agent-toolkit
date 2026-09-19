@@ -6,6 +6,8 @@
     { "$ref": "#/$defs/routeBinding" },
     { "$ref": "#/$defs/routeDecision" },
     { "$ref": "#/$defs/ownershipDecision" },
+    { "$ref": "#/$defs/repositoryFence" },
+    { "$ref": "#/$defs/mutationAdmission" },
     { "$ref": "#/$defs/executionPlan" }
   ],
   "$defs": {
@@ -23,6 +25,9 @@
     },
     "stage": {
       "enum": ["G0", "G1", "G2", "G3", "G4", "LOOP", "FINAL_AUDIT", "BROWSER"]
+    },
+    "controllerMode": {
+      "enum": ["OWNER", "OBSERVER", "READ_ONLY", "RECONCILING"]
     },
     "route": {
       "type": "object",
@@ -120,6 +125,35 @@
         "reason_code": { "$ref": "#/$defs/id" },
         "handover": { "type": "boolean" },
         "concurrency_authorised": { "type": "boolean" }
+      }
+    },
+    "repositoryFence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "controller_repository_fence", "controller_mode", "binding_digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.repository-fence.v1" },
+        "version": { "const": 1 },
+        "controller_repository_fence": { "$ref": "#/$defs/id" },
+        "controller_mode": { "$ref": "#/$defs/controllerMode" },
+        "binding_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "mutationAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "target_repository", "controller_repository_fence", "controller_mode", "operation", "mutation_allowed", "read_allowed", "reason_code"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.mutation-admission.v1" },
+        "version": { "const": 1 },
+        "target_repository": { "$ref": "#/$defs/id" },
+        "controller_repository_fence": { "$ref": "#/$defs/id" },
+        "controller_mode": { "$ref": "#/$defs/controllerMode" },
+        "operation": { "enum": ["read", "mutation"] },
+        "mutation_allowed": { "type": "boolean" },
+        "read_allowed": { "type": "boolean" },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "rebound": { "type": "boolean" }
       }
     },
     "executionPlan": {

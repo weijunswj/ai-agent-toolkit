@@ -1,7 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const Ajv2020 = require('ajv/dist/2020');
 
 const programme = require('../scripts/toolkit-programme-surface-v1.cjs');
 const programmeV5 = require('../scripts/toolkit-github-program-state-v5.cjs');
@@ -11,6 +14,51 @@ const revision = 'af14f91b0f6335212003a37a5119f233489e598f';
 const head = '1'.repeat(40);
 const tree = '2'.repeat(40);
 const base = '3'.repeat(40);
+const programmeSurfaceSchema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'controller-kernel', 'programme-surface-v1.schema.json'), 'utf8'));
+
+function graphFixture(overrides = {}) {
+  return {
+    repository: 'example/neutral-repo',
+    programme: {
+      id: 'programme-neutral',
+      issue: 100,
+      title: 'Neutral Programme',
+      objective: 'Prove a repository-neutral parent projection.',
+      lifecycle: 'ACTIVE',
+      finality: 'PENDING',
+      labels: ['programme', 'neutral'],
+      boundaries: ['Parent owns topology only.'],
+      holds: [],
+      next_action: 'Await the next authorised child transition.',
+      sections: { scope: { title: 'Programme scope', items: ['Topology and delivery identity.'] } },
+    },
+    outcomes: [
+      {
+        id: 'child-first',
+        order: 1,
+        kind: 'CHILD',
+        title: 'First delivery child',
+        materialized: true,
+        lifecycle: 'CURRENT',
+        dependencies: [],
+        native_issue: { repository: 'example/neutral-repo', number: 101 },
+        delivery_pr: { repository: 'example/neutral-repo', number: 201, status: 'OPEN', role: 'DELIVERY', completes_child: false, reference: null },
+      },
+      {
+        id: 'planned-follow-up',
+        order: 2,
+        kind: 'OUTCOME',
+        title: 'Planned follow-up outcome',
+        materialized: false,
+        lifecycle: 'PLANNED',
+        dependencies: ['child-first'],
+        native_issue: null,
+        delivery_pr: null,
+      },
+    ],
+    ...overrides,
+  };
+}
 
 function currentInput() {
   return {
@@ -24,7 +72,13 @@ function currentInput() {
     repair_count: { used: 0, limit: 2 },
     candidate: { pr: 422, head, tree, base: { ref: 'main', sha: base } },
     hold: { active: false },
-    in_flight: { state: 'RUNNING', worker: 'executor-c1', executor: 'owner-openai' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'executor-c1',
+      executor: 'owner-openai',
+      worker_liveness: 'active',
+      worker_liveness_evidence: 'runtime-native',
+    },
     controlling_receipt: { id: 'receipt-c1', reference: 'github:issue-comment:422:5729731423', digest: '4'.repeat(64) },
     next_admissible_action: 'RUN_G3_VALIDATE',
   };
@@ -110,6 +164,370 @@ test('bootstrap plan is bounded and the shared v5 facade exposes the projection 
   assert.equal(plan.ok, true, plan.code);
   assert.equal(plan.plan.bounded, true);
   assert.equal(plan.plan.history_policy, 'exact-controlling-pointer-only');
+  assert.equal(plan.bootstrap_io.bootstrap_escalation_reason, 'none');
+  assert.match(plan.BOOTSTRAP_IO, /^BOOTSTRAP_IO /);
   assert.equal(programmeV5.programmeV5.currentProjection, programme);
   assert.equal(programmeV5.createCurrentProjection, programme.createCurrentProjection);
+  assert.equal(programmeV5.reconcileWorkerLiveness, programme.reconcileWorkerLiveness);
+});
+
+test('BOOTSTRAP_IO counts identity checks without inferring full reads and measures projected PR input', () => {
+  const diagnostic = programme.createBootstrapIoDiagnostic();
+  const plan = programme.createBootstrapPlan({
+    repository,
+    controller_revision: revision,
+    bootstrap_io: diagnostic,
+    controller_identity: { revision },
+    controller_identity_observed: { revision },
+    stack_registry_identity: { revision: 'registry-1' },
+    stack_registry_identity_observed: { revision: 'registry-1' },
+  });
+  assert.equal(plan.ok, true, plan.code);
+  assert.equal(plan.bootstrap_io.controller_identity_checks, 1);
+  assert.equal(plan.bootstrap_io.controller_full_reads, 0);
+  assert.equal(plan.bootstrap_io.stack_registry_identity_checks, 1);
+  assert.equal(plan.bootstrap_io.stack_registry_full_reads, 0);
+  assert.equal(plan.bootstrap_io.full_pr_diff_reads, 0);
+  assert.equal(plan.bootstrap_io.full_comment_history_reads, 0);
+  assert.equal(plan.bootstrap_io.workflow_log_reads, 0);
+  assert.equal(plan.bootstrap_io.historical_expansions, 0);
+
+  const projected = programme.projectPullRequestMetadata({
+    repository,
+    number: 422,
+    state: 'open',
+    draft: true,
+    head: { ref: 'codex/c1', sha: head, tree },
+    base: { ref: 'main', sha: base },
+    body: 'unprojected body',
+    diff: 'unprojected diff',
+  }, { bootstrap_io: diagnostic });
+  assert.equal(projected.ok, true, projected.code);
+  assert.equal(projected.bootstrap_io.lightweight_pr_reads, 1);
+  assert.equal(projected.bootstrap_io.model_visible_chars, JSON.stringify(projected.projection).length);
+  assert.doesNotMatch(projected.BOOTSTRAP_IO, /unprojected/);
+});
+
+test('BOOTSTRAP_IO records stale CURRENT and justified deep evidence without blocking', () => {
+  const diagnostic = programme.createBootstrapIoDiagnostic();
+  const stale = programme.createBootstrapPlan({
+    repository,
+    controller_revision: revision,
+    bootstrap_io: diagnostic,
+    current_projection: { invalid: true },
+    expected_current: { projection_digest: 'f'.repeat(64) },
+    expensive_reads: {
+      exact_receipt_reads: 1,
+      full_comment_history_reads: 2,
+      full_pr_diff_reads: 1,
+      workflow_log_reads: 1,
+      historical_expansions: 1,
+    },
+  });
+  assert.equal(stale.ok, true, stale.code);
+  assert.equal(stale.bootstrap_io.current_projection_reads, 1);
+  assert.equal(stale.bootstrap_io.stale_current_projections, 1);
+  assert.equal(stale.bootstrap_io.bootstrap_escalation_reason, 'current_state_conflict');
+  assert.equal(stale.bootstrap_io.full_comment_history_reads, 2);
+  assert.equal(stale.bootstrap_io.historical_expansions, 1);
+});
+
+test('BOOTSTRAP_IO records bounded worker-liveness checks without becoming authority', () => {
+  const diagnostic = programme.createBootstrapIoDiagnostic();
+  const plan = programme.createBootstrapPlan({
+    repository,
+    controller_revision: revision,
+    bootstrap_io: diagnostic,
+    in_flight: { state: 'RUNNING', worker: 'worker-unknown', worker_launch_evidence: 'admitted' },
+  });
+  assert.equal(plan.ok, true, plan.code);
+  assert.equal(plan.bootstrap_io.worker_liveness_checks, 1);
+  assert.equal(plan.bootstrap_io.worker_liveness_unknown, 1);
+  assert.equal(plan.bootstrap_io.bootstrap_escalation_reason, 'worker_liveness_unverified');
+  assert.match(plan.BOOTSTRAP_IO, /worker_liveness_unknown=1/);
+});
+
+test('CURRENT launch safety rejects duplicate launch and derives reconciliation actions', () => {
+  const active = programme.validateCurrentLaunchSafety({
+    run: { state: 'IN_FLIGHT' },
+    in_flight: { state: 'RUNNING', worker_liveness: 'active', worker_liveness_evidence: 'runtime-native' },
+    next_admissible_action: 'G4_EXECUTE',
+    stage: 'G4',
+  });
+  assert.equal(active.ok, false);
+  assert.equal(active.code, 'CURRENT_STATE_INVARIANT_VIOLATION');
+  assert.equal(active.derived_action, 'ADOPT_IN_FLIGHT');
+
+  const ambiguous = programme.deriveNextAdmissibleAction({
+    in_flight: { state: 'DELIVERY_PENDING' },
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+    stage: 'G3',
+  });
+  assert.equal(ambiguous.ok, true);
+  assert.equal(ambiguous.action, 'RECONCILE_LAUNCH_OUTCOME');
+
+  const packet = programme.deriveNextAdmissibleAction({
+    terminal_packet: { packet_id: 'packet-1' },
+    next_admissible_action: 'LAUNCH_G4_DIRECT',
+    stage: 'G4',
+  });
+  assert.equal(packet.action, 'RECONCILE_TERMINAL_PACKET');
+
+  const terminal = programme.validateCurrentLaunchSafety({
+    run: { state: 'TERMINAL' },
+    terminal_non_converged: true,
+    next_admissible_action: 'G4_EXECUTE',
+    stage: 'G4',
+  });
+  assert.equal(terminal.ok, false);
+  assert.equal(terminal.code, 'CURRENT_STATE_INVARIANT_VIOLATION');
+  assert.equal(terminal.derived_action, 'HOLD_TERMINAL_NON_CONVERGENCE');
+
+  const ready = programme.validateCurrentLaunchSafety({ stage: 'G3', authorised_stage: 'G3' });
+  assert.equal(ready.ok, true, ready.code);
+  assert.equal(ready.action, 'LAUNCH_G3_DIRECT');
+  assert.equal(ready.launch_allowed, true);
+});
+
+test('worker identity and admitted launch evidence do not substitute for current active liveness', () => {
+  const active = {
+    run: { state: 'IN_FLIGHT' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'worker-active',
+      worker_launch_evidence: 'admitted',
+      worker_liveness: 'active',
+      worker_liveness_evidence: 'runtime-native',
+    },
+    next_admissible_action: 'G3_EXECUTE',
+    stage: 'G3',
+  };
+  assert.equal(programme.reconcileWorkerLiveness(active).state, 'active');
+  assert.equal(programme.deriveNextAdmissibleAction(active).action, 'ADOPT_IN_FLIGHT');
+  assert.equal(programme.validateCurrentLaunchSafety(active).ok, false);
+
+  const handleOnly = {
+    ...active,
+    in_flight: { state: 'RUNNING', worker: 'worker-active', worker_launch_evidence: 'admitted' },
+  };
+  const unresolved = programme.reconcileWorkerLiveness(handleOnly);
+  assert.equal(unresolved.ok, false);
+  assert.equal(unresolved.code, 'WORKER_LIVENESS_UNVERIFIED');
+  assert.equal(programme.deriveNextAdmissibleAction(handleOnly).action, 'RECONCILE_WORKER_LIVENESS');
+  assert.equal(programme.deriveNextAdmissibleAction(handleOnly).reason_code, 'WORKER_LIVENESS_UNVERIFIED');
+});
+
+test('verified inactive liveness clears active projection while preserving historical identity and admitting one launch', () => {
+  const inactive = programme.createCurrentProjection({
+    repository,
+    controller_revision: revision,
+    run: { id: 'run-stale', state: 'IN_FLIGHT' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'worker-stale',
+      worker_launch_evidence: 'admitted',
+      worker_liveness: 'inactive',
+      worker_liveness_evidence: 'runtime-native',
+    },
+    stage: 'G3',
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+  });
+  assert.equal(inactive.ok, true, inactive.code);
+  assert.equal(inactive.projection.run.state, 'QUEUED');
+  assert.equal(inactive.projection.in_flight.state, 'NONE');
+  assert.equal(inactive.projection.in_flight.worker, 'worker-stale');
+  assert.equal(inactive.projection.in_flight.worker_identity, 'worker-stale');
+  assert.equal(inactive.projection.in_flight.worker_launch_evidence, 'admitted');
+  assert.equal(inactive.projection.in_flight.worker_liveness, 'inactive');
+  assert.equal(inactive.projection.next_admissible_action, 'LAUNCH_G3_DIRECT');
+  assert.equal(programme.validateCurrentLaunchSafety(inactive.projection).launch_allowed, true);
+});
+
+test('terminal evidence wins over an in-flight allegation and requires terminal reconciliation without relaunch', () => {
+  const input = {
+    run: { id: 'run-terminal', state: 'IN_FLIGHT' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'worker-terminal',
+      worker_launch_evidence: 'admitted',
+    },
+    terminal_packet: { packet_id: 'packet-terminal' },
+    stage: 'G3',
+    next_admissible_action: 'RECONCILE_TERMINAL_PACKET',
+  };
+  const derived = programme.deriveNextAdmissibleAction(input);
+  assert.equal(derived.action, 'RECONCILE_TERMINAL_PACKET');
+  const projection = programme.createCurrentProjection({
+    repository,
+    controller_revision: revision,
+    ...input,
+  });
+  assert.equal(projection.ok, true, projection.code);
+  assert.equal(projection.projection.run.state, 'TERMINAL');
+  assert.equal(projection.projection.in_flight.state, 'DELIVERY_PENDING');
+  assert.equal(projection.projection.in_flight.worker_identity, 'worker-terminal');
+  assert.equal(projection.projection.next_admissible_action, 'RECONCILE_TERMINAL_PACKET');
+});
+
+test('branch or PR evidence cannot classify a worker as alive, and no branch or PR absence classifies it as dead', () => {
+  const branchOnly = {
+    run: { state: 'IN_FLIGHT' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'worker-branch',
+      worker_liveness: 'active',
+      worker_liveness_evidence: 'branch-pr',
+    },
+    candidate: { pr: 434, head, tree, base: { ref: 'main', sha: base } },
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+    stage: 'G3',
+  };
+  assert.equal(programme.reconcileWorkerLiveness(branchOnly).state, 'unknown');
+  assert.equal(programme.deriveNextAdmissibleAction(branchOnly).reason_code, 'WORKER_LIVENESS_UNVERIFIED');
+
+  const notRunningFromBranch = {
+    ...branchOnly,
+    in_flight: { state: 'RUNNING', worker: 'worker-branch', worker_liveness: 'inactive', worker_liveness_evidence: 'branch-pr' },
+  };
+  assert.equal(programme.reconcileWorkerLiveness(notRunningFromBranch).state, 'unknown');
+});
+
+test('a previous liveness observation must be refreshed before it can suppress a launch', () => {
+  const previous = {
+    run: { state: 'IN_FLIGHT' },
+    in_flight: {
+      state: 'RUNNING',
+      worker: 'worker-previous',
+      worker_liveness: 'active',
+      worker_liveness_evidence: 'runtime-native',
+      worker_liveness_refreshed: false,
+    },
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+    stage: 'G3',
+  };
+  const refreshed = programme.reconcileWorkerLiveness(previous);
+  assert.equal(refreshed.ok, false);
+  assert.equal(refreshed.state, 'unknown');
+  assert.equal(programme.validateCurrentLaunchSafety(previous).reason_code, 'WORKER_LIVENESS_UNVERIFIED');
+});
+
+test('an already-authorised launch is not gated by a magic-word confirmation or by the utterance itself', () => {
+  const ready = programme.validateCurrentLaunchSafety({
+    stage: 'G3',
+    authorised_stage: 'G3',
+    user_confirmation: 'launch',
+  });
+  assert.equal(ready.ok, true, ready.code);
+  assert.equal(ready.launch_allowed, true);
+  assert.equal(ready.action, 'LAUNCH_G3_DIRECT');
+
+  const typedOnly = programme.deriveNextAdmissibleAction({
+    stage: 'G3',
+    authorised_stage: 'G3',
+    user_message: 'launch',
+  });
+  assert.equal(typedOnly.action, 'LAUNCH_G3_DIRECT');
+  assert.equal(typedOnly.launch_allowed, true);
+});
+
+test('Programme Graph is the single deterministic parent topology projection', () => {
+  const rendered = programme.renderProgrammeGraph(graphFixture());
+  assert.equal(rendered.ok, true, rendered.code);
+  assert.equal(rendered.graph.outcomes.length, 2);
+  assert.deepEqual(rendered.graph.outcomes.map((item) => item.id), ['child-first', 'planned-follow-up']);
+  assert.equal(rendered.graph.outcomes.filter((item) => item.materialized).length, 1);
+  assert.deepEqual(rendered.graph.outcomes[0].native_issue, { repository: 'example/neutral-repo', number: 101 });
+  assert.equal(rendered.graph.outcomes[0].delivery_pr.number, 201);
+  assert.equal(rendered.graph.outcomes[1].native_issue, null);
+  assert.equal(rendered.graph.outcomes[1].delivery_pr, null);
+  assert.match(rendered.body, /^## Programme Graph$/m);
+  assert.match(rendered.body, /#101/);
+  assert.match(rendered.body, /#201 \(OPEN\)/);
+  assert.match(rendered.body, /planned-follow-up: Planned follow-up outcome/);
+  assert.doesNotMatch(rendered.body, /^## (Current Programme Children|Children|PR history|Foundation)$/m);
+  assert.equal(rendered.parent_registry.length, 2);
+  assert.deepEqual(rendered.parent_registry.map((item) => item.outcome_id), ['child-first', 'planned-follow-up']);
+  assert.equal(programme.validateProgrammeGraph(rendered.graph).ok, true);
+});
+
+test('Programme Graph renderer is repository-neutral and dry-runs the current Toolkit programme without live mutation', () => {
+  const neutral = programme.renderProgrammeParent(graphFixture());
+  const toolkit421 = programme.renderProgrammeParent({
+    repository: 'weijunswj/ai-agent-toolkit',
+    programme: {
+      id: 'programme-421',
+      issue: 421,
+      title: 'Controller Kernel Delivery Contract',
+      objective: 'Deliver the controller-kernel contract through the authorised child lane.',
+      lifecycle: 'ACTIVE',
+      finality: 'PENDING',
+      labels: ['controller-kernel', 'programme'],
+      boundaries: ['Web owns G4 admission and finality.'],
+    },
+    outcomes: [
+      {
+        id: 'child-422', order: 1, kind: 'CHILD', title: 'Controller kernel delivery', materialized: true,
+        lifecycle: 'CURRENT', dependencies: [], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 422 },
+        delivery_pr: { repository: 'weijunswj/ai-agent-toolkit', number: 434, status: 'OPEN', role: 'DELIVERY', completes_child: false, reference: 'github:pull/434' },
+      },
+      {
+        id: 'outcome-423', order: 2, kind: 'OUTCOME', title: 'Future assurance outcome', materialized: false,
+        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: null, delivery_pr: null,
+      },
+    ],
+  });
+  assert.equal(neutral.ok, true, neutral.code);
+  assert.equal(toolkit421.ok, true, toolkit421.code);
+  assert.match(toolkit421.body, /weijunswj\/ai-agent-toolkit/);
+  assert.match(toolkit421.body, /#422/);
+  assert.match(toolkit421.body, /#434 \(OPEN\)/);
+  assert.match(toolkit421.body, /outcome-423: Future assurance outcome/);
+  assert.doesNotMatch(toolkit421.body, /example\/neutral-repo|programme-neutral/);
+  assert.doesNotMatch(toolkit421.body, /RUN|Lock|worker|detailed CI/i);
+  assert.notEqual(neutral.graph.graph_digest, toolkit421.graph.graph_digest);
+});
+
+test('Programme Graph excludes child-local chronology and preserves parent minimality', () => {
+  const canonical = graphFixture();
+  const baseline = programme.renderProgrammeGraph(canonical);
+  const childLocalMutation = programme.renderProgrammeGraph({
+    ...canonical,
+    child_local: {
+      run: 'run-999',
+      lock: 'DL-CHILD-LOCAL',
+      gate: 'G3',
+      repair_count: 2,
+      worker: 'private-worker-identity',
+      detailed_ci: ['private-check-log'],
+    },
+  });
+  assert.equal(baseline.ok, true, baseline.code);
+  assert.equal(childLocalMutation.ok, true, childLocalMutation.code);
+  assert.equal(childLocalMutation.body, baseline.body);
+  assert.equal(childLocalMutation.graph_digest, baseline.graph_digest);
+  assert.equal(childLocalMutation.canonical_snapshot_digest, baseline.canonical_snapshot_digest);
+  assert.doesNotMatch(baseline.body, /run-999|DL-CHILD-LOCAL|private-worker-identity|private-check-log/);
+});
+
+test('Programme Graph regeneration is stable, derives labels and registry, and verifies readback', () => {
+  const source = graphFixture();
+  const first = programme.renderProgrammeGraph(source);
+  const second = programme.renderProgrammeGraph({ ...source, outcomes: source.outcomes.slice().reverse() });
+  assert.equal(first.ok, true, first.code);
+  assert.equal(second.ok, true, second.code);
+  assert.equal(second.body, first.body);
+  assert.deepEqual(second.labels, ['neutral', 'programme']);
+  assert.deepEqual(second.parent_registry, first.parent_registry);
+  assert.equal(programme.reconcileProgrammeSurface(first, second).ok, true);
+  assert.equal(programme.reconcileProgrammeGraph(first, { ...second, surface: { ...second.surface, body: second.body + '\n' } }).code, 'PROGRAMME_SURFACE_READBACK_MISMATCH');
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  const validate = ajv.compile(programmeSurfaceSchema);
+  assert.equal(validate(first.graph), true, JSON.stringify(validate.errors));
+});
+
+test('Programme Graph rejects duplicate membership and unknown dependencies', () => {
+  const duplicate = graphFixture({ outcomes: [graphFixture().outcomes[0], { ...graphFixture().outcomes[0], id: 'another-id', order: 2 }] });
+  assert.equal(programme.renderProgrammeGraph(duplicate).code, 'PROGRAMME_GRAPH_DUPLICATE_NATIVE_ISSUE');
+  const unknownDependency = graphFixture({ outcomes: [{ ...graphFixture().outcomes[0], dependencies: ['missing-outcome'] }] });
+  assert.equal(programme.renderProgrammeGraph(unknownDependency).code, 'PROGRAMME_GRAPH_DEPENDENCY_UNKNOWN');
 });

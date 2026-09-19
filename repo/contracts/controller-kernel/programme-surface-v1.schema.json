@@ -5,7 +5,8 @@
   "oneOf": [
     { "$ref": "#/$defs/currentProjection" },
     { "$ref": "#/$defs/prAdmission" },
-    { "$ref": "#/$defs/bootstrapPlan" }
+    { "$ref": "#/$defs/bootstrapPlan" },
+    { "$ref": "#/$defs/programmeGraph" }
   ],
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
@@ -95,11 +96,16 @@
         "in_flight": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "worker", "executor"],
+          "required": ["state", "worker", "executor", "worker_identity", "worker_launch_evidence", "worker_liveness", "worker_liveness_evidence", "worker_terminal_state"],
           "properties": {
-            "state": { "enum": ["NONE", "PREPARING", "RUNNING", "VALIDATING", "DELIVERY_PENDING"] },
+            "state": { "enum": ["NONE", "PREPARING", "RUNNING", "VALIDATING", "DELIVERY_PENDING", "UNKNOWN"] },
             "worker": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
-            "executor": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
+            "executor": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_identity": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_launch_evidence": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_liveness": { "enum": ["active", "terminal", "inactive", "unknown"] },
+            "worker_liveness_evidence": { "enum": ["runtime-native", "durable-terminal", "user-web", "branch-pr", "native-handle", "unavailable", null] },
+            "worker_terminal_state": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
           }
         },
         "controlling_receipt": {
@@ -161,6 +167,69 @@
         "bounded": { "const": true },
         "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
         "history_policy": { "const": "exact-controlling-pointer-only" }
+      }
+    },
+    "programmeGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "repository", "programme", "outcomes", "graph_digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.programme-graph.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "programme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "issue", "title", "lifecycle", "finality"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "issue": { "type": ["integer", "null"], "minimum": 1 },
+            "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "lifecycle": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "finality": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/programmeGraphOutcome" }
+        },
+        "graph_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "programmeGraphOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "order", "kind", "title", "materialized", "lifecycle", "dependencies", "native_issue", "delivery_pr"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "order": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["CHILD", "OUTCOME"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "materialized": { "type": "boolean" },
+        "lifecycle": { "enum": ["PLANNED", "QUEUED", "CURRENT", "HELD", "COMPLETED", "RETIRED"] },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "native_issue": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["repository", "number"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/id" },
+            "number": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "delivery_pr": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["repository", "number", "status", "role", "completes_child", "reference"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/id" },
+            "number": { "type": "integer", "minimum": 1 },
+            "status": { "enum": ["OPEN", "CLOSED", "MERGED", "UNKNOWN"] },
+            "role": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "completes_child": { "type": "boolean" },
+            "reference": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 }
+          }
+        }
       }
     }
   }

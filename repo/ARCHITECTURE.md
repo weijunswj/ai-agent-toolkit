@@ -221,6 +221,8 @@ Always-loaded information must remain small.
 
 Bootstrap/restart is current-state reconstruction, not chronology replay.
 
+Bootstrap I/O is a non-authoritative diagnostic over projected/model-visible context. It has no gate, authority, ledger or telemetry-service semantics; unavailable measurements remain unavailable and never weaken required evidence.
+
 Adding completed children or historical comments must not enlarge ordinary takeover/worker context when current state is unchanged.
 
 ## Evidence and terminal decisions
@@ -238,6 +240,8 @@ A producer must not assume that Web, Loop or another later consumer has its file
 Worker process success is not terminal completion. A terminal or gate-complete decision requires a validated self-sufficient terminal packet with stable identity, digest, and durable retrieval/reference evidence. Missing, truncated, malformed, or unverifiable packets fail closed as `TERMINAL_PACKET_INCOMPLETE`; lost model/chat delivery is recovered by exact packet replay without rerunning the worker.
 
 Active overlapping Toolkit work remains durably human-owned across GitHub users and controllers. An overlapping newcomer is read-only until explicit handover or explicitly authorised concurrency. Timeout, heartbeat loss, inactivity, labels, status, and executor replacement never transfer ownership; ambiguous or competing ownership requires `USER_DECISION_REQUIRED`.
+
+Repository mutation is fenced to the exact bound Controller repository. Cross-repository reads are evidence-only; cross-repository mutation and observer mutation fail closed with typed denials. CURRENT launch projections reject active, ambiguous, returned-unreconciled, and terminal/non-converged duplicate launches.
 
 If required supporting evidence cannot be durably and verifiably retrieved by the intended consumer, deliver the relevant material with the packet/authorised attachment or hold with `EVIDENCE_NOT_RETRIEVABLE`.
 

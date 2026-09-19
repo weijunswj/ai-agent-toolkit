@@ -31,5 +31,22 @@
     "labels_are_authority": false,
     "executor_replacement_transfers_owner": false,
     "ambiguous_owner_status": "USER_DECISION_REQUIRED"
+  },
+  "repository_fence": {
+    "controller_repository_fence": "one-exact-bound-repository",
+    "cross_repository_reads": "evidence-only",
+    "cross_repository_mutation": "CROSS_REPOSITORY_MUTATION_DENIED",
+    "observer_mutation": "OBSERVER_MUTATION_DENIED",
+    "timeout_self_promotion": false,
+    "takeover_requires": ["explicit-user-web-authority", "prior-in-flight-admission-reconciliation"]
+  },
+  "current_launch_safety": {
+    "in_flight_launch": "CURRENT_STATE_INVARIANT_VIOLATION",
+    "unverified_worker_liveness": "WORKER_LIVENESS_UNVERIFIED",
+    "worker_liveness_reconciliation": "RECONCILE_WORKER_LIVENESS",
+    "ambiguous_launch": "RECONCILE_LAUNCH_OUTCOME",
+    "returned_terminal_packet": "RECONCILE_TERMINAL_PACKET",
+    "terminal_non_convergence": "HOLD_TERMINAL_NON_CONVERGENCE",
+    "safe_direct_launch": "no-active-or-ambiguous-worker-and-authorised-stage"
   }
 }

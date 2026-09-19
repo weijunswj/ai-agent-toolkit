@@ -4593,33 +4593,53 @@ function h2ManagedDocument(style, kind, prose, carrier) {
     prose,
   };
 }
+function h2ProgrammeGraphSnapshot(state, projection) {
+  const outcomes = state.children.map((child) => {
+    const registry = (child.pr_registry || []).slice().sort((left, right) => left.pr - right.pr);
+    const delivery = registry.length ? registry[registry.length - 1] : null;
+    const deliveryState = delivery && ['OPEN', 'CLOSED', 'MERGED'].includes(delivery.github_state)
+      ? delivery.github_state : 'UNKNOWN';
+    return {
+      id: 'child-' + child.issue,
+      order: child.order,
+      kind: 'CHILD',
+      title: child.title,
+      materialized: true,
+      lifecycle: child.lifecycle,
+      dependencies: child.dependencies || [],
+      native_issue: { repository: state.repository, number: child.issue },
+      delivery_pr: delivery ? {
+        repository: state.repository,
+        number: delivery.pr,
+        status: deliveryState,
+        role: delivery.role,
+        completes_child: delivery.completes_child,
+        reference: null,
+      } : null,
+    };
+  });
+  return {
+    repository: state.repository,
+    programme: {
+      id: 'programme-' + state.parent.issue,
+      issue: state.parent.issue,
+      title: state.parent.title,
+      objective: state.parent.goal,
+      lifecycle: projection.lifecycle,
+      finality: projection.finality,
+      labels: state.parent.labels || [],
+      boundaries: state.boundaries || [],
+      holds: state.holds || [],
+      next_action: projection.next_action.text,
+    },
+    outcomes,
+  };
+}
+
 function h2ParentProse(state, projection) {
-  const lines = [
-    '# AI Agent Toolkit Programme',
-    '',
-    '## Programme status',
-    '| Field | Value |',
-    '| --- | --- |',
-    '| Repository | ' + h2Cell(projection.repository) + ' |',
-    '| Parent issue | #' + h2Identifier(projection.parent_issue) + ' |',
-    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
-    '| Finality | ' + h2Cell(projection.finality) + ' |',
-    '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
-    '',
-    '## Children',
-    '| Issue | Order | Lifecycle | Finality | Summary |',
-    '| --- | --- | --- | --- | --- |',
-  ];
-  for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
-  lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
-  lines.push('## Completed work', ...h2LinesForArray(projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary)), '');
-  lines.push('## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)), '');
-  lines.push('## PR history', '| PR | Child | Epoch | Outcome | Summary |', '| --- | --- | --- | --- | --- |');
-  if (projection.pr_history.length) for (const item of projection.pr_history) lines.push('| #' + h2Identifier(item.pr) + ' | #' + h2Identifier(item.child_issue) + ' | ' + h2Cell(item.epoch_id || '-') + ' | ' + h2Cell(item.outcome) + ' | ' + h2Cell(item.summary) + ' |');
-  else lines.push('| None | - | - | None recorded | - |');
-  lines.push('', '## ELI5', h2Paragraph('The parent is the one source of programme truth; child and PR views are derived from it.'), '');
-  lines.push('## Immediate next', h2Bullet(projection.next_action.text));
-  return lines;
+  const rendered = programmeSurface.renderProgrammeGraph(h2ProgrammeGraphSnapshot(state, projection));
+  h2Require(rendered.ok, true, 'PROGRAMME_GRAPH_RENDER_INVALID', 'PUBLIC_AUDIT');
+  return rendered.body.split('\n');
 }
 function h2ChildProse(projection) {
   const lines = [
@@ -5541,6 +5561,9 @@ const programmeV5 = Object.freeze({
     return valid.ok ? success('V5_PROJECTION_READY', { projection: projectionPayload(state, kind), projection_digest: digestValue(projectionPayload(state, kind)) }) : valid;
   },
   renderProgrammeV5,
+  renderProgrammeGraph: programmeSurface.renderProgrammeGraph,
+  renderProgrammeParent: programmeSurface.renderProgrammeParent,
+  reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
   parseProgrammeV5Body,
   currentProjection: programmeSurface,
   projectionBootstrapRecovery,
@@ -5654,6 +5677,19 @@ module.exports = Object.freeze({
   postMergeEpochFinalisation,
   programmeSurface,
   projectPullRequestMetadata: programmeSurface.projectPullRequestMetadata,
+  normalizeProgrammeGraphSnapshot: programmeSurface.normalizeProgrammeGraphSnapshot,
+  validateProgrammeGraph: programmeSurface.validateProgrammeGraph,
+  renderProgrammeGraph: programmeSurface.renderProgrammeGraph,
+  renderProgrammeParent: programmeSurface.renderProgrammeParent,
+  reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
+  reconcileProgrammeGraph: programmeSurface.reconcileProgrammeGraph,
+  createBootstrapIoDiagnostic: programmeSurface.createBootstrapIoDiagnostic,
+  createBootstrapIODiagnostic: programmeSurface.createBootstrapIODiagnostic,
+  renderBootstrapIO: programmeSurface.renderBootstrapIO,
+  reconcileWorkerLiveness: programmeSurface.reconcileWorkerLiveness,
+  workerLiveness: programmeSurface.workerLiveness,
+  deriveNextAdmissibleAction: programmeSurface.deriveNextAdmissibleAction,
+  validateCurrentLaunchSafety: programmeSurface.validateCurrentLaunchSafety,
   createCurrentProjection: programmeSurface.createCurrentProjection,
   validateCurrentProjection: programmeSurface.validateCurrentProjection,
   isCurrentFresh: programmeSurface.isCurrentFresh,

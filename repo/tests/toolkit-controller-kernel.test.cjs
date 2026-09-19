@@ -168,3 +168,73 @@ test('cross-user overlap is read-only until handover or authorised concurrency',
   assert.deepEqual(replacement.owner, owner);
   assert.equal(replacement.ownership_transferred, false);
 });
+
+test('repository fence denies cross-repository mutation while permitting read evidence', () => {
+  const fence = kernel.bindRepositoryFence({ repository: 'weijunswj/ai-agent-toolkit', controller_mode: 'OWNER' });
+  assert.equal(fence.ok, true, fence.code);
+  assert.equal(kernel.validateRepositoryFence(fence.fence).ok, true);
+
+  const crossWrite = kernel.admitRepositoryMutation({
+    fence: fence.fence,
+    target_repository: 'weijunswj/sqag',
+    mutation_authorised: true,
+  });
+  assert.equal(crossWrite.ok, false);
+  assert.equal(crossWrite.code, 'CROSS_REPOSITORY_MUTATION_DENIED');
+
+  const crossRead = kernel.admitRepositoryMutation({
+    fence: fence.fence,
+    target_repository: 'weijunswj/sqag',
+    operation: 'read',
+  });
+  assert.equal(crossRead.ok, true);
+  assert.equal(crossRead.code, 'CROSS_REPOSITORY_READ_ALLOWED');
+  assert.equal(crossRead.decision.mutation_allowed, false);
+});
+
+test('observer mutation is denied and timeout cannot self-promote', () => {
+  const observer = kernel.bindRepositoryFence({ repository: 'weijunswj/sqag', controller_mode: 'OBSERVER' });
+  assert.equal(observer.ok, true, observer.code);
+  const denied = kernel.admitRepositoryMutation({
+    fence: observer.fence,
+    target_repository: 'weijunswj/sqag',
+    mutation_authorised: true,
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 'OBSERVER_MUTATION_DENIED');
+
+  const timeoutTakeover = kernel.admitRepositoryMutation({
+    fence: observer.fence,
+    target_repository: 'weijunswj/sqag',
+    takeover: true,
+    timeout: true,
+    mutation_authorised: true,
+  });
+  assert.equal(timeoutTakeover.ok, false);
+  assert.equal(timeoutTakeover.code, 'TAKEOVER_AUTHORITY_REQUIRED');
+});
+
+test('explicit takeover requires prior reconciliation and then still requires mutation authority', () => {
+  const observer = kernel.bindRepositoryFence({ repository: 'weijunswj/ai-agent-toolkit', controller_mode: 'OBSERVER' });
+  const notReconciled = kernel.admitRepositoryMutation({
+    fence: observer.fence,
+    target_repository: 'weijunswj/ai-agent-toolkit',
+    takeover: true,
+    explicit_user_web_authority: true,
+    mutation_authorised: true,
+  });
+  assert.equal(notReconciled.ok, false);
+  assert.equal(notReconciled.code, 'PRIOR_CONTROLLER_RECONCILIATION_REQUIRED');
+
+  const admitted = kernel.admitRepositoryMutation({
+    fence: observer.fence,
+    target_repository: 'weijunswj/ai-agent-toolkit',
+    takeover: true,
+    explicit_user_web_authority: true,
+    prior_state_reconciled: true,
+    mutation_authorised: true,
+  });
+  assert.equal(admitted.ok, true, admitted.code);
+  assert.equal(admitted.controller_mode, 'OWNER');
+  assert.equal(admitted.rebound, true);
+});
