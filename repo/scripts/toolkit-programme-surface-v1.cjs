@@ -936,6 +936,15 @@ function normalizeProgrammeGraphSnapshot(input = {}) {
     const outcomeTitle = raw.title ?? raw.name ?? id;
     const lifecycleValue = raw.lifecycle ?? (materialized ? 'QUEUED' : 'PLANNED');
     const lifecycle = typeof lifecycleValue === 'string' ? lifecycleValue.toUpperCase() : null;
+    const hasCompleteWhen = Object.prototype.hasOwnProperty.call(raw, 'complete_when')
+      || Object.prototype.hasOwnProperty.call(raw, 'completeWhen');
+    const completeWhenSource = Object.prototype.hasOwnProperty.call(raw, 'complete_when') ? raw.complete_when : raw.completeWhen;
+    const completeWhen = hasCompleteWhen ? completeWhenSource
+      : Array.isArray(raw.done_when) && raw.done_when.length === 1 ? raw.done_when[0] : undefined;
+    const hasCurrentGate = Object.prototype.hasOwnProperty.call(raw, 'current_gate')
+      || Object.prototype.hasOwnProperty.call(raw, 'currentGate');
+    const currentGateSource = Object.prototype.hasOwnProperty.call(raw, 'current_gate') ? raw.current_gate : raw.currentGate;
+    const currentGate = hasCurrentGate ? normalizeGraphCurrentGate(currentGateSource) : null;
     const rawDependencies = raw.dependencies ?? [];
     if (!Array.isArray(rawDependencies)) return result(false, 'PROGRAMME_GRAPH_DEPENDENCIES_INVALID', { id });
     const dependencies = [];
@@ -946,7 +955,8 @@ function normalizeProgrammeGraphSnapshot(input = {}) {
       }
       dependencies.push(dependencyId);
     }
-    if (id === null || kind === null || !safeText(outcomeTitle) || !PROGRAMME_GRAPH_LIFECYCLES.includes(lifecycle)
+    if (id === null || kind === null || !safeText(outcomeTitle) || !safeText(completeWhen, 2048)
+      || currentGate === undefined || !PROGRAMME_GRAPH_LIFECYCLES.includes(lifecycle)
       || nativeSource !== null && nativeIssue === null
       || kind === 'CHILD' && materialized && nativeIssue === null) {
       return result(false, 'PROGRAMME_GRAPH_OUTCOME_INVALID', { index, id });
@@ -961,6 +971,8 @@ function normalizeProgrammeGraphSnapshot(input = {}) {
       dependencies: dependencies.sort(graphCompare),
       native_issue: nativeIssue,
       delivery_pr: deliveryPr,
+      current_gate: currentGate,
+      complete_when: completeWhen,
     });
   }
   outcomes.sort((left, right) => left.order - right.order || graphCompare(left.id, right.id));
@@ -1038,6 +1050,46 @@ function programmeGraphDeliveryCell(pr) {
   return pr === null ? '-' : '#' + pr.number + ' (' + pr.status + ')';
 }
 
+function normalizeGraphCurrentGate(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const gate = value.gate ?? value.stage ?? null;
+  let repair = value.repair;
+  if (repair === undefined && Number.isSafeInteger(value.repair_number)) repair = value.repair_number;
+  if (repair === undefined && isRecord(value.repair_count)) repair = value.repair_count.used;
+  if (repair === undefined) repair = null;
+  if (!safeText(gate, 128) || (repair !== null && (!Number.isSafeInteger(repair) || repair < 0))) return undefined;
+  return { gate, repair };
+}
+
+function programmeGraphCurrentGateCell(outcome) {
+  if (outcome.current_gate !== null && outcome.materialized && outcome.lifecycle === 'CURRENT') {
+    return outcome.current_gate.repair === null
+      ? outcome.current_gate.gate
+      : outcome.current_gate.gate + ' Repair-' + outcome.current_gate.repair;
+  }
+  if (outcome.lifecycle === 'COMPLETED') return 'Complete';
+  if (outcome.lifecycle === 'HELD' || outcome.dependencies.length > 0) return 'Blocked';
+  if (outcome.kind === 'OUTCOME') return 'Parent-owned';
+  return 'Not admitted';
+}
+
+function programmeGraphDependencyCell(outcome) {
+  return outcome.dependencies.length ? 'blocked by ' + outcome.dependencies.join(', ') : null;
+}
+
+function programmeGraphCurrentWorkCell(outcome) {
+  const parts = [];
+  if (outcome.native_issue !== null) parts.push('#' + outcome.native_issue.number);
+  if (outcome.delivery_pr !== null) parts.push('PR #' + outcome.delivery_pr.number);
+  const dependency = programmeGraphDependencyCell(outcome);
+  if (dependency !== null) parts.push(dependency);
+  if (parts.length === 0) return outcome.kind === 'OUTCOME' ? 'Parent-owned' : 'Not admitted';
+  if (outcome.kind === 'OUTCOME' && outcome.delivery_pr === null && outcome.dependencies.length === 0) parts.push('Parent-owned');
+  return parts.join(' · ');
+}
+
 function programmeSurfaceView(value) {
   const source = isRecord(value) && isRecord(value.surface) ? value.surface : value;
   if (!isRecord(source) || typeof source.title !== 'string' || typeof source.body !== 'string'
@@ -1070,19 +1122,16 @@ function renderProgrammeGraph(input = {}) {
     '| Materialised outcomes | ' + graphCell(graph.outcomes.filter((item) => item.materialized).length) + ' |',
     '',
     '## Programme Graph',
-    '| Order | Outcome | Kind | Materialised | Lifecycle | Dependencies | Native issue | Delivery PR |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Outcome | Status | Current gate | Current work | Complete when |',
+    '| --- | --- | --- | --- | --- |',
   ];
-  if (graph.outcomes.length === 0) lines.push('| - | None | - | - | - | - | - | - |');
+  if (graph.outcomes.length === 0) lines.push('| - | - | - | - | - |');
   for (const outcome of graph.outcomes) {
-    lines.push('| ' + graphCell(outcome.order)
-      + ' | ' + graphCell(outcome.id + ': ' + outcome.title)
-      + ' | ' + graphCell(outcome.kind)
-      + ' | ' + (outcome.materialized ? 'YES' : 'NO')
+    lines.push('| ' + graphCell(outcome.id + ': ' + outcome.title)
       + ' | ' + graphCell(outcome.lifecycle)
-      + ' | ' + graphCell(outcome.dependencies.length ? outcome.dependencies.join(', ') : null)
-      + ' | ' + graphCell(programmeGraphNativeCell(outcome.native_issue))
-      + ' | ' + graphCell(programmeGraphDeliveryCell(outcome.delivery_pr)) + ' |');
+      + ' | ' + graphCell(programmeGraphCurrentGateCell(outcome))
+      + ' | ' + graphCell(programmeGraphCurrentWorkCell(outcome))
+      + ' | ' + graphCell(outcome.complete_when) + ' |');
   }
   if (programme.objective !== null) lines.push('', '## Programme objective', graphCell(programme.objective));
   if (programme.labels.length) lines.push('', '## Programme labels', ...programme.labels.map((label) => '- ' + graphCell(label)));
@@ -1099,8 +1148,11 @@ function renderProgrammeGraph(input = {}) {
     title: outcome.title,
     materialized: outcome.materialized,
     lifecycle: outcome.lifecycle,
+    dependencies: outcome.dependencies.slice(),
     native_issue: clone(outcome.native_issue),
     delivery_pr: clone(outcome.delivery_pr),
+    current_gate: clone(outcome.current_gate),
+    complete_when: outcome.complete_when,
   }));
   const surface = {
     title: programme.title,

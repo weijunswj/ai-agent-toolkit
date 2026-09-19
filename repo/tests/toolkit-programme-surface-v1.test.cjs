@@ -43,6 +43,8 @@ function graphFixture(overrides = {}) {
         dependencies: [],
         native_issue: { repository: 'example/neutral-repo', number: 101 },
         delivery_pr: { repository: 'example/neutral-repo', number: 201, status: 'OPEN', role: 'DELIVERY', completes_child: false, reference: null },
+        current_gate: { gate: 'G3', repair: 1 },
+        complete_when: 'The first delivery child is accepted under the programme contract.',
       },
       {
         id: 'planned-follow-up',
@@ -54,6 +56,8 @@ function graphFixture(overrides = {}) {
         dependencies: ['child-first'],
         native_issue: null,
         delivery_pr: null,
+        current_gate: null,
+        complete_when: 'The planned follow-up outcome is accepted under its source-backed criteria.',
       },
     ],
     ...overrides,
@@ -481,15 +485,24 @@ test('Programme Graph is the single deterministic parent topology projection', (
   assert.equal(rendered.graph.outcomes.filter((item) => item.materialized).length, 1);
   assert.deepEqual(rendered.graph.outcomes[0].native_issue, { repository: 'example/neutral-repo', number: 101 });
   assert.equal(rendered.graph.outcomes[0].delivery_pr.number, 201);
+  assert.deepEqual(rendered.graph.outcomes[0].current_gate, { gate: 'G3', repair: 1 });
+  assert.equal(rendered.graph.outcomes[0].complete_when, 'The first delivery child is accepted under the programme contract.');
   assert.equal(rendered.graph.outcomes[1].native_issue, null);
   assert.equal(rendered.graph.outcomes[1].delivery_pr, null);
   assert.match(rendered.body, /^## Programme Graph$/m);
+  assert.match(rendered.body, /^\| Outcome \| Status \| Current gate \| Current work \| Complete when \|$/m);
+  assert.doesNotMatch(rendered.body, /^\| Order \| Outcome \| Kind \| Materialised \| Lifecycle \| Dependencies \| Native issue \| Delivery PR \|$/m);
   assert.match(rendered.body, /#101/);
-  assert.match(rendered.body, /#201 \(OPEN\)/);
+  assert.match(rendered.body, /#101 · PR #201/);
+  assert.match(rendered.body, /G3 Repair-1/);
+  assert.match(rendered.body, /blocked by child-first/);
   assert.match(rendered.body, /planned-follow-up: Planned follow-up outcome/);
   assert.doesNotMatch(rendered.body, /^## (Current Programme Children|Children|PR history|Foundation)$/m);
   assert.equal(rendered.parent_registry.length, 2);
   assert.deepEqual(rendered.parent_registry.map((item) => item.outcome_id), ['child-first', 'planned-follow-up']);
+  assert.deepEqual(rendered.parent_registry[0].dependencies, []);
+  assert.deepEqual(rendered.parent_registry[0].current_gate, { gate: 'G3', repair: 1 });
+  assert.equal(rendered.parent_registry[0].complete_when, 'The first delivery child is accepted under the programme contract.');
   assert.equal(programme.validateProgrammeGraph(rendered.graph).ok, true);
 });
 
@@ -509,21 +522,29 @@ test('Programme Graph renderer is repository-neutral and dry-runs the current To
     },
     outcomes: [
       {
-        id: 'child-422', order: 1, kind: 'CHILD', title: 'Controller kernel delivery', materialized: true,
+        id: 'C1', order: 1, kind: 'CHILD', title: 'Controller kernel delivery', materialized: true,
         lifecycle: 'CURRENT', dependencies: [], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 422 },
         delivery_pr: { repository: 'weijunswj/ai-agent-toolkit', number: 434, status: 'OPEN', role: 'DELIVERY', completes_child: false, reference: 'github:pull/434' },
+        current_gate: { gate: 'G3', repair: 2 },
+        complete_when: 'The controller-kernel delivery is accepted at the Web finality boundary.',
       },
       {
-        id: 'child-423', order: 2, kind: 'CHILD', title: 'Planned assurance child', materialized: false,
-        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 423 }, delivery_pr: null,
+        id: 'C2', order: 2, kind: 'CHILD', title: 'Assurance child', materialized: false,
+        lifecycle: 'QUEUED', dependencies: ['C1'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 423 }, delivery_pr: null,
+        current_gate: null,
+        complete_when: 'The assurance child is accepted with its source-backed validation evidence.',
       },
       {
-        id: 'child-424', order: 3, kind: 'CHILD', title: 'Planned reconciliation child', materialized: false,
-        lifecycle: 'PLANNED', dependencies: ['child-422'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 424 }, delivery_pr: null,
+        id: 'C3', order: 3, kind: 'CHILD', title: 'Reconciliation child', materialized: false,
+        lifecycle: 'QUEUED', dependencies: ['C2'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 424 }, delivery_pr: null,
+        current_gate: null,
+        complete_when: 'The reconciliation child is accepted with its source-backed convergence evidence.',
       },
       {
-        id: 'outcome-425', order: 4, kind: 'OUTCOME', title: 'Planned parent-owned outcome', materialized: false,
-        lifecycle: 'PLANNED', dependencies: ['child-423', 'child-424'], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 425 }, delivery_pr: null,
+        id: 'Q', order: 4, kind: 'OUTCOME', title: 'Deferred parent-owned outcome', materialized: false,
+        lifecycle: 'PLANNED', dependencies: [], native_issue: { repository: 'weijunswj/ai-agent-toolkit', number: 425 }, delivery_pr: null,
+        current_gate: null,
+        complete_when: 'The deferred parent-owned outcome is accepted under its registered programme criterion.',
       },
     ],
   });
@@ -531,13 +552,30 @@ test('Programme Graph renderer is repository-neutral and dry-runs the current To
   assert.equal(toolkit421.ok, true, toolkit421.code);
   assert.match(toolkit421.body, /weijunswj\/ai-agent-toolkit/);
   assert.match(toolkit421.body, /#422/);
-  assert.match(toolkit421.body, /#434 \(OPEN\)/);
+  assert.match(toolkit421.body, /PR #434/);
   assert.match(toolkit421.body, /#423/);
   assert.match(toolkit421.body, /#424/);
   assert.match(toolkit421.body, /#425/);
-  assert.match(toolkit421.body, /outcome-425: Planned parent-owned outcome/);
+  assert.match(toolkit421.body, /C1: Controller kernel delivery/);
+  assert.match(toolkit421.body, /C2: Assurance child/);
+  assert.match(toolkit421.body, /C3: Reconciliation child/);
+  assert.match(toolkit421.body, /Q: Deferred parent-owned outcome/);
+  assert.match(toolkit421.body, /#422 · PR #434/);
+  assert.match(toolkit421.body, /#423 · blocked by C1/);
+  assert.match(toolkit421.body, /#424 · blocked by C2/);
+  assert.match(toolkit421.body, /#425 · Parent-owned/);
+  assert.match(toolkit421.body, /G3 Repair-2/);
+  assert.match(toolkit421.body, /\| C2: Assurance child \| QUEUED \| Blocked \|/);
+  assert.match(toolkit421.body, /\| C3: Reconciliation child \| QUEUED \| Blocked \|/);
+  assert.match(toolkit421.body, /\| Q: Deferred parent-owned outcome \| PLANNED \| Parent-owned \|/);
+  assert.equal((toolkit421.body.match(/\| C1: Controller kernel delivery \|/g) || []).length, 1);
+  assert.equal((toolkit421.body.match(/\| C2: Assurance child \|/g) || []).length, 1);
+  assert.equal((toolkit421.body.match(/\| C3: Reconciliation child \|/g) || []).length, 1);
+  assert.equal((toolkit421.body.match(/\| Q: Deferred parent-owned outcome \|/g) || []).length, 1);
+  assert.deepEqual(toolkit421.parent_registry.map((item) => item.outcome_id), ['C1', 'C2', 'C3', 'Q']);
+  assert.deepEqual(toolkit421.parent_registry.map((item) => item.dependencies), [[], ['C1'], ['C2'], []]);
   assert.doesNotMatch(toolkit421.body, /example\/neutral-repo|programme-neutral/);
-  assert.doesNotMatch(toolkit421.body, /RUN|Lock|worker|detailed CI/i);
+  assert.doesNotMatch(toolkit421.body, /\bRUN\b|\bLock\b|\bworker\b|detailed CI/i);
   assert.notEqual(neutral.graph.graph_digest, toolkit421.graph.graph_digest);
 
   const regenerated = programme.renderProgrammeGraph(toolkit421.canonical_snapshot);
@@ -545,6 +583,75 @@ test('Programme Graph renderer is repository-neutral and dry-runs the current To
   assert.equal(regenerated.body, toolkit421.body);
   assert.equal(regenerated.graph_digest, toolkit421.graph_digest);
   assert.equal(regenerated.canonical_snapshot_digest, toolkit421.canonical_snapshot_digest);
+});
+
+test('Programme Graph keeps gate authority explicit and requires source-backed completion criteria', () => {
+  const noGate = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0 ? { ...outcome, current_gate: null } : outcome),
+  });
+  const rendered = programme.renderProgrammeGraph(noGate);
+  assert.equal(rendered.ok, true, rendered.code);
+  assert.equal(rendered.graph.outcomes[0].current_gate, null);
+  assert.match(rendered.body, /\| child-first: First delivery child \| CURRENT \| Not admitted \|/);
+  assert.doesNotMatch(rendered.body, /G3 Repair-1/);
+
+  const queuedWithGate = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 1 ? { ...outcome, current_gate: { gate: 'G4', repair: 9 } } : outcome),
+  });
+  const queued = programme.renderProgrammeGraph(queuedWithGate);
+  assert.equal(queued.ok, true, queued.code);
+  assert.match(queued.body, /\| planned-follow-up: Planned follow-up outcome \| PLANNED \| Blocked \|/);
+  assert.doesNotMatch(queued.body, /G4 Repair-9/);
+
+  const missingCriterion = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0 ? { ...outcome, complete_when: undefined } : outcome),
+  });
+  assert.equal(programme.renderProgrammeGraph(missingCriterion).code, 'PROGRAMME_GRAPH_OUTCOME_INVALID');
+  const nullCriterion = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0 ? { ...outcome, complete_when: null } : outcome),
+  });
+  assert.equal(programme.renderProgrammeGraph(nullCriterion).code, 'PROGRAMME_GRAPH_OUTCOME_INVALID');
+  const malformedGate = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0 ? { ...outcome, current_gate: 'G3' } : outcome),
+  });
+  assert.equal(programme.renderProgrammeGraph(malformedGate).code, 'PROGRAMME_GRAPH_OUTCOME_INVALID');
+  const undefinedGate = graphFixture({
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0 ? { ...outcome, current_gate: undefined } : outcome),
+  });
+  assert.equal(programme.renderProgrammeGraph(undefinedGate).code, 'PROGRAMME_GRAPH_OUTCOME_INVALID');
+});
+
+test('human-v2 public adapter supplies source-backed graph fields without changing authority state', () => {
+  const sourceBody = programmeV5.FINALISATION_RENDERED_TARGETS.stage_b.parent;
+  const sourceRead = {
+    body: sourceBody,
+    complete: true,
+    byte_length: Buffer.byteLength(sourceBody, 'utf8'),
+    body_sha256: programmeV5.sha256Text(sourceBody),
+    revision: null,
+  };
+  const first = programmeV5.humanSurfaceV2.render({
+    source: { type: 'PARENT_READ', parent_read: sourceRead },
+    target: { kind: 'parent' },
+  });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.match(first.body, /^\| Outcome \| Status \| Current gate \| Current work \| Complete when \|$/m);
+  const current = programmeV5.FINALISATION_STAGE_B_TARGET_STATE.children.find((child) => child.lifecycle === 'CURRENT');
+  assert.ok(current);
+  assert.match(first.body, /Not admitted/);
+  assert.ok(first.body.includes(current.done_when[0]));
+  assert.equal(first.canonical_state.parent.issue, programmeV5.FINALISATION_STAGE_B_TARGET_STATE.parent.issue);
+  assert.equal(first.canonical_state.children.find((child) => child.issue === current.issue).lifecycle, 'CURRENT');
+  assert.deepEqual(first.canonical_state.children.find((child) => child.issue === 360).dependencies, [358]);
+  assert.equal(first.read.complete, true);
+
+  const second = programmeV5.humanSurfaceV2.render({
+    source: { type: 'PARENT_READ', parent_read: first.read },
+    target: { kind: 'parent' },
+  });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.body, first.body);
+  assert.equal(second.canonical_sha256, first.canonical_sha256);
 });
 
 test('all public programme renderers apply the retained public-data screen', () => {
@@ -563,6 +670,11 @@ test('all public programme renderers apply the retained public-data screen', () 
     ...graphFixture(),
     programme: { ...graphFixture().programme, title: 'token=synthetic-review-canary' },
   };
+  const graphCompletionCanary = {
+    ...graphFixture(),
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0
+      ? { ...outcome, complete_when: 'token=synthetic-review-canary' } : outcome),
+  };
   for (const renderer of [
     programmeV5.renderProgrammeGraph,
     programmeV5.renderProgrammeParent,
@@ -571,6 +683,14 @@ test('all public programme renderers apply the retained public-data screen', () 
     programmeV5.programmeSurface.renderProgrammeGraph,
     programmeV5.programmeSurface.renderProgrammeParent,
   ]) assert.throws(() => renderer(graphCanary), /PUBLIC_DATA_UNSAFE/);
+  for (const renderer of [
+    programmeV5.renderProgrammeGraph,
+    programmeV5.renderProgrammeParent,
+    programmeV5.programmeV5.renderProgrammeGraph,
+    programmeV5.programmeV5.renderProgrammeParent,
+    programmeV5.programmeSurface.renderProgrammeGraph,
+    programmeV5.programmeSurface.renderProgrammeParent,
+  ]) assert.throws(() => renderer(graphCompletionCanary), /PUBLIC_DATA_UNSAFE/);
 });
 
 test('Programme Graph excludes child-local chronology and preserves parent minimality', () => {

@@ -199,7 +199,7 @@
     "programmeGraphOutcome": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "order", "kind", "title", "materialized", "lifecycle", "dependencies", "native_issue", "delivery_pr"],
+      "required": ["id", "order", "kind", "title", "materialized", "lifecycle", "dependencies", "native_issue", "delivery_pr", "current_gate", "complete_when"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "order": { "type": "integer", "minimum": 1 },
@@ -229,7 +229,17 @@
             "completes_child": { "type": "boolean" },
             "reference": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 }
           }
-        }
+        },
+        "current_gate": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["gate", "repair"],
+          "properties": {
+            "gate": { "$ref": "#/$defs/id" },
+            "repair": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "complete_when": { "type": "string", "minLength": 1, "maxLength": 2048 }
       }
     }
   }

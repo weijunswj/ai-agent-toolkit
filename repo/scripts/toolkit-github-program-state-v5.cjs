@@ -4594,6 +4594,18 @@ function h2ManagedDocument(style, kind, prose, carrier) {
   };
 }
 function h2ProgrammeGraphSnapshot(state, projection) {
+  const currentGateForChild = (child) => {
+    if (child.lifecycle !== 'CURRENT') return null;
+    const lanes = (state.active_lanes || []).filter((lane) => (lane.child_issue ?? lane.child) === child.issue);
+    if (lanes.length === 0) return null;
+    h2Require(lanes.length === 1 && lanes[0].gate_state === 'ACTIVE' && h2SafeId(lanes[0].gate), true, 'PROGRAMME_GRAPH_GATE_SOURCE_INVALID', 'CANONICAL');
+    return { gate: lanes[0].gate, repair: null };
+  };
+  const completeWhenForChild = (child) => {
+    h2Require(Array.isArray(child.done_when) && child.done_when.length > 0 && typeof child.done_when[0] === 'string' && child.done_when[0].length > 0,
+      true, 'PROGRAMME_GRAPH_COMPLETION_SOURCE_MISSING', 'CANONICAL');
+    return child.done_when[0];
+  };
   const outcomes = state.children.map((child) => {
     const registry = (child.pr_registry || []).slice().sort((left, right) => left.pr - right.pr);
     const delivery = registry.length ? registry[registry.length - 1] : null;
@@ -4616,6 +4628,8 @@ function h2ProgrammeGraphSnapshot(state, projection) {
         completes_child: delivery.completes_child,
         reference: null,
       } : null,
+      current_gate: currentGateForChild(child),
+      complete_when: completeWhenForChild(child),
     };
   });
   return {
