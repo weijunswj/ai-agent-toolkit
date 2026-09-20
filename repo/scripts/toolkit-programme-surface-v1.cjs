@@ -17,10 +17,11 @@ const PROGRAMME_421_PROOF_OUTCOME_IDS = Object.freeze([
   'C1', 'C2', 'C3', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4', 'W1', 'W2', 'D1', 'A1', 'A2', 'A3', 'A4', 'A5',
   'N1', 'N2', 'N3', 'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'V1', 'V2', 'Q',
 ]);
+const PROGRAMME_421_PROOF_A1_COMPLETE_WHEN = 'Authoritative route identity is provider/model/reasoning plus exact stack/registry/stage/thread provenance; service treatment (tier, priority, standard, default or equivalent provider execution class) is non-authoritative and excluded from route selection, route digests, admission, stored-route checks, prompt requirements, gate contracts and correctness/finality claims; observed treatment is diagnostic-only with explicit provenance, and A2 consumes the tier-free route contract.';
 const PROGRAMME_421_PROOF_SOURCE_HASHES = Object.freeze({
-  foundation_body_sha256: 'faa3bac99662330a151f57da4f6910408ccc48ac8674c4b33f254ba570a93f3a',
-  foundation_issue_and_comments_sha256: '6f3b3e7105a148d93a1a2e983b964cce3200b26d93248b90fec38d0ae2001394',
-  canonical_30_row_payload_sha256: 'dbd074c96e14817e0db53f764d34825943c86488b8b9fc8e67dfa082fb5b8a1c',
+  foundation_body_sha256: '567c90114277700da83ddb0d5b92af562fd0706c45c95afd71731518f81ae92b',
+  foundation_issue_and_comments_sha256: 'f492a1b3fa92967c3a6550860894072072f0b94b3645e8e00d339a6214f67a0b',
+  canonical_30_row_payload_sha256: '50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759',
   c2_body_sha256: '76ded413a0ad2997096ba07da93f7485b0dafc587b1d62eb5ab4568131e7cd7b',
   c3_body_sha256: '865ed06c60b93a41d480979c4559490f550a14962e29061e6b47e8074536a1df',
   queue_body_sha256: 'f9b21cdeb8c87b87b9f15e341169322e62e3492c0228249da066794799107669',
@@ -37,7 +38,7 @@ const PROGRAMME_421_PROOF_SOURCE_REFERENCES = Object.freeze({
   pre_g3_receipt_body_sha256: Object.freeze({ reference: 'github:issue:421:pre-g3-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.pre_g3_receipt_body_sha256 }),
   g2_authority_receipt_body_sha256: Object.freeze({ reference: 'github:issue:435:g2-authority-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.g2_authority_receipt_body_sha256 }),
 });
-const PROGRAMME_421_PROOF_FIELD_MAP_DIGEST = 'cdb173315d9da28d9c8272a6f2beeaff0f4b21e74a70375630e63b15b3a6309c';
+const PROGRAMME_421_PROOF_FIELD_MAP_DIGEST = 'dbc171653929ff8ef54b14acc6a05cf726c708c20ba62902ce4bce43156fb018';
 const CURRENT_KEYS = Object.freeze([
   'schema', 'version', 'repository', 'controller_revision', 'canonical_main', 'programme', 'run', 'lock', 'gate',
   'repair_count', 'candidate', 'hold', 'in_flight', 'controlling_receipt', 'next_admissible_action', 'projection_digest',
@@ -1449,6 +1450,8 @@ function validateProgrammeGraphProof(fixture) {
   try { actualFieldMap = programmeProofFieldMap(snapshot); }
   catch (_error) { return invalid('SOURCE_FIELD_MAP_DERIVATION_INVALID'); }
   if (kernel.canonicalSerialize(actualFieldMap) !== kernel.canonicalSerialize(sourceEvidence.field_map)) return invalid('SOURCE_FIELD_MAP_MISMATCH');
+  if (kernel.digestValue(actualFieldMap.outcomes) !== PROGRAMME_421_PROOF_SOURCE_HASHES.canonical_30_row_payload_sha256) return invalid('CANONICAL_30_ROW_PAYLOAD_DIGEST_MISMATCH');
+  if (actualFieldMap.outcomes.A1?.complete_when !== PROGRAMME_421_PROOF_A1_COMPLETE_WHEN) return invalid('A1_SERVICE_TREATMENT_AUTHORITY_INVALID');
   if (sourceEvidence.field_map.execution_authority?.Q !== 'NON_EXECUTING'
     || Object.keys(sourceEvidence.field_map.execution_authority || {}).length !== 1) return invalid('QUEUE_EXECUTION_AUTHORITY_INVALID');
   const snapshotIds = snapshot.outcomes.map((outcome) => outcome.id);
@@ -1607,6 +1610,7 @@ module.exports = Object.freeze({
   validateProgrammeGraph,
   validateProgrammeGraphProof,
   PROGRAMME_421_PROOF_OUTCOME_IDS,
+  PROGRAMME_421_PROOF_A1_COMPLETE_WHEN,
   PROGRAMME_421_PROOF_SOURCE_HASHES,
   PROGRAMME_421_PROOF_SOURCE_REFERENCES,
   PROGRAMME_421_PROOF_FIELD_MAP_DIGEST,

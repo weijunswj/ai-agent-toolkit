@@ -864,3 +864,36 @@ test('Programme #421 proof rejects incomplete source evidence and authority drif
     assert.equal(programme.validateProgrammeGraphProof(candidate).ok, false);
   }
 });
+
+test('Programme #421 proof requires the current authority source and tier-free A1 acceptance mapping', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'controller-kernel', 'programme-421-proof-v1.json'), 'utf8'));
+  const oldBody = 'faa3bac99662330a151f57da4f6910408ccc48ac8674c4b33f254ba570a93f3a';
+  const oldIssueAndComments = '6f3b3e7105a148d93a1a2e983b964cce3200b26d93248b90fec38d0ae2001394';
+  const oldCriterion = 'Every admitted route resolves exactly against the current registered stack and capability contract.';
+
+  assert.equal(programme.validateProgrammeGraphProof(fixture).ok, true);
+  assert.equal(fixture.source_receipts.foundation_body_sha256, programme.PROGRAMME_421_PROOF_SOURCE_HASHES.foundation_body_sha256);
+  assert.equal(fixture.source_receipts.foundation_issue_and_comments_sha256, programme.PROGRAMME_421_PROOF_SOURCE_HASHES.foundation_issue_and_comments_sha256);
+  assert.equal(fixture.canonical_snapshot.outcomes.length, 30);
+  assert.deepEqual(fixture.canonical_snapshot.outcomes.map((outcome) => outcome.id), programme.PROGRAMME_421_PROOF_OUTCOME_IDS);
+  assert.equal(fixture.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'A1').complete_when, programme.PROGRAMME_421_PROOF_A1_COMPLETE_WHEN);
+
+  const staleSource = structuredClone(fixture);
+  staleSource.source_receipts.foundation_body_sha256 = oldBody;
+  staleSource.source_receipts.foundation_issue_and_comments_sha256 = oldIssueAndComments;
+  staleSource.source_evidence.source_references.foundation_body_sha256.sha256 = oldBody;
+  staleSource.source_evidence.source_references.foundation_issue_and_comments_sha256.sha256 = oldIssueAndComments;
+  assert.equal(programme.validateProgrammeGraphProof(staleSource).ok, false);
+
+  const genericMapping = structuredClone(fixture);
+  genericMapping.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'A1').complete_when = oldCriterion;
+  assert.equal(programme.validateProgrammeGraphProof(genericMapping).ok, false);
+
+  const removedRequirement = structuredClone(fixture);
+  removedRequirement.source_evidence.field_map.outcomes.A1.complete_when = oldCriterion;
+  assert.equal(programme.validateProgrammeGraphProof(removedRequirement).ok, false);
+
+  const changedRequirement = structuredClone(fixture);
+  changedRequirement.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'A1').complete_when = 'Observed service treatment is authoritative.';
+  assert.equal(programme.validateProgrammeGraphProof(changedRequirement).ok, false);
+});

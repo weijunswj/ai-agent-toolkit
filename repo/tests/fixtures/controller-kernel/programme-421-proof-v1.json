@@ -5,9 +5,9 @@
   "repository": "weijunswj/ai-agent-toolkit",
   "controller_revision": "af14f91b0f6335212003a37a5119f233489e598f",
   "source_receipts": {
-    "foundation_body_sha256": "faa3bac99662330a151f57da4f6910408ccc48ac8674c4b33f254ba570a93f3a",
-    "foundation_issue_and_comments_sha256": "6f3b3e7105a148d93a1a2e983b964cce3200b26d93248b90fec38d0ae2001394",
-    "canonical_30_row_payload_sha256": "dbd074c96e14817e0db53f764d34825943c86488b8b9fc8e67dfa082fb5b8a1c",
+    "foundation_body_sha256": "567c90114277700da83ddb0d5b92af562fd0706c45c95afd71731518f81ae92b",
+    "foundation_issue_and_comments_sha256": "f492a1b3fa92967c3a6550860894072072f0b94b3645e8e00d339a6214f67a0b",
+    "canonical_30_row_payload_sha256": "50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759",
     "c2_body_sha256": "76ded413a0ad2997096ba07da93f7485b0dafc587b1d62eb5ab4568131e7cd7b",
     "c3_body_sha256": "865ed06c60b93a41d480979c4559490f550a14962e29061e6b47e8074536a1df",
     "queue_body_sha256": "f9b21cdeb8c87b87b9f15e341169322e62e3492c0228249da066794799107669",
@@ -19,15 +19,15 @@
     "source_references": {
       "foundation_body_sha256": {
         "reference": "github:issue:421:body",
-        "sha256": "faa3bac99662330a151f57da4f6910408ccc48ac8674c4b33f254ba570a93f3a"
+        "sha256": "567c90114277700da83ddb0d5b92af562fd0706c45c95afd71731518f81ae92b"
       },
       "foundation_issue_and_comments_sha256": {
         "reference": "github:issue:421:body-and-comments",
-        "sha256": "6f3b3e7105a148d93a1a2e983b964cce3200b26d93248b90fec38d0ae2001394"
+        "sha256": "f492a1b3fa92967c3a6550860894072072f0b94b3645e8e00d339a6214f67a0b"
       },
       "canonical_30_row_payload_sha256": {
         "reference": "github:issue:421:canonical-30-row-payload",
-        "sha256": "dbd074c96e14817e0db53f764d34825943c86488b8b9fc8e67dfa082fb5b8a1c"
+        "sha256": "50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759"
       },
       "c2_body_sha256": {
         "reference": "github:issue:423:body",
@@ -254,7 +254,7 @@
           "native_issue": null,
           "delivery_pr": null,
           "current_gate": null,
-          "complete_when": "Every admitted route resolves exactly against the current registered stack and capability contract."
+          "complete_when": "Authoritative route identity is provider/model/reasoning plus exact stack/registry/stage/thread provenance; service treatment (tier, priority, standard, default or equivalent provider execution class) is non-authoritative and excluded from route selection, route digests, admission, stored-route checks, prompt requirements, gate contracts and correctness/finality claims; observed treatment is diagnostic-only with explicit provenance, and A2 consumes the tier-free route contract."
         },
         "A2": {
           "id": "A2",
@@ -517,7 +517,7 @@
         "Q": "NON_EXECUTING"
       }
     },
-    "field_map_digest": "cdb173315d9da28d9c8272a6f2beeaff0f4b21e74a70375630e63b15b3a6309c"
+    "field_map_digest": "dbc171653929ff8ef54b14acc6a05cf726c708c20ba62902ce4bce43156fb018"
   },
   "canonical_snapshot": {
     "schema": "toolkit.controller.programme-snapshot.v1",
@@ -549,7 +549,7 @@
       {"id":"W1","order":10,"kind":"OUTCOME","title":"Source-Watch Conformance","materialized":false,"lifecycle":"PLANNED","dependencies":[],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Source-watch behavior remains notification-only, pinned and approval-bound."},
       {"id":"W2","order":11,"kind":"OUTCOME","title":"Workspace Safety and Lifecycle","materialized":false,"lifecycle":"PLANNED","dependencies":[],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Workspace lifecycle and isolation controls are verified before consequential concurrency."},
       {"id":"D1","order":12,"kind":"OUTCOME","title":"Evidence-Driven Debugging + Fresh Verification","materialized":false,"lifecycle":"PLANNED","dependencies":[],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Debugging and verification use fresh bounded evidence with truthful readiness conclusions."},
-      {"id":"A1","order":13,"kind":"OUTCOME","title":"Exact Route Resolution","materialized":false,"lifecycle":"PLANNED","dependencies":[],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Every admitted route resolves exactly against the current registered stack and capability contract."},
+      {"id":"A1","order":13,"kind":"OUTCOME","title":"Exact Route Resolution","materialized":false,"lifecycle":"PLANNED","dependencies":[],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Authoritative route identity is provider/model/reasoning plus exact stack/registry/stage/thread provenance; service treatment (tier, priority, standard, default or equivalent provider execution class) is non-authoritative and excluded from route selection, route digests, admission, stored-route checks, prompt requirements, gate contracts and correctness/finality claims; observed treatment is diagnostic-only with explicit provenance, and A2 consumes the tier-free route contract."},
       {"id":"A2","order":14,"kind":"OUTCOME","title":"Repository Loop Manager + Durable Child Execution + Metering","materialized":false,"lifecycle":"PLANNED","dependencies":["A1"],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Durable child execution and metering preserve terminal delivery, identity and bounded resource accounting."},
       {"id":"A3","order":15,"kind":"OUTCOME","title":"Concurrent Loop Execution + Integration","materialized":false,"lifecycle":"PLANNED","dependencies":["A2","W2"],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Concurrent execution and integration are admitted only after workspace safety and independent-path proof."},
       {"id":"A4","order":16,"kind":"OUTCOME","title":"Trusted CI Publication","materialized":false,"lifecycle":"PLANNED","dependencies":["A3"],"native_issue":null,"delivery_pr":null,"current_gate":null,"complete_when":"Trusted CI publishes the exact validation union with unique contexts and deterministic aggregation."},
