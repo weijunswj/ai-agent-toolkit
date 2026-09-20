@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.contract-router.v1",
+  "title": "Toolkit controller route, ownership and execution contracts",
+  "oneOf": [
+    { "$ref": "#/$defs/routeBinding" },
+    { "$ref": "#/$defs/routeDecision" },
+    { "$ref": "#/$defs/ownershipDecision" },
+    { "$ref": "#/$defs/repositoryFence" },
+    { "$ref": "#/$defs/mutationAdmission" },
+    { "$ref": "#/$defs/executionPlan" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "stage": {
+      "enum": ["G0", "G1", "G2", "G3", "G4", "LOOP", "FINAL_AUDIT", "BROWSER"]
+    },
+    "controllerMode": {
+      "enum": ["OWNER", "OBSERVER", "READ_ONLY", "RECONCILING"]
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "reasoning"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "reasoning": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "harnessIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "verified", "source"],
+      "properties": {
+        "name": { "enum": ["claude-code", "codex", "opencode", "unknown"] },
+        "verified": { "type": "boolean" },
+        "source": { "enum": ["hook", "adapter", "runtime", "unavailable"] }
+      }
+    },
+    "registryIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "digest"],
+      "properties": {
+        "revision": { "$ref": "#/$defs/id" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "routeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "version",
+        "thread_id",
+        "stage",
+        "stack_id",
+        "selection_source",
+        "harness_identity",
+        "registry_identity",
+        "route",
+        "route_digest",
+        "execution_path",
+        "a2_status",
+        "status",
+        "repair_budget_consumed"
+      ],
+      "properties": {
+        "schema": { "const": "toolkit.controller.route-binding.v1" },
+        "version": { "const": 1 },
+        "thread_id": { "$ref": "#/$defs/id" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "stack_id": { "enum": ["owner-openai", "owner-claude"] },
+        "selection_source": { "enum": ["explicit_web_binding", "verified_harness_policy"] },
+        "harness_identity": { "$ref": "#/$defs/harnessIdentity" },
+        "registry_identity": { "$ref": "#/$defs/registryIdentity" },
+        "route": { "$ref": "#/$defs/route" },
+        "route_digest": { "$ref": "#/$defs/digest" },
+        "execution_path": { "enum": ["direct-web-executor", "accepted-a2-loop-reconciliation"] },
+        "a2_status": { "enum": ["not-accepted", "accepted"] },
+        "status": { "const": "ROUTE_RESOLVED" },
+        "repair_budget_consumed": { "const": false }
+      }
+    },
+    "routeDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "status", "stage", "selection_source", "selected_stack", "reason_code", "repair_budget_consumed"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.route-decision.v1" },
+        "version": { "const": 1 },
+        "status": { "enum": ["USER_DECISION_REQUIRED", "ROUTE_UNAVAILABLE"] },
+        "stage": { "$ref": "#/$defs/stage" },
+        "selection_source": { "enum": ["explicit_web_binding", "verified_harness_policy", "none"] },
+        "selected_stack": { "type": ["string", "null"] },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "repair_budget_consumed": { "const": false }
+      }
+    },
+    "ownershipDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "repository", "requester", "status", "decision", "owner", "mutation_allowed", "reason_code", "handover", "concurrency_authorised"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.ownership-decision.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "requester": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["ADMITTED", "READ_ONLY", "USER_DECISION_REQUIRED"] },
+        "decision": { "enum": ["OWNER_CLEAR", "OWNER_MATCH", "HANDOVER_AUTHORISED", "CONCURRENCY_AUTHORISED", "OVERLAP_READ_ONLY", "OWNERSHIP_AMBIGUOUS"] },
+        "owner": { "type": ["object", "null"] },
+        "mutation_allowed": { "type": "boolean" },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "handover": { "type": "boolean" },
+        "concurrency_authorised": { "type": "boolean" }
+      }
+    },
+    "repositoryFence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "controller_repository_fence", "controller_mode", "binding_digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.repository-fence.v1" },
+        "version": { "const": 1 },
+        "controller_repository_fence": { "$ref": "#/$defs/id" },
+        "controller_mode": { "$ref": "#/$defs/controllerMode" },
+        "binding_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "mutationAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "target_repository", "controller_repository_fence", "controller_mode", "operation", "mutation_allowed", "read_allowed", "reason_code"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.mutation-admission.v1" },
+        "version": { "const": 1 },
+        "target_repository": { "$ref": "#/$defs/id" },
+        "controller_repository_fence": { "$ref": "#/$defs/id" },
+        "controller_mode": { "$ref": "#/$defs/controllerMode" },
+        "operation": { "enum": ["read", "mutation"] },
+        "mutation_allowed": { "type": "boolean" },
+        "read_allowed": { "type": "boolean" },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "rebound": { "type": "boolean" }
+      }
+    },
+    "executionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "thread_id", "stage", "route_binding", "execution_path", "loop_invoked", "web_reconciliation_required"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.execution-plan.v1" },
+        "version": { "const": 1 },
+        "thread_id": { "$ref": "#/$defs/id" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "route_binding": { "$ref": "#/$defs/routeBinding" },
+        "execution_path": { "enum": ["direct-web-executor", "accepted-a2-loop-reconciliation"] },
+        "loop_invoked": { "type": "boolean" },
+        "web_reconciliation_required": { "const": true }
+      }
+    }
+  }
+}

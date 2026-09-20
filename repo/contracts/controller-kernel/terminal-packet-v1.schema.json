@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.terminal-packet.v1",
+  "title": "Toolkit self-sufficient terminal packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "packet_id", "packet_digest", "packet_reference", "run_id", "repository",
+    "controller_revision", "lock", "gate", "candidate", "outcome", "process", "findings", "observations",
+    "qualifications", "blockers", "verdict", "next_state", "evidence", "replay", "created_at"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.controller.terminal-packet.v1" },
+    "version": { "const": 1 },
+    "packet_id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+    "packet_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "packet_reference": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$" },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+    "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "controller_revision": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+    "lock": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "gate": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr", "head", "tree", "base"],
+      "properties": {
+        "pr": { "type": ["integer", "null"], "minimum": 1 },
+        "head": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+        "tree": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+        "base": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref", "sha"],
+          "properties": {
+            "ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "sha": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" }
+          }
+        }
+      }
+    },
+    "outcome": { "enum": ["success", "failure", "blocked", "interrupted"] },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code", "completed"],
+      "properties": {
+        "status": { "const": "completed" },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "completed": { "const": true }
+      }
+    },
+    "findings": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/finding" } },
+    "observations": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/observation" } },
+    "qualifications": { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 2048 } },
+    "blockers": { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 2048 } },
+    "verdict": { "enum": ["PASS", "FAIL", "HOLD", "INCOMPLETE"] },
+    "next_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "next_admissible_action"],
+      "properties": {
+        "state": { "enum": ["TERMINAL", "HELD", "RECONCILIATION_REQUIRED"] },
+        "next_admissible_action": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "manifest_id", "items"],
+      "properties": {
+        "complete": { "const": true },
+        "manifest_id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+        "items": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "digest", "kind", "summary"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+              "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "kind": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+              "summary": { "type": "string", "minLength": 1, "maxLength": 2048 }
+            }
+          }
+        }
+      }
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durable", "retrieval_key", "worker_rerun_required"],
+      "properties": {
+        "durable": { "const": true },
+        "retrieval_key": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$" },
+        "worker_rerun_required": { "const": false }
+      }
+    },
+    "created_at": { "type": "string", "minLength": 1, "maxLength": 64 }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "summary", "disposition"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+        "severity": { "enum": ["none", "info", "low", "medium", "high", "critical"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "disposition": { "enum": ["closed", "deferred", "blocking", "observed"] }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "availability"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+        "value": { "type": ["string", "number", "boolean", "null"] },
+        "availability": { "enum": ["observed", "unavailable"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.programme-surface.v1",
+  "title": "Toolkit bounded CURRENT and admission projection",
+  "oneOf": [
+    { "$ref": "#/$defs/currentProjection" },
+    { "$ref": "#/$defs/prAdmission" },
+    { "$ref": "#/$defs/bootstrapPlan" },
+    { "$ref": "#/$defs/programmeGraph" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sha": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40}$" },
+    "currentProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "version", "repository", "controller_revision", "canonical_main", "programme", "run", "lock", "gate",
+        "repair_count", "candidate", "hold", "in_flight", "controlling_receipt", "next_admissible_action", "projection_digest"
+      ],
+      "properties": {
+        "schema": { "const": "toolkit.controller.current.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "controller_revision": { "$ref": "#/$defs/id" },
+        "canonical_main": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref", "sha", "tree"],
+          "properties": {
+            "ref": { "const": "main" },
+            "sha": { "$ref": "#/$defs/sha" },
+            "tree": { "$ref": "#/$defs/sha" }
+          }
+        },
+        "programme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parent", "current_child", "lane"],
+          "properties": {
+            "parent": { "type": ["integer", "null"], "minimum": 1 },
+            "current_child": { "type": ["integer", "null"], "minimum": 1 },
+            "lane": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "state"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "state": { "enum": ["NONE", "QUEUED", "IN_FLIGHT", "TERMINAL", "HELD"] }
+          }
+        },
+        "lock": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "gate": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "repair_count": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["used", "limit"],
+          "properties": {
+            "used": { "type": "integer", "minimum": 0 },
+            "limit": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "candidate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pr", "head", "tree", "base"],
+          "properties": {
+            "pr": { "type": ["integer", "null"], "minimum": 1 },
+            "head": { "$ref": "#/$defs/sha" },
+            "tree": { "$ref": "#/$defs/sha" },
+            "base": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ref", "sha"],
+              "properties": {
+                "ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+                "sha": { "$ref": "#/$defs/sha" }
+              }
+            }
+          }
+        },
+        "hold": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["active", "code", "dependency"],
+          "properties": {
+            "active": { "type": "boolean" },
+            "code": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+            "dependency": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "in_flight": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "worker", "executor", "worker_identity", "worker_launch_evidence", "worker_liveness", "worker_liveness_evidence", "worker_terminal_state"],
+          "properties": {
+            "state": { "enum": ["NONE", "PREPARING", "RUNNING", "VALIDATING", "DELIVERY_PENDING", "UNKNOWN"] },
+            "worker": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "executor": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_identity": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_launch_evidence": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "worker_liveness": { "enum": ["active", "terminal", "inactive", "unknown"] },
+            "worker_liveness_evidence": { "enum": ["runtime-native", "durable-terminal", "user-web", "branch-pr", "native-handle", "unavailable", null] },
+            "worker_terminal_state": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "controlling_receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "reference", "digest"],
+          "properties": {
+            "id": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "reference": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 },
+            "digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "next_admissible_action": { "$ref": "#/$defs/id" },
+        "projection_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "prAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "repository", "number", "state", "draft", "head", "base", "mergeability"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.pr-admission.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "number": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["OPEN", "CLOSED", "MERGED", "UNKNOWN"] },
+        "draft": { "type": "boolean" },
+        "head": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref", "sha", "tree"],
+          "properties": {
+            "ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "sha": { "$ref": "#/$defs/sha" },
+            "tree": { "$ref": "#/$defs/sha" }
+          }
+        },
+        "base": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref", "sha"],
+          "properties": {
+            "ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "sha": { "$ref": "#/$defs/sha" }
+          }
+        },
+        "mergeability": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "bootstrapPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "repository", "controller_revision", "bounded", "fields", "history_policy"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.bootstrap-plan.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "controller_revision": { "$ref": "#/$defs/id" },
+        "bounded": { "const": true },
+        "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "history_policy": { "const": "exact-controlling-pointer-only" }
+      }
+    },
+    "programmeGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "repository", "programme", "outcomes", "graph_digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.programme-graph.v1" },
+        "version": { "const": 1 },
+        "repository": { "$ref": "#/$defs/id" },
+        "programme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "issue", "title", "lifecycle", "finality"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "issue": { "type": ["integer", "null"], "minimum": 1 },
+            "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "lifecycle": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "finality": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/programmeGraphOutcome" }
+        },
+        "graph_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "programmeGraphOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "order", "kind", "title", "materialized", "lifecycle", "dependencies", "native_issue", "delivery_pr", "current_gate", "complete_when"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "order": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["CHILD", "OUTCOME"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "materialized": { "type": "boolean" },
+        "lifecycle": { "enum": ["PLANNED", "QUEUED", "CURRENT", "HELD", "COMPLETED", "RETIRED"] },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "native_issue": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["repository", "number"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/id" },
+            "number": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "delivery_pr": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["repository", "number", "status", "role", "completes_child", "reference"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/id" },
+            "number": { "type": "integer", "minimum": 1 },
+            "status": { "enum": ["OPEN", "CLOSED", "MERGED", "UNKNOWN"] },
+            "role": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+            "completes_child": { "type": "boolean" },
+            "reference": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 }
+          }
+        },
+        "current_gate": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["gate", "repair"],
+          "properties": {
+            "gate": { "$ref": "#/$defs/id" },
+            "repair": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "complete_when": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    }
+  }
+}

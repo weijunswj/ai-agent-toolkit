@@ -40,6 +40,8 @@
 - Do not bulk-read or summarise completed/retired children, closed historical PRs, full issue-comment histories, old repair packets, superseded prompts, or unrelated chronology during ordinary takeover. Retrieve historical evidence lazily and by exact reference only when a current transition, conflict check, gate-reuse decision, or repair-lineage decision requires it. Memory/prior chats may suggest IDs to verify but are never authority and must not be expanded into programme history during bootstrap.
 - Keep the initial takeover response compact. If required current state is missing, stale, conflicting or unverifiable, including an unreconciled concurrent write or competing authority, return `PARENT_RECONCILIATION_INCOMPLETE` and stop the affected transition rather than performing an unbounded history scan. Authorised compatible concurrency is not itself a reconciliation failure.
 - Repository fence: one Web Controller is bound to one repository. If a returned worker/Loop packet names another repository, reject it without analysing or acting on it.
+- Cross-repository reads may be retained as evidence only; every mutation requires an exact target match to the bound repository fence and the existing mutation authority. A mismatch is `CROSS_REPOSITORY_MUTATION_DENIED`.
+- A watcher, shadow or external-evidence context is `OBSERVER`/read-only and cannot mutate even its observed repository; return `OBSERVER_MUTATION_DENIED`. Timeout, stale state, missing heartbeat or apparent inactivity never self-promotes an observer. Explicit User/Web takeover must reconcile prior in-flight and admission state before rebinding mutation control.
 
 ## Public, private, and secrets
 
@@ -54,22 +56,25 @@
 
 ## Controller, Loop, and ownership topology
 
-- One active Web Controller and one active Repository Loop Manager per repository + GitHub user.
+- Before accepted A2, C1 uses `Web -> direct executor -> Web reconciliation`; C1 does not require or invoke the planned Repository Loop Manager.
+- After accepted A2, a Loop may perform the equivalent already-authorised reconciliation, but it cannot become an authority source or silently widen C1 scope.
 - Web owns architecture/Lock decisions, material scope/risk/authority changes, waivers, owner decisions, and finality.
-- The Loop Manager continuously executes already-authorised work and may select among compatible authorised lanes, but it cannot silently widen scope, rewrite a Lock, waive a blocker, transfer human ownership, or cross a User/Web decision barrier.
+- If a Loop is accepted later, it continuously executes already-authorised work and may select among compatible authorised lanes, but it cannot silently widen scope, rewrite a Lock, waive a blocker, transfer human ownership, or cross a User/Web decision barrier.
 - Executors/workers carry no ownership or finality authority. Worker replacement never transfers task ownership.
 - GitHub assignment represents human ownership. Labels/status are state/visibility markers, not distributed mutexes.
 - Resolve one durable Toolkit owner in the existing issue/pipeline record before activation. Ambiguous ownership or competing authority requires `USER_DECISION_REQUIRED`; an active marker does not acquire ownership.
 - Human/task ownership does not expire through timeout or heartbeat loss.
 - A second controller for the same repository/user remains read-only until explicit handover stops old admissions and stops or drains outstanding writers.
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
+- Active overlapping Toolkit work is durably human-owned across GitHub users and controllers. Another user or controller encountering overlapping active work remains read-only until explicit handover or explicitly authorised concurrency.
+- Timeout, heartbeat loss, apparent inactivity, labels, status, and executor replacement never transfer human ownership. Ambiguous or competing ownership is `USER_DECISION_REQUIRED`.
 - Semantic delegation authority is stage-based, not model-based.
 - `G0` and `G3` are the only subagent-capable stages.
-- `G0` is Loop-owned pre-G1 discovery/evidence preparation. A G0 worker may fan out bounded depth-1 read-only discovery subagents only when the split is genuinely separable and materially faster.
+- `G0` is bounded pre-G1 discovery/evidence preparation. Before A2 it is direct-executor work; after A2 a Loop may carry the already-authorised reconciliation. A G0 worker may fan out bounded depth-1 read-only discovery subagents only when the split is genuinely separable and materially faster.
 - `G3` may fan out bounded depth-1 subagents only inside the accepted G2 contract. Mutating G3 subagents require disjoint mutation scopes and deterministic integration/revalidation.
 - All other semantic stages/roles are leaf-only, including G1, G2, G4, Final Audit, Browser/computer-use, and every spawned subagent.
 - Delegation depth is one. A spawned subagent must not launch another semantic agent.
-- Concrete parent/child model, reasoning and service-tier bindings come from the selected stack registry; model identity never grants delegation authority by itself.
+- Concrete parent/child model, reasoning and route bindings come from the selected stack registry; model identity never grants delegation authority by itself.
 - Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
@@ -82,11 +87,14 @@
 ## Stage and stack routing
 
 - Governance refers to symbolic execution stages/roles, not concrete model families: `G0`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `FINAL_AUDIT`, and `BROWSER`.
-- Concrete provider/model/reasoning/service-tier choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v1.json` in canonical Toolkit; they are configuration, not Controller law. Managed consumer repositories resolve that registry from the exact Toolkit controller revision they bind rather than copying it locally by default.
+- Concrete provider/model/reasoning choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v1.json` in canonical Toolkit; they are configuration, not Controller law. Managed consumer repositories resolve that registry from the exact Toolkit controller revision they bind rather than copying it locally by default.
+- Authoritative requested route identity is `provider + model + reasoning`, plus only controls that the runtime can actually enforce and verify. Actual service treatment, latency, and usage are observational metadata only; missing observation is `unavailable`, never inferred.
+- Selection precedence is explicit current-thread User/Web stack choice, then owner-authorised verified-harness policy, then `USER_DECISION_REQUIRED`. Explicit User/Web choice always wins and a hook/adapter cannot override it.
+- The owner policy maps verified `claude-code` to `owner-claude`, verified `codex` and `opencode` to `owner-openai`, and unknown or unverifiable harness identity to `USER_DECISION_REQUIRED`.
 - Before launch, resolve the requested stage against one selected registered stack from the bound canonical Toolkit revision and record the stack ID, exact stack-registry revision/digest, and resolved route in trusted launch metadata.
 - `G0` and `G3` subagent launches resolve through the selected stack's corresponding subagent route. Other stages must not resolve a semantic subagent route.
 - Current explicit User/Web authority may select another registered stack for a run. Changing only stack bindings does not change stage semantics or grant new topology authority.
-- Missing stack, missing required stage route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
+- Missing stack, missing required stage route, unavailable provider/model/reasoning route, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently substitute another route or consume repair budget.
 - Worker self-report of model/route is non-binding. The launcher/runtime must verify the resolved route where the host exposes that capability.
 - Prompts should remain portable and stage-oriented; include concrete routing metadata in prompt text only when a runtime strictly requires it.
 
@@ -146,6 +154,8 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Later-required non-repository evidence must be deterministically reproducible from retained immutable inputs or durably retrievable by the intended consumer.
 - Digest-only or temporary/session-path-only evidence is insufficient.
 - Executor/worker terminal packets must be self-sufficient for the receiving Loop/Web decision: include every decision-relevant finding, exact identity/value, material observation, qualification, blocker, verdict rationale, and next-state fact needed to adjudicate the result. Do not assume the receiver has the producer's filesystem, shell, process/session state, hidden logs, private host tools, or ability to refetch/recompute missing facts.
+- Worker process success is not terminal completion. Before `TERMINAL` or `GATE_COMPLETE`, the exact terminal packet must validate against the typed contract and have stable identity, digest, and durable retrieval/reference evidence.
+- Missing, truncated, malformed, or unverifiable terminal packet => `TERMINAL_PACKET_INCOMPLETE`. If packet production succeeded but model/chat delivery was lost, retrieve and replay the exact packet by identity without rerunning the worker.
 - After a substantive terminal packet, Web should normally reconcile only live identities/state needed to prove the packet still applies. Do not refetch broad logs/history merely to reconstruct information that the terminal packet was required to contain.
 - Pointers, commands, digests, URLs, or retrieval instructions may supplement a terminal packet but must not replace decision-relevant content needed for immediate adjudication.
 - Bulky supporting evidence may remain external only when the accepted contract guarantees durable access by the intended consumer and the packet contains the exact evidence identity/binding/retrieval manifest. If that access is unavailable or uncertain, deliver the required material with the packet/authorised attachment or return `EVIDENCE_NOT_RETRIEVABLE`.
@@ -170,7 +180,9 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Title, body, labels and parent-list output that are renderer-managed must reconcile from the same canonical snapshot and be read back together so one surface cannot silently drift from the others.
 - The bounded CURRENT projection is the minimum restart surface of existing canonical state, not a new authority object. Where applicable it must expose repository, bound Controller revision, canonical main, programme parent, CURRENT child/lane, active RUN/Lock/gate/repair count, active PR/head/tree/base, HOLD/dependency, in-flight execution state, exact controlling authority/receipt pointer, and next admissible action.
 - Any material transition that changes those current facts must update the owned canonical state/projection and read it back before the next consequential continuation. A stale CURRENT projection that forces chronology archaeology is a reconciliation defect.
+- A missing, stale, conflicting, or unverifiable CURRENT projection fails closed with a reconciliation hold; it never authorises chronology archaeology or a new worker.
 - Where current authority depends on a durable receipt/comment/object, project its exact identity in CURRENT state so takeover can fetch that evidence directly rather than enumerate chronology.
+- CURRENT launch safety is derived from the same canonical snapshot: `IN_FLIGHT` or ambiguous launch state adopts/reconciles the existing execution; a returned but unreconciled terminal packet requires packet reconciliation; terminal/non-converged state cannot project a completed gate as executable. Contradictory combinations return `CURRENT_STATE_INVARIANT_VIOLATION` and hold the transition.
 - Labels and other presentation metadata are visibility/discovery aids only; they do not grant ownership, authority, gate status, completion or finality.
 - The programme parent owns programme identity/objective/material boundaries, the registered-child catalogue and order/lifecycle, cross-child dependencies/authorised concurrency, programme-wide holds, terminal child dispositions, deferred-owner relationships, Web acceptance references and programme finality.
 - Operational execution truth belongs to the relevant child: scope/root/run/Lock/gates/repair/evidence/candidate/holds/next action.
@@ -266,7 +278,7 @@ Final Audit is the last whole-programme assurance step, not a per-PR or per-chil
 - Durable GitHub/repository authority outranks chat/Loop summaries when they conflict.
 - Persist material receipts needed for restart/reconstruction.
 - G4 remains read-only; Loop converges authorised work; Web retains judgement/finality.
-- Pre-S3 `RETURN_TO_WEB` behaviour is transitional and must not be reproduced as routine Loop architecture.
+- Before accepted A2, return through the direct `Web -> executor -> Web` path. After A2, an accepted Loop may perform the equivalent already-authorised reconciliation; no unfinished Loop is a C1 prerequisite.
 - On takeover/continuation, if the user states or live state indicates that a prompt/run/worker may already be in flight, reconcile/adopt that existing execution and do not emit, relaunch, duplicate, or switch worker transport. If launch outcome is ambiguous, hold for launch-outcome reconciliation rather than starting another worker.
 - After a terminal packet, reconcile live state.
 - Only after that terminal-packet reconciliation, if the next action is already authorised and no worker for that action is already active or ambiguously launched, issue/launch the next prompt/action in the same controller turn.
