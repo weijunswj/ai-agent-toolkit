@@ -275,7 +275,14 @@ Each Delivery Child owns its operational truth:
 - correction accounting;
 - evidence pointers;
 - holds;
-- next admissible action.
+- next admissible action;
+- the bounded material live operational identities required to safely execute that current/next action, with authoritative provenance or deterministic derivation.
+
+CURRENT is an operational projection, not merely a gate projection. It must be complete enough to name and touch the correct live repository/external targets for the next admissible action without consulting stale chronology. Repository-specific identities remain bounded to the active lane; Toolkit does not require a global configuration registry.
+
+For mutable live identity, reconciliation is field-level and semantic. Explicit Owner/Web authority and the owned CURRENT projection outrank historical reporting; exact controlling receipts and fresh provider/repository reads support CURRENT where applicable. Historical receipts remain immutable evidence but never silently become current authority because CURRENT omitted a field.
+
+An accepted change to a material live identity must update/read back CURRENT before consequential progression. Missing, stale, contradictory or unverifiable action-required identity is `CURRENT_PROJECTION_INCOMPLETE`, not permission to infer from comments, examples, fixtures, caches, memory or prior worker packets.
 
 Child-local transitions should not churn the parent.
 
