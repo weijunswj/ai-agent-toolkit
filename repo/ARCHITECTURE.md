@@ -196,6 +196,19 @@ Before returning to G4, inspect materially equivalent paths and retain semantic 
 
 Renaming a child, branch, PR, contract or lineage label does not reset exhausted work.
 
+### Delivery Child lifecycle and non-convergence
+
+A Delivery Child is the durable owner of its admitted outcome until one of two explicit terminal dispositions occurs:
+
+- **completed** — its required acceptance/finality has been achieved and its terminal disposition is durably recorded; or
+- **superseded/retired by Owner/Web** — an explicit current Owner/Web decision changes the child topology/lifecycle and identifies the durable continuing owner for every still-required obligation.
+
+Normal execution events do not imply either disposition. In particular, worker failure/replacement, HOLD, G4 AMEND, route/provider/evidence blockage, implementation non-convergence, or exhaustion of the current implementation-lineage correction budget must leave the existing child open/current or held unless Owner/Web explicitly decides otherwise.
+
+Correction-budget exhaustion is terminal for that **implementation lineage**, not automatically for the Delivery Child. It requires Owner/Web adjudication of the smallest genuinely new authority boundary. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting.
+
+Repository Loop bounded-convergence/anti-bounce rules govern **executor and diagnostic persistence inside the existing child**. When repeated same-root HOLDs exhaust the configured diagnostic convergence path, `LOOP_NONCONVERGENCE_OWNER_REQUIRED` stops autonomous progression and returns the existing child/authority to Owner/Web. It does not close, retire, supersede, replace, or transfer the Delivery Child and does not reset or expand mutation/repair budgets.
+
 ## Roles
 
 - **User/Web** — architecture, material scope/risk/authority changes, topology decisions, waivers, consequential authority and finality.
