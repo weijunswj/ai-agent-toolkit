@@ -263,6 +263,32 @@ test('pre-A2 execution is direct Web to executor and Loop is conditional', () =>
   assert.equal(blockedLoop.decision.reason_code, 'A2_NOT_ACCEPTED');
 });
 
+test('explicit null, empty, undefined, or accessor route bindings fail closed without fresh resolution', () => {
+  const options = { stage: 'G3', selected_stack: 'owner-openai', registry_revision: revision, route_available: true };
+  assert.equal(kernel.planExecution(options).ok, true);
+  for (const binding of [null, {}, undefined]) {
+    const supplied = { ...options };
+    Object.defineProperty(supplied, 'binding', { enumerable: true, value: binding });
+    const checked = kernel.planExecution(supplied);
+    assert.equal(checked.ok, false);
+    assert.equal(checked.code, 'ROUTE_UNAVAILABLE');
+    assert.equal(checked.reason_code, 'STORED_ROUTE_BINDING_INVALID');
+    assert.equal(checked.repair_budget_consumed, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(checked, 'plan'), false);
+  }
+
+  let getterRuns = 0;
+  const accessor = { ...options };
+  Object.defineProperty(accessor, 'binding', {
+    enumerable: true,
+    get() { getterRuns += 1; return kernel.resolveRoute(options).binding; },
+  });
+  const checked = kernel.planExecution(accessor);
+  assert.equal(checked.ok, false);
+  assert.equal(checked.reason_code, 'STORED_ROUTE_BINDING_INVALID');
+  assert.equal(getterRuns, 0);
+});
+
 test('cross-user overlap is read-only until handover or authorised concurrency', () => {
   const owner = { user: 'alice', controller: 'web-a' };
   const otherUser = kernel.admitOwnership({

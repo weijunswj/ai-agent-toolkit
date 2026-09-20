@@ -336,6 +336,35 @@ function childLaunchRefusal(options = {}) {
     : null;
 }
 
+function repositoryTestInvocationAuthority(options = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return null;
+  const present = REPOSITORY_TEST_INVOCATION_ALIASES.map((alias) => ({
+    alias,
+    descriptor: Object.getOwnPropertyDescriptor(options, alias),
+  })).filter((entry) => entry.descriptor !== undefined);
+  if (present.length !== 1) return null;
+  const optionDescriptor = present[0].descriptor;
+  if (!Object.prototype.hasOwnProperty.call(optionDescriptor, 'value')) return null;
+  const authority = optionDescriptor.value;
+  if (!authority || typeof authority !== 'object' || Array.isArray(authority)) return null;
+  let prototype;
+  try { prototype = Object.getPrototypeOf(authority); } catch (_error) { return null; }
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  let keys;
+  try { keys = Reflect.ownKeys(authority); } catch (_error) { return null; }
+  if (keys.length !== 2 || keys.some((key) => typeof key !== 'string')
+    || !keys.includes('invocation') || !keys.includes('fixture_id')) return null;
+  const values = {};
+  for (const key of ['invocation', 'fixture_id']) {
+    const descriptor = Object.getOwnPropertyDescriptor(authority, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return null;
+    values[key] = descriptor.value;
+  }
+  if (values.invocation !== REPOSITORY_TEST_RESOURCE_INVOCATION
+    || values.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE_ID) return null;
+  return { alias: present[0].alias, authority };
+}
+
 function verifyCurrentClaudeEnforcement(profile, options = {}) {
   const env = effectiveEnvironment(options);
   const current = require('./setup-claude-toolkit-plugin.cjs').verifyCurrentInstalledEnforcement(profile.activation_proof, {
@@ -392,9 +421,8 @@ function configureProfile(host, selected, options = {}) {
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
   const resourceOptions = { resourceState: selected.resource_state };
-  for (const alias of REPOSITORY_TEST_INVOCATION_ALIASES) {
-    if (Object.prototype.hasOwnProperty.call(options, alias)) resourceOptions[alias] = options[alias];
-  }
+  const invocationAuthority = repositoryTestInvocationAuthority(options);
+  if (invocationAuthority) resourceOptions.repository_test_invocation = invocationAuthority.authority;
   const resourceCapability = inspectResourceCapability(resourceOptions);
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
   const explicitResourceState = Object.prototype.hasOwnProperty.call(selected, 'resource_state');
@@ -457,13 +485,7 @@ function repositoryTestResourceStateFromEnvironment(env = process.env) {
 }
 
 function resourceTestSeamEnabled(options = {}) {
-  const aliases = REPOSITORY_TEST_INVOCATION_ALIASES.filter((key) => Object.prototype.hasOwnProperty.call(options, key));
-  if (aliases.length !== 1) return false;
-  const authority = options[aliases[0]];
-  return Boolean(authority && typeof authority === 'object' && !Array.isArray(authority)
-    && Object.keys(authority).length === 2
-    && authority.invocation === REPOSITORY_TEST_RESOURCE_INVOCATION
-    && authority.fixture_id === REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+  return repositoryTestInvocationAuthority(options) !== null;
 }
 
 function resourceEvidenceSourceAccepted(resources, options = {}) {

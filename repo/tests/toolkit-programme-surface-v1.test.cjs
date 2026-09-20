@@ -328,6 +328,44 @@ test('CURRENT launch safety rejects duplicate launch and derives reconciliation 
   assert.equal(ready.launch_allowed, true);
 });
 
+test('CURRENT canonical gate and launch action bindings fail closed on drift', () => {
+  const mismatch = programme.validateCurrentLaunchSafety({
+    gate: 'G2',
+    stage: 'G4',
+    next_admissible_action: 'LAUNCH_G4_DIRECT',
+  });
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.code, 'CURRENT_STATE_INVARIANT_VIOLATION');
+  assert.equal(mismatch.launch_allowed, false);
+
+  const lowercase = programme.validateCurrentLaunchSafety({
+    gate: 'g3',
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+  });
+  assert.equal(lowercase.ok, false);
+  assert.equal(lowercase.reason_code, 'CURRENT_GATE_INVALID');
+  assert.equal(lowercase.launch_allowed, false);
+
+  const matching = programme.validateCurrentLaunchSafety({
+    gate: 'G3',
+    next_admissible_action: 'LAUNCH_G3_DIRECT',
+  });
+  assert.equal(matching.ok, true, matching.code);
+  assert.equal(matching.launch_allowed, true);
+
+  const current = programme.createCurrentProjection(currentInput());
+  assert.equal(current.ok, true, current.code);
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  const validate = ajv.compile(programmeSurfaceSchema);
+  const schemaGateMismatch = structuredClone(current.projection);
+  schemaGateMismatch.gate = 'G2';
+  schemaGateMismatch.next_admissible_action = 'LAUNCH_G3_DIRECT';
+  assert.equal(validate(schemaGateMismatch), false);
+  const schemaLowercase = structuredClone(current.projection);
+  schemaLowercase.gate = 'g3';
+  assert.equal(validate(schemaLowercase), false);
+});
+
 test('CURRENT restart admission rejects stale, incomplete, and mismatched executable identity', () => {
   const staleQueued = programme.validateCurrentLaunchSafety({
     run: { id: 'run-stale-queued', state: 'QUEUED' },
@@ -766,6 +804,47 @@ test('all public programme renderers apply the retained public-data screen', () 
   assert.throws(() => programme.reconcileProgrammeSurface(expectedGraph, unsafeReadback), /PUBLIC_DATA_UNSAFE/);
 });
 
+test('all public programme graph normalizer and validator aliases screen unsafe data', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'controller-kernel', 'programme-421-proof-v1.json'), 'utf8'));
+  const unsafeSnapshot = structuredClone(fixture.canonical_snapshot);
+  unsafeSnapshot.programme.title = 'token=unsafe-normalizer-alias';
+  const normalizers = [
+    programme.normalizeProgrammeGraphSnapshot,
+    programmeV5.normalizeProgrammeGraphSnapshot,
+    programmeV5.programmeSurface.normalizeProgrammeGraphSnapshot,
+    programmeV5.programmeV5.currentProjection.normalizeProgrammeGraphSnapshot,
+  ];
+  for (const normalize of normalizers) {
+    const checked = normalize(unsafeSnapshot);
+    assert.equal(checked.ok, false);
+    assert.doesNotMatch(JSON.stringify(checked), /token=unsafe-normalizer-alias/);
+  }
+
+  const graph = programme.renderProgrammeGraph(graphFixture());
+  assert.equal(graph.ok, true, graph.code);
+  const unsafeGraph = structuredClone(graph.graph);
+  unsafeGraph.programme.title = 'token=unsafe-validator-alias';
+  const validators = [
+    programme.validateProgrammeGraph,
+    programmeV5.validateProgrammeGraph,
+    programmeV5.programmeSurface.validateProgrammeGraph,
+    programmeV5.programmeV5.currentProjection.validateProgrammeGraph,
+  ];
+  for (const validate of validators) {
+    const checked = validate(unsafeGraph);
+    assert.equal(checked.ok, false);
+    assert.doesNotMatch(JSON.stringify(checked), /token=unsafe-validator-alias/);
+  }
+
+  const malformedDependency = structuredClone(graphFixture());
+  malformedDependency.outcomes[0].dependencies = ['access_token=unsafe-dependency'];
+  for (const normalize of normalizers) {
+    const checked = normalize(malformedDependency);
+    assert.equal(checked.ok, false);
+    assert.doesNotMatch(JSON.stringify(checked), /access_token=unsafe-dependency/);
+  }
+});
+
 test('Programme Graph excludes child-local chronology and preserves parent minimality', () => {
   const canonical = graphFixture();
   const baseline = programme.renderProgrammeGraph(canonical);
@@ -845,24 +924,56 @@ test('Programme #421 proof fixture round-trips the exact 30-outcome topology', (
 test('Programme #421 proof rejects incomplete source evidence and authority drift', () => {
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'controller-kernel', 'programme-421-proof-v1.json'), 'utf8'));
   const cases = [
-    (candidate) => { delete candidate.source_evidence; },
-    (candidate) => { candidate.source_evidence.source_references.foundation_body_sha256.sha256 = '0'.repeat(64); },
-    (candidate) => { candidate.source_evidence.field_map.programme.title = 'tampered source field'; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').title = 'tampered title'; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').complete_when = 'tampered criterion'; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').dependencies = []; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').lifecycle = 'CURRENT'; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').native_issue.number = 436; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').delivery_pr = { repository: candidate.repository, number: 436, status: 'OPEN', role: null, completes_child: false, reference: null }; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').current_gate.gate = 'G4'; },
-    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'Q').kind = 'OUTCOME'; },
-    (candidate) => { candidate.source_evidence.field_map.execution_authority.Q = 'EXECUTING'; },
+    { mutate: (candidate) => { delete candidate.source_evidence; }, valid: false },
+    { mutate: (candidate) => { candidate.source_evidence.source_references.foundation_body_sha256.sha256 = '0'.repeat(64); }, valid: false },
+    { mutate: (candidate) => { candidate.source_evidence.field_map.programme.title = 'tampered source field'; }, valid: false },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').title = 'tampered title'; }, valid: false },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').complete_when = 'tampered criterion'; }, valid: false },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').dependencies = []; }, valid: false },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').lifecycle = 'CURRENT'; }, valid: true },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').native_issue.number = 436; }, valid: false },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').delivery_pr = { repository: candidate.repository, number: 436, status: 'OPEN', role: null, completes_child: false, reference: null }; }, valid: true },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').current_gate.gate = 'G4'; }, valid: true },
+    { mutate: (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'Q').kind = 'OUTCOME'; }, valid: false },
+    { mutate: (candidate) => { candidate.source_evidence.field_map.execution_authority.Q = 'EXECUTING'; }, valid: false },
   ];
-  for (const mutate of cases) {
+  for (const { mutate, valid } of cases) {
     const candidate = structuredClone(fixture);
     mutate(candidate);
-    assert.equal(programme.validateProgrammeGraphProof(candidate).ok, false);
+    assert.equal(programme.validateProgrammeGraphProof(candidate).ok, valid);
   }
+});
+
+test('Programme #421 structural proof survives volatile delivery, CURRENT, and finality transitions', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'controller-kernel', 'programme-421-proof-v1.json'), 'utf8'));
+  assert.equal(fixture.structural_checkpoint.schema, programme.PROGRAMME_421_PROOF_CHECKPOINT_SCHEMA);
+  assert.equal(fixture.structural_checkpoint.serialization, programme.PROGRAMME_421_PROOF_CHECKPOINT_SERIALIZATION);
+  assert.deepEqual(fixture.structural_checkpoint.candidate_git, programme.PROGRAMME_421_PROOF_CHECKPOINT_CANDIDATE);
+
+  const g4 = structuredClone(fixture);
+  const g4C1 = g4.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1');
+  g4C1.delivery_pr = {
+    repository: fixture.repository,
+    number: 436,
+    status: 'OPEN',
+    role: 'DELIVERY',
+    completes_child: false,
+    reference: 'github:pull/436',
+  };
+  g4C1.current_gate = { gate: 'G4', repair: 2 };
+  g4.canonical_snapshot.programme.next_action = 'Await Web G4 adjudication.';
+  assert.equal(programme.validateProgrammeGraphProof(g4).ok, true);
+
+  const finality = structuredClone(g4);
+  finality.canonical_snapshot.programme.lifecycle = 'COMPLETED';
+  finality.canonical_snapshot.programme.finality = 'ACCEPTED';
+  finality.canonical_snapshot.programme.next_action = 'No further programme action is admissible.';
+  const finalC1 = finality.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1');
+  finalC1.lifecycle = 'COMPLETED';
+  finalC1.delivery_pr.status = 'MERGED';
+  finalC1.delivery_pr.completes_child = true;
+  finalC1.current_gate = null;
+  assert.equal(programme.validateProgrammeGraphProof(finality).ok, true);
 });
 
 test('Programme #421 proof requires the current authority source and tier-free A1 acceptance mapping', () => {

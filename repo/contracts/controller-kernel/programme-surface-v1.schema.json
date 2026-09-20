@@ -54,7 +54,7 @@
           }
         },
         "lock": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
-        "gate": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "gate": { "type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^(?:G[0-4]|LOOP|FINAL_AUDIT|BROWSER)(?:_[A-Z0-9]+)*$" },
         "repair_count": {
           "type": "object",
           "additionalProperties": false,
@@ -150,7 +150,7 @@
             "anyOf": [
               {
                 "required": ["gate"],
-                "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+                "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$))" } }
               },
               {
                 "required": ["next_admissible_action"],
@@ -186,7 +186,7 @@
                   "anyOf": [
                     {
                       "required": ["gate"],
-                      "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+                      "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$))" } }
                     },
                     {
                       "required": ["next_admissible_action"],
@@ -227,6 +227,26 @@
                 }
               }
             }
+          }
+        },
+        {
+          "if": {
+            "required": ["next_admissible_action"],
+            "properties": { "next_admissible_action": { "type": "string", "pattern": "^(?:LAUNCH|EXECUTE)_G3(?:_|$)" } }
+          },
+          "then": {
+            "required": ["gate"],
+            "properties": { "gate": { "type": "string", "pattern": "^G3(?:_|$)" } }
+          }
+        },
+        {
+          "if": {
+            "required": ["next_admissible_action"],
+            "properties": { "next_admissible_action": { "type": "string", "pattern": "^(?:LAUNCH|EXECUTE)_G4(?:_|$)" } }
+          },
+          "then": {
+            "required": ["gate"],
+            "properties": { "gate": { "type": "string", "pattern": "^G4(?:_|$)" } }
           }
         }
       ]

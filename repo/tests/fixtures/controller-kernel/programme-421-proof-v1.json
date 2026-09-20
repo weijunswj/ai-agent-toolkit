@@ -4,10 +4,24 @@
   "version": 1,
   "repository": "weijunswj/ai-agent-toolkit",
   "controller_revision": "af14f91b0f6335212003a37a5119f233489e598f",
+  "structural_checkpoint": {
+    "schema": "toolkit.controller.programme-421-structural-checkpoint.v1",
+    "version": 1,
+    "serialization": "canonical-json-v1",
+    "payload_ref": "source_evidence.field_map",
+    "payload_sha256": "5ad48a18d2043f18c7a40d9de08f5d19b49d5693f62136beae27d0386c3e0d88",
+    "candidate_git": {
+      "repository": "weijunswj/ai-agent-toolkit",
+      "commit": "1ae053c9835c34358bb3acf8f413174a7d35a3ca",
+      "path": "repo/tests/fixtures/controller-kernel/programme-421-proof-v1.json",
+      "blob": "a1f352e709e749a75269e90615546794d32c4ddd"
+    },
+    "captured_source_hashes_ref": "source_receipts"
+  },
   "source_receipts": {
     "foundation_body_sha256": "567c90114277700da83ddb0d5b92af562fd0706c45c95afd71731518f81ae92b",
     "foundation_issue_and_comments_sha256": "f492a1b3fa92967c3a6550860894072072f0b94b3645e8e00d339a6214f67a0b",
-    "canonical_30_row_payload_sha256": "50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759",
+    "canonical_30_row_payload_sha256": "cc393b94f8c5eaa6a6442b859d052caa60aa35715ffd3062734ff8ff77a4f346",
     "c2_body_sha256": "76ded413a0ad2997096ba07da93f7485b0dafc587b1d62eb5ab4568131e7cd7b",
     "c3_body_sha256": "865ed06c60b93a41d480979c4559490f550a14962e29061e6b47e8074536a1df",
     "queue_body_sha256": "f9b21cdeb8c87b87b9f15e341169322e62e3492c0228249da066794799107669",
@@ -27,7 +41,7 @@
       },
       "canonical_30_row_payload_sha256": {
         "reference": "github:issue:421:canonical-30-row-payload",
-        "sha256": "50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759"
+        "sha256": "cc393b94f8c5eaa6a6442b859d052caa60aa35715ffd3062734ff8ff77a4f346"
       },
       "c2_body_sha256": {
         "reference": "github:issue:423:body",
@@ -517,7 +531,7 @@
         "Q": "NON_EXECUTING"
       }
     },
-    "field_map_digest": "dbc171653929ff8ef54b14acc6a05cf726c708c20ba62902ce4bce43156fb018"
+    "field_map_digest": "5ad48a18d2043f18c7a40d9de08f5d19b49d5693f62136beae27d0386c3e0d88"
   },
   "canonical_snapshot": {
     "schema": "toolkit.controller.programme-snapshot.v1",

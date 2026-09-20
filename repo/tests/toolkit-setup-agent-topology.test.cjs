@@ -183,6 +183,25 @@ test('repository-test resource fixture is explicit and isolated from runtime cou
   assert.equal(explicitFixture.supported, true);
   assert.equal(explicitFixture.source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
   assert.equal(control.inspectResourceCapability({ repositoryTestInvocation: invocation, resourceState: fixture }).supported, true);
+  const inheritedAuthority = Object.create(invocation);
+  inheritedAuthority.unrelated = 'reject-inherited-authority';
+  assert.equal(control.inspectResourceCapability({ repository_test_invocation: inheritedAuthority, resourceState: fixture }).supported, false);
+  let getterRuns = 0;
+  const accessorAuthority = {};
+  Object.defineProperty(accessorAuthority, 'invocation', {
+    enumerable: true,
+    get() { getterRuns += 1; return invocation.invocation; },
+  });
+  Object.defineProperty(accessorAuthority, 'fixture_id', { enumerable: true, value: invocation.fixture_id });
+  assert.equal(control.inspectResourceCapability({ repository_test_invocation: accessorAuthority, resourceState: fixture }).supported, false);
+  assert.equal(getterRuns, 0);
+  const accessorOptions = { resourceState: fixture };
+  Object.defineProperty(accessorOptions, 'repository_test_invocation', {
+    enumerable: true,
+    get() { getterRuns += 1; return invocation; },
+  });
+  assert.equal(control.inspectResourceCapability(accessorOptions).supported, false);
+  assert.equal(getterRuns, 0);
   assert.equal(control.inspectResourceCapability({ repository_test_invocation: invocation, repositoryTestInvocation: invocation, resourceState: fixture }).supported, false);
   assert.equal(control.inspectResourceCapability({ test_seam: false, resourceState: fixture }).supported, false);
   assert.equal(control.inspectResourceCapability({ resourceState: fixture, resource_state: fixture }).supported, false);
@@ -201,6 +220,12 @@ test('repository-test resource fixture is explicit and isolated from runtime cou
     supported: true,
     source: 'proc-meminfo',
     resources: production,
+  });
+  const windowsProduction = { ...production, source: 'win32-operating-system' };
+  assert.deepEqual(control.inspectResourceCapability({ resourceState: windowsProduction }), {
+    supported: true,
+    source: 'win32-operating-system',
+    resources: windowsProduction,
   });
 
   for (const resourceState of [undefined, null, 'malformed', [], { ...fixture, source: 'unsupported-source' }]) {

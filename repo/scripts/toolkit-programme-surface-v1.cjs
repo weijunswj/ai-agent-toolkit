@@ -21,7 +21,7 @@ const PROGRAMME_421_PROOF_A1_COMPLETE_WHEN = 'Authoritative route identity is pr
 const PROGRAMME_421_PROOF_SOURCE_HASHES = Object.freeze({
   foundation_body_sha256: '567c90114277700da83ddb0d5b92af562fd0706c45c95afd71731518f81ae92b',
   foundation_issue_and_comments_sha256: 'f492a1b3fa92967c3a6550860894072072f0b94b3645e8e00d339a6214f67a0b',
-  canonical_30_row_payload_sha256: '50fa0fd126fe39c99aa121da2d2e62ce3c98069336cf9f06c82e5fa17b088759',
+  canonical_30_row_payload_sha256: 'cc393b94f8c5eaa6a6442b859d052caa60aa35715ffd3062734ff8ff77a4f346',
   c2_body_sha256: '76ded413a0ad2997096ba07da93f7485b0dafc587b1d62eb5ab4568131e7cd7b',
   c3_body_sha256: '865ed06c60b93a41d480979c4559490f550a14962e29061e6b47e8074536a1df',
   queue_body_sha256: 'f9b21cdeb8c87b87b9f15e341169322e62e3492c0228249da066794799107669',
@@ -38,7 +38,15 @@ const PROGRAMME_421_PROOF_SOURCE_REFERENCES = Object.freeze({
   pre_g3_receipt_body_sha256: Object.freeze({ reference: 'github:issue:421:pre-g3-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.pre_g3_receipt_body_sha256 }),
   g2_authority_receipt_body_sha256: Object.freeze({ reference: 'github:issue:435:g2-authority-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.g2_authority_receipt_body_sha256 }),
 });
-const PROGRAMME_421_PROOF_FIELD_MAP_DIGEST = 'dbc171653929ff8ef54b14acc6a05cf726c708c20ba62902ce4bce43156fb018';
+const PROGRAMME_421_PROOF_FIELD_MAP_DIGEST = '5ad48a18d2043f18c7a40d9de08f5d19b49d5693f62136beae27d0386c3e0d88';
+const PROGRAMME_421_PROOF_CHECKPOINT_SCHEMA = 'toolkit.controller.programme-421-structural-checkpoint.v1';
+const PROGRAMME_421_PROOF_CHECKPOINT_SERIALIZATION = 'canonical-json-v1';
+const PROGRAMME_421_PROOF_CHECKPOINT_CANDIDATE = Object.freeze({
+  repository: 'weijunswj/ai-agent-toolkit',
+  commit: '1ae053c9835c34358bb3acf8f413174a7d35a3ca',
+  path: 'repo/tests/fixtures/controller-kernel/programme-421-proof-v1.json',
+  blob: 'a1f352e709e749a75269e90615546794d32c4ddd',
+});
 const CURRENT_KEYS = Object.freeze([
   'schema', 'version', 'repository', 'controller_revision', 'canonical_main', 'programme', 'run', 'lock', 'gate',
   'repair_count', 'candidate', 'hold', 'in_flight', 'controlling_receipt', 'next_admissible_action', 'projection_digest',
@@ -71,7 +79,9 @@ const BOOTSTRAP_IO_REASONS = Object.freeze([
   'explicit_decision_required_deeper_evidence',
   'other_required_evidence',
 ]);
-const LAUNCH_ACTION_PATTERN = /^(?:LAUNCH|EXECUTE)_|_EXECUTE$/;
+const LAUNCH_ACTION_PATTERN = /^(?:LAUNCH|EXECUTE)_[A-Z0-9]+(?:_|$)|^[A-Z0-9]+_EXECUTE$/;
+const CURRENT_GATE_PATTERN = /^(?:G[0-4]|LOOP|FINAL_AUDIT|BROWSER)(?:_[A-Z0-9]+)*$/;
+const CURRENT_GATE_BASE_PATTERN = /^(G[0-4]|LOOP|FINAL_AUDIT|BROWSER)(?:_|$)/;
 const LAUNCH_SAFETY_CODES = Object.freeze({
   violation: 'CURRENT_STATE_INVARIANT_VIOLATION',
   safe: 'CURRENT_LAUNCH_SAFE',
@@ -471,13 +481,36 @@ function reconcileWorkerLiveness(input = {}) {
   });
 }
 
+function canonicalCurrentGate(value) {
+  return typeof value === 'string' && CURRENT_GATE_PATTERN.test(value) ? value : null;
+}
+
+function currentGateBase(value) {
+  const match = typeof value === 'string' ? CURRENT_GATE_BASE_PATTERN.exec(value) : null;
+  return match ? match[1] : null;
+}
+
+function currentGateInput(source) {
+  const hasGate = Object.prototype.hasOwnProperty.call(source, 'gate');
+  const aliases = ['stage', 'authorised_stage', 'authorized_stage'];
+  const suppliedAliases = aliases.filter((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const supplied = hasGate || suppliedAliases.length > 0;
+  const value = hasGate ? source.gate : suppliedAliases.length > 0 ? source[suppliedAliases[0]] : null;
+  const canonical = canonicalCurrentGate(value);
+  const conflictingAlias = suppliedAliases.some((key) => {
+    const alias = canonicalCurrentGate(source[key]);
+    return alias === null || alias !== canonical;
+  });
+  return { supplied, value, canonical, invalid: supplied && canonical === null, conflict: supplied && conflictingAlias };
+}
+
 function launchAction(value) {
-  return typeof value === 'string' && LAUNCH_ACTION_PATTERN.test(value.toUpperCase());
+  return typeof value === 'string' && value === value.toUpperCase() && LAUNCH_ACTION_PATTERN.test(value);
 }
 
 function stageFromAction(value) {
   if (typeof value !== 'string') return null;
-  const match = /^(?:LAUNCH|EXECUTE)_([A-Z0-9]+)(?:_|$)|^([A-Z0-9]+)_EXECUTE$/.exec(value.toUpperCase());
+  const match = /^(?:LAUNCH|EXECUTE)_((?:G[0-4]|LOOP|FINAL_AUDIT|BROWSER))(?:_|$)|^((?:G[0-4]|LOOP|FINAL_AUDIT|BROWSER))_EXECUTE$/.exec(value);
   return match ? (match[1] || match[2]) : null;
 }
 
@@ -506,9 +539,13 @@ function launchSafetyView(input = {}) {
     || source.completed_gate_executable === true
     || hold.code === 'TERMINAL_NON_CONVERGED'
     || hold.code === 'CURRENT_STATE_INVARIANT_VIOLATION';
+  const gateInput = currentGateInput(source);
   return {
     next,
-    stage: source.stage || source.authorised_stage || source.authorized_stage || null,
+    gate: gateInput.canonical,
+    stage: currentGateBase(gateInput.canonical),
+    gateInvalid: gateInput.invalid,
+    gateConflict: gateInput.conflict,
     active,
     inactive: worker.inactive,
     liveness: worker.liveness,
@@ -526,6 +563,14 @@ function launchSafetyView(input = {}) {
 
 function deriveNextAdmissibleAction(input = {}) {
   const view = launchSafetyView(input);
+  if (view.gateInvalid || view.gateConflict) {
+    return result(false, LAUNCH_SAFETY_CODES.violation, {
+      action: 'USER_DECISION_REQUIRED',
+      derived_action: 'USER_DECISION_REQUIRED',
+      reason_code: view.gateConflict ? 'CURRENT_GATE_ALIAS_CONFLICT' : 'CURRENT_GATE_INVALID',
+      launch_allowed: false,
+    });
+  }
   if (view.packetReturned) {
     return result(true, 'CURRENT_ACTION_DERIVED', {
       action: 'RECONCILE_TERMINAL_PACKET',
@@ -562,7 +607,18 @@ function deriveNextAdmissibleAction(input = {}) {
       launch_allowed: false,
     });
   }
-  if (view.next) return result(true, 'CURRENT_ACTION_DERIVED', { action: view.next, reason_code: 'CURRENT_ACTION_PRESERVED', launch_allowed: !launchAction(view.next) || !view.terminal });
+  if (view.next) {
+    const requestedStage = stageFromAction(view.next);
+    if (launchAction(view.next) && (!view.stage || requestedStage !== view.stage)) {
+      return result(false, LAUNCH_SAFETY_CODES.violation, {
+        action: 'USER_DECISION_REQUIRED',
+        derived_action: 'USER_DECISION_REQUIRED',
+        reason_code: 'STAGE_BINDING_MISMATCH',
+        launch_allowed: false,
+      });
+    }
+    return result(true, 'CURRENT_ACTION_DERIVED', { action: view.next, reason_code: 'CURRENT_ACTION_PRESERVED', launch_allowed: !launchAction(view.next) || !view.terminal });
+  }
   if (view.terminal) {
     return result(true, 'CURRENT_ACTION_DERIVED', {
       action: 'HOLD_TERMINAL_NON_CONVERGENCE',
@@ -583,6 +639,7 @@ function deriveNextAdmissibleAction(input = {}) {
 function validateCurrentLaunchSafety(input = {}) {
   const view = launchSafetyView(input);
   const derived = deriveNextAdmissibleAction(input);
+  if (!derived.ok) return derived;
   const requested = view.next;
   const requestedStage = stageFromAction(requested);
   const currentStage = typeof view.stage === 'string' ? view.stage.toUpperCase() : null;
@@ -593,7 +650,7 @@ function validateCurrentLaunchSafety(input = {}) {
     || view.packetReturned
     || view.nonConverged
     || view.terminal
-    || requestedStage && currentStage && requestedStage !== currentStage
+    || requestedStage && (!currentStage || requestedStage !== currentStage)
   );
   if (contradictory) {
     return result(false, LAUNCH_SAFETY_CODES.violation, {
@@ -630,6 +687,7 @@ function currentInput(input = {}) {
   const inFlight = worker.nested;
   const receipt = isRecord(input.controlling_receipt) ? input.controlling_receipt : isRecord(input.controllingReceipt) ? input.controllingReceipt : {};
   const repair = isRecord(input.repair_count) ? input.repair_count : isRecord(input.repairCount) ? input.repairCount : {};
+  const gateInput = currentGateInput(isRecord(input) ? input : {});
   const safety = deriveNextAdmissibleAction(input);
   const safetyAction = safety.action;
   const derivedSafetyAction = safetyAction === 'ADOPT_IN_FLIGHT'
@@ -673,7 +731,7 @@ function currentInput(input = {}) {
       state: runState,
     },
     lock: typeof input.lock === 'string' && input.lock.length > 0 ? input.lock : null,
-    gate: typeof input.gate === 'string' && input.gate.length > 0 ? input.gate : null,
+    gate: gateInput.supplied ? gateInput.value : null,
     repair_count: {
       used: Number.isSafeInteger(repair.used) && repair.used >= 0 ? repair.used : 0,
       limit: Number.isSafeInteger(repair.limit) && repair.limit >= 0 ? repair.limit : 0,
@@ -759,7 +817,7 @@ function validateCurrentProjection(value) {
     || (value.programme.current_child !== null && (!Number.isSafeInteger(value.programme.current_child) || value.programme.current_child < 1))
     || (value.programme.lane !== null && !safeText(value.programme.lane))
     || !isRecord(value.run) || !exactKeys(value.run, ['id', 'state']) || !safeId(value.run.id) || !['NONE', 'QUEUED', 'IN_FLIGHT', 'TERMINAL', 'HELD'].includes(value.run.state)
-    || (value.lock !== null && !safeText(value.lock)) || (value.gate !== null && !safeText(value.gate, 128))
+    || (value.lock !== null && !safeText(value.lock)) || (value.gate !== null && canonicalCurrentGate(value.gate) === null)
     || !isRecord(value.repair_count) || !exactKeys(value.repair_count, ['used', 'limit']) || !Number.isSafeInteger(value.repair_count.used) || value.repair_count.used < 0 || !Number.isSafeInteger(value.repair_count.limit) || value.repair_count.limit < 0
     || validateCandidate(value.candidate) === false
     || !isRecord(value.hold) || !exactKeys(value.hold, ['active', 'code', 'dependency']) || typeof value.hold.active !== 'boolean'
@@ -959,7 +1017,7 @@ function normalizeGraphSections(value) {
   return sections;
 }
 
-function normalizeProgrammeGraphSnapshot(input = {}) {
+function normalizeProgrammeGraphSnapshotInternal(input = {}) {
   if (!isRecord(input) || !safeText(input.repository)) return result(false, 'PROGRAMME_GRAPH_SNAPSHOT_INVALID');
   const sourceProgramme = isRecord(input.programme) ? input.programme : isRecord(input.parent) ? input.parent : {};
   const programmeIssue = graphIssue(sourceProgramme.issue ?? sourceProgramme.parent_issue ?? input.parent_issue);
@@ -1099,10 +1157,10 @@ function normalizeProgrammeGraphSnapshot(input = {}) {
   return result(true, 'PROGRAMME_GRAPH_SNAPSHOT_READY', { snapshot, graph });
 }
 
-function validateProgrammeGraph(value) {
+function validateProgrammeGraphInternal(value) {
   if (!isRecord(value) || !exactKeys(value, ['schema', 'version', 'repository', 'programme', 'outcomes', 'graph_digest'])
     || value.schema !== SCHEMAS.programmeGraph || value.version !== 1) return result(false, 'PROGRAMME_GRAPH_INVALID');
-  const normalized = normalizeProgrammeGraphSnapshot({
+  const normalized = normalizeProgrammeGraphSnapshotInternal({
     repository: value.repository,
     programme: value.programme,
     outcomes: value.outcomes,
@@ -1111,6 +1169,27 @@ function validateProgrammeGraph(value) {
     return result(false, 'PROGRAMME_GRAPH_INVALID');
   }
   return result(true, 'PROGRAMME_GRAPH_VALID', { graph: clone(value) });
+}
+
+function publicGraphResult(value, fallbackCode) {
+  try {
+    if (!isRecord(value) || typeof value.ok !== 'boolean' || typeof value.code !== 'string' || !publicGraphFieldsSafe(value)) {
+      return result(false, fallbackCode);
+    }
+    return value;
+  } catch (_error) {
+    return result(false, fallbackCode);
+  }
+}
+
+function normalizeProgrammeGraphSnapshot(input = {}) {
+  if (!publicGraphInputSafe(input)) return result(false, 'PROGRAMME_GRAPH_PUBLIC_INVALID');
+  return publicGraphResult(normalizeProgrammeGraphSnapshotInternal(input), 'PROGRAMME_GRAPH_PUBLIC_INVALID');
+}
+
+function validateProgrammeGraph(value) {
+  if (!publicGraphInputSafe(value)) return result(false, 'PROGRAMME_GRAPH_INVALID');
+  return publicGraphResult(validateProgrammeGraphInternal(value), 'PROGRAMME_GRAPH_INVALID');
 }
 
 function programmeGraphNativeCell(issue) {
@@ -1274,9 +1353,13 @@ function publicGraphFieldsSafe(value, key = '') {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return true;
   if (Array.isArray(value)) return value.every((item) => publicGraphFieldsSafe(item, key));
   if (!isRecord(value)) return false;
-  return Object.entries(value).every(([field, item]) => {
-    if (PUBLIC_GRAPH_SENSITIVE_KEY.test(field)) return false;
-    return publicGraphFieldsSafe(item, field);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return Reflect.ownKeys(value).every((field) => {
+    if (typeof field !== 'string' || PUBLIC_GRAPH_SENSITIVE_KEY.test(field)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    return Boolean(descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value'))
+      && publicGraphFieldsSafe(descriptor.value, field);
   });
 }
 
@@ -1286,9 +1369,13 @@ function publicGraphInputSafe(value, key = '') {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return true;
   if (Array.isArray(value)) return value.every((item) => publicGraphInputSafe(item, key));
   if (!isRecord(value)) return false;
-  return Object.entries(value).every(([field, item]) => {
-    if (PUBLIC_GRAPH_SENSITIVE_KEY.test(field)) return false;
-    return publicGraphInputSafe(item, field);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return Reflect.ownKeys(value).every((field) => {
+    if (typeof field !== 'string' || PUBLIC_GRAPH_SENSITIVE_KEY.test(field)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    return Boolean(descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value'))
+      && publicGraphInputSafe(descriptor.value, field);
   });
 }
 
@@ -1377,12 +1464,9 @@ function programmeProofFieldMap(snapshot) {
       issue: snapshot.programme.issue,
       title: snapshot.programme.title,
       objective: snapshot.programme.objective,
-      lifecycle: snapshot.programme.lifecycle,
-      finality: snapshot.programme.finality,
       labels: snapshot.programme.labels,
       boundaries: snapshot.programme.boundaries,
       holds: snapshot.programme.holds,
-      next_action: snapshot.programme.next_action,
     },
     outcomes: Object.fromEntries(snapshot.outcomes.map((outcome) => [outcome.id, {
       id: outcome.id,
@@ -1390,15 +1474,58 @@ function programmeProofFieldMap(snapshot) {
       kind: outcome.kind,
       title: outcome.title,
       materialized: outcome.materialized,
-      lifecycle: outcome.lifecycle,
       dependencies: outcome.dependencies,
       native_issue: outcome.native_issue,
-      delivery_pr: outcome.delivery_pr,
-      current_gate: outcome.current_gate,
       complete_when: outcome.complete_when,
     }])),
     execution_authority: { Q: 'NON_EXECUTING' },
   };
+}
+
+function structuralProofFieldMap(value) {
+  if (!isRecord(value) || !isRecord(value.programme) || !isRecord(value.outcomes) || !isRecord(value.execution_authority)) return null;
+  const programme = value.programme;
+  const outcomes = Object.fromEntries(Object.entries(value.outcomes).map(([id, outcome]) => [id, {
+    id: outcome?.id,
+    order: outcome?.order,
+    kind: outcome?.kind,
+    title: outcome?.title,
+    materialized: outcome?.materialized,
+    dependencies: outcome?.dependencies,
+    native_issue: outcome?.native_issue,
+    complete_when: outcome?.complete_when,
+  }]));
+  return {
+    programme: {
+      id: programme.id,
+      issue: programme.issue,
+      title: programme.title,
+      objective: programme.objective,
+      labels: programme.labels,
+      boundaries: programme.boundaries,
+      holds: programme.holds,
+    },
+    outcomes,
+    execution_authority: { Q: value.execution_authority.Q },
+  };
+}
+
+function validateStructuralCheckpoint(fixture, sourceEvidence) {
+  const checkpoint = fixture.structural_checkpoint;
+  if (!isRecord(checkpoint) || !exactKeys(checkpoint, [
+    'schema', 'version', 'serialization', 'payload_ref', 'payload_sha256', 'candidate_git', 'captured_source_hashes_ref',
+  ]) || checkpoint.schema !== PROGRAMME_421_PROOF_CHECKPOINT_SCHEMA
+    || checkpoint.version !== 1
+    || checkpoint.serialization !== PROGRAMME_421_PROOF_CHECKPOINT_SERIALIZATION
+    || checkpoint.payload_ref !== 'source_evidence.field_map'
+    || checkpoint.payload_sha256 !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST
+    || checkpoint.captured_source_hashes_ref !== 'source_receipts'
+    || !isRecord(checkpoint.candidate_git)
+    || !exactKeys(checkpoint.candidate_git, ['repository', 'commit', 'path', 'blob'])
+    || kernel.canonicalSerialize(checkpoint.candidate_git) !== kernel.canonicalSerialize(PROGRAMME_421_PROOF_CHECKPOINT_CANDIDATE)) return false;
+  const captured = structuralProofFieldMap(sourceEvidence?.field_map);
+  try { return captured !== null && kernel.digestValue(captured) === checkpoint.payload_sha256; }
+  catch (_error) { return false; }
 }
 
 function validateProgrammeGraphProof(fixture) {
@@ -1422,6 +1549,7 @@ function validateProgrammeGraphProof(fixture) {
     || !isRecord(sourceEvidence.field_map) || !exactKeys(sourceEvidence.field_map, ['programme', 'outcomes', 'execution_authority'])
     || !isDigest(sourceEvidence.field_map_digest)
     || sourceEvidence.field_map_digest !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST) return invalid('SOURCE_EVIDENCE_SHAPE_INVALID');
+  if (!validateStructuralCheckpoint(fixture, sourceEvidence)) return invalid('STRUCTURAL_CHECKPOINT_INVALID');
   for (const key of sourceKeysExact) {
     const reference = sourceEvidence.source_references[key];
     if (!isRecord(reference) || !exactKeys(reference, ['reference', 'sha256'])
@@ -1429,7 +1557,8 @@ function validateProgrammeGraphProof(fixture) {
       || reference.sha256 !== fixture.source_receipts[key]) return invalid(`SOURCE_REFERENCE_${key.toUpperCase()}_MISMATCH`);
   }
   try {
-    if (kernel.digestValue(sourceEvidence.field_map) !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST) return invalid('SOURCE_FIELD_MAP_DIGEST_MISMATCH');
+    const capturedFieldMap = structuralProofFieldMap(sourceEvidence.field_map);
+    if (!capturedFieldMap || kernel.digestValue(capturedFieldMap) !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST) return invalid('SOURCE_FIELD_MAP_DIGEST_MISMATCH');
   } catch (_error) { return invalid('SOURCE_FIELD_MAP_INVALID'); }
   const canonical = fixture.canonical_snapshot || fixture.canonical_input;
   if (!isRecord(canonical)) return invalid('CANONICAL_SNAPSHOT_MISSING');
@@ -1449,7 +1578,8 @@ function validateProgrammeGraphProof(fixture) {
   let actualFieldMap;
   try { actualFieldMap = programmeProofFieldMap(snapshot); }
   catch (_error) { return invalid('SOURCE_FIELD_MAP_DERIVATION_INVALID'); }
-  if (kernel.canonicalSerialize(actualFieldMap) !== kernel.canonicalSerialize(sourceEvidence.field_map)) return invalid('SOURCE_FIELD_MAP_MISMATCH');
+  const capturedFieldMap = structuralProofFieldMap(sourceEvidence.field_map);
+  if (!capturedFieldMap || kernel.canonicalSerialize(actualFieldMap) !== kernel.canonicalSerialize(capturedFieldMap)) return invalid('SOURCE_FIELD_MAP_MISMATCH');
   if (kernel.digestValue(actualFieldMap.outcomes) !== PROGRAMME_421_PROOF_SOURCE_HASHES.canonical_30_row_payload_sha256) return invalid('CANONICAL_30_ROW_PAYLOAD_DIGEST_MISMATCH');
   if (actualFieldMap.outcomes.A1?.complete_when !== PROGRAMME_421_PROOF_A1_COMPLETE_WHEN) return invalid('A1_SERVICE_TREATMENT_AUTHORITY_INVALID');
   if (sourceEvidence.field_map.execution_authority?.Q !== 'NON_EXECUTING'
@@ -1461,9 +1591,7 @@ function validateProgrammeGraphProof(fixture) {
   const exactIds = (actual) => actual.length === expectedIds.length && actual.every((id, index) => id === expectedIds[index]);
   if (!exactIds(snapshotIds) || !exactIds(graphIds) || !exactIds(registryIds)) return invalid('OUTCOME_ID_SET_OR_ORDER_INVALID');
   if (graph.outcomes.length !== 30 || !validateProgrammeGraph(graph).ok || !validateProgrammeGraphMarkdown(rendered)) return invalid('GRAPH_OR_TABLE_INVALID');
-  if (snapshot.programme.id !== 'programme-421' || snapshot.programme.issue !== 421
-    || snapshot.programme.lifecycle !== 'ACTIVE' || graph.programme.lifecycle !== 'ACTIVE'
-    || graph.programme.finality !== snapshot.programme.finality) return invalid('PROGRAMME_AUTHORITY_INVALID');
+  if (snapshot.programme.id !== 'programme-421' || snapshot.programme.issue !== 421) return invalid('PROGRAMME_AUTHORITY_INVALID');
   if (!Array.isArray(snapshot.programme.labels) || !Array.isArray(snapshot.programme.boundaries)
     || !Array.isArray(snapshot.programme.holds) || !Array.isArray(snapshot.programme.sections)) return invalid('OPTIONAL_SECTION_NORMALISATION_INVALID');
   const outcomes = new Map(graph.outcomes.map((outcome) => [outcome.id, outcome]));
@@ -1472,22 +1600,20 @@ function validateProgrammeGraphProof(fixture) {
   const c2 = child('C2');
   const c3 = child('C3');
   const queue = child('Q');
-  if (!c1 || c1.kind !== 'CHILD' || c1.materialized !== true || c1.lifecycle !== 'CURRENT' || c1.dependencies.length !== 0
-    || c1.native_issue?.repository !== fixture.repository || c1.native_issue?.number !== 435 || c1.delivery_pr !== null
-    || c1.current_gate?.gate !== 'G3') return invalid('C1_AUTHORITY_INVALID');
-  if (!c2 || c2.kind !== 'CHILD' || c2.materialized !== true || c2.lifecycle !== 'QUEUED'
+  if (!c1 || c1.kind !== 'CHILD' || c1.materialized !== true || c1.dependencies.length !== 0
+    || c1.native_issue?.repository !== fixture.repository || c1.native_issue?.number !== 435) return invalid('C1_AUTHORITY_INVALID');
+  if (!c2 || c2.kind !== 'CHILD' || c2.materialized !== true
     || c2.native_issue?.number !== 423 || c2.dependencies.length !== 1 || c2.dependencies[0] !== 'C1') return invalid('C2_AUTHORITY_INVALID');
-  if (!c3 || c3.kind !== 'CHILD' || c3.materialized !== true || c3.lifecycle !== 'QUEUED'
+  if (!c3 || c3.kind !== 'CHILD' || c3.materialized !== true
     || c3.native_issue?.number !== 424 || c3.dependencies.length !== 1 || c3.dependencies[0] !== 'C2') return invalid('C3_AUTHORITY_INVALID');
-  if (!queue || queue.kind !== 'CHILD' || queue.materialized !== true || queue.lifecycle !== 'QUEUED'
-    || queue.native_issue?.number !== 425 || queue.delivery_pr !== null || queue.current_gate !== null) return invalid('QUEUE_AUTHORITY_INVALID');
+  if (!queue || queue.kind !== 'CHILD' || queue.materialized !== true
+    || queue.native_issue?.number !== 425) return invalid('QUEUE_AUTHORITY_INVALID');
   for (const id of expectedIds.filter((outcomeId) => !['C1', 'C2', 'C3', 'Q'].includes(outcomeId))) {
     const outcome = child(id);
-    if (!outcome || outcome.kind !== 'OUTCOME' || outcome.materialized !== false || outcome.lifecycle !== 'PLANNED'
-      || outcome.native_issue !== null || outcome.delivery_pr !== null || outcome.current_gate !== null) return invalid(`PARENT_OWNERSHIP_INVALID_${id}`);
+    if (!outcome || outcome.kind !== 'OUTCOME' || outcome.materialized !== false
+      || outcome.native_issue !== null) return invalid(`PARENT_OWNERSHIP_INVALID_${id}`);
   }
-  if (graph.outcomes.some((outcome) => outcome.native_issue?.number === 422 || outcome.native_issue?.number === 434
-    || outcome.delivery_pr?.number === 434)) return invalid('RETIRED_PREDECESSOR_AUTHORITY_PRESENT');
+  if (graph.outcomes.some((outcome) => outcome.native_issue?.number === 422 || outcome.native_issue?.number === 434)) return invalid('RETIRED_PREDECESSOR_AUTHORITY_PRESENT');
   let roundTrip;
   try { roundTrip = renderProgrammeGraphPublic(snapshot); } catch { return invalid('ROUND_TRIP_RENDER_FAILED'); }
   if (!roundTrip.ok || roundTrip.body !== rendered.body || roundTrip.graph_digest !== rendered.graph_digest
@@ -1614,6 +1740,9 @@ module.exports = Object.freeze({
   PROGRAMME_421_PROOF_SOURCE_HASHES,
   PROGRAMME_421_PROOF_SOURCE_REFERENCES,
   PROGRAMME_421_PROOF_FIELD_MAP_DIGEST,
+  PROGRAMME_421_PROOF_CHECKPOINT_SCHEMA,
+  PROGRAMME_421_PROOF_CHECKPOINT_SERIALIZATION,
+  PROGRAMME_421_PROOF_CHECKPOINT_CANDIDATE,
   renderProgrammeGraph,
   renderProgrammeParent,
   reconcileProgrammeSurface,

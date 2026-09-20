@@ -58,6 +58,17 @@ function exactKeys(value, keys) {
   return actual.length === expected.size && actual.every((key) => expected.has(key));
 }
 
+function exactDataKeys(value, keys) {
+  if (!exactKeys(value, keys)) return false;
+  try {
+    return Reflect.ownKeys(value).length === keys.length
+      && keys.every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return Boolean(descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value'));
+      });
+  } catch (_error) { return false; }
+}
+
 function canonicalSerialize(value) {
   if (value === null) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
@@ -308,7 +319,7 @@ function resolveRoute(options = {}) {
 
 function validateRouteBinding(binding, options = {}) {
   const keys = ['schema', 'version', 'thread_id', 'stage', 'stack_id', 'selection_source', 'harness_identity', 'registry_identity', 'route', 'route_digest', 'execution_path', 'a2_status', 'status', 'repair_budget_consumed'];
-  if (!isRecord(binding) || !exactKeys(binding, keys)
+  if (!isRecord(binding) || !exactDataKeys(binding, keys)
     || binding.schema !== SCHEMAS.routeBinding || binding.version !== 1
     || !isSafeId(binding.thread_id) || !STAGES.includes(binding.stage) || !STACK_IDS.includes(binding.stack_id)
     || !['explicit_web_binding', 'verified_harness_policy'].includes(binding.selection_source)
@@ -317,7 +328,9 @@ function validateRouteBinding(binding, options = {}) {
     || !isRecord(binding.registry_identity) || !isSafeId(binding.registry_identity.revision) || binding.registry_identity.revision === 'workspace' || !isDigest(binding.registry_identity.digest)
     || !routeOnly(binding.route) || !isDigest(binding.route_digest) || binding.route_digest !== digestValue(binding.route)
     || !EXECUTION_PATHS.includes(binding.execution_path) || !['not-accepted', 'accepted'].includes(binding.a2_status)
-    || binding.status !== 'ROUTE_RESOLVED' || binding.repair_budget_consumed !== false) return result(false, 'ROUTE_BINDING_INVALID');
+    || binding.status !== 'ROUTE_RESOLVED' || binding.repair_budget_consumed !== false) {
+    return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_BINDING_INVALID', repair_budget_consumed: false });
+  }
   const bindingA2Accepted = binding.a2_status === 'accepted';
   const executionA2Accepted = binding.execution_path === 'accepted-a2-loop-reconciliation';
   if (bindingA2Accepted !== executionA2Accepted || binding.stage === 'LOOP' && !bindingA2Accepted) {
@@ -388,7 +401,10 @@ function validateRouteBinding(binding, options = {}) {
 }
 
 function planExecution(options = {}) {
-  const resolved = options.binding ? validateRouteBinding(options.binding, options) : resolveRoute(options);
+  const bindingDescriptor = isRecord(options) ? Object.getOwnPropertyDescriptor(options, 'binding') : undefined;
+  const bindingSupplied = bindingDescriptor !== undefined;
+  const bindingValue = bindingSupplied && Object.prototype.hasOwnProperty.call(bindingDescriptor, 'value') ? bindingDescriptor.value : undefined;
+  const resolved = bindingSupplied ? validateRouteBinding(bindingValue, options) : resolveRoute(options);
   if (!resolved.ok) return resolved;
   const binding = resolved.binding;
   const plan = {
