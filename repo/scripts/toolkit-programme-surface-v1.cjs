@@ -27,6 +27,17 @@ const PROGRAMME_421_PROOF_SOURCE_HASHES = Object.freeze({
   pre_g3_receipt_body_sha256: 'cbcc0afeca8434310814050acbf381ba59098af0c71d7b900aac6cdc4fb5149f',
   g2_authority_receipt_body_sha256: '5f8ce047c309c81fc7dbfa06f7c7dedb9d3d3aa4cb00722e0f1a1a02ae67e89b',
 });
+const PROGRAMME_421_PROOF_SOURCE_REFERENCES = Object.freeze({
+  foundation_body_sha256: Object.freeze({ reference: 'github:issue:421:body', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.foundation_body_sha256 }),
+  foundation_issue_and_comments_sha256: Object.freeze({ reference: 'github:issue:421:body-and-comments', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.foundation_issue_and_comments_sha256 }),
+  canonical_30_row_payload_sha256: Object.freeze({ reference: 'github:issue:421:canonical-30-row-payload', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.canonical_30_row_payload_sha256 }),
+  c2_body_sha256: Object.freeze({ reference: 'github:issue:423:body', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.c2_body_sha256 }),
+  c3_body_sha256: Object.freeze({ reference: 'github:issue:424:body', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.c3_body_sha256 }),
+  queue_body_sha256: Object.freeze({ reference: 'github:issue:425:body', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.queue_body_sha256 }),
+  pre_g3_receipt_body_sha256: Object.freeze({ reference: 'github:issue:421:pre-g3-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.pre_g3_receipt_body_sha256 }),
+  g2_authority_receipt_body_sha256: Object.freeze({ reference: 'github:issue:435:g2-authority-receipt', sha256: PROGRAMME_421_PROOF_SOURCE_HASHES.g2_authority_receipt_body_sha256 }),
+});
+const PROGRAMME_421_PROOF_FIELD_MAP_DIGEST = 'cdb173315d9da28d9c8272a6f2beeaff0f4b21e74a70375630e63b15b3a6309c';
 const CURRENT_KEYS = Object.freeze([
   'schema', 'version', 'repository', 'controller_revision', 'canonical_main', 'programme', 'run', 'lock', 'gate',
   'repair_count', 'candidate', 'hold', 'in_flight', 'controlling_receipt', 'next_admissible_action', 'projection_digest',
@@ -174,17 +185,19 @@ function maybeSha(value) {
   return isSha(value) ? value : null;
 }
 
-function candidateProjection(input = {}) {
-  const candidate = isRecord(input) ? input : {};
-  const base = isRecord(candidate.base) ? candidate.base : {};
+function candidateProjection(input) {
+  if (input === undefined) return { pr: null, head: null, tree: null, base: { ref: null, sha: null } };
+  if (!isRecord(input)) return { pr: input, head: null, tree: null, base: null };
+  const candidate = input;
+  const base = Object.prototype.hasOwnProperty.call(candidate, 'base') ? candidate.base : null;
   return {
-    pr: Number.isSafeInteger(candidate.pr) && candidate.pr >= 1 ? candidate.pr : null,
-    head: maybeSha(candidate.head),
-    tree: maybeSha(candidate.tree),
-    base: {
-      ref: safeText(base.ref) ? base.ref : null,
-      sha: maybeSha(base.sha),
-    },
+    pr: Object.prototype.hasOwnProperty.call(candidate, 'pr') ? candidate.pr : null,
+    head: Object.prototype.hasOwnProperty.call(candidate, 'head') ? candidate.head : null,
+    tree: Object.prototype.hasOwnProperty.call(candidate, 'tree') ? candidate.tree : null,
+    base: isRecord(base) ? {
+      ref: Object.prototype.hasOwnProperty.call(base, 'ref') ? base.ref : null,
+      sha: Object.prototype.hasOwnProperty.call(base, 'sha') ? base.sha : null,
+    } : base,
   };
 }
 
@@ -549,6 +562,13 @@ function deriveNextAdmissibleAction(input = {}) {
     });
   }
   if (view.next) return result(true, 'CURRENT_ACTION_DERIVED', { action: view.next, reason_code: 'CURRENT_ACTION_PRESERVED', launch_allowed: !launchAction(view.next) || !view.terminal });
+  if (view.terminal) {
+    return result(true, 'CURRENT_ACTION_DERIVED', {
+      action: 'HOLD_TERMINAL_NON_CONVERGENCE',
+      reason_code: 'TERMINAL_STATE_NOT_EXECUTABLE',
+      launch_allowed: false,
+    });
+  }
   if (typeof view.stage === 'string' && /^[A-Za-z0-9]+$/.test(view.stage)) {
     return result(true, 'CURRENT_ACTION_DERIVED', {
       action: `LAUNCH_${view.stage.toUpperCase()}_DIRECT`,
@@ -687,7 +707,7 @@ function hasExecutableCurrentIdentity(value) {
     safeText(value.repository)
     && (safeText(value.lock) || safeText(value.gate) || isRecord(value.run) && value.run.id !== 'none'
       || isRecord(value.canonical_main) && (value.canonical_main.sha !== null || value.canonical_main.tree !== null)
-      || isRecord(value.candidate) && value.candidate.pr !== null
+      || isRecord(value.candidate) && candidateMode(value.candidate) === 'BOUND'
       || isRecord(value.controlling_receipt) && Object.values(value.controlling_receipt).some((item) => item !== null)
       || isRecord(value.in_flight) && (value.in_flight.worker !== null || value.in_flight.state !== 'NONE')
   ));
@@ -700,12 +720,14 @@ function executableCurrentIdentityComplete(value) {
     || !isRecord(value.canonical_main) || !isSha(value.canonical_main.sha) || !isSha(value.canonical_main.tree)
     || !isRecord(value.run) || !safeId(value.run.id) || value.run.id === 'none'
     || !safeText(value.lock) || !safeText(value.gate, 128)
+    || candidateMode(value.candidate) === null
+    || requiredCurrentCandidateMode(value) !== null && candidateMode(value.candidate) !== requiredCurrentCandidateMode(value)
     || !isRecord(value.controlling_receipt)
     || !safeText(value.controlling_receipt.id)
     || !safeText(value.controlling_receipt.reference, 1024)
     || !isDigest(value.controlling_receipt.digest)
     || !safeId(value.next_admissible_action)) return false;
-  if (value.candidate?.pr !== null
+  if (candidateMode(value.candidate) === 'BOUND'
     && (!isSha(value.candidate.head) || !isSha(value.candidate.tree) || !safeText(value.candidate.base?.ref) || !isSha(value.candidate.base?.sha))) return false;
   if (value.in_flight?.state !== 'NONE' || value.in_flight?.worker !== null || value.in_flight?.worker_liveness !== 'inactive') {
     if (!value.in_flight || !WORKER_LIVENESS_EVIDENCE.includes(value.in_flight.worker_liveness_evidence)) return false;
@@ -718,6 +740,7 @@ function createCurrentProjection(input = {}) {
   const launchSafety = validateCurrentLaunchSafety(input);
   const base = currentInput(input);
   if (!safeText(base.repository) || !safeId(base.controller_revision) || !safeId(base.next_admissible_action)) return result(false, 'CURRENT_PROJECTION_INCOMPLETE');
+  if (candidateMode(base.candidate) === null) return result(false, 'CURRENT_CANDIDATE_INVALID');
   if (hasExecutableCurrentIdentity(base) && !executableCurrentIdentityComplete(base)) return result(false, 'CURRENT_EXECUTABLE_IDENTITY_INCOMPLETE');
   if (!launchSafety.ok) return launchSafety;
   const projection = { ...base, projection_digest: kernel.digestValue(base) };
@@ -760,13 +783,28 @@ function validateCurrentProjection(value) {
 }
 
 function validateCandidate(value) {
-  return isRecord(value) && exactKeys(value, ['pr', 'head', 'tree', 'base'])
-    && (value.pr === null || Number.isSafeInteger(value.pr) && value.pr >= 1)
-    && (value.head === null || isSha(value.head))
-    && (value.tree === null || isSha(value.tree))
-    && isRecord(value.base) && exactKeys(value.base, ['ref', 'sha'])
-    && (value.base.ref === null || safeText(value.base.ref))
-    && (value.base.sha === null || isSha(value.base.sha));
+  return candidateMode(value) !== null;
+}
+
+function candidateMode(value) {
+  if (!isRecord(value) || !exactKeys(value, ['pr', 'head', 'tree', 'base'])
+    || !isRecord(value.base) || !exactKeys(value.base, ['ref', 'sha'])) return null;
+  const fields = [value.pr, value.head, value.tree, value.base.ref, value.base.sha];
+  if (fields.every((field) => field === null)) return 'NONE';
+  return Number.isSafeInteger(value.pr) && value.pr >= 1
+    && isSha(value.head) && isSha(value.tree)
+    && safeText(value.base.ref) && isSha(value.base.sha) ? 'BOUND' : null;
+}
+
+function requiredCurrentCandidateMode(value = {}) {
+  const tokens = [value.gate, value.next_admissible_action]
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.toUpperCase());
+  if (tokens.some((item) => /^(?:G3|G4)(?:_|$)/.test(item)
+    || /(?:^|_)(?:REPAIR|AMEND)(?:_|$)/.test(item)
+    || /^LAUNCH_G[34]_DIRECT$/.test(item))) return 'BOUND';
+  if (tokens.some((item) => /^(?:G0|G1|G2|LOOP|FINAL_AUDIT|BROWSER)(?:_|$)/.test(item))) return 'NONE';
+  return null;
 }
 
 function compareFields(projection, expected, fields) {
@@ -913,7 +951,8 @@ function normalizeGraphSections(value) {
     const source = isRecord(raw) ? raw : { items: raw };
     const title = source.title === undefined ? id : source.title;
     const items = graphStringList(source.items);
-    if (!safeText(title) || items === null || items.length === 0) return null;
+    if (!safeText(title) || items === null) return null;
+    if (items.length === 0) continue;
     sections.push({ id, title, items });
   }
   return sections;
@@ -1240,6 +1279,18 @@ function publicGraphFieldsSafe(value, key = '') {
   });
 }
 
+function publicGraphInputSafe(value, key = '') {
+  if (value === undefined) return true;
+  if (typeof value === 'string') return publicGraphTextSafe(value, key === 'body');
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return true;
+  if (Array.isArray(value)) return value.every((item) => publicGraphInputSafe(item, key));
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(([field, item]) => {
+    if (PUBLIC_GRAPH_SENSITIVE_KEY.test(field)) return false;
+    return publicGraphInputSafe(item, field);
+  });
+}
+
 function splitProgrammeGraphTableRow(line) {
   if (typeof line !== 'string' || !line.startsWith('|') || !line.endsWith('|')) return null;
   const cells = [];
@@ -1306,11 +1357,47 @@ function validateProgrammeGraphMarkdown(rendered) {
 }
 
 function renderProgrammeGraphPublic(input = {}) {
-  const normalized = normalizeProgrammeGraphSnapshot(input);
-  if (!normalized.ok) return normalized;
-  const rendered = renderProgrammeGraphRaw(normalized);
+  if (input !== null && input !== undefined && !publicGraphInputSafe(input)) publicGraphUnsafe();
+  let normalized;
+  try { normalized = normalizeProgrammeGraphSnapshot(input); }
+  catch (_error) { return result(false, 'PROGRAMME_GRAPH_PUBLIC_INVALID'); }
+  if (!normalized.ok) return result(false, normalized.code);
+  let rendered;
+  try { rendered = renderProgrammeGraphRaw(normalized); }
+  catch (_error) { return result(false, 'PROGRAMME_GRAPH_PUBLIC_INVALID'); }
   if (!validateProgrammeGraphMarkdown(rendered) || !publicGraphFieldsSafe(rendered)) publicGraphUnsafe();
   return rendered;
+}
+
+function programmeProofFieldMap(snapshot) {
+  return {
+    programme: {
+      id: snapshot.programme.id,
+      issue: snapshot.programme.issue,
+      title: snapshot.programme.title,
+      objective: snapshot.programme.objective,
+      lifecycle: snapshot.programme.lifecycle,
+      finality: snapshot.programme.finality,
+      labels: snapshot.programme.labels,
+      boundaries: snapshot.programme.boundaries,
+      holds: snapshot.programme.holds,
+      next_action: snapshot.programme.next_action,
+    },
+    outcomes: Object.fromEntries(snapshot.outcomes.map((outcome) => [outcome.id, {
+      id: outcome.id,
+      order: outcome.order,
+      kind: outcome.kind,
+      title: outcome.title,
+      materialized: outcome.materialized,
+      lifecycle: outcome.lifecycle,
+      dependencies: outcome.dependencies,
+      native_issue: outcome.native_issue,
+      delivery_pr: outcome.delivery_pr,
+      current_gate: outcome.current_gate,
+      complete_when: outcome.complete_when,
+    }])),
+    execution_authority: { Q: 'NON_EXECUTING' },
+  };
 }
 
 function validateProgrammeGraphProof(fixture) {
@@ -1326,13 +1413,44 @@ function validateProgrammeGraphProof(fixture) {
   for (const [key, expected] of Object.entries(PROGRAMME_421_PROOF_SOURCE_HASHES)) {
     if (fixture.source_receipts[key] !== expected) return invalid(`SOURCE_RECEIPT_${key.toUpperCase()}_MISMATCH`);
   }
+  const sourceEvidence = fixture.source_evidence;
+  const sourceKeysExact = Object.keys(PROGRAMME_421_PROOF_SOURCE_HASHES);
+  if (!isRecord(sourceEvidence) || !exactKeys(sourceEvidence, ['schema', 'source_references', 'field_map', 'field_map_digest'])
+    || sourceEvidence.schema !== 'toolkit.controller.programme-421-source-evidence.v1'
+    || !isRecord(sourceEvidence.source_references) || !exactKeys(sourceEvidence.source_references, sourceKeysExact)
+    || !isRecord(sourceEvidence.field_map) || !exactKeys(sourceEvidence.field_map, ['programme', 'outcomes', 'execution_authority'])
+    || !isDigest(sourceEvidence.field_map_digest)
+    || sourceEvidence.field_map_digest !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST) return invalid('SOURCE_EVIDENCE_SHAPE_INVALID');
+  for (const key of sourceKeysExact) {
+    const reference = sourceEvidence.source_references[key];
+    if (!isRecord(reference) || !exactKeys(reference, ['reference', 'sha256'])
+      || kernel.canonicalSerialize(reference) !== kernel.canonicalSerialize(PROGRAMME_421_PROOF_SOURCE_REFERENCES[key])
+      || reference.sha256 !== fixture.source_receipts[key]) return invalid(`SOURCE_REFERENCE_${key.toUpperCase()}_MISMATCH`);
+  }
+  try {
+    if (kernel.digestValue(sourceEvidence.field_map) !== PROGRAMME_421_PROOF_FIELD_MAP_DIGEST) return invalid('SOURCE_FIELD_MAP_DIGEST_MISMATCH');
+  } catch (_error) { return invalid('SOURCE_FIELD_MAP_INVALID'); }
   const canonical = fixture.canonical_snapshot || fixture.canonical_input;
   if (!isRecord(canonical)) return invalid('CANONICAL_SNAPSHOT_MISSING');
+  if (!exactKeys(canonical, ['schema', 'version', 'repository', 'programme', 'outcomes'])
+    || !isRecord(canonical.programme)
+    || !exactKeys(canonical.programme, ['id', 'issue', 'title', 'objective', 'lifecycle', 'finality', 'labels', 'boundaries', 'holds', 'next_action', 'sections'])
+    || !Array.isArray(canonical.outcomes)
+    || !canonical.outcomes.every((outcome) => isRecord(outcome)
+      && exactKeys(outcome, ['id', 'order', 'kind', 'title', 'materialized', 'lifecycle', 'dependencies', 'native_issue', 'delivery_pr', 'current_gate', 'complete_when']))) {
+    return invalid('CANONICAL_SOURCE_SHAPE_INVALID');
+  }
   let rendered;
   try { rendered = renderProgrammeGraphPublic(canonical); } catch { return invalid('PUBLIC_RENDER_FAILED'); }
   if (!rendered.ok || !isRecord(rendered.graph) || !isRecord(rendered.canonical_snapshot)) return invalid('CANONICAL_RENDER_INVALID');
   const snapshot = rendered.canonical_snapshot;
   const graph = rendered.graph;
+  let actualFieldMap;
+  try { actualFieldMap = programmeProofFieldMap(snapshot); }
+  catch (_error) { return invalid('SOURCE_FIELD_MAP_DERIVATION_INVALID'); }
+  if (kernel.canonicalSerialize(actualFieldMap) !== kernel.canonicalSerialize(sourceEvidence.field_map)) return invalid('SOURCE_FIELD_MAP_MISMATCH');
+  if (sourceEvidence.field_map.execution_authority?.Q !== 'NON_EXECUTING'
+    || Object.keys(sourceEvidence.field_map.execution_authority || {}).length !== 1) return invalid('QUEUE_EXECUTION_AUTHORITY_INVALID');
   const snapshotIds = snapshot.outcomes.map((outcome) => outcome.id);
   const graphIds = graph.outcomes.map((outcome) => outcome.id);
   const registryIds = rendered.parent_registry.map((entry) => entry.outcome_id);
@@ -1382,9 +1500,16 @@ function validateProgrammeGraphProof(fixture) {
 }
 
 function reconcileProgrammeSurface(expected, observed) {
-  const expectedSurface = programmeSurfaceView(expected);
-  const observedSurface = programmeSurfaceView(observed);
+  let expectedSurface;
+  let observedSurface;
+  try {
+    expectedSurface = programmeSurfaceView(expected);
+    observedSurface = programmeSurfaceView(observed);
+  } catch {
+    return result(false, 'PROGRAMME_SURFACE_READBACK_INVALID');
+  }
   if (!expectedSurface || !observedSurface) return result(false, 'PROGRAMME_SURFACE_READBACK_INVALID');
+  if (!publicGraphFieldsSafe(expectedSurface) || !publicGraphFieldsSafe(observedSurface)) publicGraphUnsafe();
   if (kernel.canonicalSerialize(expectedSurface) !== kernel.canonicalSerialize(observedSurface)) {
     return result(false, 'PROGRAMME_SURFACE_READBACK_MISMATCH', { expected: expectedSurface, observed: observedSurface });
   }
@@ -1483,6 +1608,8 @@ module.exports = Object.freeze({
   validateProgrammeGraphProof,
   PROGRAMME_421_PROOF_OUTCOME_IDS,
   PROGRAMME_421_PROOF_SOURCE_HASHES,
+  PROGRAMME_421_PROOF_SOURCE_REFERENCES,
+  PROGRAMME_421_PROOF_FIELD_MAP_DIGEST,
   renderProgrammeGraph,
   renderProgrammeParent,
   reconcileProgrammeSurface,

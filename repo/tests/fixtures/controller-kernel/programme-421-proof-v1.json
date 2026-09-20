@@ -14,6 +14,511 @@
     "pre_g3_receipt_body_sha256": "cbcc0afeca8434310814050acbf381ba59098af0c71d7b900aac6cdc4fb5149f",
     "g2_authority_receipt_body_sha256": "5f8ce047c309c81fc7dbfa06f7c7dedb9d3d3aa4cb00722e0f1a1a02ae67e89b"
   },
+  "source_evidence": {
+    "schema": "toolkit.controller.programme-421-source-evidence.v1",
+    "source_references": {
+      "foundation_body_sha256": {
+        "reference": "github:issue:421:body",
+        "sha256": "faa3bac99662330a151f57da4f6910408ccc48ac8674c4b33f254ba570a93f3a"
+      },
+      "foundation_issue_and_comments_sha256": {
+        "reference": "github:issue:421:body-and-comments",
+        "sha256": "6f3b3e7105a148d93a1a2e983b964cce3200b26d93248b90fec38d0ae2001394"
+      },
+      "canonical_30_row_payload_sha256": {
+        "reference": "github:issue:421:canonical-30-row-payload",
+        "sha256": "dbd074c96e14817e0db53f764d34825943c86488b8b9fc8e67dfa082fb5b8a1c"
+      },
+      "c2_body_sha256": {
+        "reference": "github:issue:423:body",
+        "sha256": "76ded413a0ad2997096ba07da93f7485b0dafc587b1d62eb5ab4568131e7cd7b"
+      },
+      "c3_body_sha256": {
+        "reference": "github:issue:424:body",
+        "sha256": "865ed06c60b93a41d480979c4559490f550a14962e29061e6b47e8074536a1df"
+      },
+      "queue_body_sha256": {
+        "reference": "github:issue:425:body",
+        "sha256": "f9b21cdeb8c87b87b9f15e341169322e62e3492c0228249da066794799107669"
+      },
+      "pre_g3_receipt_body_sha256": {
+        "reference": "github:issue:421:pre-g3-receipt",
+        "sha256": "cbcc0afeca8434310814050acbf381ba59098af0c71d7b900aac6cdc4fb5149f"
+      },
+      "g2_authority_receipt_body_sha256": {
+        "reference": "github:issue:435:g2-authority-receipt",
+        "sha256": "5f8ce047c309c81fc7dbfa06f7c7dedb9d3d3aa4cb00722e0f1a1a02ae67e89b"
+      }
+    },
+    "field_map": {
+      "programme": {
+        "id": "programme-421",
+        "issue": 421,
+        "title": "Toolkit delivery and operational assurance",
+        "objective": "Complete the required Toolkit outcomes under the accepted north-star architecture while reducing routine context, orchestration and model-call cost without weakening safety, correctness, recoverability or evidence.",
+        "lifecycle": "ACTIVE",
+        "finality": "NOT_ACCEPTED",
+        "labels": [
+          "controller-kernel",
+          "programme"
+        ],
+        "boundaries": [
+          "G3 implementation and validation remain bounded to the accepted successor contract."
+        ],
+        "holds": [
+          "G4 and Web finality remain separate transitions."
+        ],
+        "next_action": "Validate the exact successor candidate before any Web G4 adjudication."
+      },
+      "outcomes": {
+        "C1": {
+          "id": "C1",
+          "order": 1,
+          "kind": "CHILD",
+          "title": "Controller Kernel + Delivery Contract",
+          "materialized": true,
+          "lifecycle": "CURRENT",
+          "dependencies": [],
+          "native_issue": {
+            "repository": "weijunswj/ai-agent-toolkit",
+            "number": 435
+          },
+          "delivery_pr": null,
+          "current_gate": {
+            "gate": "G3",
+            "repair": null
+          },
+          "complete_when": "The successor contract passes bounded G3 validation and is accepted at the Web finality boundary."
+        },
+        "C2": {
+          "id": "C2",
+          "order": 2,
+          "kind": "CHILD",
+          "title": "Child-Owned Programme State + Obligation Continuity",
+          "materialized": true,
+          "lifecycle": "QUEUED",
+          "dependencies": [
+            "C1"
+          ],
+          "native_issue": {
+            "repository": "weijunswj/ai-agent-toolkit",
+            "number": 423
+          },
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Child-owned programme state is transferred with criterion-level obligation continuity and source-backed evidence."
+        },
+        "C3": {
+          "id": "C3",
+          "order": 3,
+          "kind": "CHILD",
+          "title": "Published Capability Conformance",
+          "materialized": true,
+          "lifecycle": "QUEUED",
+          "dependencies": [
+            "C2"
+          ],
+          "native_issue": {
+            "repository": "weijunswj/ai-agent-toolkit",
+            "number": 424
+          },
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Published capabilities conform to the accepted controller and programme contracts."
+        },
+        "S1": {
+          "id": "S1",
+          "order": 4,
+          "kind": "OUTCOME",
+          "title": "Managed Setup Execution Safety",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Managed setup execution preserves bounded transport, cleanup, cancellation, exit-code and privacy semantics."
+        },
+        "S2": {
+          "id": "S2",
+          "order": 5,
+          "kind": "OUTCOME",
+          "title": "Managed Configuration Recovery",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Managed configuration recovery is source-bound, reversible and verified without manufacturing authority."
+        },
+        "H1": {
+          "id": "H1",
+          "order": 6,
+          "kind": "OUTCOME",
+          "title": "Native Delivery - Codex",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Codex native delivery is qualified under the registered host and completion contract."
+        },
+        "H2": {
+          "id": "H2",
+          "order": 7,
+          "kind": "OUTCOME",
+          "title": "Native Delivery - Claude Code",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Claude Code native delivery is qualified under the registered host and completion contract."
+        },
+        "H3": {
+          "id": "H3",
+          "order": 8,
+          "kind": "OUTCOME",
+          "title": "Native Delivery - OpenCode",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "OpenCode native delivery is qualified under the registered host and completion contract."
+        },
+        "H4": {
+          "id": "H4",
+          "order": 9,
+          "kind": "OUTCOME",
+          "title": "AG2 Skills-Only Qualification",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "AG2 skills-only qualification is verified without introducing an unsupported execution path."
+        },
+        "W1": {
+          "id": "W1",
+          "order": 10,
+          "kind": "OUTCOME",
+          "title": "Source-Watch Conformance",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Source-watch behavior remains notification-only, pinned and approval-bound."
+        },
+        "W2": {
+          "id": "W2",
+          "order": 11,
+          "kind": "OUTCOME",
+          "title": "Workspace Safety and Lifecycle",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Workspace lifecycle and isolation controls are verified before consequential concurrency."
+        },
+        "D1": {
+          "id": "D1",
+          "order": 12,
+          "kind": "OUTCOME",
+          "title": "Evidence-Driven Debugging + Fresh Verification",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Debugging and verification use fresh bounded evidence with truthful readiness conclusions."
+        },
+        "A1": {
+          "id": "A1",
+          "order": 13,
+          "kind": "OUTCOME",
+          "title": "Exact Route Resolution",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Every admitted route resolves exactly against the current registered stack and capability contract."
+        },
+        "A2": {
+          "id": "A2",
+          "order": 14,
+          "kind": "OUTCOME",
+          "title": "Repository Loop Manager + Durable Child Execution + Metering",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "A1"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Durable child execution and metering preserve terminal delivery, identity and bounded resource accounting."
+        },
+        "A3": {
+          "id": "A3",
+          "order": 15,
+          "kind": "OUTCOME",
+          "title": "Concurrent Loop Execution + Integration",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "A2",
+            "W2"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Concurrent execution and integration are admitted only after workspace safety and independent-path proof."
+        },
+        "A4": {
+          "id": "A4",
+          "order": 16,
+          "kind": "OUTCOME",
+          "title": "Trusted CI Publication",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "A3"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Trusted CI publishes the exact validation union with unique contexts and deterministic aggregation."
+        },
+        "A5": {
+          "id": "A5",
+          "order": 17,
+          "kind": "OUTCOME",
+          "title": "Repository Protection Reconciliation",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "A4"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Repository protection mechanically matches Controller finality and rejects pending or failing required lanes."
+        },
+        "N1": {
+          "id": "N1",
+          "order": 18,
+          "kind": "OUTCOME",
+          "title": "Official n8n Dependency Admission",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Official n8n dependencies are admitted only with verified source and safety provenance."
+        },
+        "N2": {
+          "id": "N2",
+          "order": 19,
+          "kind": "OUTCOME",
+          "title": "Offline n8n Workflow Handling",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "N1"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Offline workflow handling validates and transports workflow artifacts without live mutation."
+        },
+        "N3": {
+          "id": "N3",
+          "order": 20,
+          "kind": "OUTCOME",
+          "title": "Authorized n8n API Transport",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "N2"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "n8n API transport remains explicitly authorized, bounded and auditable."
+        },
+        "X1": {
+          "id": "X1",
+          "order": 21,
+          "kind": "OUTCOME",
+          "title": "Secret References + Private Custody",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Secret references and private custody remain outside public projections and repository artifacts."
+        },
+        "X2": {
+          "id": "X2",
+          "order": 22,
+          "kind": "OUTCOME",
+          "title": "Sensitive-File Access Guard",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X1"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Sensitive-file access is guarded by explicit scope, provenance and fail-closed checks."
+        },
+        "X3": {
+          "id": "X3",
+          "order": 23,
+          "kind": "OUTCOME",
+          "title": "External Operation Authority",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X2"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "External operations require current-turn authority for the named target and operation."
+        },
+        "X4": {
+          "id": "X4",
+          "order": 24,
+          "kind": "OUTCOME",
+          "title": "Privacy-Safe Operational Evidence",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X3"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Operational evidence remains privacy-minimized, support-safe and source-traceable."
+        },
+        "X5": {
+          "id": "X5",
+          "order": 25,
+          "kind": "OUTCOME",
+          "title": "Hosted Monitoring and Reporting",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X4"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Hosted monitoring and reporting expose only truthful, authorized state transitions."
+        },
+        "X6": {
+          "id": "X6",
+          "order": 26,
+          "kind": "OUTCOME",
+          "title": "Hosted Recovery and Disaster Recovery",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X5"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Hosted recovery and disaster recovery are tested, bounded and reversible."
+        },
+        "X7": {
+          "id": "X7",
+          "order": 27,
+          "kind": "OUTCOME",
+          "title": "SHA-Bound Deployment and Health",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "X6"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Deployment and health verification remain bound to the exact accepted revision and rollback evidence."
+        },
+        "V1": {
+          "id": "V1",
+          "order": 28,
+          "kind": "OUTCOME",
+          "title": "Integrated Conformance + UAT",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "A5",
+            "C3",
+            "N3",
+            "X7"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "Integrated conformance and UAT accept every required outcome and unresolved hold."
+        },
+        "V2": {
+          "id": "V2",
+          "order": 29,
+          "kind": "OUTCOME",
+          "title": "Whole-Programme Final Audit",
+          "materialized": false,
+          "lifecycle": "PLANNED",
+          "dependencies": [
+            "V1"
+          ],
+          "native_issue": null,
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "The whole programme passes final audit and exact Web finality is accepted after readback."
+        },
+        "Q": {
+          "id": "Q",
+          "order": 30,
+          "kind": "CHILD",
+          "title": "Continuing Improvement Queue",
+          "materialized": true,
+          "lifecycle": "QUEUED",
+          "dependencies": [],
+          "native_issue": {
+            "repository": "weijunswj/ai-agent-toolkit",
+            "number": 425
+          },
+          "delivery_pr": null,
+          "current_gate": null,
+          "complete_when": "The deferred queue remains non-executing and retains parent-owned continuing-improvement obligations."
+        }
+      },
+      "execution_authority": {
+        "Q": "NON_EXECUTING"
+      }
+    },
+    "field_map_digest": "cdb173315d9da28d9c8272a6f2beeaff0f4b21e74a70375630e63b15b3a6309c"
+  },
   "canonical_snapshot": {
     "schema": "toolkit.controller.programme-snapshot.v1",
     "version": 1,

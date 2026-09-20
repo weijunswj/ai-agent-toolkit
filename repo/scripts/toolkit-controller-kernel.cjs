@@ -117,6 +117,15 @@ function routeSignature(route) {
   return normalized ? `${normalized.provider}/${normalized.model}/${normalized.reasoning}` : null;
 }
 
+function readA2Evidence(options = {}) {
+  const aliases = ['a2_accepted', 'a2Accepted'].filter((key) => hasOwn(options, key));
+  if (aliases.length > 1) return { ok: false };
+  if (aliases.length === 0) return { ok: true, accepted: false };
+  return typeof options[aliases[0]] === 'boolean'
+    ? { ok: true, accepted: options[aliases[0]] }
+    : { ok: false };
+}
+
 function validateRegistry(registry) {
   if (!isRecord(registry)
     || !exactKeys(registry, ['schema', 'version', 'stacks'])
@@ -257,7 +266,11 @@ function resolveRoute(options = {}) {
     });
   }
 
-  if (stage === 'LOOP' && options.a2_accepted !== true) {
+  const a2 = readA2Evidence(options);
+  if (!a2.ok) {
+    return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', 'A2_EVIDENCE_INVALID', stackId) });
+  }
+  if (stage === 'LOOP' && a2.accepted !== true) {
     return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', 'A2_NOT_ACCEPTED', stackId) });
   }
   const route = routeOnly(loaded.registry.stacks[stackId].routes[stage]);
@@ -273,7 +286,7 @@ function resolveRoute(options = {}) {
   if (!identity.ok) return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', identity.code, stackId) });
   const threadId = options.thread_id || options.threadId || `thread-${digestValue({ stage, stackId, route, registry: identity.identity }).slice(0, 24)}`;
   if (!isSafeId(threadId)) return result(false, 'ROUTE_UNAVAILABLE', { decision: routeDecision(stage, selectionSource, 'ROUTE_UNAVAILABLE', 'THREAD_ID_INVALID', stackId) });
-  const a2Status = options.a2_accepted === true ? 'accepted' : 'not-accepted';
+  const a2Status = a2.accepted ? 'accepted' : 'not-accepted';
   const binding = {
     schema: SCHEMAS.routeBinding,
     version: 1,
@@ -305,6 +318,11 @@ function validateRouteBinding(binding, options = {}) {
     || !routeOnly(binding.route) || !isDigest(binding.route_digest) || binding.route_digest !== digestValue(binding.route)
     || !EXECUTION_PATHS.includes(binding.execution_path) || !['not-accepted', 'accepted'].includes(binding.a2_status)
     || binding.status !== 'ROUTE_RESOLVED' || binding.repair_budget_consumed !== false) return result(false, 'ROUTE_BINDING_INVALID');
+  const bindingA2Accepted = binding.a2_status === 'accepted';
+  const executionA2Accepted = binding.execution_path === 'accepted-a2-loop-reconciliation';
+  if (bindingA2Accepted !== executionA2Accepted || binding.stage === 'LOOP' && !bindingA2Accepted) {
+    return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_A2_EXECUTION_PATH_MISMATCH', repair_budget_consumed: false });
+  }
   const loaded = loadRegistry(options.registry || DEFAULT_REGISTRY);
   if (!loaded.ok) return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'CURRENT_REGISTRY_UNAVAILABLE', repair_budget_consumed: false });
   if (binding.registry_identity.digest !== loaded.digest) return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_REGISTRY_DIGEST_MISMATCH', repair_budget_consumed: false });
@@ -336,10 +354,13 @@ function validateRouteBinding(binding, options = {}) {
   if (!currentThread || currentThread !== binding.thread_id) {
     return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_THREAD_MISMATCH', repair_budget_consumed: false });
   }
-  const currentA2 = Object.prototype.hasOwnProperty.call(options, 'current_a2_accepted') ? options.current_a2_accepted
-    : Object.prototype.hasOwnProperty.call(options, 'currentA2Accepted') ? options.currentA2Accepted
-      : Object.prototype.hasOwnProperty.call(options, 'a2_accepted') ? options.a2_accepted : undefined;
-  if (currentA2 === undefined || (binding.a2_status === 'accepted') !== (currentA2 === true)) {
+  const currentA2Aliases = ['current_a2_accepted', 'currentA2Accepted', 'a2_accepted', 'a2Accepted']
+    .filter((key) => hasOwn(options, key));
+  const currentA2 = currentA2Aliases.length === 1 ? options[currentA2Aliases[0]] : undefined;
+  if (currentA2Aliases.length !== 1 || typeof currentA2 !== 'boolean') {
+    return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_A2_EVIDENCE_INVALID', repair_budget_consumed: false });
+  }
+  if (bindingA2Accepted !== currentA2) {
     return result(false, 'ROUTE_UNAVAILABLE', { reason_code: 'STORED_ROUTE_A2_STATE_MISMATCH', repair_budget_consumed: false });
   }
   if (!routeCapabilityAvailable(binding.route, options)) {

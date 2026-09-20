@@ -16,6 +16,7 @@ const REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE = 'ai-agent-toolkit-repository-test
 const REPOSITORY_TEST_RESOURCE_FIXTURE_ID = 'healthy-resource-v1';
 const REPOSITORY_TEST_RESOURCE_INVOCATION = 'toolkit.repository-test.resource.v1';
 const REPOSITORY_TEST_RESOURCE_SOURCE = 'repository-test-fixture';
+const REPOSITORY_TEST_INVOCATION_ALIASES = Object.freeze(['repository_test_invocation', 'repositoryTestInvocation']);
 const RESOURCE_STATE_ALIASES = Object.freeze(['resourceState', 'resource_state']);
 const RESOURCE_STATE_CONFLICT_ALIASES = Object.freeze(['resourceState', 'resource_state', 'resources', 'resource']);
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
@@ -390,10 +391,11 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({
-    resourceState: selected.resource_state,
-    test_seam: options.test_seam === true || options.testSeam === true || selected.test_seam === true,
-  });
+  const resourceOptions = { resourceState: selected.resource_state };
+  for (const alias of REPOSITORY_TEST_INVOCATION_ALIASES) {
+    if (Object.prototype.hasOwnProperty.call(options, alias)) resourceOptions[alias] = options[alias];
+  }
+  const resourceCapability = inspectResourceCapability(resourceOptions);
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
   const explicitResourceState = Object.prototype.hasOwnProperty.call(selected, 'resource_state');
   if (topology === TOPOLOGIES.CLAUDE_DIRECT && (explicitResourceState && !resourceCapability.supported
@@ -448,29 +450,20 @@ function windowsResources() {
 }
 
 function repositoryTestResourceStateFromEnvironment(env = process.env) {
-  if (env?.[REPOSITORY_TEST_RESOURCE_CONTEXT_ENV] !== REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE) return null;
-  const raw = String(env?.[REPOSITORY_TEST_RESOURCE_STATE_ENV] || '');
-  if (!raw || raw.length > 4096) return null;
-  try {
-    const state = JSON.parse(raw);
-    if (!state || typeof state !== 'object'
-      || state.invocation !== REPOSITORY_TEST_RESOURCE_INVOCATION
-      || state.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE_ID
-      || state.source !== REPOSITORY_TEST_RESOURCE_SOURCE) return null;
-    return { ...state };
-  } catch {
-    return null;
-  }
+  // Environment, preload state and descendants are never invocation authority.
+  // Keep the bounded probe for compatibility, but do not return evidence from it.
+  void env;
+  return null;
 }
 
 function resourceTestSeamEnabled(options = {}) {
-  const aliases = RESOURCE_STATE_CONFLICT_ALIASES.filter((key) => Object.prototype.hasOwnProperty.call(options, key));
-  if (aliases.length !== 1 || !RESOURCE_STATE_ALIASES.includes(aliases[0])) return false;
-  const resource = options[aliases[0]];
-  return Boolean(resource && typeof resource === 'object' && !Array.isArray(resource)
-    && resource.invocation === REPOSITORY_TEST_RESOURCE_INVOCATION
-    && resource.source === REPOSITORY_TEST_RESOURCE_SOURCE
-    && resource.fixture_id === REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
+  const aliases = REPOSITORY_TEST_INVOCATION_ALIASES.filter((key) => Object.prototype.hasOwnProperty.call(options, key));
+  if (aliases.length !== 1) return false;
+  const authority = options[aliases[0]];
+  return Boolean(authority && typeof authority === 'object' && !Array.isArray(authority)
+    && Object.keys(authority).length === 2
+    && authority.invocation === REPOSITORY_TEST_RESOURCE_INVOCATION
+    && authority.fixture_id === REPOSITORY_TEST_RESOURCE_FIXTURE_ID);
 }
 
 function resourceEvidenceSourceAccepted(resources, options = {}) {
@@ -480,11 +473,10 @@ function resourceEvidenceSourceAccepted(resources, options = {}) {
     || resources.source === 'fixture'
     || resources.source === REPOSITORY_TEST_RESOURCE_SOURCE;
   if (hasFixtureMarker) {
-    const exactKeys = ['invocation', 'source', 'fixture_id', 'physical_total', 'physical_available', 'commit_total', 'commit_available', 'host_responsive'];
+    const exactKeys = ['source', 'fixture_id', 'physical_total', 'physical_available', 'commit_total', 'commit_available', 'host_responsive'];
     return resourceTestSeamEnabled(options)
       && Object.keys(resources).length === exactKeys.length
       && exactKeys.every((key) => Object.prototype.hasOwnProperty.call(resources, key))
-      && resources.invocation === REPOSITORY_TEST_RESOURCE_INVOCATION
       && resources.source === REPOSITORY_TEST_RESOURCE_SOURCE
       && resources.fixture_id === REPOSITORY_TEST_RESOURCE_FIXTURE_ID
       && resources.physical_total === 16 * GIB
@@ -521,8 +513,8 @@ function validResourceState(resources) {
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources)
-    && resourceEvidenceSourceAccepted(resources, options));
+  const sourceAccepted = resourceEvidenceSourceAccepted(resources, options);
+  const supported = Boolean(sourceAccepted && validResourceState(resources));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -774,7 +766,7 @@ function admissionDecision(specInput, options = {}) {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
-  if (!validResourceState(resources) || !resourceEvidenceSourceAccepted(resources, options)) return refusal('Resource state could not be verified safely.');
+  if (!resourceEvidenceSourceAccepted(resources, options) || !validResourceState(resources)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -786,7 +778,7 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources) || !resourceEvidenceSourceAccepted(resources, options)) return refusal('Resource state could not be verified safely.');
+  if (!resourceEvidenceSourceAccepted(resources, options) || !validResourceState(resources)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 

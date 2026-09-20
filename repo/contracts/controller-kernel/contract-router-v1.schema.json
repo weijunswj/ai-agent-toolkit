@@ -92,7 +92,26 @@
         "a2_status": { "enum": ["not-accepted", "accepted"] },
         "status": { "const": "ROUTE_RESOLVED" },
         "repair_budget_consumed": { "const": false }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "execution_path": { "const": "accepted-a2-loop-reconciliation" } } },
+          "then": { "properties": { "a2_status": { "const": "accepted" } } }
+        },
+        {
+          "if": { "properties": { "execution_path": { "const": "direct-web-executor" } } },
+          "then": { "properties": { "a2_status": { "const": "not-accepted" } } }
+        },
+        {
+          "if": { "properties": { "stage": { "const": "LOOP" } } },
+          "then": {
+            "properties": {
+              "execution_path": { "const": "accepted-a2-loop-reconciliation" },
+              "a2_status": { "const": "accepted" }
+            }
+          }
+        }
+      ]
     },
     "routeDecision": {
       "type": "object",

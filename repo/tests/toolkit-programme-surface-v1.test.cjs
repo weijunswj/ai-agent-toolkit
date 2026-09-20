@@ -73,8 +73,8 @@ function currentInput() {
     run: { id: 'run-c1', state: 'IN_FLIGHT' },
     lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
     gate: 'G3',
-    repair_count: { used: 0, limit: 2 },
     candidate: { pr: 422, head, tree, base: { ref: 'main', sha: base } },
+    repair_count: { used: 0, limit: 2 },
     hold: { active: false },
     in_flight: {
       state: 'RUNNING',
@@ -137,6 +137,32 @@ test('CURRENT exposes the bounded restart fields and validates its digest', () =
   const staleField = programme.isCurrentFresh(projection, { gate: 'G4' });
   assert.equal(staleField.ok, false);
   assert.equal(staleField.code, 'CURRENT_STALE');
+});
+
+test('CURRENT rejects partial executable candidate identity instead of normalizing it away', () => {
+  const input = currentInput();
+  input.candidate = { ...input.candidate, head: null };
+  const created = programme.createCurrentProjection(input);
+  assert.equal(created.ok, false);
+  assert.equal(created.code, 'CURRENT_CANDIDATE_INVALID');
+  const malformed = currentInput();
+  malformed.candidate = {};
+  assert.equal(programme.createCurrentProjection(malformed).code, 'CURRENT_CANDIDATE_INVALID');
+  const nonObject = currentInput();
+  nonObject.candidate = 'malformed-candidate';
+  assert.equal(programme.createCurrentProjection(nonObject).code, 'CURRENT_CANDIDATE_INVALID');
+
+  const valid = programme.createCurrentProjection(currentInput());
+  assert.equal(valid.ok, true, valid.code);
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  const validate = ajv.compile(programmeSurfaceSchema);
+  assert.equal(validate(valid.projection), true, JSON.stringify(validate.errors));
+  const partial = structuredClone(valid.projection);
+  partial.candidate.head = null;
+  assert.equal(validate(partial), false);
+  const wrongMode = structuredClone(valid.projection);
+  wrongMode.candidate = { pr: null, head: null, tree: null, base: { ref: null, sha: null } };
+  assert.equal(validate(wrongMode), false);
 });
 
 test('material CURRENT transition requires a matching canonical readback', () => {
@@ -287,6 +313,15 @@ test('CURRENT launch safety rejects duplicate launch and derives reconciliation 
   assert.equal(terminal.code, 'CURRENT_STATE_INVARIANT_VIOLATION');
   assert.equal(terminal.derived_action, 'HOLD_TERMINAL_NON_CONVERGENCE');
 
+  const terminalWithoutNextAction = programme.validateCurrentLaunchSafety({
+    run: { state: 'TERMINAL' },
+    stage: 'G3',
+  });
+  assert.equal(terminalWithoutNextAction.ok, true, terminalWithoutNextAction.code);
+  assert.equal(terminalWithoutNextAction.action, 'HOLD_TERMINAL_NON_CONVERGENCE');
+  assert.equal(terminalWithoutNextAction.derived_action, 'HOLD_TERMINAL_NON_CONVERGENCE');
+  assert.equal(terminalWithoutNextAction.launch_allowed, false);
+
   const ready = programme.validateCurrentLaunchSafety({ stage: 'G3', authorised_stage: 'G3' });
   assert.equal(ready.ok, true, ready.code);
   assert.equal(ready.action, 'LAUNCH_G3_DIRECT');
@@ -361,6 +396,7 @@ test('verified inactive liveness clears active projection while preserving histo
     run: { id: 'run-stale', state: 'IN_FLIGHT' },
     lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
     gate: 'G3',
+    candidate: { pr: 422, head, tree, base: { ref: 'main', sha: base } },
     repair_count: { used: 0, limit: 2 },
     controlling_receipt: { id: 'receipt-stale', reference: 'github:issue-comment:422:5729731423', digest: '4'.repeat(64) },
     in_flight: {
@@ -391,6 +427,7 @@ test('terminal evidence wins over an in-flight allegation and requires terminal 
     run: { id: 'run-terminal', state: 'IN_FLIGHT' },
     lock: 'DL-C1-CONTROLLER-KERNEL-DELIVERY-CONTRACT-008',
     gate: 'G3',
+    candidate: { pr: 422, head, tree, base: { ref: 'main', sha: base } },
     repair_count: { used: 0, limit: 2 },
     controlling_receipt: { id: 'receipt-terminal', reference: 'github:issue-comment:422:5729731423', digest: '4'.repeat(64) },
     in_flight: {
@@ -704,6 +741,29 @@ test('all public programme renderers apply the retained public-data screen', () 
     programmeV5.programmeSurface.renderProgrammeGraph,
     programmeV5.programmeSurface.renderProgrammeParent,
   ]) assert.throws(() => renderer(graphMarkupCanary), /PUBLIC_DATA_UNSAFE/);
+
+  const malformedCanary = {
+    ...graphFixture(),
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0
+      ? { ...outcome, id: 'token=unsafe-canary', complete_when: undefined } : outcome),
+  };
+  assert.throws(() => programme.renderProgrammeGraph(malformedCanary), /PUBLIC_DATA_UNSAFE/);
+
+  const safeMalformed = {
+    ...graphFixture(),
+    outcomes: graphFixture().outcomes.map((outcome, index) => index === 0
+      ? { ...outcome, id: 'safe-canary', complete_when: undefined } : outcome),
+  };
+  const safeMalformedResult = programme.renderProgrammeGraph(safeMalformed);
+  assert.equal(safeMalformedResult.ok, false);
+  assert.equal(safeMalformedResult.code, 'PROGRAMME_GRAPH_OUTCOME_INVALID');
+
+  const expectedGraph = programme.renderProgrammeGraph(graphFixture());
+  const unsafeReadback = {
+    ...expectedGraph,
+    surface: { ...expectedGraph.surface, body: 'token=unsafe-reconciliation-canary' },
+  };
+  assert.throws(() => programme.reconcileProgrammeSurface(expectedGraph, unsafeReadback), /PUBLIC_DATA_UNSAFE/);
 });
 
 test('Programme Graph excludes child-local chronology and preserves parent minimality', () => {
@@ -752,15 +812,24 @@ test('Programme Graph rejects duplicate membership and unknown dependencies', ()
 });
 
 test('Programme Graph keeps only the minimum core when optional sections are empty', () => {
-  const minimal = programme.renderProgrammeGraph({
+  const input = {
     repository: 'example/minimal-repo',
     programme: { id: 'programme-minimal', title: 'Minimal Programme' },
     outcomes: [],
-  });
+  };
+  const minimal = programme.renderProgrammeGraph(input);
   assert.equal(minimal.ok, true, minimal.code);
   assert.match(minimal.body, /^## Programme status$/m);
   assert.match(minimal.body, /^## Programme Graph$/m);
   assert.doesNotMatch(minimal.body, /^## Programme (objective|labels|boundaries|holds|next action)$/m);
+
+  for (const sections of [{ empty: [] }, []]) {
+    const rendered = programme.renderProgrammeGraph({ ...input, programme: { ...input.programme, sections } });
+    assert.equal(rendered.ok, true, rendered.code);
+    assert.equal(rendered.body, minimal.body);
+    assert.equal(rendered.graph_digest, minimal.graph_digest);
+    assert.equal(rendered.canonical_snapshot_digest, minimal.canonical_snapshot_digest);
+  }
 });
 
 test('Programme #421 proof fixture round-trips the exact 30-outcome topology', () => {
@@ -771,4 +840,27 @@ test('Programme #421 proof fixture round-trips the exact 30-outcome topology', (
   assert.equal(programmeV5.validateProgrammeGraphProof(fixture).ok, true);
   assert.equal(programmeV5.renderProgrammeGraph, programmeV5.renderProgrammeParent);
   assert.equal(programmeV5.renderProgrammeGraph, programmeV5.programmeSurface.renderProgrammeGraph);
+});
+
+test('Programme #421 proof rejects incomplete source evidence and authority drift', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'controller-kernel', 'programme-421-proof-v1.json'), 'utf8'));
+  const cases = [
+    (candidate) => { delete candidate.source_evidence; },
+    (candidate) => { candidate.source_evidence.source_references.foundation_body_sha256.sha256 = '0'.repeat(64); },
+    (candidate) => { candidate.source_evidence.field_map.programme.title = 'tampered source field'; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').title = 'tampered title'; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').complete_when = 'tampered criterion'; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').dependencies = []; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C2').lifecycle = 'CURRENT'; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').native_issue.number = 436; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').delivery_pr = { repository: candidate.repository, number: 436, status: 'OPEN', role: null, completes_child: false, reference: null }; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'C1').current_gate.gate = 'G4'; },
+    (candidate) => { candidate.canonical_snapshot.outcomes.find((outcome) => outcome.id === 'Q').kind = 'OUTCOME'; },
+    (candidate) => { candidate.source_evidence.field_map.execution_authority.Q = 'EXECUTING'; },
+  ];
+  for (const mutate of cases) {
+    const candidate = structuredClone(fixture);
+    mutate(candidate);
+    assert.equal(programme.validateProgrammeGraphProof(candidate).ok, false);
+  }
 });

@@ -108,6 +108,81 @@ test('stored route bindings revalidate the current registry, stage, thread, capa
   }
 });
 
+test('A2 evidence is boolean, binds execution path, and cannot authorize Loop by metadata alone', () => {
+  const invalidEvidence = kernel.resolveRoute({
+    stage: 'G3', selected_stack: 'owner-openai', a2_accepted: 'true', registry_revision: revision, route_available: true,
+  });
+  assert.equal(invalidEvidence.ok, false);
+  assert.equal(invalidEvidence.code, 'ROUTE_UNAVAILABLE');
+  assert.equal(invalidEvidence.decision.reason_code, 'A2_EVIDENCE_INVALID');
+
+  const direct = kernel.resolveRoute({
+    stage: 'G3', selected_stack: 'owner-openai', registry_revision: revision, route_available: true, thread_id: 'thread-a2-direct',
+  });
+  assert.equal(direct.ok, true, direct.code);
+  const directTampered = structuredClone(direct.binding);
+  directTampered.execution_path = 'accepted-a2-loop-reconciliation';
+  assert.equal(kernel.validateRouteBinding(directTampered, {
+    ...{
+      current_registry_revision: revision,
+      current_registry_digest: direct.binding.registry_identity.digest,
+      stage: 'G3',
+      thread_id: 'thread-a2-direct',
+      selected_stack: 'owner-openai',
+      a2_accepted: false,
+      route_available: true,
+    },
+  }).reason_code, 'STORED_ROUTE_A2_EXECUTION_PATH_MISMATCH');
+
+  const loop = kernel.resolveRoute({
+    stage: 'LOOP', selected_stack: 'owner-openai', a2_accepted: true, registry_revision: revision,
+    route_available: true, thread_id: 'thread-a2-loop',
+  });
+  assert.equal(loop.ok, true, loop.code);
+  const loopTampered = structuredClone(loop.binding);
+  loopTampered.execution_path = 'direct-web-executor';
+  loopTampered.a2_status = 'not-accepted';
+  assert.equal(kernel.validateRouteBinding(loopTampered, {
+    current_registry_revision: revision,
+    current_registry_digest: loop.binding.registry_identity.digest,
+    stage: 'LOOP',
+    thread_id: 'thread-a2-loop',
+    selected_stack: 'owner-openai',
+    a2_accepted: false,
+    route_available: true,
+  }).reason_code, 'STORED_ROUTE_A2_EXECUTION_PATH_MISMATCH');
+
+  const unknownCurrentA2 = {
+    current_registry_revision: revision,
+    current_registry_digest: direct.binding.registry_identity.digest,
+    stage: 'G3',
+    thread_id: 'thread-a2-direct',
+    selected_stack: 'owner-openai',
+    route_available: true,
+  };
+  const missingCurrentA2 = kernel.validateRouteBinding(direct.binding, unknownCurrentA2);
+  assert.equal(missingCurrentA2.ok, false);
+  assert.equal(missingCurrentA2.reason_code, 'STORED_ROUTE_A2_EVIDENCE_INVALID');
+  assert.equal(kernel.validateRouteBinding(direct.binding, { ...unknownCurrentA2, a2Accepted: false }).code, 'ROUTE_BINDING_VALID');
+
+  const acceptedBinding = kernel.resolveRoute({
+    stage: 'G3', selected_stack: 'owner-openai', a2_accepted: true, registry_revision: revision,
+    route_available: true, thread_id: 'thread-a2-accepted',
+  });
+  assert.equal(acceptedBinding.ok, true, acceptedBinding.code);
+  const preA2Validation = kernel.validateRouteBinding(acceptedBinding.binding, {
+    current_registry_revision: revision,
+    current_registry_digest: acceptedBinding.binding.registry_identity.digest,
+    stage: 'G3',
+    thread_id: 'thread-a2-accepted',
+    selected_stack: 'owner-openai',
+    a2_accepted: false,
+    route_available: true,
+  });
+  assert.equal(preA2Validation.ok, false);
+  assert.equal(preA2Validation.reason_code, 'STORED_ROUTE_A2_STATE_MISMATCH');
+});
+
 test('verified harness policy maps only the owner harnesses and unknown is a decision hold', () => {
   const claude = kernel.resolveRoute({
     stage: 'G1',

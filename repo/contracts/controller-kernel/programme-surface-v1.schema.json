@@ -65,23 +65,46 @@
           }
         },
         "candidate": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["pr", "head", "tree", "base"],
-          "properties": {
-            "pr": { "type": ["integer", "null"], "minimum": 1 },
-            "head": { "$ref": "#/$defs/sha" },
-            "tree": { "$ref": "#/$defs/sha" },
-            "base": {
+          "oneOf": [
+            {
               "type": "object",
               "additionalProperties": false,
-              "required": ["ref", "sha"],
+              "required": ["pr", "head", "tree", "base"],
               "properties": {
-                "ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
-                "sha": { "$ref": "#/$defs/sha" }
+                "pr": { "type": "null" },
+                "head": { "type": "null" },
+                "tree": { "type": "null" },
+                "base": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["ref", "sha"],
+                  "properties": {
+                    "ref": { "type": "null" },
+                    "sha": { "type": "null" }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["pr", "head", "tree", "base"],
+              "properties": {
+                "pr": { "type": "integer", "minimum": 1 },
+                "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+                "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+                "base": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["ref", "sha"],
+                  "properties": {
+                    "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+                    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+                  }
+                }
               }
             }
-          }
+          ]
         },
         "hold": {
           "type": "object",
@@ -120,7 +143,93 @@
         },
         "next_admissible_action": { "$ref": "#/$defs/id" },
         "projection_digest": { "$ref": "#/$defs/digest" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["gate"],
+                "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+              },
+              {
+                "required": ["next_admissible_action"],
+                "properties": { "next_admissible_action": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidate": {
+                "type": "object",
+                "properties": {
+                  "pr": { "type": "integer", "minimum": 1 },
+                  "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+                  "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+                  "base": {
+                    "type": "object",
+                    "properties": {
+                      "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+                      "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": ["gate"],
+                      "properties": { "gate": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+                    },
+                    {
+                      "required": ["next_admissible_action"],
+                      "properties": { "next_admissible_action": { "type": "string", "pattern": "^(?:(?:G3|G4)(?:_|$)|(?:.*_)?(?:REPAIR|AMEND)(?:_|$)|LAUNCH_G[34]_DIRECT$)" } }
+                    }
+                  ]
+                }
+              },
+              {
+                "anyOf": [
+                  {
+                    "required": ["gate"],
+                    "properties": { "gate": { "type": "string", "pattern": "^(?:G0|G1|G2|LOOP|FINAL_AUDIT|BROWSER)(?:_|$)" } }
+                  },
+                  {
+                    "required": ["next_admissible_action"],
+                    "properties": { "next_admissible_action": { "type": "string", "pattern": "^(?:G0|G1|G2|LOOP|FINAL_AUDIT|BROWSER)(?:_|$)" } }
+                  }
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidate": {
+                "type": "object",
+                "properties": {
+                  "pr": { "type": "null" },
+                  "head": { "type": "null" },
+                  "tree": { "type": "null" },
+                  "base": {
+                    "type": "object",
+                    "properties": {
+                      "ref": { "type": "null" },
+                      "sha": { "type": "null" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "prAdmission": {
       "type": "object",

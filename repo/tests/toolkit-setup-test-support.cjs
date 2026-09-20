@@ -10,8 +10,11 @@ const { version: CURRENT_TOOLKIT_VERSION } = require('../contracts/toolkit-local
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
-const REPOSITORY_TEST_RESOURCE_STATE = Object.freeze({
+const REPOSITORY_TEST_INVOCATION = Object.freeze({
   invocation: agentControl.REPOSITORY_TEST_RESOURCE_INVOCATION,
+  fixture_id: agentControl.REPOSITORY_TEST_RESOURCE_FIXTURE_ID,
+});
+const REPOSITORY_TEST_RESOURCE_STATE = Object.freeze({
   fixture_id: agentControl.REPOSITORY_TEST_RESOURCE_FIXTURE_ID,
   physical_total: 16 * 1024 ** 3,
   physical_available: 8 * 1024 ** 3,
@@ -311,4 +314,4 @@ function backupFiles(root) {
   return fs.readdirSync(location, { recursive: true });
 }
 
-module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, REPOSITORY_TEST_RESOURCE_STATE, repositoryTestResourceEnvironment, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles };
+module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, REPOSITORY_TEST_INVOCATION, REPOSITORY_TEST_RESOURCE_STATE, repositoryTestResourceEnvironment, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles };

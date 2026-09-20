@@ -176,9 +176,15 @@ test('resource-counter loss removes direct automatic and resolves recommended se
 
 test('repository-test resource fixture is explicit and isolated from runtime counters', () => {
   const fixture = setupTestSupport.REPOSITORY_TEST_RESOURCE_STATE;
-  assert.equal(control.inspectResourceCapability({ resourceState: fixture }).supported, true);
-  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
-  assert.equal(control.inspectResourceCapability({ test_seam: false, resourceState: fixture }).supported, true);
+  const invocation = setupTestSupport.REPOSITORY_TEST_INVOCATION;
+  assert.equal(control.inspectResourceCapability({ resourceState: fixture }).supported, false);
+  assert.equal(control.inspectResourceCapability({ test_seam: true, resourceState: fixture }).supported, false);
+  const explicitFixture = control.inspectResourceCapability({ repository_test_invocation: invocation, resourceState: fixture });
+  assert.equal(explicitFixture.supported, true);
+  assert.equal(explicitFixture.source, control.REPOSITORY_TEST_RESOURCE_SOURCE);
+  assert.equal(control.inspectResourceCapability({ repositoryTestInvocation: invocation, resourceState: fixture }).supported, true);
+  assert.equal(control.inspectResourceCapability({ repository_test_invocation: invocation, repositoryTestInvocation: invocation, resourceState: fixture }).supported, false);
+  assert.equal(control.inspectResourceCapability({ test_seam: false, resourceState: fixture }).supported, false);
   assert.equal(control.inspectResourceCapability({ resourceState: fixture, resource_state: fixture }).supported, false);
   assert.equal(control.inspectResourceCapability({ resourceState: fixture, resources: fixture }).supported, false);
   assert.equal(control.inspectResourceCapability({ test_seam: true }).source === control.REPOSITORY_TEST_RESOURCE_SOURCE, false);
@@ -238,7 +244,7 @@ test('repository-test resource fixture is explicit and isolated from runtime cou
 
   const unavailable = control.inspectResourceCapability({ test_seam: true, resourceState: null });
   assert.deepEqual(unavailable, { supported: false, source: 'unsupported-or-malformed', resources: null });
-  const malformed = control.inspectResourceCapability({ test_seam: true, resourceState: { ...fixture, physical_available: 0 } });
+  const malformed = control.inspectResourceCapability({ repository_test_invocation: invocation, resourceState: { ...fixture, physical_available: 0 } });
   assert.deepEqual(malformed, { supported: false, source: 'unsupported-or-malformed', resources: null });
 });
 
