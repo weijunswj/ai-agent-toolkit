@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 const receipt = require('./toolkit-github-program-receipt.cjs');
+const programmeSurface = require('./toolkit-programme-surface-v1.cjs');
 
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 const PARENT_ISSUE = 240;
@@ -2386,7 +2387,7 @@ function previewRecovery(input = {}) {
   if (!evidenceValid.ok) return evidenceValid;
   const parsed = evidenceValid.parsed;
   const targetState = parsed.target_state;
-  const rendered = renderProgrammeV5(targetState);
+  const rendered = publicRenderProgrammeV5(targetState);
   if (!rendered.ok) return failure('RECOVERY_TARGET_RENDER_INVALID');
   const parentTargetBytes = parsed.parent.canonical_digest === parsed.target_digest
     ? parsed.parent.raw_body
@@ -4572,7 +4573,7 @@ function h2LinesForArray(values, empty = 'None recorded.') {
 }
 function h2ManagedDocument(style, kind, prose, carrier) {
   const marker = style[kind];
-  h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+  h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line) && h2AuditScalar(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
   for (const line of prose) h2Require(!H2_RESERVED_STEMS.some((stem) => line.includes(stem)), true, 'RESERVED_RESIDUE', 'PUBLIC_AUDIT');
   const proseDigest = h2DigestText(prose.join('\n'));
   const finalizedCarrier = { ...carrier, public_prose_sha256: proseDigest };
@@ -4592,33 +4593,67 @@ function h2ManagedDocument(style, kind, prose, carrier) {
     prose,
   };
 }
+function h2ProgrammeGraphSnapshot(state, projection) {
+  const currentGateForChild = (child) => {
+    if (child.lifecycle !== 'CURRENT') return null;
+    const lanes = (state.active_lanes || []).filter((lane) => (lane.child_issue ?? lane.child) === child.issue);
+    if (lanes.length === 0) return null;
+    h2Require(lanes.length === 1 && lanes[0].gate_state === 'ACTIVE' && h2SafeId(lanes[0].gate), true, 'PROGRAMME_GRAPH_GATE_SOURCE_INVALID', 'CANONICAL');
+    return { gate: lanes[0].gate, repair: null };
+  };
+  const completeWhenForChild = (child) => {
+    h2Require(Array.isArray(child.done_when) && child.done_when.length > 0 && typeof child.done_when[0] === 'string' && child.done_when[0].length > 0,
+      true, 'PROGRAMME_GRAPH_COMPLETION_SOURCE_MISSING', 'CANONICAL');
+    return child.done_when[0];
+  };
+  const outcomes = state.children.map((child) => {
+    const registry = (child.pr_registry || []).slice().sort((left, right) => left.pr - right.pr);
+    const delivery = registry.length ? registry[registry.length - 1] : null;
+    const deliveryState = delivery && ['OPEN', 'CLOSED', 'MERGED'].includes(delivery.github_state)
+      ? delivery.github_state : 'UNKNOWN';
+    return {
+      id: 'child-' + child.issue,
+      order: child.order,
+      kind: 'CHILD',
+      title: child.title,
+      materialized: true,
+      lifecycle: child.lifecycle,
+      dependencies: child.dependencies || [],
+      native_issue: { repository: state.repository, number: child.issue },
+      delivery_pr: delivery ? {
+        repository: state.repository,
+        number: delivery.pr,
+        status: deliveryState,
+        role: delivery.role,
+        completes_child: delivery.completes_child,
+        reference: null,
+      } : null,
+      current_gate: currentGateForChild(child),
+      complete_when: completeWhenForChild(child),
+    };
+  });
+  return {
+    repository: state.repository,
+    programme: {
+      id: 'programme-' + state.parent.issue,
+      issue: state.parent.issue,
+      title: state.parent.title,
+      objective: state.parent.goal,
+      lifecycle: projection.lifecycle,
+      finality: projection.finality,
+      labels: state.parent.labels || [],
+      boundaries: state.boundaries || [],
+      holds: state.holds || [],
+      next_action: projection.next_action.text,
+    },
+    outcomes,
+  };
+}
+
 function h2ParentProse(state, projection) {
-  const lines = [
-    '# AI Agent Toolkit Programme',
-    '',
-    '## Programme status',
-    '| Field | Value |',
-    '| --- | --- |',
-    '| Repository | ' + h2Cell(projection.repository) + ' |',
-    '| Parent issue | #' + h2Identifier(projection.parent_issue) + ' |',
-    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
-    '| Finality | ' + h2Cell(projection.finality) + ' |',
-    '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
-    '',
-    '## Children',
-    '| Issue | Order | Lifecycle | Finality | Summary |',
-    '| --- | --- | --- | --- | --- |',
-  ];
-  for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
-  lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
-  lines.push('## Completed work', ...h2LinesForArray(projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary)), '');
-  lines.push('## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)), '');
-  lines.push('## PR history', '| PR | Child | Epoch | Outcome | Summary |', '| --- | --- | --- | --- | --- |');
-  if (projection.pr_history.length) for (const item of projection.pr_history) lines.push('| #' + h2Identifier(item.pr) + ' | #' + h2Identifier(item.child_issue) + ' | ' + h2Cell(item.epoch_id || '-') + ' | ' + h2Cell(item.outcome) + ' | ' + h2Cell(item.summary) + ' |');
-  else lines.push('| None | - | - | None recorded | - |');
-  lines.push('', '## ELI5', h2Paragraph('The parent is the one source of programme truth; child and PR views are derived from it.'), '');
-  lines.push('## Immediate next', h2Bullet(projection.next_action.text));
-  return lines;
+  const rendered = programmeSurface.renderProgrammeGraph(h2ProgrammeGraphSnapshot(state, projection));
+  h2Require(rendered.ok, true, 'PROGRAMME_GRAPH_RENDER_INVALID', 'PUBLIC_AUDIT');
+  return rendered.body.split('\n');
 }
 function h2ChildProse(projection) {
   const lines = [
@@ -5494,6 +5529,34 @@ function h2PlanMigrationPublic(input) {
   });
 }
 
+function h2ScreenLegacyRender(value) {
+  if (!isRecord(value) || value.ok !== true) return value;
+  const screened = h2Clone(value);
+  const bodies = [screened.parent, screened.child];
+  delete screened.parent;
+  delete screened.child;
+  h2Require(h2Audit(screened), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  for (const body of bodies) {
+    h2Require(typeof body === 'string' && body.split('\n').filter((line) => !line.includes('<!--')).every(h2AuditScalar), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  }
+  return value;
+}
+
+function publicRenderProgrammeV5(state) {
+  h2Require(h2Audit(state), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2ScreenLegacyRender(renderProgrammeV5(state));
+}
+
+const publicRenderProgrammeGraph = programmeSurface.renderProgrammeGraph;
+
+const publicProgrammeSurface = Object.freeze({
+  ...programmeSurface,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
+  admitCurrent: programmeSurface.admitCurrent,
+  currentAdmission: programmeSurface.admitCurrent,
+});
+
 const humanSurfaceV2 = Object.freeze({
   readComplete: h2ReadCompletePublic,
   render: h2RenderPublic,
@@ -5511,7 +5574,7 @@ const projectionBootstrapRecovery = Object.freeze({
   parseParentV5Body,
   parseChildV5Body,
   parse: parseProgrammeV5Body,
-  render: renderProgrammeV5,
+  render: publicRenderProgrammeV5,
   preview: previewRecovery,
   buildTargetState: buildRecoveryTargetState,
   buildReceiptOperationDescriptor,
@@ -5539,8 +5602,13 @@ const programmeV5 = Object.freeze({
     const valid = validateCanonicalStateV5(state);
     return valid.ok ? success('V5_PROJECTION_READY', { projection: projectionPayload(state, kind), projection_digest: digestValue(projectionPayload(state, kind)) }) : valid;
   },
-  renderProgrammeV5,
+  renderProgrammeV5: publicRenderProgrammeV5,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
+  validateProgrammeGraphProof: programmeSurface.validateProgrammeGraphProof,
+  reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
   parseProgrammeV5Body,
+  currentProjection: programmeSurface,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
 });
@@ -5637,7 +5705,7 @@ module.exports = Object.freeze({
   classifyPostMergeEpochFinalisationCheckpoint,
   previewPostMergeEpochFinalisation,
   deriveProjectionV5: programmeV5.deriveProjectionV5,
-  renderProgrammeV5,
+  renderProgrammeV5: publicRenderProgrammeV5,
   parseParentV5Body,
   parseChildV5Body,
   parseProgrammeV5Body,
@@ -5650,6 +5718,31 @@ module.exports = Object.freeze({
   validateControllerBootstrap,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
+  programmeSurface: publicProgrammeSurface,
+  projectPullRequestMetadata: programmeSurface.projectPullRequestMetadata,
+  normalizeProgrammeGraphSnapshot: programmeSurface.normalizeProgrammeGraphSnapshot,
+  validateProgrammeGraph: programmeSurface.validateProgrammeGraph,
+  validateProgrammeGraphProof: programmeSurface.validateProgrammeGraphProof,
+  PROGRAMME_421_PROOF_OUTCOME_IDS: programmeSurface.PROGRAMME_421_PROOF_OUTCOME_IDS,
+  PROGRAMME_421_PROOF_SOURCE_HASHES: programmeSurface.PROGRAMME_421_PROOF_SOURCE_HASHES,
+  renderProgrammeGraph: publicRenderProgrammeGraph,
+  renderProgrammeParent: publicRenderProgrammeGraph,
+  reconcileProgrammeSurface: programmeSurface.reconcileProgrammeSurface,
+  reconcileProgrammeGraph: programmeSurface.reconcileProgrammeGraph,
+  createBootstrapIoDiagnostic: programmeSurface.createBootstrapIoDiagnostic,
+  createBootstrapIODiagnostic: programmeSurface.createBootstrapIODiagnostic,
+  renderBootstrapIO: programmeSurface.renderBootstrapIO,
+  reconcileWorkerLiveness: programmeSurface.reconcileWorkerLiveness,
+  workerLiveness: programmeSurface.workerLiveness,
+  deriveNextAdmissibleAction: programmeSurface.deriveNextAdmissibleAction,
+  admitCurrent: programmeSurface.admitCurrent,
+  currentAdmission: programmeSurface.admitCurrent,
+  validateCurrentLaunchSafety: programmeSurface.validateCurrentLaunchSafety,
+  createCurrentProjection: programmeSurface.createCurrentProjection,
+  validateCurrentProjection: programmeSurface.validateCurrentProjection,
+  isCurrentFresh: programmeSurface.isCurrentFresh,
+  transitionCurrent: programmeSurface.transitionCurrent,
+  transitionCurrentAndReadback: programmeSurface.transitionAndReadback,
   humanSurfaceV2,
   programmeV5,
 });

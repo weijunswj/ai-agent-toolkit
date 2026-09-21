@@ -13,7 +13,7 @@ const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
+  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'proc-meminfo', ...overrides };
 }
 function spec(overrides = {}) {
   return {
