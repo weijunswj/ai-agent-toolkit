@@ -90,3 +90,24 @@ test('every evidence macro expands to bounded read-only instructions', () => {
     assert.ok(packet.steps.length > 0);
   }
 });
+
+
+test('global provenance cannot be suppressed by an empty question-level override', () => {
+  const input = manifest();
+  input.questions[0].required_provenance = [];
+  const plan = compileEvidenceManifest(input);
+  assert.deepEqual(
+    plan.leaf_packets[0].required_provenance,
+    ['exact path', 'symbol or line identity'],
+  );
+});
+
+test('evidence compiler requires durable provenance and rejects duplicate macro expansion', () => {
+  const missing = manifest();
+  missing.required_provenance = [];
+  assert.throws(() => compileEvidenceManifest(missing), /required_provenance/);
+
+  const duplicate = manifest();
+  duplicate.questions[0].macros.push('SYMBOL_CONSUMER_SEARCH');
+  assert.throws(() => compileEvidenceManifest(duplicate), /must not contain duplicates/);
+});
