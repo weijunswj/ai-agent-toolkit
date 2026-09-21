@@ -9,7 +9,16 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.9';
+const CONTROL_VERSION = '2.10.10';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_CONTEXT';
+const REPOSITORY_TEST_RESOURCE_STATE_ENV = 'AI_AGENT_TOOLKIT_REPOSITORY_TEST_RESOURCE_STATE';
+const REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE = 'ai-agent-toolkit-repository-test-v1';
+const REPOSITORY_TEST_RESOURCE_FIXTURE_ID = 'healthy-resource-v1';
+const REPOSITORY_TEST_RESOURCE_INVOCATION = 'toolkit.repository-test.resource.v1';
+const REPOSITORY_TEST_RESOURCE_SOURCE = 'repository-test-fixture';
+const REPOSITORY_TEST_INVOCATION_ALIASES = Object.freeze(['repository_test_invocation', 'repositoryTestInvocation']);
+const RESOURCE_STATE_ALIASES = Object.freeze(['resourceState', 'resource_state']);
+const RESOURCE_STATE_CONFLICT_ALIASES = Object.freeze(['resourceState', 'resource_state', 'resources', 'resource']);
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -327,6 +336,117 @@ function childLaunchRefusal(options = {}) {
     : null;
 }
 
+function ownDataDescriptor(value, key) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try { return Object.getOwnPropertyDescriptor(value, key) || null; } catch (_error) { return null; }
+}
+
+function inheritedDescriptor(value, key) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  let prototype;
+  try { prototype = Object.getPrototypeOf(value); } catch (_error) { return { unsafe: true }; }
+  while (prototype !== null) {
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
+      if (descriptor) return descriptor;
+      prototype = Object.getPrototypeOf(prototype);
+    } catch (_error) { return { unsafe: true }; }
+  }
+  return null;
+}
+
+function trustedDataValue(value, seen = new Set()) {
+  if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return { ok: true, value };
+  }
+  if (typeof value === 'number') return { ok: Number.isFinite(value), value };
+  if (typeof value !== 'object' || seen.has(value)) return { ok: false };
+  const nextSeen = new Set(seen);
+  nextSeen.add(value);
+  let array;
+  try { array = Array.isArray(value); } catch (_error) { return { ok: false }; }
+  if (array) {
+    let lengthDescriptor;
+    let keys;
+    try {
+      lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+      keys = Reflect.ownKeys(value);
+    } catch (_error) { return { ok: false }; }
+    if (!lengthDescriptor || !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value')
+      || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0) return { ok: false };
+    const output = [];
+    for (let index = 0; index < lengthDescriptor.value; index += 1) {
+      let descriptor;
+      try { descriptor = Object.getOwnPropertyDescriptor(value, String(index)); } catch (_error) { return { ok: false }; }
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return { ok: false };
+      const checked = trustedDataValue(descriptor.value, nextSeen);
+      if (!checked.ok) return { ok: false };
+      output.push(checked.value);
+    }
+    for (const key of keys) {
+      if (key !== 'length' && (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= lengthDescriptor.value)) return { ok: false };
+    }
+    return { ok: true, value: output };
+  }
+  let prototype;
+  try { prototype = Object.getPrototypeOf(value); } catch (_error) { return { ok: false }; }
+  if (prototype !== Object.prototype && prototype !== null) return { ok: false };
+  let keys;
+  try { keys = Reflect.ownKeys(value); } catch (_error) { return { ok: false }; }
+  const output = {};
+  for (const key of keys) {
+    if (typeof key !== 'string') return { ok: false };
+    const descriptor = ownDataDescriptor(value, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return { ok: false };
+    const checked = trustedDataValue(descriptor.value, nextSeen);
+    if (!checked.ok) return { ok: false };
+    output[key] = checked.value;
+  }
+  return { ok: true, value: output };
+}
+
+function trustedAliasValues(value, aliases) {
+  let array;
+  try { array = Array.isArray(value); } catch (_error) { return { ok: false, reason: 'INPUT_NOT_OBJECT' }; }
+  if (!value || typeof value !== 'object' || array) return { ok: false, reason: 'INPUT_NOT_OBJECT' };
+  const values = {};
+  try {
+    for (const alias of aliases) {
+      const own = ownDataDescriptor(value, alias);
+      const inherited = inheritedDescriptor(value, alias);
+      if (inherited?.unsafe || !own && inherited) return { ok: false, reason: 'INHERITED_AUTHORITY' };
+      if (!own) continue;
+      if (!Object.prototype.hasOwnProperty.call(own, 'value')) return { ok: false, reason: 'ACCESSOR_AUTHORITY' };
+      values[alias] = own.value;
+    }
+  } catch (_error) { return { ok: false, reason: 'DESCRIPTOR_READ_FAILED' }; }
+  return { ok: true, values };
+}
+
+function trustedRecordFromValue(value) {
+  return trustedDataValue(value);
+}
+
+function repositoryTestInvocationAuthority(options = {}) {
+  let array;
+  try { array = Array.isArray(options); } catch (_error) { return null; }
+  if (!options || typeof options !== 'object' || array) return null;
+  const aliases = trustedAliasValues(options, REPOSITORY_TEST_INVOCATION_ALIASES);
+  if (!aliases.ok) return null;
+  const present = Object.keys(aliases.values);
+  if (present.length !== 1) return null;
+  const authority = aliases.values[present[0]];
+  if (!authority || typeof authority !== 'object' || Array.isArray(authority)) return null;
+  const trusted = trustedRecordFromValue(authority);
+  if (!trusted.ok || Object.keys(trusted.value).length !== 2
+    || !Object.prototype.hasOwnProperty.call(trusted.value, 'invocation')
+    || !Object.prototype.hasOwnProperty.call(trusted.value, 'fixture_id')) return null;
+  const values = trusted.value;
+  if (values.invocation !== REPOSITORY_TEST_RESOURCE_INVOCATION
+    || values.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE_ID) return null;
+  return { alias: present[0], authority: { invocation: values.invocation, fixture_id: values.fixture_id } };
+}
+
 function verifyCurrentClaudeEnforcement(profile, options = {}) {
   const env = effectiveEnvironment(options);
   const current = require('./setup-claude-toolkit-plugin.cjs').verifyCurrentInstalledEnforcement(profile.activation_proof, {
@@ -362,6 +482,9 @@ function readProfile(host = 'claude-code', options = {}) {
 
 function configureProfile(host, selected, options = {}) {
   if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
+  const trustedSelected = trustedRecordFromValue(selected);
+  if (!trustedSelected.ok) throw new Error('Profile authority could not be inspected safely.');
+  selected = trustedSelected.value;
   const topology = selected.topology;
   const capacityMode = selected.capacity_mode;
   if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
@@ -382,9 +505,14 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
+  const resourceOptions = { resourceState: selected.resource_state };
+  const invocationAuthority = repositoryTestInvocationAuthority(options);
+  if (invocationAuthority) resourceOptions.repository_test_invocation = invocationAuthority.authority;
+  const resourceCapability = inspectResourceCapability(resourceOptions);
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
-  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
+  const explicitResourceState = Object.prototype.hasOwnProperty.call(selected, 'resource_state');
+  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (explicitResourceState && !resourceCapability.supported
+    || selected.resource_counter_supported !== true && !resourceCapability.supported
     || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
     throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
   }
@@ -434,8 +562,51 @@ function windowsResources() {
   return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
 }
 
+function repositoryTestResourceStateFromEnvironment(env = process.env) {
+  // Environment, preload state and descendants are never invocation authority.
+  // Keep the bounded probe for compatibility, but do not return evidence from it.
+  void env;
+  return null;
+}
+
+function resourceTestSeamEnabled(options = {}) {
+  return repositoryTestInvocationAuthority(options) !== null;
+}
+
+function resourceEvidenceSourceAccepted(resources, options = {}) {
+  const trusted = trustedRecordFromValue(resources);
+  if (!trusted.ok || !trusted.value || typeof trusted.value !== 'object' || Array.isArray(trusted.value)) return false;
+  resources = trusted.value;
+  const hasFixtureMarker = Object.prototype.hasOwnProperty.call(resources, 'fixture_id')
+    || Object.prototype.hasOwnProperty.call(resources, 'invocation')
+    || resources.source === 'fixture'
+    || resources.source === REPOSITORY_TEST_RESOURCE_SOURCE;
+  if (hasFixtureMarker) {
+    const exactKeys = ['source', 'fixture_id', 'physical_total', 'physical_available', 'commit_total', 'commit_available', 'host_responsive'];
+    return resourceTestSeamEnabled(options)
+      && Object.keys(resources).length === exactKeys.length
+      && exactKeys.every((key) => Object.prototype.hasOwnProperty.call(resources, key))
+      && resources.source === REPOSITORY_TEST_RESOURCE_SOURCE
+      && resources.fixture_id === REPOSITORY_TEST_RESOURCE_FIXTURE_ID
+      && resources.physical_total === 16 * GIB
+      && resources.physical_available === 8 * GIB
+      && resources.commit_total === 32 * GIB
+      && resources.commit_available === 16 * GIB
+      && resources.host_responsive === true;
+  }
+  return ['proc-meminfo', 'win32-operating-system'].includes(resources.source);
+}
+
 function inspectResources(options = {}) {
-  if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+  const checked = trustedAliasValues(options, RESOURCE_STATE_CONFLICT_ALIASES);
+  if (!checked.ok) return null;
+  const aliases = Object.keys(checked.values);
+  if (aliases.length > 0) {
+    if (aliases.length !== 1 || !RESOURCE_STATE_ALIASES.includes(aliases[0])) return null;
+    const resourceState = trustedRecordFromValue(checked.values[aliases[0]]);
+    if (!resourceState.ok || !resourceState.value || typeof resourceState.value !== 'object' || Array.isArray(resourceState.value)) return null;
+    return resourceState.value;
+  }
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -444,16 +615,23 @@ function inspectResources(options = {}) {
 }
 
 function validResourceState(resources) {
-  return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
-    .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
-    && resources.physical_available <= resources.physical_total
-    && resources.commit_available <= resources.commit_total
-    && resources.host_responsive === true;
+  const trusted = trustedRecordFromValue(resources);
+  if (!trusted.ok) return false;
+  const value = trusted.value;
+  return value && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
+    .every((key) => Number.isSafeInteger(value[key]) && value[key] > 0)
+    && value.physical_available <= value.physical_total
+    && value.commit_available <= value.commit_total
+    && value.host_responsive === true;
 }
 
 function inspectResourceCapability(options = {}) {
+  const trustedOptions = trustedRecordFromValue(options);
+  if (!trustedOptions.ok) return { supported: false, source: 'unsupported-or-malformed', resources: null };
+  options = trustedOptions.value;
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  const sourceAccepted = resourceEvidenceSourceAccepted(resources, options);
+  const supported = Boolean(sourceAccepted && validResourceState(resources));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -621,6 +799,9 @@ function checkerAdmissionOutcome(admission, details = {}) {
 
 function validateLaunchSpec(spec) {
   if (!spec || typeof spec !== 'object') throw new Error('Launch specification is required.');
+  const trustedSpec = trustedRecordFromValue(spec);
+  if (!trustedSpec.ok) throw new Error('Launch specification authority could not be inspected safely.');
+  spec = trustedSpec.value;
   const requiredText = ['child_responsibility', 'parent_responsibility', 'integration_plan', 'validation_plan', 'material_benefit'];
   for (const key of requiredText) if (String(spec[key] || '').trim().length < 12) throw new Error(`${key} must declare a meaningful responsibility.`);
   const child = String(spec.child_responsibility).trim().toLowerCase();
@@ -685,6 +866,9 @@ function validAdmissionProfile(profile) {
 }
 
 function admissionDecision(specInput, options = {}) {
+  const trustedOptions = trustedRecordFromValue(options);
+  if (!trustedOptions.ok) return refusal('Launch admission options could not be inspected safely.');
+  options = trustedOptions.value;
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -705,11 +889,19 @@ function admissionDecision(specInput, options = {}) {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!resourceEvidenceSourceAccepted(resources, options) || !validResourceState(resources)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
 function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  const trustedOptions = trustedRecordFromValue(options);
+  if (!trustedOptions.ok) return refusal('Launch admission options could not be inspected safely.');
+  options = trustedOptions.value;
+  const trustedProfile = trustedRecordFromValue(profile);
+  const trustedResources = trustedRecordFromValue(resources);
+  if (!trustedProfile.ok || !trustedResources.ok) return refusal('Launch admission authority could not be inspected safely.');
+  profile = trustedProfile.value;
+  resources = trustedResources.value;
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -717,7 +909,7 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  if (!resourceEvidenceSourceAccepted(resources, options) || !validResourceState(resources)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -995,6 +1187,9 @@ function readCheckerWorkflowInput(inputPath, options = {}) {
 }
 
 function launch(specInput, options = {}) {
+  const trustedOptions = trustedRecordFromValue(options);
+  if (!trustedOptions.ok) return refusal('Launch options could not be inspected safely.');
+  options = trustedOptions.value;
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -1119,7 +1314,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, REPOSITORY_TEST_RESOURCE_CONTEXT_ENV, REPOSITORY_TEST_RESOURCE_STATE_ENV, REPOSITORY_TEST_RESOURCE_CONTEXT_VALUE, REPOSITORY_TEST_RESOURCE_FIXTURE_ID, REPOSITORY_TEST_RESOURCE_INVOCATION, REPOSITORY_TEST_RESOURCE_SOURCE, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
   checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

@@ -74,7 +74,7 @@ function descriptor(overrides = {}) {
       base_sha: MAIN_SHA,
       head: '1111111111111111111111111111111111111111',
       tree: '2222222222222222222222222222222222222222',
-      version: '2.10.9',
+      version: '2.10.10',
     },
     ...overrides,
   };
@@ -559,7 +559,7 @@ function humanSurfaceContractInstance() {
     root: ROOT,
     lock: LOCK,
     version: 'human-v2',
-    package_version: '2.10.9',
+    package_version: '2.10.10',
     facade_export: 'humanSurfaceV2',
     operations: ['readComplete', 'render', 'extendHistory', 'planMigration'],
     stages: [
