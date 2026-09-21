@@ -95,47 +95,71 @@ A technically necessary replacement PR may preserve the same child only when ide
 
 Governance stage semantics are provider/model agnostic.
 
-- `G0` = bounded pre-G1 discovery/evidence preparation. It is not an authority gate.
-- `G1` = architecture/authority.
-- `G2` = executable implementation contract.
+- `G0-A` = bounded problem framing; leaf-only, read-only and conditional for genuinely simple/well-specified work.
+- `G0-B` = bounded evidence acquisition; the subagent-capable phase of the single non-gating G0 stage.
+- `G1` = root convergence plus architecture/authority.
+- `G2` = adversarial executable implementation-contract closure.
 - `G3` = implementation/validation.
 - `G4` = fresh isolated exact-head independent assurance.
-- `LOOP`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence.
+- `LOOP`, `RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. RECONVERGENCE is read-only and non-gating.
 
-Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only discovery; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
+Only G0-B and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0-B fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
-Concrete provider/model/reasoning/service-tier choices are selected through a stack registry and are configuration, not architecture law. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Service treatment/speed is non-authoritative observed metadata. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
 
 ## Gate lifecycle
 
-### G1 — Architecture and authority
+### G0 — Problem framing and evidence acquisition
 
-G1 establishes:
+G0 is non-gating and may use two chronological phases.
+
+G0-A frames uncertain/diagnostic work: known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and the stopping condition for sufficient evidence. G0-A is leaf-only. A separate G0-A model invocation may be omitted or compacted for genuinely simple/well-specified work.
+
+G0-B acquires the evidence requested by the framing packet and may fan out bounded depth-1 read-only leaves for genuinely separable questions. Leaves collect evidence rather than independently redesigning the solution. G0-B may be omitted when existing evidence is already sufficient.
+
+### G1 — Root convergence, architecture and authority
+
+For material uncertain work, G1 establishes:
 
 - outcome and scope;
+- a supported bounded causal/root model explaining the material observations;
+- material competing hypotheses and their disposition;
+- governing invariant and trust/authority ordering;
+- materially equivalent surfaces inside the defect/risk class;
 - architecture and authority boundaries;
 - risk/assurance path;
 - dependencies;
-- child sizing and whether work must split.
+- child sizing and whether work must split;
+- remaining assumptions and evidence that would invalidate them.
+
+Material unresolved root uncertainty produces HOLD with a specific missing-evidence request rather than a speculative PASS.
 
 Toolkit G1 must prove conformance to this document or explicitly obtain authority to amend it.
 
-### G2 — Executable implementation contract
+### G2 — Adversarial executable implementation contract
+
+G2 independently challenges the accepted G1 boundary before mutation. It may inspect primary sources and reject a flawed G1 assumption.
 
 G2 binds:
 
 - acceptance criteria and invariants;
+- consequential entry/copy/serialization/consumer boundaries;
 - affected consumers;
-- permitted effects;
+- permitted and forbidden behaviour;
+- positive, negative and adversarial regression oracles;
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
 
-G1 and G2 are decisions, not mandatory separate conversations. Where one accepted design invocation can truthfully establish both under current routing/authority, separate model launches are unnecessary.
+For material difficult/diagnostic/security/authority-sensitive work, G2 should use a fresh context and ask how an implementation could satisfy the proposed instructions while still violate the accepted invariant.
+
+For expressly simple/low-uncertainty work, one invocation may establish logically separate G1 and G2 decisions when current routing/authority permits it; record the absence of a fresh independent-model challenge.
 
 ### G3 — Implementation and validation
 
-G3 implements and validates the complete bounded child candidate within the accepted contract.
+G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
+
+Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
 
 Ordinary commits or internal increments do not create separate G4 lifecycles.
 
@@ -145,9 +169,19 @@ Material scope expansion stops the affected work at a safe boundary and returns 
 
 G4 is fresh, isolated, read-only assurance of the **complete final Delivery Child candidate** and its relevant dependency boundaries/evidence.
 
+G4 remains adversarial; upstream convergence must improve first-pass quality without weakening G4.
+
+A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. Classification is diagnostic evidence, not a score or authority grant.
+
 G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.
+
+### Re-convergence
+
+RECONVERGENCE is a read-only non-gate role used only after bounded focused recovery fails to converge at the same/root-related boundary.
+
+Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. It grants no authority. `CONTINUE_CURRENT_CONTRACT` is actionable only when existing authority, budgets and fresh state already permit the named correction; `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`.
 
 ## Child sizing and splitting
 
@@ -182,19 +216,36 @@ If an intermediate source integration is independently shippable, prefer another
 
 Classify findings before continuing:
 
-- bounded implementation defect within accepted contract -> correct in the same child/PR, rerun affected validation, then fresh G4;
+- bounded implementation defect within accepted contract -> correct in the same child/PR when correction budget remains, rerun affected validation, then fresh G4;
 - executable-contract defect with architecture intact -> re-enter affected G2;
-- architecture, authority or child-boundary defect -> hold and re-enter G1/replan/split;
+- root-model, architecture, authority or child-boundary defect -> hold and re-enter G1/replan/split;
 - provider, route, authentication, check-system or evidence-availability problem -> typed HOLD, not an implementation correction;
 - non-blocking improvement -> retain one durable continuing owner without prolonging a safe candidate.
 
-Retain at most two material correction attempts per implementation lineage.
+Retain at most two ordinary material correction attempts per implementation lineage.
 
-One correction attempt is a coherent correction batch following an accepted material verdict, not each finding, commit or test run.
+One ordinary correction attempt is a coherent correction batch following an accepted material verdict, not each finding, commit or test run.
 
 Before returning to G4, inspect materially equivalent paths and retain semantic regressions for the accepted defect family.
 
-Renaming a child, branch, PR, contract or lineage label does not reset exhausted work.
+Renaming a child, branch, PR, contract, hypothesis or lineage label does not reset exhausted work.
+
+### Reconverged correction exception
+
+After an implementation lineage is `2/2_EXHAUSTED`, Owner/Web may explicitly reserve **at most one** `RECONVERGED_CORRECTION` for the same continuing scope. This is an exception to the ordinary correction ceiling, not a Repair 3 and not a fresh lineage.
+
+Admission requires all of:
+
+- the exhausted history remains explicit and continuous;
+- fresh root synthesis explains why the earlier corrections failed and states the supported governing invariant;
+- concrete counterexamples plus a boundary-to-regression/evidence map demonstrate what prior implementation/tests missed;
+- fresh G2 adversarial closure is accepted before mutation;
+- Owner/Web separately grants the exceptional implementation after G2;
+- the exceptional episode has fixed scope and whole-episode authority, may resume after interruption, and may submit exactly one candidate to fresh exact-head G4;
+- normal validation/CI/G4 standards are unchanged;
+- the reservation survives renamed branches/PRs/children/contracts and cannot be renewed for the same continuing correction scope.
+
+A material rejection of that exceptional G4 candidate ends autonomous same-scope correction. No further repair, reconverged exception, manufactured lineage or replacement child follows automatically.
 
 ### Delivery Child lifecycle and non-convergence
 
@@ -205,9 +256,9 @@ A Delivery Child is the durable owner of its admitted outcome until one of two e
 
 Normal execution events do not imply either disposition. In particular, worker failure/replacement, HOLD, G4 AMEND, route/provider/evidence blockage, implementation non-convergence, or exhaustion of the current implementation-lineage correction budget must leave the existing child open/current or held unless Owner/Web explicitly decides otherwise.
 
-Correction-budget exhaustion is terminal for that **implementation lineage**, not automatically for the Delivery Child. It requires Owner/Web adjudication of the smallest genuinely new authority boundary. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting.
+Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception above is the only same-scope post-exhaustion corrective path and is never automatic.
 
-Repository Loop bounded-convergence/anti-bounce rules govern **executor and diagnostic persistence inside the existing child**. When repeated same-root HOLDs exhaust the configured diagnostic convergence path, `LOOP_NONCONVERGENCE_OWNER_REQUIRED` stops autonomous progression and returns the existing child/authority to Owner/Web. It does not close, retire, supersede, replace, or transfer the Delivery Child and does not reset or expand mutation/repair budgets.
+Repository Loop bounded-convergence/anti-bounce rules govern executor and diagnostic persistence inside the existing child. After one focused diagnosis/recovery, a repeated same/root-related HOLD may invoke one read-only Re-convergence synthesis. Re-convergence may resume an already-authorised correction or identify the smallest G2/G1/Owner decision boundary; it cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets. `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`.
 
 ## Roles
 
