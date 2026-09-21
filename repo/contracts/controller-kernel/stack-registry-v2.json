@@ -67,6 +67,204 @@
           "reasoning": "max"
         }
       }
+    },
+    "owner-claude": {
+      "routes": {
+        "G0-A": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        },
+        "G0-B": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        },
+        "G1": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "high"
+        },
+        "G2": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "high"
+        },
+        "G3": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        },
+        "G4": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "very-high"
+        },
+        "LOOP": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        },
+        "RECONVERGENCE": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "high"
+        },
+        "FINAL_AUDIT": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "max"
+        },
+        "BROWSER": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "high"
+        }
+      },
+      "subagents": {
+        "G0-B": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        },
+        "G3": {
+          "provider": "anthropic",
+          "model": "opus-5",
+          "reasoning": "medium"
+        }
+      }
+    },
+    "owner-deepseek": {
+      "routes": {
+        "G0-A": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G0-B": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G1": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G2": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G3": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G4": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "LOOP": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "RECONVERGENCE": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "FINAL_AUDIT": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "BROWSER": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        }
+      },
+      "subagents": {
+        "G0-B": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G3": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        }
+      }
+    },
+    "owner-mixed-openai-deepseek": {
+      "routes": {
+        "G0-A": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G0-B": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G1": {
+          "provider": "openai",
+          "model": "gpt-5.6-sol",
+          "reasoning": "high"
+        },
+        "G2": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "medium"
+        },
+        "G3": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G4": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "high"
+        },
+        "LOOP": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "RECONVERGENCE": {
+          "provider": "openai",
+          "model": "gpt-5.6-sol",
+          "reasoning": "high"
+        },
+        "FINAL_AUDIT": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "max"
+        },
+        "BROWSER": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "medium"
+        }
+      },
+      "subagents": {
+        "G0-B": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        },
+        "G3": {
+          "provider": "deepseek",
+          "model": "deepseek-4.0-flash",
+          "reasoning": "native"
+        }
+      }
     }
   }
 }
