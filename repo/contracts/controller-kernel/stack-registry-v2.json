@@ -22,7 +22,7 @@
         "G2": {
           "provider": "openai",
           "model": "gpt-6-astra",
-          "reasoning": "low"
+          "reasoning": "medium"
         },
         "G3": {
           "provider": "openai",
@@ -73,7 +73,7 @@
         "G0-A": {
           "provider": "anthropic",
           "model": "opus-5",
-          "reasoning": "medium"
+          "reasoning": "high"
         },
         "G0-B": {
           "provider": "anthropic",
