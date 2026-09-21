@@ -55,7 +55,7 @@ test('named stacks support explicit multi-provider selection without harness aut
   }
   assert.match(controller, /Stack selection is an explicit User\/Web execution decision and is independent of the physical harness/);
   assert.match(controller, /HARNESS_HANDOFF_REQUIRED/);
-  assert.match(controller, /semantic prompts name the semantic role\/capability, not a concrete model/i);
+  assert.match(controller, /Subagent prompts name the semantic role\/capability, not a concrete model/i);
   assert.match(architecture, /Stack selection and physical harness selection are orthogonal/);
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
