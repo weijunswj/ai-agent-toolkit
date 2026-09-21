@@ -105,7 +105,9 @@ Governance stage semantics are provider/model agnostic.
 
 Only G0-B and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0-B fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
-Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Service treatment/speed is non-authoritative observed metadata. A route change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Stack selection and physical harness selection are orthogonal: User/Web chooses the named stack, while the current harness is only a capability/transport binding. One logical lane may hand off between qualified harnesses without changing semantic gate identity, RUN/Lock, ownership, correction accounting or candidate identity. A harness that cannot launch the selected valid route returns a typed handoff instead of silently selecting another model or stack. Service treatment/speed is non-authoritative observed metadata. A route or harness change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+
+Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0-B/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. Concrete child routes come from the selected stack; semantic prompts do not own model names.
 
 ## Gate lifecycle
 
