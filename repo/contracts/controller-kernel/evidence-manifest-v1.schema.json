@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.local/contracts/controller-kernel/evidence-manifest-v1.schema.json",
+  "title": "Toolkit G0-B Evidence Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "questions"],
+  "properties": {
+    "schema": { "const": "toolkit.evidence-manifest.v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "required_provenance": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "targets", "macros", "stop_when"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "question": { "type": "string", "minLength": 1 },
+          "targets": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "macros": { "type": "array", "minItems": 1, "items": { "enum": ["SYMBOL_CONSUMER_SEARCH","PUBLIC_SURFACE_INVENTORY","STATE_ROUNDTRIP_INVENTORY","AUTHORITY_ALIAS_INVENTORY","DESCRIPTOR_BOUNDARY_INVENTORY","SECRET_PATTERN_INVENTORY","CONFIG_PRECEDENCE_INVENTORY"] } },
+          "operations": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "required_provenance": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "stop_when": { "type": "string", "minLength": 1 },
+          "parallelizable": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
