@@ -181,9 +181,9 @@ Web retains merge and child-finality authority after exact candidate, base, chec
 
 ### Re-convergence
 
-RECONVERGENCE is a read-only non-gate role used only after bounded focused recovery fails to converge at the same/root-related boundary.
+RECONVERGENCE is a read-only non-gate diagnostic that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. The Loop does not invoke it automatically merely to avoid a Web return.
 
-Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. It grants no authority. `CONTINUE_CURRENT_CONTRACT` is actionable only when existing authority, budgets and fresh state already permit the named correction; `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`.
+Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. It grants no authority. `CONTINUE_CURRENT_CONTRACT` is actionable only when existing authority and fresh state already permit the named work; `NONCONVERGED` remains an Owner/Web decision state.
 
 ## Child sizing and splitting
 
@@ -249,6 +249,21 @@ Admission requires all of:
 
 A material rejection of that exceptional G4 candidate ends autonomous same-scope correction. No further repair, reconverged exception, manufactured lineage or replacement child follows automatically.
 
+### Web-directed continuation after autonomous exhaustion
+
+Autonomous correction limits bound model-driven retry loops; they do not make unresolved required work impossible to finish. After ordinary corrections and any permitted reconverged exception are exhausted, the existing child returns to Owner/Web.
+
+Owner/Web may explicitly grant a `WEB_DIRECTED_CONTINUATION` for the same continuing child and scope when a fresh accepted G2 contract deterministically binds the remaining implementation boundary. The grant:
+
+- preserves the exhausted `2/2` history and any consumed reconverged exception;
+- is not Repair 3, a new implementation lineage, a fresh budget or a replacement child;
+- names the exact current base, mutation/carry/preserve boundary, validation floor and candidate construction;
+- authorises at most one bounded implementation candidate and its required fresh exact-head G4;
+- gives no automatic follow-on authority after a material G4 result;
+- returns any material ambiguity, scope expansion or G4 AMEND to Owner/Web.
+
+This is an explicit human/Web authority path, not an autonomous Loop retry mechanism. It therefore does not require inventing a material architecture boundary merely to continue required same-scope work.
+
 ### Delivery Child lifecycle and non-convergence
 
 A Delivery Child is the durable owner of its admitted outcome until one of two explicit terminal dispositions occurs:
@@ -258,9 +273,9 @@ A Delivery Child is the durable owner of its admitted outcome until one of two e
 
 Normal execution events do not imply either disposition. In particular, worker failure/replacement, HOLD, G4 AMEND, route/provider/evidence blockage, implementation non-convergence, or exhaustion of the current implementation-lineage correction budget must leave the existing child open/current or held unless Owner/Web explicitly decides otherwise.
 
-Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception above is the only same-scope post-exhaustion corrective path and is never automatic.
+Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception is the final autonomous same-scope exception. A later same-scope `WEB_DIRECTED_CONTINUATION` is possible only through a new explicit Owner/Web grant under the section above and never resets the exhausted accounting.
 
-Repository Loop bounded-convergence/anti-bounce rules govern executor and diagnostic persistence inside the existing child. After one focused diagnosis/recovery, a repeated same/root-related HOLD may invoke one read-only Re-convergence synthesis. Re-convergence may resume an already-authorised correction or identify the smallest G2/G1/Owner decision boundary; it cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets. `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`.
+Repository Loop bounded-convergence rules govern executor persistence inside the existing child, but do not require an automatic higher-model referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
 
 ## Roles
 

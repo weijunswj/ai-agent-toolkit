@@ -108,4 +108,7 @@ test('convergence-first roles are represented without widening delegation', () =
   assert.match(controller, /G2.*adversarial executable-contract closure/s);
   assert.match(controller, /RECONVERGENCE.*read-only.*not a gate/s);
   assert.match(architecture, /Reconverged correction exception/);
+  assert.match(architecture, /Web-directed continuation after autonomous exhaustion/);
+  assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
+  assert.match(controller, /does not automatically spend a higher-model `RECONVERGENCE` call/);
 });
