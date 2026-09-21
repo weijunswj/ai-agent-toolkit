@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  MACRO_STEPS,
   compileEvidenceManifest,
 } = require('../scripts/toolkit-evidence-plan-compiler.cjs');
 
@@ -56,4 +57,36 @@ test('unknown evidence macro fails closed', () => {
   const input = manifest();
   input.questions[0].macros.push('PLEASE_IMPROVISE');
   assert.throws(() => compileEvidenceManifest(input), /unsupported evidence macro/);
+});
+
+
+test('evidence schema macro vocabulary exactly matches compiler macro vocabulary', () => {
+  const schema = require('../contracts/controller-kernel/evidence-manifest-v1.schema.json');
+  const schemaMacros = schema.properties.questions.items.properties.macros.items.enum;
+  assert.deepEqual([...schemaMacros].sort(), Object.keys(MACRO_STEPS).sort());
+});
+
+test('every evidence macro expands to bounded read-only instructions', () => {
+  const questions = Object.keys(MACRO_STEPS).map((macro, index) => ({
+    id: `Q-${String(index + 1).padStart(2, '0')}`,
+    question: `Collect bounded evidence for ${macro}.`,
+    targets: ['target-a'],
+    macros: [macro],
+    stop_when: 'Named evidence boundary is fully classified.',
+    parallelizable: true,
+  }));
+  const plan = compileEvidenceManifest({
+    schema: 'toolkit.evidence-manifest.v1',
+    id: 'all-evidence-macros',
+    required_provenance: ['exact source identity'],
+    questions,
+  });
+  assert.equal(plan.leaf_packets.length, Object.keys(MACRO_STEPS).length);
+  for (const packet of plan.leaf_packets) {
+    assert.equal(packet.read_only, true);
+    assert.equal(packet.mutation_allowed, false);
+    assert.equal(packet.architecture_decision_allowed, false);
+    assert.equal(packet.delegation_depth_remaining, 0);
+    assert.ok(packet.steps.length > 0);
+  }
 });
