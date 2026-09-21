@@ -21,10 +21,12 @@ test('controller stage policy is provider/model agnostic', () => {
   for (const stack of Object.values(registry.stacks)) {
     for (const route of Object.values(stack.routes)) {
       assert.equal(controller.includes(route.model), false, `model leaked into Controller law: ${route.model}`);
+      assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
     }
     for (const route of Object.values(stack.subagents)) {
       if (route) {
         assert.equal(controller.includes(route.model), false, `subagent model leaked into Controller law: ${route.model}`);
+        assert.equal(architecture.includes(route.model), false, `subagent model leaked into Architecture law: ${route.model}`);
       }
     }
   }
@@ -45,6 +47,30 @@ test('stack registry has explicit complete symbolic routes and only G0-B/G3 suba
       assert.ok(route.reasoning.length > 0);
     }
   }
+});
+
+test('named stacks support explicit multi-provider selection without harness authority', () => {
+  for (const stackId of ['owner-openai-default', 'owner-claude', 'owner-deepseek', 'owner-mixed-openai-deepseek']) {
+    assert.ok(registry.stacks[stackId], `missing named stack: ${stackId}`);
+  }
+  assert.match(controller, /Stack selection is an explicit User\/Web execution decision and is independent of the physical harness/);
+  assert.match(controller, /HARNESS_HANDOFF_REQUIRED/);
+  assert.match(controller, /semantic prompts name the semantic role\/capability, not a concrete model/i);
+  assert.match(architecture, /Stack selection and physical harness selection are orthogonal/);
+  assert.match(architecture, /logical lane may hand off between qualified harnesses/);
+});
+
+test('provider-specialized stacks keep complete gate and subagent shapes', () => {
+  const claude = registry.stacks['owner-claude'];
+  const deepseek = registry.stacks['owner-deepseek'];
+  const mixed = registry.stacks['owner-mixed-openai-deepseek'];
+  assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
+  assert.equal(new Set(Object.values(deepseek.routes).map((route) => route.model)).size, 1);
+  assert.ok(new Set(Object.values(mixed.routes).map((route) => route.provider)).size > 1);
+  assert.equal(claude.routes.G3.reasoning, 'medium');
+  assert.equal(claude.routes.G4.reasoning, 'very-high');
+  assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
+  assert.equal(deepseek.routes.G1.reasoning, 'native');
 });
 
 test('delegation capability is stage law, not model law', () => {
