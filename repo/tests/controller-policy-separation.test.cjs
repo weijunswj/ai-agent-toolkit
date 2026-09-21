@@ -17,7 +17,7 @@ const requiredStages = ['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVE
 
 test('controller stage policy is provider/model agnostic', () => {
   assert.match(controller, /## Stage and stack routing/);
-  assert.match(controller, /Concrete provider\\/model\\/reasoning choices live in the cold stack registry/);
+  assert.match(controller, /Concrete provider\/model\/reasoning choices live in the cold stack registry/);
   for (const stack of Object.values(registry.stacks)) {
     for (const route of Object.values(stack.routes)) {
       assert.equal(controller.includes(route.model), false, `model leaked into Controller law: ${route.model}`);
