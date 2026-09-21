@@ -100,12 +100,15 @@
 - Governance refers to symbolic execution stages/roles, not concrete model families: `G0-A`, `G0-B`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `RECONVERGENCE`, `FINAL_AUDIT`, and `BROWSER`. `G0-A` and `G0-B` are phases of one non-gating G0 stage.
 - Concrete provider/model/reasoning choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v2.json` in canonical Toolkit; they are configuration, not Controller law. Service treatment/speed is non-authoritative observed metadata only and is not part of an authoritative route binding.
 - Every execution thread must bind an explicit named registered stack from the bound canonical Toolkit revision. There is no default stack and no silent fallback.
+- Stack selection is an explicit User/Web execution decision and is independent of the physical harness. A harness may expose several providers/models, but it must not choose or rewrite the stack merely because a route is locally available.
 - Before launch, resolve the requested stage/role against that explicitly selected stack and record the stack ID, exact stack-registry revision/digest, and resolved provider/model/reasoning route in trusted launch metadata.
-- Only `G0-B` and `G3` may resolve semantic subagent routes. All other stages/roles are leaf-only.
+- Bind the physical harness/session separately from the semantic stage and route. The same logical lane may continue across OpenCode, Claude Code, Codex, or another qualified harness without changing its RUN/Lock, gate semantics, ownership, correction accounting or candidate identity.
+- If a registered route is valid but the current harness cannot launch and verify it, return `HARNESS_HANDOFF_REQUIRED` with the portable continuation identity; preserve the lane and let User/Web either switch harness or explicitly select another registered stack. Missing stack/route or genuinely unavailable provider/model remains `ROUTE_UNAVAILABLE`. Neither condition authorises silent fallback or consumes repair budget.
+- Only `G0-B` and `G3` may resolve semantic subagent routes. All other stages/roles are leaf-only. Subagent prompts name the semantic role/capability, not a concrete model; the selected stack plus harness adapter supplies concrete launch metadata.
+- Parallel semantic fan-out is optional. If the selected subagent route cannot be launched by the current harness, use an explicitly selected compatible stack/harness, run serially when the accepted contract permits it, or return `HARNESS_HANDOFF_REQUIRED`; never silently substitute another transport such as a generic chat thread.
 - Current explicit User/Web authority may select another registered stack for a run. Changing only stack bindings does not change stage semantics or grant new topology authority.
-- Missing explicit stack, missing required route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
 - Worker self-report of model/route is non-binding. The launcher/runtime must verify the resolved route where the host exposes that capability.
-- Prompts remain portable and stage-oriented; harness adapters may render native routing/delegation wording where required, but prompt wording never grants authority.
+- Authoritative semantic prompts remain portable and stage-oriented and do not hard-code concrete provider/model/reasoning names. Harness-specific launch envelopes may contain the resolved concrete route because they execute configuration, but prompt wording never grants route or model authority.
 
 ## Assurance paths and gates
 
