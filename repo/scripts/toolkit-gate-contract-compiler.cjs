@@ -5,7 +5,9 @@ const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromE
 const hash=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
 function fail(m){const e=new Error(m);e.code='GATE_CONTRACT_IR_INVALID';throw e;}
 function str(v,n){if(typeof v!=='string'||!v)fail(`${n} must be a non-empty string`);}
-function strs(v,n){if(!Array.isArray(v)||!v.length||v.some(x=>typeof x!=='string'||!x))fail(`${n} must be a non-empty string array`);}\nfunction obj(v,n){if(!v||typeof v!=='object'||Array.isArray(v))fail(`${n} must be an object`);}\nfunction unique(v,n){if(new Set(v).size!==v.length)fail(`${n} must not contain duplicates`);}
+function strs(v,n){if(!Array.isArray(v)||!v.length||v.some(x=>typeof x!=='string'||!x))fail(`${n} must be a non-empty string array`);}
+function obj(v,n){if(!v||typeof v!=='object'||Array.isArray(v))fail(`${n} must be an object`);}
+function unique(v,n){if(new Set(v).size!==v.length)fail(`${n} must not contain duplicates`);}
 const exp=(v,d)=>v&&typeof v==='object'&&!Array.isArray(v)?canon(v):d;
 const cid=(r,m,s)=>`${r}::${m}::${s}`;
 function variants(t){const s=new Set([t.toLowerCase(),t.replaceAll('_','-'),t.replace(/^LAUNCH_/,''),t.replace(/^LAUNCH_/,'EXECUTE_')]);const m=/^LAUNCH_(.+)_DIRECT$/.exec(t);if(m){s.add(`${m[1]}_EXECUTE`);s.add(`EXECUTE_${m[1]}`);s.add(m[1]);}s.delete(t);return [...s].sort();}
