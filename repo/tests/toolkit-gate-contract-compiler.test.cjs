@@ -149,3 +149,18 @@ test('human-bound routing law forbids executor self-attestation while preserving
   assert.doesNotMatch(controller, /cannot launch and verify it/i);
   assert.doesNotMatch(controller, /launcher\/runtime must verify the resolved route/i);
 });
+
+
+test('compiler fails closed on missing oracle coverage, validation, evidence, and malformed explicit cases', () => {
+  const noOracle = sample();
+  noOracle.requirements[0].macros = [];
+  assert.throws(() => compileGateContract(noOracle), /at least one macro or explicit case/);
+
+  assert.throws(() => compileGateContract(sample({ required_validation: [] })), /required_validation/);
+  assert.throws(() => compileGateContract(sample({ required_evidence: [] })), /required_evidence/);
+
+  const explicit = sample();
+  explicit.requirements[0].macros = [];
+  explicit.requirements[0].cases = [{ id: 'BAD', input: {}, expected: null }];
+  assert.throws(() => compileGateContract(explicit), /case.expected must be an object/);
+});
