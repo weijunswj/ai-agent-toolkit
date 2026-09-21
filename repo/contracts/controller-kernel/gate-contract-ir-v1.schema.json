@@ -20,12 +20,10 @@
       "const": "toolkit.gate-contract-ir.v1"
     },
     "run": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/S"
     },
     "lock": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/S"
     },
     "source_stage": {
       "const": "G2"
@@ -42,13 +40,7 @@
       ],
       "properties": {
         "allow_paths": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
+          "$ref": "#/$defs/SSet"
         },
         "forbid_extra_paths": {
           "const": true
@@ -59,140 +51,621 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "invariant",
-          "surfaces",
-          "macros"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "invariant": {
-            "type": "string",
-            "minLength": 1
-          },
-          "surfaces": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "forbidden_behaviour": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "macros": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "name"
-              ],
-              "properties": {
-                "name": {
-                  "enum": [
-                    "EXACT_ALLOWLIST",
-                    "SPELLING_VARIANTS_REJECT",
-                    "ALIAS_CLOSURE",
-                    "TRISTATE_UNKNOWN_AMBIGUOUS",
-                    "CONTRADICTORY_EVIDENCE",
-                    "OWN_VS_INHERITED_PROPERTY",
-                    "NULLISH_DEFAULT_MATRIX",
-                    "DESCRIPTOR_ZERO_READ",
-                    "ROUNDTRIP_STATE_STABILITY",
-                    "STRUCTURAL_REVALIDATION",
-                    "SECRET_PATTERN_PARITY",
-                    "PUBLIC_ALIAS_SURFACE_PARITY"
-                  ]
-                },
-                "params": {
-                  "type": "object"
-                }
-              }
-            },
-            "uniqueItems": true
-          },
-          "cases": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "id",
-                "input",
-                "expected"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "surface": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "input": {
-                  "type": "object"
-                },
-                "expected": {
-                  "type": "object"
-                }
-              }
-            },
-            "minItems": 1
-          }
-        },
-        "anyOf": [
-          {
-            "properties": {
-              "macros": {
-                "minItems": 1
-              }
-            }
-          },
-          {
-            "required": [
-              "cases"
-            ],
-            "properties": {
-              "cases": {
-                "minItems": 1
-              }
-            }
-          }
-        ]
+        "$ref": "#/$defs/Requirement"
       }
     },
     "required_validation": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
+      "$ref": "#/$defs/SSet"
     },
     "required_evidence": {
+      "$ref": "#/$defs/SSet"
+    }
+  },
+  "$defs": {
+    "S": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "J": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/J"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/J"
+          }
+        }
+      ]
+    },
+    "O": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/J"
+      }
+    },
+    "E": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/J"
+      }
+    },
+    "SSet": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/S"
       }
+    },
+    "SSet0": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/S"
+      }
+    },
+    "Exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surface",
+        "author_stage",
+        "run",
+        "lock",
+        "reason_code",
+        "reason",
+        "authority_ref"
+      ],
+      "properties": {
+        "surface": {
+          "$ref": "#/$defs/S"
+        },
+        "author_stage": {
+          "const": "G2"
+        },
+        "run": {
+          "$ref": "#/$defs/S"
+        },
+        "lock": {
+          "$ref": "#/$defs/S"
+        },
+        "reason_code": {
+          "const": "G2_EXPLICIT_EXCLUSION"
+        },
+        "reason": {
+          "$ref": "#/$defs/S"
+        },
+        "authority_ref": {
+          "$ref": "#/$defs/S"
+        }
+      }
+    },
+    "Pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/O"
+        },
+        "right": {
+          "$ref": "#/$defs/O"
+        }
+      }
+    },
+    "ExactAllowlistParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "allow",
+        "reject_values",
+        "accept",
+        "reject"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/S"
+        },
+        "allow": {
+          "$ref": "#/$defs/SSet"
+        },
+        "reject_values": {
+          "$ref": "#/$defs/SSet"
+        },
+        "accept": {
+          "$ref": "#/$defs/E"
+        },
+        "reject": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "SpellingVariantsRejectParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "allow",
+        "expected"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/S"
+        },
+        "allow": {
+          "$ref": "#/$defs/SSet"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "AliasClosureParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aliases",
+        "value",
+        "expected"
+      ],
+      "properties": {
+        "aliases": {
+          "$ref": "#/$defs/SSet"
+        },
+        "value": {
+          "$ref": "#/$defs/J"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "TristateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "states",
+        "expected"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/S"
+        },
+        "states": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "contains": {
+            "const": "UNKNOWN"
+          },
+          "items": {
+            "enum": [
+              "UNKNOWN",
+              "AMBIGUOUS"
+            ]
+          }
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "ContradictoryEvidenceParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pairs",
+        "expected"
+      ],
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Pair"
+          }
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "OwnInheritedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "value",
+        "expected"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/S"
+        },
+        "value": {
+          "$ref": "#/$defs/J"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "NullishParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "expected"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/S"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "DescriptorParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields",
+        "expected"
+      ],
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/SSet"
+        },
+        "expected": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/E"
+            },
+            {
+              "type": "object",
+              "required": [
+                "accessor_calls"
+              ],
+              "properties": {
+                "accessor_calls": {
+                  "const": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "RoundtripParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "fixture",
+        "expected"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/S"
+          }
+        },
+        "fixture": {
+          "$ref": "#/$defs/O"
+        },
+        "expected": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/E"
+            },
+            {
+              "type": "object",
+              "required": [
+                "state_before",
+                "state_after"
+              ],
+              "properties": {
+                "state_before": {
+                  "$ref": "#/$defs/O"
+                },
+                "state_after": {
+                  "$ref": "#/$defs/O"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "StructuralParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surfaces",
+        "malformed",
+        "expected"
+      ],
+      "properties": {
+        "surfaces": {
+          "$ref": "#/$defs/SSet"
+        },
+        "malformed": {
+          "$ref": "#/$defs/O",
+          "minProperties": 1
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "SecretPatternParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "patterns",
+        "surfaces",
+        "expected"
+      ],
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/S",
+            "pattern": "SYNTHETIC"
+          }
+        },
+        "surfaces": {
+          "$ref": "#/$defs/SSet"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "PublicAliasParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surfaces",
+        "input",
+        "expected"
+      ],
+      "properties": {
+        "surfaces": {
+          "$ref": "#/$defs/SSet"
+        },
+        "input": {
+          "$ref": "#/$defs/O"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "Macro": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "EXACT_ALLOWLIST"},
+            "params": {"$ref": "#/$defs/ExactAllowlistParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "SPELLING_VARIANTS_REJECT"},
+            "params": {"$ref": "#/$defs/SpellingVariantsRejectParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "ALIAS_CLOSURE"},
+            "params": {"$ref": "#/$defs/AliasClosureParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "TRISTATE_UNKNOWN_AMBIGUOUS"},
+            "params": {"$ref": "#/$defs/TristateParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "CONTRADICTORY_EVIDENCE"},
+            "params": {"$ref": "#/$defs/ContradictoryEvidenceParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "OWN_VS_INHERITED_PROPERTY"},
+            "params": {"$ref": "#/$defs/OwnInheritedParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "NULLISH_DEFAULT_MATRIX"},
+            "params": {"$ref": "#/$defs/NullishParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "DESCRIPTOR_ZERO_READ"},
+            "params": {"$ref": "#/$defs/DescriptorParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "ROUNDTRIP_STATE_STABILITY"},
+            "params": {"$ref": "#/$defs/RoundtripParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "STRUCTURAL_REVALIDATION"},
+            "params": {"$ref": "#/$defs/StructuralParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "SECRET_PATTERN_PARITY"},
+            "params": {"$ref": "#/$defs/SecretPatternParams"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "params"],
+          "properties": {
+            "name": {"const": "PUBLIC_ALIAS_SURFACE_PARITY"},
+            "params": {"$ref": "#/$defs/PublicAliasParams"}
+          }
+        }
+      ]
+    },
+    "ExplicitCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "input",
+        "expected"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/S"
+        },
+        "surface": {
+          "$ref": "#/$defs/S"
+        },
+        "input": {
+          "$ref": "#/$defs/O"
+        },
+        "expected": {
+          "$ref": "#/$defs/E"
+        }
+      }
+    },
+    "Requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "invariant",
+        "surfaces",
+        "macros"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/S"
+        },
+        "invariant": {
+          "$ref": "#/$defs/S"
+        },
+        "surfaces": {
+          "$ref": "#/$defs/SSet"
+        },
+        "macros": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Macro"
+          }
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExplicitCase"
+          }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Exclusion"
+          }
+        },
+        "forbidden_behaviour": {
+          "$ref": "#/$defs/SSet0"
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "macros": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": ["cases"],
+          "properties": {
+            "cases": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
     }
   }
 }
