@@ -88,7 +88,7 @@
         "G2": {
           "provider": "anthropic",
           "model": "opus-5",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         },
         "G3": {
           "provider": "anthropic",
@@ -98,7 +98,7 @@
         "G4": {
           "provider": "anthropic",
           "model": "opus-5",
-          "reasoning": "very-high"
+          "reasoning": "medium"
         },
         "LOOP": {
           "provider": "anthropic",
@@ -118,7 +118,7 @@
         "BROWSER": {
           "provider": "anthropic",
           "model": "opus-5",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         }
       },
       "subagents": {
@@ -131,138 +131,6 @@
           "provider": "anthropic",
           "model": "opus-5",
           "reasoning": "medium"
-        }
-      }
-    },
-    "owner-deepseek": {
-      "routes": {
-        "G0-A": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G0-B": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G1": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G2": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G3": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G4": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "LOOP": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "RECONVERGENCE": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "FINAL_AUDIT": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "BROWSER": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        }
-      },
-      "subagents": {
-        "G0-B": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G3": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        }
-      }
-    },
-    "owner-mixed-openai-deepseek": {
-      "routes": {
-        "G0-A": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G0-B": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G1": {
-          "provider": "openai",
-          "model": "gpt-5.6-sol",
-          "reasoning": "high"
-        },
-        "G2": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "medium"
-        },
-        "G3": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G4": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "high"
-        },
-        "LOOP": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "RECONVERGENCE": {
-          "provider": "openai",
-          "model": "gpt-5.6-sol",
-          "reasoning": "high"
-        },
-        "FINAL_AUDIT": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "max"
-        },
-        "BROWSER": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "medium"
-        }
-      },
-      "subagents": {
-        "G0-B": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
-        },
-        "G3": {
-          "provider": "deepseek",
-          "model": "deepseek-4.0-flash",
-          "reasoning": "native"
         }
       }
     }
