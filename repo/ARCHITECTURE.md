@@ -105,7 +105,7 @@ Governance stage semantics are provider/model agnostic.
 
 Only G0-B and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0-B fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
-Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Stack selection and physical harness selection are orthogonal: User/Web chooses the named stack, while the current harness is only a capability/transport binding. One logical lane may hand off between qualified harnesses without changing semantic gate identity, RUN/Lock, ownership, correction accounting or candidate identity. A harness that cannot launch the selected valid route returns a typed handoff instead of silently selecting another model or stack. Service treatment/speed is non-authoritative observed metadata. A route or harness change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Stack selection and physical harness selection are orthogonal: User/Web chooses the named stack, the resolved route is displayed before launch, and the human or deterministic launcher selects/configures that route in the harness. For interactive desktop harnesses the human launch after route selection is the trusted binding. Executors never self-inspect or attest their provider/model/reasoning identity, and missing runtime model metadata is not a HOLD. If the required route cannot be selected/configured, the worker is not launched and User/Web chooses another registered stack/harness or explicitly changes the route. Silent fallback remains prohibited as a pre-launch orchestration invariant. One logical lane may move between separately bound sessions without changing semantic gate identity, RUN/Lock, ownership, correction accounting or candidate identity. Service treatment/speed is non-authoritative observed metadata.
 
 Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0-B/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. Concrete child routes come from the selected stack; semantic prompts do not own model names.
 
@@ -117,7 +117,7 @@ G0 is non-gating and may use two chronological phases.
 
 G0-A frames uncertain/diagnostic work: known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and the stopping condition for sufficient evidence. G0-A is leaf-only. A separate G0-A model invocation may be omitted or compacted for genuinely simple/well-specified work.
 
-G0-B acquires the evidence requested by the framing packet and may fan out bounded depth-1 read-only leaves for genuinely separable questions. Leaves collect evidence rather than independently redesigning the solution. G0-B may be omitted when existing evidence is already sufficient.
+G0-B acquires evidence from a compact Evidence Manifest IR. A deterministic compiler expands question IDs, target surfaces, reusable evidence macros, provenance and stop conditions into leaf-ready packets plus deterministic merge requirements. Leaves remain read-only and may adapt only to follow evidence inside the named question/surface boundary; they do not invent new architecture questions or implementation work. G0-B may be omitted when existing evidence is already sufficient.
 
 ### G1 — Root convergence, architecture and authority
 
@@ -142,16 +142,18 @@ Toolkit G1 must prove conformance to this document or explicitly obtain authorit
 
 G2 independently challenges the accepted G1 boundary before mutation. It may inspect primary sources and reject a flawed G1 assumption.
 
-G2 binds:
+G2 binds semantic decisions in a compact Gate Contract IR:
 
 - acceptance criteria and invariants;
-- consequential entry/copy/serialization/consumer boundaries;
-- affected consumers;
+- consequential entry/copy/serialization/consumer boundaries and materially equivalent surfaces;
 - permitted and forbidden behaviour;
-- positive, negative and adversarial regression oracles;
+- reusable adversarial macro selections and explicit exceptions;
+- exact mutation allowlist;
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
+
+A deterministic compiler expands that IR into the verbose G3 execution packet and concrete adversarial oracle matrix. This keeps expensive G2 reasoning focused on semantic closure while repetitive permutations are produced by code. G3 is not permitted to fill a material omission by inference; an incomplete IR returns to G2.
 
 For material difficult/diagnostic/security/authority-sensitive work, G2 should use a fresh context and ask how an implementation could satisfy the proposed instructions while still violate the accepted invariant.
 
@@ -159,7 +161,7 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 
 ### G3 — Implementation and validation
 
-G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
+G3 literally implements the compiled execution packet, materializes every generated oracle, and validates the complete bounded child candidate. G3 does not infer missing aliases, compatibility, fallback behaviour, equivalent surfaces or adversarial cases. The compiler, not G3, supplies repetitive detail; G3 demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
 
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
 
