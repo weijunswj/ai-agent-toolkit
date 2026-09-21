@@ -49,10 +49,12 @@ test('stack registry has explicit complete symbolic routes and only G0-B/G3 suba
   }
 });
 
-test('named stacks support explicit multi-provider selection without harness authority', () => {
-  for (const stackId of ['owner-openai-default', 'owner-claude', 'owner-deepseek', 'owner-mixed-openai-deepseek']) {
+test('named stacks support explicit cross-harness selection without harness authority', () => {
+  for (const stackId of ['owner-openai-default', 'owner-claude']) {
     assert.ok(registry.stacks[stackId], `missing named stack: ${stackId}`);
   }
+  assert.equal(Object.hasOwn(registry.stacks, 'owner-deepseek'), false);
+  assert.equal(Object.hasOwn(registry.stacks, 'owner-mixed-openai-deepseek'), false);
   assert.match(controller, /Stack selection is an explicit User\/Web execution decision and is independent of the physical harness/);
   assert.match(controller, /HARNESS_HANDOFF_REQUIRED/);
   assert.match(controller, /Subagent prompts name the semantic role\/capability, not a concrete model/i);
@@ -60,17 +62,22 @@ test('named stacks support explicit multi-provider selection without harness aut
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
 
-test('provider-specialized stacks keep complete gate and subagent shapes', () => {
+test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
-  const deepseek = registry.stacks['owner-deepseek'];
-  const mixed = registry.stacks['owner-mixed-openai-deepseek'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
-  assert.equal(new Set(Object.values(deepseek.routes).map((route) => route.model)).size, 1);
-  assert.ok(new Set(Object.values(mixed.routes).map((route) => route.provider)).size > 1);
+  assert.equal(claude.routes['G0-A'].reasoning, 'high');
+  assert.equal(claude.routes['G0-B'].reasoning, 'medium');
+  assert.equal(claude.routes.G1.reasoning, 'high');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
+  assert.equal(claude.routes.G2.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
-  assert.equal(claude.routes.G4.reasoning, 'very-high');
+  assert.equal(claude.routes.G4.reasoning, 'medium');
+  assert.equal(claude.routes.LOOP.reasoning, 'medium');
+  assert.equal(claude.routes.RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
-  assert.equal(deepseek.routes.G1.reasoning, 'native');
+  assert.equal(claude.routes.BROWSER.reasoning, 'xhigh');
+  assert.equal(claude.subagents['G0-B'].reasoning, 'medium');
+  assert.equal(claude.subagents.G3.reasoning, 'medium');
 });
 
 test('delegation capability is stage law, not model law', () => {
