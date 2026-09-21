@@ -164,3 +164,19 @@ test('compiler fails closed on missing oracle coverage, validation, evidence, an
   explicit.requirements[0].cases = [{ id: 'BAD', input: {}, expected: null }];
   assert.throws(() => compileGateContract(explicit), /case.expected must be an object/);
 });
+
+
+test('canonical Toolkit governance binding is remote-first and local checkout is cache-only', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const controller = fs.readFileSync(path.join(root, 'repo', 'CONTROLLER.md'), 'utf8');
+  const architecture = fs.readFileSync(path.join(root, 'repo', 'ARCHITECTURE.md'), 'utf8');
+
+  assert.match(controller, /canonical repository `weijunswj\/ai-agent-toolkit`/i);
+  assert.match(controller, /exact remote canonical-`main` commit/i);
+  assert.match(controller, /local Toolkit repository.*never governance authority/i);
+  assert.match(controller, /Local Git objects may be used only as a byte cache after the exact canonical remote commit\/blob identities are already bound/i);
+  assert.match(controller, /establish it from canonical GitHub `main` first/i);
+
+  assert.match(architecture, /remote-first/i);
+  assert.match(architecture, /local Toolkit checkout is cache\/transport only and never authority/i);
+});
