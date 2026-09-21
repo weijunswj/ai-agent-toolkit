@@ -1,0 +1,72 @@
+{
+  "schema": "toolkit.controller.stack-registry.v2",
+  "version": 2,
+  "stacks": {
+    "owner-openai-default": {
+      "routes": {
+        "G0-A": {
+          "provider": "openai",
+          "model": "gpt-5.6-sol",
+          "reasoning": "high"
+        },
+        "G0-B": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        },
+        "G1": {
+          "provider": "openai",
+          "model": "gpt-5.6-sol",
+          "reasoning": "high"
+        },
+        "G2": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "low"
+        },
+        "G3": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        },
+        "G4": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "high"
+        },
+        "LOOP": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        },
+        "RECONVERGENCE": {
+          "provider": "openai",
+          "model": "gpt-5.6-sol",
+          "reasoning": "high"
+        },
+        "FINAL_AUDIT": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "max"
+        },
+        "BROWSER": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "medium"
+        }
+      },
+      "subagents": {
+        "G0-B": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        },
+        "G3": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        }
+      }
+    }
+  }
+}

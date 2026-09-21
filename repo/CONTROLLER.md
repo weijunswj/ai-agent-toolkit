@@ -77,15 +77,15 @@
 - Completion of one intentionally parallel pipeline must not clear another pipeline's active ownership or state.
 - **Delivery Child lifecycle law:** an admitted Delivery Child is a durable programme ownership boundary. Ordinary worker failure, gate HOLD, G4 AMEND, implementation non-convergence, exhausted correction budget, route/provider/evidence HOLD, Loop pause, or executor replacement does **not** by itself close, retire, supersede, replace, or transfer that child.
 - A Delivery Child may be closed as completed only after its required acceptance/finality is actually achieved and the terminal disposition is durably recorded. A still-required child may be superseded or retired only by an explicit current Owner/Web decision that names that lifecycle disposition and preserves/transfers every remaining mandatory obligation to a durable continuing owner. Do not infer supersession from repair exhaustion or create a replacement child merely to obtain a fresh correction budget.
-- Exhaustion of an implementation-lineage correction budget places the existing child in a non-convergence/Owner-Web adjudication state. It does not manufacture Repair 3, a fresh budget, or a new Delivery Child. A later implementation lineage or child boundary requires a separately justified architecture/authority decision; renaming or recreating containers is never sufficient.
-- **Loop executor anti-bounce is not child lifecycle:** bounded diagnostic convergence applies to executor/worker orchestration inside the existing child. A repeated same-root HOLD may escalate from focused diagnosis to bounded RCA and then `LOOP_NONCONVERGENCE_OWNER_REQUIRED`, but that state stops Loop persistence while preserving the existing child, RUN/Lock, ownership, evidence and budgets for Owner/Web adjudication. The Loop Manager has no authority to close/retire/supersede a Delivery Child because an executor bounced or exhausted diagnostic convergence.
+- Exhaustion of an implementation-lineage correction budget places the existing child in a non-convergence/Owner-Web adjudication state. It does not manufacture Repair 3, a fresh budget, or a new Delivery Child. A later implementation lineage or child boundary requires a separately justified architecture/authority decision; renaming or recreating containers is never sufficient. After exhaustion, Owner/Web may explicitly reserve at most one `RECONVERGED_CORRECTION` for the same continuing scope only when fresh root synthesis explains why earlier corrections missed the accepted invariant, fresh G2 adversarial closure is required before mutation, the exhausted `2/2` history remains visible, and the exceptional episode has a fixed scope, one submitted G4 candidate, unchanged assurance, and no automatic follow-on repair. A material rejection of that exceptional candidate ends autonomous same-scope correction.
+- **Loop executor anti-bounce is not child lifecycle:** bounded diagnostic convergence applies to executor/worker orchestration inside the existing child. After one focused diagnosis/recovery, a repeated same/root-related HOLD may invoke one read-only `RECONVERGENCE` synthesis. Re-convergence may resume an already-authorised correction or classify the smallest required G2/G1/Owner boundary, but it cannot grant authority, reset budgets or change child lifecycle. `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`, preserving the existing child, RUN/Lock, ownership, evidence and budgets for Owner/Web adjudication.
 - Semantic delegation authority is stage-based, not model-based.
-- `G0` and `G3` are the only subagent-capable stages.
-- `G0` is Loop-owned pre-G1 discovery/evidence preparation. A G0 worker may fan out bounded depth-1 read-only discovery subagents only when the split is genuinely separable and materially faster.
+- `G0-B` and `G3` are the only subagent-capable stages/roles.
+- `G0-A` is leaf-only problem framing. `G0-B` is Loop-owned evidence acquisition and may fan out bounded depth-1 read-only discovery subagents only when the split is genuinely separable and useful.
 - `G3` may fan out bounded depth-1 subagents only inside the accepted G2 contract. Mutating G3 subagents require disjoint mutation scopes and deterministic integration/revalidation.
-- All other semantic stages/roles are leaf-only, including G1, G2, G4, Final Audit, Browser/computer-use, and every spawned subagent.
+- All other semantic stages/roles are leaf-only, including G0-A, G1, G2, G4, RECONVERGENCE, Final Audit, Browser/computer-use, and every spawned subagent.
 - Delegation depth is one. A spawned subagent must not launch another semantic agent.
-- Concrete parent/child model, reasoning and service-tier bindings come from the selected stack registry; model identity never grants delegation authority by itself.
+- Concrete parent/child provider/model/reasoning bindings come from the explicitly selected stack registry; service treatment is non-authoritative and model identity never grants delegation authority by itself.
 - Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
 
 ## Workspace safety
@@ -97,35 +97,38 @@
 
 ## Stage and stack routing
 
-- Governance refers to symbolic execution stages/roles, not concrete model families: `G0`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `FINAL_AUDIT`, and `BROWSER`.
-- Concrete provider/model/reasoning/service-tier choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v1.json` in canonical Toolkit; they are configuration, not Controller law. Managed consumer repositories resolve that registry from the exact Toolkit controller revision they bind rather than copying it locally by default.
-- Before launch, resolve the requested stage against one selected registered stack from the bound canonical Toolkit revision and record the stack ID, exact stack-registry revision/digest, and resolved route in trusted launch metadata.
-- `G0` and `G3` subagent launches resolve through the selected stack's corresponding subagent route. Other stages must not resolve a semantic subagent route.
+- Governance refers to symbolic execution stages/roles, not concrete model families: `G0-A`, `G0-B`, `G1`, `G2`, `G3`, `G4`, `LOOP`, `RECONVERGENCE`, `FINAL_AUDIT`, and `BROWSER`. `G0-A` and `G0-B` are phases of one non-gating G0 stage.
+- Concrete provider/model/reasoning choices live in the cold stack registry at `repo/contracts/controller-kernel/stack-registry-v2.json` in canonical Toolkit; they are configuration, not Controller law. Service treatment/speed is non-authoritative observed metadata only and is not part of an authoritative route binding.
+- Every execution thread must bind an explicit named registered stack from the bound canonical Toolkit revision. There is no default stack and no silent fallback.
+- Before launch, resolve the requested stage/role against that explicitly selected stack and record the stack ID, exact stack-registry revision/digest, and resolved provider/model/reasoning route in trusted launch metadata.
+- Only `G0-B` and `G3` may resolve semantic subagent routes. All other stages/roles are leaf-only.
 - Current explicit User/Web authority may select another registered stack for a run. Changing only stack bindings does not change stage semantics or grant new topology authority.
-- Missing stack, missing required stage route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
+- Missing explicit stack, missing required route, unavailable provider/model, or unverifiable launch metadata => `ROUTE_UNAVAILABLE`; do not silently fall back or consume repair budget.
 - Worker self-report of model/route is non-binding. The launcher/runtime must verify the resolved route where the host exposes that capability.
-- Prompts should remain portable and stage-oriented; include concrete routing metadata in prompt text only when a runtime strictly requires it.
+- Prompts remain portable and stage-oriented; harness adapters may render native routing/delegation wording where required, but prompt wording never grants authority.
 
 ## Assurance paths and gates
 
 - Follow the Web-selected assurance path, then start at its earliest unresolved required gate.
 - LIGHT administrative work uses deterministic operation/readback.
 - LIGHT low-risk mutation uses focused validation without mandatory G4.
-- ASSURED/STRICT material work uses the standard sequence `G0 -> G1 -> G2 -> G3 -> G4` where the applicable stages/gates are required.
-- `G0` is bounded pre-G1 discovery/evidence preparation, not an authority gate and does not produce PASS/FAIL. G0 publishes durable self-sufficient discovery packets before G1 starts.
-- G1 consumes completed G0 packets and current authority as static inputs. G1 is leaf-only.
-- G2 and G4 are leaf-only.
-- G3 is the only decision/implementation gate that may launch semantic subagents, and only under the accepted G2 separation/mutation contract.
+- ASSURED/STRICT material work uses the standard chronology `G0-A -> G0-B -> G1 -> G2 -> G3 -> G4` where applicable. `G0-A` and `G0-B` are phases of one non-gating G0 stage, not additional approval gates.
+- `G0-A` = bounded problem framing. For uncertain, diagnostic, security- or authority-sensitive work it identifies known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and a stopping condition for sufficient evidence. It is leaf-only and read-only. For genuinely simple/well-specified work a separate G0-A model invocation may be omitted or compacted.
+- `G0-B` = bounded evidence acquisition. It consumes the framing/evidence manifest, may use depth-1 read-only semantic subagents only when the questions are genuinely separable and useful, and publishes durable self-sufficient evidence packets. Leaves gather observations/evidence rather than independently redesigning the solution.
+- G1 = root convergence plus architecture/authority. For material uncertain work, G1 PASS requires a supported bounded causal model, material competing hypotheses and their disposition, governing invariant/trust ordering, materially equivalent surfaces, smallest coherent boundary, and explicit remaining assumptions. Material unresolved root uncertainty => HOLD with a specific missing-evidence request.
+- G2 = adversarial executable-contract closure. A fresh G2 must be able to inspect primary sources and challenge G1. PASS requires a concrete mapping from accepted invariant to consequential entry/copy/serialization/consumer boundaries, permitted/forbidden behaviour, regression oracle and required evidence. G2 must ask how code could satisfy the proposed instructions while still violating the invariant.
+- For expressly low-uncertainty/simple work, one invocation may establish logically separate G1 and G2 decisions when current routing/authority allows it; record that no fresh independent-model challenge occurred. Difficult/diagnostic/security/authority-sensitive work uses a fresh G2 context.
+- G3 = implementation/validation within the accepted G2 contract. G3 demonstrates closure at actual consequential/public boundaries, not merely helper-level tests. Discoveries that change the invariant, trust boundary or material contract HOLD for the appropriate re-entry; ordinary implementation choices inside the contract remain G3 work.
+- G4 = fresh isolated read-only exact-head independent assurance of the complete candidate. Do not weaken G4 to improve pass rates.
+- Material G4 findings should carry one primary diagnostic classification when supported: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. Classification is learning evidence, not a score or authority grant.
+- `RECONVERGENCE` is a read-only leaf role, not a gate. After one bounded focused diagnosis/recovery and a repeated same/root-related HOLD, the Loop may obtain specifically missing evidence and invoke one Re-convergence synthesis. Its result is one of `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. The result grants no authority by itself.
+- `CONTINUE_CURRENT_CONTRACT` resumes only when current authority, budgets and fresh state already permit the named correction. `NONCONVERGED` becomes `LOOP_NONCONVERGENCE_OWNER_REQUIRED`. Immediate authority barriers return directly to the relevant decision boundary rather than consuming diagnostic cycles.
 - Web-selected STRICT adds the required explicit Lock and adversarial obligations.
 - The Loop Manager cannot select or downgrade the assurance path.
 - Newly exposed material risk holds the affected lane with `RISK_RECLASSIFICATION_REQUIRED` until User/Web reclassifies it.
-- G1 = architecture/authority.
-- G2 = executable implementation contract.
-- G3 = implement/validate within the accepted contract.
-- G4 = fresh isolated read-only exact-head independent assurance.
-- Gate reuse is allowed only when the current accepted Lock exactly covers task, scope, trust boundary, and material assumptions; otherwise `GATE_REENTRY_REQUIRED`.
+- Gate reuse is allowed only when the current accepted Lock exactly covers task, scope, trust boundary, material assumptions and causal/contract evidence required by that gate; otherwise `GATE_REENTRY_REQUIRED`.
 - G3 must not invent architecture outside its accepted contract.
-- Before launch, transition, merge/finality, or next-gate authority, reconcile exact head, child/PR/parent, Lock/authority, checks, reviews/threads/findings, and current programme state.
+- Before launch, transition, merge/finality, or next-gate authority, reconcile exact head, child/PR/parent, Lock/authority, checks, reviews/threads/findings, current programme state and any action-material CURRENT identities.
 - Before merge/finality, every first-party repository CI/check run triggered for the exact candidate head must be terminal. Pending, queued or in-progress CI is never green and must block merge even when GitHub branch protection would technically allow it.
 - Every applicable first-party candidate-validation check must conclude success. A skipped/neutral result is acceptable only when that workflow/check is explicitly non-applicable to the candidate rather than a validation failure. A first-party red/failing candidate-validation check always blocks merge.
 - External/advisory/provider checks may be classified separately only when the accepted contract already makes them non-gating and Web records the exact reason; branch-protection permissiveness alone is never such a reason.

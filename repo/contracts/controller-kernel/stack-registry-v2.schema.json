@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.stack-registry.v2",
+  "title": "Toolkit controller stage stack registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "stacks"
+  ],
+  "properties": {
+    "schema": {
+      "const": "toolkit.controller.stack-registry.v2"
+    },
+    "version": {
+      "const": 2
+    },
+    "stacks": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/stack"
+      }
+    }
+  },
+  "$defs": {
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "reasoning"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "nullableRoute": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/route"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routes",
+        "subagents"
+      ],
+      "properties": {
+        "routes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "G0-A",
+            "G0-B",
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "LOOP",
+            "RECONVERGENCE",
+            "FINAL_AUDIT",
+            "BROWSER"
+          ],
+          "properties": {
+            "G0-A": {
+              "$ref": "#/$defs/route"
+            },
+            "G0-B": {
+              "$ref": "#/$defs/route"
+            },
+            "G1": {
+              "$ref": "#/$defs/route"
+            },
+            "G2": {
+              "$ref": "#/$defs/route"
+            },
+            "G3": {
+              "$ref": "#/$defs/route"
+            },
+            "G4": {
+              "$ref": "#/$defs/route"
+            },
+            "LOOP": {
+              "$ref": "#/$defs/route"
+            },
+            "RECONVERGENCE": {
+              "$ref": "#/$defs/route"
+            },
+            "FINAL_AUDIT": {
+              "$ref": "#/$defs/route"
+            },
+            "BROWSER": {
+              "$ref": "#/$defs/route"
+            }
+          }
+        },
+        "subagents": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "G0-B",
+            "G3"
+          ],
+          "properties": {
+            "G0-B": {
+              "$ref": "#/$defs/nullableRoute"
+            },
+            "G3": {
+              "$ref": "#/$defs/nullableRoute"
+            }
+          }
+        }
+      }
+    }
+  }
+}
