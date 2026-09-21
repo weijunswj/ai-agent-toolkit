@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.local/contracts/controller-kernel/gate-contract-ir-v1.schema.json",
+  "title": "Toolkit G2 Gate Contract IR v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run", "lock", "source_stage", "target_stage", "mutation", "requirements"],
+  "properties": {
+    "schema": { "const": "toolkit.gate-contract-ir.v1" },
+    "run": { "type": "string", "minLength": 1 },
+    "lock": { "type": "string", "minLength": 1 },
+    "source_stage": { "const": "G2" },
+    "target_stage": { "const": "G3" },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_paths", "forbid_extra_paths"],
+      "properties": {
+        "allow_paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "forbid_extra_paths": { "const": true }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "invariant", "surfaces", "macros"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "invariant": { "type": "string", "minLength": 1 },
+          "surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "forbidden_behaviour": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "macros": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "enum": ["EXACT_ALLOWLIST","SPELLING_VARIANTS_REJECT","ALIAS_CLOSURE","TRISTATE_UNKNOWN_AMBIGUOUS","CONTRADICTORY_EVIDENCE","OWN_VS_INHERITED_PROPERTY","NULLISH_DEFAULT_MATRIX","DESCRIPTOR_ZERO_READ","ROUNDTRIP_STATE_STABILITY","STRUCTURAL_REVALIDATION","SECRET_PATTERN_PARITY","PUBLIC_ALIAS_SURFACE_PARITY"] },
+                "params": { "type": "object" }
+              }
+            }
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "input", "expected"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "surface": { "type": "string", "minLength": 1 },
+                "input": { "type": "object" },
+                "expected": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "required_validation": { "type": "array" },
+    "required_evidence": { "type": "array" }
+  }
+}
