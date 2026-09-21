@@ -65,9 +65,10 @@ test('named stacks support explicit cross-harness selection without harness auth
 test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
-  assert.equal(claude.routes['G0-A'].reasoning, 'medium');
+  assert.equal(claude.routes['G0-A'].reasoning, 'high');
   assert.equal(claude.routes['G0-B'].reasoning, 'medium');
   assert.equal(claude.routes.G1.reasoning, 'high');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
   assert.equal(claude.routes.G2.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'medium');
