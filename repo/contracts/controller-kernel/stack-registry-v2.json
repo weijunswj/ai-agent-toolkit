@@ -6,17 +6,17 @@
       "routes": {
         "G0-A": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "G0-B": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G1": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "G2": {
@@ -26,7 +26,7 @@
         },
         "G3": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G4": {
@@ -36,12 +36,12 @@
         },
         "LOOP": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "RECONVERGENCE": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "FINAL_AUDIT": {
@@ -58,12 +58,12 @@
       "subagents": {
         "G0-B": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G3": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         }
       }
