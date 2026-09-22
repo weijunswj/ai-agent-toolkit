@@ -120,14 +120,30 @@ test('G2 A01-I06 and X01-X10 oracle fixture compiles with complete coverage', ()
   assert.equal(ir.mutation.allow_paths.length, 29);
   assert.equal(new Set(ir.mutation.allow_paths).size, 29);
   assert.deepEqual(ir.requirements.map((item) => item.id), expectedIds);
-  assert.ok(ir.requirements.every((item) => item.macros.length === 0 && item.cases.length === 2));
-  assert.ok(ir.requirements.every((item) => item.cases.some((entry) => entry.id.endsWith('-NEG'))
+  assert.ok(ir.requirements.every((item) => item.macros.length === 0));
+  assert.equal(ir.requirements.find((item) => item.id === 'D01').cases.length, 31);
+  assert.ok(ir.requirements.filter((item) => item.id !== 'D01').every((item) => item.cases.length === 2));
+  assert.ok(ir.requirements.every((item) => item.cases.some((entry) => entry.id.endsWith('-NEG') || entry.id.startsWith('D01-NEG-'))
     && item.cases.some((entry) => entry.id.endsWith('-POS'))));
   const packet = compiler.compileGateContract(ir);
   assert.equal(packet.requirements.length, 66);
-  assert.equal(packet.generated_cases.length, 132);
+  assert.equal(packet.generated_cases.length, 337);
   assert.equal(packet.coverage_map.length, 66);
   assert.ok(packet.generated_cases.every((item) => item.assertion_count > 0));
+});
+
+test('F14 executes every compiled oracle case through production-backed boundaries', async () => {
+  const ir = JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'));
+  const packet = compiler.compileGateContract(ir);
+  const result = await support.runAuthorityPacketOracleMatrix(packet.generated_cases);
+  assert.equal(result.requirement_count, 66);
+  assert.equal(result.case_count, 337);
+  assert.equal(result.skipped_count, 0);
+  assert.equal(result.unexecuted_count, 0);
+  assert.equal(result.failed_count, 0);
+  assert.ok(result.evidence.every((item) => item.passed === true));
+  assert.ok(result.evidence.every((item) => item.assertions_executed > 0));
+  assert.ok(result.evidence.every((item) => item.production_surface));
 });
 
 test('semantic admission binds exact CURRENT, acceptance and fresh packet evidence', () => {

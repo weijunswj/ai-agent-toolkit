@@ -406,7 +406,9 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
 
 function packetParseInput(value) {
   if (typeof value === 'string') return { value, serialized: true };
-  if (Buffer.isBuffer(value)) {
+  let isBuffer = false;
+  try { isBuffer = Buffer.isBuffer(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  if (isBuffer) {
     if (value.length >= 3 && value[0] === 0xef && value[1] === 0xbb && value[2] === 0xbf) {
       packetFail('GPR_PACKET_VALUE_INVALID');
     }
@@ -3361,17 +3363,23 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
   return deepFreeze({ admission: token, proof, admission_id: record.admission_id, recovered: true });
 }
 
-function verifyAuthorityPacketDatabase(db, namespace, digest, databasePath, expectedFingerprint) {
+function verifyAuthorityPacketDatabase(db, namespace, digest, databasePath, expectedFingerprint, options = {}) {
   if (fs.statSync(databasePath).size > LIMITS.databaseBytes) packetFail('GPR_PACKET_LIMIT');
   if (Number(oneValue(db, 'PRAGMA application_id', 'application_id')) !== APPLICATION_ID
     || Number(oneValue(db, 'PRAGMA user_version', 'user_version')) !== AUTHORITY_PACKET_USER_VERSION) {
     packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
   }
   const metadata = db.prepare('SELECT * FROM metadata WHERE singleton = 1').get();
-  if (!metadata || metadata.schema_id !== SCHEMA_ID || metadata.namespace_digest !== digest
-    || metadata.repository !== namespace.repository || metadata.parent_issue !== namespace.parent_issue
-    || metadata.child_issue !== namespace.child_issue || metadata.schema_fingerprint !== expectedFingerprint
-    || schemaFingerprint(db) !== expectedFingerprint) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  if (!metadata || metadata.schema_id !== SCHEMA_ID) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  if (metadata.namespace_digest !== digest
+    || metadata.repository !== namespace.repository
+    || metadata.parent_issue !== namespace.parent_issue
+    || metadata.child_issue !== namespace.child_issue) {
+    packetFail(options.identityBoundary ? 'GPR_PACKET_STORE_IDENTITY_MISMATCH' : 'GPR_PACKET_SCHEMA_UNAVAILABLE');
+  }
+  if (metadata.schema_fingerprint !== expectedFingerprint || schemaFingerprint(db) !== expectedFingerprint) {
+    packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  }
   const integrity = db.prepare('PRAGMA integrity_check').all();
   if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') packetFail('GPR_PACKET_STORE_UNAVAILABLE');
   if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) packetFail('GPR_PACKET_STORE_UNAVAILABLE');
@@ -4107,7 +4115,7 @@ function openVerified(config, create = true, readOnly = false) {
   }
 }
 
-function openAuthorityPacketVerified(config, create = false, readOnly = false) {
+function openAuthorityPacketVerified(config, create = false, readOnly = false, verificationOptions = {}) {
   assertRuntimeSupport();
   const databasePath = config.databasePath;
   const existed = fs.existsSync(databasePath);
@@ -4141,7 +4149,8 @@ function openAuthorityPacketVerified(config, create = false, readOnly = false) {
       config.namespace,
       config.namespaceDigest,
       databasePath,
-      expectedAuthorityPacketSchemaFingerprint(DatabaseSync)
+      expectedAuthorityPacketSchemaFingerprint(DatabaseSync),
+      verificationOptions
     );
     return db;
   } catch (error) {
@@ -4183,7 +4192,7 @@ function authorityPacketStoreIdentityDb(db, config) {
 
 function authorityPacketStoreIdentity(options) {
   const config = createStoreConfig(options);
-  const db = openAuthorityPacketVerified(config, false, true);
+  const db = openAuthorityPacketVerified(config, false, true, { identityBoundary: true });
   try { return authorityPacketStoreIdentityDb(db, config); } finally { db.close(); }
 }
 
