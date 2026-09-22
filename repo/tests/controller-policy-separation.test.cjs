@@ -112,3 +112,68 @@ test('convergence-first roles are represented without widening delegation', () =
   assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
   assert.match(controller, /does not automatically spend a higher-model `RECONVERGENCE` call/);
 });
+
+test('shipping-first policy is singular, ordered, and retains canonical Shipping Law', () => {
+  const heading = '## Shipping-first scope and repair decisions';
+  assert.equal(controller.split(heading).length - 1, 1);
+  assert.ok(controller.indexOf(heading) < controller.indexOf('## Structural-change law'));
+  assert.match(controller, /Apply the canonical \[Shipping Law\]\(contracts\/agent-rules\/ai-coding-agent-execution\.md#shipping-law\)/);
+});
+
+test('shipping scope admission preserves minimum safety, acceptance, and blocker evidence', () => {
+  assert.match(controller, /smallest usable outcome, supported environment, applicable minimum safety floor and explicit acceptance criteria/);
+  assert.match(controller, /concrete failure evidence or a critical evidence gap, and the consequence for this shipment/);
+  assert.match(controller, /Existing criteria and blockers require evidence-backed User\/Web adjudication before reclassification; exhaustion or deadline pressure is not grounds to weaken the floor/);
+});
+
+test('POST_SHIP findings retain ownership without granting authority or forcing repair', () => {
+  assert.match(controller, /Preserve each material `POST_SHIP` finding with its original evidence, disposition\/reason and exactly one verified continuing owner/);
+  assert.match(controller, /Deferral grants no implementation authority/);
+  assert.match(controller, /Non-blocking follow-ups alone must not cause G4 AMEND, current repair or repair-budget consumption; G4 may PASS with such follow-ups only when all applicable assurance obligations are satisfied/);
+});
+
+test('shipping repair routing distinguishes settled G3, targeted G2, G1, and evidence work', () => {
+  assert.match(controller, /existing authorised G3 correction path when the accepted contract already settles the required behaviour, trust boundary, mutation scope and validation/);
+  assert.match(controller, /Missing semantic, coverage or implementation-boundary decisions require a targeted G2 amendment; a changed root model, architecture or trust ordering requires bounded G1 re-entry/);
+  assert.match(controller, /Evidence-only failure calls for bounded evidence acquisition, not automatic code repair/);
+});
+
+test('shipping repair routing preserves exhausted history and candidate limits', () => {
+  assert.match(controller, /Repair routing does not reset budgets, grant another candidate, create Repair 3 or waive an explicitly required fresh G2 for an exceptional continuation/);
+  assert.match(controller, /Same implementation lineage has a maximum of 2 corrections regardless of run, head, branch, or renamed repair label/);
+  assert.match(controller, /After 2\/2, a same-lineage material defect => `NON_CONVERGENCE_DECISION_REQUIRED`; no Repair-3 alias\/reset/);
+  assert.match(controller, /Each grant authorises at most one bounded implementation candidate plus its required fresh G4/);
+});
+
+test('G4 repair handoff retains complete evidence and independent follow-up obligations', () => {
+  assert.match(controller, /actual and required observable results; affected consequential\/equivalent surfaces and unexamined areas; regression and positive-control obligations/);
+  assert.match(controller, /Mark unexamined material areas explicitly; do not infer assurance from silence/);
+  assert.match(controller, /Keep the original complete G4 packet unchanged/);
+  assert.match(controller, /Fresh follow-up G4 receives prior findings and reproducers as evidence, independently verifies the current exact candidate and affected interactions/);
+  assert.match(controller, /There is no finding quota or rejection limit/);
+});
+
+test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent integration', () => {
+  assert.match(controller, /depth-one leaves only for genuinely independent slices with fixed interfaces, explicit expected results, disjoint mutation ownership, isolated workspaces, tests and an integration order/);
+  assert.match(controller, /parent owns serial integration, combined validation and candidate publication; leaves do not race to push the delivery branch/);
+  assert.match(controller, /Serial execution is valid when fan-out is unsupported or not useful, and active worker contracts are not retroactively widened/);
+});
+
+test('candidate acceptance, child completion, and per-repository wait removal stay distinct', () => {
+  assert.match(controller, /Distinguish candidate acceptance from programme completion/);
+  assert.match(controller, /safe independently accepted increment need not wait for unrelated future-owned work, but the continuing child remains open until its required outcomes are complete/);
+  assert.match(controller, /release an otherwise unsupported blanket Toolkit wait only after recording that no genuine local safety, evidence, authority or code dependency requires it/);
+  assert.match(controller, /Keep named real holds, active-worker protections and all existing permissions\/budgets/);
+});
+
+test('shipping policy remains symbolic and preserves existing policy boundaries', () => {
+  for (const stack of Object.values(registry.stacks)) {
+    for (const route of Object.values(stack.routes)) {
+      assert.equal(controller.includes(route.model), false, `model leaked into Controller law: ${route.model}`);
+      assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
+    }
+  }
+  assert.match(controller, /G0-B.*G3.*only subagent-capable stages\/roles/s);
+  assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
+  assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
+});
