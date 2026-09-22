@@ -8,12 +8,43 @@ const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
 
+function semanticGate() {
+  const store = {
+    admitSemanticGate() { return Object.freeze({}); },
+    revalidateSemanticGate() { return true; },
+    beginSemanticGateDispatch() { return true; },
+    recordSemanticGateDispatch() { return true; },
+    recoverSemanticGateAdmission() { return Object.freeze({}); },
+  };
+  return {
+    store,
+    consumer_intent: { execution_binding: {} },
+    trusted_readers: {
+      readAuthority() { return {}; },
+      readCurrent() { return {}; },
+      readWebDecision() { return {}; },
+      readCandidate() { return {}; },
+      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
+      screenPacket() { return true; },
+    },
+  };
+}
+
+function customizedGate(overrides = {}) {
+  const gate = semanticGate();
+  Object.assign(gate.store, overrides.store || {});
+  if (overrides.trusted_readers) gate.trusted_readers = { ...gate.trusted_readers, ...overrides.trusted_readers };
+  if (overrides.consumer_identity) gate.consumer_identity = overrides.consumer_identity;
+  return gate;
+}
+
 const common = {
   task: { id: 'task-boundary', digest: 'a'.repeat(64) },
   repository_id: 'b'.repeat(64),
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+  semantic_gate: semanticGate(),
 };
 
 function expectCode(fn, code) {
@@ -112,6 +143,90 @@ test('A3 exposes exactly five contract identities and no second authority surfac
   assert.equal(runtime.POLICY.mutation_lease.required_before_stage, true);
 });
 
+test('semantic admission is receipt-owned, opaque, and required at direct consequential boundaries', () => {
+  const blocked = runtime.admitRun({
+    ...common,
+    semantic_gate: undefined,
+    verified: true,
+    legacy_ok: true,
+    environment: { execution_loop: 'enabled' },
+    authority: { delegated: false, lanes: [] },
+  });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+
+  const route = runtime.admitRoute({ ...common, authority: { delegated: false, lanes: [] } });
+  const planned = runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission' });
+  expectCode(() => runtime.transitionRun(planned, 'admitted'), 'GPR_PACKET_ADMISSION_REQUIRED');
+  const directGate = customizedGate();
+  let directAdmissions = 0;
+  directGate.store.admitSemanticGate = () => { directAdmissions += 1; return Object.freeze({}); };
+  const directAdmitted = runtime.transitionRun(
+    runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission-success' }),
+    'admitted',
+    { semantic_gate: directGate },
+  );
+  assert.equal(directAdmitted.execution_state, 'admitted');
+  assert.equal(directAdmissions, 1);
+
+  const admitted = runtime.admitRun({ ...common, run_id: 'run-serialized-admission', authority: { delegated: false, lanes: [] } });
+  const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+  const workspace = runtime.admitWorkspace({
+    run: admitted.run,
+    expected_live: live,
+    liveRefProvider: { read: () => live },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-serialized', workspace_handle: 'handle-serialized', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
+  });
+  const serialized = JSON.parse(JSON.stringify(workspace.run));
+  expectCode(() => runtime.transitionRun(serialized, 'running'), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted.run, 'semantic_admission'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted.run, 'verified'), false);
+});
+
+test('semantic gate admission and readers reject promises in synchronous Loop guards', () => {
+  const asyncAdmission = customizedGate({ store: { admitSemanticGate: () => Promise.resolve({}) } });
+  const blocked = runtime.admitRun({ ...common, semantic_gate: asyncAdmission, authority: { delegated: false, lanes: [] } });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+
+  const asyncRevalidation = customizedGate({ store: { revalidateSemanticGate: () => Promise.resolve(true) } });
+  const admitted = runtime.admitRun({ ...common, semantic_gate: asyncRevalidation, run_id: 'run-async-revalidation', authority: { delegated: false, lanes: [] } });
+  assert.equal(admitted.status, 'blocked');
+
+  const voidRevalidation = customizedGate({ store: { revalidateSemanticGate() {} } });
+  const voidResult = runtime.admitRun({ ...common, semantic_gate: voidRevalidation, run_id: 'run-void-revalidation', authority: { delegated: false, lanes: [] } });
+  assert.equal(voidResult.status, 'admitted');
+});
+
+test('restart release can recover only through the receipt-owned semantic admission API', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-loop-recovery-'));
+  const evidence = commitEvidence('run-loop-recovery', {}, stateRoot);
+  const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: evidence.repository_id, authorized_ref_digest: evidence.authorized_ref_digest, run_id: evidence.run_id });
+  let recoveries = 0;
+  let revalidations = 0;
+  const gate = customizedGate({
+    consumer_identity: { consumer: 'restart' },
+    store: {
+      recoverSemanticGateAdmission() { recoveries += 1; return Object.freeze({}); },
+      revalidateSemanticGate() { revalidations += 1; return true; },
+    },
+  });
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: evidence.repository_id,
+    authorized_ref_digest: evidence.authorized_ref_digest,
+    run_id: evidence.run_id,
+    lease_id: lease.lease_id,
+    terminal_state: terminalEvidence.terminal.execution_state,
+    workspace_disposition: terminalEvidence.terminal.workspace_disposition,
+    publication_state: terminalEvidence.terminal.publication_state,
+    semantic_gate: gate,
+  }), { released: true });
+  assert.equal(recoveries, 1);
+  assert.equal(revalidations, 1);
+});
+
 test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-success-'));
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
@@ -137,7 +252,27 @@ test('typed A1 commit seam stages exactly the authorized paths and verifies the 
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
+});
+
+test('typed commit and commitExact reject serialized admission context before staging', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-loop-opaque-commit-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-opaque-commit' });
+  const evidence = commitEvidence('run-opaque-commit', {}, stateRoot);
+  const fixture = gitFixture();
+  let stageCalls = 0;
+  const originalStage = fixture.stageExact;
+  fixture.stageExact = (input) => { stageCalls += 1; return originalStage.call(fixture, input); };
+  const serializedEvidence = { ...evidence, run: JSON.parse(JSON.stringify(evidence.run)) };
+  const options = {
+    ...commitOptions({ run_id: 'run-opaque-commit', state_root: stateRoot, mutation_lease: lease, evidence: serializedEvidence }),
+    git: fixture,
+    broker: { authorize: () => ({ decision: 'allow' }) },
+  };
+  expectCode(() => runtime.executeTypedGitCommit(options), 'GPR_PACKET_ADMISSION_REQUIRED');
+  expectCode(() => runtime.commitExact(options), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(stageCalls, 0);
 });
 
 test('typed A1 commit without an owned lease performs zero stage or commit mutation', () => {
@@ -276,6 +411,7 @@ test('uncertain or interrupted publication preserves lease evidence until safe t
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
   const later = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-later' });
   assert.equal(later.run_id, 'run-later');
@@ -317,7 +453,7 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
   expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
   expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: 'lease-forged', terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_TOKEN_MISMATCH');
   const running = runtime.transitionRun(firstWorkspace.run, 'running', { state_root: stateRoot });
-  completeSafeEvidence(running, stateRoot);
+  const terminalEvidence = completeSafeEvidence(running, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: run.repository_id,
@@ -327,6 +463,7 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
 });
 

@@ -43,7 +43,11 @@
       "mutation_operation_events",
       "holder_attestations",
       "recovery_records",
-      "receipt_chain_digests"
+      "receipt_chain_digests",
+      "authority_packets",
+      "authority_packet_events",
+      "semantic_gate_admissions",
+      "semantic_gate_admission_events"
     ],
     "atomic_cas_transactions": true,
     "independent_reopen_readback": true,
@@ -261,6 +265,84 @@
         "broker_installation_in_s1": false,
         "broker_key_in_s1": false
       }
+    }
+  },
+  "authority_packet": {
+    "schema": "toolkit.github-program.authority-packet.v1",
+    "delivery_schema": "toolkit.github-program.authority-packet-delivery.v1",
+    "user_version": 4,
+    "is_v2_plus_extension": true,
+    "legacy_v2_unchanged": true,
+    "v3_remains_dormant": true,
+    "explicit_actions": [
+      "initialiseAuthorityPacketStore",
+      "planAuthorityPacketMigration",
+      "migrateAuthorityPacketStore"
+    ],
+    "read_only_open_migrates": false,
+    "packet_tables": [
+      "authority_packets",
+      "authority_packet_events",
+      "semantic_gate_admissions",
+      "semantic_gate_admission_events"
+    ],
+    "append_only": true,
+    "identity": {
+      "content_digest": "SHA256(canonicalSerialize(body))",
+      "binding_digest": "SHA256(canonicalSerialize(bindings))",
+      "packet_digest": "SHA256(canonicalSerialize({schema, bindings, body}))",
+      "packet_id": "ap1- plus packet_digest",
+      "producer_key": "SHA256(canonicalSerialize({repository, parent_issue, child_issue, lane_id, producer_run: producer.run}))"
+    },
+    "artifact_limits": {
+      "canonical_bytes": 1048576,
+      "nesting_depth": 32,
+      "value_nodes": 65536,
+      "prose_bytes": 262144,
+      "findings": 256,
+      "evidence_references": 64,
+      "required_consumers": 16,
+      "current_predecessors": 16,
+      "current_projection_bytes": 65536,
+      "delivery_bytes": 1114112
+    },
+    "fresh_reader": {
+      "command": "read-authority-packet",
+      "read_only": true,
+      "creates_store": false,
+      "migrates_store": false,
+      "shell": false,
+      "node_injection_environment_removed": true,
+      "timeout_ms": 30000,
+      "stderr": "empty",
+      "stdout": "one canonical JSON line",
+      "challenge": "fresh 256-bit parent-generated value",
+      "delivery": [
+        "envelope",
+        "packet"
+      ]
+    },
+    "privacy": {
+      "closed_value_model": true,
+      "canonical_utf8_without_bom_or_trailing_newline": true,
+      "comment_bodies": false,
+      "repository_contents": false,
+      "credentials_secrets_tokens_auth_headers": false,
+      "private_filesystem_locations": false,
+      "raw_environment_values": false
+    },
+    "backfill": {
+      "explicit_source_authority_required": true,
+      "complete_source_required": true,
+      "adds_event": "BACKFILL_AUTHORISED",
+      "preserves_original_producer": true,
+      "unprovable_source": "GPR_PACKET_LEGACY_RERUN_REQUIRED"
+    },
+    "failure_envelope": {
+      "code": "TERMINAL_PACKET_DURABILITY_UNVERIFIED",
+      "accepted": false,
+      "consumable": false,
+      "next_gate_admitted": false
     }
   },
   "allocator": {

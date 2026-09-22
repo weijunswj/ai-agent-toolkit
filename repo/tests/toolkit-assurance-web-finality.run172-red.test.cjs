@@ -16,6 +16,29 @@ const {
 const sha = (letter) => letter.repeat(40);
 const digest = (letter) => letter.repeat(64);
 
+function receiptContext() {
+  const admission = Object.freeze({});
+  const receiptRuntime = {
+    revalidateSemanticGate(handle, expected) {
+      assert.equal(handle, admission);
+      return {
+        schema: runtime.RECEIPT_DEPENDENCY_SCHEMA,
+        fresh: true,
+        operation: expected.operation,
+        consumer: {
+          candidate: expected.candidate === undefined ? null : { ...expected.candidate },
+          scope_digest: expected.scope_digest === undefined ? null : expected.scope_digest,
+        },
+        dependency_state: 'NO_PREDECESSOR',
+        checks: { packet: 'not_applicable', acceptance: 'not_applicable', current: 'verified' },
+        current: { projection_digest: digest('1'), body_digest: digest('2'), revision: 1 },
+        predecessors: [],
+      };
+    },
+  };
+  return runtime.bindReceiptAdmission(receiptRuntime, admission);
+}
+
 const candidate = Object.freeze({
   head: sha('a'),
   tree: sha('b'),
@@ -255,8 +278,14 @@ test('an unknown extra property cannot replace missing required evidence', () =>
 });
 
 test('Run-172 RED C: valid exact accepted candidate tuple remains verifiable', () => {
-  const result = evaluateFinality(finalityEvidence());
+  const result = evaluateFinality(finalityEvidence(), receiptContext());
   assert.equal(result.code, 'FINALITY_VERIFIED');
+});
+
+test('finality fails closed without a receipt-owned admission', () => {
+  const result = evaluateFinality(finalityEvidence());
+  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  assert.deepEqual(result.reasons, ['receipt-admission-required']);
 });
 
 test('Run-172 RED C: unexpected PR binding is rejected', () => {

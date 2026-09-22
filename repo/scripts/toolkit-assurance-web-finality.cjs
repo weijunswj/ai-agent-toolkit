@@ -5,6 +5,22 @@ const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
 const G4_MODEL = 'GPT-5.6 Sol High';
 const G4A_MODEL = 'GPT-5.6 Sol Max';
+const RECEIPT_DEPENDENCY_SCHEMA = 'toolkit.assurance-web-finality.receipt-dependency.v1';
+
+const RECEIPT_DEPENDENCY_STAGES = Object.freeze([
+  'G0-A',
+  'G0-B',
+  'G1',
+  'G2',
+  'G3',
+  'G4',
+  'LOOP',
+  'RECONVERGENCE',
+  'FINAL_AUDIT',
+  'BROWSER',
+]);
+
+const RECEIPT_CONTEXT_OWNERS = new WeakMap();
 
 const MATERIAL_PREDICATES = Object.freeze([
   'applies_to_current_candidate',
@@ -30,6 +46,13 @@ const FORBIDDEN_REPORT_VALUE = /(?:https?:\/\/|^(?:[A-Za-z]:[\\/]|[\\/])|(?:^|[\
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function exactKeys(value, keys) {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
 function isSha(value) {
@@ -83,6 +106,229 @@ function isSafePublicRef(value) {
     && /^[A-Za-z0-9._:/#-]+$/.test(value)
     && !value.includes('..')
     && !value.includes('://');
+}
+
+function isSafeReferenceValue(value) {
+  return (Number.isSafeInteger(value) && value >= 1)
+    || (typeof value === 'string'
+      && value.length > 0
+      && value.length <= 256
+      && /^[A-Za-z0-9._:/-]+$/.test(value)
+      && !value.includes('..')
+      && !value.includes('://'));
+}
+
+function isSafeReceiptRevision(value) {
+  return (Number.isSafeInteger(value) && value >= 1)
+    || (typeof value === 'string'
+      && value.length > 0
+      && value.length <= 256
+      && /^[A-Za-z0-9._:/-]+$/.test(value)
+      && !value.includes('..')
+      && !value.includes('://'));
+}
+
+function validReceiptCandidate(value) {
+  if (value === null) return true;
+  return exactKeys(value, ['pr_number', 'branch', 'base_ref', 'base_sha', 'head_sha', 'tree_sha'])
+    && Number.isSafeInteger(value.pr_number)
+    && value.pr_number >= 1
+    && isSafeId(value.branch)
+    && isSafeId(value.base_ref)
+    && isSha(value.base_sha)
+    && isSha(value.head_sha)
+    && isSha(value.tree_sha);
+}
+
+function sameReceiptCandidate(left, right) {
+  if (left === null || right === null) return left === right;
+  return validReceiptCandidate(left)
+    && validReceiptCandidate(right)
+    && left.pr_number === right.pr_number
+    && left.branch === right.branch
+    && left.base_ref === right.base_ref
+    && left.base_sha === right.base_sha
+    && left.head_sha === right.head_sha
+    && left.tree_sha === right.tree_sha;
+}
+
+function validReceiptConsumerCandidate(value) {
+  return exactKeys(value, ['head', 'tree', 'base'])
+    && isSha(value.head)
+    && isSha(value.tree)
+    && isSha(value.base);
+}
+
+function sameReceiptConsumerCandidate(left, right) {
+  if (left === null || right === null) return left === right;
+  return validReceiptConsumerCandidate(left)
+    && validReceiptConsumerCandidate(right)
+    && left.head === right.head
+    && left.tree === right.tree
+    && left.base === right.base;
+}
+
+function validReceiptWebSource(value) {
+  return exactKeys(value, ['repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'])
+    && typeof value.repository === 'string'
+    && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(value.repository)
+    && Number.isSafeInteger(value.issue_number)
+    && value.issue_number >= 1
+    && isSafeReferenceValue(value.comment_id)
+    && isSafeReferenceValue(value.node_id)
+    && isSafeId(value.author_login)
+    && typeof value.updated_at === 'string'
+    && value.updated_at.length > 0
+    && value.updated_at.length <= 64
+    && /^[A-Za-z0-9T:._+Z-]+$/.test(value.updated_at)
+    && !FORBIDDEN_REPORT_VALUE.test(value.updated_at)
+    && isDigest(value.body_digest);
+}
+
+function validReceiptProducer(value) {
+  return exactKeys(value, ['run', 'lock', 'stage', 'role'])
+    && isSafeId(value.run)
+    && isSafeId(value.lock)
+    && RECEIPT_DEPENDENCY_STAGES.includes(value.stage)
+    && value.role === value.stage;
+}
+
+function validReceiptPredecessor(value) {
+  return exactKeys(value, [
+    'packet_id',
+    'packet_digest',
+    'content_digest',
+    'binding_digest',
+    'producer',
+    'candidate',
+    'dependency_id',
+    'acceptance_event_id',
+    'web_source',
+    'readback_event_id',
+    'store_identity_digest',
+  ])
+    && typeof value.packet_id === 'string'
+    && /^ap1-[a-f0-9]{64}$/.test(value.packet_id)
+    && isDigest(value.packet_digest)
+    && value.packet_id === 'ap1-' + value.packet_digest
+    && isDigest(value.content_digest)
+    && isDigest(value.binding_digest)
+    && validReceiptProducer(value.producer)
+    && validReceiptCandidate(value.candidate)
+    && isSafeId(value.dependency_id)
+    && isDigest(value.acceptance_event_id)
+    && validReceiptWebSource(value.web_source)
+    && isDigest(value.readback_event_id)
+    && isDigest(value.store_identity_digest);
+}
+
+function validateReceiptDependencyProof(value, expected = {}) {
+  const failures = [];
+  if (!exactKeys(value, ['schema', 'fresh', 'operation', 'consumer', 'dependency_state', 'checks', 'current', 'predecessors'])) {
+    return ['receipt-dependency-proof-shape-invalid'];
+  }
+  if (value.schema !== RECEIPT_DEPENDENCY_SCHEMA) failures.push('receipt-dependency-schema-invalid');
+  if (value.fresh !== true) failures.push('receipt-dependency-stale');
+  if (value.operation !== expected.operation) failures.push('receipt-consumer-operation-conflict');
+
+  if (!exactKeys(value.consumer, ['candidate', 'scope_digest'])
+    || (value.consumer.candidate !== null && !validReceiptConsumerCandidate(value.consumer.candidate))
+    || (value.consumer.scope_digest !== null && !isDigest(value.consumer.scope_digest))) {
+    failures.push('receipt-consumer-binding-invalid');
+  } else {
+    if (Object.prototype.hasOwnProperty.call(expected, 'candidate')
+      && !sameReceiptConsumerCandidate(value.consumer.candidate, expected.candidate)) {
+      failures.push('receipt-consumer-candidate-conflict');
+    }
+    if (Object.prototype.hasOwnProperty.call(expected, 'scope_digest')
+      && value.consumer.scope_digest !== expected.scope_digest) {
+      failures.push('receipt-consumer-scope-conflict');
+    }
+  }
+
+  if (!['NO_PREDECESSOR', 'PREDECESSORS_VERIFIED'].includes(value.dependency_state)) {
+    failures.push('receipt-dependency-state-invalid');
+  }
+  if (!exactKeys(value.checks, ['packet', 'acceptance', 'current'])
+    || value.checks.current !== 'verified'
+    || (value.dependency_state === 'NO_PREDECESSOR'
+      && (value.checks.packet !== 'not_applicable' || value.checks.acceptance !== 'not_applicable'))
+    || (value.dependency_state === 'PREDECESSORS_VERIFIED'
+      && (value.checks.packet !== 'verified' || value.checks.acceptance !== 'verified'))) {
+    failures.push('receipt-dependency-checks-invalid');
+  }
+
+  if (!exactKeys(value.current, ['projection_digest', 'body_digest', 'revision'])
+    || !isDigest(value.current.projection_digest)
+    || !isDigest(value.current.body_digest)
+    || !isSafeReceiptRevision(value.current.revision)) {
+    failures.push('receipt-current-readback-invalid');
+  }
+
+  if (!Array.isArray(value.predecessors)
+    || value.predecessors.length > 16
+    || (value.dependency_state === 'NO_PREDECESSOR' && value.predecessors.length !== 0)
+    || (value.dependency_state === 'PREDECESSORS_VERIFIED' && value.predecessors.length === 0)) {
+    failures.push('receipt-predecessor-set-invalid');
+  } else {
+    let priorId;
+    const ids = new Set();
+    for (const predecessor of value.predecessors) {
+      if (!validReceiptPredecessor(predecessor)) {
+        failures.push('receipt-predecessor-invalid');
+        continue;
+      }
+      if (ids.has(predecessor.dependency_id) || (priorId !== undefined && predecessor.dependency_id <= priorId)) {
+        failures.push('receipt-predecessor-order-invalid');
+      }
+      ids.add(predecessor.dependency_id);
+      priorId = predecessor.dependency_id;
+    }
+  }
+  return [...new Set(failures)];
+}
+
+function bindReceiptAdmission(receiptRuntime, admission) {
+  if (!isRecord(receiptRuntime) || typeof receiptRuntime.revalidateSemanticGate !== 'function') {
+    throw new TypeError('RECEIPT_RUNTIME_INVALID');
+  }
+  if (!isRecord(admission) || !Object.isFrozen(admission)) throw new TypeError('RECEIPT_ADMISSION_INVALID');
+  const context = {};
+  Object.defineProperty(context, 'toJSON', {
+    value: () => { throw new TypeError('RECEIPT_CONTEXT_NONSERIALISABLE'); },
+  });
+  Object.freeze(context);
+  RECEIPT_CONTEXT_OWNERS.set(context, {
+    admission,
+    revalidateSemanticGate: receiptRuntime.revalidateSemanticGate.bind(receiptRuntime),
+  });
+  return context;
+}
+
+function receiptDependencyFailures(context, expected) {
+  if (!context) return ['receipt-admission-required'];
+  const owner = RECEIPT_CONTEXT_OWNERS.get(context);
+  if (!owner) return ['receipt-admission-untrusted'];
+  let proof;
+  try {
+    proof = owner.revalidateSemanticGate(owner.admission, Object.freeze({ ...expected }));
+  } catch (_error) {
+    return ['receipt-dependency-unverified'];
+  }
+  try {
+    if (proof && typeof proof.then === 'function') return ['receipt-dependency-async'];
+    return validateReceiptDependencyProof(proof, expected);
+  } catch (_error) {
+    return ['receipt-dependency-proof-invalid'];
+  }
+}
+
+function receiptFailureResult(failures, fields = {}) {
+  return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', {
+    ...fields,
+    receipt_dependency_required: true,
+    reasons: failures,
+  });
 }
 
 function hasTrue(record, key) {
@@ -212,9 +458,15 @@ function failureLabel(failures) {
   return match ? match[1] : undefined;
 }
 
-function admitG4(input) {
+function admitG4(input, receiptContext) {
   const failures = g4AdmissionFailures(input);
   if (failures.length > 0) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { admitted: false, reasons: failures });
+  const receiptFailures = receiptDependencyFailures(receiptContext, {
+    operation: 'G4',
+    candidate: { head: input.candidate.head, tree: input.candidate.tree, base: input.candidate.base },
+    scope_digest: input.scope.digest,
+  });
+  if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { admitted: false });
   return valid('G4_ADMISSION_ACCEPTED', {
     admitted: true,
     contract_version: CONTRACT_VERSION,
@@ -235,7 +487,7 @@ function isMaterialBlocker(finding) {
     && EXCLUSION_FLAGS.every((key) => finding[key] !== true);
 }
 
-function evaluateAssurance(input) {
+function evaluateAssurance(input, receiptContext) {
   const failures = requiredEvidenceFailures(input);
   if (failures.length > 0) {
     const result = {
@@ -268,6 +520,25 @@ function evaluateAssurance(input) {
       next_action: 'WEB_ROUTE_SAME_LOCK_REPAIR',
     };
   }
+  const receiptFailures = receiptDependencyFailures(receiptContext, {
+    operation: 'ASSURANCE',
+    candidate: { head: input.candidate.head, tree: input.candidate.tree, base: input.candidate.base },
+    scope_digest: input.scope.digest,
+  });
+  if (receiptFailures.length > 0) {
+    const result = {
+      verdict: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
+      code: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
+      stop: true,
+      finality_blocked: true,
+      receipt_dependency_required: true,
+      reasons: receiptFailures,
+      next_action: 'WEB_REESTABLISH_REQUIRED_EVIDENCE',
+    };
+    const label = failureLabel(receiptFailures);
+    if (label) result.label = label;
+    return result;
+  }
   return {
     verdict: 'PASS',
     code: 'PASS_AND_STOP',
@@ -280,7 +551,7 @@ function evaluateAssurance(input) {
   };
 }
 
-function evaluateNoByteReviewDisposition(input = {}) {
+function evaluateNoByteReviewDisposition(input = {}, receiptContext) {
   const unchanged = isRecord(input.unchanged) && ['head', 'tree', 'base', 'lock', 'scope'].every((key) => input.unchanged[key] === true);
   const disposition = ['stale', 'duplicate-closed-root', 'false-positive', 'non-material'].includes(input.disposition);
   const proof = unchanged
@@ -290,6 +561,18 @@ function evaluateNoByteReviewDisposition(input = {}) {
     && input.complete_inventory === true
     && input.all_other_evidence_current === true;
   if (proof) {
+    const receiptFailures = receiptDependencyFailures(receiptContext, { operation: 'NO_BYTE_REVIEW' });
+    if (receiptFailures.length > 0) {
+      return {
+        eligible: false,
+        code: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
+        receipt_dependency_required: true,
+        reasons: receiptFailures,
+        g4_invalidated: true,
+        fresh_g4_required: true,
+        finality_blocked: true,
+      };
+    }
     return {
       eligible: true,
       code: 'NO_BYTE_REVIEW_DISPOSITION_ACCEPTED',
@@ -307,9 +590,9 @@ function evaluateNoByteReviewDisposition(input = {}) {
   };
 }
 
-function evaluateInvalidation(input = {}) {
+function evaluateInvalidation(input = {}, receiptContext) {
   const event = input.event;
-  if (event === 'READY_MOVEMENT' && input.movement_event) return evaluateInvalidation({ ...input, event: input.movement_event });
+  if (event === 'READY_MOVEMENT' && input.movement_event) return evaluateInvalidation({ ...input, event: input.movement_event }, receiptContext);
   if (event === 'CANDIDATE_MOVEMENT' || event === 'SUCCESSOR_CANDIDATE_HEAD' || event === 'CANDIDATE_TREE_MOVEMENT') {
     return {
       code: 'G4_INVALIDATED_CANDIDATE_MOVEMENT',
@@ -386,7 +669,7 @@ function evaluateInvalidation(input = {}) {
       fresh_g4_required: false,
     };
   }
-  if (event === 'NO_BYTE_REVIEW_DISPOSITION') return evaluateNoByteReviewDisposition(input);
+  if (event === 'NO_BYTE_REVIEW_DISPOSITION') return evaluateNoByteReviewDisposition(input, receiptContext);
   if (event === 'REQUIRED_CHECK_COMPLETED_SUCCESS') {
     return {
       code: 'REQUIRED_CHECK_REFRESH_ONLY',
@@ -461,7 +744,7 @@ function evaluateInvalidation(input = {}) {
   };
 }
 
-function evaluateG4A(input = {}) {
+function evaluateG4A(input = {}, receiptContext) {
   if (input.required_evidence_current !== true) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { allowed: false });
   if (['confidence', 'routine_duplicate', 'second_opinion', 'missing_evidence'].includes(input.purpose)) {
     return fail('G4A_NOT_PERMITTED', { allowed: false });
@@ -481,6 +764,8 @@ function evaluateG4A(input = {}) {
       next_action: 'CONTROLLER_REQUIRED',
     });
   }
+  const receiptFailures = receiptDependencyFailures(receiptContext, { operation: 'G4A' });
+  if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { allowed: false });
   return valid('G4A_ELIGIBLE', {
     allowed: true,
     model_class: G4A_MODEL,
@@ -495,7 +780,7 @@ function evaluateG4A(input = {}) {
   });
 }
 
-function evaluateFinality(input = {}) {
+function evaluateFinality(input = {}, receiptContext) {
   const web = isRecord(input.web_acceptance) ? input.web_acceptance : {};
   const ready = isRecord(input.ready) ? input.ready : {};
   const merge = isRecord(input.merge) ? input.merge : {};
@@ -563,6 +848,11 @@ function evaluateFinality(input = {}) {
   if (canonical.server_authoritative !== true || canonical.verifiable !== true) {
     return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
   }
+  const receiptFailures = receiptDependencyFailures(receiptContext, {
+    operation: 'FINALITY',
+    candidate: { head: accepted.head, tree: accepted.tree, base: accepted.base },
+  });
+  if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { finality_blocked: true });
   return {
     code: 'FINALITY_VERIFIED',
     verdict: 'VERIFIED',
@@ -705,8 +995,11 @@ module.exports = Object.freeze({
   G4_AUTHORITY,
   G4_MODEL,
   G4A_MODEL,
+  RECEIPT_DEPENDENCY_SCHEMA,
   MATERIAL_PREDICATES,
   EXCLUSION_FLAGS,
+  bindReceiptAdmission,
+  validateReceiptDependencyProof,
   admitG4,
   evaluateAssurance,
   evaluateInvalidation,

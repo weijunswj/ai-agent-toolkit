@@ -12,12 +12,35 @@ const a1RuntimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-pl
 const runtime = require(runtimePath);
 const a1 = require(a1RuntimePath);
 
+function semanticGate() {
+  const store = {
+    admitSemanticGate() { return Object.freeze({}); },
+    revalidateSemanticGate() { return true; },
+    beginSemanticGateDispatch() { return true; },
+    recordSemanticGateDispatch() { return true; },
+    recoverSemanticGateAdmission() { return Object.freeze({}); },
+  };
+  return {
+    store,
+    consumer_intent: { execution_binding: {} },
+    trusted_readers: {
+      readAuthority() { return {}; },
+      readCurrent() { return {}; },
+      readWebDecision() { return {}; },
+      readCandidate() { return {}; },
+      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
+      screenPacket() { return true; },
+    },
+  };
+}
+
 const common = {
   task: { id: 'task-1', digest: 'a'.repeat(64) },
   repository_id: 'b'.repeat(64),
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+  semantic_gate: semanticGate(),
 };
 
 function commitOperation(overrides = {}) {
@@ -191,6 +214,42 @@ test('A3 complete atomic launch starts exactly the admitted lane set', () => {
   assert.equal(batches.length, 1);
   assert.deepEqual(batches[0].lanes, ['worker-a', 'worker-b']);
   assert.equal(Object.isFrozen(result.started.route_plan), true);
+});
+
+test('semantic dispatch records one intent and one trusted confirmation for an atomic launch', () => {
+  const gate = semanticGate();
+  let intents = 0;
+  let confirmations = 0;
+  gate.store.beginSemanticGateDispatch = () => { intents += 1; };
+  gate.store.recordSemanticGateDispatch = (_admission, evidence) => {
+    confirmations += 1;
+    assert.equal(evidence.status, 'confirmed');
+  };
+  const result = startDelegated(delegatedLaunchOptions({
+    semantic_gate: gate,
+    prepareLaunch(lane) { return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }; },
+    commitLaunchBatch({ reservations }) { return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) }; },
+  }));
+  assert.equal(result.started.status, 'running');
+  assert.equal(intents, 1);
+  assert.equal(confirmations, 1);
+});
+
+test('ambiguous atomic dispatch is held and never retried automatically', () => {
+  const gate = semanticGate();
+  let commitCalls = 0;
+  let recorded = 0;
+  gate.trusted_readers.readDispatchOutcome = () => ({ status: 'ambiguous' });
+  gate.store.recordSemanticGateDispatch = (_admission, evidence) => { if (evidence.status === 'confirmed') recorded += 1; return true; };
+  const result = startDelegated(delegatedLaunchOptions({
+    semantic_gate: gate,
+    prepareLaunch(lane) { return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }; },
+    commitLaunchBatch() { commitCalls += 1; throw new Error('transport outcome unavailable'); },
+  }));
+  assert.equal(result.started.status, 'blocked');
+  assert.equal(result.started.reason_code, 'GPR_PACKET_DISPATCH_UNRESOLVED');
+  assert.equal(commitCalls, 1);
+  assert.equal(recorded, 0);
 });
 
 function expectCode(fn, code) {

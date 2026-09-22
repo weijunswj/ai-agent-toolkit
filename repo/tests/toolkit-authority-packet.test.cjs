@@ -1,0 +1,252 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+const test = require('node:test');
+let Ajv2020 = null;
+try { Ajv2020 = require('ajv/dist/2020'); } catch (_) { /* Optional in dependency-light checkouts. */ }
+
+const runtime = require('../scripts/toolkit-github-program-receipt.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+const schemaPath = path.join(__dirname, '../contracts/github-program-receipt/authority-packet-v1.schema.json');
+
+test.afterEach(() => support.cleanup());
+
+function assertCode(callback, code) {
+  assert.throws(callback, (error) => error && error.code === code);
+}
+
+function packetFixture(seed = 'packet') {
+  return support.packet({ seed, bindings: support.bindings(seed) });
+}
+
+function initialise(packetValue, root = support.stateRoot()) {
+  const storeOptions = support.options(root);
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, support.readers(packetValue));
+  return { store, storeOptions, packetValue };
+}
+
+function schemaValidator() {
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  ajv.addFormat('date-time', () => true);
+  return { schema, validate: ajv.compile(schema) };
+}
+
+test('authority packet JSON contract is closed and accepts the complete fixture', { skip: !Ajv2020 }, () => {
+  const { schema, validate } = schemaValidator();
+  const value = packetFixture();
+  assert.equal(schema.$id, runtime.AUTHORITY_PACKET_SCHEMA_ID);
+  assert.equal(validate(value), true);
+  assert.equal(validate({ ...value, unexpected: true }), false);
+  assert.equal(validate({ ...value, bindings: { ...value.bindings, human_owner: 'owner with spaces' } }), false);
+});
+
+test('authority packet validation rejects noncanonical, sparse, accessor, custom-value, and privacy inputs', () => {
+  const value = packetFixture();
+  assertCode(() => runtime.validateAuthorityPacket(JSON.stringify(value)), 'GPR_PACKET_VALUE_INVALID');
+  const sparse = structuredClone(value);
+  delete sparse.body.sections[1];
+  assertCode(() => runtime.validateAuthorityPacket(sparse), 'GPR_PACKET_VALUE_INVALID');
+  const accessor = structuredClone(value);
+  Object.defineProperty(accessor.body, 'decision', { enumerable: true, get() { return 'not data'; } });
+  assertCode(() => runtime.validateAuthorityPacket(accessor), 'GPR_PACKET_VALUE_INVALID');
+  const custom = structuredClone(value);
+  custom.body.decision = new String('custom prototype');
+  assertCode(() => runtime.validateAuthorityPacket(custom), 'GPR_PACKET_VALUE_INVALID');
+  const lone = structuredClone(value);
+  lone.body.decision = String.fromCharCode(0xd800);
+  assertCode(() => runtime.validateAuthorityPacket(lone), 'GPR_PACKET_VALUE_INVALID');
+  const privateValue = structuredClone(value);
+  privateValue.body.decision = 'password=raw-secret-value';
+  assertCode(() => runtime.validateAuthorityPacket(privateValue), 'GPR_PACKET_PRIVACY_REJECTED');
+  const pathValue = structuredClone(value);
+  pathValue.body.decision = 'The private file is C:\\Users\\owner\\secret.txt';
+  assertCode(() => runtime.validateAuthorityPacket(pathValue), 'GPR_PACKET_PRIVACY_REJECTED');
+});
+
+test('packet identities are deterministic and producer identity is independent of body content', () => {
+  const first = packetFixture('identity');
+  const second = structuredClone(first);
+  second.body.decision = 'A different semantic body with the same producer invocation.';
+  const firstIdentity = runtime.authorityPacketIdentities(first);
+  const secondIdentity = runtime.authorityPacketIdentities(second);
+  assert.notEqual(firstIdentity.packet_id, secondIdentity.packet_id);
+  assert.equal(firstIdentity.producer_key, secondIdentity.producer_key);
+  assert.equal(firstIdentity.packet_id, `ap1-${firstIdentity.packet_digest}`);
+  assert.equal(firstIdentity.content_digest, runtime.digestValue(first.body));
+  assert.equal(firstIdentity.binding_digest, runtime.digestValue(first.bindings));
+  assert.equal(firstIdentity.canonical_packet_bytes, runtime.canonicalSerialize(first));
+  const runtimeIdentity = runtime.authorityPacketRuntimeIdentity();
+  assert.match(runtimeIdentity.gate_contract_compiler_digest, /^[a-f0-9]{64}$/);
+  assert.match(runtimeIdentity.runtime_identity_digest, /^[a-f0-9]{64}$/);
+});
+
+test('initialisation creates a v4 store with four strict append-only tables and leaves v2 factory semantics separate', () => {
+  const packetValue = packetFixture('schema');
+  const { store, storeOptions } = initialise(packetValue);
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try {
+    assert.equal(Number(db.prepare('PRAGMA user_version').get().user_version), runtime.AUTHORITY_PACKET_USER_VERSION);
+    assert.equal(db.prepare('PRAGMA application_id').get().application_id, runtime.APPLICATION_ID);
+    const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type='table' AND name IN ('authority_packets','authority_packet_events','semantic_gate_admissions','semantic_gate_admission_events') ORDER BY name").all();
+    assert.deepEqual(tables.map((row) => row.name), [
+      'authority_packet_events', 'authority_packets', 'semantic_gate_admission_events', 'semantic_gate_admissions'
+    ]);
+    assert.ok(tables.every((row) => /STRICT/.test(row.sql)));
+    assert.equal(runtime.authorityPacketStoreIdentity(storeOptions), store.storeIdentityDigest());
+  } finally {
+    db.close();
+  }
+});
+
+test('persistence is atomic, immutable, idempotent by identity, and readable after reopen', () => {
+  const packetValue = packetFixture('persist');
+  const { store, storeOptions } = initialise(packetValue);
+  const first = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  const duplicate = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  assert.equal(first.duplicate, false);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(first.packet_id, duplicate.packet_id);
+  const reopened = runtime.createAuthorityPacketStore(storeOptions, support.readers(packetValue));
+  assert.deepEqual(reopened.readAuthorityPacket(first.packet_id, packetValue.bindings), packetValue);
+  const conflicting = structuredClone(packetValue);
+  conflicting.body.decision = 'Conflicting immutable result for the same producer key.';
+  const conflictReaders = runtime.createAuthorityPacketStore(storeOptions, support.readers(conflicting));
+  assertCode(() => conflictReaders.persistAuthorityPacket(conflicting, support.producerAdmission(conflicting)), 'GPR_PACKET_CONFLICT');
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS value FROM authority_packets').get().value, 1); }
+  finally { db.close(); }
+});
+
+test('fresh-process delivery returns a full packet larger than the legacy 16 KiB verifier limit', () => {
+  const packetValue = packetFixture('fresh-reader');
+  packetValue.body.sections[0].text = 'bounded implementation detail '.repeat(1200);
+  const { store } = initialise(packetValue);
+  const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  const delivery = store.verifyAuthorityPacketFresh(persisted.packet_id, packetValue.bindings);
+  assert.ok(Buffer.byteLength(delivery.envelope.canonical_packet_bytes, 'utf8') > 16 * 1024);
+  assert.equal(delivery.envelope.challenge.length, 64);
+  assert.deepEqual(delivery.packet, packetValue);
+  assert.deepEqual(runtime.validateAuthorityPacketDelivery(delivery, {
+    packet_id: persisted.packet_id,
+    expectedBindings: packetValue.bindings,
+    packet: packetValue,
+    store_identity_digest: store.storeIdentityDigest(),
+    runtime_identity_digest: delivery.envelope.runtime_identity_digest,
+    namespace_digest: runtime.namespaceDigest({ repository: 'weijunswj/ai-agent-toolkit', parent_issue: 435, child_issue: 435 })
+  }), delivery);
+});
+
+test('authority packet event identities are append-only and duplicate-safe', () => {
+  const packetValue = packetFixture('events');
+  const { store } = initialise(packetValue);
+  const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  const payload = {
+    namespace_digest: runtime.namespaceDigest({ repository: 'weijunswj/ai-agent-toolkit', parent_issue: 435, child_issue: 435 }),
+    store_identity_digest: store.storeIdentityDigest(),
+    runtime_identity_digest: 'a'.repeat(64),
+    challenge: 'b'.repeat(64)
+  };
+  const wrongAuthority = { ...packetValue.bindings.authority, body_digest: 'c'.repeat(64) };
+  assertCode(() => store.appendAuthorityPacketEvent(persisted.packet_id, 'FINALITY_OBSERVED', {
+    boundary: 'CHILD', authority_ref: wrongAuthority, dependent_consumers_complete: true
+  }), 'GPR_PACKET_CONTENT_MISMATCH');
+  const first = store.appendAuthorityPacketEvent(persisted.packet_id, 'READBACK_VERIFIED', payload);
+  const duplicate = store.appendAuthorityPacketEvent(persisted.packet_id, 'READBACK_VERIFIED', payload);
+  assert.equal(first.duplicate, false);
+  assert.equal(duplicate.duplicate, true);
+  const db = new DatabaseSync(store.databasePath);
+  try {
+    assert.throws(() => db.exec(`UPDATE authority_packets SET canonical_json='{}' WHERE packet_id='${persisted.packet_id}'`), /GPR_APPEND_ONLY/);
+    assert.throws(() => db.exec(`DELETE FROM authority_packet_events WHERE packet_id='${persisted.packet_id}'`), /GPR_APPEND_ONLY/);
+    assert.throws(() => db.exec(`INSERT OR REPLACE INTO authority_packets SELECT * FROM authority_packets WHERE packet_id='${persisted.packet_id}'`), /GPR_APPEND_ONLY/);
+  } finally { db.close(); }
+});
+
+test('migration is explicit, quiescent, preserves v2 receipt rows, and rejects v3 input', () => {
+  const root = support.stateRoot('authority-packet-migration-');
+  const storeOptions = support.options(root);
+  const legacy = runtime.createProgrammeReceiptStore(storeOptions);
+  const plan = runtime.planAuthorityPacketMigration(storeOptions);
+  assert.equal(plan.target_user_version, runtime.AUTHORITY_PACKET_USER_VERSION);
+  assert.equal(plan.target_schema_fingerprint, runtime.expectedAuthorityPacketSchemaFingerprint());
+  const migrated = runtime.migrateAuthorityPacketStore(storeOptions);
+  assert.equal(migrated.storeIdentityDigest().length, 64);
+  const db = new DatabaseSync(migrated.databasePath, { readOnly: true });
+  try { assert.equal(Number(db.prepare('PRAGMA user_version').get().user_version), 4); }
+  finally { db.close(); }
+  assert.equal(typeof legacy.readReceiptChain, 'function');
+  const v3 = new DatabaseSync(migrated.databasePath);
+  try { v3.exec('PRAGMA user_version=3'); }
+  finally { v3.close(); }
+  assertCode(() => runtime.planAuthorityPacketMigration(storeOptions), 'GPR_PACKET_MIGRATION_SOURCE_INVALID');
+});
+
+test('migration refuses an unexpired unreleased legacy allocation', () => {
+  const root = support.stateRoot('authority-packet-quiescence-');
+  const storeOptions = support.options(root);
+  const legacy = runtime.createProgrammeReceiptStore(storeOptions);
+  legacy.allocateRun({
+    lock: 'legacy-lock',
+    authority: {
+      child_comment_id: 1,
+      parent_comment_id: 2,
+      node_id: 'IC_legacy',
+      author_login: 'weijunswj',
+      author_association: 'OWNER',
+      body_digest: 'a'.repeat(64),
+      updated_at: '2026-09-22T10:00:00.000Z',
+      update_identity_digest: 'b'.repeat(64),
+      scope_digest: 'c'.repeat(64)
+    },
+    start: {
+      base_sha: '1'.repeat(40),
+      head_sha: '2'.repeat(40),
+      tree_sha: '3'.repeat(40),
+      status_digest: 'd'.repeat(64),
+      clean_worktree: true,
+      ref: { detached: true, name: null }
+    },
+    candidate: null,
+    lease_ms: 60000
+  });
+  assertCode(() => runtime.planAuthorityPacketMigration(storeOptions), 'GPR_PACKET_MIGRATION_NOT_QUIESCENT');
+});
+
+test('backfill requires a complete trusted source and records the original producer unchanged', () => {
+  const packetValue = packetFixture('backfill');
+  const root = support.stateRoot('authority-packet-backfill-');
+  const storeOptions = support.options(root);
+  const identities = runtime.authorityPacketIdentities(packetValue);
+  const readerSet = support.readers(packetValue, {
+    readBackfillSource: () => ({
+      source_ref: support.sourceReference('historical-source'),
+      source_packet: structuredClone(packetValue),
+      source_packet_digest: identities.packet_digest,
+      source_binding_digest: identities.binding_digest,
+      producer_key: identities.producer_key,
+      screening: support.screening(packetValue)
+    })
+  });
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readerSet);
+  const result = store.backfillAuthorityPacket(packetValue);
+  assert.equal(result.backfill_duplicate, false);
+  assert.equal(store.readAuthorityPacket(result.packet_id, packetValue.bindings).bindings.producer.run, 'run-backfill');
+  const failedStore = runtime.initialiseAuthorityPacketStore(support.options(support.stateRoot('authority-packet-backfill-fail-')), support.readers(packetValue));
+  assertCode(() => failedStore.backfillAuthorityPacket(packetValue), 'GPR_PACKET_LEGACY_RERUN_REQUIRED');
+});
+
+test('packet boundary failures use the exact typed terminal envelope', () => {
+  const envelope = runtime.packetFailureEnvelope({ reason_code: 'GPR_PACKET_NOT_FOUND' });
+  assert.deepEqual(envelope, {
+    ok: false,
+    code: 'TERMINAL_PACKET_DURABILITY_UNVERIFIED',
+    reason_code: 'GPR_PACKET_NOT_FOUND',
+    accepted: false,
+    consumable: false,
+    next_gate_admitted: false
+  });
+});

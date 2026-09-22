@@ -20,6 +20,67 @@ const {
 const sha = (letter) => letter.repeat(40);
 const digest = (letter) => letter.repeat(64);
 
+function receiptContext(overrides = {}) {
+  const admission = Object.freeze({});
+  const receiptRuntime = {
+    revalidateSemanticGate(handle, expected) {
+      assert.equal(handle, admission);
+      const base = {
+        schema: runtime.RECEIPT_DEPENDENCY_SCHEMA,
+        fresh: true,
+        operation: expected.operation,
+        consumer: {
+          candidate: expected.candidate === undefined ? null : { ...expected.candidate },
+          scope_digest: expected.scope_digest === undefined ? null : expected.scope_digest,
+        },
+        dependency_state: 'NO_PREDECESSOR',
+        checks: { packet: 'not_applicable', acceptance: 'not_applicable', current: 'verified' },
+        current: { projection_digest: digest('1'), body_digest: digest('2'), revision: 1 },
+        predecessors: [],
+      };
+      return {
+        ...base,
+        ...overrides,
+        consumer: { ...base.consumer, ...(overrides.consumer || {}) },
+        checks: { ...base.checks, ...(overrides.checks || {}) },
+        current: { ...base.current, ...(overrides.current || {}) },
+      };
+    },
+  };
+  return runtime.bindReceiptAdmission(receiptRuntime, admission);
+}
+
+function predecessor() {
+  return {
+    packet_id: 'ap1-' + digest('a'),
+    packet_digest: digest('a'),
+    content_digest: digest('b'),
+    binding_digest: digest('c'),
+    producer: { run: 'g2-run', lock: 'g2-lock', stage: 'G2', role: 'G2' },
+    candidate: {
+      pr_number: 447,
+      branch: 'c1-foundation',
+      base_ref: 'main',
+      base_sha: sha('c'),
+      head_sha: sha('a'),
+      tree_sha: sha('b'),
+    },
+    dependency_id: 'g2-packet',
+    acceptance_event_id: digest('d'),
+    web_source: {
+      repository: 'weijunswj/ai-agent-toolkit',
+      issue_number: 435,
+      comment_id: 5772542748,
+      node_id: 'MDU6SXNzdWVCb21tZW50',
+      author_login: 'owner',
+      updated_at: '2026-09-22T00:00:00Z',
+      body_digest: digest('e'),
+    },
+    readback_event_id: digest('f'),
+    store_identity_digest: digest('0'),
+  };
+}
+
 const candidate = Object.freeze({
   head: sha('a'),
   tree: sha('b'),
@@ -206,22 +267,53 @@ test('all six material-blocker predicates are necessary', () => {
 });
 
 test('required evidence pass plus no material blocker is PASS AND STOP', () => {
-  const result = evaluateAssurance(evidence());
+  const result = evaluateAssurance(evidence(), receiptContext());
   assert.equal(result.code, 'PASS_AND_STOP');
   assert.equal(result.stop, true);
   assert.equal(result.g4_status, 'PASS');
 });
 
 test('v2 required evidence passes without retired external evidence', () => {
-  const result = evaluateAssurance(evidence());
+  const result = evaluateAssurance(evidence(), receiptContext());
   assert.equal(result.code, 'PASS_AND_STOP');
 });
 
 test('G4 admission enforces the exact independent complete-candidate contract', () => {
-  const result = admitG4(evidence());
+  const result = admitG4(evidence(), receiptContext());
   assert.equal(result.admitted, true);
   assert.equal(result.contract_version, CONTRACT_VERSION);
   assert.equal(result.authority, 'read-only-assurance');
+});
+
+test('positive assurance fails closed without a receipt-owned admission', () => {
+  const result = evaluateAssurance(evidence());
+  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  assert.deepEqual(result.reasons, ['receipt-admission-required']);
+});
+
+test('mismatched receipt admission cannot authorize the current candidate', () => {
+  const result = evaluateAssurance(evidence(), receiptContext({
+    consumer: { candidate: { head: sha('e'), tree: candidate.tree, base: candidate.base } },
+  }));
+  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  assert.equal(result.reasons.includes('receipt-consumer-candidate-conflict'), true);
+});
+
+test('declared predecessor requires exact packet, acceptance, and CURRENT checks', () => {
+  const accepted = evaluateAssurance(evidence(), receiptContext({
+    dependency_state: 'PREDECESSORS_VERIFIED',
+    checks: { packet: 'verified', acceptance: 'verified', current: 'verified' },
+    predecessors: [predecessor()],
+  }));
+  assert.equal(accepted.code, 'PASS_AND_STOP');
+
+  const missingAcceptance = evaluateAssurance(evidence(), receiptContext({
+    dependency_state: 'PREDECESSORS_VERIFIED',
+    checks: { packet: 'verified', acceptance: 'not_applicable', current: 'verified' },
+    predecessors: [predecessor()],
+  }));
+  assert.equal(missingAcceptance.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  assert.equal(missingAcceptance.reasons.includes('receipt-dependency-checks-invalid'), true);
 });
 
 test('G4 model, reasoning, and mode remain exact', () => {
@@ -290,7 +382,7 @@ test('authorised scope movement invalidates G4', () => {
 test('speculative finding cannot block', () => {
   const result = evaluateAssurance(evidence({
     review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: false, evidence_reproducible: false, material_impact: false, in_scope_current: true, speculative: true }] },
-  }));
+  }), receiptContext());
   assert.equal(result.code, 'PASS_AND_STOP');
   assert.equal(result.non_blocking_findings, 1);
 });
@@ -298,14 +390,14 @@ test('speculative finding cannot block', () => {
 test('optional finding cannot block', () => {
   const result = evaluateAssurance(evidence({
     review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, optional: true }] },
-  }));
+  }), receiptContext());
   assert.equal(result.code, 'PASS_AND_STOP');
 });
 
 test('duplicate-root finding does not create assurance noise', () => {
   const result = evaluateAssurance(evidence({
     review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, duplicate_root: true }] },
-  }));
+  }), receiptContext());
   assert.equal(result.code, 'PASS_AND_STOP');
   assert.equal(result.non_blocking_findings, 1);
 });
@@ -355,7 +447,7 @@ test('no-byte review disposition preserves G4 only with every locked proof', () 
     no_candidate_change: true,
     complete_inventory: true,
     all_other_evidence_current: true,
-  });
+  }, receiptContext());
   assert.equal(result.eligible, true);
   assert.equal(result.g4_invalidated, false);
 });
@@ -367,10 +459,10 @@ test('successor H invalidates prior H-bound G4', () => {
 });
 
 test('fresh G4 is required after successor exact-head admission', () => {
-  const next = { ...evidence(), candidate: { ...candidate, head: sha('j') } };
-  next.g4 = g4Evidence({ candidate_head: sha('j') });
-  next.pr = { ...next.pr, head: sha('j') };
-  const result = admitG4(next);
+  const next = { ...evidence(), candidate: { ...candidate, head: sha('e') } };
+  next.g4 = g4Evidence({ candidate_head: sha('e') });
+  next.pr = { ...next.pr, head: sha('e') };
+  const result = admitG4(next, receiptContext());
   assert.equal(result.admitted, true);
   assert.equal(result.fresh, true);
 });
@@ -388,6 +480,21 @@ test('G4A is rejected for routine second opinion', () => {
 test('G4A is rejected when required evidence is missing', () => {
   const result = evaluateG4A({ ordinary_complete: true, exact_head_g4_passed: true, required_evidence_current: false, question: 'bounded', purpose: 'routing', web_recorded_question: true });
   assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+});
+
+test('G4A eligibility uses an explicit receipt admission handle', () => {
+  const result = evaluateG4A({
+    ordinary_complete: true,
+    exact_head_g4_passed: true,
+    required_evidence_current: true,
+    question: 'bounded',
+    purpose: 'routing',
+    deterministic_evidence_settles: false,
+    web_recorded_question: true,
+    settled: true,
+  }, receiptContext());
+  assert.equal(result.code, 'G4A_ELIGIBLE');
+  assert.equal(result.allowed, true);
 });
 
 test('Ready cannot precede final Web acceptance', () => {

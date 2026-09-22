@@ -1,0 +1,372 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.authority-packet.v1",
+  "title": "Toolkit GitHub Programme Authority Packet v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "bindings", "body"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.authority-packet.v1" },
+    "bindings": { "$ref": "#/$defs/bindings" },
+    "body": { "$ref": "#/$defs/body" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G0-A" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG0A" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G0-B" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG0B" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G1" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG1" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G2" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG2" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G3" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG3" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G4" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG4" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "LOOP" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsLoop" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "RECONVERGENCE" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsReconvergence" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "FINAL_AUDIT" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsFinalAudit" } } } } }
+    },
+    {
+      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "BROWSER" } } } } } } },
+      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsBrowser" } } } } }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "issue": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    },
+    "login": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^[A-Za-z0-9-]+$"
+    },
+    "stage": {
+      "enum": ["G0-A", "G0-B", "G1", "G2", "G3", "G4", "LOOP", "RECONVERGENCE", "FINAL_AUDIT", "BROWSER"]
+    },
+    "consumerClass": {
+      "enum": ["G0-A", "G0-B", "G1", "G2", "G3", "G4", "LOOP", "RECONVERGENCE", "FINAL_AUDIT", "BROWSER", "WEB", "FINALITY"]
+    },
+    "prose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 262144,
+      "pattern": "\\S"
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue_number", "comment_id", "node_id", "author_login", "updated_at", "body_digest"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "issue_number": { "$ref": "#/$defs/issue" },
+        "comment_id": { "$ref": "#/$defs/issue" },
+        "node_id": { "$ref": "#/$defs/id" },
+        "author_login": { "$ref": "#/$defs/login" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "body_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "lock", "stage", "role"],
+      "properties": {
+        "run": { "$ref": "#/$defs/id" },
+        "lock": { "$ref": "#/$defs/id" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "role": { "$ref": "#/$defs/stage" }
+      },
+      "allOf": [
+        { "if": { "properties": { "stage": { "const": "G0-A" } } }, "then": { "properties": { "role": { "const": "G0-A" } } } },
+        { "if": { "properties": { "stage": { "const": "G0-B" } } }, "then": { "properties": { "role": { "const": "G0-B" } } } },
+        { "if": { "properties": { "stage": { "const": "G1" } } }, "then": { "properties": { "role": { "const": "G1" } } } },
+        { "if": { "properties": { "stage": { "const": "G2" } } }, "then": { "properties": { "role": { "const": "G2" } } } },
+        { "if": { "properties": { "stage": { "const": "G3" } } }, "then": { "properties": { "role": { "const": "G3" } } } },
+        { "if": { "properties": { "stage": { "const": "G4" } } }, "then": { "properties": { "role": { "const": "G4" } } } },
+        { "if": { "properties": { "stage": { "const": "LOOP" } } }, "then": { "properties": { "role": { "const": "LOOP" } } } },
+        { "if": { "properties": { "stage": { "const": "RECONVERGENCE" } } }, "then": { "properties": { "role": { "const": "RECONVERGENCE" } } } },
+        { "if": { "properties": { "stage": { "const": "FINAL_AUDIT" } } }, "then": { "properties": { "role": { "const": "FINAL_AUDIT" } } } },
+        { "if": { "properties": { "stage": { "const": "BROWSER" } } }, "then": { "properties": { "role": { "const": "BROWSER" } } } }
+      ]
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "main_commit", "controller_blob", "stack_registry_blob"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "main_commit": { "$ref": "#/$defs/sha" },
+        "controller_blob": { "$ref": "#/$defs/sha" },
+        "stack_registry_blob": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "candidate": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["pr_number", "branch", "base_ref", "base_sha", "head_sha", "tree_sha"],
+      "properties": {
+        "pr_number": { "$ref": "#/$defs/issue" },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "base_ref": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "head_sha": { "$ref": "#/$defs/sha" },
+        "tree_sha": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "dependency_id", "scope_digest"],
+      "properties": {
+        "class": { "$ref": "#/$defs/consumerClass" },
+        "dependency_id": { "$ref": "#/$defs/id" },
+        "scope_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_digest", "required_consumers", "retain_through_child_finality", "retain_through_candidate_finality"],
+      "properties": {
+        "scope_digest": { "$ref": "#/$defs/digest" },
+        "required_consumers": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/consumer" }
+        },
+        "retain_through_child_finality": { "type": "boolean" },
+        "retain_through_candidate_finality": { "type": "boolean" }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "parent_issue", "child_issue", "lane_id", "human_owner", "producer", "authority", "governance", "candidate", "applicability"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "parent_issue": { "$ref": "#/$defs/issue" },
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "lane_id": { "$ref": "#/$defs/id" },
+        "human_owner": { "$ref": "#/$defs/login" },
+        "producer": { "$ref": "#/$defs/producer" },
+        "authority": { "$ref": "#/$defs/sourceReference" },
+        "governance": { "$ref": "#/$defs/governance" },
+        "candidate": { "$ref": "#/$defs/candidate" },
+        "applicability": { "$ref": "#/$defs/applicability" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "requirement", "observed", "required", "consequence", "disposition", "evidence_ids"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "requirement": { "$ref": "#/$defs/prose" },
+        "observed": { "$ref": "#/$defs/prose" },
+        "required": { "$ref": "#/$defs/prose" },
+        "consequence": { "$ref": "#/$defs/prose" },
+        "disposition": { "enum": ["BLOCKING", "NON_BLOCKING", "RESOLVED"] },
+        "evidence_ids": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "text"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9_-]+$" },
+        "text": { "$ref": "#/$defs/prose" }
+      }
+    },
+    "evidenceGitBlob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "repository", "commit", "path", "blob", "content_digest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "GIT_BLOB" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "commit": { "$ref": "#/$defs/sha" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\)(?!.*://)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$" },
+        "blob": { "$ref": "#/$defs/sha" },
+        "content_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "evidenceComment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "source"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "GITHUB_COMMENT" },
+        "source": { "$ref": "#/$defs/sourceReference" }
+      }
+    },
+    "evidencePacket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "packet_id", "packet_digest", "binding_digest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "AUTHORITY_PACKET" },
+        "packet_id": { "type": "string", "pattern": "^ap1-[a-f0-9]{64}$" },
+        "packet_digest": { "$ref": "#/$defs/digest" },
+        "binding_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "evidence": {
+      "oneOf": [
+        { "$ref": "#/$defs/evidenceGitBlob" },
+        { "$ref": "#/$defs/evidenceComment" },
+        { "$ref": "#/$defs/evidencePacket" }
+      ]
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "decision", "findings", "qualifications", "next_state", "sections", "evidence_refs", "gate_contract_ir"],
+      "properties": {
+        "verdict": { "enum": ["PASS", "HOLD", "AMEND", "REENTRY_REQUIRED", "COMPLETE"] },
+        "decision": { "$ref": "#/$defs/prose" },
+        "findings": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/finding" } },
+        "qualifications": { "type": "array", "items": { "$ref": "#/$defs/prose" } },
+        "next_state": { "$ref": "#/$defs/prose" },
+        "sections": { "type": "array", "minItems": 3, "maxItems": 5, "items": { "$ref": "#/$defs/section" } },
+        "evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/evidence" } },
+        "gate_contract_ir": {
+          "type": ["object", "null"],
+          "properties": { "schema": { "const": "toolkit.gate-contract-ir.v1" } },
+          "required": ["schema"],
+          "additionalProperties": true
+        }
+      }
+    },
+    "sectionsG0A": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionFraming" }, { "$ref": "#/$defs/sectionUnknowns" }, { "$ref": "#/$defs/sectionEvidenceQuestions" }, { "$ref": "#/$defs/sectionStopCondition" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionsG0B": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionQuestions" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionProvenance" }, { "$ref": "#/$defs/sectionCoverage" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionsG1": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionCausalModel" }, { "$ref": "#/$defs/sectionAlternatives" }, { "$ref": "#/$defs/sectionInvariants" }, { "$ref": "#/$defs/sectionArchitecture" }, { "$ref": "#/$defs/sectionAssumptions" }], "items": false, "minItems": 5, "maxItems": 5 },
+    "sectionsG2": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionImplementationContract" }, { "$ref": "#/$defs/sectionMutationBoundary" }, { "$ref": "#/$defs/sectionOracleMatrix" }, { "$ref": "#/$defs/sectionValidation" }, { "$ref": "#/$defs/sectionPublicationBoundary" }], "items": false, "minItems": 5, "maxItems": 5 },
+    "sectionsG3": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionImplementation" }, { "$ref": "#/$defs/sectionCandidateIdentity" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionRemainingObligations" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionsG4": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionCandidateIdentity" }, { "$ref": "#/$defs/sectionCoverage" }, { "$ref": "#/$defs/sectionFindingsAndReproducers" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 5, "maxItems": 5 },
+    "sectionsLoop": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionReconciliation" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionHandoff" }], "items": false, "minItems": 3, "maxItems": 3 },
+    "sectionsReconvergence": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionRootSynthesis" }, { "$ref": "#/$defs/sectionPriorFailures" }, { "$ref": "#/$defs/sectionRetainedDecisions" }, { "$ref": "#/$defs/sectionReentryBoundary" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionsFinalAudit": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionProgrammeCoverage" }, { "$ref": "#/$defs/sectionRemainingObligations" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionsBrowser": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionScope" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 4, "maxItems": 4 },
+    "sectionFraming": { "$ref": "#/$defs/namedSectionFraming" },
+    "sectionUnknowns": { "$ref": "#/$defs/namedSectionUnknowns" },
+    "sectionEvidenceQuestions": { "$ref": "#/$defs/namedSectionEvidenceQuestions" },
+    "sectionStopCondition": { "$ref": "#/$defs/namedSectionStopCondition" },
+    "sectionQuestions": { "$ref": "#/$defs/namedSectionQuestions" },
+    "sectionObservations": { "$ref": "#/$defs/namedSectionObservations" },
+    "sectionProvenance": { "$ref": "#/$defs/namedSectionProvenance" },
+    "sectionCoverage": { "$ref": "#/$defs/namedSectionCoverage" },
+    "sectionCausalModel": { "$ref": "#/$defs/namedSectionCausalModel" },
+    "sectionAlternatives": { "$ref": "#/$defs/namedSectionAlternatives" },
+    "sectionInvariants": { "$ref": "#/$defs/namedSectionInvariants" },
+    "sectionArchitecture": { "$ref": "#/$defs/namedSectionArchitecture" },
+    "sectionAssumptions": { "$ref": "#/$defs/namedSectionAssumptions" },
+    "sectionImplementationContract": { "$ref": "#/$defs/namedSectionImplementationContract" },
+    "sectionMutationBoundary": { "$ref": "#/$defs/namedSectionMutationBoundary" },
+    "sectionOracleMatrix": { "$ref": "#/$defs/namedSectionOracleMatrix" },
+    "sectionValidation": { "$ref": "#/$defs/namedSectionValidation" },
+    "sectionPublicationBoundary": { "$ref": "#/$defs/namedSectionPublicationBoundary" },
+    "sectionImplementation": { "$ref": "#/$defs/namedSectionImplementation" },
+    "sectionCandidateIdentity": { "$ref": "#/$defs/namedSectionCandidateIdentity" },
+    "sectionValidationResults": { "$ref": "#/$defs/namedSectionValidationResults" },
+    "sectionRemainingObligations": { "$ref": "#/$defs/namedSectionRemainingObligations" },
+    "sectionFindingsAndReproducers": { "$ref": "#/$defs/namedSectionFindingsAndReproducers" },
+    "sectionDisposition": { "$ref": "#/$defs/namedSectionDisposition" },
+    "sectionReconciliation": { "$ref": "#/$defs/namedSectionReconciliation" },
+    "sectionHandoff": { "$ref": "#/$defs/namedSectionHandoff" },
+    "sectionRootSynthesis": { "$ref": "#/$defs/namedSectionRootSynthesis" },
+    "sectionPriorFailures": { "$ref": "#/$defs/namedSectionPriorFailures" },
+    "sectionRetainedDecisions": { "$ref": "#/$defs/namedSectionRetainedDecisions" },
+    "sectionReentryBoundary": { "$ref": "#/$defs/namedSectionReentryBoundary" },
+    "sectionProgrammeCoverage": { "$ref": "#/$defs/namedSectionProgrammeCoverage" },
+    "sectionScope": { "$ref": "#/$defs/namedSectionScope" },
+    "namedSectionFraming": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "framing" } } }] },
+    "namedSectionUnknowns": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "unknowns" } } }] },
+    "namedSectionEvidenceQuestions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "evidence_questions" } } }] },
+    "namedSectionStopCondition": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "stop_condition" } } }] },
+    "namedSectionQuestions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "questions" } } }] },
+    "namedSectionObservations": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "observations" } } }] },
+    "namedSectionProvenance": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "provenance" } } }] },
+    "namedSectionCoverage": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "coverage" } } }] },
+    "namedSectionCausalModel": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "causal_model" } } }] },
+    "namedSectionAlternatives": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "alternatives" } } }] },
+    "namedSectionInvariants": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "invariants" } } }] },
+    "namedSectionArchitecture": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "architecture" } } }] },
+    "namedSectionAssumptions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "assumptions" } } }] },
+    "namedSectionImplementationContract": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "implementation_contract" } } }] },
+    "namedSectionMutationBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "mutation_boundary" } } }] },
+    "namedSectionOracleMatrix": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "oracle_matrix" } } }] },
+    "namedSectionValidation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "validation" } } }] },
+    "namedSectionPublicationBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "publication_boundary" } } }] },
+    "namedSectionImplementation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "implementation" } } }] },
+    "namedSectionCandidateIdentity": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "candidate_identity" } } }] },
+    "namedSectionValidationResults": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "validation_results" } } }] },
+    "namedSectionRemainingObligations": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "remaining_obligations" } } }] },
+    "namedSectionFindingsAndReproducers": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "findings_and_reproducers" } } }] },
+    "namedSectionDisposition": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "disposition" } } }] },
+    "namedSectionReconciliation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "reconciliation" } } }] },
+    "namedSectionHandoff": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "handoff" } } }] },
+    "namedSectionRootSynthesis": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "root_synthesis" } } }] },
+    "namedSectionPriorFailures": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "prior_failures" } } }] },
+    "namedSectionRetainedDecisions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "retained_decisions" } } }] },
+    "namedSectionReentryBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "reentry_boundary" } } }] },
+    "namedSectionProgrammeCoverage": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "programme_coverage" } } }] },
+    "namedSectionScope": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "scope" } } }] }
+  }
+}

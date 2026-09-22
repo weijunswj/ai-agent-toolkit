@@ -17,6 +17,9 @@ const WRITE_SAFETY_MODE = 'WEB_EXCLUSIVE_SINGLE_WRITER_RECOVERY_WINDOW';
 const STATE_SCHEMA = 'toolkit.github-program.state.v5';
 const PROJECTION_SCHEMA = 'toolkit.github-program.projection.v1';
 const SURFACE_SCHEMA = 'toolkit.github-program.surface.v5';
+const AUTHORITY_PACKET_CURRENT_SCHEMA = 'toolkit.github.program.authority-packet-current.v1';
+const AUTHORITY_PACKET_STAGES = Object.freeze(['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER', 'WEB', 'FINALITY']);
+const AUTHORITY_PACKET_CURRENT_MAX_BYTES = 65536;
 const DECISION_SCHEMA = 'toolkit.github-program.projection-bootstrap-recovery-decision.v1';
 const EVIDENCE_SCHEMA = 'toolkit.github-program.projection-bootstrap-recovery-evidence.v1';
 const BOOTSTRAP_SCHEMA = 'toolkit.github-program.controller-bootstrap.v1';
@@ -833,6 +836,79 @@ function isSafeRevision(value) {
 function isTimestamp(value) {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value);
 }
+function packetExactKeys(value, expected) {
+  return isRecord(value) && Object.keys(value).length === expected.length && expected.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+function packetHumanOwner(value) { return typeof value === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(value); }
+function packetNodeId(value) { return typeof value === 'string' && /^[A-Za-z0-9_:-]{1,256}$/.test(value); }
+function validateAuthorityPacketSource(value, repository) {
+  return packetExactKeys(value, ['repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'])
+    && value.repository === repository
+    && isIssue(value.issue_number)
+    && isIssue(value.comment_id)
+    && packetNodeId(value.node_id)
+    && packetHumanOwner(value.author_login)
+    && isSafeRevision(value.updated_at)
+    && isTimestamp(value.updated_at)
+    && isDigest(value.body_digest);
+}
+function validateAuthorityPacketProducer(value) {
+  return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
+    && isSafeId(value.run)
+    && isSafeId(value.lock)
+    && AUTHORITY_PACKET_STAGES.includes(value.stage)
+    && isSafeId(value.role);
+}
+function validateAuthorityPacketCandidate(value) {
+  return value === null || packetExactKeys(value, ['pr_number', 'branch', 'base_ref', 'base_sha', 'head_sha', 'tree_sha'])
+    && (value === null || isIssue(value.pr_number)
+      && isSafeRevision(value.branch)
+      && isSafeRevision(value.base_ref)
+      && isSha(value.base_sha)
+      && isSha(value.head_sha)
+      && isSha(value.tree_sha));
+}
+function validateAuthorityPacketCurrent(value, expected = {}) {
+  if (!packetExactKeys(value, ['schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'consumer', 'authority', 'candidate', 'predecessors'])
+    || value.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA
+    || value.repository !== REPOSITORY
+    || expected.repository !== undefined && value.repository !== expected.repository
+    || !isIssue(value.parent_issue)
+    || expected.parent_issue !== undefined && value.parent_issue !== expected.parent_issue
+    || !isIssue(value.child_issue)
+    || expected.child_issue !== undefined && value.child_issue !== expected.child_issue
+    || !isSafeId(value.lane_id)
+    || !packetHumanOwner(value.human_owner)
+    || !packetExactKeys(value.consumer, ['run', 'lock', 'stage', 'role', 'scope_digest'])
+    || !isSafeId(value.consumer.run)
+    || !isSafeId(value.consumer.lock)
+    || !AUTHORITY_PACKET_STAGES.includes(value.consumer.stage)
+    || !isSafeId(value.consumer.role)
+    || !isDigest(value.consumer.scope_digest)
+    || !validateAuthorityPacketSource(value.authority, value.repository)
+    || value.human_owner !== value.authority.author_login
+    || !validateAuthorityPacketCandidate(value.candidate)
+    || !Array.isArray(value.predecessors)
+    || value.predecessors.length > 16) return false;
+  let previousDependency = '';
+  for (const predecessor of value.predecessors) {
+    if (!packetExactKeys(predecessor, ['packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'producer', 'candidate', 'dependency_id', 'acceptance_event_id', 'web_source', 'readback_event_id', 'store_identity_digest'])
+      || !isSafeId(predecessor.packet_id)
+      || !isDigest(predecessor.packet_digest)
+      || !isDigest(predecessor.content_digest)
+      || !isDigest(predecessor.binding_digest)
+      || !validateAuthorityPacketProducer(predecessor.producer)
+      || !validateAuthorityPacketCandidate(predecessor.candidate)
+      || !isSafeId(predecessor.dependency_id)
+      || predecessor.dependency_id <= previousDependency
+      || !isSafeId(predecessor.acceptance_event_id)
+      || !validateAuthorityPacketSource(predecessor.web_source, value.repository)
+      || !isSafeId(predecessor.readback_event_id)
+      || !isDigest(predecessor.store_identity_digest)) return false;
+    previousDependency = predecessor.dependency_id;
+  }
+  try { return Buffer.byteLength(canonicalSerialize(value), 'utf8') <= AUTHORITY_PACKET_CURRENT_MAX_BYTES; } catch (_error) { return false; }
+}
 function isStringArray(value, max = 4096) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length <= max && !/[\r\n]/.test(item));
 }
@@ -1119,8 +1195,9 @@ function validateRegistryEntry(value, target = false) {
 }
 function validateChild(value) {
   const keys = ['boundaries', 'deliverables', 'dependencies', 'done_when', 'eli5', 'epochs', 'finality', 'holds', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
+  const optional = ['authority_packet_current'];
   return isRecord(value)
-    && exactKeys(value, keys)
+    && hasOnly(value, keys, optional)
     && isStringArray(value.boundaries)
     && isStringArray(value.deliverables)
     && Array.isArray(value.dependencies) && value.dependencies.every(isIssue)
@@ -1137,7 +1214,9 @@ function validateChild(value) {
     && Array.isArray(value.pr_registry) && value.pr_registry.every((entry) => validateRegistryEntry(entry))
     && isStringArray(value.scope)
     && typeof value.summary === 'string'
-    && typeof value.title === 'string';
+    && typeof value.title === 'string'
+    && (!Object.prototype.hasOwnProperty.call(value, 'authority_packet_current')
+      || value.lifecycle === 'CURRENT' && validateAuthorityPacketCurrent(value.authority_packet_current, { repository: REPOSITORY, parent_issue: PARENT_ISSUE, child_issue: value.issue }));
 }
 function validateParent(value) {
   return isRecord(value)
@@ -1482,6 +1561,7 @@ function projectionPayload(state, kind) {
     delete payload.accepted_pr;
     delete payload.pr_379_github_state;
   }
+  if (Object.prototype.hasOwnProperty.call(child, 'authority_packet_current')) payload.authority_packet_current = clone(child.authority_packet_current);
   return payload;
 }
 function projectionEnvelope(state, kind) {
@@ -3722,6 +3802,11 @@ function h2Exact(value, keys) {
   const actual = Object.keys(value).sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
+function h2HasOnly(value, required, optional = []) {
+  return h2IsPlain(value)
+    && required.every((key) => h2Own(value, key))
+    && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
 function h2NoMalformedUnicode(value) {
   if (typeof value !== 'string') return false;
   for (let index = 0; index < value.length; index += 1) {
@@ -4094,7 +4179,7 @@ function h2ValidateFinality(value) {
 function h2ValidateChild(value, legacy = false) {
   const required = ['boundaries', 'done_when', 'eli5', 'epochs', 'finality', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
   const optional = ['dependencies', 'holds', 'deliverables'];
-  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional])
+  if (!h2HasOnly(value, [...required, ...optional], ['authority_packet_current'])
     || !h2Issue(value.issue) || !Number.isSafeInteger(value.order) || value.order < 1
     || !['COMPLETED', 'CURRENT', 'QUEUED'].includes(value.lifecycle)
     || !h2SafeLine(value.title) || !h2SafeLine(value.summary) || !h2SafeLine(value.objective) || !h2SafeLine(value.eli5)
@@ -4408,7 +4493,15 @@ function h2ProjectionState(state, history) {
     lifecycle: current ? 'ACTIVE' : (programme.action === 'PROGRAMME_COMPLETE' ? 'COMPLETED' : 'PENDING_FINALITY'),
     finality: programme.action === 'PROGRAMME_COMPLETE' ? 'MERGED' : (current?.finality.state || 'HELD'),
     programme_action: programme.action,
-    current_child: current ? { issue: current.issue, title: current.title, lifecycle: current.lifecycle, finality: current.finality.state, summary: current.summary, action: childAction.action } : null,
+    current_child: current ? {
+      issue: current.issue,
+      title: current.title,
+      lifecycle: current.lifecycle,
+      finality: current.finality.state,
+      summary: current.summary,
+      action: childAction.action,
+      ...(h2Own(current, 'authority_packet_current') ? { authority_packet_current: h2Clone(current.authority_packet_current) } : {}),
+    } : null,
     children,
     completed_work: children.filter((child) => child.lifecycle === 'COMPLETED'),
     boundaries: boundaryList,
@@ -4455,6 +4548,7 @@ function h2ProjectionChild(state, history, childIssue) {
     epochs,
     pr_history: rows,
     next_action: { action: action.action, ref: action.ref, text: action.text },
+    ...(h2Own(child, 'authority_packet_current') ? { authority_packet_current: h2Clone(child.authority_packet_current) } : {}),
   };
 }
 function h2Line(type, value, field) {
@@ -5558,6 +5652,8 @@ module.exports = Object.freeze({
   STATE_SCHEMA,
   PROJECTION_SCHEMA,
   SURFACE_SCHEMA,
+  AUTHORITY_PACKET_CURRENT_SCHEMA,
+  AUTHORITY_PACKET_STAGES,
   DECISION_SCHEMA,
   EVIDENCE_SCHEMA,
   BOOTSTRAP_SCHEMA,
@@ -5624,6 +5720,7 @@ module.exports = Object.freeze({
   createRecoveryDecision,
   validateDecision,
   validateCanonicalStateV5,
+  validateAuthorityPacketCurrent,
   buildRecoveryTargetState,
   validateInterEpochStateV5,
   validateFinalisationSourceState,

@@ -8,12 +8,35 @@ const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
 
+function semanticGate() {
+  const store = {
+    admitSemanticGate() { return Object.freeze({}); },
+    revalidateSemanticGate() { return true; },
+    beginSemanticGateDispatch() { return true; },
+    recordSemanticGateDispatch() { return true; },
+    recoverSemanticGateAdmission() { return Object.freeze({}); },
+  };
+  return {
+    store,
+    consumer_intent: { execution_binding: {} },
+    trusted_readers: {
+      readAuthority() { return {}; },
+      readCurrent() { return {}; },
+      readWebDecision() { return {}; },
+      readCandidate() { return {}; },
+      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
+      screenPacket() { return true; },
+    },
+  };
+}
+
 const common = {
   task: { id: 'task-run160-red', digest: 'a'.repeat(64) },
   repository_id: 'b'.repeat(64),
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+  semantic_gate: semanticGate(),
 };
 
 function expectCode(fn, code) {
