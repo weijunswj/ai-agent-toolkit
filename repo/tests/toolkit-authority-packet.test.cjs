@@ -24,8 +24,9 @@ function packetFixture(seed = 'packet') {
 
 function initialise(packetValue, root = support.stateRoot()) {
   const storeOptions = support.options(root);
-  const store = runtime.initialiseAuthorityPacketStore(storeOptions, support.readers(packetValue));
-  return { store, storeOptions, packetValue };
+  const readers = support.readers(packetValue);
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readers);
+  return { store, storeOptions, packetValue, readers };
 }
 
 function schemaValidator() {
@@ -142,22 +143,14 @@ test('fresh-process delivery returns a full packet larger than the legacy 16 KiB
 
 test('authority packet event identities are append-only and duplicate-safe', () => {
   const packetValue = packetFixture('events');
-  const { store } = initialise(packetValue);
+  const { store, readers } = initialise(packetValue);
   const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
-  const payload = {
-    namespace_digest: runtime.namespaceDigest({ repository: 'weijunswj/ai-agent-toolkit', parent_issue: 435, child_issue: 435 }),
-    store_identity_digest: store.storeIdentityDigest(),
-    runtime_identity_digest: 'a'.repeat(64),
-    challenge: 'b'.repeat(64)
-  };
-  const wrongAuthority = { ...packetValue.bindings.authority, body_digest: 'c'.repeat(64) };
-  assertCode(() => store.appendAuthorityPacketEvent(persisted.packet_id, 'FINALITY_OBSERVED', {
-    boundary: 'CHILD', authority_ref: wrongAuthority, dependent_consumers_complete: true
-  }), 'GPR_PACKET_CONTENT_MISMATCH');
-  const first = store.appendAuthorityPacketEvent(persisted.packet_id, 'READBACK_VERIFIED', payload);
-  const duplicate = store.appendAuthorityPacketEvent(persisted.packet_id, 'READBACK_VERIFIED', payload);
+  const first = store.bindWebPacketAcceptance(persisted.packet_id, readers);
+  const duplicate = store.bindWebPacketAcceptance(persisted.packet_id, readers);
   assert.equal(first.duplicate, false);
   assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.acceptance_event_id, first.acceptance_event_id);
+  assert.equal(store.readAuthorityPacket(persisted.packet_id, packetValue.bindings).bindings.repository, 'weijunswj/ai-agent-toolkit');
   const db = new DatabaseSync(store.databasePath);
   try {
     assert.throws(() => db.exec(`UPDATE authority_packets SET canonical_json='{}' WHERE packet_id='${persisted.packet_id}'`), /GPR_APPEND_ONLY/);

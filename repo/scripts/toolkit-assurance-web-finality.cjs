@@ -1,5 +1,7 @@
 'use strict';
 
+const receiptStoreRuntime = require('./toolkit-github-program-receipt.cjs');
+
 const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
 const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
@@ -156,16 +158,39 @@ function validReceiptConsumerCandidate(value) {
   return exactKeys(value, ['head', 'tree', 'base'])
     && isSha(value.head)
     && isSha(value.tree)
-    && isSha(value.base);
+    && isSha(value.base)
+    || validReceiptCandidate(value);
 }
 
 function sameReceiptConsumerCandidate(left, right) {
   if (left === null || right === null) return left === right;
-  return validReceiptConsumerCandidate(left)
-    && validReceiptConsumerCandidate(right)
-    && left.head === right.head
-    && left.tree === right.tree
-    && left.base === right.base;
+  if (!validReceiptConsumerCandidate(left) || !validReceiptConsumerCandidate(right)) return false;
+  if (validReceiptCandidate(left) && validReceiptCandidate(right)) {
+    return left.pr_number === right.pr_number
+      && left.branch === right.branch
+      && left.base_ref === right.base_ref
+      && left.base_sha === right.base_sha
+      && left.head_sha === right.head_sha
+      && left.tree_sha === right.tree_sha;
+  }
+  const leftTuple = validReceiptCandidate(left)
+    ? { head: left.head_sha, tree: left.tree_sha, base: left.base_sha }
+    : left;
+  const rightTuple = validReceiptCandidate(right)
+    ? { head: right.head_sha, tree: right.tree_sha, base: right.base_sha }
+    : right;
+  return leftTuple.head === rightTuple.head
+    && leftTuple.tree === rightTuple.tree
+    && leftTuple.base === rightTuple.base;
+}
+
+function assuranceCandidateTuple(value) {
+  if (value !== null && validReceiptCandidate(value)) return { head: value.head_sha, tree: value.tree_sha, base: value.base_sha };
+  if (exactKeys(value, ['head', 'tree', 'base', 'current'])
+    && isSha(value.head) && isSha(value.tree) && isSha(value.base)) {
+    return { head: value.head, tree: value.tree, base: value.base };
+  }
+  return null;
 }
 
 function validReceiptWebSource(value) {
@@ -288,11 +313,15 @@ function validateReceiptDependencyProof(value, expected = {}) {
   return [...new Set(failures)];
 }
 
-function bindReceiptAdmission(receiptRuntime, admission) {
-  if (!isRecord(receiptRuntime) || typeof receiptRuntime.revalidateSemanticGate !== 'function') {
+function bindReceiptAdmission(receiptStore, admission) {
+  if (!isRecord(receiptStore) || typeof receiptStore.revalidateSemanticGate !== 'function') {
     throw new TypeError('RECEIPT_RUNTIME_INVALID');
   }
-  if (!isRecord(admission) || !Object.isFrozen(admission)) throw new TypeError('RECEIPT_ADMISSION_INVALID');
+  try {
+    receiptStoreRuntime.assertAuthenticSemanticGateAdmission(receiptStore, admission);
+  } catch (_) {
+    throw new TypeError('RECEIPT_ADMISSION_INVALID');
+  }
   const context = {};
   Object.defineProperty(context, 'toJSON', {
     value: () => { throw new TypeError('RECEIPT_CONTEXT_NONSERIALISABLE'); },
@@ -300,7 +329,7 @@ function bindReceiptAdmission(receiptRuntime, admission) {
   Object.freeze(context);
   RECEIPT_CONTEXT_OWNERS.set(context, {
     admission,
-    revalidateSemanticGate: receiptRuntime.revalidateSemanticGate.bind(receiptRuntime),
+    revalidateSemanticGate: receiptStore.revalidateSemanticGate.bind(receiptStore),
   });
   return context;
 }
@@ -350,10 +379,11 @@ function requiredEvidenceFailures(input) {
   if (Object.prototype.hasOwnProperty.call(input, 'findings')) failures.push('review-findings-shadow-source');
 
   const { candidate, pr, lock, scope, g4, review, required_checks: checks } = input;
-  if (!isRecord(candidate)) failures.push('candidate-identity-missing');
+  const candidateTuple = assuranceCandidateTuple(candidate);
+  if (!candidateTuple) failures.push('candidate-identity-missing');
   else {
     for (const key of ['head', 'tree', 'base']) {
-      if (!isSha(candidate[key])) failures.push('candidate-' + key + '-invalid');
+      if (!isSha(candidateTuple[key])) failures.push('candidate-' + key + '-invalid');
     }
     if (!hasTrue(candidate, 'current')) failures.push('candidate-not-current');
   }
@@ -361,9 +391,9 @@ function requiredEvidenceFailures(input) {
   if (!isRecord(pr)) failures.push('pr-topology-missing');
   else {
     if (!Number.isSafeInteger(pr.number) || pr.number < 1) failures.push('pr-number-invalid');
-    if (!isSha(pr.head) || !candidate || pr.head !== candidate.head) failures.push('pr-head-conflict');
-    if (!isSha(pr.tree) || !candidate || pr.tree !== candidate.tree) failures.push('pr-tree-conflict');
-    if (!isSha(pr.base) || !candidate || pr.base !== candidate.base) failures.push('pr-base-conflict');
+    if (!isSha(pr.head) || !candidateTuple || pr.head !== candidateTuple.head) failures.push('pr-head-conflict');
+    if (!isSha(pr.tree) || !candidateTuple || pr.tree !== candidateTuple.tree) failures.push('pr-tree-conflict');
+    if (!isSha(pr.base) || !candidateTuple || pr.base !== candidateTuple.base) failures.push('pr-base-conflict');
     if (pr.base_ref !== 'main') failures.push('pr-base-ref-invalid');
     if (!hasTrue(pr, 'open')) failures.push('pr-not-open');
     if (!hasTrue(pr, 'server_authoritative')) failures.push('pr-not-authoritative');
@@ -431,13 +461,14 @@ function g4AdmissionFailures(input) {
   const failures = [];
   if (!isRecord(input)) return ['g4-admission-missing'];
   const { candidate, lock, scope, g4 } = input;
+  const candidateTuple = assuranceCandidateTuple(candidate);
   if (!isRecord(g4)) return ['g4-admission-missing'];
   if (g4.status !== 'PASS') failures.push('g4-status-not-pass');
   if (g4.provider !== 'OpenAI' || g4.model_class !== G4_MODEL || g4.reasoning !== 'high' || g4.mode !== 'standard') failures.push('g4-model-binding-invalid');
   for (const key of ['fresh', 'isolated', 'read_only', 'complete_candidate', 'current', 'complete', 'server_authoritative', 'verifiable']) {
     if (!hasTrue(g4, key)) failures.push('g4-' + key + '-failed');
   }
-  if (!candidate || g4.candidate_head !== candidate.head || g4.candidate_tree !== candidate.tree || g4.candidate_base !== candidate.base) failures.push('g4-candidate-binding-conflict');
+  if (!candidateTuple || g4.candidate_head !== candidateTuple.head || g4.candidate_tree !== candidateTuple.tree || g4.candidate_base !== candidateTuple.base) failures.push('g4-candidate-binding-conflict');
   if (g4.lock_id !== DESIGN_LOCK_ID || !lock || g4.lock_id !== lock.id) failures.push('g4-lock-binding-conflict');
   if (!scope || g4.scope_digest !== scope.digest) failures.push('g4-scope-binding-conflict');
   if (!hasTrue(g4, 'root_only')) failures.push('g4-root-boundary-failed');
@@ -463,7 +494,7 @@ function admitG4(input, receiptContext) {
   if (failures.length > 0) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { admitted: false, reasons: failures });
   const receiptFailures = receiptDependencyFailures(receiptContext, {
     operation: 'G4',
-    candidate: { head: input.candidate.head, tree: input.candidate.tree, base: input.candidate.base },
+    candidate: assuranceCandidateTuple(input.candidate),
     scope_digest: input.scope.digest,
   });
   if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { admitted: false });
@@ -522,7 +553,7 @@ function evaluateAssurance(input, receiptContext) {
   }
   const receiptFailures = receiptDependencyFailures(receiptContext, {
     operation: 'ASSURANCE',
-    candidate: { head: input.candidate.head, tree: input.candidate.tree, base: input.candidate.base },
+    candidate: assuranceCandidateTuple(input.candidate),
     scope_digest: input.scope.digest,
   });
   if (receiptFailures.length > 0) {

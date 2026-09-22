@@ -5,34 +5,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
-function semanticGate() {
-  const store = {
-    admitSemanticGate() { return Object.freeze({}); },
-    revalidateSemanticGate() { return true; },
-    beginSemanticGateDispatch() { return true; },
-    recordSemanticGateDispatch() { return true; },
-    recoverSemanticGateAdmission() { return Object.freeze({}); },
-  };
-  return {
-    store,
-    consumer_intent: { execution_binding: {} },
-    trusted_readers: {
-      readAuthority() { return {}; },
-      readCurrent() { return {}; },
-      readWebDecision() { return {}; },
-      readCandidate() { return {}; },
-      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
-      screenPacket() { return true; },
-    },
-  };
+function semanticGate(seed = 'boundary') {
+  return support.semanticGate(seed);
 }
 
 function customizedGate(overrides = {}) {
   const gate = semanticGate();
-  Object.assign(gate.store, overrides.store || {});
   if (overrides.trusted_readers) gate.trusted_readers = { ...gate.trusted_readers, ...overrides.trusted_readers };
   if (overrides.consumer_identity) gate.consumer_identity = overrides.consumer_identity;
   return gate;
@@ -44,7 +27,7 @@ const common = {
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
-  semantic_gate: semanticGate(),
+  semantic_gate: semanticGate('common'),
 };
 
 function expectCode(fn, code) {
@@ -52,12 +35,13 @@ function expectCode(fn, code) {
 }
 
 function createRun(runId = 'run-boundary') {
-  const admitted = runtime.admitRun({ ...common, run_id: runId, authority: { delegated: false, lanes: [] } });
+  const admitted = runtime.admitRun({ ...common, semantic_gate: semanticGate(runId), run_id: runId, authority: { delegated: false, lanes: [] } });
   return admitted.run;
 }
 
 function commitEvidence(runId = 'run-commit', bindings = {}, stateRoot) {
-  const admitted = runtime.admitRun({ ...common, ...bindings, run_id: runId, authority: { delegated: false, lanes: [] } });
+  const semantic_gate = semanticGate(runId);
+  const admitted = runtime.admitRun({ ...common, ...bindings, semantic_gate, run_id: runId, authority: { delegated: false, lanes: [] } });
   const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
   const workspace = runtime.admitWorkspace({
     state_root: stateRoot,
@@ -67,7 +51,7 @@ function commitEvidence(runId = 'run-commit', bindings = {}, stateRoot) {
     workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + runId, workspace_handle: 'handle-' + runId, commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
-  return { ...common, ...bindings, run_id: runId, repository_id: running.repository_id, authorized_ref_digest: running.authorized_ref_digest, current_authority_digest: running.current_authority_digest, route_plan: admitted.route_plan, run: running, workspace_receipt: workspace.workspace_receipt, liveRefProvider: { read: () => live } };
+  return { ...common, ...bindings, semantic_gate, run_id: runId, repository_id: running.repository_id, authorized_ref_digest: running.authorized_ref_digest, current_authority_digest: running.current_authority_digest, route_plan: admitted.route_plan, run: running, workspace_receipt: workspace.workspace_receipt, liveRefProvider: { read: () => live } };
 }
 
 function completeSafeEvidence(running, stateRoot) {
@@ -159,15 +143,14 @@ test('semantic admission is receipt-owned, opaque, and required at direct conseq
   const planned = runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission' });
   expectCode(() => runtime.transitionRun(planned, 'admitted'), 'GPR_PACKET_ADMISSION_REQUIRED');
   const directGate = customizedGate();
-  let directAdmissions = 0;
-  directGate.store.admitSemanticGate = () => { directAdmissions += 1; return Object.freeze({}); };
   const directAdmitted = runtime.transitionRun(
     runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission-success' }),
     'admitted',
     { semantic_gate: directGate },
   );
   assert.equal(directAdmitted.execution_state, 'admitted');
-  assert.equal(directAdmissions, 1);
+  const directDb = new DatabaseSync(directGate.store.databasePath, { readOnly: true });
+  try { assert.equal(directDb.prepare('SELECT COUNT(*) AS count FROM semantic_gate_admissions').get().count, 1); } finally { directDb.close(); }
 
   const admitted = runtime.admitRun({ ...common, run_id: 'run-serialized-admission', authority: { delegated: false, lanes: [] } });
   const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
@@ -184,18 +167,18 @@ test('semantic admission is receipt-owned, opaque, and required at direct conseq
 });
 
 test('semantic gate admission and readers reject promises in synchronous Loop guards', () => {
-  const asyncAdmission = customizedGate({ store: { admitSemanticGate: () => Promise.resolve({}) } });
+  const asyncAdmission = { ...semanticGate('async-admission'), store: { admitSemanticGate: () => Promise.resolve({}) } };
   const blocked = runtime.admitRun({ ...common, semantic_gate: asyncAdmission, authority: { delegated: false, lanes: [] } });
   assert.equal(blocked.status, 'blocked');
   assert.equal(blocked.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
 
-  const asyncRevalidation = customizedGate({ store: { revalidateSemanticGate: () => Promise.resolve(true) } });
+  const asyncRevalidation = { ...semanticGate('async-revalidation'), store: { revalidateSemanticGate: () => Promise.resolve(true) } };
   const admitted = runtime.admitRun({ ...common, semantic_gate: asyncRevalidation, run_id: 'run-async-revalidation', authority: { delegated: false, lanes: [] } });
   assert.equal(admitted.status, 'blocked');
 
-  const voidRevalidation = customizedGate({ store: { revalidateSemanticGate() {} } });
+  const voidRevalidation = { ...semanticGate('void-revalidation'), store: { revalidateSemanticGate() {} } };
   const voidResult = runtime.admitRun({ ...common, semantic_gate: voidRevalidation, run_id: 'run-void-revalidation', authority: { delegated: false, lanes: [] } });
-  assert.equal(voidResult.status, 'admitted');
+  assert.equal(voidResult.status, 'blocked');
 });
 
 test('restart release can recover only through the receipt-owned semantic admission API', () => {
@@ -203,15 +186,12 @@ test('restart release can recover only through the receipt-owned semantic admiss
   const evidence = commitEvidence('run-loop-recovery', {}, stateRoot);
   const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: evidence.repository_id, authorized_ref_digest: evidence.authorized_ref_digest, run_id: evidence.run_id });
-  let recoveries = 0;
-  let revalidations = 0;
-  const gate = customizedGate({
-    consumer_identity: { consumer: 'restart' },
-    store: {
-      recoverSemanticGateAdmission() { recoveries += 1; return Object.freeze({}); },
-      revalidateSemanticGate() { revalidations += 1; return true; },
-    },
-  });
+  const gate = semanticGate('restart');
+  gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
+  const restartDb = new DatabaseSync(gate.store.databasePath, { readOnly: true });
+  let consumerKey;
+  try { consumerKey = restartDb.prepare('SELECT consumer_key FROM semantic_gate_admissions').get().consumer_key; } finally { restartDb.close(); }
+  gate.consumer_identity = { consumer_key: consumerKey };
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: evidence.repository_id,
@@ -223,8 +203,6 @@ test('restart release can recover only through the receipt-owned semantic admiss
     publication_state: terminalEvidence.terminal.publication_state,
     semantic_gate: gate,
   }), { released: true });
-  assert.equal(recoveries, 1);
-  assert.equal(revalidations, 1);
 });
 
 test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {

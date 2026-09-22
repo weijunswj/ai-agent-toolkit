@@ -32,19 +32,28 @@ function setup(seed = 'admission') {
       later_controlling_comments: [],
     }),
     readCandidate: () => null,
-    readWebDecision: () => ({
-      web_source: structuredClone(authority),
-      disposition: 'ACCEPTED_FOR_CONSUMPTION',
-      permitted_consumers: structuredClone(required),
-      applicability: structuredClone(packetValue.bindings.applicability),
-    }),
+    readWebDecision: () => {
+      const identities = runtime.authorityPacketIdentities(packetValue);
+      return {
+        packet_id: identities.packet_id,
+        packet_digest: identities.packet_digest,
+        binding_digest: identities.binding_digest,
+        web_source: structuredClone(authority),
+        disposition: 'ACCEPTED_FOR_CONSUMPTION',
+        permitted_consumers: structuredClone(required),
+        applicability: structuredClone(packetValue.bindings.applicability),
+      };
+    },
     readCurrent: () => ({
       current,
       projection_digest: runtime.digestValue(current),
       body_digest: currentBodyDigest,
       revision: 1,
     }),
-    readDispatchOutcome: ({ status }) => ({ status: status || 'confirmed' }),
+    readDispatchOutcome: ({ status }) => ({
+      status: status || 'confirmed',
+      delayed_completion_excluded: (status || 'confirmed') === 'not-started'
+    }),
     screenPacket: (value) => ({
       packet_digest: value && value.bindings
         ? runtime.authorityPacketIdentities(value).packet_digest

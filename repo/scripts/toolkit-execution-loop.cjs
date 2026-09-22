@@ -200,6 +200,9 @@ function receiptFailure(error, fallbackCode) {
 }
 
 function receiptCall(store, methodName, args, fallbackCode, requireResult = false) {
+  const receipt = loadReceiptRuntime();
+  if (typeof receipt.assertAuthenticAuthorityPacketStore !== 'function') fail(fallbackCode);
+  try { receipt.assertAuthenticAuthorityPacketStore(store); } catch (error) { receiptFailure(error, fallbackCode); }
   if (!isRecord(store) || typeof store[methodName] !== 'function') fail(fallbackCode);
   let result;
   try {
@@ -231,6 +234,9 @@ function semanticGateOptions(options = {}, requireIntent = true) {
   const consumerIntent = supplied.consumer_intent || supplied.consumerIntent;
   const trustedReaders = supplied.trusted_readers || supplied.trustedReaders;
   if (!isRecord(store) || requireIntent && !isRecord(consumerIntent) || !isRecord(trustedReaders)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const receipt = loadReceiptRuntime();
+  if (typeof receipt.assertAuthenticAuthorityPacketStore !== 'function') fail('GPR_PACKET_ADMISSION_REQUIRED');
+  try { receipt.assertAuthenticAuthorityPacketStore(store); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
   return { store, consumerIntent, trustedReaders, consumerIdentity: supplied.consumer_identity || supplied.consumerIdentity };
 }
 
@@ -262,6 +268,8 @@ function admitSemanticContext(options, run) {
   const gate = semanticGateOptions(options);
   const consumerIntent = boundConsumerIntent(gate.consumerIntent, run);
   const result = receiptCall(gate.store, 'admitSemanticGate', [consumerIntent, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
   const context = Object.freeze({
     store: gate.store,
     admission: admissionToken(result),
@@ -275,6 +283,8 @@ function admitSemanticContext(options, run) {
 
 function revalidateSemanticContext(context) {
   if (!context || !isRecord(context.store)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(context.store, context.admission); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
   return receiptCall(context.store, 'revalidateSemanticGate', [context.admission], 'GPR_PACKET_ADMISSION_REQUIRED');
 }
 
@@ -282,6 +292,8 @@ function recoverSemanticContext(options, run) {
   const gate = semanticGateOptions(options, false);
   if (!isRecord(gate.consumerIdentity)) fail('GPR_PACKET_ADMISSION_REQUIRED');
   const result = receiptCall(gate.store, 'recoverSemanticGateAdmission', [gate.consumerIdentity, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
   const context = Object.freeze({
     store: gate.store,
     admission: admissionToken(result),

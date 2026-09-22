@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -11,27 +12,10 @@ const contractPath = path.join(repoRoot, 'repo', 'contracts', 'bounded-local-exe
 const a1RuntimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
 const runtime = require(runtimePath);
 const a1 = require(a1RuntimePath);
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
-function semanticGate() {
-  const store = {
-    admitSemanticGate() { return Object.freeze({}); },
-    revalidateSemanticGate() { return true; },
-    beginSemanticGateDispatch() { return true; },
-    recordSemanticGateDispatch() { return true; },
-    recoverSemanticGateAdmission() { return Object.freeze({}); },
-  };
-  return {
-    store,
-    consumer_intent: { execution_binding: {} },
-    trusted_readers: {
-      readAuthority() { return {}; },
-      readCurrent() { return {}; },
-      readWebDecision() { return {}; },
-      readCandidate() { return {}; },
-      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
-      screenPacket() { return true; },
-    },
-  };
+function semanticGate(seed = 'loop', readerOverrides = {}) {
+  return support.semanticGate(seed, readerOverrides);
 }
 
 const common = {
@@ -40,8 +24,8 @@ const common = {
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
-  semantic_gate: semanticGate(),
 };
+Object.defineProperty(common, 'semantic_gate', { enumerable: true, get: () => semanticGate('common') });
 
 function commitOperation(overrides = {}) {
   const paths = overrides.authorized_paths || ['src/file.txt'];
@@ -218,29 +202,21 @@ test('A3 complete atomic launch starts exactly the admitted lane set', () => {
 
 test('semantic dispatch records one intent and one trusted confirmation for an atomic launch', () => {
   const gate = semanticGate();
-  let intents = 0;
-  let confirmations = 0;
-  gate.store.beginSemanticGateDispatch = () => { intents += 1; };
-  gate.store.recordSemanticGateDispatch = (_admission, evidence) => {
-    confirmations += 1;
-    assert.equal(evidence.status, 'confirmed');
-  };
   const result = startDelegated(delegatedLaunchOptions({
     semantic_gate: gate,
     prepareLaunch(lane) { return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }; },
     commitLaunchBatch({ reservations }) { return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) }; },
   }));
   assert.equal(result.started.status, 'running');
-  assert.equal(intents, 1);
-  assert.equal(confirmations, 1);
+  const db = new DatabaseSync(gate.store.databasePath, { readOnly: true });
+  try {
+    assert.deepEqual(db.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all().map((row) => row.event_type), ['DISPATCH_INTENT', 'DISPATCH_CONFIRMED']);
+  } finally { db.close(); }
 });
 
 test('ambiguous atomic dispatch is held and never retried automatically', () => {
-  const gate = semanticGate();
+  const gate = semanticGate('ambiguous', { readDispatchOutcome: () => ({ status: 'ambiguous' }) });
   let commitCalls = 0;
-  let recorded = 0;
-  gate.trusted_readers.readDispatchOutcome = () => ({ status: 'ambiguous' });
-  gate.store.recordSemanticGateDispatch = (_admission, evidence) => { if (evidence.status === 'confirmed') recorded += 1; return true; };
   const result = startDelegated(delegatedLaunchOptions({
     semantic_gate: gate,
     prepareLaunch(lane) { return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true }; },
@@ -249,7 +225,10 @@ test('ambiguous atomic dispatch is held and never retried automatically', () => 
   assert.equal(result.started.status, 'blocked');
   assert.equal(result.started.reason_code, 'GPR_PACKET_DISPATCH_UNRESOLVED');
   assert.equal(commitCalls, 1);
-  assert.equal(recorded, 0);
+  const db = new DatabaseSync(gate.store.databasePath, { readOnly: true });
+  try {
+    assert.deepEqual(db.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all().map((row) => row.event_type), ['DISPATCH_INTENT']);
+  } finally { db.close(); }
 });
 
 function expectCode(fn, code) {

@@ -19,7 +19,7 @@ const MUTATION_ACTIONS = Object.freeze({
 });
 const RESOURCE_KINDS = Object.freeze(['parent', 'child', 'pr']);
 const LIFECYCLES = Object.freeze(['pending', 'current', 'terminal']);
-const AUTHORITY_PACKET_CURRENT_SCHEMA = 'toolkit.github.program.authority-packet-current.v1';
+const AUTHORITY_PACKET_CURRENT_SCHEMA = 'toolkit.github-program.authority-packet-current.v1';
 const AUTHORITY_PACKET_STAGES = Object.freeze(['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER', 'WEB', 'FINALITY']);
 const AUTHORITY_PACKET_CURRENT_MAX_BYTES = 65536;
 const A4_MATERIAL_PREDICATES = Object.freeze([

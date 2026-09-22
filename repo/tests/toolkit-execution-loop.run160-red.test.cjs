@@ -7,27 +7,10 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
-function semanticGate() {
-  const store = {
-    admitSemanticGate() { return Object.freeze({}); },
-    revalidateSemanticGate() { return true; },
-    beginSemanticGateDispatch() { return true; },
-    recordSemanticGateDispatch() { return true; },
-    recoverSemanticGateAdmission() { return Object.freeze({}); },
-  };
-  return {
-    store,
-    consumer_intent: { execution_binding: {} },
-    trusted_readers: {
-      readAuthority() { return {}; },
-      readCurrent() { return {}; },
-      readWebDecision() { return {}; },
-      readCandidate() { return {}; },
-      readDispatchOutcome({ transport_result, transport_error }) { return transport_error ? { status: 'not-started' } : { status: 'confirmed', transport_result }; },
-      screenPacket() { return true; },
-    },
-  };
+function semanticGate(seed = 'run160') {
+  return support.semanticGate(seed);
 }
 
 const common = {
@@ -36,8 +19,8 @@ const common = {
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
-  semantic_gate: semanticGate(),
 };
+Object.defineProperty(common, 'semantic_gate', { enumerable: true, get: () => semanticGate('common') });
 
 function expectCode(fn, code) {
   assert.throws(fn, (error) => error && error.code === code);

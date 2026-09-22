@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-assurance-web-finality.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
 const {
   DESIGN_LOCK_ID,
@@ -21,33 +22,8 @@ const sha = (letter) => letter.repeat(40);
 const digest = (letter) => letter.repeat(64);
 
 function receiptContext(overrides = {}) {
-  const admission = Object.freeze({});
-  const receiptRuntime = {
-    revalidateSemanticGate(handle, expected) {
-      assert.equal(handle, admission);
-      const base = {
-        schema: runtime.RECEIPT_DEPENDENCY_SCHEMA,
-        fresh: true,
-        operation: expected.operation,
-        consumer: {
-          candidate: expected.candidate === undefined ? null : { ...expected.candidate },
-          scope_digest: expected.scope_digest === undefined ? null : expected.scope_digest,
-        },
-        dependency_state: 'NO_PREDECESSOR',
-        checks: { packet: 'not_applicable', acceptance: 'not_applicable', current: 'verified' },
-        current: { projection_digest: digest('1'), body_digest: digest('2'), revision: 1 },
-        predecessors: [],
-      };
-      return {
-        ...base,
-        ...overrides,
-        consumer: { ...base.consumer, ...(overrides.consumer || {}) },
-        checks: { ...base.checks, ...(overrides.checks || {}) },
-        current: { ...base.current, ...(overrides.current || {}) },
-      };
-    },
-  };
-  return runtime.bindReceiptAdmission(receiptRuntime, admission);
+  const fixture = support.assuranceReceiptAdmission(overrides);
+  return runtime.bindReceiptAdmission(fixture.store, fixture.admission);
 }
 
 function predecessor() {
@@ -307,13 +283,22 @@ test('declared predecessor requires exact packet, acceptance, and CURRENT checks
   }));
   assert.equal(accepted.code, 'PASS_AND_STOP');
 
-  const missingAcceptance = evaluateAssurance(evidence(), receiptContext({
+  const candidateTuple = { head: candidate.head, tree: candidate.tree, base: candidate.base };
+  const malformedProof = {
+    schema: runtime.RECEIPT_DEPENDENCY_SCHEMA,
+    fresh: true,
+    operation: 'ASSURANCE',
+    consumer: { candidate: candidateTuple, scope_digest: digest('d') },
     dependency_state: 'PREDECESSORS_VERIFIED',
     checks: { packet: 'verified', acceptance: 'not_applicable', current: 'verified' },
+    current: { projection_digest: digest('1'), body_digest: digest('2'), revision: 1 },
     predecessors: [predecessor()],
-  }));
-  assert.equal(missingAcceptance.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
-  assert.equal(missingAcceptance.reasons.includes('receipt-dependency-checks-invalid'), true);
+  };
+  assert.deepEqual(runtime.validateReceiptDependencyProof(malformedProof, {
+    operation: 'ASSURANCE',
+    candidate: candidateTuple,
+    scope_digest: digest('d'),
+  }).filter((reason) => reason === 'receipt-dependency-checks-invalid'), ['receipt-dependency-checks-invalid']);
 });
 
 test('G4 model, reasoning, and mode remain exact', () => {
@@ -462,7 +447,7 @@ test('fresh G4 is required after successor exact-head admission', () => {
   const next = { ...evidence(), candidate: { ...candidate, head: sha('e') } };
   next.g4 = g4Evidence({ candidate_head: sha('e') });
   next.pr = { ...next.pr, head: sha('e') };
-  const result = admitG4(next, receiptContext());
+  const result = admitG4(next, receiptContext({ consumer: { candidate: { head: sha('e'), tree: candidate.tree, base: candidate.base } } }));
   assert.equal(result.admitted, true);
   assert.equal(result.fresh, true);
 });

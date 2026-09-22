@@ -8,31 +8,14 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const contractRoot = path.join(repoRoot, 'repo', 'contracts', 'independent-assurance-web-finality');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-assurance-web-finality.cjs'));
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
 const sha = (letter) => letter.repeat(40);
 const digest = (letter) => letter.repeat(64);
 
 function receiptContext() {
-  const admission = Object.freeze({});
-  const receiptRuntime = {
-    revalidateSemanticGate(handle, expected) {
-      assert.equal(handle, admission);
-      return {
-        schema: runtime.RECEIPT_DEPENDENCY_SCHEMA,
-        fresh: true,
-        operation: expected.operation,
-        consumer: {
-          candidate: expected.candidate === undefined ? null : { ...expected.candidate },
-          scope_digest: expected.scope_digest === undefined ? null : expected.scope_digest,
-        },
-        dependency_state: 'NO_PREDECESSOR',
-        checks: { packet: 'not_applicable', acceptance: 'not_applicable', current: 'verified' },
-        current: { projection_digest: digest('1'), body_digest: digest('2'), revision: 1 },
-        predecessors: [],
-      };
-    },
-  };
-  return runtime.bindReceiptAdmission(receiptRuntime, admission);
+  const fixture = support.assuranceReceiptAdmission();
+  return runtime.bindReceiptAdmission(fixture.store, fixture.admission);
 }
 
 test('A4 contract is direct and has no generated or published surface', () => {

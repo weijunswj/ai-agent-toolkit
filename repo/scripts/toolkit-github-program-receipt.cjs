@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { types: utilTypes } = require('node:util');
 const { spawnSync } = require('node:child_process');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 
@@ -67,7 +68,8 @@ const AUTHORITY_PACKET_LIMITS = Object.freeze({
   requiredConsumers: 16,
   currentPredecessors: 16,
   currentProjectionBytes: 65536,
-  deliveryBytes: 1024 * 1024 + 64 * 1024
+  // The delivery contains the envelope, canonical bytes, and decoded packet.
+  deliveryBytes: 3 * 1024 * 1024 + 880
 });
 const HOLDER_ATTESTATION_SCHEMA_ID = 'toolkit.github-program.holder-attestation.v1';
 const PRE_RECOVERY_EVIDENCE_SCHEMA_ID = 'toolkit.github-program.pre-recovery-evidence.v1';
@@ -249,6 +251,13 @@ const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0
 const SESSION_OWNERS = new WeakMap();
 const ADMISSION_OWNERS = new WeakMap();
 const SEMANTIC_GATE_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_STORE_OWNERS = new WeakMap();
+const PROGRAMME_RECEIPT_STORE_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_READER_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_READER_KEYS = Object.freeze([
+  'readAuthority', 'readStart', 'screenPacket', 'readBackfillSource',
+  'readCandidate', 'readCurrent', 'readWebDecision', 'readDispatchOutcome'
+]);
 
 class GprError extends Error {
   constructor(code, details = {}) {
@@ -339,6 +348,11 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
     let names;
     let symbols;
     try {
+      if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID');
+    } catch (_) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
+    try {
       prototype = Object.getPrototypeOf(value);
       names = Object.getOwnPropertyNames(value);
       symbols = Object.getOwnPropertySymbols(value);
@@ -346,7 +360,6 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
       packetFail('GPR_PACKET_VALUE_INVALID');
     }
     if (symbols.length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
-    try { structuredClone(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
     if (Array.isArray(value)) {
       if (prototype !== Array.prototype && prototype !== null) packetFail('GPR_PACKET_VALUE_INVALID');
       const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
@@ -394,6 +407,9 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
 function packetParseInput(value) {
   if (typeof value === 'string') return { value, serialized: true };
   if (Buffer.isBuffer(value)) {
+    if (value.length >= 3 && value[0] === 0xef && value[1] === 0xbb && value[2] === 0xbf) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
     let decoded;
     try {
       decoded = new TextDecoder('utf-8', { fatal: true }).decode(value);
@@ -408,6 +424,7 @@ function packetParseInput(value) {
 function packetCanonicalInput(value) {
   const input = packetParseInput(value);
   if (!input.serialized) return packetClosedClone(input.value);
+  if (input.value.charCodeAt(0) === 0xfeff) packetFail('GPR_PACKET_VALUE_INVALID');
   let parsed;
   try { parsed = JSON.parse(input.value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
   const normalized = packetClosedClone(parsed);
@@ -2532,7 +2549,13 @@ function validateAuthorityPacketAcceptance(value) {
 }
 
 function packetRequireReaderSet(boundReaders, suppliedReaders, required = []) {
-  if (!boundReaders || suppliedReaders !== boundReaders) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  if (!boundReaders) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  if (suppliedReaders !== boundReaders) {
+    const owner = suppliedReaders && AUTHORITY_PACKET_READER_OWNERS.get(suppliedReaders);
+    if (!owner || owner.bound !== boundReaders || !authorityPacketReadersUnchanged(suppliedReaders, owner)) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+  }
   validateAuthorityPacketReaders(boundReaders, required.includes('screenPacket'));
   for (const key of required) if (typeof boundReaders[key] !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   return boundReaders;
@@ -2561,13 +2584,27 @@ function packetReadAuthorityObservation(readers, argument) {
 }
 
 function packetReadCandidateObservation(readers, argument, fallback) {
-  if (typeof readers.readCandidate !== 'function') return fallback === undefined ? null : fallback;
+  if (typeof readers.readCandidate !== 'function') {
+    return { candidate: fallback === undefined ? null : fallback, candidate_reuse: false };
+  }
   const raw = callTrustedReaderSync(readers.readCandidate, argument, 'GPR_PACKET_BINDING_MISMATCH');
   const candidate = isRecord(raw) && Object.hasOwn(raw, 'candidate') ? raw.candidate : raw;
   if (candidate !== null) {
     try { validateCandidate(candidate); } catch (_) { packetFail('GPR_PACKET_BINDING_MISMATCH'); }
   }
-  return candidate;
+  return {
+    candidate,
+    candidate_reuse: isRecord(raw) && raw.candidate_reuse === true
+  };
+}
+
+function packetCandidateReusePermitted(candidateObservation, previousCandidates, candidate) {
+  for (const previous of previousCandidates) {
+    if (canonicalSerialize(previous) === canonicalSerialize(candidate)) continue;
+    if (!candidateObservation || candidateObservation.candidate_reuse !== true) {
+      packetFail('GPR_PACKET_BINDING_MISMATCH');
+    }
+  }
 }
 
 function packetReadCurrentObservation(readers, argument) {
@@ -2687,6 +2724,12 @@ function packetAppendReadbackEvent(config, packetId, delivery) {
 
 function packetAcceptanceFromDecision(packet, decision, readbackEventId) {
   if (!isRecord(decision)) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  const identity = isRecord(decision.packet_identity) ? decision.packet_identity : decision;
+  if (identity.packet_id !== packet.packet_id
+    || identity.packet_digest !== packet.packet_digest
+    || identity.binding_digest !== packet.binding_digest) {
+    packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  }
   const source = decision.web_source || decision.source;
   const acceptance = {
     schema: AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID,
@@ -2754,14 +2797,13 @@ function packetCurrentConsumerIds(current) {
 
 function packetVerifyCurrentReadbackDb(db, currentObservation, current) {
   if (current.predecessors.length === 0) return true;
-  const acceptanceIds = current.predecessors.map((item) => item.acceptance_event_id).sort();
   for (const predecessor of current.predecessors) {
     const events = packetReadEventsDb(db, predecessor.packet_id);
     const match = events.find((event) => event.event_type === 'CURRENT_READBACK'
-      && event.payload.projection_digest === currentObservation.projection_digest
-      && event.payload.body_digest === currentObservation.body_digest
-      && event.payload.revision === currentObservation.revision
-      && JSON.stringify(event.payload.acceptance_event_ids) === JSON.stringify(acceptanceIds));
+        && event.payload.projection_digest === currentObservation.projection_digest
+        && event.payload.body_digest === currentObservation.body_digest
+        && event.payload.revision === currentObservation.revision
+        && JSON.stringify(event.payload.acceptance_event_ids) === JSON.stringify([predecessor.acceptance_event_id]));
     if (!match) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
   }
   return true;
@@ -2777,7 +2819,9 @@ function packetVerifySemanticDependencies(config, readers, consumerIntent, expec
     || canonicalSerialize(current.authority) !== canonicalSerialize(authorityObservation.source)) {
     packetFail('GPR_PACKET_BINDING_MISMATCH');
   }
-  const candidate = packetReadCandidateObservation(readers, consumerIntent, current.candidate);
+  const candidateObservation = packetReadCandidateObservation(readers, consumerIntent, current.candidate);
+  const candidate = candidateObservation.candidate;
+  packetCandidateReusePermitted(candidateObservation, current.predecessors.map((item) => item.candidate), candidate);
   if (canonicalSerialize(candidate) !== canonicalSerialize(current.candidate)) packetFail('GPR_PACKET_BINDING_MISMATCH');
   const consumer = packetConsumerIntent({ ...consumerIntent, candidate }, authorityObservation.source, candidate);
   if (canonicalSerialize(consumer.consumer) !== canonicalSerialize(current.consumer)) packetFail('GPR_PACKET_BINDING_MISMATCH');
@@ -2802,6 +2846,14 @@ function packetVerifySemanticDependencies(config, readers, consumerIntent, expec
         || canonicalSerialize(identities.packet.bindings.producer) !== canonicalSerialize(predecessor.producer)
         || canonicalSerialize(identities.packet.bindings.candidate) !== canonicalSerialize(predecessor.candidate)
         || predecessor.store_identity_digest !== storeIdentity) packetFail('GPR_PACKET_BINDING_MISMATCH');
+      const delivery = verifyAuthorityPacketFreshProcess(config, predecessor.packet_id, identities.packet.bindings);
+      if (delivery.envelope.packet_digest !== identities.packet_digest
+        || delivery.envelope.content_digest !== identities.content_digest
+        || delivery.envelope.binding_digest !== identities.binding_digest
+        || canonicalSerialize(delivery.packet) !== identities.canonical_packet_bytes) {
+        packetFail('GPR_PACKET_READBACK_FAILED');
+      }
+      packetScreenPersistedPacket(readers, delivery.packet, identities.packet_digest);
       const events = packetReadEventsDb(db, predecessor.packet_id);
       const acceptanceEvent = packetFindEvent(events, predecessor.acceptance_event_id, 'WEB_ACCEPTANCE_BOUND');
       const acceptance = validateAuthorityPacketAcceptance(acceptanceEvent.payload);
@@ -2834,12 +2886,33 @@ function packetVerifySemanticDependencies(config, readers, consumerIntent, expec
   } finally { db.close(); }
 }
 
+function authorityPacketStoreState(store) {
+  const state = store && AUTHORITY_PACKET_STORE_OWNERS.get(store);
+  if (!state || state.processId !== process.pid) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  return state;
+}
+
+function programmeReceiptStoreState(store) {
+  const state = store && PROGRAMME_RECEIPT_STORE_OWNERS.get(store);
+  if (!state || state.processId !== process.pid) fail('GPR_OWNERSHIP_LOST');
+  return state;
+}
+
+function assertAuthenticAuthorityPacketStore(store) {
+  return authorityPacketStoreState(store);
+}
+
 function semanticGateAdmissionState(store, admission) {
+  const storeState = authorityPacketStoreState(store);
   const state = admission && SEMANTIC_GATE_OWNERS.get(admission);
-  if (!state || state.storeInstanceId !== store.instanceId || state.processId !== process.pid) {
+  if (!state || state.storeInstanceId !== storeState.instanceId || state.processId !== process.pid) {
     packetFail('GPR_PACKET_ADMISSION_REQUIRED');
   }
   return state;
+}
+
+function assertAuthenticSemanticGateAdmission(store, admission) {
+  return semanticGateAdmissionState(store, admission);
 }
 
 function semanticGateEventObject(admissionId, sequence, priorEventId, eventType, transportEvidenceDigest, createdAt) {
@@ -3006,7 +3079,8 @@ function packetBuildAcceptance(config, boundReaders, packetId) {
 
 function packetBuildCurrentProjection(config, boundReaders, consumerIntent) {
   const authorityObservation = packetReadAuthorityObservation(boundReaders, consumerIntent);
-  const candidate = packetReadCandidateObservation(boundReaders, consumerIntent, consumerIntent.candidate === undefined ? null : consumerIntent.candidate);
+  const candidateObservation = packetReadCandidateObservation(boundReaders, consumerIntent, consumerIntent.candidate === undefined ? null : consumerIntent.candidate);
+  const candidate = candidateObservation.candidate;
   const intent = packetConsumerIntent({ ...consumerIntent, candidate }, authorityObservation.source, candidate);
   const specs = consumerIntent.predecessors || consumerIntent.required_predecessors;
   if (!Array.isArray(specs)) {
@@ -3017,6 +3091,7 @@ function packetBuildCurrentProjection(config, boundReaders, consumerIntent) {
     const storeIdentity = authorityPacketStoreIdentityDb(db, config);
     const predecessors = [];
     for (const spec of specs || []) predecessors.push(packetBuildPredecessorDb(db, spec, null, storeIdentity));
+    packetCandidateReusePermitted(candidateObservation, predecessors.map((item) => item.candidate), candidate);
     const projection = {
       schema: AUTHORITY_PACKET_CURRENT_SCHEMA_ID,
       repository: intent.repository,
@@ -3042,7 +3117,6 @@ function packetConfirmCurrentProjection(config, boundReaders, expectedProjection
   const projection = validateAuthorityPacketCurrent(expectedProjection);
   const observed = packetReadCurrentObservation(boundReaders, projection);
   if (canonicalSerialize(observed.current) !== canonicalSerialize(projection)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
-  const acceptanceEventIds = projection.predecessors.map((item) => item.acceptance_event_id).sort();
   const events = [];
   if (projection.predecessors.length > 0) {
     const db = openAuthorityPacketVerified(config, false, false);
@@ -3056,7 +3130,7 @@ function packetConfirmCurrentProjection(config, boundReaders, expectedProjection
             projection_digest: observed.projection_digest,
             body_digest: observed.body_digest,
             revision: observed.revision,
-            acceptance_event_ids: acceptanceEventIds
+            acceptance_event_ids: [predecessor.acceptance_event_id]
           },
           isoAt()
         )));
@@ -3213,11 +3287,29 @@ function semanticGateRecordDispatch(config, store, token, evidence) {
   let transport;
   try { transport = packetClosedClone(evidence); } catch (_) { packetFail('GPR_PACKET_DISPATCH_UNRESOLVED'); }
   if (!isRecord(transport)) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  const outcome = transport.outcome || transport.classification || transport.state || transport.status;
+  const observed = callTrustedReaderSync(state.readers.readDispatchOutcome, {
+    admission_id: state.admissionId,
+    consumer_key: state.consumerKey,
+    status: transport.status,
+    outcome: transport.outcome,
+    classification: transport.classification,
+    transport_result: transport.transport_result,
+    transport_error: transport.transport_error || null,
+    evidence: transport
+  }, 'GPR_PACKET_DISPATCH_UNRESOLVED');
+  if (!isRecord(observed)) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  if (observed.admission_id !== undefined && observed.admission_id !== state.admissionId
+    || observed.consumer_key !== undefined && observed.consumer_key !== state.consumerKey) {
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  const outcome = observed.outcome || observed.classification || observed.state || observed.status;
   const eventType = ['DISPATCH_CONFIRMED', 'CONFIRMED', 'STARTED', 'confirmed'].includes(outcome)
     ? 'DISPATCH_CONFIRMED'
     : ['DISPATCH_NOT_STARTED', 'NOT_STARTED', 'not-started', 'not_started'].includes(outcome) ? 'DISPATCH_NOT_STARTED' : null;
   if (!eventType) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  if (eventType === 'DISPATCH_NOT_STARTED' && observed.delayed_completion_excluded !== true) {
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
   const db = openAuthorityPacketVerified(config, false, false);
   try {
     return transaction(db, () => appendSemanticGateEventDb(db, state.admissionId, eventType, transport));
@@ -4002,6 +4094,10 @@ function openVerified(config, create = true, readOnly = false) {
       createDatabase(db, config.namespace, config.namespaceDigest, isoAt(), expectedFingerprint);
       if (process.platform !== 'win32') fs.chmodSync(databasePath, 0o600);
     }
+    if (Number(oneValue(db, 'PRAGMA user_version', 'user_version')) === AUTHORITY_PACKET_USER_VERSION) {
+      verifyAuthorityPacketDatabase(db, config.namespace, config.namespaceDigest, databasePath);
+      return db;
+    }
     verifyDatabase(db, config.namespace, config.namespaceDigest, databasePath, expectedFingerprint);
     return db;
   } catch (error) {
@@ -4236,6 +4332,7 @@ function migrateAuthorityPacketStore(options, trustedAuthorityReaders) {
   }
   const reopened = openAuthorityPacketVerified(config, false, true);
   reopened.close();
+  verifyAuthorityPacketStoreFreshProcess(config);
   return createAuthorityPacketStore(options, trustedAuthorityReaders);
 }
 
@@ -4314,17 +4411,103 @@ function authorityPacketRuntimeIdentity(nodeExecutable = process.execPath, runti
   });
 }
 
+function verifyAuthorityPacketStoreFreshProcess(config) {
+  const identity = authorityPacketRuntimeIdentity();
+  const env = { ...process.env };
+  const nodeInjectionKeys = new Set([
+    'NODE_OPTIONS', 'NODE_PATH', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE',
+    'NODE_REPL_EXTERNAL_MODULE', 'NODE_COMPILE_CACHE', 'NODE_V8_COVERAGE'
+  ]);
+  for (const key of Object.keys(env)) if (nodeInjectionKeys.has(key.toUpperCase())) delete env[key];
+  let result;
+  try {
+    result = spawnSync(identity.nodeRealpath, [
+      '--no-warnings', identity.runtimeRealpath, 'verify-authority-packet-store',
+      '--repository', config.namespace.repository,
+      '--parent-issue', String(config.namespace.parent_issue),
+      '--child-issue', String(config.namespace.child_issue),
+      '--state-root', config.stateRoot,
+      '--repository-root', config.repositoryRoot
+    ], {
+      cwd: config.repositoryRoot,
+      encoding: 'utf8',
+      env,
+      shell: false,
+      windowsHide: true,
+      timeout: VERIFIER_TIMEOUT_MS,
+      maxBuffer: VERIFIER_STREAM_BYTES
+    });
+  } catch (_) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  if (!result || result.error || result.signal || result.status !== 0
+    || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || result.stderr !== '' || !result.stdout.endsWith('\n')
+    || result.stdout.slice(0, -1).includes('\n')) packetFail('GPR_PACKET_READBACK_FAILED');
+  let observed;
+  try { observed = JSON.parse(result.stdout.slice(0, -1)); } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  const expected = {
+    ok: true,
+    schema: AUTHORITY_PACKET_SCHEMA_ID,
+    namespace_digest: config.namespaceDigest
+  };
+  if (canonicalSerialize(observed) !== canonicalSerialize({
+    ...expected,
+    store_identity_digest: observed.store_identity_digest
+  }) || !isDigest(observed.store_identity_digest)) packetFail('GPR_PACKET_READBACK_FAILED');
+  return deepFreeze(observed);
+}
+
 function validateAuthorityPacketReaders(value, requireScreen = false) {
   if (value === undefined || value === null) {
     if (requireScreen) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     return null;
   }
   if (!isRecord(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  try {
+    if (utilTypes.isProxy(value) || Object.getOwnPropertySymbols(value).length > 0) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+  } catch (_) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
   for (const key of ['readAuthority', 'readStart', 'screenPacket', 'readBackfillSource']) {
     if (Object.hasOwn(value, key) && typeof value[key] !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
   if (requireScreen && typeof value.screenPacket !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
   return value;
+}
+
+function captureAuthorityPacketReaders(value) {
+  if (value === undefined || value === null) return null;
+  validateAuthorityPacketReaders(value, false);
+  if (Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const keys = Object.keys(value).sort();
+  const values = new Map();
+  const bound = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    values.set(key, descriptor.value);
+    bound[key] = descriptor.value;
+  }
+  const snapshot = { bound: Object.freeze(bound), keys: Object.freeze(keys), values };
+  AUTHORITY_PACKET_READER_OWNERS.set(value, snapshot);
+  return snapshot.bound;
+}
+
+function authorityPacketReadersUnchanged(value, snapshot) {
+  if (!isRecord(value) || Object.keys(value).sort().join('\u0000') !== snapshot.keys.join('\u0000')
+    || Object.getOwnPropertySymbols(value).length > 0) return false;
+  for (const key of snapshot.keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set || descriptor.value !== snapshot.values.get(key)) return false;
+  }
+  return true;
 }
 
 function callTrustedReaderSync(reader, argument, code) {
@@ -4352,10 +4535,11 @@ function packetBindingsFromAdmission(admission) {
 }
 
 function verifyPacketProducerAdmission(packet, admission, readers) {
+  if (!readers || typeof readers.readAuthority !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   const bindings = packetBindingsFromAdmission(admission);
   if (canonicalSerialize(bindings) !== canonicalSerialize(packet.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
-  let observedAuthority = admission.authority;
-  if (readers && typeof readers.readAuthority === 'function') {
+  let observedAuthority;
+  {
     const observed = callTrustedReaderSync(readers.readAuthority, { packet_id: `ap1-${digestValue(packet)}` }, 'GPR_PACKET_AUTHORITY_UNVERIFIED');
     observedAuthority = observed && isRecord(observed) && Object.hasOwn(observed, 'authority') ? observed.authority : observed;
     if (observed && Array.isArray(observed.later_controlling_comments) && observed.later_controlling_comments.length > 0) {
@@ -4394,13 +4578,11 @@ function verifyPacketProducerAdmission(packet, admission, readers) {
 }
 
 function verifyPacketScreening(packetIdentities, admission, readers) {
-  let screening = admission && admission.screening;
-  if (readers && typeof readers.screenPacket === 'function') {
-    screening = callTrustedReaderSync(readers.screenPacket, {
-      packet: packetIdentities.packet,
-      packet_digest: packetIdentities.packet_digest
-    }, 'GPR_PACKET_PRIVACY_REJECTED');
-  }
+  if (!readers || typeof readers.screenPacket !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  const screening = callTrustedReaderSync(readers.screenPacket, {
+    packet: packetIdentities.packet,
+    packet_digest: packetIdentities.packet_digest
+  }, 'GPR_PACKET_PRIVACY_REJECTED');
   if (!isRecord(screening)) packetFail('GPR_PACKET_PRIVACY_REJECTED');
   let normalized;
   try { normalized = packetClosedClone(screening); } catch (error) {
@@ -4554,12 +4736,22 @@ function persistAuthorityPacketWithReaders(config, readers, artifactInput, produ
     if (error instanceof GprError) throw error;
     packetFail('GPR_PACKET_VALUE_INVALID');
   }
+  if (identities.packet.bindings.repository !== config.namespace.repository
+    || identities.packet.bindings.parent_issue !== config.namespace.parent_issue
+    || identities.packet.bindings.child_issue !== config.namespace.child_issue) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
   verifyPacketProducerAdmission(identities.packet, producerAdmission, readers);
   verifyPacketScreening(identities, producerAdmission, readers);
   const db = openAuthorityPacketVerified(config, false, false);
   let duplicate = false;
   try {
     transaction(db, () => {
+      if (identities.packet.bindings.repository !== config.namespace.repository
+        || identities.packet.bindings.parent_issue !== config.namespace.parent_issue
+        || identities.packet.bindings.child_issue !== config.namespace.child_issue) {
+        packetFail('GPR_PACKET_BINDING_MISMATCH');
+      }
       const existing = db.prepare(
         'SELECT * FROM authority_packets WHERE producer_key = ? OR packet_id = ? ORDER BY packet_id LIMIT 1'
       ).get(identities.producer_key, identities.packet_id);
@@ -4710,7 +4902,7 @@ function verifyAuthorityPacketFreshProcess(config, packetId, expectedBindings) {
 
 function createAuthorityPacketStore(options, trustedAuthorityReaders) {
   const config = createStoreConfig(options || {});
-  const readers = validateAuthorityPacketReaders(trustedAuthorityReaders, false);
+  const readers = captureAuthorityPacketReaders(trustedAuthorityReaders);
   const check = openAuthorityPacketVerified(config, false, true);
   check.close();
   const instanceId = randomId('authority-store');
@@ -4719,75 +4911,77 @@ function createAuthorityPacketStore(options, trustedAuthorityReaders) {
     databasePath: config.databasePath,
     namespace: config.namespace,
     storeIdentityDigest() {
-      const db = openAuthorityPacketVerified(config, false, true);
-      try { return authorityPacketStoreIdentityDb(db, config); } finally { db.close(); }
+      const owner = authorityPacketStoreState(this);
+      const db = openAuthorityPacketVerified(owner.config, false, true);
+      try { return authorityPacketStoreIdentityDb(db, owner.config); } finally { db.close(); }
     },
     persistAuthorityPacket(artifact, producerAdmission) {
-      return persistAuthorityPacketWithReaders(config, readers, artifact, producerAdmission);
+      const owner = authorityPacketStoreState(this);
+      return persistAuthorityPacketWithReaders(owner.config, owner.readers, artifact, producerAdmission);
     },
     readAuthorityPacket(packetId, expectedBindings) {
-      const db = openAuthorityPacketVerified(config, false, true);
+      const owner = authorityPacketStoreState(this);
+      const db = openAuthorityPacketVerified(owner.config, false, true);
       try { return readAuthorityPacketRow(db, packetId, expectedBindings).packet; } finally { db.close(); }
     },
     verifyAuthorityPacketFresh(packetId, expectedBindings) {
-      return verifyAuthorityPacketFreshProcess(config, packetId, expectedBindings);
-    },
-    appendAuthorityPacketEvent(packetId, eventType, payload, createdAt) {
-      const db = openAuthorityPacketVerified(config, false, false);
-      let event;
-      try {
-        event = transaction(db, () => {
-          const row = db.prepare('SELECT packet_id FROM authority_packets WHERE packet_id = ?').get(packetId);
-          if (!row) packetFail('GPR_PACKET_NOT_FOUND');
-          return appendAuthorityPacketEventDb(db, packetId, eventType, payload, createdAt || isoAt());
-        });
-      } catch (error) {
-        if (error instanceof GprError) throw error;
-        packetFail('GPR_PACKET_WRITE_FAILED');
-      } finally { db.close(); }
-      const reopened = openAuthorityPacketVerified(config, false, true);
-      reopened.close();
-      return deepFreeze(event);
+      const owner = authorityPacketStoreState(this);
+      return verifyAuthorityPacketFreshProcess(owner.config, packetId, expectedBindings);
     },
     backfillAuthorityPacket(artifact, backfillReaders = readers) {
-      return backfillAuthorityPacketWithReaders(config, backfillReaders, artifact);
+      const owner = authorityPacketStoreState(this);
+      if (!owner.readers || typeof owner.readers.readBackfillSource !== 'function') {
+        packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+      }
+      const boundReaders = packetRequireReaderSet(owner.readers, backfillReaders, ['readBackfillSource']);
+      return backfillAuthorityPacketWithReaders(owner.config, boundReaders, artifact);
     },
     bindWebPacketAcceptance(packetId, suppliedReaders = readers) {
-      const boundReaders = packetRequireReaderSet(readers, suppliedReaders, ['readWebDecision', 'screenPacket']);
-      return packetBuildAcceptance(config, boundReaders, packetId);
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readWebDecision', 'screenPacket']);
+      return packetBuildAcceptance(owner.config, boundReaders, packetId);
     },
     buildCurrentPacketProjection(consumerIntent, suppliedReaders = readers) {
-      const boundReaders = packetRequireReaderSet(readers, suppliedReaders, ['readAuthority', 'readCandidate']);
-      return packetBuildCurrentProjection(config, boundReaders, consumerIntent);
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readAuthority', 'readCandidate']);
+      return packetBuildCurrentProjection(owner.config, boundReaders, consumerIntent);
     },
     confirmCurrentPacketProjection(expectedProjection, suppliedReaders = readers) {
-      const boundReaders = packetRequireReaderSet(readers, suppliedReaders, ['readCurrent']);
-      return packetConfirmCurrentProjection(config, boundReaders, expectedProjection);
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readCurrent']);
+      return packetConfirmCurrentProjection(owner.config, boundReaders, expectedProjection);
     },
     admitSemanticGate(consumerIntent, suppliedReaders) {
-      const boundReaders = packetRequireReaderSet(readers, suppliedReaders, [
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, [
         'readAuthority', 'readCurrent', 'readWebDecision', 'readCandidate', 'readDispatchOutcome', 'screenPacket'
       ]);
-      return semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent);
+      return semanticGateAdmissionRecord(owner.config, this, boundReaders, consumerIntent);
     },
     revalidateSemanticGate(admission, expected = {}) {
-      const state = semanticGateAdmissionState(store, admission);
-      return semanticGateRevalidate(config, store, state.readers, admission, expected);
+      const owner = authorityPacketStoreState(this);
+      const state = semanticGateAdmissionState(this, admission);
+      return semanticGateRevalidate(owner.config, this, state.readers, admission, expected);
     },
     beginSemanticGateDispatch(admission) {
-      return semanticGateBeginDispatch(config, store, admission);
+      const owner = authorityPacketStoreState(this);
+      return semanticGateBeginDispatch(owner.config, this, admission);
     },
     recordSemanticGateDispatch(admission, evidence) {
-      return semanticGateRecordDispatch(config, store, admission, evidence);
+      const owner = authorityPacketStoreState(this);
+      return semanticGateRecordDispatch(owner.config, this, admission, evidence);
     },
     recoverSemanticGateAdmission(consumerIdentity, suppliedReaders) {
-      const boundReaders = packetRequireReaderSet(readers, suppliedReaders, [
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, [
         'readAuthority', 'readCurrent', 'readWebDecision', 'readCandidate', 'readDispatchOutcome', 'screenPacket'
       ]);
-      return semanticGateRecover(config, store, boundReaders, consumerIdentity);
+      return semanticGateRecover(owner.config, this, boundReaders, consumerIdentity);
     }
   };
-  return Object.freeze(store);
+  Object.freeze(store);
+  AUTHORITY_PACKET_STORE_OWNERS.set(store, { config, readers, instanceId, processId: process.pid });
+  return store;
 }
 
 function storeStateFactsDb(db) {
@@ -5271,6 +5465,7 @@ function createProgrammeReceiptStore(options) {
     config,
     get databasePath() { return config.databasePath; },
     allocateRun(input) {
+      programmeReceiptStoreState(this);
       if (isRecord(input) && ('lease' in input || 'fence_id' in input || 'fence_sequence' in input || 'lease_id' in input)) fail('GPR_CALLER_FENCE_FORBIDDEN');
       if (!exactKeys(input, ['lock', 'authority', 'start', 'candidate', 'lease_ms'])
         || !isSafeId(input.lock) || !Number.isSafeInteger(input.lease_ms)
@@ -5357,6 +5552,7 @@ function createProgrammeReceiptStore(options) {
       return session;
     },
     async startAllocatedRun(session, readers) {
+      programmeReceiptStoreState(this);
       const state = sessionState(store, session);
       const db = openVerified(config);
       let allocation;
@@ -5402,13 +5598,16 @@ function createProgrammeReceiptStore(options) {
       return started;
     },
     async startRun(input, readers) {
+      programmeReceiptStoreState(this);
       const allocated = store.allocateRun(input);
       return store.startAllocatedRun(allocated, readers);
     },
     appendReceipt(session, input) {
+      programmeReceiptStoreState(this);
       return appendReceiptInternal(store, session, input);
     },
     interruptRun(session, input = {}) {
+      programmeReceiptStoreState(this);
       return appendReceiptInternal(store, session, {
         receipt_type: 'RUN_INTERRUPTED',
         candidate: input.candidate,
@@ -5417,11 +5616,13 @@ function createProgrammeReceiptStore(options) {
       });
     },
     readReceiptChain(runId) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(runId)) fail('GPR_RUN_ID_INVALID');
       const db = openVerified(config, false);
       try { return readChainDb(db, runId); } finally { db.close(); }
     },
     classifyRecovery(runId, now = Date.now()) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(runId)) fail('GPR_RUN_ID_INVALID');
       const observedAt = isoAt(now);
       const db = openVerified(config, false);
@@ -5438,6 +5639,7 @@ function createProgrammeReceiptStore(options) {
       }
     },
     async admitMutationOperation(session, descriptorInput, trustedReadersInput) {
+      programmeReceiptStoreState(this);
       const state = sessionState(store, session);
       if (!state.startVerificationDigest) fail('GPR_RUN_NOT_FRESHLY_VERIFIED');
       const descriptor = validateOperationDescriptor(descriptorInput);
@@ -5545,6 +5747,7 @@ function createProgrammeReceiptStore(options) {
       return admission;
     },
     async authorizeMutationDispatch(session, admission) {
+      programmeReceiptStoreState(this);
       const { sessionOwner, state } = admissionState(store, session, admission);
       if (state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
       const dbBefore = openVerified(config, false);
@@ -5569,6 +5772,7 @@ function createProgrammeReceiptStore(options) {
       }
     },
     async recordMutationOutcome(session, admission, evidenceInput) {
+      programmeReceiptStoreState(this);
       const { state } = admissionState(store, session, admission);
       if (!state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
       let operation;
@@ -5615,6 +5819,7 @@ function createProgrammeReceiptStore(options) {
       return store.readMutationOperation(state.operationId);
     },
     readMutationOperation(operationId) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(operationId)) fail('GPR_OPERATION_NOT_FOUND');
       const db = openVerified(config, false);
       try {
@@ -5623,6 +5828,7 @@ function createProgrammeReceiptStore(options) {
       } finally { db.close(); }
     },
     async reconcileMutationOperation(operationId, authorityReader, providerReader) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(operationId) || typeof authorityReader !== 'function' || typeof providerReader !== 'function') fail('GPR_RECONCILIATION_INVALID');
       let operation;
       let currentState;
@@ -5652,7 +5858,9 @@ function createProgrammeReceiptStore(options) {
     }
   };
   openVerified(config).close();
-  return Object.freeze(store);
+  Object.freeze(store);
+  PROGRAMME_RECEIPT_STORE_OWNERS.set(store, { config, instanceId: store.instanceId, processId: process.pid });
+  return store;
 }
 
 function parseArgs(args) {
@@ -5737,6 +5945,25 @@ function main() {
     readAuthorityPacketCli(args);
     return;
   }
+  if (args._[0] === 'verify-authority-packet-store') {
+    const config = createStoreConfig({
+      repository: args.repository,
+      parent_issue: Number(args.parent_issue),
+      child_issue: Number(args.child_issue),
+      stateRoot: args.state_root,
+      repositoryRoot: args.repository_root
+    });
+    const db = openAuthorityPacketVerified(config, false, true);
+    let storeIdentity;
+    try { storeIdentity = authorityPacketStoreIdentityDb(db, config); } finally { db.close(); }
+    process.stdout.write(`${canonicalSerialize({
+      ok: true,
+      schema: AUTHORITY_PACKET_SCHEMA_ID,
+      namespace_digest: config.namespaceDigest,
+      store_identity_digest: storeIdentity
+    })}\n`);
+    return;
+  }
   if (args._[0] === 'inspect') {
     const config = createStoreConfig({
       repository: args.repository,
@@ -5802,6 +6029,8 @@ module.exports = Object.freeze({
   V3_MIGRATION_PLAN_SCHEMA_ID,
   V3_USER_VERSION,
   GprError,
+  assertAuthenticAuthorityPacketStore,
+  assertAuthenticSemanticGateAdmission,
   assertRuntimeSupport,
   appendV3ReceiptWithChainDigest,
   authorityPacketIdentities,
