@@ -72,64 +72,64 @@
       "routes": {
         "G0-A": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "G0-B": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G1": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "G2": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "xhigh"
         },
         "G3": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G4": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "LOOP": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "RECONVERGENCE": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "FINAL_AUDIT": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "max"
         },
         "BROWSER": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "xhigh"
         }
       },
       "subagents": {
         "G0-B": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G3": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         }
       }
