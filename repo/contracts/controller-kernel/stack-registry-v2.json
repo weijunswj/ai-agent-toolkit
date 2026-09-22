@@ -98,7 +98,7 @@
         "G4": {
           "provider": "anthropic",
           "model": "opus-5.5",
-          "reasoning": "medium"
+          "reasoning": "xhigh"
         },
         "LOOP": {
           "provider": "anthropic",
@@ -118,7 +118,7 @@
         "BROWSER": {
           "provider": "anthropic",
           "model": "opus-5.5",
-          "reasoning": "xhigh"
+          "reasoning": "high"
         }
       },
       "subagents": {
