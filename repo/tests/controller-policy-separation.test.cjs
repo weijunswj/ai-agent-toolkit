@@ -87,6 +87,14 @@ test('delegation capability is stage law, not model law', () => {
   assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
 });
 
+test('executor transport keeps gh escalation separate from sandbox-native git publication', () => {
+  assert.match(controller, /`gh` may require executor-side escalation/);
+  assert.match(controller, /specific to `gh`, not to all Git\/GitHub transport/);
+  assert.match(controller, /including an authorised `git push`, without `gh` escalation/);
+  assert.match(controller, /Do not reject or reroute an authorised `git push` merely because `gh` is the escalated GitHub CLI path/);
+  assert.match(controller, /Transport does not grant authority/);
+});
+
 test('github presentation mechanics stay in renderer automation, not Controller law', () => {
   for (const presentationToken of ['[ PARENT THREAD ]', 'delivery-child', 'deferred-child']) {
     assert.equal(controller.includes(presentationToken), false, `presentation token leaked into Controller law: ${presentationToken}`);
