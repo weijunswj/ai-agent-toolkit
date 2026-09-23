@@ -17,7 +17,7 @@
         "G1": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         },
         "G2": {
           "provider": "openai",
