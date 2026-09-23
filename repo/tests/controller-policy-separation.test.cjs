@@ -169,6 +169,20 @@ test('shipping repair routing preserves exhausted history and candidate limits',
   assert.match(controller, /Do not impose a crude cumulative numeric cap/);
 });
 
+test('post-Web-directed G4 amend defaults to targeted G2 reclosure before another grant', () => {
+  assert.match(controller, /Post-Web-directed G4 reclosure default/);
+  assert.match(controller, /material `G4_AMEND`.*fresh targeted G2 reclosure.*exact material G4 counterexamples/s);
+  assert.match(controller, /deterministic regressions plus positive controls/);
+  assert.match(controller, /production-boundary evidence/);
+  assert.match(controller, /changed root\/trust\/architecture model requires G1 re-entry/);
+  assert.match(controller, /`G2_CONTRACT_COVERAGE_MISS` requires targeted G2 re-entry and may use `G2_ESCALATED`/);
+  assert.match(controller, /standard G2 route normally applies/);
+  assert.match(controller, /Narrow G2-reuse exception/);
+  assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
+  assert.match(controller, /`G3_IMPLEMENTATION_MISS` label alone is insufficient/);
+  assert.match(controller, /G2 reclosure grants no mutation authority, budget reset, new lineage or automatic follow-on/);
+});
+
 test('G4 repair handoff retains complete evidence and independent follow-up obligations', () => {
   assert.match(controller, /actual and required observable results; affected consequential\/equivalent surfaces and unexamined areas; regression and positive-control obligations/);
   assert.match(controller, /Mark unexamined material areas explicitly; do not infer assurance from silence/);
