@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredStages = ['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G0-A', 'G0-B', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller stage policy is provider/model agnostic', () => {
   assert.match(controller, /## Stage and stack routing/);
@@ -36,7 +36,7 @@ test('stack registry has explicit complete symbolic routes and only G0-B/G3 suba
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
   assert.equal(registry.version, 2);
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
-    assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredStages].sort(), stackId);
+    assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredRoutes].sort(), stackId);
     assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0-B', 'G3'], stackId);
     for (const route of Object.values(stack.routes)) {
       assert.equal(typeof route.provider, 'string');
@@ -70,7 +70,9 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G1.reasoning, 'high');
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
-  assert.equal(claude.routes.G2.reasoning, 'xhigh');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'high');
+  assert.equal(claude.routes.G2.reasoning, 'high');
+  assert.equal(claude.routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.LOOP.reasoning, 'medium');
@@ -79,6 +81,15 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
   assert.equal(claude.subagents['G0-B'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
+});
+
+test('G2 escalation is a stronger route category, not a new gate', () => {
+  assert.match(controller, /`G2_ESCALATED` is a stronger route category for the same semantic `G2` gate/);
+  assert.match(controller, /fresh G4 has classified a material blocker as `G2_CONTRACT_COVERAGE_MISS`/);
+  assert.match(controller, /normal G2 route returned HOLD.*remaining blocker is adversarial executable-contract closure/s);
+  assert.match(controller, /once for the same G2 root\/contract/);
+  assert.match(controller, /does not authorise mutation or bypass missing evidence/);
+  assert.match(controller, /Do not auto-escalate merely because.*G3 implementation failed/s);
 });
 
 test('delegation capability is stage law, not model law', () => {
