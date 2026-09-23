@@ -87,6 +87,17 @@ test('delegation capability is stage law, not model law', () => {
   assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
 });
 
+test('route admission uses trusted launch binding and never requires harness self-attestation', () => {
+  assert.match(controller, /authoritative route evidence is the trusted launch binding/i);
+  assert.match(controller, /self-introspection.*never required for gate admission/i);
+  assert.match(controller, /Absence of runtime model\/reasoning metadata is not a HOLD/i);
+  assert.match(controller, /must not cause `HARNESS_HANDOFF_REQUIRED`/);
+  assert.match(controller, /cannot launch it, return `HARNESS_HANDOFF_REQUIRED`/);
+  assert.match(controller, /material contradiction fails closed/i);
+  assert.match(controller, /Silent route\/model fallback remains prohibited/i);
+  assert.doesNotMatch(controller, /cannot launch and verify it/);
+});
+
 test('github presentation mechanics stay in renderer automation, not Controller law', () => {
   for (const presentationToken of ['[ PARENT THREAD ]', 'delivery-child', 'deferred-child']) {
     assert.equal(controller.includes(presentationToken), false, `presentation token leaked into Controller law: ${presentationToken}`);
