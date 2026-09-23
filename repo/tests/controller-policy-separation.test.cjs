@@ -168,6 +168,9 @@ test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-roo
   assert.match(controller, /parent remains the sole G3 owner\/integrator/);
   assert.match(controller, /G3_PASS.*complete integrated production-boundary validation floor green/);
   assert.match(controller, /Web alone reconciles and launches fresh G4/);
+  assert.match(controller, /Before Web admits fresh G4/);
+  assert.match(controller, /zero unresolved required in-contract roots/);
+  assert.match(controller, /worker's `G3_PASS` label alone never authorises G4/);
 });
 
 test('candidate acceptance, child completion, and per-repository wait removal stay distinct', () => {
