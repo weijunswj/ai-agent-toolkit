@@ -162,7 +162,9 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
 
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
   assert.match(controller, /G3 in-gate convergence/);
-  assert.match(controller, /at most 5 materially distinct substantive recovery attempts/);
+  assert.match(controller, /3 normal materially distinct substantive recovery attempts and an absolute ceiling of 5/);
+  assert.match(controller, /After attempt 3.*attempts 4-5 only when.*materially shrunk.*clearly narrower corrective path/s);
+  assert.match(controller, /Attempt 5 is the absolute ceiling/);
   assert.match(controller, /G3_IN_CONTRACT_NONCONVERGENCE/);
   assert.match(controller, /must not publish a knowingly failing candidate/);
   assert.match(controller, /parent remains the sole G3 owner\/integrator/);
