@@ -21,6 +21,8 @@ test('controller bootstrap does not manufacture Toolkit or merge authority', () 
   assert.match(controller, /GitHub permissions, connector\/CLI access, or the ability to push are transport capabilities only/);
   assert.match(controller, /default delivery stops at a reviewable pull request/);
   assert.match(controller, /mark it Ready for Review when appropriate and leave merge\/finality to repository maintainers/);
+  assert.match(controller, /Before deciding whether Toolkit governance applies, bind the exact repository named by the user as the controller repository fence/);
+  assert.match(controller, /This one-repository fence applies to both Toolkit-governed and non-Toolkit work/);
 });
 
 test('controller stage policy is provider/model agnostic', () => {

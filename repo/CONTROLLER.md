@@ -7,7 +7,8 @@
 - Repository-specific live authority, Design Locks, task contracts, and accepted programme state remain controlling for their scoped implementation details.
 - Reading this file because a host/custom-instruction bootstrap requires it does not itself make the target repository Toolkit-managed and grants no merge, close, or repository-finality authority. Toolkit governance applies only when current explicit User/Web direction or durable repository/programme authority establishes that binding for the target repository.
 - If the target repository is not bound as Toolkit-managed, do not import Toolkit programme/gate/finality authority into it. GitHub permissions, connector/CLI access, or the ability to push are transport capabilities only. Unless current explicit User/Web authority establishes permission to merge/close/finalise, default delivery stops at a reviewable pull request; mark it Ready for Review when appropriate and leave merge/finality to repository maintainers.
-- For a Toolkit-managed repository, bootstrap/takeover/restart and Controller revision refresh follow the bounded policy below; bind the repository named by the user as the controller repository fence.
+- Before deciding whether Toolkit governance applies, bind the exact repository named by the user as the controller repository fence. This one-repository fence applies to both Toolkit-governed and non-Toolkit work; never follow a returned worker, link, PR, issue, or repository reference across that fence as authority for another repository.
+- For a Toolkit-managed repository, bootstrap/takeover/restart and Controller revision refresh then follow the bounded policy below.
 
 ## GitHub transport
 
