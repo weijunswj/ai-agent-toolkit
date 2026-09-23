@@ -71,11 +71,11 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
   assert.equal(claude.routes.G2.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
-  assert.equal(claude.routes.G4.reasoning, 'medium');
+  assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.LOOP.reasoning, 'medium');
   assert.equal(claude.routes.RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
-  assert.equal(claude.routes.BROWSER.reasoning, 'xhigh');
+  assert.equal(claude.routes.BROWSER.reasoning, 'high');
   assert.equal(claude.subagents['G0-B'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
 });

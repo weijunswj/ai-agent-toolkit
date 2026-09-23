@@ -159,6 +159,17 @@
 - Distinguish candidate acceptance from programme completion. A safe independently accepted increment need not wait for unrelated future-owned work, but the continuing child remains open until its required outcomes are complete. Do not split coupled unsafe changes or manufacture a lineage to evade assurance.
 - Operating-rule adoption does not require unfinished Toolkit runtime code. A repository Web Controller may release an otherwise unsupported blanket Toolkit wait only after recording that no genuine local safety, evidence, authority or code dependency requires it. Keep named real holds, active-worker protections and all existing permissions/budgets. Do not claim that adopting these instructions implements automated admission, packet custody or Loop enforcement.
 
+
+## Production-boundary execution evidence
+
+- For any material requirement enforced at a production boundary, acceptance evidence must execute the real production enforcement path or a faithful production path that reaches it.
+- Fixture presence, requirement/case counts, assertion metadata, mocks/fakes/stubs that bypass the enforcement point, hand-authored stand-ins for real producer output, compiler/coverage inventories, or green CI that never reaches the relevant boundary are insufficient by themselves.
+- Where applicable, exercise a negative/adversarial case and a positive control through the same boundary, and verify the exact outcome/reason plus material side effects or zero-effect guarantees.
+- When producer/consumer compatibility is the invariant, use actual producer output at the consumer rather than a manually reconstructed equivalent.
+- Mocks/fakes remain valid for unit isolation and fault injection, but cannot solely prove the material production-boundary guarantee.
+- If the material boundary cannot be exercised under current authority/environment, classify the evidence as incomplete/HOLD rather than treating indirect evidence as equivalent proof.
+- Live production services are not required. Disposable local stores/processes, isolated runtimes, test servers, and provider simulators are valid when they execute the actual production path and preserve the enforcement boundary.
+
 ## Structural-change law
 
 A rename/remove/move/re-signature or material identity/contract/schema/path/shape change requires a repository-wide consumer search:

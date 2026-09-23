@@ -6,17 +6,17 @@
       "routes": {
         "G0-A": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "G0-B": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G1": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "G2": {
@@ -26,7 +26,7 @@
         },
         "G3": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G4": {
@@ -36,12 +36,12 @@
         },
         "LOOP": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "RECONVERGENCE": {
           "provider": "openai",
-          "model": "gpt-5.6-sol",
+          "model": "gpt-6-sol",
           "reasoning": "high"
         },
         "FINAL_AUDIT": {
@@ -58,12 +58,12 @@
       "subagents": {
         "G0-B": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         },
         "G3": {
           "provider": "openai",
-          "model": "gpt-5.6-luna",
+          "model": "gpt-6-luna",
           "reasoning": "max"
         }
       }
@@ -72,64 +72,64 @@
       "routes": {
         "G0-A": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "G0-B": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G1": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "G2": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "xhigh"
         },
         "G3": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G4": {
           "provider": "anthropic",
-          "model": "opus-5",
-          "reasoning": "medium"
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
         },
         "LOOP": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "RECONVERGENCE": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "FINAL_AUDIT": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "max"
         },
         "BROWSER": {
           "provider": "anthropic",
-          "model": "opus-5",
-          "reasoning": "xhigh"
+          "model": "opus-5.5",
+          "reasoning": "high"
         }
       },
       "subagents": {
         "G0-B": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         },
         "G3": {
           "provider": "anthropic",
-          "model": "opus-5",
+          "model": "opus-5.5",
           "reasoning": "medium"
         }
       }
