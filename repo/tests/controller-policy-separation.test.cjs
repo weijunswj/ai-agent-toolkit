@@ -144,6 +144,10 @@ test('shipping repair routing preserves exhausted history and candidate limits',
   assert.match(controller, /Same implementation lineage has a maximum of 2 corrections regardless of run, head, branch, or renamed repair label/);
   assert.match(controller, /After 2\/2, a same-lineage material defect => `NON_CONVERGENCE_DECISION_REQUIRED`; no Repair-3 alias\/reset/);
   assert.match(controller, /Each grant authorises at most one bounded implementation candidate plus its required fresh G4/);
+  assert.match(controller, /Monotonic Web-directed continuation chain/);
+  assert.match(controller, /durable continuation-chain\/root-family identity plus the unresolved accepted blocker set/);
+  assert.match(controller, /Repeated materially equivalent G4 rejection.*root\/Owner adjudication/s);
+  assert.match(controller, /Do not impose a crude cumulative numeric cap/);
 });
 
 test('G4 repair handoff retains complete evidence and independent follow-up obligations', () => {
