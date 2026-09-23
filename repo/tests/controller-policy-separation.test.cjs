@@ -108,6 +108,15 @@ test('delegation capability is stage law, not model law', () => {
   assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
 });
 
+test('git publication transport probes do not manufacture publication certainty', () => {
+  assert.match(controller, /Transport availability is operation-local and point-in-time/);
+  assert.match(controller, /Successful `gh` access or a successful Git probe such as `git ls-remote` does not prove that a later `git push` route will remain available/);
+  assert.match(controller, /preserve the exact immutable candidate.*transport infrastructure, not an implementation\/candidate defect/s);
+  assert.match(controller, /consume no implementation\/correction budget/);
+  assert.match(controller, /Re-establish the required Git transport before retry/);
+  assert.match(controller, /If publication outcome is ambiguous, reconcile the remote ref\/readback first/);
+});
+
 test('executor transport keeps gh escalation separate from sandbox-native git publication', () => {
   assert.match(controller, /`gh` may require executor-side escalation/);
   assert.match(controller, /specific to `gh`, not to all Git\/GitHub transport/);
