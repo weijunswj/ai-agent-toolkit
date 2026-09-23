@@ -15,6 +15,14 @@ const registry = JSON.parse(fs.readFileSync(
 
 const requiredRoutes = ['G0-A', 'G0-B', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
+test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
+  assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
+  assert.match(controller, /Toolkit governance applies only when current explicit User\/Web direction or durable repository\/programme authority establishes that binding/);
+  assert.match(controller, /GitHub permissions, connector\/CLI access, or the ability to push are transport capabilities only/);
+  assert.match(controller, /default delivery stops at a reviewable pull request/);
+  assert.match(controller, /mark it Ready for Review when appropriate and leave merge\/finality to repository maintainers/);
+});
+
 test('controller stage policy is provider/model agnostic', () => {
   assert.match(controller, /## Stage and stack routing/);
   assert.match(controller, /Concrete provider\/model\/reasoning choices live in the cold stack registry/);
