@@ -53,6 +53,11 @@
           "provider": "openai",
           "model": "gpt-6-astra",
           "reasoning": "medium"
+        },
+        "G2_ESCALATED": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "high"
         }
       },
       "subagents": {
@@ -88,7 +93,7 @@
         "G2": {
           "provider": "anthropic",
           "model": "opus-5.5",
-          "reasoning": "xhigh"
+          "reasoning": "high"
         },
         "G3": {
           "provider": "anthropic",
@@ -119,6 +124,11 @@
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "high"
+        },
+        "G2_ESCALATED": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
         }
       },
       "subagents": {
