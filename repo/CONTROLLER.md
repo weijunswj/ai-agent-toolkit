@@ -10,7 +10,7 @@
 ## GitHub transport
 
 - Web Controller GitHub reads and writes use the available authenticated GitHub connector. Web does not have or claim local or elevated `gh` CLI access.
-- Elevated `gh` and escalated network access for `gh` are executor-only. An executor may use local `git` plus `gh` only when its runtime supports them and the accepted task contract authorises the operation.
+- `gh` may require executor-side escalation because its authenticated state or network path is outside the sandbox. That escalation rule is specific to `gh`, not to all Git/GitHub transport. An executor may use local `git` with the sandbox/runtime's own configured authentication, including an authorised `git push`, without `gh` escalation when that transport is available. Do not reject or reroute an authorised `git push` merely because `gh` is the escalated GitHub CLI path. If the runtime itself requires elevation for a particular Git operation, use that runtime permission boundary.
 - Transport does not grant authority. Executors remain mechanical actors for any Web-owned GitHub decision and never gain architecture, waiver, ownership or finality authority by possessing `gh` access.
 - If the Web connector cannot perform a required GitHub operation, do not reinterpret the failure as repository state. Hold the affected transition or delegate only an already-authorised bounded mechanical operation, then verify the result through the Web connector before consequential continuation.
 
