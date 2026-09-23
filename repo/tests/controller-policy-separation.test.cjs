@@ -160,6 +160,16 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
   assert.match(controller, /Serial execution is valid when fan-out is unsupported or not useful, and active worker contracts are not retroactively widened/);
 });
 
+test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
+  assert.match(controller, /G3 in-gate convergence/);
+  assert.match(controller, /at most 5 materially distinct substantive recovery attempts/);
+  assert.match(controller, /G3_IN_CONTRACT_NONCONVERGENCE/);
+  assert.match(controller, /must not publish a knowingly failing candidate/);
+  assert.match(controller, /parent remains the sole G3 owner\/integrator/);
+  assert.match(controller, /G3_PASS.*complete integrated production-boundary validation floor green/);
+  assert.match(controller, /Web alone reconciles and launches fresh G4/);
+});
+
 test('candidate acceptance, child completion, and per-repository wait removal stay distinct', () => {
   assert.match(controller, /Distinguish candidate acceptance from programme completion/);
   assert.match(controller, /safe independently accepted increment need not wait for unrelated future-owned work, but the continuing child remains open until its required outcomes are complete/);
