@@ -279,6 +279,46 @@ test('ordinary coding path keeps exception mechanics exceptional', () => {
   assert.match(controller, /Repeated exception use without material blocker\/root reduction returns to the responsible root\/Owner boundary/);
 });
 
+test('causal negative controls cannot manufacture the consequential outcome they claim to prove', () => {
+  assert.match(controller, /Causal negative-control oracle/);
+  assert.match(controller, /test instrumentation may expose, delay, synchronise or observe X but must not independently manufacture Y/);
+  assert.match(controller, /Missing observation fails/);
+  assert.match(controller, /Constructed\/fallback evidence, cleanup actions and fault-injection performed by another actor cannot substitute/);
+  assert.match(architecture, /causal negative-control requirements that prove the named production actor caused the consequential observation/);
+});
+
+test('async waiters and deferred work require adversarial progress and truthful outstanding-work accounting', () => {
+  assert.match(controller, /Async\/liveness adversarial validation/);
+  assert.match(controller, /deterministic waiter-first control/);
+  assert.match(controller, /completion occurs later and requires event-loop, I\/O, timer or callback progress/);
+  assert.match(controller, /already-complete-before-waiter control is insufficient by itself/);
+  assert.match(controller, /outstanding work is non-zero but no pending completion\/progress signal exists, fail loudly/);
+  assert.match(controller, /Deferred consequential-work accounting/);
+  assert.match(controller, /outstanding from scheduling until its real consequential completion/);
+  assert.match(controller, /Cancelling\/clearing a timer cannot make required work disappear/);
+  assert.match(controller, /flush either allows the scheduled normal path to execute or takes ownership of that same work/);
+});
+
+test('logical identities that alias one consequential resource are closed before G3', () => {
+  assert.match(controller, /Resource-equivalence identity check/);
+  assert.match(controller, /two different accepted logical identities can address the same underlying resource/);
+  assert.match(controller, /one coherent resource-equivalence identity or explicit alias semantics before G3/);
+  assert.match(controller, /Do not widen this into speculative Unicode\/path normalisation work/);
+  assert.match(architecture, /distinct accepted logical identities can address the same underlying resource/);
+});
+
+test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
+  assert.match(controller, /Conditional G3 adversarial pre-publication validation/);
+  assert.match(controller, /sufficiently complex\/STRICT G3 work involving concurrency, async completion, deferred work, causal negative controls, lifecycle coordination or logical-identity\/resource mapping/);
+  assert.match(controller, /optional depth-1 read-only validation leaf/);
+  assert.match(controller, /leaf never mutates or declares gate completion/);
+  assert.match(controller, /parent remains sole owner\/integrator/);
+  assert.match(controller, /RED against settled behaviour stays inside G3/);
+  assert.match(controller, /missing product\/compatibility semantic returns to G2/);
+  assert.match(controller, /changed root\/trust\/architecture model returns to G1/);
+  assert.match(architecture, /It is not another gate/);
+});
+
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
   assert.match(controller, /G3 in-gate convergence/);
   assert.match(controller, /3 normal materially distinct substantive recovery attempts and an absolute ceiling of 5/);
