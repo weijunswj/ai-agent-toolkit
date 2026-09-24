@@ -7,7 +7,7 @@
         "G0-A": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         },
         "G0-B": {
           "provider": "openai",
