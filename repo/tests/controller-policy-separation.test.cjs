@@ -241,6 +241,40 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
   assert.match(controller, /Serial execution is valid when fan-out is unsupported or not useful, and active worker contracts are not retroactively widened/);
 });
 
+test('G0 differential evidence starts from known-good and keeps incidental environment failures out of the root model', () => {
+  assert.match(controller, /Known-good vs production differential evidence/);
+  assert.match(controller, /G0-A first inventories the material differences/);
+  assert.match(controller, /known-good upper-bound positive control/);
+  assert.match(controller, /real production entry point/);
+  assert.match(controller, /G0-B then prefers one bounded differential experiment/);
+  assert.match(controller, /Serial one-delta evidence episodes are allowed only when an earlier boundary genuinely prevents deeper observation/);
+  assert.match(controller, /unrelated environment\/check\/transport failure does not redefine the causal question/);
+  assert.match(architecture, /known-good qualified path succeeds while the real production path fails/);
+});
+
+test('active legacy lineages adopt current governance only at safe boundaries without resetting history', () => {
+  assert.match(controller, /still-required active lineage admitted under older governance.*next safe terminal\/reconciliation boundary/s);
+  assert.match(controller, /never by silently rewriting an in-flight worker contract/);
+  assert.match(controller, /Preserve Delivery Child\/root\/continuation identity, all consumed budgets\/attempts, historical findings\/evidence\/candidates and original gate outcomes/);
+  assert.match(controller, /Newer governance alone does not reopen accepted architecture\/contract or reset history/);
+  assert.match(architecture, /compatible stricter current governance is adopted prospectively/);
+});
+
+test('later-required candidates and evidence survive disposable execution teardown', () => {
+  assert.match(controller, /Before tearing down a disposable worktree, sandbox, worker\/session or temporary evidence surface/);
+  assert.match(controller, /preserve every later-required exact candidate and non-repository evidence artifact/);
+  assert.match(controller, /verify the intended later consumer can recover it/);
+  assert.match(controller, /Temporary path, chat memory, digest-only evidence or disappearing uncommitted state is insufficient/);
+  assert.match(controller, /Publication authority is not implied/);
+  assert.match(architecture, /Before a disposable execution surface is destroyed/);
+});
+
+test('ordinary coding path keeps exception mechanics exceptional', () => {
+  assert.match(controller, /ordinary coding path is `G1 -> G2 -> G3 in-gate convergence -> G4 -> Web finality`/);
+  assert.match(controller, /G0, targeted re-entry, RECONVERGENCE, HOLD recovery and Web-directed continuation are exception mechanics/);
+  assert.match(controller, /Repeated exception use without material blocker\/root reduction returns to the responsible root\/Owner boundary/);
+});
+
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
   assert.match(controller, /G3 in-gate convergence/);
   assert.match(controller, /3 normal materially distinct substantive recovery attempts and an absolute ceiling of 5/);
