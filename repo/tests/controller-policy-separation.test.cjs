@@ -103,6 +103,10 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes['G0-A'].reasoning, 'high');
   assert.equal(claude.routes['G0-B'].reasoning, 'medium');
   assert.equal(claude.routes.G1.reasoning, 'high');
+  const openai = registry.stacks['owner-openai-default'];
+  for (const [role, route] of Object.entries(openai.routes)) {
+    if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'xhigh', `OpenAI Sol route must be xhigh: ${role}`);
+  }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'high');
