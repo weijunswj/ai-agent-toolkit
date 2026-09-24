@@ -95,6 +95,7 @@
 - Delegation depth is one. A spawned subagent must not launch another semantic agent.
 - Concrete parent/child provider/model/reasoning bindings come from the explicitly selected stack registry; service treatment is non-authoritative and model identity never grants delegation authority by itself.
 - Workers/subagents receive the minimum bounded packet and no inherited chat/scratchpad. Deterministic tools/runtimes are not agents.
+- Full `repo/CONTROLLER.md` retrieval is a control-plane responsibility for Web/controller bootstrap, Controller source/policy work, or narrowly evidenced conformance/debug that needs an exact clause. Ordinary G0/G1/G2/G3/G4 root executors and subagents must not be instructed to read/apply the full Controller as a prerequisite. They receive the bounded stage/task/authority packet plus the smallest relevant repository instructions/playbooks. Reading the Controller never grants worker authority.
 
 ## Workspace safety
 
