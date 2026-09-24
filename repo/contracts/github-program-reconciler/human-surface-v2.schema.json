@@ -29,7 +29,7 @@
     "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "version": { "const": "human-v2" },
-    "package_version": { "const": "2.10.9" },
+    "package_version": { "const": "2.10.10" },
     "facade_export": { "const": "humanSurfaceV2" },
     "operations": {
       "const": ["readComplete", "render", "extendHistory", "planMigration"]
