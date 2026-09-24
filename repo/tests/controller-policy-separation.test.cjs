@@ -246,29 +246,29 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
 });
 
 test('G0 differential evidence starts from known-good and keeps incidental environment failures out of the root model', () => {
-  assert.match(controller, /Known-good vs production differential evidence/);
-  assert.match(controller, /G0-A first inventories the material differences/);
-  assert.match(controller, /known-good upper-bound positive control/);
+  assert.match(controller, /Known-good vs production differential/);
+  assert.match(controller, /G0-A records the material differences/);
+  assert.match(controller, /known-good positive control/);
   assert.match(controller, /real production entry point/);
-  assert.match(controller, /G0-B then prefers one bounded differential experiment/);
-  assert.match(controller, /Serial one-delta evidence episodes are allowed only when an earlier boundary genuinely prevents deeper observation/);
-  assert.match(controller, /unrelated environment\/check\/transport failure does not redefine the causal question/);
+  assert.match(controller, /G0-B prefers one bounded differential experiment/);
+  assert.match(controller, /Serial one-delta probes are fallback-only when a prior boundary blocks deeper observation/);
+  assert.match(controller, /Incidental environment\/check\/transport failure does not replace the causal question/);
   assert.match(architecture, /known-good qualified path succeeds while the real production path fails/);
 });
 
 test('active legacy lineages adopt current governance only at safe boundaries without resetting history', () => {
-  assert.match(controller, /still-required active lineage admitted under older governance.*next safe terminal\/reconciliation boundary/s);
-  assert.match(controller, /never by silently rewriting an in-flight worker contract/);
-  assert.match(controller, /Preserve Delivery Child\/root\/continuation identity, all consumed budgets\/attempts, historical findings\/evidence\/candidates and original gate outcomes/);
+  assert.match(controller, /still-required lineage admitted under older governance.*next safe terminal\/reconciliation boundary/s);
+  assert.match(controller, /never by rewriting an in-flight worker/);
+  assert.match(controller, /Preserve child\/root\/continuation identity, consumed budgets\/attempts, historical evidence\/candidates and original gate outcomes/);
   assert.match(controller, /Newer governance alone does not reopen accepted architecture\/contract or reset history/);
   assert.match(architecture, /compatible stricter current governance is adopted prospectively/);
 });
 
 test('later-required candidates and evidence survive disposable execution teardown', () => {
-  assert.match(controller, /Before tearing down a disposable worktree, sandbox, worker\/session or temporary evidence surface/);
-  assert.match(controller, /preserve every later-required exact candidate and non-repository evidence artifact/);
-  assert.match(controller, /verify the intended later consumer can recover it/);
-  assert.match(controller, /Temporary path, chat memory, digest-only evidence or disappearing uncommitted state is insufficient/);
+  assert.match(controller, /Before disposable execution teardown/);
+  assert.match(controller, /preserve every later-required exact candidate and non-repository evidence/);
+  assert.match(controller, /prove the later consumer can recover it/);
+  assert.match(controller, /Temporary paths, chat memory, digest-only evidence or disappearing uncommitted state are insufficient/);
   assert.match(controller, /Publication authority is not implied/);
   assert.match(architecture, /Before a disposable execution surface is destroyed/);
 });
@@ -281,41 +281,41 @@ test('ordinary coding path keeps exception mechanics exceptional', () => {
 
 test('causal negative controls cannot manufacture the consequential outcome they claim to prove', () => {
   assert.match(controller, /Causal negative-control oracle/);
-  assert.match(controller, /test instrumentation may expose, delay, synchronise or observe X but must not independently manufacture Y/);
+  assert.match(controller, /instrumentation may expose\/synchronise X but must not manufacture Y/);
   assert.match(controller, /Missing observation fails/);
-  assert.match(controller, /Constructed\/fallback evidence, cleanup actions and fault-injection performed by another actor cannot substitute/);
+  assert.match(controller, /constructed\/fallback\/cleanup\/fault-injection evidence from another actor cannot substitute/);
   assert.match(architecture, /causal negative-control requirements that prove the named production actor caused the consequential observation/);
 });
 
 test('async waiters and deferred work require adversarial progress and truthful outstanding-work accounting', () => {
-  assert.match(controller, /Async\/liveness adversarial validation/);
+  assert.match(controller, /Async\/liveness validation/);
   assert.match(controller, /deterministic waiter-first control/);
-  assert.match(controller, /completion occurs later and requires event-loop, I\/O, timer or callback progress/);
-  assert.match(controller, /already-complete-before-waiter control is insufficient by itself/);
-  assert.match(controller, /outstanding work is non-zero but no pending completion\/progress signal exists, fail loudly/);
-  assert.match(controller, /Deferred consequential-work accounting/);
-  assert.match(controller, /outstanding from scheduling until its real consequential completion/);
-  assert.match(controller, /Cancelling\/clearing a timer cannot make required work disappear/);
-  assert.match(controller, /flush either allows the scheduled normal path to execute or takes ownership of that same work/);
+  assert.match(controller, /later completion requires event-loop\/I\/O\/timer\/callback progress/);
+  assert.match(controller, /Already-complete-before-waiter is insufficient alone/);
+  assert.match(controller, /non-zero outstanding work without a progress signal fails loudly/);
+  assert.match(controller, /Deferred-work accounting/);
+  assert.match(controller, /remains outstanding until real consequential completion/);
+  assert.match(controller, /Cancelling its scheduler does not erase it/);
+  assert.match(controller, /Flush either permits the normal dispatch or takes ownership of that same work/);
 });
 
 test('logical identities that alias one consequential resource are closed before G3', () => {
-  assert.match(controller, /Resource-equivalence identity check/);
-  assert.match(controller, /two different accepted logical identities can address the same underlying resource/);
-  assert.match(controller, /one coherent resource-equivalence identity or explicit alias semantics before G3/);
-  assert.match(controller, /Do not widen this into speculative Unicode\/path normalisation work/);
+  assert.match(controller, /Resource-equivalence identity/);
+  assert.match(controller, /distinct accepted identities can address the same resource/);
+  assert.match(controller, /one resource-equivalence identity or explicit alias semantics before G3/);
+  assert.match(controller, /do not generalise beyond the resource's actual rules/);
   assert.match(architecture, /distinct accepted logical identities can address the same underlying resource/);
 });
 
 test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
   assert.match(controller, /Conditional G3 adversarial pre-publication validation/);
-  assert.match(controller, /sufficiently complex\/STRICT G3 work involving concurrency, async completion, deferred work, causal negative controls, lifecycle coordination or logical-identity\/resource mapping/);
+  assert.match(controller, /sufficiently complex\/STRICT G3 involving concurrency, async\/deferred work, causal controls, lifecycle coordination or identity\/resource mapping/);
   assert.match(controller, /optional depth-1 read-only validation leaf/);
-  assert.match(controller, /leaf never mutates or declares gate completion/);
-  assert.match(controller, /parent remains sole owner\/integrator/);
-  assert.match(controller, /RED against settled behaviour stays inside G3/);
-  assert.match(controller, /missing product\/compatibility semantic returns to G2/);
-  assert.match(controller, /changed root\/trust\/architecture model returns to G1/);
+  assert.match(controller, /leaf never mutates or declares completion/);
+  assert.match(controller, /parent remains sole integrator\/revalidator/);
+  assert.match(controller, /Settled-behaviour RED stays in G3/);
+  assert.match(controller, /missing product\/compatibility semantics return to G2/);
+  assert.match(controller, /changed root\/trust\/architecture returns to G1/);
   assert.match(architecture, /It is not another gate/);
 });
 
