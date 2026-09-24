@@ -65,11 +65,28 @@ test('named stacks support explicit cross-harness selection without harness auth
   }
   assert.equal(Object.hasOwn(registry.stacks, 'owner-deepseek'), false);
   assert.equal(Object.hasOwn(registry.stacks, 'owner-mixed-openai-deepseek'), false);
-  assert.match(controller, /Stack selection is an explicit User\/Web execution decision and is independent of the physical harness/);
+  assert.match(controller, /Root stack selection is an explicit User\/Web execution decision and is independent of the physical harness/);
   assert.match(controller, /HARNESS_HANDOFF_REQUIRED/);
-  assert.match(controller, /Subagent prompts name the semantic role\/capability, not a concrete model/i);
+  assert.match(controller, /subagent semantic prompt names the role\/capability, not a concrete model/i);
   assert.match(architecture, /Stack selection and physical harness selection are orthogonal/);
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
+});
+
+test('root workers never self-verify model identity while G0-B/G3 parents configure child routes before launch', () => {
+  assert.match(controller, /Root execution threads are bound.*out of band by User\/Web\/controller\/harness before launch or adoption/s);
+  assert.match(controller, /root semantic worker must never resolve, inspect, verify, attest, compare, reject, or HOLD on its own provider\/model\/reasoning identity/i);
+  assert.match(controller, /regardless of whether the harness exposes model metadata/i);
+  assert.match(controller, /inability to introspect its own model can never create either HOLD/i);
+  assert.doesNotMatch(controller, /current harness cannot launch and verify it/i);
+  assert.match(controller, /Only `G0-B` and `G3` may resolve semantic subagent routes/);
+  assert.match(controller, /parent\/launcher resolves the concrete child provider\/model\/reasoning route.*before child creation/s);
+  assert.match(controller, /spawned child never self-attests after launch/i);
+  assert.match(controller, /Silent provider\/model\/reasoning substitution remains prohibited.*controller\/launcher boundary/s);
+  assert.match(controller, /root semantic prompts.*do not carry concrete provider\/model\/reasoning verification obligations/i);
+  assert.match(architecture, /Root model\/route selection is an out-of-band User\/Web\/controller\/harness act/i);
+  assert.match(architecture, /root semantic worker never verifies or attests its own model identity/i);
+  assert.match(architecture, /parent\/launcher resolves the concrete child route.*before child creation/s);
+  assert.match(architecture, /spawned children never self-attest after launch/i);
 });
 
 test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
