@@ -109,6 +109,12 @@ Concrete provider/model/reasoning choices are selected through an explicitly nam
 
 Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0-B/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. When G0-B/G3 launches a semantic child, the parent/launcher resolves the concrete child route from the selected stack and supplies the model/reasoning configuration to the harness before child creation. Root and child semantic prompts do not own model names, and spawned children never self-attest after launch. Semantic executors consume bounded stage/task authority and the smallest relevant repository instruction surface; the full Controller is control-plane source material and is not a default worker prerequisite.
 
+## Governance cutover for active lineages
+
+A still-required lineage may outlive the Controller revision under which it began. At the next safe terminal/reconciliation boundary, compatible stricter current governance is adopted prospectively for the continuing lineage. This preserves the same Delivery Child/root-family/continuation identity, consumed budgets/attempts, historical candidates/evidence and original gate outcomes. In-flight workers are never silently rewritten, and newer governance does not itself reopen accepted architecture or implementation contract. A genuine semantic conflict returns to the responsible G1/G2/Owner boundary.
+
+Before a disposable execution surface is destroyed after material construction or validation, any candidate/evidence required by a later gate or controller must already be durably retrievable or deterministically reproducible and bound to the continuing RUN/Lock/candidate identity. Teardown cannot be used as an implicit evidence-retention policy.
+
 ## Gate lifecycle
 
 ### G0 — Problem framing and evidence acquisition
@@ -118,6 +124,8 @@ G0 is non-gating and may use two chronological phases.
 G0-A frames uncertain/diagnostic work: known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and the stopping condition for sufficient evidence. G0-A is leaf-only. A separate G0-A model invocation may be omitted or compacted for genuinely simple/well-specified work.
 
 G0-B acquires the evidence requested by the framing packet and may fan out bounded depth-1 read-only leaves for genuinely separable questions. Leaves collect evidence rather than independently redesigning the solution. G0-B may be omitted when existing evidence is already sufficient.
+
+When a known-good qualified path succeeds while the real production path fails, G0-A first records the material differential between them, including the known-good upper-bound positive control and the real production entry point. G0-B then prefers one bounded differential experiment that starts from the known-good state and varies/minimises the material differences systematically while exercising that production entry point. Serial symptom-by-symptom probes are a fallback only when an earlier boundary genuinely prevents deeper observation in the same safe experiment. Incidental environment/check/transport failures do not become the new root model when a deterministic authorised carrier can still answer the original differential question.
 
 ### G1 — Root convergence, architecture and authority
 
