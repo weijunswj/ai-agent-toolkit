@@ -136,6 +136,7 @@ For material uncertain work, G1 establishes:
 - material competing hypotheses and their disposition;
 - governing invariant and trust/authority ordering;
 - materially equivalent surfaces inside the defect/risk class;
+- where a logical identity controls lifecycle/coordination and maps to a consequential external resource, whether distinct accepted logical identities can address the same underlying resource and therefore require one resource-equivalence identity or explicit alias semantics;
 - architecture and authority boundaries;
 - risk/assurance path;
 - dependencies;
@@ -157,6 +158,8 @@ G2 binds:
 - affected consumers;
 - permitted and forbidden behaviour;
 - positive, negative and adversarial regression oracles;
+- causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
+- async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
@@ -170,6 +173,10 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
 
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
+
+For sufficiently complex/STRICT work involving concurrency, async completion, deferred consequential work, causal negative controls, lifecycle coordination or identity/resource equivalence, G3 performs a pre-publication adversarial validation episode inside the same G3. When separable and useful this may use one depth-1 read-only validation leaf; otherwise the parent performs it serially. The challenge tries to falsify the regression oracle, causal attribution, liveness/progress, outstanding-work accounting, resource-equivalence handling and false-green controls. It is not another gate: the parent remains sole integrator, ordinary RED stays inside G3, missing product/compatibility semantics return to G2, and changed root/trust/architecture returns to G1.
+
+Async validation for a changed drain/wait/flush/join/poll/quiesce/retry/completion boundary includes a waiter-first control where required completion occurs later and depends on event-loop/I/O/timer/callback progress. Required deferred work remains outstanding from scheduling through consequential completion; clearing its scheduling primitive is not completion. Flush semantics either permit the normal dispatch or take ownership of the same work and complete it through the normal consequential path.
 
 Ordinary commits or internal increments do not create separate G4 lifecycles.
 
