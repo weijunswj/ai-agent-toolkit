@@ -42,7 +42,7 @@
         "RECONVERGENCE": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         },
         "FINAL_AUDIT": {
           "provider": "openai",
