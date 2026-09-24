@@ -89,6 +89,14 @@ test('root workers never self-verify model identity while G0-B/G3 parents config
   assert.match(architecture, /spawned children never self-attest after launch/i);
 });
 
+test('ordinary semantic executors receive bounded authority instead of being told to read the full Controller', () => {
+  assert.match(controller, /Full `repo\/CONTROLLER\.md` retrieval is a control-plane responsibility/);
+  assert.match(controller, /Ordinary G0\/G1\/G2\/G3\/G4 root executors and subagents must not be instructed to read\/apply the full Controller as a prerequisite/);
+  assert.match(controller, /bounded stage\/task\/authority packet plus the smallest relevant repository instructions\/playbooks/);
+  assert.match(controller, /Reading the Controller never grants worker authority/);
+  assert.match(architecture, /full Controller is control-plane source material and is not a default worker prerequisite/i);
+});
+
 test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
