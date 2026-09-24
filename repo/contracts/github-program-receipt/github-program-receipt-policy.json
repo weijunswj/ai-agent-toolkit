@@ -373,7 +373,25 @@
     "candidate_initial": null,
     "candidate_introduction_type": "TRANSITION_PREVIEW",
     "candidate_immutable_after_introduction": true,
-    "terminal_append_and_release_atomic": true
+    "terminal_append_and_release_atomic": true,
+    "semantic_terminal_custody": {
+      "common_boundary": "appendReceiptInternal",
+      "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+      "applicability": "fresh_trusted_authority_observation",
+      "required_input": {
+        "field": "semantic_completion",
+        "keys": ["store", "outcome_ref"],
+        "payload_evidence_digest_must_match": true
+      },
+      "substantive_output_must_preexist": true,
+      "verify_through": "verifySemanticCompletion",
+      "duplicate_replay_reverifies_custody": true,
+      "reason_codes": [
+        "GPR_PACKET_OUTGOING_CUSTODY_REQUIRED",
+        "GPR_PACKET_OUTGOING_CUSTODY_MISMATCH",
+        "GPR_PACKET_AUTHORITY_UNVERIFIED"
+      ]
+    }
   },
   "pre_pr_start": {
     "exact_repository": true,

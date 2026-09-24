@@ -152,6 +152,9 @@ function bindings(seed = 'packet') {
 
 function packet(overrides = {}) {
   const packetBindings = overrides.bindings || bindings(overrides.seed || 'packet');
+  const sectionNames = packetBindings.producer.stage === 'G3'
+    ? ['implementation', 'candidate_identity', 'validation_results', 'remaining_obligations']
+    : ['implementation_contract', 'mutation_boundary', 'oracle_matrix', 'validation', 'publication_boundary'];
   const body = {
     verdict: 'HOLD',
     decision: 'The custody implementation remains pending downstream semantic admission integration.',
@@ -166,13 +169,7 @@ function packet(overrides = {}) {
     }],
     qualifications: ['This fixture exercises custody only, not downstream admission.'],
     next_state: 'A parent integration must bind the packet to its semantic consumer.',
-    sections: [
-      { name: 'implementation_contract', text: 'The v4 extension stores the complete packet without changing v2 receipt semantics.' },
-      { name: 'mutation_boundary', text: 'Only the explicitly initialised private custody store may receive this artifact.' },
-      { name: 'oracle_matrix', text: 'Focused tests cover canonical values, identities, migration, persistence, and readback.' },
-      { name: 'validation', text: 'The isolated test process verifies exact bytes and independent readback.' },
-      { name: 'publication_boundary', text: 'No live system, GitHub mutation, or publication operation is performed.' }
-    ],
+    sections: sectionNames.map((name) => ({ name, text: `Disposable authority packet fixture for ${name}.` })),
     evidence_refs: [{ id: 'authority-source', kind: 'GITHUB_COMMENT', source: packetBindings.authority }],
     gate_contract_ir: null
   };
@@ -256,6 +253,73 @@ function trackOracleProgrammeReceiptStore(store) {
   ORACLE_PROGRAMME_RECEIPT_STORES.add(store);
   if (activeOracleHarness) activeOracleHarness.storeBaselines.set(store, oracleCounts(store));
   return store;
+}
+
+const RECEIPT_EFFECT_TABLES = Object.freeze({
+  allocations: 'allocation_id',
+  runs: 'run_id',
+  coordination_state: 'singleton',
+  lease_events: 'event_id',
+  receipts: 'receipt_id',
+  mutation_operations: 'operation_id',
+  mutation_operation_events: 'event_id',
+  authority_packets: 'packet_id',
+  authority_packet_events: 'event_id',
+  semantic_gate_admissions: 'admission_id',
+  semantic_gate_admission_events: 'event_id'
+});
+
+function receiptEffectSnapshot(store) {
+  const databaseExists = !!store && fs.existsSync(store.databasePath);
+  const tables = {};
+  for (const [table, identity] of Object.entries(RECEIPT_EFFECT_TABLES)) {
+    tables[table] = { count: 0, identity_values: [], rows_digest: runtime.digestValue([]) };
+  }
+  if (!databaseExists) return { database_exists: false, tables };
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try {
+    const known = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map((row) => row.name));
+    for (const [table, identity] of Object.entries(RECEIPT_EFFECT_TABLES)) {
+      if (!known.has(table)) continue;
+      const rows = db.prepare(`SELECT * FROM ${table}`).all().map((row) => ({ ...row }))
+        .sort((left, right) => runtime.canonicalSerialize(left).localeCompare(runtime.canonicalSerialize(right)));
+      tables[table] = {
+        count: rows.length,
+        identity_values: rows.map((row) => row[identity]).sort((left, right) => `${left}`.localeCompare(`${right}`)),
+        rows_digest: runtime.digestValue(rows)
+      };
+    }
+    return { database_exists: true, tables };
+  } finally { db.close(); }
+}
+
+function mutateSemanticAdmissionRecord(store, consumerKey, update) {
+  if (typeof update !== 'function') throw new Error('SEMANTIC_ADMISSION_MUTATOR_REQUIRED');
+  const db = new DatabaseSync(store.databasePath);
+  let started = false;
+  let triggers = [];
+  try {
+    triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'semantic_gate_admissions' ORDER BY name").all();
+    db.exec('BEGIN IMMEDIATE');
+    started = true;
+    for (const trigger of triggers) {
+      db.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
+    }
+    const row = db.prepare('SELECT admission_id, canonical_json FROM semantic_gate_admissions WHERE consumer_key = ?').get(consumerKey);
+    if (!row) throw new Error('SEMANTIC_ADMISSION_FIXTURE_NOT_FOUND');
+    const changed = JSON.parse(row.canonical_json);
+    update(changed);
+    db.prepare('UPDATE semantic_gate_admissions SET canonical_json = ? WHERE admission_id = ? AND consumer_key = ?')
+      .run(runtime.canonicalSerialize(changed), row.admission_id, consumerKey);
+    for (const trigger of triggers) db.exec(trigger.sql);
+    db.exec('COMMIT');
+    started = false;
+  } catch (error) {
+    if (started) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the fixture failure. */ }
+    }
+    throw error;
+  } finally { db.close(); }
 }
 
 function resetOracleEffectBaseline(harness = activeOracleHarness) {
@@ -2864,6 +2928,8 @@ module.exports = {
   ORACLE_MANDATORY_CASES,
   oracleCaseIdentity,
   oracleDispatchOutcomeReader,
+  mutateSemanticAdmissionRecord,
+  receiptEffectSnapshot,
   bindings,
   cleanup,
   assertOracleHandlerCompleteness,

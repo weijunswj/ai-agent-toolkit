@@ -56,7 +56,9 @@ const AUTHORITY_PACKET_REASON_CODES = Object.freeze([
   'GPR_PACKET_DISPATCH_UNRESOLVED',
   'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED',
   'GPR_PACKET_LEGACY_RERUN_REQUIRED',
-  'GPR_PACKET_RETENTION_REQUIRED'
+  'GPR_PACKET_RETENTION_REQUIRED',
+  'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+  'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH'
 ]);
 const AUTHORITY_PACKET_LIMITS = Object.freeze({
   artifactBytes: 1024 * 1024,
@@ -3281,6 +3283,63 @@ function semanticGateRecordDb(db, admissionId) {
   return validateSemanticGateAdmission(record);
 }
 
+function semanticGateAssertRecordContext(record, intent, consumerKey) {
+  if (!isRecord(intent) || !isRecord(intent.consumer) || !Array.isArray(intent.predecessors)) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  const expectedKey = digestValue({
+    repository: intent.repository,
+    parent_issue: intent.parent_issue,
+    child_issue: intent.child_issue,
+    lane_id: intent.lane_id,
+    consumer: intent.consumer,
+    candidate: intent.candidate,
+    scope_digest: intent.consumer.scope_digest,
+    execution_binding: intent.execution_binding
+  });
+  const durable = {
+    repository: record.repository,
+    parent_issue: record.parent_issue,
+    child_issue: record.child_issue,
+    lane_id: record.lane_id,
+    human_owner: record.human_owner,
+    consumer: record.consumer,
+    authority: record.authority,
+    candidate: record.candidate,
+    scope_digest: record.scope_digest,
+    predecessors: record.predecessors,
+    execution_binding: record.execution_binding
+  };
+  const reconstructed = {
+    repository: intent.repository,
+    parent_issue: intent.parent_issue,
+    child_issue: intent.child_issue,
+    lane_id: intent.lane_id,
+    human_owner: intent.human_owner,
+    consumer: intent.consumer,
+    authority: intent.authority,
+    candidate: intent.candidate,
+    scope_digest: intent.consumer.scope_digest,
+    predecessors: intent.predecessors,
+    execution_binding: intent.execution_binding
+  };
+  if (record.consumer_key !== consumerKey || consumerKey !== expectedKey
+    || canonicalSerialize(durable) !== canonicalSerialize(reconstructed)) {
+    packetFail('GPR_PACKET_STALE_REPLAY');
+  }
+  return true;
+}
+
+function semanticGateAssertProof(record, proof) {
+  if (proof.current.projection_digest !== record.current_projection_digest
+    || proof.current.body_digest !== record.current_body_digest
+    || `${proof.current.revision}` !== `${record.current_revision}`
+    || canonicalSerialize(proof.predecessors) !== canonicalSerialize(record.predecessors)) {
+    packetFail('GPR_PACKET_STALE_REPLAY');
+  }
+  return proof;
+}
+
 function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent) {
   if (!isRecord(consumerIntent)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
   const verification = packetVerifySemanticDependencies(config, boundReaders, consumerIntent, {
@@ -3351,7 +3410,7 @@ function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent
     processId: process.pid,
     admissionId: record.admission_id,
     consumerKey,
-    consumerIntent: { ...consumerIntent, ...consumer },
+    consumerIntent: { ...consumerIntent, ...consumer, predecessors: proof.predecessors },
     readers: boundReaders,
     config
   };
@@ -3367,15 +3426,9 @@ function semanticGateRevalidate(config, store, boundReaders, token, expected = {
   const db = openAuthorityPacketVerified(config, false, true);
   let record;
   try { record = semanticGateRecordDb(db, state.admissionId); } finally { db.close(); }
+  semanticGateAssertRecordContext(record, state.consumerIntent, state.consumerKey);
   const verification = packetVerifySemanticDependencies(config, boundReaders, state.consumerIntent, expected);
-  const proof = verification.proof;
-  if (proof.current.projection_digest !== record.current_projection_digest
-    || proof.current.body_digest !== record.current_body_digest
-    || `${proof.current.revision}` !== `${record.current_revision}`
-    || canonicalSerialize(proof.predecessors) !== canonicalSerialize(record.predecessors)) {
-    packetFail('GPR_PACKET_STALE_REPLAY');
-  }
-  return proof;
+  return semanticGateAssertProof(record, verification.proof);
 }
 
 function semanticGateDispatchState(config, admissionId) {
@@ -3528,30 +3581,6 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
   } finally { db.close(); }
   events = semanticGateDispatchState(config, record.admission_id);
   let last = events.at(-1);
-  if (last && last.event_type === 'DISPATCH_INTENT') {
-    const recoveryState = {
-      admissionId: record.admission_id,
-      consumerKey,
-      readers: boundReaders
-    };
-    const intent = semanticGateDispatchIntent(events, recoveryState);
-    const outcome = semanticGateDispatchOutcome(boundReaders.readDispatchOutcome, recoveryState, intent, null, true);
-    if (outcome.outcome !== 'not-started' || outcome.delayed_completion_excluded !== true) {
-      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-    }
-    const dbWrite = openAuthorityPacketVerified(config, false, false);
-    try {
-      transaction(dbWrite, () => appendSemanticGateEventDb(
-        dbWrite, record.admission_id, 'DISPATCH_NOT_STARTED', outcome
-      ));
-    } catch (error) {
-      if (error instanceof GprError) throw error;
-      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-    } finally { dbWrite.close(); }
-    events = semanticGateDispatchState(config, record.admission_id);
-    last = events.at(-1);
-    if (!last || last.event_type !== 'DISPATCH_NOT_STARTED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  }
   const intent = {
     repository: record.repository,
     parent_issue: record.parent_issue,
@@ -3562,8 +3591,44 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
     authority: record.authority,
     candidate: record.candidate,
     execution_binding: record.execution_binding,
+    predecessors: record.predecessors,
     operation: record.consumer.stage
   };
+  semanticGateAssertRecordContext(record, intent, consumerKey);
+  const verification = packetVerifySemanticDependencies(config, boundReaders, intent, {
+    operation: record.consumer.stage
+  });
+  const proof = semanticGateAssertProof(record, verification.proof);
+  if (last && last.event_type === 'DISPATCH_CONFIRMED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  let recoveryOutcome = null;
+  let recoveryIntent = null;
+  if (last && last.event_type === 'DISPATCH_INTENT') {
+    const recoveryState = { admissionId: record.admission_id, consumerKey, readers: boundReaders };
+    recoveryIntent = semanticGateDispatchIntent(events, recoveryState);
+    recoveryOutcome = semanticGateDispatchOutcome(boundReaders.readDispatchOutcome, recoveryState, recoveryIntent, null, true);
+    if (recoveryOutcome.outcome !== 'not-started' || recoveryOutcome.delayed_completion_excluded !== true) {
+      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+    }
+  }
+  if (recoveryOutcome) {
+    const dbWrite = openAuthorityPacketVerified(config, false, false);
+    try {
+      transaction(dbWrite, () => {
+        const liveRecord = semanticGateRecordDb(dbWrite, record.admission_id);
+        if (canonicalSerialize(liveRecord) !== canonicalSerialize(record)) packetFail('GPR_PACKET_STALE_REPLAY');
+        const tail = dbWrite.prepare('SELECT * FROM semantic_gate_admission_events WHERE admission_id = ? ORDER BY sequence DESC LIMIT 1').get(record.admission_id);
+        if (!tail || tail.event_id !== recoveryIntent.event.event_id || tail.event_type !== 'DISPATCH_INTENT'
+          || tail.sequence !== recoveryIntent.event.sequence) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+        appendSemanticGateEventDb(dbWrite, record.admission_id, 'DISPATCH_NOT_STARTED', recoveryOutcome);
+      });
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+    } finally { dbWrite.close(); }
+    events = semanticGateDispatchState(config, record.admission_id);
+    last = events.at(-1);
+    if (!last || last.event_type !== 'DISPATCH_NOT_STARTED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
   const tokenState = {
     storeInstanceId: store.instanceId,
     processId: process.pid,
@@ -3575,7 +3640,6 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
   };
   const token = Object.freeze({ toJSON() { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); } });
   SEMANTIC_GATE_OWNERS.set(token, tokenState);
-  const proof = semanticGateRevalidate(config, store, boundReaders, token, {});
   return deepFreeze({ admission: token, proof, admission_id: record.admission_id, recovered: true });
 }
 
@@ -5810,6 +5874,44 @@ function createReceipt(allocation, config, input) {
   return validateReceiptObject(receipt);
 }
 
+function verifyReceiptTerminalCustody(store, sessionOwner, allocation, input, payload) {
+  const gate = sessionOwner.semanticGate;
+  if (!gate) {
+    if (sessionOwner.semanticRequired === true) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    return false;
+  }
+  verifyReceiptSemanticBinding(gate, {
+    receiptMetadataVerified: true,
+    receiptStoreInstanceId: store.instanceId,
+    lock_id: allocation.lock_id,
+    run_id: allocation.run_id
+  });
+  let result;
+  try {
+    result = semanticCompletionApplicability(gate.store, gate.admission);
+  } catch (error) {
+    if (error instanceof GprError && ['GPR_PACKET_BINDING_MISMATCH', 'GPR_PACKET_ADMISSION_REQUIRED'].includes(error.code)) throw error;
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  const supplied = Object.hasOwn(input, 'semantic_completion') ? input.semantic_completion : undefined;
+  if (!result.required) {
+    if (supplied !== undefined) packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+    return false;
+  }
+  if (!isRecord(supplied) || !exactKeys(supplied, ['store', 'outcome_ref'])
+    || !supplied.store || !isDigest(supplied.outcome_ref) || !isDigest(payload.evidence_digest)) {
+    packetFail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+  }
+  if (payload.evidence_digest !== supplied.outcome_ref) packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  try {
+    verifySemanticCompletion(gate.store, gate.admission, supplied.store, supplied.outcome_ref);
+  } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED') throw error;
+    packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  }
+  return true;
+}
+
 function appendReceiptInternal(store, session, input) {
   const state = sessionState(store, session);
   if (!isRecord(input) || !RECEIPT_TYPES.includes(input.receipt_type) || input.receipt_type === 'RUN_STARTED') fail('GPR_RECEIPT_INPUT_INVALID');
@@ -5825,6 +5927,12 @@ function appendReceiptInternal(store, session, input) {
   const db = openVerified(store.config);
   try {
     const allocation = allocationFromStateDb(db, state);
+    verifyReceiptSemanticBinding(state.semanticGate, {
+      receiptMetadataVerified: true,
+      receiptStoreInstanceId: store.instanceId,
+      lock_id: allocation.lock_id,
+      run_id: allocation.run_id
+    });
     const chain = readChainDb(db, state.runId);
     const prior = chain[chain.length - 1];
     if (Date.parse(createdAt) < Date.parse(allocation.issued_at)
@@ -5834,6 +5942,9 @@ function appendReceiptInternal(store, session, input) {
       && prior.created_at === createdAt
       && canonicalSerialize(prior.payload) === canonicalSerialize(payload)
       && canonicalSerialize(prior.candidate) === canonicalSerialize(repeatedCandidate)) {
+      if (TERMINAL_TYPES.includes(input.receipt_type)) {
+        verifyReceiptTerminalCustody(store, state, allocation, input, payload);
+      }
       return deepFreeze({ receipt: prior, duplicate: true });
     }
     if (TERMINAL_TYPES.includes(prior.receipt_type)) fail('GPR_RUN_TERMINAL');
@@ -5863,6 +5974,9 @@ function appendReceiptInternal(store, session, input) {
       verifyFenceDb(db, state, isoAt());
       const liveChain = readChainDb(db, state.runId);
       if (liveChain.length !== chain.length || liveChain[liveChain.length - 1].receipt_id !== prior.receipt_id) fail('GPR_CHAIN_CONFLICT');
+      if (TERMINAL_TYPES.includes(receipt.receipt_type)) {
+        verifyReceiptTerminalCustody(store, state, allocation, input, payload);
+      }
       if (['EXECUTOR_TERMINAL', 'G4_TERMINAL'].includes(receipt.receipt_type)) assertNoUnresolvedOperationDb(db);
       db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
@@ -5888,11 +6002,12 @@ function verifyAuthoritySnapshot(expected, snapshot) {
   return observed;
 }
 
-function receiptSemanticGate(input) {
+function receiptSemanticGate(input, receiptStore) {
   if (input === undefined) return null;
   if (!isRecord(input) || !exactKeys(input, ['store', 'admission']) || !isRecord(input.store)) {
     fail('GPR_PACKET_ADMISSION_REQUIRED');
   }
+  const receiptState = programmeReceiptStoreState(receiptStore);
   const state = semanticGateAdmissionState(input.store, input.admission);
   const intent = state.consumerIntent;
   const execution = intent && intent.execution_binding;
@@ -5903,7 +6018,15 @@ function receiptSemanticGate(input) {
     || !packetSafeContractId(execution.loop_run_id)) {
     fail('GPR_PACKET_ADMISSION_REQUIRED');
   }
-  return { store: input.store, admission: input.admission, state, intent, execution };
+  return {
+    store: input.store,
+    admission: input.admission,
+    state,
+    intent,
+    execution,
+    receiptConfig: receiptState.config,
+    receiptStoreInstanceId: receiptStore.instanceId
+  };
 }
 
 function receiptDeclaredConsumers(snapshot) {
@@ -5931,20 +6054,55 @@ function receiptDeclaredConsumers(snapshot) {
   return consumers;
 }
 
-function revalidateReceiptSemanticGate(gate) {
-  if (!gate) return;
-  semanticGateRevalidate(gate.state.config, gate.store, gate.state.readers, gate.admission, {});
+function verifyReceiptSemanticBinding(gate, expected = {}) {
+  if (!gate) return null;
+  const state = semanticGateAdmissionState(gate.store, gate.admission);
+  if (state !== gate.state || !gate.receiptConfig || !gate.receiptConfig.namespace
+    || expected.receiptStoreInstanceId !== undefined
+      && expected.receiptStoreInstanceId !== gate.receiptStoreInstanceId) {
+    fail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  if (!expected.receiptMetadataVerified && fs.existsSync(gate.receiptConfig.databasePath)) {
+    const db = openVerified(gate.receiptConfig, false, true);
+    db.close();
+  }
+  semanticGateRevalidate(state.config, gate.store, state.readers, gate.admission, {});
+  const packetDb = openAuthorityPacketVerified(state.config, false, true);
+  let record;
+  try { record = semanticGateRecordDb(packetDb, state.admissionId); } finally { packetDb.close(); }
+  semanticGateAssertRecordContext(record, state.consumerIntent, state.consumerKey);
+  const namespace = gate.receiptConfig.namespace;
+  if (record.repository !== namespace.repository
+    || record.parent_issue !== namespace.parent_issue
+    || record.child_issue !== namespace.child_issue
+    || record.execution_binding.semantic_run !== record.consumer.run) {
+    fail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  if (expected.lock !== undefined && expected.lock !== record.consumer.lock
+    || expected.lock_id !== undefined && expected.lock_id !== record.consumer.lock
+    || expected.run_id !== undefined && expected.run_id !== record.execution_binding.receipt_run_id) {
+    fail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  return record;
 }
 
-function verifyReceiptSemanticAuthority(snapshot, sessionOwner) {
+function revalidateReceiptSemanticGate(gate, expected = {}) {
+  if (!gate) return;
+  verifyReceiptSemanticBinding(gate, expected);
+}
+
+function verifyReceiptSemanticAuthority(snapshot, sessionOwner, allocation) {
   const consumers = receiptDeclaredConsumers(snapshot);
   const gate = sessionOwner.semanticGate;
-  if (consumers.length === 0) {
-    revalidateReceiptSemanticGate(gate);
-    return false;
-  }
+  if (consumers.length === 0 && !gate) return false;
   sessionOwner.semanticRequired = true;
   if (!gate) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  verifyReceiptSemanticBinding(gate, {
+    receiptStoreInstanceId: sessionOwner.storeInstanceId,
+    lock_id: allocation && allocation.lock_id || sessionOwner.lockId,
+    run_id: allocation && allocation.run_id || sessionOwner.runId
+  });
+  if (consumers.length === 0) return true;
   const binding = snapshot.semantic_binding;
   const requiredForConsumer = consumers.filter((item) => item.class === gate.intent.consumer.stage);
   const admittedDependencies = gate.intent.predecessors.map((item) => ({
@@ -5966,7 +6124,11 @@ function verifyReceiptSemanticAuthority(snapshot, sessionOwner) {
     || canonicalSerialize(authorityDependencies) !== canonicalSerialize(admittedDependencies)) {
     fail('GPR_PACKET_BINDING_MISMATCH');
   }
-  revalidateReceiptSemanticGate(gate);
+  revalidateReceiptSemanticGate(gate, {
+    receiptStoreInstanceId: sessionOwner.storeInstanceId,
+    lock_id: allocation && allocation.lock_id || sessionOwner.lockId,
+    run_id: allocation && allocation.run_id || sessionOwner.runId
+  });
   return true;
 }
 
@@ -6061,7 +6223,12 @@ function createProgrammeReceiptStore(options) {
       if (!exactKeys(input, allowedKeys)
         || !isSafeId(input.lock) || !Number.isSafeInteger(input.lease_ms)
         || input.lease_ms < LIMITS.leaseMinMs || input.lease_ms > LIMITS.leaseMaxMs) fail('GPR_ALLOCATION_INVALID');
-      const semanticGate = hasSemanticGate ? receiptSemanticGate(input.semantic_gate) : null;
+      const semanticGate = hasSemanticGate ? receiptSemanticGate(input.semantic_gate, store) : null;
+      if (semanticGate) verifyReceiptSemanticBinding(semanticGate, {
+        receiptStoreInstanceId: store.instanceId,
+        lock: input.lock,
+        run_id: semanticGate.execution.receipt_run_id
+      });
       const authority = validateAuthority(input.authority);
       const start = validateStart(input.start);
       if (input.candidate !== undefined && input.candidate !== null) fail('GPR_FAKE_START_CANDIDATE');
@@ -6079,6 +6246,12 @@ function createProgrammeReceiptStore(options) {
           const previous = latestAllocationDb(db);
           const highWater = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
           const fenceSequence = highWater + 1;
+          if (semanticGate) verifyReceiptSemanticBinding(semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock: input.lock,
+            run_id: semanticGate.execution.receipt_run_id
+          });
           if (semanticGate && db.prepare('SELECT 1 AS value FROM allocations WHERE run_id = ?').get(semanticGate.execution.receipt_run_id)) {
             fail('GPR_PACKET_BINDING_MISMATCH');
           }
@@ -6143,6 +6316,7 @@ function createProgrammeReceiptStore(options) {
         processId: process.pid,
         allocationId: allocation.allocation_id,
         runId: allocation.run_id,
+        lockId: allocation.lock_id,
         semanticGate
       });
       return session;
@@ -6162,7 +6336,7 @@ function createProgrammeReceiptStore(options) {
       const start = JSON.parse(allocation.start_json);
       const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
       verifyAuthoritySnapshot(authority, authoritySnapshot);
-      verifyReceiptSemanticAuthority(authoritySnapshot, state);
+      verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
       const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
       if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
       revalidateReceiptSemanticGate(state.semanticGate);
@@ -6173,6 +6347,12 @@ function createProgrammeReceiptStore(options) {
         transaction(writeDb, () => {
           const transactionNow = isoAt();
           allocation = verifyFenceDb(writeDb, state, transactionNow);
+          verifyReceiptSemanticBinding(state.semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock_id: allocation.lock_id,
+            run_id: allocation.run_id
+          });
           if (readChainDb(writeDb, state.runId, true).length > 0) fail('GPR_RUN_ALREADY_STARTED');
           receipt = createReceipt(allocation, config, {
             receipt_type: 'RUN_STARTED',
@@ -6214,7 +6394,8 @@ function createProgrammeReceiptStore(options) {
         receipt_type: 'RUN_INTERRUPTED',
         candidate: input.candidate,
         payload: input.payload || { classification: 'RUN_INTERRUPTED' },
-        created_at: input.created_at
+        created_at: input.created_at,
+        ...(Object.hasOwn(input, 'semantic_completion') ? { semantic_completion: input.semantic_completion } : {})
       });
     },
     readReceiptChain(runId) {
@@ -6251,7 +6432,7 @@ function createProgrammeReceiptStore(options) {
       try { allocation = allocationFromStateDb(initialDb, state); } finally { initialDb.close(); }
       const authoritySnapshot = await callReader(trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
       verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), authoritySnapshot);
-      verifyReceiptSemanticAuthority(authoritySnapshot, state);
+      verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
       revalidateReceiptSemanticGate(state.semanticGate);
       const source = validateSourceSnapshot(await callReader(trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
       if (source.source_digest !== descriptor.expected_source_digest || source.cas_digest !== descriptor.cas_digest) fail('GPR_SOURCE_CHANGED');
@@ -6271,6 +6452,12 @@ function createProgrammeReceiptStore(options) {
         operation = transaction(db, () => {
           const createdAt = isoAt();
           allocation = verifyFenceDb(db, state, createdAt);
+          verifyReceiptSemanticBinding(state.semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock_id: allocation.lock_id,
+            run_id: allocation.run_id
+          });
           const chain = readChainDb(db, state.runId);
           if (chain[0].receipt_type !== 'RUN_STARTED' || chain[0].sequence !== 1) fail('GPR_RUN_NOT_STARTED');
           if (TERMINAL_TYPES.includes(chain[chain.length - 1].receipt_type)) fail('GPR_RUN_TERMINAL');
@@ -6360,12 +6547,18 @@ function createProgrammeReceiptStore(options) {
       try { allocation = allocationFromStateDb(dbBefore, sessionOwner); } finally { dbBefore.close(); }
       const authoritySnapshot = await callReader(state.trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
       verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), authoritySnapshot);
-      verifyReceiptSemanticAuthority(authoritySnapshot, sessionOwner);
+      verifyReceiptSemanticAuthority(authoritySnapshot, sessionOwner, allocation);
       revalidateReceiptSemanticGate(sessionOwner.semanticGate);
       const source = validateSourceSnapshot(await callReader(state.trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
       const db = openVerified(config, false);
       try {
         allocation = verifyFenceDb(db, sessionOwner, isoAt());
+        verifyReceiptSemanticBinding(sessionOwner.semanticGate, {
+          receiptMetadataVerified: true,
+          receiptStoreInstanceId: store.instanceId,
+          lock_id: allocation.lock_id,
+          run_id: allocation.run_id
+        });
         const current = operationWithStateDb(db, state.operationId);
         if (current.event.state !== 'IN_FLIGHT'
           || current.operation.run_id !== allocation.run_id

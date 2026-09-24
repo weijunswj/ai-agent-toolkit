@@ -22,6 +22,7 @@ childProcess.spawnSync = function (file, args, options) {
 const runtime = require('../scripts/toolkit-github-program-receipt.cjs');
 const support = require('./toolkit-authority-packet-test-support.cjs');
 const schemaPath = path.join(__dirname, '../contracts/github-program-receipt/authority-packet-v1.schema.json');
+const policyPath = path.join(__dirname, '../contracts/github-program-receipt/github-program-receipt-policy.json');
 
 test.afterEach(() => { failedVerifierCalls = 0; support.cleanup(); });
 
@@ -46,6 +47,24 @@ function schemaValidator() {
   ajv.addFormat('date-time', () => true);
   return { schema, validate: ajv.compile(schema) };
 }
+
+test('Run-077 C2 terminal custody policy and runtime reason codes remain aligned', () => {
+  const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+  const custody = policy.receipt_lifecycle.semantic_terminal_custody;
+  const reasons = [
+    'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+    'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH',
+    'GPR_PACKET_AUTHORITY_UNVERIFIED',
+  ];
+  assert.equal(custody.common_boundary, 'appendReceiptInternal');
+  assert.deepEqual(custody.terminal_types, ['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED']);
+  assert.deepEqual(custody.required_input.keys, ['store', 'outcome_ref']);
+  assert.equal(custody.required_input.payload_evidence_digest_must_match, true);
+  assert.equal(custody.substantive_output_must_preexist, true);
+  assert.equal(custody.duplicate_replay_reverifies_custody, true);
+  assert.deepEqual(custody.reason_codes, reasons);
+  for (const reason of reasons) assert.equal(runtime.AUTHORITY_PACKET_REASON_CODES.includes(reason), true, reason);
+});
 
 test('authority packet JSON contract is closed and accepts the complete fixture', { skip: !Ajv2020 }, () => {
   const { schema, validate } = schemaValidator();
