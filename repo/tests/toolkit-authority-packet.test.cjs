@@ -3,16 +3,27 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
 let Ajv2020 = null;
 try { Ajv2020 = require('ajv/dist/2020'); } catch (_) { /* Optional in dependency-light checkouts. */ }
 
+let failedVerifierCalls = 0;
+const originalSpawnSync = childProcess.spawnSync;
+childProcess.spawnSync = function (file, args, options) {
+  if (failedVerifierCalls > 0 && Array.isArray(args) && args.includes('verify-authority-packet-store')) {
+    failedVerifierCalls -= 1;
+    return { pid: 1, output: [], stdout: '', stderr: 'injected-verifier-failure', status: 1, signal: null, error: null };
+  }
+  return originalSpawnSync.call(this, file, args, options);
+};
+
 const runtime = require('../scripts/toolkit-github-program-receipt.cjs');
 const support = require('./toolkit-authority-packet-test-support.cjs');
 const schemaPath = path.join(__dirname, '../contracts/github-program-receipt/authority-packet-v1.schema.json');
 
-test.afterEach(() => support.cleanup());
+test.afterEach(() => { failedVerifierCalls = 0; support.cleanup(); });
 
 function assertCode(callback, code) {
   assert.throws(callback, (error) => error && error.code === code);
@@ -85,6 +96,27 @@ test('packet identities are deterministic and producer identity is independent o
   assert.match(runtimeIdentity.runtime_identity_digest, /^[a-f0-9]{64}$/);
 });
 
+test('packet validation binds recomputed content identities and exact ownership bindings when supplied', () => {
+  const original = packetFixture('expected-identity');
+  const identity = runtime.authorityPacketIdentities(original);
+  const changedBody = structuredClone(original);
+  changedBody.body.decision = 'content-only recompute must not preserve the original identity';
+  assert.throws(() => runtime.validateAuthorityPacket(changedBody, {
+    packet_id: identity.packet_id,
+    packet_digest: identity.packet_digest,
+    content_digest: identity.content_digest,
+  }), (error) => error.code === 'GPR_PACKET_IDENTITY_MISMATCH');
+  const changedBinding = structuredClone(original);
+  changedBinding.bindings.lane_id = 'different-owner-lane';
+  assert.throws(() => runtime.validateAuthorityPacket(changedBinding, {
+    binding_digest: identity.binding_digest,
+    bindings: original.bindings,
+  }), (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH');
+  assert.throws(() => runtime.validateAuthorityPacket(original, {
+    canonical_packet_bytes: `${identity.canonical_packet_bytes}\n`,
+  }), (error) => error.code === 'GPR_PACKET_CONTENT_MISMATCH');
+});
+
 test('initialisation creates a v4 store with four strict append-only tables and leaves v2 factory semantics separate', () => {
   const packetValue = packetFixture('schema');
   const { store, storeOptions } = initialise(packetValue);
@@ -119,6 +151,70 @@ test('persistence is atomic, immutable, idempotent by identity, and readable aft
   assertCode(() => conflictReaders.persistAuthorityPacket(conflicting, support.producerAdmission(conflicting)), 'GPR_PACKET_CONFLICT');
   const db = new DatabaseSync(store.databasePath, { readOnly: true });
   try { assert.equal(db.prepare('SELECT COUNT(*) AS value FROM authority_packets').get().value, 1); }
+  finally { db.close(); }
+});
+
+test('authenticity guards return no mutable ownership or reader state and reject cross-store handles', () => {
+  const gate = support.semanticGate('private-ownership');
+  const admitted = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
+  const second = runtime.createAuthorityPacketStore(gate.storeOptions, gate.trusted_readers);
+  const storeGuard = runtime.assertAuthenticAuthorityPacketStore(gate.store);
+  assert.equal(storeGuard, true);
+  assert.equal(typeof storeGuard, 'boolean');
+  assert.equal(runtime.assertAuthenticSemanticGateAdmission(gate.store, admitted.admission), true);
+  assert.equal(gate.store.bindWebPacketAcceptance(gate.consumer_intent.predecessors[0].packet_id, gate.trusted_readers).duplicate, true);
+  assert.throws(() => second.revalidateSemanticGate(admitted.admission), (error) => error.code === 'GPR_PACKET_ADMISSION_REQUIRED');
+  const assurance = require('../scripts/toolkit-assurance-web-finality.cjs');
+  assert.throws(() => assurance.bindReceiptAdmission(second, admitted.admission), /RECEIPT_ADMISSION_INVALID/);
+});
+
+test('constructor-captured screening cannot be replaced through the supplied reader object', () => {
+  const packetValue = packetFixture('captured-reader');
+  const storeOptions = support.options(support.stateRoot('authority-packet-captured-reader-'));
+  let screeningDecision = 'ALLOW';
+  let replacementCalls = 0;
+  const readers = support.readers(packetValue, {
+    screenPacket: ({ packet }) => ({ ...support.screening(packet), decision: screeningDecision }),
+  });
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readers);
+  const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  screeningDecision = 'REJECT';
+  readers.screenPacket = ({ packet }) => { replacementCalls += 1; return support.screening(packet); };
+  const changedPacket = structuredClone(packetValue);
+  changedPacket.body.decision += ' follow-up body';
+  assert.throws(
+    () => store.persistAuthorityPacket(changedPacket, support.producerAdmission(changedPacket)),
+    (error) => error.code === 'GPR_PACKET_PRIVACY_REJECTED'
+  );
+  assert.throws(
+    () => store.bindWebPacketAcceptance(persisted.packet_id, readers),
+    (error) => error.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED'
+  );
+  assert.equal(replacementCalls, 0);
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS value FROM authority_packets').get().value, 1); }
+  finally { db.close(); }
+});
+
+test('producer lane and owner must match independent trusted producer authority before persistence', () => {
+  const packetValue = packetFixture('trusted-producer-lane');
+  packetValue.bindings.lane_id = 'unapproved-lane';
+  const trustedProducer = {
+    lane_id: 'c1-g3-leaf-a',
+    human_owner: packetValue.bindings.human_owner,
+    producer: structuredClone(packetValue.bindings.producer),
+  };
+  const storeOptions = support.options(support.stateRoot('authority-packet-trusted-producer-'));
+  const readerSet = support.readers(packetValue, {
+    producer_authority: trustedProducer,
+  });
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readerSet);
+  assert.throws(
+    () => store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue)),
+    (error) => error.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED'
+  );
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM authority_packets').get().n, 0); }
   finally { db.close(); }
 });
 
@@ -176,6 +272,68 @@ test('migration is explicit, quiescent, preserves v2 receipt rows, and rejects v
   try { v3.exec('PRAGMA user_version=3'); }
   finally { v3.close(); }
   assertCode(() => runtime.planAuthorityPacketMigration(storeOptions), 'GPR_PACKET_MIGRATION_SOURCE_INVALID');
+});
+
+function v2ReceiptInputs(seed) {
+  const authority = {
+    child_comment_id: 1,
+    parent_comment_id: 2,
+    node_id: `IC_${seed}`,
+    author_login: 'weijunswj',
+    author_association: 'OWNER',
+    body_digest: 'a'.repeat(64),
+    updated_at: '2026-09-22T10:00:00.000Z',
+    update_identity_digest: 'b'.repeat(64),
+    scope_digest: 'c'.repeat(64),
+  };
+  const start = {
+    base_sha: '1'.repeat(40),
+    head_sha: '2'.repeat(40),
+    tree_sha: '3'.repeat(40),
+    status_digest: 'd'.repeat(64),
+    clean_worktree: true,
+    ref: { detached: false, name: `oracle/${seed}` },
+  };
+  return {
+    authority,
+    start,
+    readers: {
+      readAuthority: async () => ({ authority, later_controlling_comments: [] }),
+      readStart: async () => start,
+    },
+  };
+}
+
+test('populated v2 receipt APIs remain readable after v4 migration and failed fresh verification gates packet use', async () => {
+  const successfulOptions = support.options(support.stateRoot('authority-packet-v2-history-'));
+  const successfulInputs = v2ReceiptInputs('historical');
+  const successfulLegacy = runtime.createProgrammeReceiptStore(successfulOptions);
+  const session = await successfulLegacy.startRun({
+    lock: 'historical-lock', authority: successfulInputs.authority, start: successfulInputs.start,
+    candidate: null, lease_ms: 60000,
+  }, successfulInputs.readers);
+  successfulLegacy.interruptRun(session, { payload: { classification: 'RUN_INTERRUPTED' } });
+  runtime.migrateAuthorityPacketStore(successfulOptions);
+  assert.deepEqual(successfulLegacy.readReceiptChain(session.run_id).map((item) => item.receipt_type), ['RUN_STARTED', 'RUN_INTERRUPTED']);
+
+  const heldOptions = support.options(support.stateRoot('authority-packet-v2-verifier-hold-'));
+  const heldInputs = v2ReceiptInputs('verifier-hold');
+  const heldLegacy = runtime.createProgrammeReceiptStore(heldOptions);
+  const heldSession = await heldLegacy.startRun({
+    lock: 'verifier-hold-lock', authority: heldInputs.authority, start: heldInputs.start,
+    candidate: null, lease_ms: 60000,
+  }, heldInputs.readers);
+  heldLegacy.interruptRun(heldSession, { payload: { classification: 'RUN_INTERRUPTED' } });
+  failedVerifierCalls = 1;
+  assertCode(() => runtime.migrateAuthorityPacketStore(heldOptions), 'GPR_PACKET_READBACK_FAILED');
+  failedVerifierCalls = 1;
+  const packetValue = packetFixture('post-failed-verifier');
+  const readers = support.readers(packetValue);
+  assertCode(() => runtime.createAuthorityPacketStore(heldOptions, readers), 'GPR_PACKET_READBACK_FAILED');
+  const verified = runtime.createAuthorityPacketStore(heldOptions, readers);
+  const persisted = verified.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  assert.equal(persisted.packet_id, runtime.authorityPacketIdentities(packetValue).packet_id);
+  assert.deepEqual(heldLegacy.readReceiptChain(heldSession.run_id).map((item) => item.receipt_type), ['RUN_STARTED', 'RUN_INTERRUPTED']);
 });
 
 test('migration refuses an unexpired unreleased legacy allocation', () => {

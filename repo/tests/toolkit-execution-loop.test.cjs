@@ -215,7 +215,7 @@ test('semantic dispatch records one intent and one trusted confirmation for an a
 });
 
 test('ambiguous atomic dispatch is held and never retried automatically', () => {
-  const gate = semanticGate('ambiguous', { readDispatchOutcome: () => ({ status: 'ambiguous' }) });
+  const gate = semanticGate('ambiguous', { readDispatchOutcome: support.oracleDispatchOutcomeReader('ambiguous') });
   let commitCalls = 0;
   const result = startDelegated(delegatedLaunchOptions({
     semantic_gate: gate,

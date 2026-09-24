@@ -889,7 +889,7 @@
       "additionalProperties": false,
       "required": ["schema", "repository", "parent_issue", "child_issue", "lane_id", "human_owner", "consumer", "authority", "candidate", "predecessors"],
       "properties": {
-        "schema": { "const": "toolkit.github.program.authority-packet-current.v1" },
+        "schema": { "const": "toolkit.github-program.authority-packet-current.v1" },
         "repository": { "$ref": "#/$defs/repository" },
         "parent_issue": { "$ref": "#/$defs/issue" },
         "child_issue": { "$ref": "#/$defs/issue" },

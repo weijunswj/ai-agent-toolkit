@@ -328,6 +328,7 @@ function bindReceiptAdmission(receiptStore, admission) {
   });
   Object.freeze(context);
   RECEIPT_CONTEXT_OWNERS.set(context, {
+    store: receiptStore,
     admission,
     revalidateSemanticGate: receiptStore.revalidateSemanticGate.bind(receiptStore),
   });
@@ -341,7 +342,8 @@ function receiptDependencyFailures(context, expected) {
   let proof;
   try {
     proof = owner.revalidateSemanticGate(owner.admission, Object.freeze({ ...expected }));
-  } catch (_error) {
+  } catch (error) {
+    if (error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)) return [error.code];
     return ['receipt-dependency-unverified'];
   }
   try {
@@ -353,10 +355,17 @@ function receiptDependencyFailures(context, expected) {
 }
 
 function receiptFailureResult(failures, fields = {}) {
+  const packetReason = failures.find((item) => typeof item === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(item));
+  const missingAdmission = failures.some((item) => ['receipt-admission-required', 'receipt-admission-untrusted'].includes(item));
+  const reasonCode = packetReason
+    || (failures.some((item) => ['receipt-dependency-proof-invalid', 'receipt-consumer-candidate-conflict', 'receipt-consumer-scope-conflict', 'receipt-consumer-binding-invalid'].includes(item))
+      ? 'GPR_PACKET_BINDING_MISMATCH' : null)
+    || (missingAdmission ? 'GPR_PACKET_ADMISSION_REQUIRED' : null);
   return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', {
     ...fields,
     receipt_dependency_required: true,
     reasons: failures,
+    ...(reasonCode ? { reason_code: reasonCode } : {}),
   });
 }
 
@@ -557,18 +566,13 @@ function evaluateAssurance(input, receiptContext) {
     scope_digest: input.scope.digest,
   });
   if (receiptFailures.length > 0) {
-    const result = {
+    return receiptFailureResult(receiptFailures, {
       verdict: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
-      code: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
       stop: true,
       finality_blocked: true,
-      receipt_dependency_required: true,
-      reasons: receiptFailures,
       next_action: 'WEB_REESTABLISH_REQUIRED_EVIDENCE',
-    };
-    const label = failureLabel(receiptFailures);
-    if (label) result.label = label;
-    return result;
+      ...(failureLabel(receiptFailures) ? { label: failureLabel(receiptFailures) } : {}),
+    });
   }
   return {
     verdict: 'PASS',
@@ -592,17 +596,17 @@ function evaluateNoByteReviewDisposition(input = {}, receiptContext) {
     && input.complete_inventory === true
     && input.all_other_evidence_current === true;
   if (proof) {
-    const receiptFailures = receiptDependencyFailures(receiptContext, { operation: 'NO_BYTE_REVIEW' });
+    const expectedReceipt = { operation: 'NO_BYTE_REVIEW' };
+    if (Object.hasOwn(input, 'candidate')) expectedReceipt.candidate = assuranceCandidateTuple(input.candidate);
+    if (Object.hasOwn(input, 'scope_digest')) expectedReceipt.scope_digest = input.scope_digest;
+    const receiptFailures = receiptDependencyFailures(receiptContext, expectedReceipt);
     if (receiptFailures.length > 0) {
-      return {
+      return receiptFailureResult(receiptFailures, {
         eligible: false,
-        code: 'FAIL_CLOSED_REQUIRED_EVIDENCE',
-        receipt_dependency_required: true,
-        reasons: receiptFailures,
         g4_invalidated: true,
         fresh_g4_required: true,
         finality_blocked: true,
-      };
+      });
     }
     return {
       eligible: true,
@@ -622,6 +626,21 @@ function evaluateNoByteReviewDisposition(input = {}, receiptContext) {
 }
 
 function evaluateInvalidation(input = {}, receiptContext) {
+  if (Object.hasOwn(input, 'semantic_run')) {
+    const owner = receiptContext && RECEIPT_CONTEXT_OWNERS.get(receiptContext);
+    if (!owner || !isSafeId(input.semantic_run)) return fail('GPR_PACKET_ADMISSION_REQUIRED', { invalidated: false });
+    if (input.repository !== undefined
+      && (!isRecord(owner.store.namespace) || owner.store.namespace.repository !== input.repository)) {
+      return fail('GPR_PACKET_BINDING_MISMATCH', { invalidated: false });
+    }
+    try { owner.revalidateSemanticGate(owner.admission, {}); } catch (_error) {
+      return fail('GPR_PACKET_ADMISSION_REQUIRED', { invalidated: false });
+    }
+  }
+  if (receiptContext) {
+    const receiptFailures = receiptDependencyFailures(receiptContext, { operation: 'INVALIDATION' });
+    if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { g4_invalidated: false });
+  }
   const event = input.event;
   if (event === 'READY_MOVEMENT' && input.movement_event) return evaluateInvalidation({ ...input, event: input.movement_event }, receiptContext);
   if (event === 'CANDIDATE_MOVEMENT' || event === 'SUCCESSOR_CANDIDATE_HEAD' || event === 'CANDIDATE_TREE_MOVEMENT') {
@@ -795,7 +814,10 @@ function evaluateG4A(input = {}, receiptContext) {
       next_action: 'CONTROLLER_REQUIRED',
     });
   }
-  const receiptFailures = receiptDependencyFailures(receiptContext, { operation: 'G4A' });
+  const expectedReceipt = { operation: 'G4A' };
+  if (Object.hasOwn(input, 'candidate')) expectedReceipt.candidate = assuranceCandidateTuple(input.candidate);
+  if (Object.hasOwn(input, 'scope_digest')) expectedReceipt.scope_digest = input.scope_digest;
+  const receiptFailures = receiptDependencyFailures(receiptContext, expectedReceipt);
   if (receiptFailures.length > 0) return receiptFailureResult(receiptFailures, { allowed: false });
   return valid('G4A_ELIGIBLE', {
     allowed: true,

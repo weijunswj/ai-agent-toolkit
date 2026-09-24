@@ -576,46 +576,23 @@ function exactIdSet(actual, expected) {
     && [...actual].sort().every((item, index) => item === [...expected].sort()[index]);
 }
 
-function readTrustedDispatchOutcome(context, options, routePlan, transportResult, transportError) {
-  const reader = context && context.trusted_readers && context.trusted_readers.readDispatchOutcome;
-  if (typeof reader !== 'function') fail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  let evidence;
-  try {
-    evidence = reader.call(context.trusted_readers, {
-      run: options.run,
-      route_plan: routePlan,
-      workspace_receipt: options.workspace_receipt,
-      transport_result: transportResult,
-      transport_error: transportError || null,
-    });
-  } catch (error) {
-    receiptFailure(error, 'GPR_PACKET_DISPATCH_UNRESOLVED');
-  }
-  if (evidence && typeof evidence.then === 'function') fail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  if (!isRecord(evidence)) fail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  return evidence;
-}
-
 function dispatchWasNotStarted(evidence) {
-  return isRecord(evidence) && (
-    evidence.status === 'not-started'
-    || evidence.status === 'DISPATCH_NOT_STARTED'
-    || evidence.outcome === 'DISPATCH_NOT_STARTED'
-    || evidence.event_type === 'DISPATCH_NOT_STARTED'
-    || evidence.classification === 'DISPATCH_NOT_STARTED'
-    || evidence.classification === 'NOT_STARTED'
-  );
+  return isRecord(evidence) && evidence.outcome === 'not-started'
+    && evidence.delayed_completion_excluded === true;
 }
 
-function recordTrustedDispatchOutcome(context, evidence) {
-  return receiptCall(context.store, 'recordSemanticGateDispatch', [context.admission, evidence], 'GPR_PACKET_DISPATCH_UNRESOLVED');
+function recordTrustedDispatchOutcome(context, transportId, transportResult, transportError) {
+  return receiptCall(context.store, 'recordSemanticGateDispatch', [context.admission, {
+    transport_id: transportId,
+    transport_result: transportResult === undefined ? null : transportResult,
+    transport_error: transportError ? { code: isSafeId(transportError.code) ? transportError.code : 'TRANSPORT_FAILED' } : null,
+  }], 'GPR_PACKET_DISPATCH_UNRESOLVED');
 }
 
-function reconcileDispatchAttempt(context, options, routePlan, transportResult, transportError, originalError) {
+function reconcileDispatchAttempt(context, transportId, transportResult, transportError, originalError) {
   let evidence;
   try {
-    evidence = readTrustedDispatchOutcome(context, options, routePlan, transportResult, transportError);
-    recordTrustedDispatchOutcome(context, evidence);
+    evidence = recordTrustedDispatchOutcome(context, transportId, transportResult, transportError);
   } catch (error) {
     if (error instanceof ExecutionLoopError && error.code === 'GPR_PACKET_DISPATCH_UNRESOLVED') throw error;
     fail('GPR_PACKET_DISPATCH_UNRESOLVED');
@@ -648,33 +625,30 @@ function executeAtomicLaunch(routePlan, options) {
     if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
   }
   revalidateSemanticContext(semanticContext);
-  receiptCall(semanticContext.store, 'beginSemanticGateDispatch', [semanticContext.admission], 'GPR_PACKET_DISPATCH_UNRESOLVED');
+  const dispatchIntent = receiptCall(semanticContext.store, 'beginSemanticGateDispatch', [semanticContext.admission], 'GPR_PACKET_DISPATCH_UNRESOLVED', true);
+  if (!isRecord(dispatchIntent) || !isDigest(dispatchIntent.transport_id)) fail('GPR_PACKET_DISPATCH_UNRESOLVED');
   let committed;
   try {
     committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
       route_plan: routePlan,
       reservations: deepFreeze(reservations.slice()),
       run_id: options.run && options.run.run_id,
+      transport_id: dispatchIntent.transport_id,
       repository_id: options.run && options.run.repository_id,
       authorized_ref_digest: options.run && options.run.authorized_ref_digest,
       current_authority_digest: options.run && options.run.current_authority_digest,
       workspace_receipt: options.workspace_receipt,
     }, 'LAUNCH_BATCH_FAILED');
   } catch (error) {
-    reconcileDispatchAttempt(semanticContext, options, routePlan, null, error.code || 'LAUNCH_BATCH_FAILED', error);
+    reconcileDispatchAttempt(semanticContext, dispatchIntent.transport_id, null, error, error);
   }
   const expected = routePlan.lanes.map((lane) => lane.lane_id);
   if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) {
-    reconcileDispatchAttempt(semanticContext, options, routePlan, committed, 'LAUNCH_BATCH_INVALID');
+    reconcileDispatchAttempt(semanticContext, dispatchIntent.transport_id, committed, { code: 'LAUNCH_BATCH_INVALID' }, null);
     fail('LAUNCH_BATCH_INVALID');
   }
-  const evidence = readTrustedDispatchOutcome(semanticContext, options, routePlan, committed, null);
-  try {
-    recordTrustedDispatchOutcome(semanticContext, evidence);
-  } catch (error) {
-    if (error instanceof ExecutionLoopError && error.code === 'GPR_PACKET_DISPATCH_UNRESOLVED') throw error;
-    fail('GPR_PACKET_DISPATCH_UNRESOLVED');
-  }
+  const evidence = recordTrustedDispatchOutcome(semanticContext, dispatchIntent.transport_id, committed, null);
+  if (!isRecord(evidence) || evidence.outcome !== 'confirmed') fail('GPR_PACKET_DISPATCH_UNRESOLVED');
   return { launches: expected };
 }
 
@@ -739,6 +713,28 @@ function transitionRun(run, nextState, options = {}) {
   if (['admitted', 'running'].includes(nextState)) {
     if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
     revalidateSemanticContext(context);
+  }
+  if (['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'].includes(nextState)) {
+    if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    if (!options.terminal_packet) fail('TERMINAL_PACKET_REQUIRED');
+    const terminalPacket = validateTerminalPacket(options.terminal_packet);
+    if (terminalPacket.run_id !== current.run_id || TERMINAL_OUTCOMES[terminalPacket.outcome] !== nextState) fail('TERMINAL_RUN_MISMATCH');
+    const applicability = receiptCall(context.store, 'semanticCompletionApplicability', [context.admission], 'GPR_PACKET_AUTHORITY_UNVERIFIED', true);
+    if (!isRecord(applicability) || typeof applicability.required !== 'boolean') fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    if (applicability.required) {
+      const result = options.substantive_result;
+      const terminal = options.terminal_packet;
+      if (!isRecord(result) || !isRecord(result.store) || !isRecord(terminal) || !isDigest(terminal.evidence_digest)) {
+        fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+      }
+      receiptCall(context.store, 'verifySemanticCompletion', [context.admission, result.store, terminal.evidence_digest], 'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED', true);
+    }
+    options = {
+      ...options,
+      terminal_packet_digest: digestValue(terminalPacket),
+      publication_state: terminalPacket.publication_state,
+      workspace_disposition: terminalPacket.workspace_disposition,
+    };
   }
   const next = clone(current);
   next.execution_state = nextState;
@@ -1058,13 +1054,52 @@ function completeRun(options = {}) {
   } else if (!['validating', 'publication-pending'].includes(run.execution_state)) {
     fail('INVALID_STATE_TRANSITION');
   }
-  revalidateRunSemanticContext(run, options);
-  const terminalRun = transitionRun(run, state, { now: options.now, terminal_packet_digest: digestValue(packet), publication_state: packet.publication_state, workspace_disposition: packet.workspace_disposition });
+  const semanticContext = revalidateRunSemanticContext(run, options);
+  const completionApplicability = receiptCall(
+    semanticContext.store,
+    'semanticCompletionApplicability',
+    [semanticContext.admission],
+    'GPR_PACKET_AUTHORITY_UNVERIFIED',
+    true
+  );
+  if (!isRecord(completionApplicability) || typeof completionApplicability.required !== 'boolean'
+    || !isRecord(completionApplicability.applicability)) fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  let completionCustody = null;
+  if (completionApplicability.required) {
+    const result = options.substantive_result;
+    if (!isRecord(result) || !exactKeys(result, ['store', 'packet', 'producer_admission'])
+      || !isRecord(result.store) || !isRecord(result.packet) || !isRecord(result.producer_admission)) {
+      fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+    }
+    completionCustody = receiptCall(
+      semanticContext.store,
+      'confirmSemanticCompletion',
+      [semanticContext.admission, result.store, result.packet, result.producer_admission],
+      'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+      true
+    );
+    if (!isRecord(completionCustody) || !isDigest(completionCustody.outcome_ref)
+      || packet.evidence_digest !== completionCustody.outcome_ref) fail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  }
+  const terminalRun = transitionRun(run, state, {
+    now: options.now,
+    terminal_packet_digest: digestValue(packet),
+    publication_state: packet.publication_state,
+    workspace_disposition: packet.workspace_disposition,
+    terminal_packet: packet,
+    substantive_result: options.substantive_result,
+  });
   if (options.state_root !== undefined) {
     const persisted = persistGovernedCompletion({ state_root: options.state_root, previous_run: run, terminal_run: terminalRun, terminal_packet: packet });
-    bindSemanticContext(persisted, semanticContextForRun(terminalRun));
+    bindSemanticContext(persisted, completionCustody
+      ? Object.freeze({ ...semanticContext, completion_custody: Object.freeze({ store: options.substantive_result.store, outcome_ref: completionCustody.outcome_ref }) })
+      : semanticContext);
     return persisted;
   }
+  if (completionCustody) bindSemanticContext(terminalRun, Object.freeze({
+    ...semanticContext,
+    completion_custody: Object.freeze({ store: options.substantive_result.store, outcome_ref: completionCustody.outcome_ref })
+  }));
   return terminalRun;
 }
 
@@ -1472,6 +1507,29 @@ function releaseMutationLease(options = {}) {
   if (options.run && (options.run.run_id !== options.run_id || options.run.repository_id !== options.repository_id || options.run.authorized_ref_digest !== options.authorized_ref_digest)) fail('LEASE_BINDING_MISMATCH');
   const semanticContext = requireSemanticContext({ ...options, run: options.run }, true);
   revalidateSemanticContext(semanticContext);
+  const completionApplicability = receiptCall(
+    semanticContext.store,
+    'semanticCompletionApplicability',
+    [semanticContext.admission],
+    'GPR_PACKET_AUTHORITY_UNVERIFIED',
+    true
+  );
+  if (!isRecord(completionApplicability) || typeof completionApplicability.required !== 'boolean') {
+    fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  if (completionApplicability.required) {
+    const supplied = options.substantive_result;
+    const outputStore = isRecord(supplied) && isRecord(supplied.store)
+      ? supplied.store : semanticContext.completion_custody && semanticContext.completion_custody.store;
+    if (!outputStore || !isDigest(terminalPacket.evidence_digest)) fail('LEASE_RELEASE_UNSAFE');
+    receiptCall(
+      semanticContext.store,
+      'verifySemanticCompletion',
+      [semanticContext.admission, outputStore, terminalPacket.evidence_digest],
+      'LEASE_RELEASE_UNSAFE',
+      true
+    );
+  }
   try {
     fs.unlinkSync(leasePath);
   } catch (_error) {
