@@ -227,6 +227,9 @@ test('post-Web-directed G4 amend defaults to targeted G2 reclosure before anothe
   assert.match(controller, /standard G2 route normally applies/);
   assert.match(controller, /Narrow G2-reuse exception/);
   assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
+  assert.match(controller, /`MECHANISM_COMPLETENESS_ALREADY_BOUND=YES`/);
+  assert.match(controller, /enforcement mechanism covers the full counterexample family/);
+  assert.match(controller, /`MECHANISM_COMPLETENESS_UNPROVEN` forces targeted G2 re-entry/);
   assert.match(controller, /`G3_IMPLEMENTATION_MISS` label alone is insufficient/);
   assert.match(controller, /G2 reclosure grants no mutation authority, budget reset, new lineage or automatic follow-on/);
 });
@@ -305,6 +308,30 @@ test('logical identities that alias one consequential resource are closed before
   assert.match(controller, /one resource-equivalence identity or explicit alias semantics before G3/);
   assert.match(controller, /do not generalise beyond the resource's actual rules/);
   assert.match(architecture, /distinct accepted logical identities can address the same underlying resource/);
+});
+
+test('universal invariants require mechanism-complete enforcement and observable boundaries', () => {
+  assert.match(controller, /Mechanism completeness \/ observability/);
+  assert.match(controller, /quantifies over arbitrary\/unknown state, mutation, authority use, exposure, revocation or equivalent behaviour/);
+  assert.match(controller, /names the enforcement mechanism and proves that mechanism complete under the actual language\/runtime model/);
+  assert.match(controller, /finite hook\/detector\/brand\/API\/event list cannot satisfy a universal claim unless G2 proves the list complete/);
+  assert.match(controller, /required state is not generically observable after untrusted execution\/exposure/);
+  assert.match(controller, /complete trusted boundary/);
+  assert.match(controller, /detector-based post-hoc inspection is not an admissible substitute/);
+  assert.match(architecture, /Mechanism completeness is distinct from semantic correctness/);
+  assert.match(architecture, /Post-hoc detector coverage is not a substitute for observability the platform does not provide/);
+});
+
+test('fresh G4 attacks the enforcement mechanism itself and routes observer incompleteness back to G2', () => {
+  assert.match(controller, /MECHANISM_COMPLETENESS_UNPROVEN/);
+  assert.match(controller, /detector\/interceptor\/hook\/brand\/parser\/ledger mechanisms/);
+  assert.match(controller, /semantically equivalent violating path that avoids the candidate's observer entirely/);
+  assert.match(controller, /targeted G2 re-entry state, not a new gate/);
+  assert.match(architecture, /vary how the same forbidden semantic state is produced, not only the input value/);
+  assert.match(architecture, /different lexical identity/);
+  assert.match(architecture, /ordinary construction instead of an intercepted API/);
+  assert.match(architecture, /state change that leaves watched shape\/prototype evidence unchanged/);
+  assert.match(architecture, /return to targeted G2 before another G3/);
 });
 
 test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
