@@ -22,7 +22,7 @@
         "G2": {
           "provider": "openai",
           "model": "gpt-6-astra",
-          "reasoning": "medium"
+          "reasoning": "high"
         },
         "G3": {
           "provider": "openai",
@@ -57,7 +57,7 @@
         "G2_ESCALATED": {
           "provider": "openai",
           "model": "gpt-6-astra",
-          "reasoning": "high"
+          "reasoning": "max"
         }
       },
       "subagents": {

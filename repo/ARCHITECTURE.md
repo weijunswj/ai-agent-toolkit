@@ -210,6 +210,19 @@ For every material detector/interceptor/hook/brand/parser/ledger enforcement mec
 
 A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `MECHANISM_COMPLETENESS_UNPROVEN`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. `MECHANISM_COMPLETENESS_UNPROVEN` means the accepted semantics may be correct but the enforcement/observability proof is incomplete; it requires targeted G2 before another G3. Classification is diagnostic evidence, not a score or authority grant.
 
+Blocking findings also carry causal ownership independent of that learning classification:
+
+- `OWNER=PRODUCT`: the candidate/product itself is proven to violate an accepted invariant through a valid evidence path; only this ownership supports `PRODUCT_SEMANTICS_PROVEN_BAD=YES` and product/G3 correction attribution.
+- `OWNER=CONTRACT`: G2 contract, proof model, completeness boundary, acceptance criterion or executable evidence contract is missing/incorrect.
+- `OWNER=TOOLKIT`: reusable Toolkit governance/runtime/control-plane machinery is defective independently of the target product semantics.
+- `OWNER=HARNESS`: verifier, test runner, launcher, host integration or equivalent evidence machinery is defective.
+- `OWNER=ENVIRONMENT`: provider, transport, capability, runtime or validation environment prevents trustworthy evidence without proving the product bad.
+- `OWNER=UNKNOWN`: causal ownership is not yet established; remain blocked where required and run bounded diagnosis rather than mutating the candidate speculatively.
+
+Every blocking receipt records `PRODUCT_SEMANTICS_PROVEN_BAD=YES|NO`. Until candidate semantics are independently shown bad, the value is NO. A finding may retain secondary durable defect ownership, but one smallest primary causal owner drives immediate routing/correction accounting so product convergence and delivery-machinery convergence remain distinguishable.
+
+A known-broken canonical verifier may be replaced by bounded equivalent evidence only when the verifier is evidence machinery rather than itself an unresolved required shipped/product/security/finality outcome. The substitute must preserve the accepted invariant unchanged, exercise the same consequential production boundary or a proven faithful equivalent, reproduce the required positive/negative/adversarial and effect/zero-effect semantics, bind exact candidate/evidence provenance, and receive normal independent assurance. Successful substitute evidence may establish product correctness and allow product delivery to continue, while the verifier/Toolkit/harness defect remains separately owned and unresolved. If equivalent evidence cannot establish product correctness, the state remains a validation/evidence block with product semantics not proven bad.
+
 G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.

@@ -108,8 +108,8 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
     if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'xhigh', `OpenAI Sol route must be xhigh: ${role}`);
   }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'high');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'max');
   assert.equal(claude.routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
@@ -120,6 +120,16 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
   assert.equal(claude.subagents['G0'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
+});
+
+test('OpenAI normal G2 is Astra High and escalated G2 remains strictly stronger', () => {
+  const openai = registry.stacks['owner-openai-default'];
+  assert.equal(openai.routes.G2.provider, 'openai');
+  assert.equal(openai.routes.G2.model, 'gpt-6-astra');
+  assert.equal(openai.routes.G2.reasoning, 'high');
+  assert.equal(openai.routes.G2_ESCALATED.provider, 'openai');
+  assert.equal(openai.routes.G2_ESCALATED.model, 'gpt-6-astra');
+  assert.equal(openai.routes.G2_ESCALATED.reasoning, 'max');
 });
 
 test('G2 escalation is a stronger route category, not a new gate', () => {
@@ -321,6 +331,39 @@ test('universal invariants require mechanism-complete enforcement and observable
   assert.match(controller, /post-hoc detection cannot substitute/);
   assert.match(architecture, /Mechanism completeness is distinct from semantic correctness/);
   assert.match(architecture, /Post-hoc detector coverage is not a substitute for observability the platform does not provide/);
+});
+
+test('blocking findings attribute the causal layer instead of collapsing everything into G3 implementation', () => {
+  assert.match(controller, /Failure attribution/);
+  assert.match(controller, /OWNER=PRODUCT\|CONTRACT\|TOOLKIT\|HARNESS\|ENVIRONMENT\|UNKNOWN/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD=YES\|NO/);
+  assert.match(controller, /G3_IMPLEMENTATION_MISS.*OWNER=PRODUCT.*candidate semantics themselves violate an accepted invariant/s);
+  assert.match(controller, /Contract\/completeness\/proof-model defects are CONTRACT\/G2/);
+  assert.match(controller, /Toolkit, harness and environment defects do not consume product\/G3 correction budget/);
+  assert.match(controller, /UNKNOWN.*bounded diagnosis rather than blind candidate mutation/);
+
+  assert.match(architecture, /OWNER=PRODUCT/);
+  assert.match(architecture, /OWNER=CONTRACT/);
+  assert.match(architecture, /OWNER=TOOLKIT/);
+  assert.match(architecture, /OWNER=HARNESS/);
+  assert.match(architecture, /OWNER=ENVIRONMENT/);
+  assert.match(architecture, /OWNER=UNKNOWN/);
+  assert.match(architecture, /product convergence and delivery-machinery convergence remain distinguishable/);
+});
+
+test('broken verifier substitution preserves the invariant and separate defect ownership', () => {
+  assert.match(controller, /Equivalent evidence for a broken verifier/);
+  assert.match(controller, /not itself an unresolved required product\/security\/finality deliverable/);
+  assert.match(controller, /same unchanged invariant.*same consequential boundary or a proven faithful equivalent/s);
+  assert.match(controller, /same positive\/negative\/effect obligations/);
+  assert.match(controller, /normal independent review/);
+  assert.match(controller, /verifier defect remains separately owned/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD=NO/);
+
+  assert.match(architecture, /known-broken canonical verifier may be replaced by bounded equivalent evidence/);
+  assert.match(architecture, /required positive\/negative\/adversarial and effect\/zero-effect semantics/);
+  assert.match(architecture, /allow product delivery to continue.*defect remains separately owned and unresolved/s);
+  assert.match(architecture, /validation\/evidence block with product semantics not proven bad/);
 });
 
 test('fresh G4 attacks the enforcement mechanism itself and routes observer incompleteness back to G2', () => {
