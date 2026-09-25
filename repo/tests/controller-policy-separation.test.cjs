@@ -335,6 +335,39 @@ test('fresh G4 attacks the enforcement mechanism itself and routes observer inco
   assert.match(architecture, /return to targeted G2 before another G3/);
 });
 
+test('G2 cannot drop mandatory requirements when freezing the candidate contract', () => {
+  assert.match(controller, /Mandatory requirement coverage closure/);
+  assert.match(controller, /every current mandatory acceptance criterion, inherited blocker\/defect family and still-required contract obligation exactly once/);
+  assert.match(controller, /IMPLEMENT_IN_THIS_CANDIDATE/);
+  assert.match(controller, /ALREADY_SATISFIED_WITH_EXACT_EVIDENCE/);
+  assert.match(controller, /UNCHANGED_REQUIRED_CONSUMER/);
+  assert.match(controller, /OUT_OF_SCOPE_WITH_EXPLICIT_CONTINUING_OWNER/);
+  assert.match(controller, /Missing, duplicate\/conflicting, unevidenced or proof-less current rows are `G2_CONTRACT_COVERAGE_MISS`/);
+  assert.match(architecture, /one complete current-requirement coverage manifest/);
+  assert.match(architecture, /requirement -> invariant -> consequential boundary -> affected consumers\/surfaces -> negative regression -> positive control -> G3 executable proof -> G4 assurance surface/);
+});
+
+test('public-boundary and compatibility claims close bypasses and use predecessor-produced evidence', () => {
+  assert.match(controller, /Public-surface \/ predecessor-compatibility closure/);
+  assert.match(controller, /enumerate exported\/callable aliases and materially reachable alternate routes/);
+  assert.match(controller, /every public\/reachable route must use the accepted enforcement/);
+  assert.match(controller, /immutable bytes\/artifacts produced by an exact accepted predecessor producer and consumed unchanged by the candidate/);
+  assert.match(controller, /candidate-regenerated equivalents are insufficient/);
+  assert.match(architecture, /callable-surface inventory/);
+  assert.match(architecture, /predecessor-produced bytes\/artifacts from an exact accepted producer revision consumed unchanged by the candidate/);
+});
+
+test('canonical equivalence and rejection noninterference are consequential evidence, not eventual-error checks', () => {
+  assert.match(controller, /Canonical equivalence \/ rejection noninterference/);
+  assert.match(controller, /semantically equivalent accepted representations canonicalise before consequential identity\/digest\/hash\/signature comparison/);
+  assert.match(controller, /eventual rejection is insufficient/);
+  assert.match(controller, /getters, Proxy traps, coercion, iterators, serialization hooks or callbacks/);
+  assert.match(controller, /zero prohibited executions at the real boundary/);
+  assert.match(architecture, /canonicalisation rule applied before identity\/digest\/hash\/signature/);
+  assert.match(architecture, /instrumentation proving zero prohibited execution at the real boundary/);
+  assert.match(architecture, /final error code alone cannot prove zero execution/);
+});
+
 test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
   assert.match(controller, /State-transition adversarial closure/);
   assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
