@@ -269,7 +269,7 @@ test('later-required candidates and evidence survive disposable execution teardo
   assert.match(controller, /preserve every later-required exact candidate and non-repository evidence/);
   assert.match(controller, /prove the later consumer can recover it/);
   assert.match(controller, /Temporary paths, chat memory, digest-only evidence or disappearing uncommitted state are insufficient/);
-  assert.match(controller, /Publication authority is not implied/);
+  assert.match(controller, /publication is not implied/i);
   assert.match(architecture, /Before a disposable execution surface is destroyed/);
 });
 
@@ -282,7 +282,7 @@ test('ordinary coding path keeps exception mechanics exceptional', () => {
 test('causal negative controls cannot manufacture the consequential outcome they claim to prove', () => {
   assert.match(controller, /Causal negative-control oracle/);
   assert.match(controller, /instrumentation may expose\/synchronise X but must not manufacture Y/);
-  assert.match(controller, /Missing observation fails/);
+  assert.match(controller, /missing observation fails/i);
   assert.match(controller, /constructed\/fallback\/cleanup\/fault-injection evidence from another actor cannot substitute/);
   assert.match(architecture, /causal negative-control requirements that prove the named production actor caused the consequential observation/);
 });
@@ -305,6 +305,17 @@ test('logical identities that alias one consequential resource are closed before
   assert.match(controller, /one resource-equivalence identity or explicit alias semantics before G3/);
   assert.match(controller, /do not generalise beyond the resource's actual rules/);
   assert.match(architecture, /distinct accepted logical identities can address the same underlying resource/);
+});
+
+test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
+  assert.match(controller, /State-transition adversarial closure/);
+  assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
+  assert.match(controller, /relevant interruption\/replacement\/cancellation\/late-completion windows/);
+  assert.match(controller, /G3 PASS maps every material G2 invariant to a named executable regression or production-boundary check/);
+  assert.match(controller, /green suite without that transition mapping is insufficient/);
+  assert.match(architecture, /each material stateful\/async transition, a named deterministic negative transition regression plus positive control/);
+  assert.match(architecture, /invariant-to-regression map/);
+  assert.match(architecture, /Aggregate suite-green status cannot substitute for this mapping/);
 });
 
 test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
