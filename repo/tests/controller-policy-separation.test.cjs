@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G0-A', 'G0-B', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -42,12 +42,12 @@ test('controller stage policy is provider/model agnostic', () => {
   }
 });
 
-test('stack registry has explicit complete symbolic routes and only G0-B/G3 subagent bindings', () => {
+test('stack registry has explicit complete symbolic routes and only G0/G3 subagent bindings', () => {
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
   assert.equal(registry.version, 2);
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
     assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredRoutes].sort(), stackId);
-    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0-B', 'G3'], stackId);
+    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0', 'G3'], stackId);
     for (const route of Object.values(stack.routes)) {
       assert.equal(typeof route.provider, 'string');
       assert.ok(route.provider.length > 0);
@@ -72,13 +72,13 @@ test('named stacks support explicit cross-harness selection without harness auth
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
 
-test('root workers never self-verify model identity while G0-B/G3 parents configure child routes before launch', () => {
+test('root workers never self-verify model identity while G0/G3 parents configure child routes before launch', () => {
   assert.match(controller, /Root execution threads are bound.*out of band by User\/Web\/controller\/harness before launch or adoption/s);
   assert.match(controller, /root semantic worker must never resolve, inspect, verify, attest, compare, reject, or HOLD on its own provider\/model\/reasoning identity/i);
   assert.match(controller, /regardless of whether the harness exposes model metadata/i);
   assert.match(controller, /inability to introspect its own model can never create either HOLD/i);
   assert.doesNotMatch(controller, /current harness cannot launch and verify it/i);
-  assert.match(controller, /Only `G0-B` and `G3` may resolve semantic subagent routes/);
+  assert.match(controller, /Only `G0` and `G3` may resolve semantic subagent routes/);
   assert.match(controller, /parent\/launcher resolves the concrete child provider\/model\/reasoning route.*before child creation/s);
   assert.match(controller, /spawned child never self-attests after launch/i);
   assert.match(controller, /Silent provider\/model\/reasoning substitution remains prohibited.*controller\/launcher boundary/s);
@@ -100,8 +100,8 @@ test('ordinary semantic executors receive bounded authority instead of being tol
 test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
-  assert.equal(claude.routes['G0-A'].reasoning, 'high');
-  assert.equal(claude.routes['G0-B'].reasoning, 'medium');
+  assert.equal(claude.routes['G_FRAME'].reasoning, 'high');
+  assert.equal(claude.routes['G0'].reasoning, 'medium');
   assert.equal(claude.routes.G1.reasoning, 'high');
   const openai = registry.stacks['owner-openai-default'];
   for (const [role, route] of Object.entries(openai.routes)) {
@@ -115,10 +115,10 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.LOOP.reasoning, 'medium');
-  assert.equal(claude.routes.RECONVERGENCE.reasoning, 'high');
+  assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
-  assert.equal(claude.subagents['G0-B'].reasoning, 'medium');
+  assert.equal(claude.subagents['G0'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
 });
 
@@ -132,9 +132,9 @@ test('G2 escalation is a stronger route category, not a new gate', () => {
 });
 
 test('delegation capability is stage law, not model law', () => {
-  assert.match(controller, /G0-B.*G3.*only subagent-capable stages\/roles/s);
+  assert.match(controller, /G0.*G3.*only subagent-capable stages\/roles/s);
   assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
-  assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
+  assert.match(architecture, /Only G0 and G3 may use semantic depth-1 subagents/);
 });
 
 test('git publication transport probes do not manufacture publication certainty', () => {
@@ -172,13 +172,13 @@ test('stack registry has no default stack or authoritative service tier', () => 
 });
 
 test('convergence-first roles are represented without widening delegation', () => {
-  assert.match(controller, /G0-A.*problem framing/s);
+  assert.match(controller, /G_FRAME.*problem framing/s);
   assert.match(controller, /G2.*adversarial executable-contract closure/s);
-  assert.match(controller, /RECONVERGENCE.*read-only.*not a gate/s);
+  assert.match(controller, /G1_RECONVERGENCE.*read-only.*not a gate/s);
   assert.match(architecture, /Reconverged correction exception/);
   assert.match(architecture, /Web-directed continuation after autonomous exhaustion/);
   assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
-  assert.match(controller, /does not automatically spend a higher-model `RECONVERGENCE` call/);
+  assert.match(controller, /does not automatically spend a higher-model `G1_RECONVERGENCE` call/);
 });
 
 test('shipping-first policy is singular, ordered, and retains canonical Shipping Law', () => {
@@ -250,10 +250,10 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
 
 test('G0 differential evidence starts from known-good and keeps incidental environment failures out of the root model', () => {
   assert.match(controller, /Known-good vs production differential/);
-  assert.match(controller, /G0-A records the material differences/);
+  assert.match(controller, /G_FRAME records the material differences/);
   assert.match(controller, /known-good positive control/);
   assert.match(controller, /real production entry point/);
-  assert.match(controller, /G0-B prefers one bounded differential experiment/);
+  assert.match(controller, /G0 prefers one bounded differential experiment/);
   assert.match(controller, /Serial one-delta probes are fallback-only when a prior boundary blocks deeper observation/);
   assert.match(controller, /Incidental environment\/check\/transport failure does not replace the causal question/);
   assert.match(architecture, /known-good qualified path succeeds while the real production path fails/);
@@ -278,7 +278,7 @@ test('later-required candidates and evidence survive disposable execution teardo
 
 test('ordinary coding path keeps exception mechanics exceptional', () => {
   assert.match(controller, /ordinary coding path is `G1 -> G2 -> G3 in-gate convergence -> G4 -> Web finality`/);
-  assert.match(controller, /G0, targeted re-entry, RECONVERGENCE, HOLD recovery and Web-directed continuation are exception mechanics/);
+  assert.match(controller, /G0, targeted re-entry, G1_RECONVERGENCE, HOLD recovery and Web-directed continuation are exception mechanics/);
   assert.match(controller, /Repeated exception use without material blocker\/root reduction returns to the responsible root\/Owner boundary/);
 });
 
@@ -389,7 +389,7 @@ test('shipping policy remains symbolic and preserves existing policy boundaries'
       assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
     }
   }
-  assert.match(controller, /G0-B.*G3.*only subagent-capable stages\/roles/s);
+  assert.match(controller, /G0.*G3.*only subagent-capable stages\/roles/s);
   assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
-  assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
+  assert.match(architecture, /Only G0 and G3 may use semantic depth-1 subagents/);
 });
