@@ -316,6 +316,9 @@ test('stateful and async contracts close on named transition regressions, not pr
   assert.match(architecture, /each material stateful\/async transition, a named deterministic negative transition regression plus positive control/);
   assert.match(architecture, /invariant-to-regression map/);
   assert.match(architecture, /Aggregate suite-green status cannot substitute for this mapping/);
+  assert.match(architecture, /pre-commit, partial commit, cleanup, and retry after interruption/);
+  assert.match(architecture, /pre-wait, during-wait, replacement\/cancellation, late arrival, and completion after a snapshot\/decision point/);
+  assert.match(architecture, /not a mandatory combinatorial matrix/);
 });
 
 test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
