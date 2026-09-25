@@ -161,6 +161,8 @@ G2 binds:
 - causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
 - async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
 - for each material stateful/async transition, a named deterministic negative transition regression plus positive control, covering the interruption/replacement/cancellation/late-completion windows that are actually relevant to the state machine;
+
+For transactional/state-machine work, relevant windows commonly include pre-commit, partial commit, cleanup, and retry after interruption. For async work they commonly include pre-wait, during-wait, replacement/cancellation, late arrival, and completion after a snapshot/decision point. G2 selects the windows that can materially violate the accepted invariant; this is not a mandatory combinatorial matrix.
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
