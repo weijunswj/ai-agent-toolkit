@@ -395,6 +395,37 @@ test('optional CURRENT authority packet survives v5 canonical, render, parse and
   assert.equal(programme.validateCanonicalStateV5(recursive).ok, false);
 });
 
+test('historical 256-character CURRENT ids remain canonical in v5 and stay out of strict projections', () => {
+  const source = parsedSources();
+  const state = clone(source.parent.state);
+  const packet = authorityPacket({
+    consumer: { ...authorityPacket().consumer, run: 'c'.repeat(256) },
+    predecessors: [{
+      ...authorityPacket().predecessors[0],
+      packet_id: 'p'.repeat(256),
+      dependency_id: 'd'.repeat(256),
+      acceptance_event_id: 'a'.repeat(256),
+      readback_event_id: 'b'.repeat(256),
+      producer: { ...authorityPacket().predecessors[0].producer, run: 'r'.repeat(256) },
+    }],
+  });
+  state.children.find((item) => item.issue === 359).authority_packet_current = packet;
+  const valid = programme.validateCanonicalStateV5(state);
+  assert.equal(valid.ok, true, valid.code);
+  const rendered = programme.renderProgrammeV5(state);
+  assert.equal(rendered.ok, true, rendered.code);
+  const parent = programme.parseParentV5Body(rendered.parent, { repository, parent_issue: 240 });
+  assert.equal(parent.ok, true, parent.code);
+  assert.deepEqual(parent.state.children.find((item) => item.issue === 359).authority_packet_current, packet);
+  assert.equal(programme.canonicalSerialize(parent.state.children.find((item) => item.issue === 359).authority_packet_current), programme.canonicalSerialize(packet));
+  const projection = programme.deriveProjectionV5(state, 'child');
+  assert.equal(projection.ok, true, projection.code);
+  assert.equal(Object.hasOwn(projection.projection, 'authority_packet_current'), false);
+  const child = programme.parseChildV5Body(rendered.child, { repository, parent_issue: 240, canonical_digest: valid.canonical_digest });
+  assert.equal(child.ok, true, child.code);
+  assert.equal(Object.hasOwn(child.envelope, 'authority_packet_current'), false);
+});
+
 test('held CURRENT with zero normal lanes requires the eligible blocking hold', () => {
   const source = parsedSources();
   const target = programme.buildRecoveryTargetState(source.parent.state);

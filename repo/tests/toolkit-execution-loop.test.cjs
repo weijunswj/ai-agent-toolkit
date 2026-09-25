@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
+const Ajv2020 = require('ajv/dist/2020');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-execution-loop.cjs');
@@ -67,6 +68,29 @@ test('A3 bounded-loop runtime and closed contract set are present', () => {
 test('A1 exposes typed git.commit as the bounded stage-and-commit operation', () => {
   assert.equal(typeof a1.operationDigest, 'function');
   assert.match(a1.operationDigest(commitOperation()), /^[a-f0-9]{64}$/);
+});
+
+test('physical Loop RUN ids use the 1..128 local domain and schema refs', () => {
+  const root = runtime.admitRoute({
+    task: common.task,
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    current_authority_digest: common.current_authority_digest,
+    consentProvider: common.consentProvider,
+    authority: { delegated: false, lanes: [] },
+  });
+  assert.equal(root.status, 'admitted');
+  const schema = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  const validateSchema = new Ajv2020({ strict: false }).compile(schema);
+  const valid = runtime.createRunReceipt({ request: root.request, route_plan: root.route_plan, run_id: 'a'.repeat(128) });
+  assert.equal(runtime.validateRunReceipt(valid).run_id, 'a'.repeat(128));
+  assert.equal(validateSchema(valid), true);
+  for (const run_id of ['x'.repeat(129), 'a/b', 'a\\b', '-leading', 'double..dot']) {
+    assert.throws(() => runtime.createRunReceipt({ request: root.request, route_plan: root.route_plan, run_id }),
+      (error) => error && error.code === 'RUN_ID_INVALID');
+    const malformed = { ...valid, run_id };
+    assert.equal(validateSchema(malformed), false, run_id);
+  }
 });
 
 test('A3 route admission is all-or-none before any lane launch', () => {

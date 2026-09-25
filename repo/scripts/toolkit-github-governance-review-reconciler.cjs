@@ -34,6 +34,7 @@ const OBJECTIVE_STATUSES = Object.freeze(['completed', 'disposed']);
 const NON_DELIVERY_PR_STATES = new Set(['closed', 'closed_unmerged', 'failed', 'rejected', 'superseded', 'outdated']);
 const MUTATION_TARGET_KINDS = Object.freeze({ managed_parent_block: 'n5-managed-parent-block', legacy_parent_block: 'n5-legacy-parent-block' });
 const sharedTransactionOwners = new Map();
+const currentPacketTransitionProofs = new WeakMap();
 const FINDING_EVIDENCE_VERSION = 'toolkit.n5.finding-evidence.v1';
 const REVIEW_EVIDENCE_VERSION = 'toolkit.n5.review-evidence.v1';
 const TERMINAL_EVIDENCE_VERSION = 'toolkit.n5.terminal-evidence.v1';
@@ -53,7 +54,7 @@ const FAILURE_CODES = Object.freeze([
   'PARENT_CONCURRENCY_CONFLICT', 'PARENT_BYTE_DRIFT', 'PARENT_BODY_LIMIT', 'PARENT_RECONCILIATION_INCOMPLETE',
   'N5_REPOSITORY_IDENTITY_MISMATCH', 'N5_CONSENT_REQUIRED', 'N5_AUTHORITY_REQUIRED', 'N5_TRACKER_VERSION_UNSUPPORTED',
   'N5_REVIEW_INVENTORY_INCOMPLETE', 'N5_DF_AMBIGUOUS', 'N5_REVIEW_MUTATION_DENIED', 'N5_REVIEW_DISPOSITION_INCOMPLETE',
-  'N5_GOVERNANCE_UNREADY', 'N5_SCOPE_REJECTED', 'N5_SECRET_OR_PRIVATE_DATA_REJECTED', 'PUBLISH_SOURCE_MISMATCH',
+  'N5_GOVERNANCE_UNREADY', 'N5_SCOPE_REJECTED', 'N5_AUTHORITY_PACKET_CURRENT_REQUIRED', 'N5_SECRET_OR_PRIVATE_DATA_REJECTED', 'PUBLISH_SOURCE_MISMATCH',
   'AUTO_CODE_GOVERNANCE_UNREADY',
 ]);
 const SUCCESS_CODES = Object.freeze(['N5_INSPECTION_READY', 'N5_PREVIEW_READY', 'N5_VALID', 'N5_SHOW_READY', 'N5_NOOP', 'N5_RECONCILED', 'N5_REMOVED', 'N5_DF_REGISTERED']);
@@ -82,6 +83,11 @@ function sha256(value) { return crypto.createHash('sha256').update(typeof value 
 function isSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
 function isDigest(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
 function isSafeId(value) { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value); }
+function isPacketContractId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+function isPhysicalPacketRunId(value) { return isPacketContractId(value) && value.length <= 128; }
 function isSafeLabel(value) { return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\r\n]/.test(value); }
 function isIssue(value) { return Number.isSafeInteger(value) && value >= 1; }
 function packetExactKeys(value, expected) {
@@ -102,10 +108,10 @@ function validateAuthorityPacketSource(value, repository) {
 }
 function validateAuthorityPacketProducer(value) {
   return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
-    && isSafeId(value.run)
-    && isSafeId(value.lock)
+    && isPhysicalPacketRunId(value.run)
+    && isPacketContractId(value.lock)
     && AUTHORITY_PACKET_STAGES.includes(value.stage)
-    && isSafeId(value.role);
+    && isPacketContractId(value.role);
 }
 function validateAuthorityPacketCandidate(value) {
   return value === null || packetExactKeys(value, ['pr_number', 'branch', 'base_ref', 'base_sha', 'head_sha', 'tree_sha'])
@@ -125,13 +131,13 @@ function validateAuthorityPacketCurrent(value, expected = {}) {
     || expected.parent_issue !== undefined && value.parent_issue !== expected.parent_issue
     || !isIssue(value.child_issue)
     || expected.child_issue !== undefined && value.child_issue !== expected.child_issue
-    || !isSafeId(value.lane_id)
+    || !isPacketContractId(value.lane_id)
     || !packetHumanOwner(value.human_owner)
     || !packetExactKeys(value.consumer, ['run', 'lock', 'stage', 'role', 'scope_digest'])
-    || !isSafeId(value.consumer.run)
-    || !isSafeId(value.consumer.lock)
+    || !isPacketContractId(value.consumer.run)
+    || !isPacketContractId(value.consumer.lock)
     || !AUTHORITY_PACKET_STAGES.includes(value.consumer.stage)
-    || !isSafeId(value.consumer.role)
+    || !isPacketContractId(value.consumer.role)
     || !isDigest(value.consumer.scope_digest)
     || !validateAuthorityPacketSource(value.authority, value.repository)
     || value.human_owner !== value.authority.author_login
@@ -141,17 +147,17 @@ function validateAuthorityPacketCurrent(value, expected = {}) {
   let previousDependency = '';
   for (const predecessor of value.predecessors) {
     if (!packetExactKeys(predecessor, ['packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'producer', 'candidate', 'dependency_id', 'acceptance_event_id', 'web_source', 'readback_event_id', 'store_identity_digest'])
-      || !isSafeId(predecessor.packet_id)
+      || !isPacketContractId(predecessor.packet_id)
       || !isDigest(predecessor.packet_digest)
       || !isDigest(predecessor.content_digest)
       || !isDigest(predecessor.binding_digest)
       || !validateAuthorityPacketProducer(predecessor.producer)
       || !validateAuthorityPacketCandidate(predecessor.candidate)
-      || !isSafeId(predecessor.dependency_id)
+      || !isPacketContractId(predecessor.dependency_id)
       || predecessor.dependency_id <= previousDependency
-      || !isSafeId(predecessor.acceptance_event_id)
+      || !isPacketContractId(predecessor.acceptance_event_id)
       || !validateAuthorityPacketSource(predecessor.web_source, value.repository)
-      || !isSafeId(predecessor.readback_event_id)
+      || !isPacketContractId(predecessor.readback_event_id)
       || !isDigest(predecessor.store_identity_digest)) return false;
     previousDependency = predecessor.dependency_id;
   }
@@ -369,7 +375,127 @@ function replaceManagedBlock(body, kind, nextState, options = {}) {
   const nextBody = parsed.prefix + nextManaged + parsed.suffix;
   return success('N5_VALID', { body: nextBody, prefix: parsed.prefix, suffix: parsed.suffix, outside_bytes_preserved: true, body_digest: sha256(nextBody), managed_digest: sha256(nextManaged) });
 }
-function applyBoundedUpdate(state, target, update = {}) {
+
+function verifyAuthorityPacketLifecycleTransition(state, target, update, input = {}) {
+  if (update.type !== 'set_lifecycle') return { ok: true, proof: null };
+  const found = targetRef(state, target);
+  if (!found.ok) return found;
+  const current = found.item;
+  const retiring = current.lifecycle === 'current' && update.lifecycle !== 'current'
+    && hasOwn(current, 'authority_packet_current');
+  const installing = current.lifecycle !== 'current' && update.lifecycle === 'current';
+  if (!retiring && !installing) return { ok: true, proof: null };
+  const supplied = input.current_packet_transition;
+  if (!isRecord(supplied) || !isRecord(supplied.store) || !isRecord(supplied.trusted_readers)) {
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  }
+  let receipt;
+  try { receipt = require('./toolkit-github-program-receipt.cjs'); } catch (_error) {
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  }
+  const store = supplied.store;
+  const readers = supplied.trusted_readers;
+  try {
+    receipt.assertAuthenticAuthorityPacketStore(store);
+    if (installing) {
+      if (!isRecord(supplied.consumer_intent)) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      const projection = store.buildCurrentPacketProjection(supplied.consumer_intent, readers);
+      const confirmed = store.confirmCurrentPacketProjection(projection, readers);
+      if (!isRecord(confirmed) || canonicalJson(confirmed.projection) !== canonicalJson(projection)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const admitted = store.admitSemanticGate(supplied.consumer_intent, readers);
+      receipt.assertAuthenticSemanticGateAdmission(store, admitted && admitted.admission);
+      const admissionProof = admitted.proof;
+      if (!isRecord(admissionProof) || !isRecord(admissionProof.current)
+        || admissionProof.current.projection_digest !== confirmed.projection_digest
+        || admissionProof.current.body_digest !== confirmed.body_digest
+        || `${admissionProof.current.revision}` !== `${confirmed.revision}`) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const applicability = store.semanticCompletionApplicability(admitted.admission);
+      if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const proof = Object.freeze({});
+      currentPacketTransitionProofs.set(proof, {
+        action: 'install',
+        projection: clone(confirmed.projection),
+        store,
+        admission: admitted.admission,
+        current: { projection_digest: confirmed.projection_digest, body_digest: confirmed.body_digest, revision: confirmed.revision },
+        substantive_result: supplied.substantive_result || null,
+      });
+      return { ok: true, proof };
+    }
+    receipt.assertAuthenticSemanticGateAdmission(store, supplied.admission);
+    const semanticProof = store.revalidateSemanticGate(supplied.admission);
+    const confirmed = store.confirmCurrentPacketProjection(current.authority_packet_current, readers);
+    if (!isRecord(semanticProof) || !isRecord(semanticProof.current) || !isRecord(confirmed)
+      || canonicalJson(confirmed.projection) !== canonicalJson(current.authority_packet_current)
+      || confirmed.projection_digest !== semanticProof.current.projection_digest
+      || confirmed.body_digest !== semanticProof.current.body_digest
+      || `${confirmed.revision}` !== `${semanticProof.current.revision}`) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    const applicability = store.semanticCompletionApplicability(supplied.admission);
+    if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (applicability.required) {
+      const result = supplied.substantive_result;
+      if (!isRecord(result) || !isRecord(result.store) || !isDigest(result.outcome_ref)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      store.verifySemanticCompletion(supplied.admission, result.store, result.outcome_ref);
+    }
+    const proof = Object.freeze({});
+    currentPacketTransitionProofs.set(proof, {
+      action: 'retire',
+      projection: clone(confirmed.projection),
+      store,
+      admission: supplied.admission,
+      current: { projection_digest: confirmed.projection_digest, body_digest: confirmed.body_digest, revision: confirmed.revision },
+      substantive_result: supplied.substantive_result || null,
+    });
+    return { ok: true, proof };
+  } catch (error) {
+    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
+      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
+  }
+}
+
+function revalidateAuthorityPacketLifecycleProof(proof) {
+  if (!proof || typeof proof !== 'object') return { ok: true };
+  const state = currentPacketTransitionProofs.get(proof);
+  if (!state) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  try {
+    const fresh = state.store.revalidateSemanticGate(state.admission);
+    if (!isRecord(fresh) || !isRecord(fresh.current)
+      || fresh.current.projection_digest !== state.current.projection_digest
+      || fresh.current.body_digest !== state.current.body_digest
+      || `${fresh.current.revision}` !== `${state.current.revision}`) return failure('PARENT_CONCURRENCY_CONFLICT');
+    const applicability = state.store.semanticCompletionApplicability(state.admission);
+    if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (applicability.required) {
+      const result = state.substantive_result;
+      if (!isRecord(result) || !isRecord(result.store) || !isDigest(result.outcome_ref)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      state.store.verifySemanticCompletion(state.admission, result.store, result.outcome_ref);
+    }
+    return { ok: true };
+  } catch (error) {
+    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
+      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
+  }
+}
+
+function applyBoundedUpdate(state, target, update = {}, authorizationProof = null) {
   const ownerOnly = update.type === 'set_field' && update.field === 'owner_detail' && (!target || (!target.child_id && !target.issue_number));
   const found = ownerOnly ? success('N5_VALID', { item: null, section: 'parent' }) : targetRef(state, target);
   if (!found.ok) return found;
@@ -379,16 +505,28 @@ function applyBoundedUpdate(state, target, update = {}) {
     if (update.field === 'owner_detail') {
       if (!publicSafeText(update.value)) return failure('N5_SCOPE_REJECTED');
       next.owner_detail = update.value;
-    } else if (update.field === 'authority_packet_current') {
-      if (!ref || ref.item.lifecycle !== 'current' || !validateAuthorityPacketCurrent(update.value, { repository: state.repository, parent_issue: state.parent_issue, child_issue: ref.item.issue_number })) return failure('N5_SCOPE_REJECTED');
-      ref.item.authority_packet_current = clone(update.value);
     } else if (['next_gate', 'technical_detail', 'repository_detail'].includes(update.field) && typeof update.value === 'string' && publicSafeText(update.value)) {
       ref.item[update.field] = update.value;
     } else return failure('N5_SCOPE_REJECTED');
   } else if (update.type === 'set_lifecycle') {
     if (!ref || !LIFECYCLES.includes(update.lifecycle)) return failure('N5_SCOPE_REJECTED');
+    if (!validateTracker(state).ok) return failure('N5_SCOPE_REJECTED');
+    const transition = authorizationProof && currentPacketTransitionProofs.get(authorizationProof);
+    const retiring = ref.item.lifecycle === 'current' && update.lifecycle !== 'current'
+      && hasOwn(ref.item, 'authority_packet_current');
+    const installing = ref.item.lifecycle !== 'current' && update.lifecycle === 'current';
+    if (retiring && (!transition || transition.action !== 'retire'
+      || canonicalJson(transition.projection) !== canonicalJson(ref.item.authority_packet_current))) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (installing && (!transition || transition.action !== 'install'
+      || !validateAuthorityPacketCurrent(transition.projection, {
+        repository: state.repository, parent_issue: state.parent_issue, child_issue: ref.item.issue_number
+      }))) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
     for (const section of ['current_work', 'pending_work', 'terminal']) next[section] = next[section].filter((item) => item.child_id !== ref.item.child_id);
     ref.item.lifecycle = update.lifecycle;
+    if (retiring) delete ref.item.authority_packet_current;
+    if (installing) ref.item.authority_packet_current = clone(transition.projection);
     if (update.lifecycle !== 'pending') delete ref.item.queue_order;
     if (update.lifecycle === 'current') {
       if (next.current_work.length) return failure('N5_GOVERNANCE_UNREADY');
@@ -533,10 +671,6 @@ function normalizeMutationUpdate(value, intent, target) {
   if (Object.keys(update).length === 0) return null;
   if (update.type === 'set_field') {
     if (!exactMutationKeys(update, ['type', 'field', 'value'])) return null;
-    if (update.field === 'authority_packet_current') {
-      if (!validateAuthorityPacketCurrent(update.value)) return null;
-      return { type: 'set_field', field: update.field, value: clone(update.value) };
-    }
     if (!['owner_detail', 'next_gate', 'technical_detail', 'repository_detail'].includes(update.field) || !publicSafeText(update.value)) return null;
     if (update.field !== 'owner_detail' && Object.keys(target).length === 0) return null;
     return { type: 'set_field', field: update.field, value: update.value };
@@ -1397,7 +1531,9 @@ function createRuntime(options = {}) {
       const parsed = parseManagedBlock(first.fetched.body, 'parent', { complete: first.fetched.complete !== false });
       if (!parsed.ok) return parsed;
       if (parsed.state.repository !== input.repository || parsed.state.parent_issue !== input.parent_issue) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
-      const applied = applyBoundedUpdate(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
+      let packetTransition = verifyAuthorityPacketLifecycleTransition(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update, input);
+    if (!packetTransition.ok) return packetTransition;
+    const applied = applyBoundedUpdate(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update, packetTransition.proof);
       if (!applied.ok) return applied;
       if (!applied.changed) return success('N5_NOOP', { projection: boundedProjection(parsed.state, parsed), transition_id: sha256({ repository: input.repository, parent_issue: input.parent_issue, before: parsed.body_digest }) });
       let sourceBody = first.fetched.body;
@@ -1415,7 +1551,10 @@ function createRuntime(options = {}) {
         if (moved(sourceBinding, fresh.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
         const freshParsed = parseManagedBlock(fresh.fetched.body, 'parent', { complete: fresh.fetched.complete !== false });
         if (!freshParsed.ok) return freshParsed;
-        const freshApplied = applyBoundedUpdate(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
+        const freshTransition = verifyAuthorityPacketLifecycleTransition(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update, input);
+        if (!freshTransition.ok) return freshTransition;
+        packetTransition = freshTransition;
+        const freshApplied = applyBoundedUpdate(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update, freshTransition.proof);
         if (!freshApplied.ok) return freshApplied;
         const compacted = compactTerminal(freshApplied.state, { durable_evidence: input.durable_evidence, evidence_adapter: input.evidence_adapter || state.github });
         if (!compacted.ok) return compacted;
@@ -1430,6 +1569,8 @@ function createRuntime(options = {}) {
       const preWrite = fetchParent(state.github, input);
       if (!preWrite.ok) return preWrite;
       if (moved(sourceBinding, preWrite.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
+      const packetFreshness = revalidateAuthorityPacketLifecycleProof(packetTransition.proof);
+      if (!packetFreshness.ok) return packetFreshness;
       if (typeof state.github?.updateParent !== 'function') return failure('PARENT_RECONCILIATION_INCOMPLETE');
       try { state.github.updateParent({ repository: input.repository, parent_issue: input.parent_issue, body: replaced.body, revision: preWrite.fetched.revision || null }); } catch (_error) { return failure('PARENT_RECONCILIATION_INCOMPLETE'); }
       const readback = fetchParent(state.github, input);

@@ -59,6 +59,12 @@
       "maxLength": 160,
       "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]*$"
     },
+    "physicalRunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!-)(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
     "digest": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
@@ -118,7 +124,7 @@
       "additionalProperties": false,
       "required": ["run", "lock", "stage", "role"],
       "properties": {
-        "run": { "$ref": "#/$defs/id" },
+        "run": { "$ref": "#/$defs/physicalRunId" },
         "lock": { "$ref": "#/$defs/id" },
         "stage": { "$ref": "#/$defs/stage" },
         "role": { "$ref": "#/$defs/stage" }

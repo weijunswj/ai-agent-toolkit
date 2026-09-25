@@ -251,6 +251,8 @@ const PAYLOAD_KEYS = Object.freeze([
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
+const PENDING_ALLOCATION_PREFLIGHT = Symbol('pending-allocation-preflight');
+const PENDING_ALLOCATION_COMMIT = Symbol('pending-allocation-commit');
 const ADMISSION_OWNERS = new WeakMap();
 const SEMANTIC_GATE_OWNERS = new WeakMap();
 const AUTHORITY_PACKET_STORE_OWNERS = new WeakMap();
@@ -643,6 +645,10 @@ function packetSafeContractId(value) {
   return isSafeContractId(value, 160);
 }
 
+function packetSafePhysicalLoopRunId(value) {
+  return packetSafeContractId(value) && isSafeId(value, 128);
+}
+
 function packetSortedUnique(values) {
   if (!Array.isArray(values)) return false;
   for (let index = 1; index < values.length; index += 1) {
@@ -667,7 +673,7 @@ function packetValidateSourceReference(value, code = 'GPR_PACKET_VALUE_INVALID')
 
 function packetValidateProducer(value) {
   if (!exactKeys(value, AUTHORITY_PACKET_PRODUCER_KEYS)
-    || !packetSafeContractId(value.run)
+    || !packetSafePhysicalLoopRunId(value.run)
     || !packetSafeContractId(value.lock)
     || !AUTHORITY_PACKET_STAGES.includes(value.stage)
     || value.role !== value.stage) packetFail('GPR_PACKET_VALUE_INVALID');
@@ -1331,9 +1337,10 @@ function verifyWindowsPrivateAcl(stateRoot) {
   }
   const script = [
     '$ErrorActionPreference="Stop"',
-    '$acl=Get-Acl -LiteralPath $env:GPR_ACL_PATH',
+    '$dir=[System.IO.DirectoryInfo]::new($env:GPR_ACL_PATH)',
+    '$acl=$dir.GetAccessControl()',
     '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    '$owner=(New-Object System.Security.Principal.NTAccount($acl.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value',
+    '$owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
     '$rules=@($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]) | ForEach-Object { [pscustomobject]@{ sid=$_.IdentityReference.Value; type=[string]$_.AccessControlType; rights=[string]$_.FileSystemRights } })',
     '$root=[System.IO.Path]::GetPathRoot($env:GPR_ACL_PATH)',
     'if ($root -notmatch "^[A-Za-z]:\\\\$") { throw "non-local-root" }',
@@ -2743,9 +2750,9 @@ function packetConsumerIntent(value, authority, candidate) {
   ]) || ![null, undefined].includes(result.execution_binding.semantic_run)
     && !packetSafeContractId(result.execution_binding.semantic_run)
     || ![null, undefined].includes(result.execution_binding.receipt_run_id)
-    && !packetSafeContractId(result.execution_binding.receipt_run_id)
+    && !isSafeId(result.execution_binding.receipt_run_id, 160)
     || ![null, undefined].includes(result.execution_binding.loop_run_id)
-    && !packetSafeContractId(result.execution_binding.loop_run_id)
+    && !packetSafePhysicalLoopRunId(result.execution_binding.loop_run_id)
     || !isDigest(result.execution_binding.repository_id)
     || !isDigest(result.execution_binding.authorized_ref_digest)
     || !isDigest(result.execution_binding.current_authority_digest)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
@@ -2962,6 +2969,7 @@ function packetVerifySemanticDependencies(config, readers, consumerIntent, expec
       fresh: true,
       operation,
       consumer: { candidate, scope_digest: current.consumer.scope_digest },
+      execution_binding: packetClosedClone(consumerIntent.execution_binding),
       dependency_state: predecessors.length ? 'PREDECESSORS_VERIFIED' : 'NO_PREDECESSOR',
       checks: predecessors.length
         ? { packet: 'verified', acceptance: 'verified', current: 'verified' }
@@ -3103,9 +3111,9 @@ function validateSemanticGateAdmission(value) {
   ]) || ![null, undefined].includes(normalized.execution_binding.semantic_run)
     && !packetSafeContractId(normalized.execution_binding.semantic_run)
     || ![null, undefined].includes(normalized.execution_binding.receipt_run_id)
-    && !packetSafeContractId(normalized.execution_binding.receipt_run_id)
+    && !isSafeId(normalized.execution_binding.receipt_run_id, 160)
     || ![null, undefined].includes(normalized.execution_binding.loop_run_id)
-    && !packetSafeContractId(normalized.execution_binding.loop_run_id)
+    && !packetSafePhysicalLoopRunId(normalized.execution_binding.loop_run_id)
     || !isDigest(normalized.execution_binding.repository_id)
     || !isDigest(normalized.execution_binding.authorized_ref_digest)
     || !isDigest(normalized.execution_binding.current_authority_digest)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
@@ -3334,7 +3342,8 @@ function semanticGateAssertProof(record, proof) {
   if (proof.current.projection_digest !== record.current_projection_digest
     || proof.current.body_digest !== record.current_body_digest
     || `${proof.current.revision}` !== `${record.current_revision}`
-    || canonicalSerialize(proof.predecessors) !== canonicalSerialize(record.predecessors)) {
+    || canonicalSerialize(proof.predecessors) !== canonicalSerialize(record.predecessors)
+    || canonicalSerialize(proof.execution_binding) !== canonicalSerialize(record.execution_binding)) {
     packetFail('GPR_PACKET_STALE_REPLAY');
   }
   return proof;
@@ -3418,7 +3427,13 @@ function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent
     toJSON() { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); }
   });
   SEMANTIC_GATE_OWNERS.set(token, tokenState);
-  return deepFreeze({ admission: token, proof, admission_id: record.admission_id, duplicate: !inserted });
+  return deepFreeze({
+    admission: token,
+    proof,
+    admission_id: record.admission_id,
+    execution_binding: packetClosedClone(record.execution_binding),
+    duplicate: !inserted
+  });
 }
 
 function semanticGateRevalidate(config, store, boundReaders, token, expected = {}) {
@@ -3427,7 +3442,12 @@ function semanticGateRevalidate(config, store, boundReaders, token, expected = {
   let record;
   try { record = semanticGateRecordDb(db, state.admissionId); } finally { db.close(); }
   semanticGateAssertRecordContext(record, state.consumerIntent, state.consumerKey);
-  const verification = packetVerifySemanticDependencies(config, boundReaders, state.consumerIntent, expected);
+  if (expected.execution_binding !== undefined
+    && canonicalSerialize(expected.execution_binding) !== canonicalSerialize(record.execution_binding)) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  const { execution_binding: _executionBinding, ...dependencyExpected } = expected;
+  const verification = packetVerifySemanticDependencies(config, boundReaders, state.consumerIntent, dependencyExpected);
   return semanticGateAssertProof(record, verification.proof);
 }
 
@@ -3640,7 +3660,13 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
   };
   const token = Object.freeze({ toJSON() { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); } });
   SEMANTIC_GATE_OWNERS.set(token, tokenState);
-  return deepFreeze({ admission: token, proof, admission_id: record.admission_id, recovered: true });
+  return deepFreeze({
+    admission: token,
+    proof,
+    admission_id: record.admission_id,
+    execution_binding: packetClosedClone(record.execution_binding),
+    recovered: true
+  });
 }
 
 function semanticCompletionApplicability(store, admission) {
@@ -3773,6 +3799,9 @@ function semanticCompletionEvent(config, state, outcomeRef) {
 
 function confirmSemanticCompletion(store, admission, outputStore, packetInput, producerAdmission) {
   const state = semanticGateAdmissionState(store, admission);
+  semanticGateRevalidate(state.config, store, state.readers, admission, {
+    execution_binding: state.consumerIntent.execution_binding
+  });
   const applicable = semanticCompletionApplicability(store, admission);
   if (!applicable.required) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
   const outputState = authorityPacketStoreState(outputStore);
@@ -3800,6 +3829,9 @@ function confirmSemanticCompletion(store, admission, outputStore, packetInput, p
 
 function verifySemanticCompletion(store, admission, outputStore, outcomeRef) {
   const state = semanticGateAdmissionState(store, admission);
+  semanticGateRevalidate(state.config, store, state.readers, admission, {
+    execution_binding: state.consumerIntent.execution_binding
+  });
   const applicable = semanticCompletionApplicability(store, admission);
   if (!applicable.required || !isDigest(outcomeRef)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
   const outputState = authorityPacketStoreState(outputStore);
@@ -5387,6 +5419,7 @@ function backfillAuthorityPacketWithReaders(config, readers, artifactInput) {
     packetFail('GPR_PACKET_READBACK_FAILED');
   }
   packetScreenPersistedPacket(readers, delivery.packet, packetIdentities.packet_digest);
+  const readback = packetAppendReadbackEvent(config, packetIdentities.packet_id, delivery);
   const db = openAuthorityPacketVerified(config, false, false);
   let event;
   try {
@@ -5400,7 +5433,12 @@ function backfillAuthorityPacketWithReaders(config, readers, artifactInput) {
     if (error instanceof GprError) throw error;
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { db.close(); }
-  return deepFreeze({ ...persisted, backfill_event_id: event.event_id, backfill_duplicate: event.duplicate });
+  return deepFreeze({
+    ...persisted,
+    readback_event_id: readback.event_id,
+    backfill_event_id: event.event_id,
+    backfill_duplicate: event.duplicate
+  });
 }
 
 function verifyAuthorityPacketFreshProcess(config, packetId, expectedBindings) {
@@ -6014,7 +6052,7 @@ function receiptSemanticGate(input, receiptStore) {
   if (!isRecord(intent) || !isRecord(intent.consumer) || !isRecord(execution)
     || !packetSafeContractId(intent.consumer.run)
     || execution.semantic_run !== intent.consumer.run
-    || !packetSafeContractId(execution.receipt_run_id)
+    || !isSafeId(execution.receipt_run_id, 160)
     || !packetSafeContractId(execution.loop_run_id)) {
     fail('GPR_PACKET_ADMISSION_REQUIRED');
   }
@@ -6052,6 +6090,48 @@ function receiptDeclaredConsumers(snapshot) {
     seen.add(id);
   }
   return consumers;
+}
+
+function receiptCompletionApplicability(snapshot) {
+  const values = [
+    snapshot.completion_applicability,
+    snapshot.applicability && snapshot.applicability.completion_applicability
+  ].filter((value) => value !== undefined);
+  if (values.length === 0 || values.some((value) => !isRecord(value))
+    || values.some((value) => canonicalSerialize(value) !== canonicalSerialize(values[0]))) {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  const value = values[0];
+  if (!exactKeys(value, [
+    'schema', 'scope_digest', 'candidate', 'required_consumers',
+    'retain_through_child_finality', 'retain_through_candidate_finality'
+  ]) || value.schema !== 'toolkit.github-program.semantic-completion-applicability.v1'
+    || !isDigest(value.scope_digest) || !Array.isArray(value.required_consumers)
+    || value.required_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+    || typeof value.retain_through_child_finality !== 'boolean'
+    || typeof value.retain_through_candidate_finality !== 'boolean') {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  if (value.candidate !== null) {
+    try { validateCandidate(value.candidate); } catch (_) { fail('GPR_AUTHORITY_UNVERIFIED'); }
+  }
+  const seen = new Set();
+  for (const consumer of value.required_consumers) {
+    if (!isRecord(consumer) || !exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id) || !isDigest(consumer.scope_digest)) {
+      fail('GPR_AUTHORITY_UNVERIFIED');
+    }
+    const id = `${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`;
+    if (seen.has(id)) fail('GPR_AUTHORITY_UNVERIFIED');
+    seen.add(id);
+  }
+  return deepFreeze({
+    required: value.required_consumers.length > 0
+      || value.retain_through_child_finality
+      || value.retain_through_candidate_finality,
+    applicability: deepFreeze(packetClosedClone(value))
+  });
 }
 
 function verifyReceiptSemanticBinding(gate, expected = {}) {
@@ -6094,14 +6174,19 @@ function revalidateReceiptSemanticGate(gate, expected = {}) {
 function verifyReceiptSemanticAuthority(snapshot, sessionOwner, allocation) {
   const consumers = receiptDeclaredConsumers(snapshot);
   const gate = sessionOwner.semanticGate;
-  if (consumers.length === 0 && !gate) return false;
+  if (!gate) {
+    if (consumers.length > 0) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    const completion = receiptCompletionApplicability(snapshot);
+    if (completion.required) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    return false;
+  }
   sessionOwner.semanticRequired = true;
-  if (!gate) fail('GPR_PACKET_ADMISSION_REQUIRED');
   verifyReceiptSemanticBinding(gate, {
     receiptStoreInstanceId: sessionOwner.storeInstanceId,
     lock_id: allocation && allocation.lock_id || sessionOwner.lockId,
     run_id: allocation && allocation.run_id || sessionOwner.runId
   });
+  semanticCompletionApplicability(gate.store, gate.admission);
   if (consumers.length === 0) return true;
   const binding = snapshot.semantic_binding;
   const requiredForConsumer = consumers.filter((item) => item.class === gate.intent.consumer.stage);
@@ -6215,8 +6300,10 @@ function createProgrammeReceiptStore(options) {
     instanceId: randomId('store'),
     config,
     get databasePath() { return config.databasePath; },
-    allocateRun(input) {
+    allocateRun(input, internalMode = null) {
       programmeReceiptStoreState(this);
+      if (internalMode !== null && internalMode !== PENDING_ALLOCATION_PREFLIGHT
+        && internalMode !== PENDING_ALLOCATION_COMMIT) fail('GPR_ALLOCATION_INVALID');
       if (isRecord(input) && ('lease' in input || 'fence_id' in input || 'fence_sequence' in input || 'lease_id' in input)) fail('GPR_CALLER_FENCE_FORBIDDEN');
       const hasSemanticGate = isRecord(input) && Object.hasOwn(input, 'semantic_gate');
       const allowedKeys = ['lock', 'authority', 'start', 'candidate', 'lease_ms', ...(hasSemanticGate ? ['semantic_gate'] : [])];
@@ -6232,6 +6319,20 @@ function createProgrammeReceiptStore(options) {
       const authority = validateAuthority(input.authority);
       const start = validateStart(input.start);
       if (input.candidate !== undefined && input.candidate !== null) fail('GPR_FAKE_START_CANDIDATE');
+      if (!semanticGate && internalMode !== PENDING_ALLOCATION_COMMIT) {
+        const session = deepFreeze({ status: 'PENDING_AUTHORITY_PREFLIGHT' });
+        SESSION_OWNERS.set(session, {
+          storeInstanceId: this.instanceId,
+          ownerInstanceId: null,
+          processId: process.pid,
+          allocationId: null,
+          runId: null,
+          lockId: input.lock,
+          semanticGate: null,
+          pendingInput: deepFreeze(clone(input)),
+        });
+        return session;
+      }
       const ownerInstanceId = randomId('owner');
       const db = openVerified(config);
       let allocation;
@@ -6323,7 +6424,21 @@ function createProgrammeReceiptStore(options) {
     },
     async startAllocatedRun(session, readers) {
       programmeReceiptStoreState(this);
-      const state = sessionState(store, session);
+      let state = sessionState(store, session);
+      let pendingPreflightComplete = false;
+      if (state.pendingInput) {
+        const pendingAuthority = validateAuthority(state.pendingInput.authority);
+        const pendingStart = validateStart(state.pendingInput.start);
+        const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+        verifyAuthoritySnapshot(pendingAuthority, authoritySnapshot);
+        verifyReceiptSemanticAuthority(authoritySnapshot, state, null);
+        const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
+        if (canonicalSerialize(observedStart) !== canonicalSerialize(pendingStart)) fail('GPR_START_CHANGED');
+        revalidateReceiptSemanticGate(state.semanticGate);
+        const persistedSession = store.allocateRun(state.pendingInput, PENDING_ALLOCATION_COMMIT);
+        state = sessionState(store, persistedSession);
+        pendingPreflightComplete = true;
+      }
       const db = openVerified(config);
       let allocation;
       try {
@@ -6334,12 +6449,14 @@ function createProgrammeReceiptStore(options) {
       }
       const authority = JSON.parse(allocation.authority_json);
       const start = JSON.parse(allocation.start_json);
-      const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
-      verifyAuthoritySnapshot(authority, authoritySnapshot);
-      verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
-      const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
-      if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
-      revalidateReceiptSemanticGate(state.semanticGate);
+      if (!pendingPreflightComplete) {
+        const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+        verifyAuthoritySnapshot(authority, authoritySnapshot);
+        verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
+        const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
+        if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
+        revalidateReceiptSemanticGate(state.semanticGate);
+      }
       let receipt;
       let expectedVerification;
       const writeDb = openVerified(config);
@@ -6378,7 +6495,9 @@ function createProgrammeReceiptStore(options) {
     },
     async startRun(input, readers) {
       programmeReceiptStoreState(this);
-      const allocated = store.allocateRun(input);
+      const trustedPreflightRequired = isRecord(input) && input.semantic_gate === undefined;
+      const allocated = store.allocateRun(input,
+        trustedPreflightRequired ? PENDING_ALLOCATION_PREFLIGHT : null);
       return store.startAllocatedRun(allocated, readers);
     },
     appendReceipt(session, input) {
@@ -6386,6 +6505,7 @@ function createProgrammeReceiptStore(options) {
       const owner = sessionState(store, session);
       if (owner.semanticRequired === true && !owner.semanticGate) fail('GPR_PACKET_ADMISSION_REQUIRED');
       revalidateReceiptSemanticGate(owner.semanticGate);
+      if (!owner.startVerificationDigest) fail('GPR_PACKET_ADMISSION_REQUIRED');
       return appendReceiptInternal(store, session, input);
     },
     interruptRun(session, input = {}) {

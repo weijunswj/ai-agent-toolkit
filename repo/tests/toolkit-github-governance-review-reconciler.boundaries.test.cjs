@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
+const packetSupport = require('./toolkit-authority-packet-test-support.cjs');
 const root = path.resolve(__dirname, '..', '..');
 
 function authorityPacket(overrides = {}) {
@@ -60,6 +62,28 @@ function trackerState(packet = authorityPacket()) {
   };
 }
 
+function governedRuntime(initialBody) {
+  let current = initialBody;
+  let revision = 0;
+  const github = {
+    getParent: () => ({ body: current, complete: true, revision: `r${revision}` }),
+    updateParent: ({ body: next }) => { current = next; revision += 1; return { accepted: true }; },
+    reconcileRelated: () => ({ ok: true }),
+  };
+  const identity = {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id: '1'.repeat(64), canonical_remote: 'https://github.com/weijunswj/ai-agent-toolkit.git' }),
+    getRepositoryStatus: () => ({ repository_id: '1'.repeat(64), canonical_remote: 'https://github.com/weijunswj/ai-agent-toolkit.git', capabilities: { 'repository.governance': { state: 'enabled' } } }),
+  };
+  const authority_broker = { authorize: ({ operation }) => ({
+    decision: 'allow', operation_type: operation.type,
+    operation_digest: a1.operationDigest(operation), target_digest: a1.targetDigest(operation),
+  }) };
+  return {
+    runtime: n5.createRuntime({ repository: 'weijunswj/ai-agent-toolkit', a2: identity, authority_broker, github }),
+    github,
+  };
+}
+
 test('A1 is sole mutation and ticket authority', () => { const b = n5.authorityBoundary(); assert.equal(b.a1.sole_mutation_authority, true); assert.equal(b.a1.sole_opaque_ticket_authority, true); assert.equal(b.a1.public_ticket_mint, false); assert.equal(b.n5.authority_or_finality_token, false); });
 test('A2 is consent/state only', () => { const b = n5.authorityBoundary(); assert.equal(b.a2.consent_only, true); assert.equal(b.a2.widens_task_or_delegation, false); assert.equal(b.a2.grants_review_mutation, false); assert.equal(b.a2.grants_finality, false); });
 test('A3 remains exactly five contracts without finality', () => { const b = n5.authorityBoundary(); assert.equal(b.a3.durable_contract_count, 5); assert.equal(b.a3.finality_authority, false); assert.equal(b.a3.additional_contract, false); });
@@ -92,9 +116,11 @@ test('bounded CURRENT authority packet validates, round-trips, updates and expos
   assert.equal(Object.prototype.hasOwnProperty.call(packet, 'findings'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(packet, 'history'), false);
 
-  const updated = n5.applyBoundedUpdate(trackerState(null), { child_id: 'child-435' }, { type: 'set_field', field: 'authority_packet_current', value: packet });
-  assert.equal(updated.ok, true, updated.code);
-  assert.deepEqual(updated.state.current_work[0].authority_packet_current, packet);
+  const directInstall = n5.applyBoundedUpdate(trackerState(null), { child_id: 'child-435' }, { type: 'set_field', field: 'authority_packet_current', value: packet });
+  assert.equal(directInstall.code, 'N5_SCOPE_REJECTED');
+  const directRetire = n5.applyBoundedUpdate(state, { child_id: 'child-435' }, { type: 'set_lifecycle', lifecycle: 'pending' });
+  assert.equal(directRetire.code, 'N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  assert.deepEqual(state.current_work[0].authority_packet_current, packet);
   const absent = n5.parseManagedBlock(n5.renderManagedBlock('parent', trackerState(null)), 'parent');
   assert.equal(absent.ok, true);
   assert.equal(Object.prototype.hasOwnProperty.call(absent.state.current_work[0], 'authority_packet_current'), false);
@@ -111,4 +137,44 @@ test('CURRENT packet rejects unknown, recursive and non-current shapes', () => {
   pending.current_work = [];
   pending.pending_work = [{ child_id: 'child-435', issue_number: 435, lifecycle: 'pending', queue_order: 1, authority_packet_current: packet }];
   assert.equal(n5.validateTracker(pending).ok, false);
+});
+
+test('N5 retires and installs CURRENT packets only through fresh semantic gate transitions', () => {
+  const gate = packetSupport.semanticGate('n5-lifecycle');
+  const projection = gate.store.buildCurrentPacketProjection(gate.consumer_intent, gate.trusted_readers);
+  const admission = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers).admission;
+
+  const current = trackerState(projection);
+  current.parent_issue = 435;
+  const currentBody = n5.renderManagedBlock('parent', current);
+  const retireRuntime = governedRuntime(currentBody);
+  const retired = retireRuntime.runtime.reconcile({
+    repository: current.repository,
+    parent_issue: current.parent_issue,
+    target: { child_id: 'child-435' },
+    update: { type: 'set_lifecycle', lifecycle: 'pending' },
+    accepted_preview: true,
+    current_packet_transition: { store: gate.store, trusted_readers: gate.trusted_readers, admission },
+  });
+  assert.equal(retired.code, 'N5_RECONCILED', JSON.stringify(retired));
+  assert.equal(retireRuntime.github.getParent().body.includes('"authority_packet_current"'), false);
+  assert.equal(retired.readback.target_state.pending_work[0].lifecycle, 'pending');
+
+  const pending = trackerState(null);
+  const installGate = packetSupport.semanticGate('n5-lifecycle-install');
+  const installProjection = installGate.store.buildCurrentPacketProjection(installGate.consumer_intent, installGate.trusted_readers);
+  pending.parent_issue = 435;
+  pending.current_work = [];
+  pending.pending_work = [{ child_id: 'child-435', issue_number: 435, lifecycle: 'pending', queue_order: 1, objective: 'N5 governed child' }];
+  const installRuntime = governedRuntime(n5.renderManagedBlock('parent', pending));
+  const installed = installRuntime.runtime.reconcile({
+    repository: pending.repository,
+    parent_issue: pending.parent_issue,
+    target: { child_id: 'child-435' },
+    update: { type: 'set_lifecycle', lifecycle: 'current' },
+    accepted_preview: true,
+    current_packet_transition: { store: installGate.store, trusted_readers: installGate.trusted_readers, consumer_intent: installGate.consumer_intent },
+  });
+  assert.equal(installed.code, 'N5_RECONCILED', JSON.stringify(installed));
+  assert.deepEqual(installed.readback.target_state.current_work[0].authority_packet_current, installProjection);
 });

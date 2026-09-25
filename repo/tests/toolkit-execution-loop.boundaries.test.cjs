@@ -275,6 +275,16 @@ test('restart release can recover only through the receipt-owned semantic admiss
   const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: evidence.repository_id, authorized_ref_digest: evidence.authorized_ref_digest, run_id: evidence.run_id });
   const gate = semanticGate('restart');
+  gate.consumer_intent = {
+    ...gate.consumer_intent,
+    execution_binding: {
+      ...gate.consumer_intent.execution_binding,
+      loop_run_id: evidence.run_id,
+      repository_id: evidence.repository_id,
+      authorized_ref_digest: evidence.authorized_ref_digest,
+      current_authority_digest: evidence.current_authority_digest,
+    },
+  };
   gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
   const restartDb = new DatabaseSync(gate.store.databasePath, { readOnly: true });
   let consumerKey;
@@ -284,7 +294,6 @@ test('restart release can recover only through the receipt-owned semantic admiss
     state_root: stateRoot,
     repository_id: evidence.repository_id,
     authorized_ref_digest: evidence.authorized_ref_digest,
-    run_id: evidence.run_id,
     lease_id: lease.lease_id,
     terminal_state: terminalEvidence.terminal.execution_state,
     workspace_disposition: terminalEvidence.terminal.workspace_disposition,

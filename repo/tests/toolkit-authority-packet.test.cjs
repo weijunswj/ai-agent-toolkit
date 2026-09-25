@@ -75,6 +75,20 @@ test('authority packet JSON contract is closed and accepts the complete fixture'
   assert.equal(validate({ ...value, bindings: { ...value.bindings, human_owner: 'owner with spaces' } }), false);
 });
 
+test('authority packet producer RUN uses the physical Loop intersection', { skip: !Ajv2020 }, () => {
+  const { validate } = schemaValidator();
+  const packetValue = packetFixture('producer-run-domain');
+  packetValue.bindings.producer.run = 'r'.repeat(128);
+  assert.equal(runtime.validateAuthorityPacket(packetValue).bindings.producer.run, 'r'.repeat(128));
+  assert.equal(validate(packetValue), true);
+  for (const run of ['r'.repeat(129), 'producer/run', 'producer\\run', '-leading', 'bad..run']) {
+    const malformed = structuredClone(packetValue);
+    malformed.bindings.producer.run = run;
+    assertCode(() => runtime.validateAuthorityPacket(malformed), 'GPR_PACKET_VALUE_INVALID');
+    assert.equal(validate(malformed), false, run);
+  }
+});
+
 test('authority packet validation rejects noncanonical, sparse, accessor, custom-value, and privacy inputs', () => {
   const value = packetFixture();
   assertCode(() => runtime.validateAuthorityPacket(JSON.stringify(value)), 'GPR_PACKET_VALUE_INVALID');
@@ -317,7 +331,18 @@ function v2ReceiptInputs(seed) {
     authority,
     start,
     readers: {
-      readAuthority: async () => ({ authority, later_controlling_comments: [] }),
+      readAuthority: async () => ({
+        authority,
+        later_controlling_comments: [],
+        completion_applicability: {
+          schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+          scope_digest: authority.scope_digest,
+          candidate: null,
+          required_consumers: [],
+          retain_through_child_finality: false,
+          retain_through_candidate_finality: false,
+        },
+      }),
       readStart: async () => start,
     },
   };
@@ -355,34 +380,15 @@ test('populated v2 receipt APIs remain readable after v4 migration and failed fr
   assert.deepEqual(heldLegacy.readReceiptChain(heldSession.run_id).map((item) => item.receipt_type), ['RUN_STARTED', 'RUN_INTERRUPTED']);
 });
 
-test('migration refuses an unexpired unreleased legacy allocation', () => {
+test('migration refuses an unexpired unreleased legacy allocation', async () => {
   const root = support.stateRoot('authority-packet-quiescence-');
   const storeOptions = support.options(root);
   const legacy = runtime.createProgrammeReceiptStore(storeOptions);
-  legacy.allocateRun({
-    lock: 'legacy-lock',
-    authority: {
-      child_comment_id: 1,
-      parent_comment_id: 2,
-      node_id: 'IC_legacy',
-      author_login: 'weijunswj',
-      author_association: 'OWNER',
-      body_digest: 'a'.repeat(64),
-      updated_at: '2026-09-22T10:00:00.000Z',
-      update_identity_digest: 'b'.repeat(64),
-      scope_digest: 'c'.repeat(64)
-    },
-    start: {
-      base_sha: '1'.repeat(40),
-      head_sha: '2'.repeat(40),
-      tree_sha: '3'.repeat(40),
-      status_digest: 'd'.repeat(64),
-      clean_worktree: true,
-      ref: { detached: true, name: null }
-    },
-    candidate: null,
-    lease_ms: 60000
-  });
+  const inputs = v2ReceiptInputs('quiescence');
+  await legacy.startRun({
+    lock: 'legacy-lock', authority: inputs.authority, start: inputs.start,
+    candidate: null, lease_ms: 60000,
+  }, inputs.readers);
   assertCode(() => runtime.planAuthorityPacketMigration(storeOptions), 'GPR_PACKET_MIGRATION_NOT_QUIESCENT');
 });
 
@@ -404,6 +410,19 @@ test('backfill requires a complete trusted source and records the original produ
   const store = runtime.initialiseAuthorityPacketStore(storeOptions, readerSet);
   const result = store.backfillAuthorityPacket(packetValue);
   assert.equal(result.backfill_duplicate, false);
+  assert.equal(result.readback_event_id.length, 64);
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  let custodyEvents;
+  try {
+    custodyEvents = db.prepare(
+      'SELECT event_id, sequence, event_type, prior_event_id FROM authority_packet_events WHERE packet_id = ? ORDER BY sequence'
+    ).all(result.packet_id);
+  } finally { db.close(); }
+  assert.deepEqual(custodyEvents.map((event) => event.event_type), ['READBACK_VERIFIED', 'BACKFILL_AUTHORISED']);
+  assert.equal(custodyEvents[0].event_id, result.readback_event_id);
+  assert.equal(custodyEvents[1].event_id, result.backfill_event_id);
+  assert.equal(custodyEvents[1].sequence, custodyEvents[0].sequence + 1);
+  assert.equal(custodyEvents[1].prior_event_id, custodyEvents[0].event_id);
   assert.equal(store.readAuthorityPacket(result.packet_id, packetValue.bindings).bindings.producer.run, 'run-backfill');
   const failedStore = runtime.initialiseAuthorityPacketStore(support.options(support.stateRoot('authority-packet-backfill-fail-')), support.readers(packetValue));
   assertCode(() => failedStore.backfillAuthorityPacket(packetValue), 'GPR_PACKET_LEGACY_RERUN_REQUIRED');

@@ -508,12 +508,30 @@ test('receipt-produced CURRENT passes AJV and real N5, v5, and assurance consume
   const admitted = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
   const assuranceContext = assurance.bindReceiptAdmission(gate.store, admitted.admission);
   assert.equal(assurance.evaluateInvalidation({ event: 'SUCCESSOR_CANDIDATE_HEAD' }, assuranceContext).g4_invalidated, true);
+
+  const maxContractId = structuredClone(current);
+  maxContractId.consumer.run = 'r'.repeat(160);
+  assert.equal(runtime.validateAuthorityPacketCurrent(maxContractId).consumer.run, 'r'.repeat(160));
+  assert.equal(reconciler.validateAuthorityPacketCurrent(maxContractId), true);
+  assert.equal(programme.validateAuthorityPacketCurrent(maxContractId), true);
+  const tooLongContractId = structuredClone(current);
+  tooLongContractId.consumer.run = 'r'.repeat(161);
+  assert.throws(() => runtime.validateAuthorityPacketCurrent(tooLongContractId),
+    (error) => error && error.code === 'GPR_PACKET_CURRENT_UNVERIFIED');
+  assert.equal(reconciler.validateAuthorityPacketCurrent(tooLongContractId), false);
+  assert.equal(programme.validateAuthorityPacketCurrent(tooLongContractId), false);
+  const tooLongProducerRun = structuredClone(current);
+  tooLongProducerRun.predecessors[0].producer.run = 'p'.repeat(129);
+  assert.throws(() => runtime.validateAuthorityPacketCurrent(tooLongProducerRun),
+    (error) => error && error.code === 'GPR_PACKET_VALUE_INVALID');
+  assert.equal(reconciler.validateAuthorityPacketCurrent(tooLongProducerRun), false);
+  assert.equal(programme.validateAuthorityPacketCurrent(tooLongProducerRun), false);
 });
 
 test('v2 start and mutation bind semantic, receipt, and Loop RUN identities while ordinary v2 remains compatible', async () => {
   const gate = support.semanticGate('receipt-semantic-binding');
   const semanticRun = gate.consumer_intent.consumer.run;
-  const receiptRun = 'receipt-run072-bound';
+  const receiptRun = 'receipt/run-072-bound';
   const loopRun = gate.consumer_intent.execution_binding.loop_run_id;
   gate.consumer_intent.execution_binding.semantic_run = semanticRun;
   gate.consumer_intent.execution_binding.receipt_run_id = receiptRun;
@@ -564,7 +582,16 @@ test('v2 start and mutation bind semantic, receipt, and Loop RUN identities whil
   const ordinary = runtime.createProgrammeReceiptStore(support.options(ordinaryRoot));
   const ordinaryAuthority = { ...v2Authority, node_id: 'IC_run072_ordinary' };
   const ordinaryStarted = await ordinary.startRun({ lock: 'ordinary-lock', authority: ordinaryAuthority, start, candidate: null, lease_ms: 60000 }, {
-    readAuthority: async () => ({ authority: ordinaryAuthority, later_controlling_comments: [] }),
+    readAuthority: async () => ({ authority: ordinaryAuthority,
+      completion_applicability: {
+        schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+        scope_digest: ordinaryAuthority.scope_digest,
+        candidate: null,
+        required_consumers: [],
+        retain_through_child_finality: false,
+        retain_through_candidate_finality: false
+      },
+      later_controlling_comments: [] }),
     readStart: async () => start,
   });
   assert.equal(ordinaryStarted.started, true);
@@ -573,7 +600,16 @@ test('v2 start and mutation bind semantic, receipt, and Loop RUN identities whil
     const missingStore = runtime.createProgrammeReceiptStore(support.options(support.stateRoot(`run072-v2-missing-${mode}-`)));
     const missingAuthority = { ...v2Authority, node_id: `IC_missing_${mode.replace(/[^A-Za-z0-9]/g, '_')}` };
     const missingReaders = {
-      readAuthority: async () => ({ authority: missingAuthority, required_consumers: required, semantic_binding: observedBinding, later_controlling_comments: [] }),
+      readAuthority: async () => ({ authority: missingAuthority, required_consumers: required, semantic_binding: observedBinding,
+        completion_applicability: {
+          schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+          scope_digest: missingAuthority.scope_digest,
+          candidate: null,
+          required_consumers: [],
+          retain_through_child_finality: false,
+          retain_through_candidate_finality: false
+        },
+        later_controlling_comments: [] }),
       readStart: async () => start,
     };
     if (mode === 'startRun') {
@@ -954,20 +990,78 @@ test('oracle requires the full case identity set and rejects false assertions an
   };
   await assert.rejects(
     support.executeAuthorityPacketOracleCase(acceptanceCase, falseAssertionHandlers),
-    /ORACLE_ASSERTION_FAILED/
+    /ORACLE_CALLER_ASSERTION_FORBIDDEN/
   );
 
   const mismatchedEffectHandlers = {
-    [key]: async (item, { record }) => {
+    [key]: async (item) => {
       const context = support.oracleContext(item.id);
       context.store.bindWebPacketAcceptance(context.persisted.packet_id, context.readerSet);
       const call = await support.invokeOracleSurface(item, 'authorityPacketStore', context.store, item.surface, [context.persisted.packet_id, context.readerSet]);
-      record('named-boundary-called', !call.error, call.error ? call.error.code : 'ACCEPTED_DUPLICATE');
       return { production_surface_receipts: [call.receipt] };
     },
   };
   await assert.rejects(
     support.executeAuthorityPacketOracleCase(acceptanceCase, mismatchedEffectHandlers),
     /ORACLE_EFFECT_MISMATCH/
+  );
+});
+
+test('Run-082 F5 proves the exact durable acceptance event and rejects a suppressed insert', async () => {
+  const acceptanceCase = support.ORACLE_MANDATORY_CASES.find((item) => item.requirement_id === 'A05'
+    && item.expected.positive_control === true);
+  const evidence = await support.executeAuthorityPacketOracleCase(acceptanceCase);
+  assert.equal(evidence.actual_effects.readback_verified, true);
+  assert.equal(evidence.actual_effects.acceptance_event_verified, true);
+  assert.equal(evidence.actual_effects.web_acceptance_events_delta, 1);
+  assert.equal(evidence.actual_effects.readback_events_delta, 1);
+
+  const suppressedCase = support.ORACLE_MANDATORY_CASES.find((item) => item.requirement_id === 'C09'
+    && item.expected.positive_control === true);
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  DatabaseSync.prototype.prepare = function (sql, ...args) {
+    const statement = Reflect.apply(originalPrepare, this, [sql, ...args]);
+    if (sql.trim() !== 'INSERT INTO authority_packet_events VALUES (?, ?, ?, ?, ?, ?, ?)') return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property === 'run') return (...values) => values[5] === 'WEB_ACCEPTANCE_BOUND'
+          ? { changes: 0, lastInsertRowid: 0 }
+          : target.run(...values);
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
+  try {
+    await assert.rejects(
+      support.executeAuthorityPacketOracleCase(suppressedCase),
+      /ORACLE_EFFECT_MISMATCH/
+    );
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+  }
+});
+
+test('Run-082 F4 keeps an earlier failed required call sticky when a later call succeeds', async () => {
+  const generated = compiler.compileGateContract(JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'))).generated_cases;
+  const positive = generated.find((item) => item.requirement_id === 'D01' && item.expected.positive_control === true);
+  const key = support.oracleCaseIdentity(positive);
+  const handlers = {
+    [key]: async (item) => {
+      const invalid = support.packet({ seed: 'run082-d01-invalid' });
+      delete invalid.body.decision;
+      const failed = await support.invokeOracleSurface(item, 'runtime', runtime, 'validateAuthorityPacket', [invalid]);
+      const valid = support.packet({ seed: 'run082-d01-valid' });
+      const succeeded = await support.invokeOracleSurface(item, 'runtime', runtime, 'validateAuthorityPacket', [valid]);
+      return {
+        production_surface_receipts: [succeeded.receipt],
+        positive_control_case_id: item.id,
+        assertion_trace: [{ label: 'caller-hidden-failure', passed: true, actual: failed.error ? failed.error.code : 'ACCEPT' }],
+      };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(positive, handlers),
+    /ORACLE_REQUIRED_CALL_FAILED|ORACLE_CALL_SEQUENCE_MISMATCH/
   );
 });

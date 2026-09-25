@@ -827,6 +827,13 @@ function isSafeId(value, max = 256) {
     && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value)
     && !value.includes('..');
 }
+function isPacketContractId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+function isPhysicalPacketRunId(value) {
+  return typeof value === 'string' && value.length <= 128 && isPacketContractId(value) && isSafeId(value, 128);
+}
 function isSafeRevision(value) {
   return typeof value === 'string'
     && value.length > 0
@@ -852,7 +859,7 @@ function validateAuthorityPacketSource(value, repository) {
     && isTimestamp(value.updated_at)
     && isDigest(value.body_digest);
 }
-function validateAuthorityPacketProducer(value) {
+function validateAuthorityPacketProducerBroad(value) {
   return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
     && isSafeId(value.run)
     && isSafeId(value.lock)
@@ -868,7 +875,7 @@ function validateAuthorityPacketCandidate(value) {
       && isSha(value.head_sha)
       && isSha(value.tree_sha));
 }
-function validateAuthorityPacketCurrent(value, expected = {}) {
+function validateHistoricalAuthorityPacketCurrent(value, expected = {}) {
   if (!packetExactKeys(value, ['schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'consumer', 'authority', 'candidate', 'predecessors'])
     || value.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA
     || value.repository !== REPOSITORY
@@ -897,7 +904,7 @@ function validateAuthorityPacketCurrent(value, expected = {}) {
       || !isDigest(predecessor.packet_digest)
       || !isDigest(predecessor.content_digest)
       || !isDigest(predecessor.binding_digest)
-      || !validateAuthorityPacketProducer(predecessor.producer)
+      || !validateAuthorityPacketProducerBroad(predecessor.producer)
       || !validateAuthorityPacketCandidate(predecessor.candidate)
       || !isSafeId(predecessor.dependency_id)
       || predecessor.dependency_id <= previousDependency
@@ -908,6 +915,28 @@ function validateAuthorityPacketCurrent(value, expected = {}) {
     previousDependency = predecessor.dependency_id;
   }
   try { return Buffer.byteLength(canonicalSerialize(value), 'utf8') <= AUTHORITY_PACKET_CURRENT_MAX_BYTES; } catch (_error) { return false; }
+}
+function validateAuthorityPacketProducer(value) {
+  return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
+    && isPhysicalPacketRunId(value.run)
+    && isPacketContractId(value.lock)
+    && AUTHORITY_PACKET_STAGES.includes(value.stage)
+    && isPacketContractId(value.role);
+}
+function validateAuthorityPacketCurrent(value, expected = {}) {
+  if (!validateHistoricalAuthorityPacketCurrent(value, expected)
+    || !isPacketContractId(value.lane_id)
+    || !isPacketContractId(value.consumer.run)
+    || !isPacketContractId(value.consumer.lock)
+    || !isPacketContractId(value.consumer.role)) return false;
+  for (const predecessor of value.predecessors) {
+    if (!isPacketContractId(predecessor.packet_id)
+      || !validateAuthorityPacketProducer(predecessor.producer)
+      || !isPacketContractId(predecessor.dependency_id)
+      || !isPacketContractId(predecessor.acceptance_event_id)
+      || !isPacketContractId(predecessor.readback_event_id)) return false;
+  }
+  return true;
 }
 function isStringArray(value, max = 4096) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length <= max && !/[\r\n]/.test(item));
@@ -1216,7 +1245,7 @@ function validateChild(value) {
     && typeof value.summary === 'string'
     && typeof value.title === 'string'
     && (!Object.prototype.hasOwnProperty.call(value, 'authority_packet_current')
-      || value.lifecycle === 'CURRENT' && validateAuthorityPacketCurrent(value.authority_packet_current, { repository: REPOSITORY, parent_issue: PARENT_ISSUE, child_issue: value.issue }));
+      || value.lifecycle === 'CURRENT' && validateHistoricalAuthorityPacketCurrent(value.authority_packet_current, { repository: REPOSITORY, parent_issue: PARENT_ISSUE, child_issue: value.issue }));
 }
 function validateParent(value) {
   return isRecord(value)
@@ -1561,7 +1590,10 @@ function projectionPayload(state, kind) {
     delete payload.accepted_pr;
     delete payload.pr_379_github_state;
   }
-  if (Object.prototype.hasOwnProperty.call(child, 'authority_packet_current')) payload.authority_packet_current = clone(child.authority_packet_current);
+  if (child.lifecycle === 'CURRENT' && Object.prototype.hasOwnProperty.call(child, 'authority_packet_current')
+    && validateAuthorityPacketCurrent(child.authority_packet_current, { repository: state.repository, parent_issue: state.parent.issue, child_issue: child.issue })) {
+    payload.authority_packet_current = clone(child.authority_packet_current);
+  }
   return payload;
 }
 function projectionEnvelope(state, kind) {
@@ -4187,6 +4219,12 @@ function h2ValidateChild(value, legacy = false) {
     || !h2StringArray(value.done_when) || !Array.isArray(value.epochs) || !value.epochs.every(h2ValidateEpoch)
     || !h2ValidateFinality(value.finality) || !Array.isArray(value.pr_registry)
     || !value.pr_registry.every((item) => h2ValidateRegistry(item, legacy))) return false;
+  if (h2Own(value, 'authority_packet_current')
+    && (value.lifecycle !== 'CURRENT' || !validateHistoricalAuthorityPacketCurrent(value.authority_packet_current, {
+      repository: value.authority_packet_current.repository,
+      parent_issue: value.authority_packet_current.parent_issue,
+      child_issue: value.issue,
+    }))) return false;
   if (h2Own(value, 'dependencies') && (!Array.isArray(value.dependencies) || !value.dependencies.every(h2Issue))) return false;
   if (h2Own(value, 'holds') && !Array.isArray(value.holds)) return false;
   if (h2Own(value, 'deliverables') && !h2StringArray(value.deliverables)) return false;
@@ -4500,7 +4538,9 @@ function h2ProjectionState(state, history) {
       finality: current.finality.state,
       summary: current.summary,
       action: childAction.action,
-      ...(h2Own(current, 'authority_packet_current') ? { authority_packet_current: h2Clone(current.authority_packet_current) } : {}),
+      ...(current.lifecycle === 'CURRENT' && h2Own(current, 'authority_packet_current')
+        && validateAuthorityPacketCurrent(current.authority_packet_current, { repository: state.repository, parent_issue: state.parent.issue, child_issue: current.issue })
+        ? { authority_packet_current: h2Clone(current.authority_packet_current) } : {}),
     } : null,
     children,
     completed_work: children.filter((child) => child.lifecycle === 'COMPLETED'),
@@ -4548,7 +4588,9 @@ function h2ProjectionChild(state, history, childIssue) {
     epochs,
     pr_history: rows,
     next_action: { action: action.action, ref: action.ref, text: action.text },
-    ...(h2Own(child, 'authority_packet_current') ? { authority_packet_current: h2Clone(child.authority_packet_current) } : {}),
+    ...(child.lifecycle === 'CURRENT' && h2Own(child, 'authority_packet_current')
+      && validateAuthorityPacketCurrent(child.authority_packet_current, { repository: state.repository, parent_issue: state.parent.issue, child_issue: child.issue })
+      ? { authority_packet_current: h2Clone(child.authority_packet_current) } : {}),
   };
 }
 function h2Line(type, value, field) {

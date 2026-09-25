@@ -145,6 +145,31 @@ function isSafeId(value, allowSlash = false) {
   return /^[A-Za-z0-9._:/-]+$/.test(value);
 }
 
+function isSafePacketContractId(value, max = 160) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function isSafeReceiptRunId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^[A-Za-z0-9._:/-]+$/.test(value) && !value.startsWith('-') && !value.includes('..');
+}
+
+function validateExecutionBinding(binding, run) {
+  const keys = ['semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'];
+  if (!isRecord(binding) || !exactKeys(binding, keys)
+    || ![null, undefined].includes(binding.semantic_run) && !isSafePacketContractId(binding.semantic_run)
+    || ![null, undefined].includes(binding.receipt_run_id) && !isSafeReceiptRunId(binding.receipt_run_id)
+    || ![null, undefined].includes(binding.loop_run_id) && !isSafePacketContractId(binding.loop_run_id)
+    || !isDigest(binding.repository_id) || !isDigest(binding.authorized_ref_digest)
+    || !isDigest(binding.current_authority_digest)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  if (run && (binding.loop_run_id !== run.run_id
+    || binding.repository_id !== run.repository_id
+    || binding.authorized_ref_digest !== run.authorized_ref_digest
+    || binding.current_authority_digest !== run.current_authority_digest)) fail('GPR_PACKET_BINDING_MISMATCH');
+  return deepFreeze(clone(binding));
+}
+
 function isSafeRelativePath(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > LIMITS.relativePathLength) return false;
   if (value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:/.test(value) || value.startsWith('-')) return false;
@@ -242,16 +267,22 @@ function semanticGateOptions(options = {}, requireIntent = true) {
 
 function boundConsumerIntent(consumerIntent, run) {
   const binding = isRecord(consumerIntent.execution_binding) ? consumerIntent.execution_binding : {};
-  return {
+  if (!isRecord(consumerIntent.consumer) || !isSafePacketContractId(consumerIntent.consumer.run)
+    || binding.semantic_run !== undefined && binding.semantic_run !== null
+      && binding.semantic_run !== consumerIntent.consumer.run) fail('GPR_PACKET_BINDING_MISMATCH');
+  const intent = {
     ...consumerIntent,
     execution_binding: {
       ...binding,
+      semantic_run: consumerIntent.consumer.run,
       loop_run_id: run.run_id,
       repository_id: run.repository_id,
       authorized_ref_digest: run.authorized_ref_digest,
       current_authority_digest: run.current_authority_digest,
     },
   };
+  validateExecutionBinding(intent.execution_binding, run);
+  return intent;
 }
 
 function bindSemanticContext(run, context) {
@@ -270,22 +301,24 @@ function admitSemanticContext(options, run) {
   const result = receiptCall(gate.store, 'admitSemanticGate', [consumerIntent, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
   const receipt = loadReceiptRuntime();
   try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  const executionBinding = validateExecutionBinding(result.execution_binding || consumerIntent.execution_binding, run);
   const context = Object.freeze({
     store: gate.store,
     admission: admissionToken(result),
     trusted_readers: gate.trustedReaders,
     consumer_intent: consumerIntent,
-    execution_binding: consumerIntent.execution_binding,
+    execution_binding: executionBinding,
   });
   bindSemanticContext(run, context);
   return context;
 }
 
-function revalidateSemanticContext(context) {
+function revalidateSemanticContext(context, run) {
   if (!context || !isRecord(context.store)) fail('GPR_PACKET_ADMISSION_REQUIRED');
   const receipt = loadReceiptRuntime();
   try { receipt.assertAuthenticSemanticGateAdmission(context.store, context.admission); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
-  return receiptCall(context.store, 'revalidateSemanticGate', [context.admission], 'GPR_PACKET_ADMISSION_REQUIRED');
+  const executionBinding = validateExecutionBinding(context.execution_binding, run);
+  return receiptCall(context.store, 'revalidateSemanticGate', [context.admission, { execution_binding: executionBinding }], 'GPR_PACKET_ADMISSION_REQUIRED');
 }
 
 function recoverSemanticContext(options, run) {
@@ -294,12 +327,13 @@ function recoverSemanticContext(options, run) {
   const result = receiptCall(gate.store, 'recoverSemanticGateAdmission', [gate.consumerIdentity, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
   const receipt = loadReceiptRuntime();
   try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  const executionBinding = validateExecutionBinding(result.execution_binding, run);
   const context = Object.freeze({
     store: gate.store,
     admission: admissionToken(result),
     trusted_readers: gate.trustedReaders,
     consumer_intent: null,
-    execution_binding: null,
+    execution_binding: executionBinding,
   });
   if (run) bindSemanticContext(run, context);
   return context;
@@ -316,8 +350,40 @@ function revalidateRunSemanticContext(run, options = {}) {
   const context = semanticContextForRun(run)
     || (isRecord(options.semantic_gate || options.semanticGate) ? recoverSemanticContext({ ...options, run }, run) : null);
   if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
-  revalidateSemanticContext(context);
+  revalidateSemanticContext(context, run);
   return context;
+}
+
+function terminalApplicability(context) {
+  const applicability = receiptCall(
+    context.store,
+    'semanticCompletionApplicability',
+    [context.admission],
+    'GPR_PACKET_AUTHORITY_UNVERIFIED',
+    true
+  );
+  if (!isRecord(applicability) || typeof applicability.required !== 'boolean'
+    || !isRecord(applicability.applicability)) fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  return applicability;
+}
+
+function validateTerminalPreconditions(run, terminalPacket, context, options = {}, verifyCustody = true) {
+  revalidateSemanticContext(context, run);
+  const applicability = terminalApplicability(context);
+  if (applicability.required && verifyCustody) {
+    const supplied = options.substantive_result;
+    const outputStore = isRecord(supplied) && isRecord(supplied.store)
+      ? supplied.store : context.completion_custody && context.completion_custody.store;
+    if (!outputStore || !isDigest(terminalPacket.evidence_digest)) fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+    receiptCall(
+      context.store,
+      'verifySemanticCompletion',
+      [context.admission, outputStore, terminalPacket.evidence_digest],
+      'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+      true
+    );
+  }
+  return applicability;
 }
 
 function assertPrivacySafe(value, location = 'record', seen = new Set()) {
@@ -705,30 +771,27 @@ function transitionRun(run, nextState, options = {}) {
   if (!EXECUTION_STATES.includes(nextState) || !TRANSITIONS[current.execution_state].includes(nextState)) fail('INVALID_STATE_TRANSITION', { from: current.execution_state, to: nextState });
   const suppliedGate = isRecord(options.semantic_gate) ? options.semantic_gate
     : isRecord(options.semanticGate) ? options.semanticGate : null;
+  const admissionState = ['admitted', 'running'].includes(nextState);
+  const terminalState = ['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'].includes(nextState);
+  const gateIntent = suppliedGate && (suppliedGate.consumer_intent || suppliedGate.consumerIntent);
+  const canRecover = suppliedGate && isRecord(suppliedGate.consumer_identity || suppliedGate.consumerIdentity);
   const context = suppliedContext || semanticContextForRun(current)
-    || (['admitted', 'running'].includes(nextState) && suppliedGate
-      ? (isRecord(suppliedGate.consumer_intent || suppliedGate.consumerIntent)
+    || (admissionState && suppliedGate
+      ? (isRecord(gateIntent)
         ? admitSemanticContext({ ...options, run: current }, current)
-        : recoverSemanticContext({ ...options, run: current }, current)) : null);
+        : canRecover ? recoverSemanticContext({ ...options, run: current }, current) : null)
+      : terminalState && canRecover && !isRecord(gateIntent)
+        ? recoverSemanticContext({ ...options, run: current }, current) : null);
   if (['admitted', 'running'].includes(nextState)) {
     if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
-    revalidateSemanticContext(context);
+    revalidateSemanticContext(context, current);
   }
-  if (['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'].includes(nextState)) {
+  if (terminalState) {
     if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
     if (!options.terminal_packet) fail('TERMINAL_PACKET_REQUIRED');
     const terminalPacket = validateTerminalPacket(options.terminal_packet);
     if (terminalPacket.run_id !== current.run_id || TERMINAL_OUTCOMES[terminalPacket.outcome] !== nextState) fail('TERMINAL_RUN_MISMATCH');
-    const applicability = receiptCall(context.store, 'semanticCompletionApplicability', [context.admission], 'GPR_PACKET_AUTHORITY_UNVERIFIED', true);
-    if (!isRecord(applicability) || typeof applicability.required !== 'boolean') fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-    if (applicability.required) {
-      const result = options.substantive_result;
-      const terminal = options.terminal_packet;
-      if (!isRecord(result) || !isRecord(result.store) || !isRecord(terminal) || !isDigest(terminal.evidence_digest)) {
-        fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
-      }
-      receiptCall(context.store, 'verifySemanticCompletion', [context.admission, result.store, terminal.evidence_digest], 'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED', true);
-    }
+    validateTerminalPreconditions(current, terminalPacket, context, options, true);
     options = {
       ...options,
       terminal_packet_digest: digestValue(terminalPacket),
@@ -1055,15 +1118,7 @@ function completeRun(options = {}) {
     fail('INVALID_STATE_TRANSITION');
   }
   const semanticContext = revalidateRunSemanticContext(run, options);
-  const completionApplicability = receiptCall(
-    semanticContext.store,
-    'semanticCompletionApplicability',
-    [semanticContext.admission],
-    'GPR_PACKET_AUTHORITY_UNVERIFIED',
-    true
-  );
-  if (!isRecord(completionApplicability) || typeof completionApplicability.required !== 'boolean'
-    || !isRecord(completionApplicability.applicability)) fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const completionApplicability = validateTerminalPreconditions(run, packet, semanticContext, options, false);
   let completionCustody = null;
   if (completionApplicability.required) {
     const result = options.substantive_result;
@@ -1090,10 +1145,18 @@ function completeRun(options = {}) {
     substantive_result: options.substantive_result,
   });
   if (options.state_root !== undefined) {
-    const persisted = persistGovernedCompletion({ state_root: options.state_root, previous_run: run, terminal_run: terminalRun, terminal_packet: packet });
-    bindSemanticContext(persisted, completionCustody
+    const completionContext = completionCustody
       ? Object.freeze({ ...semanticContext, completion_custody: Object.freeze({ store: options.substantive_result.store, outcome_ref: completionCustody.outcome_ref }) })
-      : semanticContext);
+      : semanticContext;
+    const persisted = persistGovernedCompletion({
+      state_root: options.state_root,
+      previous_run: run,
+      terminal_run: terminalRun,
+      terminal_packet: packet,
+      semantic_context: completionContext,
+      substantive_result: options.substantive_result
+    });
+    bindSemanticContext(persisted, completionContext);
     return persisted;
   }
   if (completionCustody) bindSemanticContext(terminalRun, Object.freeze({
@@ -1405,7 +1468,10 @@ function persistGovernedCompletion(options = {}) {
   const workspaceReceipt = readDurableWorkspaceReceipt(base);
   if (!workspaceReceipt || !isDigest(previousRun.workspace_receipt_digest)
     || digestValue(workspaceReceipt) !== previousRun.workspace_receipt_digest) fail('DURABLE_WORKSPACE_EVIDENCE_REQUIRED');
+  if (!options.semantic_context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  validateTerminalPreconditions(previousRun, packet, options.semantic_context, options, true);
   writeOrAssertDurableArtifact(base, 'terminal-packet', packet);
+  validateTerminalPreconditions(previousRun, packet, options.semantic_context, options, true);
   return writeDurableRunRecord({ ...base, run: terminalRun, expected_digest: digestValue(previousRun) });
 }
 function mutationLeasePath(stateRoot, repositoryId, authorizedRefDigest) {
@@ -1424,17 +1490,37 @@ function validateMutationLeaseRecord(record) {
   return deepFreeze(clone(record));
 }
 
-function readMutationLease(options = {}) {
+function mutationLeaseBytes(record) {
+  return Buffer.from(JSON.stringify({
+    kind: record.kind,
+    lease_id: record.lease_id,
+    repository_id: record.repository_id,
+    authorized_ref_digest: record.authorized_ref_digest,
+    run_id: record.run_id,
+    acquired_at: record.acquired_at,
+    expires_at: record.expires_at,
+  }), 'utf8');
+}
+
+function readMutationLeaseEntry(options = {}) {
   if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest)) fail('LEASE_BINDING_INVALID');
   const root = durableStateRoot(options.state_root);
   ensureStateRoot(root);
-  let record;
-  try {
-    record = JSON.parse(fs.readFileSync(mutationLeasePath(root, options.repository_id, options.authorized_ref_digest), 'utf8'));
-  } catch (_error) {
-    fail('LEASE_REQUIRED');
-  }
-  return validateMutationLeaseRecord(record);
+  const leasePath = mutationLeasePath(root, options.repository_id, options.authorized_ref_digest);
+  let stat;
+  try { stat = fs.lstatSync(leasePath); } catch (_error) { fail('LEASE_REQUIRED'); }
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('LEASE_RECORD_INVALID');
+  let bytes;
+  try { bytes = fs.readFileSync(leasePath); } catch (_error) { fail('LEASE_REQUIRED'); }
+  let parsed;
+  try { parsed = JSON.parse(bytes.toString('utf8')); } catch (_error) { fail('LEASE_RECORD_INVALID'); }
+  const record = validateMutationLeaseRecord(parsed);
+  if (!mutationLeaseBytes(record).equals(bytes)) fail('LEASE_RECORD_INVALID');
+  return { record, bytes, leasePath };
+}
+
+function readMutationLease(options = {}) {
+  return readMutationLeaseEntry(options).record;
 }
 
 function verifyOwnedMutationLease(options = {}) {
@@ -1468,35 +1554,35 @@ function acquireMutationLease(options = {}) {
   };
   assertPrivacySafe(lease);
   try {
-    fs.writeFileSync(leasePath, JSON.stringify(lease), { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(leasePath, mutationLeaseBytes(lease), { flag: 'wx', mode: 0o600 });
   } catch (_error) {
     fail('CONFLICTING_RUN');
   }
   let readback;
-  try {
-    readback = JSON.parse(fs.readFileSync(leasePath, 'utf8'));
-  } catch (_error) {
-    fail('LEASE_READBACK_FAILED');
-  }
-  if (digestValue(readback) !== digestValue(lease)) fail('LEASE_READBACK_FAILED');
+  try { readback = readMutationLeaseEntry(options); } catch (_error) { fail('LEASE_READBACK_FAILED'); }
+  if (!readback.bytes.equals(mutationLeaseBytes(lease)) || digestValue(readback.record) !== digestValue(lease)) fail('LEASE_READBACK_FAILED');
   return deepFreeze(lease);
 }
 
 function releaseMutationLease(options = {}) {
-  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id) || !isSafeId(options.lease_id)) fail('LEASE_BINDING_INVALID');
-  const leasePath = mutationLeasePath(options.state_root, options.repository_id, options.authorized_ref_digest);
-  const lease = readMutationLease(options);
-  if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.lease_id)
+    || options.run_id !== undefined && !isSafeId(options.run_id)) fail('LEASE_BINDING_INVALID');
+  const leaseEntry = readMutationLeaseEntry(options);
+  const lease = leaseEntry.record;
+  const runId = options.run_id === undefined ? lease.run_id : options.run_id;
+  if (lease.lease_id !== options.lease_id || lease.run_id !== runId) fail('LEASE_TOKEN_MISMATCH');
   let durableRun;
   let workspaceReceipt;
   let terminalPacket;
   try {
-    durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
-    workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
-    terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+    durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
+    workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
+    terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
   } catch (_error) {
     fail('LEASE_RELEASE_UNSAFE');
   }
+  if (!durableRun || durableRun.run_id !== lease.run_id || durableRun.repository_id !== lease.repository_id
+    || durableRun.authorized_ref_digest !== lease.authorized_ref_digest) fail('LEASE_RELEASE_UNSAFE');
   if (!durableRun || !['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(durableRun.execution_state) || !isDigest(durableRun.workspace_receipt_digest) || !isDigest(durableRun.terminal_packet_digest) || durableRun.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
   if (!workspaceReceipt || !terminalPacket) fail('LEASE_RELEASE_UNSAFE');
   if (workspaceReceipt.run_id !== durableRun.run_id || workspaceReceipt.repository_id !== durableRun.repository_id || workspaceReceipt.authorized_ref_digest !== durableRun.authorized_ref_digest || terminalPacket.run_id !== durableRun.run_id) fail('LEASE_RELEASE_UNSAFE');
@@ -1504,34 +1590,23 @@ function releaseMutationLease(options = {}) {
   const expectedOutcome = { 'terminal-success': 'success', 'terminal-failure': 'failure', 'terminal-blocked': 'blocked' }[durableRun.execution_state];
   if (terminalPacket.outcome !== expectedOutcome || terminalPacket.publication_state !== durableRun.publication_state || terminalPacket.workspace_disposition !== durableRun.workspace_disposition) fail('LEASE_RELEASE_UNSAFE');
   if ((hasOwn(options, 'terminal_state') && options.terminal_state !== durableRun.execution_state) || (hasOwn(options, 'workspace_disposition') && options.workspace_disposition !== durableRun.workspace_disposition) || (hasOwn(options, 'publication_state') && options.publication_state !== durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
-  if (options.run && (options.run.run_id !== options.run_id || options.run.repository_id !== options.repository_id || options.run.authorized_ref_digest !== options.authorized_ref_digest)) fail('LEASE_BINDING_MISMATCH');
-  const semanticContext = requireSemanticContext({ ...options, run: options.run }, true);
-  revalidateSemanticContext(semanticContext);
-  const completionApplicability = receiptCall(
-    semanticContext.store,
-    'semanticCompletionApplicability',
-    [semanticContext.admission],
-    'GPR_PACKET_AUTHORITY_UNVERIFIED',
-    true
-  );
-  if (!isRecord(completionApplicability) || typeof completionApplicability.required !== 'boolean') {
-    fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  let targetRun = durableRun;
+  if (options.run !== undefined) {
+    let suppliedRun;
+    try { suppliedRun = validateRunReceipt(options.run); } catch (_error) { fail('GPR_PACKET_BINDING_MISMATCH'); }
+    if (canonicalSerialize(suppliedRun) !== canonicalSerialize(durableRun)) fail('GPR_PACKET_BINDING_MISMATCH');
+    targetRun = options.run;
   }
-  if (completionApplicability.required) {
-    const supplied = options.substantive_result;
-    const outputStore = isRecord(supplied) && isRecord(supplied.store)
-      ? supplied.store : semanticContext.completion_custody && semanticContext.completion_custody.store;
-    if (!outputStore || !isDigest(terminalPacket.evidence_digest)) fail('LEASE_RELEASE_UNSAFE');
-    receiptCall(
-      semanticContext.store,
-      'verifySemanticCompletion',
-      [semanticContext.admission, outputStore, terminalPacket.evidence_digest],
-      'LEASE_RELEASE_UNSAFE',
-      true
-    );
-  }
+  const semanticContext = semanticContextForRun(targetRun)
+    || (isRecord(options.semantic_gate || options.semanticGate)
+      ? recoverSemanticContext({ ...options, run: durableRun }, durableRun) : null);
+  if (!semanticContext) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  validateTerminalPreconditions(durableRun, terminalPacket, semanticContext, options, true);
+  const finalLeaseEntry = readMutationLeaseEntry(options);
+  if (!finalLeaseEntry.bytes.equals(leaseEntry.bytes) || finalLeaseEntry.record.lease_id !== options.lease_id
+    || finalLeaseEntry.record.run_id !== durableRun.run_id) fail('LEASE_TOKEN_MISMATCH');
   try {
-    fs.unlinkSync(leasePath);
+    fs.unlinkSync(leaseEntry.leasePath);
   } catch (_error) {
     fail('LEASE_RELEASE_FAILED');
   }

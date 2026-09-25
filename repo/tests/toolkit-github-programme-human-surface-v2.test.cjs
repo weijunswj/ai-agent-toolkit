@@ -809,6 +809,81 @@ test('human-v2 preserves the bounded CURRENT packet in parent and child projecti
   assert.deepEqual(childRead.projection.authority_packet_current, packet);
 });
 
+test('human-v2 preserves historical wide CURRENT packet bytes while omitting them from strict projections', () => {
+  const base = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(base.ok, true, JSON.stringify(base));
+  const packet = authorityPacketCurrent();
+  packet.consumer.run = 'c'.repeat(161);
+  packet.predecessors[0].packet_id = 'p'.repeat(161);
+  packet.predecessors[0].dependency_id = 'd'.repeat(161);
+  packet.predecessors[0].acceptance_event_id = 'a'.repeat(161);
+  packet.predecessors[0].readback_event_id = 'b'.repeat(161);
+  packet.predecessors[0].producer.run = 'r'.repeat(129);
+  const rewritten = rewriteParentCarrier(base, (carrier) => {
+    const state = carrier.canonical.state;
+    state.design_lock = 'DL-C1-AUTHORITY-PACKET-TEST-001';
+    delete state.recovery;
+    const child = state.children.find((item) => item.issue === 359);
+    child.holds = [];
+    child.finality = { authority_ref: null, state: 'UNMERGED' };
+    child.authority_packet_current = packet;
+    const laneCandidate = clone(child.pr_registry.find((item) => item.pr === 379).candidate);
+    state.active_lanes = [{
+      candidate: { ...laneCandidate, epoch_id: 'E3', pr: 379 },
+      child_issue: 359,
+      epoch_id: 'E3',
+      gate: 'G3',
+      gate_result: null,
+      gate_state: 'ACTIVE',
+      lane_id: 'lane-g3-leaf-d',
+      work_claims: [{ mode: 'READ_ONLY', operation: 'INSPECT', resource: 'current-child' }],
+    }];
+    state.concurrency_authority.permitted_child_issues = [359];
+    carrier.canonical.digest = runtime.digestValue(state);
+    const projection = clone(base.projection);
+    projection.current_child.action = 'CONTINUE_ACTIVE_GATE';
+    projection.next_action = {
+      action: 'CONTINUE_CURRENT_CHILD',
+      ref: 'lane-g3-leaf-d',
+      text: 'Continue the already admitted active gate; no new lane is created.',
+    };
+    carrier.projection.digest = runtime.digestValue(projection);
+  });
+  const rewrittenLines = rewritten.split('\n');
+  const oldText = 'The next epoch is pending separate authority\\; no activation is inferred\\.';
+  const newText = 'Continue the already admitted active gate\\; no new lane is created\\.';
+  for (let index = 0; index < rewrittenLines.length; index += 1) {
+    rewrittenLines[index] = rewrittenLines[index]
+      .replace('- CONTINUE\\_CURRENT\\_CHILD\\: ' + oldText, '- CONTINUE\\_CURRENT\\_CHILD\\: ' + newText)
+      .replace('- ' + oldText, '- ' + newText);
+  }
+  const carrierIndex = rewrittenLines.length - 2;
+  const carrierMarker = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ';
+  const carrier = JSON.parse(Buffer.from(rewrittenLines[carrierIndex].slice(carrierMarker.length, -4), 'base64url').toString('utf8'));
+  carrier.public_prose_sha256 = runtime.sha256Text(rewrittenLines.slice(1, -2).join('\n'));
+  rewrittenLines[carrierIndex] = carrierMarker + Buffer.from(runtime.canonicalSerialize(carrier), 'utf8').toString('base64url') + ' -->';
+  const historicalBody = rewrittenLines.join('\n');
+  const parent = publicRead(historicalBody, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(parent.ok, true, JSON.stringify(parent));
+  const retained = parent.canonical_state.children.find((item) => item.issue === 359).authority_packet_current;
+  assert.deepEqual(retained, packet);
+  assert.equal(runtime.canonicalSerialize(retained), runtime.canonicalSerialize(packet));
+  assert.equal(Object.hasOwn(parent.projection.current_child, 'authority_packet_current'), false);
+
+  const child = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(historicalBody) },
+    target: { kind: 'child', issue: 359 },
+  });
+  assert.equal(child.ok, true, JSON.stringify(child));
+  assert.equal(Object.hasOwn(child.projection, 'authority_packet_current'), false);
+  const childRead = publicRead(child.body, { kind: 'child', repository: REPOSITORY, issue: 359, parent_issue: 240, parent_read: completeRead(historicalBody) });
+  assert.equal(childRead.ok, true, JSON.stringify(childRead));
+  assert.equal(Object.hasOwn(childRead.projection, 'authority_packet_current'), false);
+});
+
 test('complete-read false records fail at COMPLETE_READ while malformed types fail at INPUT', () => {
   const body = LEGACY_STAGE_B.parent;
   const incomplete = { ...completeRead(body), complete: false };

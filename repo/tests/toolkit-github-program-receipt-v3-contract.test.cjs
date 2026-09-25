@@ -119,7 +119,16 @@ function start() {
 function readers(expectedAuthority, expectedStart) {
   return {
     now: '2026-09-02T01:10:00.000Z',
-    readAuthority: async () => ({ authority: structuredClone(expectedAuthority), later_controlling_comments: [] }),
+    readAuthority: async () => ({ authority: structuredClone(expectedAuthority),
+      completion_applicability: {
+        schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+        scope_digest: expectedAuthority.scope_digest,
+        candidate: null,
+        required_consumers: [],
+        retain_through_child_finality: false,
+        retain_through_candidate_finality: false
+      },
+      later_controlling_comments: [] }),
     readStart: async () => structuredClone(expectedStart)
   };
 }

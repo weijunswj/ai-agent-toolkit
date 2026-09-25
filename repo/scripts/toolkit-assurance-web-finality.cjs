@@ -77,6 +77,34 @@ function isSafeId(value) {
     && !value.includes('://');
 }
 
+function isPacketContractId(value, max = 160) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function isReceiptRunId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^[A-Za-z0-9._:/-]+$/.test(value) && !value.startsWith('-') && !value.includes('..');
+}
+
+function validReceiptExecutionBinding(value) {
+  return exactKeys(value, [
+    'semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'
+  ])
+    && (value.semantic_run === null || isPacketContractId(value.semantic_run))
+    && (value.receipt_run_id === null || isReceiptRunId(value.receipt_run_id))
+    && (value.loop_run_id === null || isPacketContractId(value.loop_run_id, 128))
+    && isDigest(value.repository_id)
+    && isDigest(value.authorized_ref_digest)
+    && isDigest(value.current_authority_digest);
+}
+
+function sameReceiptExecutionBinding(left, right) {
+  const keys = ['semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'];
+  return validReceiptExecutionBinding(left) && validReceiptExecutionBinding(right)
+    && keys.every((key) => left[key] === right[key]);
+}
+
 function isSafeLabel(value) {
   return typeof value === 'string'
     && value.length > 0
@@ -249,12 +277,20 @@ function validReceiptPredecessor(value) {
 
 function validateReceiptDependencyProof(value, expected = {}) {
   const failures = [];
-  if (!exactKeys(value, ['schema', 'fresh', 'operation', 'consumer', 'dependency_state', 'checks', 'current', 'predecessors'])) {
+  if (!isRecord(value)) {
     return ['receipt-dependency-proof-shape-invalid'];
+  }
+  if (!exactKeys(value, ['schema', 'fresh', 'operation', 'consumer', 'execution_binding', 'dependency_state', 'checks', 'current', 'predecessors'])) {
+    failures.push('receipt-dependency-proof-shape-invalid');
   }
   if (value.schema !== RECEIPT_DEPENDENCY_SCHEMA) failures.push('receipt-dependency-schema-invalid');
   if (value.fresh !== true) failures.push('receipt-dependency-stale');
   if (value.operation !== expected.operation) failures.push('receipt-consumer-operation-conflict');
+  if (!validReceiptExecutionBinding(value.execution_binding)
+    || Object.prototype.hasOwnProperty.call(expected, 'execution_binding')
+      && !sameReceiptExecutionBinding(value.execution_binding, expected.execution_binding)) {
+    failures.push('receipt-execution-binding-invalid');
+  }
 
   if (!exactKeys(value.consumer, ['candidate', 'scope_digest'])
     || (value.consumer.candidate !== null && !validReceiptConsumerCandidate(value.consumer.candidate))
@@ -322,6 +358,16 @@ function bindReceiptAdmission(receiptStore, admission) {
   } catch (_) {
     throw new TypeError('RECEIPT_ADMISSION_INVALID');
   }
+  let executionBinding;
+  try {
+    const proof = receiptStore.revalidateSemanticGate(admission, {});
+    if (!proof || typeof proof.then === 'function' || !validReceiptExecutionBinding(proof.execution_binding)) {
+      throw new TypeError('RECEIPT_ADMISSION_INVALID');
+    }
+    executionBinding = Object.freeze({ ...proof.execution_binding });
+  } catch (_error) {
+    throw new TypeError('RECEIPT_ADMISSION_INVALID');
+  }
   const context = {};
   Object.defineProperty(context, 'toJSON', {
     value: () => { throw new TypeError('RECEIPT_CONTEXT_NONSERIALISABLE'); },
@@ -330,6 +376,7 @@ function bindReceiptAdmission(receiptStore, admission) {
   RECEIPT_CONTEXT_OWNERS.set(context, {
     store: receiptStore,
     admission,
+    executionBinding,
     revalidateSemanticGate: receiptStore.revalidateSemanticGate.bind(receiptStore),
   });
   return context;
@@ -339,16 +386,19 @@ function receiptDependencyFailures(context, expected) {
   if (!context) return ['receipt-admission-required'];
   const owner = RECEIPT_CONTEXT_OWNERS.get(context);
   if (!owner) return ['receipt-admission-untrusted'];
+  if (Object.prototype.hasOwnProperty.call(expected, 'execution_binding')
+    && !sameReceiptExecutionBinding(expected.execution_binding, owner.executionBinding)) return ['GPR_PACKET_BINDING_MISMATCH'];
+  const boundExpected = { ...expected, execution_binding: owner.executionBinding };
   let proof;
   try {
-    proof = owner.revalidateSemanticGate(owner.admission, Object.freeze({ ...expected }));
+    proof = owner.revalidateSemanticGate(owner.admission, Object.freeze(boundExpected));
   } catch (error) {
     if (error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)) return [error.code];
     return ['receipt-dependency-unverified'];
   }
   try {
     if (proof && typeof proof.then === 'function') return ['receipt-dependency-async'];
-    return validateReceiptDependencyProof(proof, expected);
+    return validateReceiptDependencyProof(proof, boundExpected);
   } catch (_error) {
     return ['receipt-dependency-proof-invalid'];
   }
@@ -628,7 +678,8 @@ function evaluateNoByteReviewDisposition(input = {}, receiptContext) {
 function evaluateInvalidation(input = {}, receiptContext) {
   if (Object.hasOwn(input, 'semantic_run')) {
     const owner = receiptContext && RECEIPT_CONTEXT_OWNERS.get(receiptContext);
-    if (!owner || !isSafeId(input.semantic_run)) return fail('GPR_PACKET_ADMISSION_REQUIRED', { invalidated: false });
+    if (!owner || !isPacketContractId(input.semantic_run)) return fail('GPR_PACKET_ADMISSION_REQUIRED', { invalidated: false });
+    if (owner.executionBinding.semantic_run !== input.semantic_run) return fail('GPR_PACKET_BINDING_MISMATCH', { invalidated: false });
     if (input.repository !== undefined
       && (!isRecord(owner.store.namespace) || owner.store.namespace.repository !== input.repository)) {
       return fail('GPR_PACKET_BINDING_MISMATCH', { invalidated: false });
