@@ -176,6 +176,8 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 
 G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
 
+A repository validator may itself require immutable commit identity or a clean committed working tree. When G2/G3 explicitly binds `COMMIT_REQUIRED_VALIDATION=YES`, run all meaningful checks that do not require commit identity first; after they pass and candidate contents/scope are frozen, create exactly one immutable local candidate commit under the existing allowance and bind its commit/tree/parent. The candidate is then byte-stable for that episode: do not amend, rebase, reconstruct or replace it. Run the identity/clean-tree-dependent and remaining floor against that exact commit, and publish only after the complete floor passes. The local commit is construction/custody, not a separate G4 lifecycle or publication event. Candidate failure returns through normal correction/re-entry; environment/transport/evidence failure preserves the exact commit.
+
 For stateful/async work, G3 PASS includes an invariant-to-regression map: every material G2 invariant names the executable regression or production-boundary check that proves it, including the relevant transition/interruption case. Aggregate suite-green status cannot substitute for this mapping.
 
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.

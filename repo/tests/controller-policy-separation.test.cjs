@@ -361,6 +361,20 @@ test('complex G3 work gets conditional adversarial pre-publication validation wi
   assert.match(architecture, /It is not another gate/);
 });
 
+test('commit-required validation sequencing freezes one local candidate before clean-head validators without publishing it', () => {
+  assert.match(controller, /Commit-required validation sequencing/);
+  assert.match(controller, /accepted validator materially requires immutable commit identity or a clean committed working tree/);
+  assert.match(controller, /all meaningful non-commit-dependent checks are green and candidate contents\/mutation scope are frozen/);
+  assert.match(controller, /Bind the exact commit\/tree\/parent/);
+  assert.match(controller, /prohibit source amendment, amend\/rebase\/reconstruction or replacement candidate inside that episode/);
+  assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
+  assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
+  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
+  assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
+  assert.match(architecture, /create exactly one immutable local candidate commit under the existing allowance/);
+  assert.match(architecture, /run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
+});
+
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
   assert.match(controller, /G3 in-gate convergence/);
   assert.match(controller, /3 normal materially distinct substantive recovery attempts and an absolute ceiling of 5/);
