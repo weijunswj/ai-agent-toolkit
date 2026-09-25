@@ -95,29 +95,35 @@ A technically necessary replacement PR may preserve the same child only when ide
 
 Governance stage semantics are provider/model agnostic.
 
-- `G0-A` = bounded problem framing; leaf-only, read-only and conditional for genuinely simple/well-specified work.
-- `G0-B` = bounded evidence acquisition; the subagent-capable phase of the single non-gating G0 stage.
+- `G_FRAME` = optional bounded problem framing; leaf-only, read-only and non-gating, used only when the causal/evidence question is not already sufficiently framed.
+- `G0` = bounded evidence acquisition/investigation; non-gating and subagent-capable for bounded read-only discovery.
 - `G1` = root convergence plus architecture/authority.
 - `G2` = adversarial executable implementation-contract closure.
 - `G3` = implementation/validation.
 - `G4` = fresh isolated exact-head independent assurance.
-- `LOOP`, `RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. RECONVERGENCE is read-only and non-gating.
+- `LOOP`, `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. G1_RECONVERGENCE is read-only and non-gating.
 
-Only G0-B and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0-B fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
+Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
 Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Stack selection and physical harness selection are orthogonal. Root model/route selection is an out-of-band User/Web/controller/harness act performed before root launch/adoption; the root semantic worker never verifies or attests its own model identity and cannot HOLD because runtime model metadata is absent. A genuine root-route handoff is therefore a pre-launch orchestration decision when the selected route cannot actually be established, not a worker self-check. One logical lane may hand off between qualified harnesses without changing semantic gate identity, RUN/Lock, ownership, correction accounting or candidate identity. Service treatment/speed is non-authoritative observed metadata. A route or harness change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
 
-Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0-B/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. When G0-B/G3 launches a semantic child, the parent/launcher resolves the concrete child route from the selected stack and supplies the model/reasoning configuration to the harness before child creation. Root and child semantic prompts do not own model names, and spawned children never self-attest after launch. Semantic executors consume bounded stage/task authority and the smallest relevant repository instruction surface; the full Controller is control-plane source material and is not a default worker prerequisite.
+Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. When G0/G3 launches a semantic child, the parent/launcher resolves the concrete child route from the selected stack and supplies the model/reasoning configuration to the harness before child creation. Root and child semantic prompts do not own model names, and spawned children never self-attest after launch. Semantic executors consume bounded stage/task authority and the smallest relevant repository instruction surface; the full Controller is control-plane source material and is not a default worker prerequisite.
+
+## Governance cutover for active lineages
+
+A still-required lineage may outlive the Controller revision under which it began. At the next safe terminal/reconciliation boundary, compatible stricter current governance is adopted prospectively for the continuing lineage. This preserves the same Delivery Child/root-family/continuation identity, consumed budgets/attempts, historical candidates/evidence and original gate outcomes. In-flight workers are never silently rewritten, and newer governance does not itself reopen accepted architecture or implementation contract. A genuine semantic conflict returns to the responsible G1/G2/Owner boundary.
+
+Before a disposable execution surface is destroyed after material construction or validation, any candidate/evidence required by a later gate or controller must already be durably retrievable or deterministically reproducible and bound to the continuing RUN/Lock/candidate identity. Teardown cannot be used as an implicit evidence-retention policy.
 
 ## Gate lifecycle
 
 ### G0 — Problem framing and evidence acquisition
 
-G0 is non-gating and may use two chronological phases.
+G_FRAME is an optional pre-G0 read-only framing role, not a phase that must run for every investigation. It frames uncertain/diagnostic work when User/Web/current evidence has not already supplied sufficient causal framing: known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and the stopping condition for sufficient evidence. G_FRAME is leaf-only and grants no G1 architecture authority.
 
-G0-A frames uncertain/diagnostic work: known facts, contradictions, material unknowns, competing hypotheses, discriminating evidence questions and the stopping condition for sufficient evidence. G0-A is leaf-only. A separate G0-A model invocation may be omitted or compacted for genuinely simple/well-specified work.
+G0 is the non-gating evidence-acquisition/investigation stage. It consumes an accepted G_FRAME packet or sufficiently specific framing already supplied by User/Web/current evidence and may fan out bounded depth-1 read-only leaves for genuinely separable questions. Leaves collect evidence rather than independently redesigning the solution. G0 may be omitted when existing evidence is already sufficient for the next required decision.
 
-G0-B acquires the evidence requested by the framing packet and may fan out bounded depth-1 read-only leaves for genuinely separable questions. Leaves collect evidence rather than independently redesigning the solution. G0-B may be omitted when existing evidence is already sufficient.
+When a known-good qualified path succeeds while the real production path fails, G_FRAME first records the material differential between them, including the known-good upper-bound positive control and the real production entry point. G0 then prefers one bounded differential experiment that starts from the known-good state and varies/minimises the material differences systematically while exercising that production entry point. Serial symptom-by-symptom probes are a fallback only when an earlier boundary genuinely prevents deeper observation in the same safe experiment. Incidental environment/check/transport failures do not become the new root model when a deterministic authorised carrier can still answer the original differential question.
 
 ### G1 — Root convergence, architecture and authority
 
@@ -128,6 +134,7 @@ For material uncertain work, G1 establishes:
 - material competing hypotheses and their disposition;
 - governing invariant and trust/authority ordering;
 - materially equivalent surfaces inside the defect/risk class;
+- where a logical identity controls lifecycle/coordination and maps to a consequential external resource, whether distinct accepted logical identities can address the same underlying resource and therefore require one resource-equivalence identity or explicit alias semantics;
 - architecture and authority boundaries;
 - risk/assurance path;
 - dependencies;
@@ -149,6 +156,14 @@ G2 binds:
 - affected consumers;
 - permitted and forbidden behaviour;
 - positive, negative and adversarial regression oracles;
+- causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
+- async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
+- for each material stateful/async transition, a named deterministic negative transition regression plus positive control, covering the interruption/replacement/cancellation/late-completion windows that are actually relevant to the state machine;
+- for universal/arbitrary/unknown-behaviour invariants, the concrete enforcement mechanism plus a completeness argument under the actual language/runtime model, including what state/events are observable and which material paths bypass any finite observer;
+
+For transactional/state-machine work, relevant windows commonly include pre-commit, partial commit, cleanup, and retry after interruption. For async work they commonly include pre-wait, during-wait, replacement/cancellation, late arrival, and completion after a snapshot/decision point. G2 selects the windows that can materially violate the accepted invariant; this is not a mandatory combinatorial matrix.
+
+Mechanism completeness is distinct from semantic correctness. A finite denylist, observer, hook, lexical brand, parser route, intercepted API or event list cannot implement a universal `any/arbitrary/unknown` invariant unless the runtime model proves that mechanism sees every relevant violating path. If the platform cannot generically introspect the required state after arbitrary/untrusted code has acted, G2 must move enforcement to a complete trusted boundary: invalidate or expire provenance at exposure, copy/normalise into trusted state, re-establish trust after the boundary, or return to G1/Owner when the trust model itself must change. Post-hoc detector coverage is not a substitute for observability the platform does not provide.
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
@@ -161,7 +176,15 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 
 G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
 
+A repository validator may itself require immutable commit identity or a clean committed working tree. When G2/G3 explicitly binds `COMMIT_REQUIRED_VALIDATION=YES`, run all meaningful checks that do not require commit identity first; after they pass and candidate contents/scope are frozen, create exactly one immutable local candidate commit under the existing allowance and bind its commit/tree/parent. The candidate is then byte-stable for that episode: do not amend, rebase, reconstruct or replace it. Run the identity/clean-tree-dependent and remaining floor against that exact commit, and publish only after the complete floor passes. The local commit is construction/custody, not a separate G4 lifecycle or publication event. Candidate failure returns through normal correction/re-entry; environment/transport/evidence failure preserves the exact commit.
+
+For stateful/async work, G3 PASS includes an invariant-to-regression map: every material G2 invariant names the executable regression or production-boundary check that proves it, including the relevant transition/interruption case. Aggregate suite-green status cannot substitute for this mapping.
+
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
+
+For sufficiently complex/STRICT work involving concurrency, async completion, deferred consequential work, causal negative controls, lifecycle coordination or identity/resource equivalence, G3 performs a pre-publication adversarial validation episode inside the same G3. When separable and useful this may use one depth-1 read-only validation leaf; otherwise the parent performs it serially. The challenge tries to falsify the regression oracle, causal attribution, liveness/progress, outstanding-work accounting, resource-equivalence handling and false-green controls. It is not another gate: the parent remains sole integrator, ordinary RED stays inside G3, missing product/compatibility semantics return to G2, and changed root/trust/architecture returns to G1.
+
+Async validation for a changed drain/wait/flush/join/poll/quiesce/retry/completion boundary includes a waiter-first control where required completion occurs later and depends on event-loop/I/O/timer/callback progress. Required deferred work remains outstanding from scheduling through consequential completion; clearing its scheduling primitive is not completion. Flush semantics either permit the normal dispatch or take ownership of the same work and complete it through the normal consequential path.
 
 Ordinary commits or internal increments do not create separate G4 lifecycles.
 
@@ -173,15 +196,17 @@ G4 is fresh, isolated, read-only assurance of the **complete final Delivery Chil
 
 G4 remains adversarial; upstream convergence must improve first-pass quality without weakening G4.
 
-A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. Classification is diagnostic evidence, not a score or authority grant.
+For every material detector/interceptor/hook/brand/parser/ledger enforcement mechanism, G4 challenges mechanism independence where materially plausible: vary how the same forbidden semantic state is produced, not only the input value. At least one adversarial equivalent should avoid the candidate's observer entirely (for example a different lexical identity, ordinary construction instead of an intercepted API, or a state change that leaves watched shape/prototype evidence unchanged). If an equivalent violating path can bypass the observer, classify `MECHANISM_COMPLETENESS_UNPROVEN` and return to targeted G2 before another G3.
+
+A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `MECHANISM_COMPLETENESS_UNPROVEN`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. `MECHANISM_COMPLETENESS_UNPROVEN` means the accepted semantics may be correct but the enforcement/observability proof is incomplete; it requires targeted G2 before another G3. Classification is diagnostic evidence, not a score or authority grant.
 
 G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.
 
-### Re-convergence
+### G1 re-convergence
 
-RECONVERGENCE is a read-only non-gate diagnostic that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. The Loop does not invoke it automatically merely to avoid a Web return.
+G1_RECONVERGENCE is a read-only, leaf-only, non-gating G1-class root-model reconsideration/synthesis role that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. The Loop does not invoke it automatically merely to avoid a Web return.
 
 Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. It grants no authority. `CONTINUE_CURRENT_CONTRACT` is actionable only when existing authority and fresh state already permit the named work; `NONCONVERGED` remains an Owner/Web decision state.
 

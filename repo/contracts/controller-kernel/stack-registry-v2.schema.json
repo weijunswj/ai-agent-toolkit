@@ -70,23 +70,23 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "G0-A",
-            "G0-B",
+            "G_FRAME",
+            "G0",
             "G1",
             "G2",
             "G2_ESCALATED",
             "G3",
             "G4",
             "LOOP",
-            "RECONVERGENCE",
+            "G1_RECONVERGENCE",
             "FINAL_AUDIT",
             "BROWSER"
           ],
           "properties": {
-            "G0-A": {
+            "G_FRAME": {
               "$ref": "#/$defs/route"
             },
-            "G0-B": {
+            "G0": {
               "$ref": "#/$defs/route"
             },
             "G1": {
@@ -104,7 +104,7 @@
             "LOOP": {
               "$ref": "#/$defs/route"
             },
-            "RECONVERGENCE": {
+            "G1_RECONVERGENCE": {
               "$ref": "#/$defs/route"
             },
             "FINAL_AUDIT": {
@@ -122,11 +122,11 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "G0-B",
+            "G0",
             "G3"
           ],
           "properties": {
-            "G0-B": {
+            "G0": {
               "$ref": "#/$defs/nullableRoute"
             },
             "G3": {

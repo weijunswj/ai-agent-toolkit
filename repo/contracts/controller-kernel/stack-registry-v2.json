@@ -4,12 +4,12 @@
   "stacks": {
     "owner-openai-default": {
       "routes": {
-        "G0-A": {
+        "G_FRAME": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "high"
+          "reasoning": "xhigh"
         },
-        "G0-B": {
+        "G0": {
           "provider": "openai",
           "model": "gpt-6-luna",
           "reasoning": "max"
@@ -39,7 +39,7 @@
           "model": "gpt-6-luna",
           "reasoning": "max"
         },
-        "RECONVERGENCE": {
+        "G1_RECONVERGENCE": {
           "provider": "openai",
           "model": "gpt-6-sol",
           "reasoning": "xhigh"
@@ -61,7 +61,7 @@
         }
       },
       "subagents": {
-        "G0-B": {
+        "G0": {
           "provider": "openai",
           "model": "gpt-6-luna",
           "reasoning": "max"
@@ -75,12 +75,12 @@
     },
     "owner-claude": {
       "routes": {
-        "G0-A": {
+        "G_FRAME": {
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "high"
         },
-        "G0-B": {
+        "G0": {
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "medium"
@@ -110,7 +110,7 @@
           "model": "opus-5.5",
           "reasoning": "medium"
         },
-        "RECONVERGENCE": {
+        "G1_RECONVERGENCE": {
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "high"
@@ -132,7 +132,7 @@
         }
       },
       "subagents": {
-        "G0-B": {
+        "G0": {
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "medium"
