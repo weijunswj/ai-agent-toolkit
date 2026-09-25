@@ -160,6 +160,7 @@ G2 binds:
 - positive, negative and adversarial regression oracles;
 - causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
 - async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
+- for each material stateful/async transition, a named deterministic negative transition regression plus positive control, covering the interruption/replacement/cancellation/late-completion windows that are actually relevant to the state machine;
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
@@ -171,6 +172,8 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 ### G3 — Implementation and validation
 
 G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
+
+For stateful/async work, G3 PASS includes an invariant-to-regression map: every material G2 invariant names the executable regression or production-boundary check that proves it, including the relevant transition/interruption case. Aggregate suite-green status cannot substitute for this mapping.
 
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
 
