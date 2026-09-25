@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 const receipt = require('./toolkit-github-program-receipt.cjs');
+const programmeSurface = require('./toolkit-programme-surface-v1.cjs');
 
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 const PARENT_ISSUE = 240;
@@ -4211,7 +4212,7 @@ function h2ValidateFinality(value) {
 function h2ValidateChild(value, legacy = false) {
   const required = ['boundaries', 'done_when', 'eli5', 'epochs', 'finality', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
   const optional = ['dependencies', 'holds', 'deliverables'];
-  if (!h2HasOnly(value, [...required, ...optional], ['authority_packet_current'])
+  if (!h2HasOnly(value, required, [...optional, 'authority_packet_current'])
     || !h2Issue(value.issue) || !Number.isSafeInteger(value.order) || value.order < 1
     || !['COMPLETED', 'CURRENT', 'QUEUED'].includes(value.lifecycle)
     || !h2SafeLine(value.title) || !h2SafeLine(value.summary) || !h2SafeLine(value.objective) || !h2SafeLine(value.eli5)
@@ -4225,15 +4226,32 @@ function h2ValidateChild(value, legacy = false) {
       parent_issue: value.authority_packet_current.parent_issue,
       child_issue: value.issue,
     }))) return false;
-  if (h2Own(value, 'dependencies') && (!Array.isArray(value.dependencies) || !value.dependencies.every(h2Issue))) return false;
-  if (h2Own(value, 'holds') && !Array.isArray(value.holds)) return false;
+  if (h2Own(value, 'dependencies') && (!Array.isArray(value.dependencies) || !value.dependencies.every(h2Issue)
+    || new Set(value.dependencies).size !== value.dependencies.length)) return false;
+  if (h2Own(value, 'holds') && (!Array.isArray(value.holds) || !value.holds.every((hold) => h2Exact(hold,
+    ['active', 'blocks_normal_lanes', 'evidence_ref', 'id', 'kind', 'lock', 'root', 'scope', 'summary'])
+    && typeof hold.active === 'boolean' && typeof hold.blocks_normal_lanes === 'boolean'
+    && h2SafeId(hold.evidence_ref) && h2SafeId(hold.id) && h2SafeId(hold.lock) && h2SafeId(hold.root)
+    && h2SafeId(hold.scope) && h2SafeId(hold.kind) && h2SafeLine(hold.summary)))) return false;
   if (h2Own(value, 'deliverables') && !h2StringArray(value.deliverables)) return false;
   return true;
+}
+function h2ValidateActiveLane(value) {
+  if (!h2IsPlain(value)) return false;
+  const optional = ['gate', 'gate_id', 'epoch_id', 'epoch', 'current_work', 'work', 'work_claims'];
+  const hasChildIssue = h2Own(value, 'child_issue');
+  const hasChild = h2Own(value, 'child');
+  if (hasChildIssue === hasChild || !h2HasOnly(value, [hasChildIssue ? 'child_issue' : 'child'], optional)
+    || !h2Issue(hasChildIssue ? value.child_issue : value.child)) return false;
+  for (const key of ['gate', 'gate_id', 'epoch_id', 'epoch', 'current_work', 'work']) {
+    if (h2Own(value, key) && !h2SafeLine(value[key], 512)) return false;
+  }
+  return !h2Own(value, 'work_claims') || h2StringArray(value.work_claims);
 }
 function h2ValidateGenericState(value) {
   const required = ['active_lanes', 'children', 'evidence_refs', 'historical_transitions', 'parent', 'prs', 'repository', 'schema'];
   const optional = ['design_lock', 'extensions', 'dependencies', H2_HISTORY_KEY];
-  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional]) || !h2Repository(value.repository)
+  if (!h2HasOnly(value, required, optional) || !h2Repository(value.repository)
     || !h2SafeLine(value.schema) || !h2IsPlain(value.parent) || !h2Exact(value.parent, ['goal', 'issue', 'title'])
     || !h2Issue(value.parent.issue) || !h2SafeLine(value.parent.title) || !h2SafeLine(value.parent.goal)
     || !Array.isArray(value.children) || value.children.length === 0
@@ -4241,6 +4259,11 @@ function h2ValidateGenericState(value) {
     || !Array.isArray(value.historical_transitions) || !Array.isArray(value.active_lanes)) return false;
   if (h2Own(value, 'design_lock') && !h2SafeLine(value.design_lock, 1024)) return false;
   if (h2Own(value, 'extensions') && (!Array.isArray(value.extensions) || !value.extensions.every(h2IsPlain))) return false;
+  if (h2Own(value, 'dependencies') && (!Array.isArray(value.dependencies) || !value.dependencies.every(h2Issue)
+    || new Set(value.dependencies).size !== value.dependencies.length)) return false;
+  if (h2Own(value, 'extensions')) {
+    try { programmeSurface.findGraphMetadata(value); } catch (_error) { return false; }
+  }
   const issues = new Set();
   const orders = new Set();
   let current = 0;
@@ -4250,14 +4273,13 @@ function h2ValidateGenericState(value) {
     const epochs = new Set();
     for (const epoch of child.epochs) { if (epochs.has(epoch.id)) return false; epochs.add(epoch.id); }
   }
-  const allCompleted = value.children.every((child) => child.lifecycle === 'COMPLETED' && child.finality.state === 'MERGED');
-  if (current !== 1 && !(current === 0 && allCompleted && value.evidence_refs.some((item) => item.kind === 'WEB' || item.kind === 'USER_WEB_CONTROLLER'))) throw h2Error('CANONICAL_STATE_CONTRADICTION', 'CANONICAL');
+  if (current !== 1) throw h2Error('CANONICAL_STATE_CONTRADICTION', 'CANONICAL');
   if (!value.prs.every((item) => h2ValidateLegacyDescriptor(item) || (() => { try { h2Descriptor(item, 'CANONICAL'); return true; } catch (_error) { return false; } })())) return false;
   if (!value.evidence_refs.every(h2ValidateEvidence)) return false;
   if (!value.historical_transitions.every((item) => h2IsPlain(item) && h2Exact(item, ['child_issue', 'disposition', 'epoch_id', 'evidence_ref', 'gate', 'id'])
     && h2Issue(item.child_issue) && h2SafeId(item.disposition) && h2SafeId(item.epoch_id) && h2SafeId(item.evidence_ref) && h2SafeId(item.gate) && h2SafeId(item.id))) return false;
   for (const lane of value.active_lanes) {
-    if (!h2IsPlain(lane) || !h2Issue(lane.child_issue ?? lane.child)) return false;
+    if (!h2ValidateActiveLane(lane)) return false;
     const child = value.children.find((item) => item.issue === (lane.child_issue ?? lane.child));
     if (!child || child.lifecycle !== 'CURRENT') return false;
   }
@@ -4424,6 +4446,7 @@ function h2ValidateState(value) {
     h2Require(legacyCompatibilityOnly, true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
   } else {
     h2Require(h2ValidateGenericState(base), true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
+    if (programmeSurface.findGraphMetadata(base)) programmeSurface.deriveProgrammeGraph(base, history);
   }
   h2Relationship(base, history, legacyCompatibilityOnly);
   return { state: h2Clone(value), canonical_sha256: h2Digest(value), history };
@@ -4491,6 +4514,8 @@ function h2ProgrammeAction(state, history) {
   return { action: 'AWAIT_PROGRAMME_FINALITY', current_child: null, child_action: null, ref: null, text: 'No current child is selected; source-backed programme finality is still pending.' };
 }
 function h2ProjectionState(state, history) {
+  const graph = programmeSurface.findGraphMetadata(state)
+    ? programmeSurface.deriveProgrammeGraph(state, history) : null;
   const evidence = h2EvidenceMap(state, history);
   const children = state.children.map((child) => ({
     issue: child.issue,
@@ -4548,6 +4573,7 @@ function h2ProjectionState(state, history) {
     pr_history: historyRows,
     next_action: { action: programme.action, ref: programme.ref, text: programme.text },
     evidence_count: evidence.size,
+    ...(graph ? { programme_graph: programmeSurface.programmeGraphIdentity(graph) } : {}),
   };
 
 }
@@ -4729,6 +4755,8 @@ function h2ManagedDocument(style, kind, prose, carrier) {
   };
 }
 function h2ParentProse(state, projection) {
+  const graph = projection.programme_graph
+    ? programmeSurface.deriveProgrammeGraph(state, h2ValidateHistoryContainer(state[H2_HISTORY_KEY], state.repository)) : null;
   const lines = [
     '# AI Agent Toolkit Programme',
     '',
@@ -4740,12 +4768,12 @@ function h2ParentProse(state, projection) {
     '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
     '| Finality | ' + h2Cell(projection.finality) + ' |',
     '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
-    '',
-    '## Children',
-    '| Issue | Order | Lifecycle | Finality | Summary |',
-    '| --- | --- | --- | --- | --- |',
   ];
-  for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
+  if (graph) lines.push(...programmeSurface.renderProgrammeGraph(graph, h2Cell));
+  else {
+    lines.push('## Children', '| Issue | Order | Lifecycle | Finality | Summary |', '| --- | --- | --- | --- | --- |');
+    for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
+  }
   lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
   lines.push('## Completed work', ...h2LinesForArray(projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary)), '');
   lines.push('## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)), '');
@@ -5091,10 +5119,15 @@ function h2BuildPrTypedDocument(projection) {
 function h2PrProse(projection) {
   return h2BuildPrTypedDocument(projection);
 }
-function h2BuildParentDoc(state) {
+function h2BuildParentDoc(state, options = {}) {
   const checked = h2ValidateState(state);
   const projection = h2ProjectionState(checked.state, checked.history);
+  if (options.historicalGraphless === true) delete projection.programme_graph;
+  if (options.requireGraph === true && !projection.programme_graph) throw h2Error('PROGRAMME_GRAPH_METADATA_REQUIRED', 'CANONICAL');
   const style = h2MarkerStyleForState(checked.state);
+  const graphIdentity = projection.programme_graph ? programmeSurface.programmeGraphIdentity(
+    programmeSurface.deriveProgrammeGraph(checked.state, checked.history),
+  ) : null;
   const carrier = {
     schema: H2_PARENT_CARRIER_SCHEMA,
     version: H2_VERSION,
@@ -5102,7 +5135,12 @@ function h2BuildParentDoc(state) {
     repository: checked.state.repository,
     parent_issue: checked.state.parent.issue,
     canonical: { schema: checked.state.schema, class: H2_CANONICAL_CLASS, digest: checked.canonical_sha256, state: h2Clone(checked.state) },
-    projection: { schema: H2_PARENT_PROJECTION_SCHEMA, digest: h2Digest(projection) },
+    ...(graphIdentity ? { programme_graph: graphIdentity } : {}),
+    projection: {
+      schema: H2_PARENT_PROJECTION_SCHEMA,
+      digest: h2Digest(projection),
+      ...(graphIdentity ? { programme_graph: graphIdentity } : {}),
+    },
     public_prose_sha256: null,
   };
   const prose = h2ParentProse(checked.state, projection);
@@ -5195,11 +5233,17 @@ function h2ValidateCarrierShape(carrier, kind) {
   const common = ['schema', 'version', 'kind', 'repository'];
   if (!h2IsPlain(carrier) || carrier.version !== H2_VERSION || carrier.kind !== kind || !h2Repository(carrier.repository)) throw h2Error('CARRIER_INVALID', 'PARSE');
   if (kind === 'parent') {
-    h2Require(h2Exact(carrier, [...common, 'parent_issue', 'canonical', 'projection', 'public_prose_sha256'])
+    h2Require(h2HasOnly(carrier, [...common, 'parent_issue', 'canonical', 'projection', 'public_prose_sha256'], ['programme_graph'])
       && carrier.schema === H2_PARENT_CARRIER_SCHEMA && h2Issue(carrier.parent_issue), true, 'CARRIER_INVALID', 'PARSE');
     h2Require(h2Exact(carrier.canonical, ['schema', 'class', 'digest', 'state']) && carrier.canonical.class === H2_CANONICAL_CLASS
       && h2SafeLine(carrier.canonical.schema) && h2Hash(carrier.canonical.digest), true, 'CARRIER_INVALID', 'PARSE');
-    h2Require(h2Exact(carrier.projection, ['schema', 'digest']) && carrier.projection.schema === H2_PARENT_PROJECTION_SCHEMA && h2Hash(carrier.projection.digest), true, 'CARRIER_INVALID', 'PARSE');
+    const graphIdentityPresent = h2Own(carrier, 'programme_graph');
+    h2Require(h2HasOnly(carrier.projection, ['schema', 'digest'], ['programme_graph'])
+      && carrier.projection.schema === H2_PARENT_PROJECTION_SCHEMA && h2Hash(carrier.projection.digest)
+      && graphIdentityPresent === h2Own(carrier.projection, 'programme_graph')
+      && (!graphIdentityPresent || h2Exact(carrier.programme_graph, ['schema', 'digest'])
+        && carrier.programme_graph.schema === programmeSurface.GRAPH_SCHEMA && h2Hash(carrier.programme_graph.digest)
+        && h2Comparable(carrier.programme_graph, carrier.projection.programme_graph)), true, 'CARRIER_INVALID', 'PARSE');
   } else if (kind === 'child') {
     h2Require(h2Exact(carrier, [...common, 'parent_issue', 'child_issue', 'canonical', 'projection', 'public_prose_sha256'])
       && carrier.schema === H2_CHILD_CARRIER_SCHEMA && h2Issue(carrier.parent_issue) && h2Issue(carrier.child_issue), true, 'CARRIER_INVALID', 'PARSE');
@@ -5265,7 +5309,7 @@ function h2ParseParentEnvelope(envelope, expected = null) {
   h2Require(parts.carrier.canonical.schema === valid.state.schema && parts.carrier.canonical.digest === valid.canonical_sha256
     && parts.carrier.parent_issue === valid.state.parent.issue, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
   if (expected) h2Require(valid.state.repository === expected.repository && valid.state.parent.issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
-  const expectedDoc = h2BuildParentDoc(valid.state);
+  const expectedDoc = h2BuildParentDoc(valid.state, { historicalGraphless: !h2Own(parts.carrier, 'programme_graph') });
   h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, parts.carrier), true, 'READBACK_MISMATCH', 'READBACK');
   return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier: parts.carrier });
 }
@@ -5520,6 +5564,9 @@ function h2ReadCompletePublic(input) {
     if (parsed.projection) {
       result.projection = h2PublicReadProjection(parsed.projection);
       result.projection_sha256 = h2Digest(parsed.projection);
+      if (parsed.kind === 'parent' && parsed.carrier?.programme_graph) {
+        result.programme_graph = programmeSurface.programmeGraphIdentity(parsed.carrier.programme_graph);
+      }
     }
     if (parsed.descriptor) {
       const descriptor = h2Clone(parsed.descriptor);
@@ -5543,7 +5590,19 @@ function h2RenderPublic(input) {
       h2Require(h2Exact(source, ['type', 'parent_read']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       h2Require(h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind']) || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       const parent = h2ReadParentUnbound(source.parent_read);
-      document = target.kind === 'parent' ? h2BuildParentDoc(parent.state) : h2BuildChildDoc(parent.state, target.issue);
+      document = target.kind === 'parent'
+        ? h2BuildParentDoc(parent.state, { requireGraph: parent.state.schema !== STATE_SCHEMA })
+        : h2BuildChildDoc(parent.state, target.issue);
+    } else if (source.type === 'CANONICAL_STATE') {
+      h2Require(h2Exact(source, ['type', 'state'])
+        && h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind'])
+          || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      const checked = h2ValidateState(source.state);
+      h2Require(checked.state.schema !== STATE_SCHEMA && programmeSurface.findGraphMetadata(checked.state), true,
+        'PROGRAMME_GRAPH_METADATA_REQUIRED', 'CANONICAL');
+      document = target.kind === 'parent'
+        ? h2BuildParentDoc(checked.state, { requireGraph: true })
+        : h2BuildChildDoc(checked.state, target.issue);
     } else if (source.type === 'PR_DESCRIPTOR') {
       h2Require(h2Exact(source, ['type', 'descriptor', 'bound_authority']) && h2IsPlain(target) && h2Exact(target, ['kind']) && target.kind === 'pr', true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       h2Descriptor(source.descriptor, 'AUTHORITY');
@@ -5555,7 +5614,9 @@ function h2RenderPublic(input) {
     const complete = h2CompleteRead(document.body);
     const extra = document.kind === 'pr'
       ? { kind: 'pr', descriptor: h2Clone(document.descriptor), bound_authority: document.bound_authority === null ? null : h2Clone(document.bound_authority), pr_number: document.bound_authority?.pr_number || null, number_state: document.bound_authority ? 'BOUND' : 'PRE_NUMBER', projection: h2Clone(document.projection), projection_sha256: document.projection_sha256 }
-      : { kind: document.kind, canonical_state: h2Clone(document.state), canonical_sha256: document.canonical_sha256, projection: h2Clone(document.projection), projection_sha256: document.projection_sha256 };
+      : { kind: document.kind, canonical_state: h2Clone(document.state), canonical_sha256: document.canonical_sha256,
+        projection: h2Clone(document.projection), projection_sha256: document.projection_sha256,
+        ...(document.carrier.programme_graph ? { programme_graph: programmeSurface.programmeGraphIdentity(document.carrier.programme_graph) } : {}) };
     return h2Success('render', 'RENDER_READY', 'SERIALIZE', { ...extra, body: document.body, read: complete, body_sha256: complete.body_sha256, carrier_sha256: document.carrier_sha256, managed_block_sha256: document.managed_block_sha256, public_prose_sha256: document.public_prose_sha256 });
   });
 }
@@ -5569,7 +5630,7 @@ function h2ExtendHistoryPublic(input) {
     const target = h2ApplyHistory(source.state, decision);
     const targetValid = h2ValidateState(target);
     const observations = h2ValidateProviderAssertions(input.provider_observations, targetValid.state, targetValid.history);
-    const parent = h2BuildParentDoc(targetValid.state);
+    const parent = h2BuildParentDoc(targetValid.state, { requireGraph: targetValid.state.schema !== STATE_SCHEMA });
     const children = targetValid.state.children.map((child) => h2BuildChildDoc(targetValid.state, child.issue));
     const programmeAction = h2ProgrammeAction(targetValid.state, targetValid.history);
     return h2Success('extendHistory', 'HISTORY_EXTENDED', 'READBACK', {
@@ -5606,6 +5667,19 @@ function h2PlanMigrationPublic(input) {
     let observations;
     if (parent.format === 'human-v2') {
       h2Require(input.history_decision === null, true, 'MIGRATION_HISTORY_DECISION_PHASE_INVALID', 'MIGRATION');
+      if (parent.state.schema !== STATE_SCHEMA && !parent.carrier?.programme_graph) {
+        const parentDocument = h2BuildParentDoc(parent.state, { requireGraph: true });
+        observations = h2ValidateProviderAssertions(input.provider_observations, parent.state,
+          h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository));
+        return h2Success('planMigration', 'MIGRATION_PARENT_WRITE_READY', 'MIGRATION', {
+          action: 'WRITE_PARENT',
+          writes: [h2WritePlan('parent', parent.state.parent.issue, parentDocument)],
+          write_count: 1,
+          source_parent_format: parent.format,
+          source_child_format: childEnvelope.classification.format,
+          provider_observations: observations,
+        });
+      }
       if (childEnvelope.classification.format === 'legacy-v5') {
         try { child = h2ParseChildEnvelope(childEnvelope, null, parent); } catch (_error) { throw h2Error('MIGRATION_CHILD_DRIFT', 'MIGRATION'); }
         h2Require(child.child_issue === childIssue, true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');

@@ -380,6 +380,49 @@ test('F14 corrupted-store rejection cases exercise the verified v4 initializer',
   }
 });
 
+test('R090 immutable call plan keeps required calls visible despite caller role flags', async () => {
+  const item = support.ORACLE_MANDATORY_CASES.find((candidate) => candidate.requirement_id === 'A03'
+    && candidate.expected.positive_control === true);
+  const key = support.oracleCaseIdentity(item);
+  const handlers = {
+    [key]: async (caseValue) => {
+      const value = support.packet({ seed: 'run090-role-flag-positive' });
+      const call = await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { setup: true, supporting: true });
+      return { production_surface_receipts: [call.receipt], positive_control_case_id: caseValue.id };
+    },
+  };
+  const result = await support.executeAuthorityPacketOracleCase(item, handlers);
+  assert.equal(result.passed, true);
+
+  const repeatedHandlers = {
+    [key]: async (caseValue) => {
+      const value = support.packet({ seed: 'run090-role-flag-repeat' });
+      const first = await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { setup: true });
+      await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { supporting: true });
+      return { production_surface_receipts: [first.receipt], positive_control_case_id: caseValue.id };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(item, repeatedHandlers),
+    /ORACLE_CALL_SEQUENCE_MISMATCH/
+  );
+
+  const wrongMethodHandlers = {
+    [key]: async (caseValue) => {
+      await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'authorityPacketIdentities', [support.packet({ seed: 'run090-role-method-swap' })], { setup: true });
+      return { production_surface_receipts: [], positive_control_case_id: caseValue.id };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(item, wrongMethodHandlers),
+    /ORACLE_CALL_SEQUENCE_MISMATCH/
+  );
+});
+
 test('semantic admission binds exact CURRENT, acceptance and fresh packet evidence', () => {
   const fixture = setup('positive');
   const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);

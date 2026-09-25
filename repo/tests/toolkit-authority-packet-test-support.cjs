@@ -199,7 +199,32 @@ const ORACLE_PROGRAMME_RECEIPT_STORE_METHODS = new WeakMap();
 const ORACLE_MUTATION_ADMISSIONS = new WeakSet();
 const ORACLE_READER_SETS = new WeakSet();
 const ORACLE_READER_SET_BINDINGS = new WeakMap();
+const ORACLE_CALL_ROLE_AUTHORIZATIONS = new WeakMap();
+const ORACLE_CALL_ROLE_AUTHORIZATIONS_USED = new WeakSet();
+const ORACLE_TRUSTED_D01_RECIPES = new Map();
 let activeOracleHarness = null;
+
+function oracleRoleAuthorization(caseValue, role) {
+  const identity = oracleCaseIdentity(caseValue);
+  if (!activeOracleHarness || activeOracleHarness.case_identity !== identity
+    || !['setup', 'supporting'].includes(role)) throw new Error('ORACLE_ROLE_AUTHORIZATION_INVALID');
+  const authorization = Object.freeze({});
+  ORACLE_CALL_ROLE_AUTHORIZATIONS.set(authorization, { harness: activeOracleHarness, identity, role });
+  return authorization;
+}
+
+function consumePlannedOracleCall(caseValue, targetType, method) {
+  const harness = activeOracleHarness;
+  const identity = oracleCaseIdentity(caseValue);
+  const state = harness && harness.call_plan_state;
+  const planned = state && state.plan.calls[state.required_index];
+  if (!state || harness.case_identity !== identity || !planned
+    || planned.target_type !== targetType || planned.method !== method) {
+    throw new Error(`ORACLE_CALL_PLAN_MISMATCH:${identity}:${targetType}:${method}`);
+  }
+  state.required_index += 1;
+  return planned;
+}
 
 function gitBlobSha1(bytes) {
   const content = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
@@ -229,7 +254,20 @@ function recordOracleHarnessReadback(observation) {
 
 function oracleArgumentBindingDigest(caseValue, targetType, target, method, args) {
   if (caseValue.requirement_id === 'D01') {
-    return runtime.digestValue({ case_identity: oracleCaseIdentity(caseValue), method, argument_count: args.length });
+    const identity = oracleCaseIdentity(caseValue);
+    const recipe = ORACLE_TRUSTED_D01_RECIPES.get(identity);
+    if (!recipe || targetType !== 'runtime' || method !== 'validateAuthorityPacket'
+      || args.length !== 1 || args[0] !== recipe.argument) {
+      throw new Error(`ORACLE_D01_RECIPE_BINDING_MISMATCH:${caseValue.id}`);
+    }
+    return runtime.digestValue({
+      schema: 'toolkit.github-program.oracle-d01-trusted-recipe-binding.v1',
+      case_identity: identity,
+      recipe_id: recipe.recipe_id,
+      target_type: targetType,
+      method,
+      argument_reference: 'exact',
+    });
   }
   const references = new Map();
   const normalize = (value) => {
@@ -1957,12 +1995,28 @@ function oracleSurfaceMethodAllowed(caseValue, targetType, target, method) {
 }
 
 async function invokeOracleSurface(caseValue, targetType, target, method, args = [], supporting = false) {
-  const callOptions = supporting && typeof supporting === 'object' ? supporting : {};
-  const setupDeclared = callOptions.setup === true;
-  const supportingCall = supporting === true || callOptions.supporting === true;
-  const allowed = oracleSurfaceMethodAllowed(caseValue, targetType, target, method);
-  if ((!allowed && !supportingCall && !setupDeclared) || !target || typeof target[method] !== 'function') {
-    throw new Error(`ORACLE_SURFACE_SUBSTITUTED:${caseValue.id}:${method}`);
+  const identity = oracleCaseIdentity(caseValue);
+  const authorization = supporting && typeof supporting === 'object'
+    ? ORACLE_CALL_ROLE_AUTHORIZATIONS.get(supporting) : null;
+  let role = null;
+  const state = activeOracleHarness && activeOracleHarness.call_plan_state;
+  const planned = state && state.plan.calls[state.required_index];
+  if (authorization && authorization.harness === activeOracleHarness && authorization.identity === identity
+    && !ORACLE_CALL_ROLE_AUTHORIZATIONS_USED.has(supporting)) {
+    ORACLE_CALL_ROLE_AUTHORIZATIONS_USED.add(supporting);
+    if (authorization.role === 'setup') role = 'setup';
+    else if (activeOracleHarness && activeOracleHarness.case_identity === identity
+      && planned && planned.target_type === targetType && planned.method === method) {
+      state.required_index += 1;
+      role = 'required';
+    } else role = authorization.role;
+  } else if (activeOracleHarness && activeOracleHarness.case_identity === identity
+    && planned && planned.target_type === targetType && planned.method === method) {
+    state.required_index += 1;
+    role = 'required';
+  }
+  if (!role || !target || typeof target[method] !== 'function') {
+    throw new Error(`ORACLE_CALL_SEQUENCE_MISMATCH:${caseValue.id}:unplanned=${targetType}.${method}`);
   }
   if (targetType === 'authorityPacketStore'
     && (!ORACLE_AUTHORITY_PACKET_STORES.has(target) || runtime.assertAuthenticAuthorityPacketStore(target) !== true)) {
@@ -1990,6 +2044,19 @@ async function invokeOracleSurface(caseValue, targetType, target, method, args =
     ? oracleObservedStoreTotals(activeOracleHarness)
     : measuredStore ? oracleCounts(measuredStore) : null;
   const countersBefore = activeOracleHarness ? { ...activeOracleHarness.counters } : {};
+  const argumentBindingDigest = oracleArgumentBindingDigest(caseValue, targetType, target, method, args);
+  const attempt = {
+    type: 'production-call-attempt',
+    sequence: activeOracleHarness ? activeOracleHarness.events.length + 1 : 1,
+    case_identity: identity,
+    method,
+    target_type: targetType,
+    role,
+    outcome: null,
+    code: null,
+    argument_binding_digest: argumentBindingDigest,
+  };
+  recordOracleHarnessEvent(attempt);
   let value;
   let error = null;
   try { value = await target[method].apply(target, args); } catch (caught) { error = caught; }
@@ -2007,6 +2074,8 @@ async function invokeOracleSurface(caseValue, targetType, target, method, args =
   const actual = error
     ? { outcome: 'REJECT', code: error && error.code ? error.code : error && error.message ? error.message : 'ORACLE_FAILURE' }
     : oracleActual(value, targetType, method);
+  attempt.outcome = actual.outcome;
+  attempt.code = actual.code;
   const effectDelta = before && after ? oracleEffectDelta(before, after, actual, activeOracleHarness) : {};
   const flags = {};
   if (!error && targetType === 'runtime' && method === 'authorityPacketIdentities') {
@@ -2061,13 +2130,13 @@ async function invokeOracleSurface(caseValue, targetType, target, method, args =
   if (!error && targetType === 'programmeReceiptStore' && method === 'admitMutationOperation') {
     flags.operation_witness = verifyMutationAdmissionWitness(target, args[0], args[1], value, objectBefore, objectAfter);
   }
-  if (!setupDeclared && !error && targetType === 'programmeReceiptStore' && method === 'allocateRun') {
+  if (role !== 'setup' && !error && targetType === 'programmeReceiptStore' && method === 'allocateRun') {
     flags.allocation_witness = verifyProgrammeAllocationWitness(target, args[0], value, objectBefore, objectAfter);
   }
-  if (!setupDeclared && !error && targetType === 'programmeReceiptStore' && ['startRun', 'startAllocatedRun'].includes(method)) {
+  if (role !== 'setup' && !error && targetType === 'programmeReceiptStore' && ['startRun', 'startAllocatedRun'].includes(method)) {
     flags.started_run_witness = verifyProgrammeStartedRunWitness(target, value, method, objectBefore, objectAfter);
   }
-  if (!setupDeclared && !error && targetType === 'programmeReceiptStore' && method === 'appendReceipt') {
+  if (role !== 'setup' && !error && targetType === 'programmeReceiptStore' && method === 'appendReceipt') {
     flags.preview_receipt_witness = verifyProgrammePreviewReceiptWitness(target, args[0], args[1], value, objectBefore, objectAfter);
   }
   if (!error && targetType === 'authorityPacketStore' && method === 'confirmCurrentPacketProjection') {
@@ -2145,36 +2214,26 @@ async function invokeOracleSurface(caseValue, targetType, target, method, args =
     surface: caseValue.surface,
     method,
     target_type: targetType,
+    role,
     outcome: error ? 'THREW' : 'RETURNED',
     actual,
     value_type: error ? 'throw' : value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value,
     returned_value: error ? undefined : value,
     target_reference: target,
-    argument_binding_digest: oracleArgumentBindingDigest(caseValue, targetType, target, method, args),
+    argument_binding_digest: argumentBindingDigest,
     object_before: objectBefore,
     object_after: objectAfter,
     effect_delta: { ...effectDelta, ...flags },
     counters_before: countersBefore,
     counters_after: activeOracleHarness ? { ...activeOracleHarness.counters } : {},
     receipt,
-    setup_declared: setupDeclared,
-    setup: setupDeclared,
+    setup_declared: false,
+    setup: role === 'setup',
   };
   ORACLE_SURFACE_RECEIPTS.set(receipt, bound);
-  recordOracleHarnessEvent({
-    type: 'production-call',
-    sequence: activeOracleHarness ? activeOracleHarness.events.length + 1 : 1,
-    case_identity: oracleCaseIdentity(caseValue),
-    method,
-    target_type: targetType,
-    outcome: actual.outcome,
-    code: actual.code,
-    value_type: bound.value_type,
-    argument_binding_digest: bound.argument_binding_digest,
-    setup: bound.setup,
-    object_before: objectBefore,
-    object_after: objectAfter,
-  });
+  attempt.value_type = bound.value_type;
+  attempt.object_before = objectBefore;
+  attempt.object_after = objectAfter;
   recordOracleHarnessReceipt(receipt);
   return { receipt, value, error };
 }
@@ -2189,6 +2248,7 @@ function oracleRecordDerivedOutcome(caseValue, actual, measuredReceipts, flags =
     || typeof source.argument_binding_digest !== 'string' || !/^[a-f0-9]{64}$/.test(source.argument_binding_digest))) {
     throw new Error(`ORACLE_DERIVED_BINDING_SOURCE_INVALID:${caseValue.id}`);
   }
+  consumePlannedOracleCall(caseValue, 'observed-production-invariant', 'COMPARE');
   const sourceCallBindings = sourceCalls.map((source) => ({
     case_identity: source.case_identity,
     surface: source.surface,
@@ -2216,6 +2276,8 @@ function oracleRecordDerivedOutcome(caseValue, actual, measuredReceipts, flags =
     surface: caseValue.surface,
     method: 'COMPARE',
     target_type: 'observed-production-invariant',
+    role: 'required',
+    role: 'required',
     outcome: 'OBSERVED_COMPARISON',
     actual,
     argument_binding_digest: argumentBindingDigest,
@@ -2238,13 +2300,6 @@ function oracleRecordDerivedOutcome(caseValue, actual, measuredReceipts, flags =
     flags: structuredClone(flags),
   });
   recordOracleHarnessReceipt(receipt);
-  return receipt;
-}
-
-function markOracleReceiptAsSetup(receipt) {
-  const bound = receipt && ORACLE_SURFACE_RECEIPTS.get(receipt);
-  if (!bound || bound.setup_declared !== true) throw new Error('ORACLE_SETUP_NOT_PREDECLARED');
-  bound.setup = true;
   return receipt;
 }
 
@@ -3361,7 +3416,9 @@ function oracleActual(result, targetType, method) {
 }
 
 function oracleProcessReceipt(caseValue, store, method, actual, before, processCounter, observed = {}) {
-  const plannedCall = expectedOraclePlan(caseValue).calls.find((call) => call.method === method);
+  const next = activeOracleHarness && activeOracleHarness.call_plan_state
+    && activeOracleHarness.call_plan_state.plan.calls[activeOracleHarness.call_plan_state.required_index];
+  const plannedCall = next && consumePlannedOracleCall(caseValue, next.target_type, method);
   if (!plannedCall || !['authorityPacketStore', 'process'].includes(plannedCall.target_type)
     || !ORACLE_AUTHORITY_PACKET_STORES.has(store)
     || runtime.assertAuthenticAuthorityPacketStore(store) !== true) throw new Error('ORACLE_PROCESS_SURFACE_UNBOUND');
@@ -3395,6 +3452,7 @@ function oracleProcessReceipt(caseValue, store, method, actual, before, processC
     surface: caseValue.surface,
     method,
     target_type: plannedCall.target_type,
+    role: 'required',
     outcome: observed.crash === true ? 'PROCESS_CRASHED'
       : plannedCall.target_type === 'process' ? 'PROCESS_COMPLETED' : 'CONCURRENT_PROCESSES_COMPLETED',
     actual,
@@ -3418,6 +3476,7 @@ function oracleProcessReceipt(caseValue, store, method, actual, before, processC
     case_identity: oracleCaseIdentity(caseValue),
     method,
     target_type: plannedCall.target_type,
+    role: 'required',
     outcome: actual.outcome,
     code: actual.code,
     value_type: 'process-result',
@@ -3431,7 +3490,7 @@ function oracleProcessReceipt(caseValue, store, method, actual, before, processC
 }
 
 function oracleEvidenceReceipt(caseValue, method, targetType, actual, flags, evidence, sourceReceipts) {
-  const plannedCall = expectedOraclePlan(caseValue).calls.find((call) => call.method === method);
+  const plannedCall = consumePlannedOracleCall(caseValue, targetType, method);
   if (!activeOracleHarness || !plannedCall || plannedCall.target_type !== targetType
     || !Array.isArray(sourceReceipts) || sourceReceipts.length === 0) {
     throw new Error(`ORACLE_EVIDENCE_SURFACE_UNBOUND:${caseValue.id}:${method}`);
@@ -3455,6 +3514,7 @@ function oracleEvidenceReceipt(caseValue, method, targetType, actual, flags, evi
     case_identity: oracleCaseIdentity(caseValue),
     method,
     target_type: targetType,
+    role: 'required',
     evidence_digest: evidenceDigest,
     source_bindings: sourceBindings,
   });
@@ -3464,6 +3524,7 @@ function oracleEvidenceReceipt(caseValue, method, targetType, actual, flags, evi
     surface: caseValue.surface,
     method,
     target_type: targetType,
+    role: 'required',
     outcome: actual.outcome === 'ACCEPT' ? 'EVIDENCE_VERIFIED' : 'EVIDENCE_REJECTED',
     actual,
     value_type: 'bounded-evidence',
@@ -3484,6 +3545,7 @@ function oracleEvidenceReceipt(caseValue, method, targetType, actual, flags, evi
     case_identity: oracleCaseIdentity(caseValue),
     method,
     target_type: targetType,
+    role: 'required',
     outcome: actual.outcome,
     code: actual.code,
     argument_binding_digest: argumentBindingDigest,
@@ -3921,7 +3983,7 @@ function oraclePacketWithVariant(packetValue, variant, counters) {
       value.body = Object.assign(Object.create({ custom: true }), body);
       return value;
     case 'toJSON':
-      body.toJSON = () => ({}) ;
+      body.toJSON = () => { counters.toJSON_calls += 1; return {}; };
       return value;
     case 'non-enumerable':
       Object.defineProperty(body, 'hidden', { enumerable: false, value: 'hidden' });
@@ -4292,7 +4354,7 @@ async function oracleRejectByCode(caseValue, context) {
       };
       return invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'admitSemanticGate', [
         forgedIntent, gate.trusted_readers,
-      ], true);
+      ], oracleRoleAuthorization(caseValue, 'supporting'));
     }
     if (caseValue.input.variant === 'runtime-injection-timeout-stream' || caseValue.input.variant === 'same-process-reread') {
       const receipt = oracleFreshReaderFailureProcess(caseValue, context);
@@ -4314,7 +4376,7 @@ async function oracleRejectByCode(caseValue, context) {
   if (surface === 'validateAuthorityPacketDelivery') {
     const fresh = await invokeOracleSurface(caseValue, 'authorityPacketStore', context.store, 'verifyAuthorityPacketFresh', [
       context.persisted.packet_id, context.packetValue.bindings,
-    ], true);
+    ], oracleRoleAuthorization(caseValue, 'supporting'));
     if (fresh.error) throw fresh.error;
     if (caseValue.input.variant === 'envelope-only-or-truncated') {
       return invokeOracleSurface(caseValue, 'runtime', runtime, surface, [{}]);
@@ -4533,9 +4595,9 @@ async function oracleRejectByCode(caseValue, context) {
   }
   if (surface === 'recordSemanticGateDispatch') {
     const gate = semanticGate(`oracle-dispatch-${oracleSafeSeed(caseValue.id)}`, { readDispatchOutcome: oracleDispatchOutcomeReader('ambiguous') });
-    const admission = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], { setup: true });
+    const admission = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], oracleRoleAuthorization(caseValue, 'setup'));
     if (admission.error) throw admission.error;
-    const intent = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [admission.value.admission], { setup: true });
+    const intent = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [admission.value.admission], oracleRoleAuthorization(caseValue, 'setup'));
     if (intent.error) throw intent.error;
     resetOracleEffectBaseline();
     return invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, surface, [admission.value.admission, {
@@ -4759,7 +4821,7 @@ async function oraclePositiveBySurface(caseValue, context) {
         }
         return oracleCallValue(await invokeOracleSurface(caseValue, 'authorityPacketStore', store, 'bindWebPacketAcceptance', [
           persisted.value.packet_id, readerSet,
-        ], true));
+        ], oracleRoleAuthorization(caseValue, 'supporting')));
       }
       if (caseValue.input.variant === 'boundary-sized-safe') {
         const packetValue = oracleBoundarySizedPacket(`oracle-boundary-${oracleSafeSeed(caseValue.id)}`);
@@ -4804,7 +4866,7 @@ async function oraclePositiveBySurface(caseValue, context) {
         const persisted = store.persistAuthorityPacket(packetValue, producerAdmission(packetValue));
         const fresh = await invokeOracleSurface(caseValue, 'authorityPacketStore', store, 'verifyAuthorityPacketFresh', [
           persisted.packet_id, packetValue.bindings,
-        ], true);
+        ], oracleRoleAuthorization(caseValue, 'supporting'));
         if (fresh.error) throw fresh.error;
         const delivery = fresh.value;
         return oracleCallValue(invokeOracleSurface(caseValue, 'runtime', runtime, surface, [delivery, {
@@ -4813,7 +4875,7 @@ async function oraclePositiveBySurface(caseValue, context) {
       }
       const fresh = await invokeOracleSurface(caseValue, 'authorityPacketStore', context.store, 'verifyAuthorityPacketFresh', [
         context.persisted.packet_id, context.packetValue.bindings,
-      ], true);
+      ], oracleRoleAuthorization(caseValue, 'supporting'));
       if (fresh.error) throw fresh.error;
       const delivery = fresh.value;
       return oracleCallValue(invokeOracleSurface(caseValue, 'runtime', runtime, surface, [delivery, { expectedBindings: context.packetValue.bindings, packet: context.packetValue }]));
@@ -4931,7 +4993,7 @@ async function oraclePositiveBySurface(caseValue, context) {
       const intent = gate.store.beginSemanticGateDispatch(admission.admission);
       const dispatchRecord = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'recordSemanticGateDispatch', [admission.admission, {
         transport_id: intent.transport_id, transport_result: { status: 'not-started' }, transport_error: null
-      }], { setup: true });
+      }], oracleRoleAuthorization(caseValue, 'setup'));
       if (dispatchRecord.error) throw dispatchRecord.error;
       ORACLE_SURFACE_RECEIPTS.get(dispatchRecord.receipt).include_setup_effect_deltas = true;
       const db = new DatabaseSync(gate.store.databasePath, { readOnly: true });
@@ -4941,11 +5003,8 @@ async function oraclePositiveBySurface(caseValue, context) {
       const recovered = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, surface, [{ consumer_key: consumerKey }, gate.trusted_readers]);
       if (recovered.error) throw recovered.error;
       const setupCall = caseValue.expected.side_effects !== 'new-attempt-permitted';
-      const dispatch = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [recovered.value.admission], {
-        setup: setupCall,
-        supporting: !setupCall,
-      });
-      if (setupCall) markOracleReceiptAsSetup(dispatch.receipt);
+      const dispatch = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [recovered.value.admission],
+        oracleRoleAuthorization(caseValue, setupCall ? 'setup' : 'supporting'));
       return recovered.value;
     }
     case 'buildCurrentPacketProjection': {
@@ -4958,7 +5017,7 @@ async function oraclePositiveBySurface(caseValue, context) {
       if (projection.error) throw projection.error;
       const confirmation = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'confirmCurrentPacketProjection', [
         projection.value, gate.trusted_readers,
-      ], true);
+      ], oracleRoleAuthorization(caseValue, 'supporting'));
       if (confirmation.error) throw confirmation.error;
       const after = runtime.canonicalSerialize(gate.store.readAuthorityPacket(packetId, gate.packetValue.bindings));
       const afterArtifact = caseValue.requirement_id === 'X07'
@@ -5004,9 +5063,9 @@ async function oraclePositiveBySurface(caseValue, context) {
     }
     case 'recordSemanticGateDispatch': {
       const gate = oracleGate(context);
-      const admission = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], { setup: true });
+      const admission = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], oracleRoleAuthorization(caseValue, 'setup'));
       if (admission.error) throw admission.error;
-      const intent = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [admission.value.admission], { setup: true });
+      const intent = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store, 'beginSemanticGateDispatch', [admission.value.admission], oracleRoleAuthorization(caseValue, 'setup'));
       if (intent.error) throw intent.error;
       ORACLE_SURFACE_RECEIPTS.get(intent.receipt).include_setup_effect_deltas = true;
       resetOracleEffectBaseline();
@@ -5164,9 +5223,9 @@ async function oracleExpandedReceiptPositive(caseValue) {
     return oracleCallValue(await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'startAllocatedRun', [session, target.startReaders]));
   }
   if (surface === 'receipt.authorizeMutationDispatch') {
-    const start = await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'startRun', [target.allocation, target.startReaders], { setup: true });
+    const start = await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'startRun', [target.allocation, target.startReaders], oracleRoleAuthorization(caseValue, 'setup'));
     if (start.error) throw start.error;
-    const admission = await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'admitMutationOperation', [start.value, target.descriptor, target.mutationReaders], { setup: true });
+    const admission = await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'admitMutationOperation', [start.value, target.descriptor, target.mutationReaders], oracleRoleAuthorization(caseValue, 'setup'));
     if (admission.error) throw admission.error;
     ORACLE_SURFACE_RECEIPTS.get(admission.receipt).include_setup_effect_deltas = true;
     const firstAuthorization = await invokeOracleSurface(caseValue, 'programmeReceiptStore', store, 'authorizeMutationDispatch', [start.value, admission.value]);
@@ -5228,9 +5287,8 @@ function oracleLoopCommon(caseValue, delegated = false, noPredecessor = false) {
 }
 
 async function oracleLoopWorkspace(base) {
-  const admittedCall = await invokeOracleSurface(base.caseValue, 'executionLoop', executionLoop, 'admitRun', [base.common], { setup: true });
+  const admittedCall = await invokeOracleSurface(base.caseValue, 'executionLoop', executionLoop, 'admitRun', [base.common], oracleRoleAuthorization(base.caseValue, 'setup'));
   if (admittedCall.error) throw admittedCall.error;
-  markOracleReceiptAsSetup(admittedCall.receipt);
   const admitted = admittedCall.value;
   const live = { ref: 'refs/heads/main', sha: '1'.repeat(40), tree: '2'.repeat(40) };
   const workspace = executionLoop.admitWorkspace({
@@ -5348,7 +5406,7 @@ async function verifyOracleLoopRunWitness(caseValue, gate, returned, options = {
     const packet = gate.store.readAuthorityPacket(gate.persisted.packet_id, gate.packetValue.bindings);
     const packetIdentity = runtime.authorityPacketIdentities(packet);
     const reopened = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store,
-      'verifyAuthorityPacketFresh', [gate.persisted.packet_id, gate.packetValue.bindings], { setup: true });
+      'verifyAuthorityPacketFresh', [gate.persisted.packet_id, gate.packetValue.bindings], oracleRoleAuthorization(caseValue, 'setup'));
     const reopenedBound = ORACLE_SURFACE_RECEIPTS.get(reopened.receipt);
     checks.predecessor_packet_fresh_readback = !reopened.error
       && reopenedBound.actual.outcome === 'ACCEPT'
@@ -5691,10 +5749,9 @@ async function verifyOracleTerminalCompletionWitness(
 
     const verification = await invokeOracleSurface(
       caseValue, 'authorityPacketStore', base.gate.store, 'verifySemanticCompletion',
-      [admission, substantiveResult.store, outcomeRef], { setup: true },
+      [admission, substantiveResult.store, outcomeRef], oracleRoleAuthorization(caseValue, 'setup'),
     );
     if (verification.error) throw verification.error;
-    markOracleReceiptAsSetup(verification.receipt);
     checks.completion_receipt_fresh_readback = verification.value.verified === true
       && verification.value.outcome_ref === identities.packet_digest
       && verification.value.packet_id === identities.packet_id;
@@ -6161,10 +6218,9 @@ async function oracleExpandedLoopPositive(caseValue) {
     if (matchingAdmission.length !== 1) throw new Error('ORACLE_COMPLETION_SETUP_ADMISSION_NOT_UNIQUE');
     const admissionInvocation = await invokeOracleSurface(
       caseValue, 'authorityPacketStore', base.gate.store, 'recoverSemanticGateAdmission',
-      [{ consumer_key: matchingAdmission[0].record.consumer_key }, base.gate.trusted_readers], { setup: true },
+      [{ consumer_key: matchingAdmission[0].record.consumer_key }, base.gate.trusted_readers], oracleRoleAuthorization(caseValue, 'setup'),
     );
     if (admissionInvocation.error) throw admissionInvocation.error;
-    markOracleReceiptAsSetup(admissionInvocation.receipt);
     if (admissionInvocation.value.recovered !== true
       || admissionInvocation.value.admission_id !== matchingAdmission[0].row.admission_id
       || !admissionInvocation.value.admission) {
@@ -6325,7 +6381,7 @@ async function verifyOracleAssuranceAdmissionWitness(caseValue, receipt, assuran
     if (!checks.packet_matches_predecessor) throw new Error('ASSURANCE_PREDECESSOR_PACKET_MISMATCH');
 
     const reopened = await invokeOracleSurface(caseValue, 'authorityPacketStore', receipt.store,
-      'verifyAuthorityPacketFresh', [predecessor.packet_id, packet.bindings], { setup: true });
+      'verifyAuthorityPacketFresh', [predecessor.packet_id, packet.bindings], oracleRoleAuthorization(caseValue, 'setup'));
     const reopenedBound = ORACLE_SURFACE_RECEIPTS.get(reopened.receipt);
     checks.fresh_process_readback = !reopened.error && reopenedBound.actual.outcome === 'ACCEPT'
       && reopenedBound.effect_delta.byte_equal_readback === true
@@ -6416,7 +6472,7 @@ async function oracleExpandedReceiptNegative(caseValue) {
     let allocationInput = { ...target.allocation };
     if (variant !== 'missing-handle') allocationInput.semantic_gate = fakeGate;
     let allocated = caseValue.requirement_id === 'X09'
-      ? await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [allocationInput], { setup: true })
+      ? await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [allocationInput], oracleRoleAuthorization(caseValue, 'setup'))
       : await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [allocationInput]);
     if (caseValue.requirement_id === 'X09' && !allocated.error) {
       ORACLE_SURFACE_RECEIPTS.get(allocated.receipt).setup = false;
@@ -6613,7 +6669,7 @@ async function oracleExpandedNegativeAssurance(caseValue) {
       stateRoot: oracleStateRoot(`oracle-assurance-negative-${oracleSafeSeed(caseValue.id)}-`),
     });
     const admission = await invokeOracleSurface(caseValue, 'authorityPacketStore', gate.store,
-      'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], { setup: true });
+      'admitSemanticGate', [gate.consumer_intent, gate.trusted_readers], oracleRoleAuthorization(caseValue, 'setup'));
     if (admission.error) throw admission.error;
     receiptContext = assuranceRuntime.bindReceiptAdmission(gate.store, admission.value.admission);
     resetOracleEffectBaseline();
@@ -6656,7 +6712,7 @@ async function oracleExpandedNegativeReceipt(caseValue) {
     else if (variant === 'plain-shaped-object') input.semantic_gate = { store: {}, admission: {} };
     else delete input.semantic_gate;
     let allocated = caseValue.requirement_id === 'X09'
-      ? await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [input], { setup: true })
+      ? await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [input], oracleRoleAuthorization(caseValue, 'setup'))
       : await invokeOracleSurface(caseValue, 'programmeReceiptStore', target.store, 'allocateRun', [input]);
     if (caseValue.requirement_id === 'X09' && !allocated.error) {
       ORACLE_SURFACE_RECEIPTS.get(allocated.receipt).setup = false;
@@ -6725,12 +6781,15 @@ async function executeAuthorityPacketOracleCase(caseValue, handlers = oracleHand
   if (!mandatory || oracleCaseContractBinding(mandatory) !== oracleCaseContractBinding(caseValue)) {
     throw new Error(`ORACLE_CASE_IDENTITY_UNKNOWN:${caseValue.id}`);
   }
+  const plan = expectedOraclePlan(caseValue);
+  const callPlanState = { plan, required_index: 0 };
   const handler = handlers[identity];
   if (typeof handler !== 'function') throw new Error(`ORACLE_HANDLER_MISSING:${caseValue.id}`);
   const parentHarness = activeOracleHarness;
   const harness = {
     case_identity: identity,
     parent: parentHarness,
+    call_plan_state: callPlanState,
     events: [],
     receipts: [],
     readbacks: [],
@@ -6757,10 +6816,53 @@ async function executeAuthorityPacketOracleCase(caseValue, handlers = oracleHand
     });
   };
   try {
+    let d01Counters = null;
+    let d01Receipt = null;
+    if (caseValue.requirement_id === 'D01') {
+      d01Counters = { getter_calls: 0, proxy_trap_calls: 0, toJSON_calls: 0 };
+      const argument = oraclePacketWithVariant(
+        packet({ seed: `oracle-${oracleSafeSeed(caseValue.id)}` }), caseValue.input.variant, d01Counters,
+      );
+      const recipe = Object.freeze({
+        recipe_id: runtime.digestValue({
+          schema: 'toolkit.github-program.oracle-d01-trusted-recipe.v1',
+          case_identity: identity,
+          variant: caseValue.input.variant,
+        }),
+        argument,
+        counters: d01Counters,
+        expected_variant: caseValue.input.variant,
+      });
+      ORACLE_TRUSTED_D01_RECIPES.set(identity, recipe);
+      const invocation = await invokeOracleSurface(caseValue, 'runtime', runtime, 'validateAuthorityPacket', [recipe.argument]);
+      d01Receipt = invocation.receipt;
+      const bound = ORACLE_SURFACE_RECEIPTS.get(d01Receipt);
+      Object.assign(harness.counters, d01Counters);
+      bound.effect_delta.recipe_identity_bound = bound.argument_binding_digest === runtime.digestValue({
+        schema: 'toolkit.github-program.oracle-d01-trusted-recipe-binding.v1',
+        case_identity: identity,
+        recipe_id: recipe.recipe_id,
+        target_type: 'runtime',
+        method: 'validateAuthorityPacket',
+        argument_reference: 'exact',
+      });
+      bound.effect_delta.getter_calls = d01Counters.getter_calls;
+      bound.effect_delta.proxy_trap_calls = d01Counters.proxy_trap_calls;
+      bound.effect_delta.toJSON_calls = d01Counters.toJSON_calls;
+      record('non-executing-value-guards', d01Counters.getter_calls === 0
+        && d01Counters.proxy_trap_calls === 0 && d01Counters.toJSON_calls === 0,
+      `${d01Counters.getter_calls}/${d01Counters.proxy_trap_calls}/${d01Counters.toJSON_calls}`);
+    }
     const handlerRecord = handler === runStandardOracleCase
       ? record
       : () => { throw new Error('ORACLE_CALLER_ASSERTION_FORBIDDEN'); };
     const result = await handler(caseValue, Object.freeze({ record: handlerRecord }));
+    if (caseValue.requirement_id === 'D01' && handler === runStandardOracleCase) {
+      const returned = Array.isArray(result && result.production_surface_receipts) ? result.production_surface_receipts : [];
+      if (returned.length !== 1 || returned[0] !== d01Receipt) {
+        throw new Error(`ORACLE_CALL_SEQUENCE_MISMATCH:${caseValue.id}:trusted-d01-receipt`);
+      }
+    }
     if (!result) throw new Error(`ORACLE_METADATA_ONLY:${caseValue.id}`);
     const handlerFailure = trace.find((item) => item && item.label === 'handler-action-error');
     if (handlerFailure) throw new Error(`ORACLE_HANDLER_ACTION_FAILED:${caseValue.id}:${handlerFailure.actual}`);
@@ -6774,8 +6876,10 @@ async function executeAuthorityPacketOracleCase(caseValue, handlers = oracleHand
       if (!bound || bound.case_identity !== identity) throw new Error(`ORACLE_UNBOUND_SURFACE_RECEIPT:${caseValue.id}`);
       return bound;
     });
-    const requiredCalls = boundaryCalls.filter((call) => call.setup !== true);
-    const plan = expectedOraclePlan(caseValue);
+    const requiredCalls = boundaryCalls.filter((call) => call.role === 'required');
+    if (callPlanState.required_index !== plan.calls.length) {
+      throw new Error(`ORACLE_CALL_PLAN_INCOMPLETE:${caseValue.id}:expected=${plan.calls.length}:observed=${callPlanState.required_index}`);
+    }
     const expectedMethods = plan.calls.map((call) => call.method);
     const observedMethods = requiredCalls.map((call) => call.method);
     if (observedMethods.length !== expectedMethods.length
@@ -6876,15 +6980,18 @@ async function executeAuthorityPacketOracleCase(caseValue, handlers = oracleHand
     validateOracleEvidence(evidence);
     return evidence;
   } finally {
+    ORACLE_TRUSTED_D01_RECIPES.delete(identity);
     activeOracleHarness = parentHarness;
   }
 }
 
 async function runStandardOracleCase(caseValue, { record }) {
   const plan = expectedOraclePlan(caseValue);
-  const counters = { getter_calls: 0, proxy_trap_calls: 0 };
+  const counters = { getter_calls: 0, proxy_trap_calls: 0, toJSON_calls: 0 };
   const harness = {
+    case_identity: oracleCaseIdentity(caseValue),
     parent: activeOracleHarness,
+    call_plan_state: activeOracleHarness && activeOracleHarness.call_plan_state,
     events: [],
     storeBaselines: new Map(),
     objectBaselines: new Map(),
@@ -6906,7 +7013,7 @@ async function runStandardOracleCase(caseValue, { record }) {
   const plannedDecision = () => {
     const required = harness.receipts.filter((receipt) => {
       const bound = ORACLE_SURFACE_RECEIPTS.get(receipt);
-      return bound && bound.setup !== true;
+      return bound && bound.role === 'required';
     });
     const receipt = required[plan.decision_call_index];
     const bound = receipt && ORACLE_SURFACE_RECEIPTS.get(receipt);
@@ -6914,11 +7021,16 @@ async function runStandardOracleCase(caseValue, { record }) {
   };
   try {
     if (caseValue.requirement_id === 'D01') {
-      const input = oraclePacketWithVariant(packet({ seed: `oracle-${oracleSafeSeed(caseValue.id)}` }), caseValue.input.variant, counters);
-      const invocation = await invokeOracleSurface(caseValue, 'runtime', runtime, 'validateAuthorityPacket', [input]);
-      activeOracleHarness.counters.getter_calls = counters.getter_calls;
-      activeOracleHarness.counters.proxy_trap_calls = counters.proxy_trap_calls;
-      actual = ORACLE_SURFACE_RECEIPTS.get(invocation.receipt).actual;
+      const recipe = ORACLE_TRUSTED_D01_RECIPES.get(oracleCaseIdentity(caseValue));
+      const trustedReceipt = harness.parent && harness.parent.receipts.find((receipt) => {
+        const bound = ORACLE_SURFACE_RECEIPTS.get(receipt);
+        return bound && bound.case_identity === oracleCaseIdentity(caseValue) && bound.role === 'required';
+      });
+      if (!recipe || !trustedReceipt) throw new Error(`ORACLE_D01_RECIPE_MISSING:${caseValue.id}`);
+      Object.assign(counters, recipe.counters);
+      Object.assign(activeOracleHarness.counters, counters);
+      harness.receipts.push(trustedReceipt);
+      actual = ORACLE_SURFACE_RECEIPTS.get(trustedReceipt).actual;
     } else if (caseValue.expected.outcome === 'REJECT') {
       await oracleRejectByCode(caseValue, context);
       actual = plannedDecision();
@@ -6932,7 +7044,7 @@ async function runStandardOracleCase(caseValue, { record }) {
   }
   if (!actual) {
     const requiredCalls = harness.receipts.map((receipt) => ORACLE_SURFACE_RECEIPTS.get(receipt))
-      .filter((receipt) => receipt && receipt.setup !== true)
+      .filter((receipt) => receipt && receipt.role === 'required')
       .map((receipt) => ({ method: receipt.method, outcome: receipt.outcome, code: receipt.actual && receipt.actual.code }));
     actual = { outcome: 'REJECT', code: 'ORACLE_DECISION_RECEIPT_MISSING' };
     record('primary-production-decision-present', false, JSON.stringify({ case_id: caseValue.id, required_calls: requiredCalls }));
@@ -6945,7 +7057,9 @@ async function runStandardOracleCase(caseValue, { record }) {
       && observed.web_acceptance_events_delta === 0 && observed.launch_calls === 0
       && observed.mutation_dispatch_calls === 0, JSON.stringify(observed));
   }
-  if (caseValue.requirement_id === 'D01') record('non-executing-value-guards', counters.getter_calls === 0 && counters.proxy_trap_calls === 0, `${counters.getter_calls}/${counters.proxy_trap_calls}`);
+  if (caseValue.requirement_id === 'D01') record('non-executing-value-guards', counters.getter_calls === 0
+    && counters.proxy_trap_calls === 0 && counters.toJSON_calls === 0,
+  `${counters.getter_calls}/${counters.proxy_trap_calls}/${counters.toJSON_calls}`);
   activeOracleHarness = previousHarness;
   return {
     production_surface_receipts: harness.receipts,

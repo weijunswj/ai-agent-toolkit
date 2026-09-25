@@ -608,6 +608,27 @@ function humanSurfaceContractInstance() {
       expectations: { kind: 'parent', repository: REPOSITORY, issue: 240 },
       render: {
         parent_child_source: { type: 'PARENT_READ', parent_read: read },
+        canonical_state_source: {
+          type: 'CANONICAL_STATE',
+          state: {
+            schema: 'toolkit.github-program.state.generic.v1',
+            repository: REPOSITORY,
+            parent: { issue: 240, title: 'Synthetic programme', goal: 'Exercise the explicit canonical-state render source.' },
+            children: [{
+              boundaries: [], done_when: ['The synthetic outcome is complete.'], eli5: 'Synthetic test.', epochs: [],
+              finality: { state: 'HELD' }, issue: 435, lifecycle: 'CURRENT', objective: 'Exercise the render contract.',
+              order: 1, out_of_scope: [], pr_registry: [], scope: [], summary: 'Synthetic current child.', title: 'Synthetic child',
+            }],
+            active_lanes: [],
+            evidence_refs: [],
+            historical_transitions: [],
+            prs: [],
+            extensions: [{
+              schema: 'toolkit.github-program.programme-graph-metadata.v1',
+              outcomes: [{ child_issue: 435, outcome_id: 'C1' }],
+            }],
+          },
+        },
         pr_source: { type: 'PR_DESCRIPTOR', descriptor: inputDescriptor, bound_authority: null },
         targets: [{ kind: 'parent' }, { kind: 'pr' }],
       },
@@ -672,6 +693,7 @@ function humanSurfaceContractInstance() {
       human_drift: 'MIGRATION_CHILD_DRIFT',
       legacy_human: 'MIGRATION_ORDER_INVALID',
       human_parent_history_null: true,
+      graphless_generic_parent: 'WRITE_PARENT_IF_COMPLETE_METADATA',
     },
     safety: {
       provider_writes_external: true,
@@ -699,6 +721,13 @@ function humanSurfaceContractInstance() {
       selective_aggregate: 'selected family only',
       false_positive_probes: ['missing', 'duplicate', 'unknown', 'failed-case', 'entrypoint-mismatch', 'metadata-tampering'],
     },
+    programme_graph: {
+      graph_schema: 'toolkit.controller.programme-graph.v1',
+      metadata_schema: 'toolkit.github-program.programme-graph-metadata.v1',
+      identity_fields: ['schema', 'digest'],
+      digest_scope: 'canonical-serialization-with-digest-excluded',
+      historical_absence: 'readable-without-current-proof',
+    },
   };
 }
 
@@ -724,6 +753,14 @@ test('human-surface-v2 schema declares every root requirement and passes strict 
   const unknownPhaseProjectionProperty = clone(valid);
   unknownPhaseProjectionProperty.phase_projection.unexpected = true;
   assert.equal(validate(unknownPhaseProjectionProperty), false);
+
+  const missingCanonicalStateSource = clone(valid);
+  delete missingCanonicalStateSource.inputs.render.canonical_state_source;
+  assert.equal(validate(missingCanonicalStateSource), false);
+
+  const wrongGraphIdentity = clone(valid);
+  wrongGraphIdentity.programme_graph.identity_fields = ['schema', 'full_graph'];
+  assert.equal(validate(wrongGraphIdentity), false);
 });
 
 test('readComplete preserves legacy v5 compatibility and reads a human-v2 parent', () => {

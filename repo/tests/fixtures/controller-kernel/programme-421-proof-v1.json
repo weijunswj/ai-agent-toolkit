@@ -1,0 +1,31 @@
+{
+  "schema": "toolkit.controller.programme-graph-source-proof.v1",
+  "parent": {
+    "issue": 421,
+    "revision": "2026-09-25T11:07:51Z",
+    "body_sha256": "c4bf059278a53582d6585cb01c2065bab2f90b645c47b6bed34b8b6b1c9469b4",
+    "programme_graph_section_sha256": "f828d04a50ed713e4ada4c6aff6d61d2b218fdea1bccb422397596e51be9a4ef"
+  },
+  "w2_a": {
+    "issue": 455,
+    "revision": "2026-09-25T11:06:41Z",
+    "body_sha256": "ea74692a8a197bc911e3f99e1be4eda2afdccb36fd2cde335cf1ddbf37d7b27f"
+  },
+  "current_outcome_ids": [
+    "C1", "W2-A", "S1-A", "C2", "C3", "S1", "S2", "H1", "H2", "H3", "H4", "W1", "W2", "D1", "A1",
+    "N1", "N2", "N3", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "V1", "V2", "A4", "A5", "Q"
+  ],
+  "forbidden_current_outcome_ids": ["A2", "A3"],
+  "canonical_assignments": {
+    "C1": { "child_issue": 435, "lifecycle": "CURRENT" },
+    "W2-A": {
+      "child_issue": 455,
+      "lifecycle": "QUEUED",
+      "priority": "URGENT",
+      "planning_admission": "G1_READ_ONLY_AUTHORIZED",
+      "implementation_admission": "DEFERRED"
+    }
+  },
+  "reference_only_issues": [467],
+  "live_fetch_during_tests": false
+}

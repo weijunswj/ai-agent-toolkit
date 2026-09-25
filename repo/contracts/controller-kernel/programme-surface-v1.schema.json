@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.programme-graph.v1",
+  "title": "Canonical-derived programme graph and metadata extension",
+  "$ref": "#/$defs/programmeGraph",
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "repository": { "type": "string", "minLength": 3, "maxLength": 512, "pattern": "^[^/\\s]+/[^/\\s]+$" },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\r\\n\\t]*$" },
+    "outcomeId": {
+      "type": "string",
+      "enum": ["C1", "W2-A", "S1-A", "C2", "C3", "S1", "S2", "H1", "H2", "H3", "H4", "W1", "W2", "D1", "A1", "N1", "N2", "N3", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "V1", "V2", "A4", "A5", "Q"]
+    },
+    "referenceIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue"],
+      "properties": { "repository": { "$ref": "#/$defs/repository" }, "issue": { "$ref": "#/$defs/issue" } }
+    },
+    "metadataOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["child_issue", "outcome_id"],
+      "properties": {
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "outcome_id": { "$ref": "#/$defs/outcomeId" },
+        "priority": { "enum": ["URGENT", "HIGH", "NORMAL", "LOW"] },
+        "planning_class": { "enum": ["INVESTIGATION", "PLANNING", "DELIVERY", "REFERENCE"] },
+        "planning_admission": { "enum": ["G1_READ_ONLY_AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "implementation_admission": { "enum": ["AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true }
+      }
+    },
+    "metadataExtension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "outcomes"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.programme-graph-metadata.v1" },
+        "outcomes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/metadataOutcome" } }
+      }
+    },
+    "nativeIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "number"],
+      "properties": { "repository": { "$ref": "#/$defs/repository" }, "number": { "$ref": "#/$defs/issue" } }
+    },
+    "deliveryPr": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "number"],
+          "properties": { "repository": { "$ref": "#/$defs/repository" }, "number": { "$ref": "#/$defs/issue" } }
+        }
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_id", "order", "status", "dependencies", "native_issue", "delivery_pr", "current_gate", "current_work", "complete_when"],
+      "properties": {
+        "outcome_id": { "$ref": "#/$defs/outcomeId" },
+        "order": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["CURRENT", "QUEUED", "COMPLETED"] },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/outcomeId" } },
+        "native_issue": { "$ref": "#/$defs/nativeIssue" },
+        "delivery_pr": { "$ref": "#/$defs/deliveryPr" },
+        "current_gate": { "anyOf": [{ "$ref": "#/$defs/safeLine" }, { "type": "null" }] },
+        "current_work": { "anyOf": [{ "$ref": "#/$defs/safeLine" }, { "type": "null" }] },
+        "complete_when": { "type": "array", "items": { "$ref": "#/$defs/safeLine" } },
+        "priority": { "enum": ["URGENT", "HIGH", "NORMAL", "LOW"] },
+        "planning_class": { "enum": ["INVESTIGATION", "PLANNING", "DELIVERY", "REFERENCE"] },
+        "planning_admission": { "enum": ["G1_READ_ONLY_AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "implementation_admission": { "enum": ["AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true }
+      }
+    },
+    "programmeGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "repository", "parent_issue", "outcomes", "digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.programme-graph.v1" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "parent_issue": { "$ref": "#/$defs/issue" },
+        "outcomes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/outcome" } },
+        "digest": { "$ref": "#/$defs/digest", "description": "SHA-256 of canonical serialization of this graph with the digest field omitted." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "parent_issue": { "const": 421 } }, "required": ["parent_issue"] },
+          "then": { "properties": { "outcomes": { "type": "array", "minItems": 30, "maxItems": 30 } } }
+        }
+      ]
+    }
+  }
+}
