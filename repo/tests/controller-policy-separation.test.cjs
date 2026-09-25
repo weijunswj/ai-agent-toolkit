@@ -368,6 +368,25 @@ test('canonical equivalence and rejection noninterference are consequential evid
   assert.match(architecture, /final error code alone cannot prove zero execution/);
 });
 
+test('universal and no-bypass claims require an explicit mechanism-completeness proof model beyond finite regressions', () => {
+  assert.match(controller, /Mechanism-completeness proof model/);
+  assert.match(controller, /MECHANISM_COMPLETENESS_PROOF_MODEL/);
+  assert.match(controller, /regression breadth cannot establish exhaustiveness by itself/);
+  assert.match(controller, /complete trusted-boundary inventory, material state machine, protocol schema, enforcement mapping and falsifiable assumptions/);
+  assert.match(controller, /ingress\/egress\/export\/receipt\/binding\/actor\/state transition/);
+  assert.match(controller, /multiplicity\/replay\/reordering, malformed evidence, actor\/identity substitution and bypass transitions/);
+  assert.match(controller, /MECHANISM_COMPLETENESS_UNPROVEN/);
+  assert.match(controller, /conditional on exhaustive claims, not ordinary bounded finite behaviour/);
+
+  assert.match(architecture, /complete trusted-boundary inventory across executable ingress\/egress/);
+  assert.match(architecture, /material state-machine artefact/);
+  assert.match(architecture, /protocol-schema artefact/);
+  assert.match(architecture, /Existing canonical schemas may be referenced rather than duplicated when complete/);
+  assert.match(architecture, /dense finite regression matrix remains necessary falsification\/implementation evidence but is not a completeness proof/);
+  assert.match(architecture, /coordinator versus actual executor/);
+  assert.match(architecture, /G4 directly challenges the proof model/);
+});
+
 test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
   assert.match(controller, /State-transition adversarial closure/);
   assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
