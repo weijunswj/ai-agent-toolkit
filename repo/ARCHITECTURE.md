@@ -161,8 +161,11 @@ G2 binds:
 - causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
 - async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
 - for each material stateful/async transition, a named deterministic negative transition regression plus positive control, covering the interruption/replacement/cancellation/late-completion windows that are actually relevant to the state machine;
+- for universal/arbitrary/unknown-behaviour invariants, the concrete enforcement mechanism plus a completeness argument under the actual language/runtime model, including what state/events are observable and which material paths bypass any finite observer;
 
 For transactional/state-machine work, relevant windows commonly include pre-commit, partial commit, cleanup, and retry after interruption. For async work they commonly include pre-wait, during-wait, replacement/cancellation, late arrival, and completion after a snapshot/decision point. G2 selects the windows that can materially violate the accepted invariant; this is not a mandatory combinatorial matrix.
+
+Mechanism completeness is distinct from semantic correctness. A finite denylist, observer, hook, lexical brand, parser route, intercepted API or event list cannot implement a universal `any/arbitrary/unknown` invariant unless the runtime model proves that mechanism sees every relevant violating path. If the platform cannot generically introspect the required state after arbitrary/untrusted code has acted, G2 must move enforcement to a complete trusted boundary: invalidate or expire provenance at exposure, copy/normalise into trusted state, re-establish trust after the boundary, or return to G1/Owner when the trust model itself must change. Post-hoc detector coverage is not a substitute for observability the platform does not provide.
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
@@ -193,7 +196,9 @@ G4 is fresh, isolated, read-only assurance of the **complete final Delivery Chil
 
 G4 remains adversarial; upstream convergence must improve first-pass quality without weakening G4.
 
-A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. Classification is diagnostic evidence, not a score or authority grant.
+For every material detector/interceptor/hook/brand/parser/ledger enforcement mechanism, G4 challenges mechanism independence where materially plausible: vary how the same forbidden semantic state is produced, not only the input value. At least one adversarial equivalent should avoid the candidate's observer entirely (for example a different lexical identity, ordinary construction instead of an intercepted API, or a state change that leaves watched shape/prototype evidence unchanged). If an equivalent violating path can bypass the observer, classify `MECHANISM_COMPLETENESS_UNPROVEN` and return to targeted G2 before another G3.
+
+A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `MECHANISM_COMPLETENESS_UNPROVEN`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. `MECHANISM_COMPLETENESS_UNPROVEN` means the accepted semantics may be correct but the enforcement/observability proof is incomplete; it requires targeted G2 before another G3. Classification is diagnostic evidence, not a score or authority grant.
 
 G4 is not an automatic review of every commit or internal increment.
 
