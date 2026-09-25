@@ -229,7 +229,7 @@ test('post-Web-directed G4 amend defaults to targeted G2 reclosure before anothe
   assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
   assert.match(controller, /`MECHANISM_COMPLETENESS_ALREADY_BOUND=YES`/);
   assert.match(controller, /mechanism covers the counterexample family/);
-  assert.match(controller, /`MECHANISM_COMPLETENESS_UNPROVEN` forces targeted G2 re-entry/);
+  assert.match(controller, /`MECHANISM_COMPLETENESS_UNPROVEN` forces targeted G2\./);
   assert.match(controller, /`G3_IMPLEMENTATION_MISS` label alone is insufficient/);
   assert.match(controller, /G2 reclosure grants no mutation authority, budget reset, new lineage or automatic follow-on/);
 });
@@ -250,10 +250,11 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
 
 test('G0 differential evidence starts from known-good and keeps incidental environment failures out of the root model', () => {
   assert.match(controller, /Known-good vs production differential/);
-  assert.match(controller, /G_FRAME records the material differences/);
+  assert.match(controller, /when a qualified path works but production fails and the causal question is not already sufficiently framed, `G_FRAME` records the material differences/);
   assert.match(controller, /known-good positive control/);
   assert.match(controller, /real production entry point/);
-  assert.match(controller, /G0 prefers one bounded differential experiment/);
+  assert.match(controller, /`G0` then prefers one bounded differential experiment/);
+  assert.match(controller, /When the supplied framing already contains those facts, G0 may proceed directly without a ceremonial G_FRAME invocation\./);
   assert.match(controller, /Serial one-delta probes are fallback-only when a prior boundary blocks deeper observation/);
   assert.match(controller, /Incidental environment\/check\/transport failure does not replace the causal question/);
   assert.match(architecture, /known-good qualified path succeeds while the real production path fails/);
