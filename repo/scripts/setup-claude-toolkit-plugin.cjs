@@ -218,8 +218,8 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
   for (const relPath of ['repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs']) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing repo-local safety package file: ${relPath}`);
   }
-  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
-    if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
+  for (const relPath of ['repo/scripts/toolkit-route-resolution.cjs', 'repo/scripts/toolkit-host-route-adapters.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
+    if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude route-adapter package file: ${relPath}`);
   }
 
   if (!fs.existsSync(localMarketplacePath)) {
@@ -238,7 +238,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   const pairs = [
     ['.claude-plugin/plugin.json', true],
     ['.claude-plugin/hooks/hooks.json', true],
-    ['repo/scripts/toolkit-agent-control.cjs', false],
+    ['repo/scripts/toolkit-route-resolution.cjs', false],
+    ['repo/scripts/toolkit-host-route-adapters.cjs', false],
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
@@ -282,10 +283,11 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
 function installedActivationProof(installed, expectedVersion) {
   const cachePath = path.resolve(String(installed?.installPath || ''));
   const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
-  const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
+  const routePath = path.join(cachePath, 'repo', 'scripts', 'toolkit-route-resolution.cjs');
+  const adapterPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-host-route-adapters.cjs');
   const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
   const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
-  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath]) {
+  for (const filePath of [hookPath, routePath, adapterPath, processLaunchPath, agentHookPath]) {
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
   }
@@ -295,14 +297,15 @@ function installedActivationProof(installed, expectedVersion) {
     plugin_version: expectedVersion,
     cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
     hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(hookPath)).digest('hex'),
-    controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
+    route_sha256: crypto.createHash('sha256').update(fs.readFileSync(routePath)).digest('hex'),
+    adapter_sha256: crypto.createHash('sha256').update(fs.readFileSync(adapterPath)).digest('hex'),
     process_launch_sha256: crypto.createHash('sha256').update(fs.readFileSync(processLaunchPath)).digest('hex'),
     agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
   };
 }
 
 function sameActivationProof(left, right) {
-  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'route_sha256', 'adapter_sha256', 'process_launch_sha256', 'agent_hook_sha256']
     .every((key) => left?.[key] === right?.[key]);
 }
 

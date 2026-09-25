@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.codex-cache-recovery.v1",
+  "title": "Codex bounded cache recovery",
+  "description": "Typed bounded recovery for source, configuration, cache, and trust evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "state", "healthy", "manual_action", "attempts", "reason_code"],
+  "properties": {
+    "contract_version": { "const": "toolkit.local-bridge.codex-cache-recovery.v1" },
+    "state": { "enum": ["NOOP", "SOURCE_VERIFIED", "REFRESHING", "REDISCOVERING", "VERIFYING", "RETRYING_TRANSIENT", "REPAIRING_ONCE", "TERMINAL"] },
+    "healthy": { "type": "boolean" },
+    "manual_action": { "type": "boolean" },
+    "attempts": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" },
+    "cache_version": { "type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "cache_root": { "type": ["string", "null"], "minLength": 1 },
+    "cache_fingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "source_proof": { "$ref": "#/$defs/trustedProof" },
+    "configuration_proof": { "$ref": "#/$defs/trustedProof" },
+    "installed_state_proof": { "$ref": "#/$defs/trustedProof" }
+  },
+  "$defs": {
+    "trustedProof": {
+      "type": ["object", "null"],
+      "required": ["trusted"],
+      "properties": { "trusted": { "const": true } }
+    }
+  }
+}

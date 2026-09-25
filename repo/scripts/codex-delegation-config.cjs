@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.10.9';
+const TOOLKIT_CLIENT_VERSION = '2.13.0';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -1058,19 +1058,21 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
 async function delegationResultForChoice(choice, configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const current = inspectCodexDelegationConfig(configPath, runtime);
-  if (choice === 'skip') return { ...current, status: 'skipped', changed: false, detail: 'Codex helper-capacity configuration was explicitly skipped.' };
+  if (choice === 'skip') return { ...current, status: 'skipped', changed: false, detail: 'Legacy Codex policy configuration was explicitly skipped; route resolution remains authoritative.' };
   if (choice === 'remove') return removeCodexDelegation(configPath, { ...options, approveCapacityResetRisk: true });
   if (choice === 'keep') {
-    return { ...current, status: current.status === 'configured' ? 'configured' : 'kept', changed: false, detail: current.status === 'configured' ? current.detail : `${current.detail} Current helper capacity was kept unchanged.` };
+    return { ...current, status: 'kept', changed: false, detail: 'Legacy Codex policy was observed but not adopted; route resolution remains authoritative.' };
   }
   if (choice === 'migrate') {
-    if (runtime !== RUNTIMES.V2 || current.status !== 'migration-required') return { ...current, changed: false, detail: `${current.detail} No exact Toolkit-managed legacy setting is available to migrate.` };
-    if (options.approvedProposal) return configureCodexDelegation(configPath, { ...options, helperCount: options.helperCount });
-    return configureCodexDelegation(configPath, { ...options, helperCount: current.helper_count });
+    if (!['migration-required', 'configured', 'repair-required'].includes(current.status)) {
+      return { ...current, status: 'kept', changed: false, detail: 'No exact removable legacy policy block was found.' };
+    }
+    return removeCodexDelegation(configPath, { ...options, approveCapacityResetRisk: true });
   }
-  if (choice === 'ram-safe') return configureCodexDelegation(configPath, { ...options, helperCount: CODEX_V2_RAM_SAFE_HELPERS });
-  if (choice === 'custom') return configureCodexDelegation(configPath, options);
-  throw new Error(`Unsupported helper-capacity choice: ${choice}`);
+  if (['ram-safe', 'custom', 'one-helper', 'root-only'].includes(choice)) {
+    return { ...current, status: 'migration-only', changed: false, reason_code: 'ROUTE_REGISTRY_AUTHORITATIVE', detail: 'Legacy quantity selection cannot configure Toolkit policy; resolve exact launches through the versioned role registry.' };
+  }
+  throw new Error(`Unsupported legacy delegation choice: ${choice}`);
 }
 
 module.exports = {

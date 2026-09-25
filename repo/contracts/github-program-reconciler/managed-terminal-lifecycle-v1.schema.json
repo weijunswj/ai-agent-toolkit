@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program-reconciler.managed-terminal-lifecycle.v1",
+  "title": "Toolkit managed terminal lifecycle",
+  "description": "Ordered, idempotent terminal cleanup evidence. It grants no branch deletion authority by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "state", "terminal_decision", "durable_disposition", "closed", "closure_readback", "delete_eligible", "deletion_intent_persisted", "deletion_observed_absent", "absence_readback", "terminal_receipt"],
+  "properties": {
+    "contract_version": { "const": "toolkit.github-program-reconciler.managed-terminal-lifecycle.v1" },
+    "state": { "enum": ["TERMINAL_DECISION", "DURABLE_DISPOSITION_OR_SUCCESSOR_RECEIPT", "CLOSE", "CLOSURE_READBACK", "DELETE_ELIGIBILITY_CHECK", "EXPECTED_REF_SHA_RECHECK", "SAFE_MANAGED_BRANCH_DELETE", "ABSENCE_READBACK", "TERMINAL_RECEIPT"] },
+    "terminal_decision": { "type": "boolean" },
+    "durable_disposition": { "type": "boolean" },
+    "closed": { "type": "boolean" },
+    "closure_readback": { "type": "boolean" },
+    "delete_eligible": { "type": "boolean" },
+    "deletion_intent_persisted": { "type": "boolean" },
+    "deletion_observed_absent": { "type": "boolean" },
+    "absence_readback": { "type": "boolean" },
+    "terminal_receipt": { "type": "boolean" },
+    "retained": { "type": "boolean" },
+    "issue_number": { "type": ["integer", "null"], "minimum": 1 },
+    "branch": { "type": ["string", "null"], "pattern": "^(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,256}$" },
+    "reason_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" },
+    "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidence" },
+    "deletion_acknowledgement": { "$ref": "#/$defs/deletionAcknowledgement" },
+    "absence_readback_evidence": { "$ref": "#/$defs/absenceReadback" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "terminal_receipt": { "const": true }, "delete_eligible": { "const": true } }, "required": ["terminal_receipt", "delete_eligible"] },
+      "then": {
+        "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
+        "properties": {
+          "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidenceObject" },
+          "absence_readback_evidence": { "$ref": "#/$defs/absenceReadbackObject" }
+        },
+        "anyOf": [
+          { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
+          { "properties": { "deletion_acknowledgement": { "not": { "type": "null" } } }, "required": ["deletion_acknowledgement"] }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "deletion_observed_absent": { "const": true } }, "required": ["deletion_observed_absent"] },
+      "then": {
+        "required": ["deletion_eligibility_evidence", "absence_readback_evidence"],
+        "properties": {
+          "deletion_eligibility_evidence": { "$ref": "#/$defs/eligibilityEvidenceObject" },
+          "deletion_acknowledgement": { "type": "null" },
+          "absence_readback": { "const": true },
+          "absence_readback_evidence": { "$ref": "#/$defs/absenceReadbackObject" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state"],
+      "properties": {
+        "trusted": { "const": true },
+        "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "ownership": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "terminal_state": { "enum": ["terminal-success", "terminal-failure", "terminal-blocked"] }
+      }
+    },
+    "eligibilityEvidence": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/eligibilityEvidenceObject" }
+      ]
+    },
+    "eligibilityEvidenceObject": {
+      "$ref": "#/$defs/identity",
+      "required": ["trusted", "repository", "ownership", "ref", "sha", "terminal_state", "retained", "unpublished_loss", "default_branch", "protected", "checked_out"],
+      "properties": {
+        "ownership": { "const": "toolkit-managed" },
+        "retained": { "const": false },
+        "unpublished_loss": { "const": false },
+        "default_branch": { "const": false },
+        "protected": { "const": false },
+        "checked_out": { "const": false }
+      }
+    },
+    "deletionAcknowledgement": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["acknowledged", "repository", "ownership", "ref", "sha", "terminal_state"],
+          "properties": {
+            "acknowledged": { "const": true },
+            "repository": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "ownership": { "const": "toolkit-managed" },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "terminal_state": { "enum": ["terminal-success", "terminal-failure", "terminal-blocked"] }
+          }
+        }
+      ]
+    },
+    "absenceReadback": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/absenceReadbackObject" }
+      ]
+    },
+    "absenceReadbackObject": {
+      "$ref": "#/$defs/identity",
+      "required": ["trusted", "present", "repository", "ownership", "ref", "sha", "terminal_state"],
+      "properties": { "present": { "const": false }, "ownership": { "const": "toolkit-managed" } }
+    }
+  }
+}

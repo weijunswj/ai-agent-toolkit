@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.invocation-action-scope.v1",
+  "title": "Toolkit Local Bridge invocation action scope",
+  "description": "Immutable, digest-bound authority for one Local Bridge invocation. Writers may confirm, narrow, or reject this scope, but must never widen it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "entrypoint",
+    "write_requested",
+    "hub",
+    "sync_source",
+    "parent_scope_digest",
+    "initial_state_digest",
+    "requested_actions",
+    "authorised_actions",
+    "destinations",
+    "digest"
+  ],
+  "properties": {
+    "contract": { "const": "toolkit.local-bridge.invocation-action-scope.v1" },
+    "entrypoint": { "enum": ["manual", "preference-only", "hook-maintenance", "repo-maintenance", "staging-reconciliation"] },
+    "write_requested": { "type": "boolean" },
+    "hub": { "type": "string", "minLength": 1 },
+    "sync_source": { "enum": ["repo", "codex-plugin", "claude-plugin"] },
+    "parent_scope_digest": { "type": "string", "pattern": "^(?:|[0-9a-f]{64})$" },
+    "initial_state_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "requested_actions": { "$ref": "#/$defs/actions" },
+    "authorised_actions": { "$ref": "#/$defs/actions" },
+    "destinations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opencode": { "type": "string" },
+        "ag2": { "type": "string" }
+      }
+    },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "$defs": {
+    "actions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferences", "targets", "repo_maintenance", "native_maintenance", "report_maintenance", "staging_reconciliation"],
+      "properties": {
+        "preferences": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "auto_sync_enabled",
+              "repo_auto_update_enabled",
+              "last_repo_update_status",
+              "last_repo_update_error",
+              "repo_path",
+              "repo_branch",
+              "repo_remote",
+              "update_report_enabled",
+              "update_report_retention_days",
+              "update_report_open_enabled",
+              "update_report_open_behavior",
+              "legacy_update_report_open_migrated",
+              "codex_plugin_auto_refresh_enabled"
+            ]
+          }
+        },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opencode": { "enum": ["enable-sync", "disable", "sync"] },
+            "ag2": { "enum": ["enable-sync", "disable", "sync"] }
+          }
+        },
+        "repo_maintenance": { "type": "boolean" },
+        "native_maintenance": { "type": "boolean" },
+        "report_maintenance": { "type": "boolean" },
+        "staging_reconciliation": { "type": "string" }
+      }
+    }
+  }
+}

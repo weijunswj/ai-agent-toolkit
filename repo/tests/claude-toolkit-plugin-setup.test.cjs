@@ -10,6 +10,25 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-claude-toolkit-plugin.cjs');
+const route = require('../scripts/toolkit-route-resolution.cjs');
+const adapters = require('../scripts/toolkit-host-route-adapters.cjs');
+const agentHook = require('../scripts/toolkit-claude-agent-hook.cjs');
+
+test('Claude Agent admission rejects non-available capability proof states', () => {
+  const launch = route.resolveRoleRoute({ role: 'g1', host: 'claude-code', launch_id: 'claude-status-proof' });
+  const capability = {
+    available: true, trusted: true, metadata_verified: true,
+    launch_id: launch.launch_id, role: launch.role, provider: launch.provider, model: launch.model,
+    reasoning: launch.reasoning, service_tier: launch.service_tier, speed: launch.speed,
+    host: launch.host, backend: launch.backend, launch_record_digest: launch.route_digest,
+  };
+  const proof = adapters.proveHostCapability({ launch_record: launch, capability }).proof;
+  for (const [status, code] of [['unsupported', 'HOST_CAPABILITY_UNAVAILABLE'], ['contradictory', 'HOST_CAPABILITY_CONTRADICTION']]) {
+    const result = agentHook.decision({ tool_name: 'Agent', launch_record: launch, capability_proof: { ...proof, status } });
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, new RegExp(code));
+  }
+});
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'claude-toolkit-plugin-'));
@@ -493,7 +512,7 @@ test('strict enforcement requires host-reported trust and active hooks bound to 
   assert.equal(summary.strict_enforcement_verified, true);
   assert.equal(summary.activation_proof.plugin_version, expectedVersion());
   assert.equal(summary.activation_proof.schema, 3);
-  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
+  for (const key of ['cache_identity', 'hook_sha256', 'route_sha256', 'adapter_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
     assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
   }
   const processLaunchBytes = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'));
@@ -960,7 +979,8 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   for (const relPath of [
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json',
-    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs',
+    'repo/scripts/toolkit-host-route-adapters.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
@@ -977,11 +997,11 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /stale.*hooks/i);
   fs.copyFileSync(path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json'), path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'));
-  fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-route-resolution.cjs'));
   state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /missing.*toolkit-agent-control/i);
-  fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  assert.match(state.errors.join('\n'), /missing.*toolkit-route-resolution/i);
+  fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-route-resolution.cjs'), path.join(cache, 'repo', 'scripts', 'toolkit-route-resolution.cjs'));
   fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), ' ');
   state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
@@ -996,7 +1016,7 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
   const cache = tmpRoot();
   for (const relPath of [
     '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
-    'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/toolkit-route-resolution.cjs', 'repo/scripts/toolkit-host-route-adapters.cjs', 'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',
   ]) {

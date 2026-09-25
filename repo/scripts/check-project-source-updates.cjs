@@ -10,12 +10,6 @@ const {
   isRetiredMigrationLock
 } = require('./audit-project-source-locks.cjs');
 const {
-  advisoryFindings,
-  defaultAdvisoryDocPath,
-  renderAdvisorySection,
-  sanitizeGeneratedMarkdown
-} = require('./source-watch-advisory-targets.cjs');
-const {
   defaultReviewStatePath,
   findMatchingReviewRecord,
   readReviewState,
@@ -25,6 +19,14 @@ const {
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
 const githubApiBaseUrl = 'https://api.github.com';
 
+function sanitizeGeneratedMarkdown(value) {
+  return String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`');
+}
+
 function slash(value) {
   return value.split(path.sep).join('/');
 }
@@ -33,14 +35,12 @@ function parseArgs(argv) {
   const args = {
     workspace: process.cwd(),
     report: defaultReportPath,
-    advisoryDoc: defaultAdvisoryDocPath,
     reviewState: defaultReviewStatePath
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--workspace') args.workspace = argv[++index] || args.workspace;
     else if (arg === '--report') args.report = argv[++index] || args.report;
-    else if (arg === '--advisory-doc') args.advisoryDoc = argv[++index] || args.advisoryDoc;
     else if (arg === '--review-state') args.reviewState = argv[++index] || args.reviewState;
     else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
@@ -51,10 +51,10 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>] [--review-state <path>]',
+    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--review-state <path>]',
     '',
-    'Checks active third-party SOURCE-LOCK.json entries and actionable advisory targets against GitHub.',
-    'When review is needed, writes a review-notification report only. It never copies upstream files, updates SOURCE-LOCK.json or advisory target documents, or changes toolkit components.'
+    'Checks active third-party SOURCE-LOCK.json entries against GitHub.',
+    'When review is needed, writes a review-notification report only. It never copies upstream files, updates SOURCE-LOCK.json or review-state cursors, or changes toolkit components.'
   ].join('\n');
 }
 
@@ -199,17 +199,16 @@ function renderSourceUpdatesSection(updates) {
   ];
 }
 
-function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
+function renderReviewReport({ updates }) {
   const notificationText = [
     'This PR is a review notification only.',
-    'No source files or advisory tracking documents were updated.',
+    'No source files or review-state cursors were updated.',
     'No review-state cursors were changed.',
-    'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.'
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, and source-lock evidence, then ask an AI agent to inspect before any real edits happen.'
   ];
   const checklist = [
     '- [ ] Review upstream diff manually.',
@@ -217,9 +216,6 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     '- [ ] Confirm attribution/licence notes still apply.',
     '- [ ] Confirm no upstream code was executed.',
     '- [ ] Decide whether a separate update PR should copy/adapt files.',
-    '- [ ] For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes.',
-    '- [ ] Confirm any shrink, move, host-native, or delete recommendation is implemented only in a separate evidence-backed PR.',
-    '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     '- [ ] Run npm run validate:all before any real source update merge.'
   ];
 
@@ -230,17 +226,13 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     '',
     ...notificationText,
     '',
-    `Advisory actions, when present, are read from \`${advisoryDocPath}\`.`,
-    'No advisory tracking document was changed by this workflow.',
-    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
-    'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
+    'Only the active SOURCE-LOCK identity and attribution records are in scope.',
     '',
     '## Manual Review Checklist',
     '',
     ...checklist,
     '',
-    ...renderSourceUpdatesSection(updates),
-    ...renderAdvisorySection(advisoryUpdates, advisoryDocPath)
+    ...renderSourceUpdatesSection(updates)
   ].join('\n'));
 }
 
@@ -263,7 +255,6 @@ function removeReportIfPresent(workspace, reportPath) {
 async function checkProjectSourceUpdates({
   workspace,
   report,
-  advisoryDoc = defaultAdvisoryDocPath,
   reviewState = defaultReviewStatePath
 }, env = process.env) {
   const locks = discoverSourceLocks(workspace);
@@ -295,46 +286,30 @@ async function checkProjectSourceUpdates({
       tracked_files: Array.isArray(lock.files) ? lock.files : []
     });
   }
-  const advisoryResult = await advisoryFindings({
-    workspace,
-    advisoryDocPath: advisoryDoc,
-    reviewStatePath: reviewState
-  }, env);
-  const advisoryUpdates = advisoryResult.findings;
-
-  if (updates.length === 0 && advisoryUpdates.length === 0) {
+  if (updates.length === 0) {
     removeReportIfPresent(workspace, report);
-    if (activeLocks.length === 0 && advisoryResult.target_count === 0) {
+    if (activeLocks.length === 0) {
       return {
         report_written: false,
         updates: [],
-        advisory_updates: [],
         summary: 'No active third-party source update candidates found.'
       };
     }
     return {
       report_written: false,
       updates,
-      advisory_updates: advisoryUpdates,
-      summary: advisoryResult.target_count > 0
-        ? `Checked ${activeLocks.length} active third-party source lock(s) and ${advisoryResult.target_count} advisory target(s); no actionable updates found.`
-        : `Checked ${activeLocks.length} active third-party source lock(s); no actionable updates found.`
+      summary: `Checked ${activeLocks.length} active third-party source lock(s); no actionable updates found.`
     };
   }
 
   const reportPath = writeReport(workspace, report, renderReviewReport({
-    updates,
-    advisoryUpdates,
-    advisoryDocPath: advisoryDoc
+    updates
   }));
   return {
     report_written: true,
     report_path: reportPath,
     updates,
-    advisory_updates: advisoryUpdates,
-    summary: advisoryUpdates.length > 0
-      ? `PR needed: yes (${updates.length} source update${updates.length === 1 ? '' : 's'}, ${advisoryUpdates.length} advisory action${advisoryUpdates.length === 1 ? '' : 's'}).`
-      : `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
+    summary: `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
   };
 }
 

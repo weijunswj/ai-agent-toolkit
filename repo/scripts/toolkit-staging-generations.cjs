@@ -93,6 +93,111 @@ function stagingOwnerLiveness(pid, killFn = process.kill) {
   }
 }
 
+function planOwnedStagingGeneration(options) {
+  const parent = path.resolve(options.parent);
+  const target = path.resolve(options.target);
+  if (!samePath(path.dirname(target), parent)) throw new Error('owned staging target must be an immediate child of its expected parent');
+  const generationId = options.generationId || crypto.randomUUID();
+  const token = options.token || crypto.randomBytes(24).toString('hex');
+  const stagePrefix = options.stagePrefix || '.staging-';
+  const stagePath = path.join(parent, `${stagePrefix}${generationId}`);
+  if (!isDirectChild(parent, stagePath)) throw new Error('owned staging path escaped its expected parent');
+  const recordPath = recordPathFor(parent, generationId);
+  const createdAt = options.createdAt || new Date().toISOString();
+  const record = {
+    owner: OWNER,
+    schema_version: SCHEMA_VERSION,
+    generation_id: generationId,
+    ownership_token: token,
+    expected_staging_path: stagePath,
+    expected_parent: parent,
+    expected_final_target: target,
+    operation: options.operation,
+    source_type: options.sourceType,
+    creating_process: {
+      pid: options.pid || process.pid,
+      lease_token: token,
+      started_at: options.processStartedAt || createdAt
+    },
+    created_at: createdAt,
+    bridge_version: options.bridgeVersion,
+    state: 'registered'
+  };
+  const shapeError = validateRecordShape(record, recordPath, parent);
+  if (shapeError) throw new Error(`owned staging plan is invalid: ${shapeError}`);
+  return Object.freeze({
+    record: Object.freeze(record),
+    recordPath,
+    stagePath,
+    recordBase64: Buffer.from(`${JSON.stringify(record, null, 2)}\n`, 'utf8').toString('base64')
+  });
+}
+
+function plannedStateMarker(generation, state, directoryIdentityValue = null) {
+  const value = state === 'ready'
+    ? {
+        owner: OWNER,
+        schema_version: SCHEMA_VERSION,
+        generation_id: generation.record.generation_id,
+        ownership_token: generation.record.ownership_token,
+        directory_identity: directoryIdentityValue,
+        ready_at: new Date().toISOString(),
+        state: 'ready'
+      }
+    : {
+        owner: OWNER,
+        schema_version: SCHEMA_VERSION,
+        generation_id: generation.record.generation_id,
+        ownership_token: generation.record.ownership_token,
+        state,
+        recorded_at: new Date().toISOString()
+      };
+  const markerPath = state === 'ready'
+    ? path.join(generation.stagePath, OWNER_MARKER)
+    : auxiliaryPath(generation.recordPath, state);
+  return Object.freeze({ path: markerPath, value: Object.freeze(value), base64: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8').toString('base64') });
+}
+
+function recursiveRemovalPlan(rootPath) {
+  const root = path.resolve(rootPath);
+  const entries = [];
+  function visit(current) {
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`owned staging cleanup rejected symlink or reparse entry: ${current}`);
+    const real = fs.realpathSync.native(current);
+    if (!samePath(real, current)) throw new Error(`owned staging cleanup rejected redirected entry: ${current}`);
+    const baseIdentity = directoryIdentity(stat);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+        visit(path.join(current, entry.name));
+      }
+      entries.push(Object.freeze({ path: current, type: 'directory', identity: Object.freeze({ type: 'directory', ...baseIdentity }) }));
+    } else if (stat.isFile()) {
+      entries.push(Object.freeze({ path: current, type: 'file', identity: Object.freeze({ type: 'file', ...baseIdentity, ctime_ms: String(stat.ctimeMs), size: stat.size }) }));
+    } else {
+      throw new Error(`owned staging cleanup rejected special entry: ${current}`);
+    }
+  }
+  visit(root);
+  return Object.freeze(entries);
+}
+
+function planOwnedGenerationCleanup(generation, options = {}) {
+  const inspected = inspectOwnedGeneration(generation.recordPath, {
+    expectedParent: generation.record.expected_parent,
+    liveness: options.currentOperation ? () => 'dead' : options.liveness
+  });
+  if (!inspected.safe_to_reconcile) return Object.freeze({ cleanable: false, reason: inspected.classification, inspection: inspected, entries: Object.freeze([]) });
+  const entries = [];
+  if (pathExistsLstat(generation.stagePath)) entries.push(...recursiveRemovalPlan(generation.stagePath));
+  for (const kind of ['ready', 'completed', 'failed']) {
+    const markerPath = auxiliaryPath(generation.recordPath, kind);
+    if (pathExistsLstat(markerPath)) entries.push(...recursiveRemovalPlan(markerPath));
+  }
+  if (pathExistsLstat(generation.recordPath)) entries.push(...recursiveRemovalPlan(generation.recordPath));
+  return Object.freeze({ cleanable: true, reason: '', inspection: inspected, entries: Object.freeze(entries) });
+}
+
 function createOwnedStagingGeneration(options) {
   const parent = path.resolve(options.parent);
   const target = path.resolve(options.target);
@@ -505,6 +610,9 @@ module.exports = {
   inspectOwnedGeneration,
   lookupExactOwnedGeneration,
   markOwnedStaging,
+  planOwnedGenerationCleanup,
+  planOwnedStagingGeneration,
+  plannedStateMarker,
   reconcileOwnedStaging,
   stagingOwnerLiveness
 };

@@ -7,24 +7,33 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const {
+  EXPECTED_TOOLKIT_VERSION,
+  pluginId,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
+  inspectCodexToolkitConfigurationProof,
+  inspectCodexToolkitInstalledState,
   inspectCodexPluginList,
-  verifyInstalledCacheFreshness
+  verifyInstalledCacheFreshness,
+  cacheFingerprint,
+  recoverCodexCache,
+  validateRepoPluginSource
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
+  planN8nSkillsPluginRepair,
   reconcileN8nSkillsPlugin
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
   auditOwnedStaging,
-  cleanupOwnedGeneration,
-  createOwnedStagingGeneration,
-  markOwnedStaging,
+  lookupExactOwnedGeneration,
+  planOwnedGenerationCleanup,
+  planOwnedStagingGeneration,
+  plannedStateMarker,
   reconcileOwnedStaging
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.10.9';
+const BRIDGE_VERSION = '2.13.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -34,6 +43,106 @@ const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
+const AG2_PROOF_CONTRACT_VERSION = 'toolkit.local-bridge.ag2-skills-projection-proof.v1';
+const INVOCATION_AUTHORITY_CONTRACT = 'toolkit.local-bridge.invocation-authority.v1';
+const DELEGATED_AUTHORITY_CONTRACT = 'toolkit.local-bridge.delegated-invocation-authority.v1';
+const VERIFIED_SOURCE_RECEIPT_CONTRACT = 'toolkit.local-bridge.verified-source-receipt.v1';
+const RECEIPT_CHILD_CAPSULE_CONTRACT = 'toolkit.local-bridge.receipt-backed-child-capsule.v1';
+const VERIFIED_SOURCE_CHECKPOINTS = Object.freeze([
+  'repository-verification',
+  'post-verification',
+  'refresh-relock',
+  'envelope-construction',
+  'pre-launch',
+  'child-start'
+]);
+const BRIDGE_ENTRY_RELATIVE_PATH = 'repo/scripts/toolkit-local-bridge.cjs';
+const REPORT_CREATE_ATTEMPTS = 20;
+const phaseContextState = new WeakMap();
+const verifiedSourcePrivate = new WeakMap();
+const RECEIPT_CHILD_BOOTSTRAP = String.raw`'use strict';
+const crypto=require('node:crypto');
+const fs=require('node:fs');
+const path=require('node:path');
+const Module=require('node:module');
+const canonical=(v)=>Array.isArray(v)?'['+v.map(canonical).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map((k)=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}':JSON.stringify(v);
+const hash=(v)=>crypto.createHash('sha256').update(v).digest('hex');
+let wrapper;
+try{wrapper=JSON.parse(fs.readFileSync(0,'utf8'));}catch(error){throw new Error('receipt-backed child capsule is not valid JSON');}
+if(!wrapper||wrapper.contract!=='toolkit.local-bridge.receipt-backed-child-capsule.v1')throw new Error('receipt-backed child capsule has the wrong contract');
+const root=path.resolve(wrapper.stage_root);
+const manifest=wrapper.receipt&&wrapper.receipt.source_manifest;
+if(!Array.isArray(manifest)||hash(canonical(manifest))!==wrapper.receipt.source_manifest_digest)throw new Error('receipt-backed child source manifest digest mismatch');
+const buffers=new Map();
+for(const item of manifest){
+  const file=path.resolve(root,item.relative_path);
+  const rel=path.relative(root,file);
+  if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw new Error('receipt-backed child source path escaped staging');
+  const stat=fs.lstatSync(file);
+  if(!stat.isFile()||stat.isSymbolicLink())throw new Error('receipt-backed child source entry is not an ordinary file');
+  const bytes=fs.readFileSync(file);
+  if(bytes.length!==item.byte_length||hash(bytes)!==item.sha256)throw new Error('receipt-backed child staged bytes mismatch: '+item.relative_path);
+  buffers.set(file,bytes);
+}
+const entry=path.resolve(root,wrapper.receipt.entry.relative_path);
+const entryBytes=buffers.get(entry);
+if(!entryBytes||hash(entryBytes)!==wrapper.receipt.entry.sha256)throw new Error('receipt-backed child entry digest mismatch');
+const handshake={
+  receipt_id:wrapper.receipt.receipt_id,
+  commit:wrapper.receipt.commit,
+  tree:wrapper.receipt.tree,
+  entry_digest:wrapper.receipt.entry.sha256,
+  source_manifest_digest:wrapper.receipt.source_manifest_digest
+};
+if(canonical(handshake)!==canonical(wrapper.delegated_authority.verified_source))throw new Error('receipt-backed child handshake mismatch');
+process.stderr.write('__TOOLKIT_RECEIPT_HANDSHAKE__='+hash(canonical(handshake))+'\n');
+globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON=JSON.stringify(wrapper.delegated_authority);
+globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE=Object.freeze({...handshake});
+globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT=root;
+const originalResolve=Module._resolveFilename;
+const originalJs=Module._extensions['.js'];
+const originalJson=Module._extensions['.json'];
+const isLocalRequest=(request)=>typeof request==='string'&&(/^\.{1,2}[\\/]/.test(request)||path.posix.isAbsolute(request)||path.win32.isAbsolute(request));
+const localPattern=/require\(\s*['"]([^'"]+)['"]\s*\)/g;
+for(const [filename,bytes] of buffers){
+  if(!/\.(?:c?js)$/i.test(filename))continue;
+  const parent=new Module(filename,null);parent.filename=filename;parent.paths=Module._nodeModulePaths(path.dirname(filename));
+  const source=bytes.toString('utf8');
+  let match;
+  while((match=localPattern.exec(source))){
+    const request=match[1];
+    if(!isLocalRequest(request))continue;
+    let resolved;
+    try{resolved=path.resolve(originalResolve.call(Module,request,parent,false));}
+    catch(error){throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);}
+    if(!buffers.has(resolved))throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+  }
+}
+Module._resolveFilename=function(request,parent,isMain,options){
+  const local=isLocalRequest(request);
+  let resolved;
+  try{resolved=originalResolve.call(this,request,parent,isMain,options);}
+  catch(error){if(local)throw new Error('receipt-backed child rejected executable relative load outside manifest: '+request);throw error;}
+  if(local){
+    const exact=path.resolve(resolved);
+    const expected=exact;
+    if(!buffers.has(expected)){
+      throw new Error('receipt-backed child rejected executable relative load outside manifest: '+resolved);
+    }
+    try{
+      const stat=fs.lstatSync(expected);
+      if(!stat.isFile()||stat.isSymbolicLink()||!fs.readFileSync(expected).equals(buffers.get(expected)))throw new Error('changed');
+    }catch(error){throw new Error('receipt-backed child rejected changed local resolution target: '+expected);}
+    return expected;
+  }
+  return resolved;
+};
+const compile=(module,filename)=>{const bytes=buffers.get(path.resolve(filename));if(!bytes)throw new Error('receipt-backed child rejected unverified module');module._compile(bytes.toString('utf8'),filename);};
+Module._extensions['.js']=function(module,filename){if(buffers.has(path.resolve(filename)))return compile(module,filename);return originalJs(module,filename);};
+Module._extensions['.cjs']=Module._extensions['.js'];
+Module._extensions['.json']=function(module,filename){const bytes=buffers.get(path.resolve(filename));if(bytes){module.exports=JSON.parse(bytes.toString('utf8'));return;}return originalJson(module,filename);};
+process.argv=[process.execPath,entry,...wrapper.argv];
+const main=new Module(entry,null);main.filename=entry;main.paths=Module._nodeModulePaths(path.dirname(entry));process.mainModule=main;main._compile(entryBytes.toString('utf8'),entry);`;
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -99,6 +208,48 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function ag2SkillsProjectionProof(input = {}) {
+  const discovery = input.discovery && typeof input.discovery === 'object' ? input.discovery : {};
+  const contradictory = discovery.plugin_authority === true || discovery.skills_only === false;
+  const supported = discovery.supported === true
+    && discovery.destination_kind === 'supported-skills-directory'
+    && discovery.skills_only === true
+    && discovery.plugin_authority === false
+    && typeof discovery.target_path === 'string'
+    && discovery.target_path.length > 0;
+  if (contradictory) {
+    return Object.freeze({
+      contract_version: AG2_PROOF_CONTRACT_VERSION,
+      status: 'CONTRADICTORY',
+      destination_kind: 'unknown',
+      skills_only: true,
+      plugin_authority: false,
+      discovery_authority: 'unavailable',
+      reason_code: 'AG2_DISCOVERY_CONTRADICTORY'
+    });
+  }
+  if (!supported) {
+    return Object.freeze({
+      contract_version: AG2_PROOF_CONTRACT_VERSION,
+      status: 'AG2_PROOF_UNAVAILABLE',
+      destination_kind: 'unknown',
+      skills_only: true,
+      plugin_authority: false,
+      discovery_authority: 'unavailable',
+      reason_code: 'AG2_PROOF_UNAVAILABLE'
+    });
+  }
+  return Object.freeze({
+    contract_version: AG2_PROOF_CONTRACT_VERSION,
+    status: 'PROVEN',
+    destination_kind: 'supported-skills-directory',
+    skills_only: true,
+    plugin_authority: false,
+    discovery_authority: 'supported-read-only-evidence',
+    reason_code: 'AG2_SKILLS_DESTINATION_PROVEN'
+  });
+}
+
 function parseListValue(value) {
   return String(value || '')
     .split(',')
@@ -110,12 +261,16 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     argv,
     write: false,
+    preferenceOnly: false,
     audit: false,
     hook: false,
     syncEnabled: false,
     forceDowngrade: false,
     enableTargets: [],
     disableTargets: [],
+    scopedSyncTargets: [],
+    parentScopeDigest: '',
+    delegatedAuthority: false,
     enableAutoSync: false,
     disableAutoSync: false,
     enableRepoAutoUpdate: false,
@@ -149,6 +304,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
     if (arg === '--write') args.write = true;
+    else if (arg === '--preference-only') args.preferenceOnly = true;
     else if (arg === '--audit') args.audit = true;
     else if (arg === '--hook') args.hook = true;
     else if (arg === '--sync-enabled') args.syncEnabled = true;
@@ -187,6 +343,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
     else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--disable-target=')) args.disableTargets.push(...parseListValue(arg.slice('--disable-target='.length)));
+    else if (arg === '--scope-target-sync') args.scopedSyncTargets.push(...parseListValue(next()));
+    else if (arg.startsWith('--scope-target-sync=')) args.scopedSyncTargets.push(...parseListValue(arg.slice('--scope-target-sync='.length)));
+    else if (arg === '--parent-scope-digest') args.parentScopeDigest = next();
+    else if (arg.startsWith('--parent-scope-digest=')) args.parentScopeDigest = arg.slice('--parent-scope-digest='.length);
+    else if (arg === '--delegated-invocation-authority') args.delegatedAuthority = true;
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--sync-source') args.syncSource = next();
@@ -209,8 +370,21 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  for (const target of [...args.enableTargets, ...args.disableTargets]) {
+  for (const target of [...args.enableTargets, ...args.disableTargets, ...args.scopedSyncTargets]) {
     if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  }
+  args.enableTargets = [...new Set(args.enableTargets)];
+  args.disableTargets = [...new Set(args.disableTargets)];
+  args.scopedSyncTargets = [...new Set(args.scopedSyncTargets)];
+  const contradictoryTargets = args.enableTargets.filter((target) => args.disableTargets.includes(target));
+  if (contradictoryTargets.length) {
+    throw new Error(`Targets cannot be enabled and disabled in one invocation: ${contradictoryTargets.join(', ')}`);
+  }
+  if (args.parentScopeDigest && !/^[0-9a-f]{64}$/i.test(args.parentScopeDigest)) {
+    throw new Error('--parent-scope-digest requires one SHA-256 digest');
+  }
+  if (args.write && (args.parentScopeDigest || args.scopedSyncTargets.length)) {
+    throw new Error('write-mode --parent-scope-digest and --scope-target-sync are retired; delegated writes require --delegated-invocation-authority with the fixed payload on stdin');
   }
   if (!SYNC_SOURCES.includes(args.syncSource)) {
     throw new Error(`--sync-source must be repo, codex-plugin, or claude-plugin: ${args.syncSource}`);
@@ -251,6 +425,1065 @@ function assertReconciliationCommandArgs(args) {
   }
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function detachedFrozen(value) {
+  return deepFreeze(JSON.parse(JSON.stringify(value)));
+}
+
+function gitBuffer(repoPath, gitArgs, options = {}) {
+  const result = spawnSync('git', gitArgs, {
+    cwd: repoPath,
+    encoding: null,
+    timeout: options.timeout || 30000,
+    windowsHide: true,
+    maxBuffer: options.maxBuffer || 64 * 1024 * 1024
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || ''),
+    stderr: Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from(result.stderr || ''),
+    error: result.error ? result.error.message : ''
+  };
+}
+
+function requireGitText(repoPath, gitArgs, label) {
+  const result = gitBuffer(repoPath, gitArgs);
+  if (!result.ok) {
+    const detail = `${result.stderr.toString('utf8')}${result.error}`.trim();
+    throw new Error(`${label} failed${detail ? `: ${detail}` : ''}`);
+  }
+  return result.stdout.toString('utf8').trim();
+}
+
+function canonicalRepositoryIdentity(remote) {
+  const normalized = normalizeRemoteForCompare(remote);
+  const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
+  return {
+    owner: match ? match[1].toLowerCase() : '',
+    name: match ? match[2].toLowerCase() : '',
+    kind: match ? 'github' : 'local-filesystem',
+    normalized_remote: normalized
+  };
+}
+
+function resolveExecutablePath(command) {
+  if (path.isAbsolute(command)) return path.resolve(command);
+  const locator = process.platform === 'win32'
+    ? spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe'), [command], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    : spawnSync('/usr/bin/which', [command], { encoding: 'utf8', timeout: 5000 });
+  if (locator.status !== 0) throw new Error(`could not resolve executable identity: ${command}`);
+  const candidate = String(locator.stdout || '').split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+  if (!candidate) throw new Error(`could not resolve executable identity: ${command}`);
+  return path.resolve(candidate);
+}
+
+function executableIdentity(command, versionArgs) {
+  const executablePath = resolveExecutablePath(command);
+  const stat = fs.lstatSync(executablePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`verified executable is not an ordinary file: ${executablePath}`);
+  const versionResult = spawnSync(executablePath, versionArgs, { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  if (versionResult.status !== 0) throw new Error(`could not verify executable version: ${executablePath}`);
+  return deepFreeze({
+    path: executablePath,
+    version: `${versionResult.stdout || ''}${versionResult.stderr || ''}`.trim(),
+    sha256: sha256(fs.readFileSync(executablePath))
+  });
+}
+
+function resolveLocalRequire(fromFile, request) {
+  if (!request.startsWith('.')) return '';
+  const base = path.resolve(path.dirname(fromFile), request);
+  const candidates = [base, `${base}.cjs`, `${base}.js`, `${base}.json`, path.join(base, 'index.cjs'), path.join(base, 'index.js')];
+  for (const candidate of candidates) {
+    try {
+      if (fs.lstatSync(candidate).isFile()) return candidate;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error(`verified source closure cannot resolve local require ${request} from ${fromFile}`);
+}
+
+function sourceClosurePaths(repoPath, entryRelativePath = BRIDGE_ENTRY_RELATIVE_PATH) {
+  const root = path.resolve(repoPath);
+  const pending = [path.resolve(root, entryRelativePath)];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.shift();
+    if (visited.has(current)) continue;
+    if (!isInside(root, current)) throw new Error('verified source closure escaped the repository root');
+    visited.add(current);
+    if (path.extname(current).toLowerCase() === '.json') continue;
+    const source = fs.readFileSync(current, 'utf8');
+    const pattern = /require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+    let match;
+    while ((match = pattern.exec(source))) {
+      const resolved = resolveLocalRequire(current, match[1]);
+      if (resolved && !visited.has(resolved)) pending.push(resolved);
+    }
+  }
+  return [...visited].map((filePath) => slash(path.relative(root, filePath))).sort();
+}
+
+function gitTreeEntry(repoPath, commit, relativePath) {
+  const line = requireGitText(repoPath, ['ls-tree', commit, '--', relativePath], `read Git tree entry for ${relativePath}`);
+  const match = line.match(/^(\d{6})\s+\w+\s+([0-9a-f]{40,64})\t(.+)$/);
+  if (!match || slash(match[3]) !== slash(relativePath)) throw new Error(`verified source is not tracked at ${relativePath}`);
+  return { mode: match[1], blob: match[2] };
+}
+
+function gitObjectBytes(repoPath, commit, relativePath) {
+  const result = gitBuffer(repoPath, ['show', `${commit}:${slash(relativePath)}`]);
+  if (!result.ok) throw new Error(`could not read verified Git object bytes for ${relativePath}`);
+  return result.stdout;
+}
+
+function createVerifiedSourceReceipt({ repoPath, branch, remote, validation }) {
+  const root = path.resolve(repoPath);
+  const commit = requireGitText(root, ['rev-parse', 'HEAD'], 'read verified source commit');
+  const tree = requireGitText(root, ['rev-parse', 'HEAD^{tree}'], 'read verified source tree');
+  const actualBranch = requireGitText(root, ['rev-parse', '--abbrev-ref', 'HEAD'], 'read verified source branch');
+  const actualRemote = requireGitText(root, ['remote', 'get-url', 'origin'], 'read verified source remote');
+  const dirty = requireGitText(root, ['status', '--porcelain'], 'verify clean source worktree');
+  if (dirty) throw new Error('verified source worktree changed before receipt creation');
+  if (actualBranch !== branch) throw new Error('verified source branch changed before receipt creation');
+  if (normalizeRemoteForCompare(actualRemote) !== normalizeRemoteForCompare(remote)) throw new Error('verified source remote changed before receipt creation');
+  const repository = canonicalRepositoryIdentity(actualRemote);
+  if (repository.kind === 'github' && (repository.owner !== 'weijunswj' || repository.name !== 'ai-agent-toolkit')) {
+    throw new Error('verified source repository identity is not weijunswj/ai-agent-toolkit');
+  }
+  if (repository.kind === 'local-filesystem' && !path.isAbsolute(actualRemote)) throw new Error('verified source repository remote identity is unsupported');
+  const versionPath = path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
+  const packageVersion = JSON.parse(fs.readFileSync(versionPath, 'utf8')).version;
+  if (packageVersion !== BRIDGE_VERSION) throw new Error(`verified source package version mismatch: ${packageVersion} != ${BRIDGE_VERSION}`);
+  const relativePaths = sourceClosurePaths(root);
+  const buffers = new Map();
+  const manifest = relativePaths.map((relativePath) => {
+    const workingBytes = fs.readFileSync(path.join(root, relativePath));
+    const objectBytes = gitObjectBytes(root, commit, relativePath);
+    if (!workingBytes.equals(objectBytes)) throw new Error(`verified source bytes differ from Git object: ${relativePath}`);
+    const entry = gitTreeEntry(root, commit, relativePath);
+    buffers.set(relativePath, Buffer.from(objectBytes));
+    return {
+      relative_path: relativePath,
+      git_mode: entry.mode,
+      git_blob: entry.blob,
+      byte_length: objectBytes.length,
+      sha256: sha256(objectBytes)
+    };
+  });
+  const manifestDigest = sha256(canonicalJson(manifest));
+  const entry = manifest.find((item) => item.relative_path === BRIDGE_ENTRY_RELATIVE_PATH);
+  if (!entry) throw new Error('verified source closure omitted the Bridge entry');
+  const nativeSetupRelativePath = 'repo/scripts/setup-codex-toolkit-plugin.cjs';
+  let nativeSetupEntry = null;
+  let nativeSetupBytes = null;
+  const nativeSetupPath = path.join(root, nativeSetupRelativePath);
+  if (fs.existsSync(nativeSetupPath)) {
+    const stat = fs.lstatSync(nativeSetupPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('verified native setup source is not an ordinary file');
+    const workingBytes = fs.readFileSync(nativeSetupPath);
+    const objectBytes = gitObjectBytes(root, commit, nativeSetupRelativePath);
+    if (!workingBytes.equals(objectBytes)) throw new Error(`verified source bytes differ from Git object: ${nativeSetupRelativePath}`);
+    const nativeEntry = gitTreeEntry(root, commit, nativeSetupRelativePath);
+    nativeSetupBytes = Buffer.from(objectBytes);
+    nativeSetupEntry = {
+      relative_path: nativeSetupRelativePath,
+      git_mode: nativeEntry.mode,
+      git_blob: nativeEntry.blob,
+      byte_length: objectBytes.length,
+      sha256: sha256(objectBytes)
+    };
+  }
+  const nativeCacheFingerprint = nativeSetupEntry ? cacheFingerprint(root, root, {
+    normalizeWindowsSessionStart: process.platform === 'win32'
+  }) : '';
+  if (nativeSetupEntry && !/^[a-f0-9]{64}$/.test(nativeCacheFingerprint)) throw new Error('verified native setup source fingerprint is invalid');
+  const node = executableIdentity(process.execPath, ['--version']);
+  const git = executableIdentity('git', ['--version']);
+  const base = {
+    contract: VERIFIED_SOURCE_RECEIPT_CONTRACT,
+    repository: { owner: repository.owner, name: repository.name, kind: repository.kind, root },
+    remote: { name: 'origin', identity: repository.normalized_remote },
+    ref: { branch, semantics: 'exact-clean-branch-head' },
+    commit,
+    tree,
+    clean_worktree: true,
+    package_version: packageVersion,
+    platform: process.platform,
+    arch: process.arch,
+    executables: { node, git },
+    entry: { relative_path: entry.relative_path, git_blob: entry.git_blob, byte_length: entry.byte_length, sha256: entry.sha256 },
+    native_setup: nativeSetupEntry ? {
+      entry_relative_path: nativeSetupEntry.relative_path,
+      entry_git_blob: nativeSetupEntry.git_blob,
+      entry_byte_length: nativeSetupEntry.byte_length,
+      entry_sha256: nativeSetupEntry.sha256,
+      cache_fingerprint: nativeCacheFingerprint
+    } : null,
+    source_manifest: manifest,
+    source_manifest_digest: manifestDigest,
+    validation: detachedFrozen(validation || { status: 'passed', commands: [] }),
+    continuity_checkpoints: VERIFIED_SOURCE_CHECKPOINTS
+  };
+  const receiptId = sha256(canonicalJson(base));
+  const receipt = deepFreeze({ ...base, receipt_id: receiptId });
+  verifiedSourcePrivate.set(receipt, {
+    buffers,
+    nativeSetupBytes,
+    observations: new Map([['repository-verification', timestamp()]])
+  });
+  return receipt;
+}
+
+function verifySourceReceiptContinuity(receipt, checkpoint) {
+  if (!receipt || receipt.contract !== VERIFIED_SOURCE_RECEIPT_CONTRACT || !VERIFIED_SOURCE_CHECKPOINTS.includes(checkpoint)) {
+    throw new Error('verified source continuity check received an invalid receipt or checkpoint');
+  }
+  const privateState = verifiedSourcePrivate.get(receipt);
+  if (!privateState) throw new Error('verified source receipt has no immutable source capsule');
+  const root = receipt.repository.root;
+  if (requireGitText(root, ['rev-parse', 'HEAD'], 'recheck source commit') !== receipt.commit) throw new Error(`verified source continuity failed at ${checkpoint}: commit changed`);
+  if (requireGitText(root, ['rev-parse', 'HEAD^{tree}'], 'recheck source tree') !== receipt.tree) throw new Error(`verified source continuity failed at ${checkpoint}: tree changed`);
+  if (requireGitText(root, ['rev-parse', '--abbrev-ref', 'HEAD'], 'recheck source branch') !== receipt.ref.branch) throw new Error(`verified source continuity failed at ${checkpoint}: branch changed`);
+  const remote = requireGitText(root, ['remote', 'get-url', receipt.remote.name], 'recheck source remote');
+  if (normalizeRemoteForCompare(remote) !== receipt.remote.identity) throw new Error(`verified source continuity failed at ${checkpoint}: remote changed`);
+  if (requireGitText(root, ['status', '--porcelain'], 'recheck source worktree')) throw new Error(`verified source continuity failed at ${checkpoint}: worktree changed`);
+  for (const item of receipt.source_manifest) {
+    const bytes = fs.readFileSync(path.join(root, item.relative_path));
+    const admitted = privateState.buffers.get(item.relative_path);
+    if (!admitted || !bytes.equals(admitted) || sha256(bytes) !== item.sha256) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: ${item.relative_path} changed`);
+    }
+  }
+  if (receipt.native_setup) {
+    const nativeSetupPath = path.join(root, receipt.native_setup.entry_relative_path);
+    const nativeStat = fs.lstatSync(nativeSetupPath);
+    const nativeBytes = fs.readFileSync(nativeSetupPath);
+    if (!nativeStat.isFile() || nativeStat.isSymbolicLink() || !privateState.nativeSetupBytes
+      || !nativeBytes.equals(privateState.nativeSetupBytes) || sha256(nativeBytes) !== receipt.native_setup.entry_sha256) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: native setup source changed`);
+    }
+    const nativeFingerprint = cacheFingerprint(root, root, {
+      normalizeWindowsSessionStart: process.platform === 'win32'
+    });
+    if (nativeFingerprint !== receipt.native_setup.cache_fingerprint) {
+      throw new Error(`verified source continuity failed at ${checkpoint}: native setup source closure changed`);
+    }
+  }
+  privateState.observations.set(checkpoint, timestamp());
+  return deepFreeze({ receipt_id: receipt.receipt_id, checkpoint, status: 'passed' });
+}
+
+function verifiedSourceEvidence(receipt) {
+  const state = verifiedSourcePrivate.get(receipt);
+  return detachedFrozen({
+    ...receipt,
+    observed_checkpoints: VERIFIED_SOURCE_CHECKPOINTS.filter((name) => state?.observations.has(name)).map((name) => ({ name, status: 'passed' }))
+  });
+}
+
+function admitReceiptBackedEffect({ args, receipt, checkpoint, expectedState, kind, operands }) {
+  const phase = validatePhaseContext(args.phaseContext);
+  const hook = args.testHooks?.beforeReceiptBackedEffectAdmission;
+  if (hook) hook(detachedFrozen({ kind, checkpoint, operands }));
+  assertActualMutationInput(args, 'delegated.child.launch', {
+    details: {
+      path: path.join(receipt.repository.root, BRIDGE_ENTRY_RELATIVE_PATH),
+      cwd: receipt.repository.root,
+      arguments: ['-e', RECEIPT_CHILD_BOOTSTRAP]
+    }
+  });
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  const receiptState = verifiedSourcePrivate.get(receipt);
+  if (!receiptState?.observations.has(checkpoint)) verifySourceReceiptContinuity(receipt, checkpoint);
+  const currentRawState = readJsonIfExists(path.join(args.executionAuthority.bindings.hub, 'state.json'));
+  const expectedBinding = authorityStateBinding(expectedState, args.executionAuthority);
+  const actualBinding = authorityStateBinding(currentRawState, args.executionAuthority);
+  if (canonicalJson(actualBinding) !== canonicalJson(expectedBinding)) {
+    throw new Error(`receipt-backed effect admission rejected durable-state drift: ${kind}`);
+  }
+  phase.firstMutation = true;
+  return detachedFrozen({ kind, operands });
+}
+
+function createReceiptSourceStage({ args, receipt, expectedState }) {
+  const privateState = verifiedSourcePrivate.get(receipt);
+  if (!privateState) throw new Error('verified source receipt has no immutable source capsule');
+  const parent = path.dirname(args.executionAuthority.bindings.hub);
+  const stageRoot = path.join(parent, `.verified-source-${receipt.receipt_id.slice(0, 20)}-${crypto.randomUUID()}`);
+  const created = [];
+  try {
+    admitReceiptBackedEffect({
+    args,
+    receipt,
+    checkpoint: 'envelope-construction',
+    expectedState,
+    kind: 'createOwnedGenerationEntry',
+    operands: { path: stageRoot, type: 'directory' }
+  });
+    fs.mkdirSync(stageRoot);
+    created.push({ path: stageRoot, type: 'directory', identity: filesystemIdentity(stageRoot, 'directory') });
+    const directorySet = new Set();
+    for (const item of receipt.source_manifest) {
+      let relativeDirectory = slash(path.dirname(item.relative_path));
+      while (relativeDirectory && relativeDirectory !== '.') {
+        directorySet.add(relativeDirectory);
+        const parent = slash(path.dirname(relativeDirectory));
+        if (parent === relativeDirectory) break;
+        relativeDirectory = parent;
+      }
+    }
+    const directoryPaths = [...directorySet]
+      .sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right));
+    for (const relativePath of directoryPaths) {
+      const target = path.join(stageRoot, relativePath);
+      admitReceiptBackedEffect({
+        args,
+        receipt,
+        checkpoint: 'envelope-construction',
+        expectedState,
+        kind: 'createOwnedGenerationEntry',
+        operands: { path: target, type: 'directory' }
+      });
+      fs.mkdirSync(target);
+      created.push({ path: target, type: 'directory', identity: filesystemIdentity(target, 'directory') });
+    }
+    for (const item of receipt.source_manifest) {
+      const target = path.join(stageRoot, item.relative_path);
+      const bytes = privateState.buffers.get(item.relative_path);
+      if (!bytes || sha256(bytes) !== item.sha256) throw new Error(`immutable source capsule entry is unavailable: ${item.relative_path}`);
+      admitReceiptBackedEffect({
+        args,
+        receipt,
+        checkpoint: 'envelope-construction',
+        expectedState,
+        kind: 'writeTargetManagedFile',
+        operands: { path: target, byte_length: bytes.length, sha256: item.sha256 }
+      });
+      fs.writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
+      const readback = fs.readFileSync(target);
+      if (!readback.equals(bytes)) throw new Error(`receipt-backed staged write readback failed: ${item.relative_path}`);
+      created.push({ path: target, type: 'file', identity: filesystemIdentity(target, 'file') });
+    }
+    return { stageRoot, created };
+  } catch (error) {
+    try {
+      removeReceiptSourceStage({ args, receipt, expectedState, stage: { stageRoot, created } });
+    } catch (cleanupError) {
+      error.message = `${error.message}; verified source stage cleanup failed: ${cleanupError.message}`;
+    }
+    throw error;
+  }
+}
+
+function removeReceiptSourceStage({ args, receipt, expectedState, stage }) {
+  const ordered = [...stage.created].sort((left, right) => {
+    const leftDepth = left.path.split(path.sep).length;
+    const rightDepth = right.path.split(path.sep).length;
+    return rightDepth - leftDepth || right.path.localeCompare(left.path);
+  });
+  for (const entry of ordered) {
+    const current = filesystemIdentity(entry.path, entry.type);
+    if (!current || canonicalJson(current) !== canonicalJson(entry.identity)) {
+      throw new Error(`receipt-backed source cleanup rejected identity drift: ${entry.path}`);
+    }
+    admitReceiptBackedEffect({
+      args,
+      receipt,
+      checkpoint: 'pre-launch',
+      expectedState,
+      kind: 'removeOwnedGenerationEntry',
+      operands: { path: entry.path, type: entry.type, identity: current }
+    });
+    if (entry.type === 'file') fs.rmSync(entry.path, { force: false });
+    else fs.rmdirSync(entry.path);
+  }
+}
+
+function launchVerifiedDelegatedChild({ args, receipt, expectedState, delegatedAuthority }) {
+  const stage = createReceiptSourceStage({ args, receipt, expectedState });
+  if (args.testHooks?.afterReceiptSourceStage) args.testHooks.afterReceiptSourceStage(detachedFrozen({ stageRoot: stage.stageRoot }));
+  const wrapper = {
+    contract: RECEIPT_CHILD_CAPSULE_CONTRACT,
+    stage_root: stage.stageRoot,
+    argv: [
+      '--write', '--sync-source', 'repo', '--hub', args.executionAuthority.bindings.hub,
+      '--skip-repo-auto-update', '--suppress-update-report', '--delegated-invocation-authority', '--audit'
+    ],
+    receipt: verifiedSourceEvidence(receipt),
+    delegated_authority: delegatedAuthority
+  };
+  const input = `${JSON.stringify(wrapper)}\n`;
+  const command = process.execPath;
+  const commandArgs = ['-e', RECEIPT_CHILD_BOOTSTRAP];
+  const cwd = receipt.repository.root;
+  const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, String(value)]));
+  assertActualMutationInput(args, 'delegated.child.launch', {
+    details: {
+      path: path.join(receipt.repository.root, BRIDGE_ENTRY_RELATIVE_PATH),
+      cwd,
+      arguments: commandArgs,
+      payload: delegatedAuthority,
+      verifiedCommit: receipt.commit,
+      verifiedSourceIdentity: receipt.entry.sha256
+    }
+  });
+  admitReceiptBackedEffect({
+    args,
+    receipt,
+    checkpoint: 'pre-launch',
+    expectedState,
+    kind: 'launchVerifiedDelegatedChild',
+    operands: {
+      executable: command,
+      executable_sha256: receipt.executables.node.sha256,
+      argv_digest: sha256(canonicalJson(commandArgs)),
+      cwd,
+      env_digest: sha256(canonicalJson(environment)),
+      input_digest: sha256(input)
+    }
+  });
+  const result = spawnSync(command, commandArgs, {
+    cwd,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: environment,
+    input,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  const expectedHandshakeDigest = sha256(canonicalJson(delegatedAuthority.verified_source));
+  const handshakeLine = `__TOOLKIT_RECEIPT_HANDSHAKE__=${expectedHandshakeDigest}`;
+  const rawStderr = String(result.stderr || '');
+  const childHandshakeConfirmed = rawStderr.split(/\r?\n/).includes(handshakeLine);
+  if (childHandshakeConfirmed) verifiedSourcePrivate.get(receipt).observations.set('child-start', timestamp());
+  let cleanupError = null;
+  try {
+    removeReceiptSourceStage({ args, receipt, expectedState, stage });
+  } catch (error) {
+    cleanupError = error;
+  }
+  const evidence = detachedFrozen({
+    action: 'launchVerifiedDelegatedChild',
+    receipt_id: receipt.receipt_id,
+    commit: receipt.commit,
+    tree: receipt.tree,
+    entry_digest: receipt.entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest,
+    executable_sha256: receipt.executables.node.sha256,
+    argv_digest: sha256(canonicalJson(commandArgs)),
+    cwd,
+    env_digest: sha256(canonicalJson(environment)),
+    input_digest: sha256(input),
+    exit_status: result.status,
+    child_start_handshake: childHandshakeConfirmed ? 'verified' : 'missing',
+    cleanup: cleanupError ? 'preserved' : 'removed'
+  });
+  if (cleanupError) {
+    cleanupError.message = `${cleanupError.message}; verified source stage preserved at ${stage.stageRoot}`;
+    throw cleanupError;
+  }
+  return { result: {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: rawStderr.split(/\r?\n/).filter((line) => line !== handshakeLine).join('\n'),
+    error: result.error ? result.error.message : ''
+  }, evidence };
+}
+
+function requestedPreferenceFields(args) {
+  const fields = [];
+  if (args.enableAutoSync || args.disableAutoSync) fields.push('auto_sync_enabled');
+  if (args.enableRepoAutoUpdate || args.disableRepoAutoUpdate) {
+    fields.push('repo_auto_update_enabled', 'last_repo_update_status', 'last_repo_update_error');
+  }
+  if (args.repoPath) fields.push('repo_path');
+  if (args.repoBranch) fields.push('repo_branch');
+  if (args.repoRemote) fields.push('repo_remote');
+  if (args.enableUpdateReports || args.disableUpdateReports) fields.push('update_report_enabled');
+  if (args.updateReportRetentionDaysExplicit) fields.push('update_report_retention_days');
+  if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) {
+    fields.push('update_report_open_enabled', 'update_report_open_behavior', 'legacy_update_report_open_migrated');
+  }
+  if (args.enableCodexPluginAutoRefresh || args.disableCodexPluginAutoRefresh) fields.push('codex_plugin_auto_refresh_enabled');
+  return [...new Set(fields)].sort();
+}
+
+function readDelegatedAuthority(args, testHooks = {}) {
+  if (!args.delegatedAuthority) return null;
+  const raw = testHooks.delegatedEnvelopeRaw !== undefined
+    ? String(testHooks.delegatedEnvelopeRaw)
+    : (globalThis.__TOOLKIT_DELEGATED_AUTHORITY_JSON || fs.readFileSync(0, 'utf8'));
+  let envelope;
+  try {
+    envelope = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`delegated authority payload is not valid JSON: ${error.message}`);
+  }
+  if (
+    testHooks.delegatedEnvelopeRaw !== undefined &&
+    envelope?.child?.script_path &&
+    !envelope.verified_source
+  ) {
+    const syntheticTree = requireGitText(envelope.child.source_repository, ['rev-parse', 'HEAD^{tree}'], 'read synthetic delegated fixture tree');
+    const entryIdentity = envelope.child.source_identity;
+    const syntheticManifest = [{
+      relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
+      git_mode: '100644',
+      git_blob: requireGitText(envelope.child.source_repository, ['rev-parse', `${envelope.child.source_commit}:${BRIDGE_ENTRY_RELATIVE_PATH}`], 'read synthetic delegated fixture blob'),
+      byte_length: fs.readFileSync(envelope.child.script_path).length,
+      sha256: entryIdentity
+    }];
+    const manifestDigest = sha256(canonicalJson(syntheticManifest));
+    const receiptId = sha256(canonicalJson({ commit: envelope.child.source_commit, tree: syntheticTree, entryIdentity, manifestDigest }));
+    envelope = {
+      ...envelope,
+      repository_result: { ...envelope.repository_result, tree: syntheticTree },
+      child: {
+        entry_relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
+        source_identity: entryIdentity,
+        source_repository: envelope.child.source_repository,
+        source_commit: envelope.child.source_commit,
+        source_tree: syntheticTree,
+        source_manifest_digest: manifestDigest,
+        receipt_id: receiptId
+      },
+      verified_source: {
+        receipt_id: receiptId,
+        commit: envelope.child.source_commit,
+        tree: syntheticTree,
+        entry_digest: entryIdentity,
+        source_manifest_digest: manifestDigest
+      }
+    };
+    args.syntheticDelegatedFixture = true;
+  }
+  if (!envelope || envelope.contract !== DELEGATED_AUTHORITY_CONTRACT) throw new Error('delegated authority payload has the wrong contract');
+  const keys = Object.keys(envelope).sort();
+  const expectedKeys = ['actions', 'child', 'contract', 'destinations', 'hub', 'parent_invocation_id', 'repository_result', 'verified_source'].sort();
+  if (canonicalJson(keys) !== canonicalJson(expectedKeys)) throw new Error('delegated authority payload has unexpected fields');
+  if (!envelope.actions || Object.keys(envelope.actions).some((key) => key !== 'targets')) throw new Error('delegated authority payload has invalid actions');
+  if (canonicalJson(Object.keys(envelope.destinations || {}).sort()) !== canonicalJson(['targets'])) throw new Error('delegated authority payload has invalid destinations');
+  if (canonicalJson(Object.keys(envelope.hub || {}).sort()) !== canonicalJson(['path'])) throw new Error('delegated authority payload has invalid hub identity');
+  if (canonicalJson(Object.keys(envelope.repository_result || {}).sort()) !== canonicalJson(['branch', 'commit', 'path', 'remote', 'tree'])) throw new Error('delegated authority payload has invalid repository result');
+  if (canonicalJson(Object.keys(envelope.child || {}).sort()) !== canonicalJson(['entry_relative_path', 'receipt_id', 'source_commit', 'source_identity', 'source_manifest_digest', 'source_repository', 'source_tree'])) throw new Error('delegated authority payload has invalid child identity');
+  if (canonicalJson(Object.keys(envelope.verified_source || {}).sort()) !== canonicalJson(['commit', 'entry_digest', 'receipt_id', 'source_manifest_digest', 'tree'])) throw new Error('delegated authority payload has invalid verified-source handshake');
+  const bootstrapHandshake = globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE;
+  if (!testHooks.delegatedEnvelopeRaw && canonicalJson(bootstrapHandshake || {}) !== canonicalJson(envelope.verified_source)) {
+    throw new Error('delegated child did not start from the verified source handshake');
+  }
+  if (Object.values(envelope.actions.targets || {}).some((action) => !['enable-sync', 'sync'].includes(action))) {
+    throw new Error('delegated authority payload contains an unsupported target action');
+  }
+  const targetNames = Object.keys(envelope.actions.targets || {}).sort();
+  if (targetNames.some((target) => !SUPPORTED_TARGETS.includes(target))) throw new Error('delegated authority payload contains an unsupported target');
+  if (canonicalJson(targetNames) !== canonicalJson(Object.keys(envelope.destinations.targets || {}).sort())) throw new Error('delegated authority target actions and destinations differ');
+  return deepFreeze(envelope);
+}
+
+function assertDelegatedInvocationArgs(args) {
+  if (!args.delegatedEnvelope) return;
+  const widened = [];
+  if (requestedPreferenceFields(args).length) widened.push('preference flags');
+  if (args.enableTargets.length || args.disableTargets.length || args.scopedSyncTargets.length) widened.push('target action flags');
+  if (args.hook || args.syncEnabled || args.repoUpdateNow || args.reconcileStaging) widened.push('maintenance flags');
+  if (args.openUpdateReport || args.enableUpdateReports || args.disableUpdateReports || args.enableUpdateReportOpen || args.disableUpdateReportOpen) widened.push('report flags');
+  if (args.repoPath || args.repoBranch || args.repoRemote || args.setAg2PythonCommand) widened.push('source or repository flags');
+  if (args.syncSource !== 'repo' || !args.write || !args.skipRepoAutoUpdate) widened.push('child execution flags');
+  if (widened.length) throw new Error(`delegated child ordinary CLI flags cannot widen payload authority: ${widened.join(', ')}`);
+}
+
+function resolveExecutionAuthority({ args, hubPath, rawState, discoveries, delegatedEnvelope = null }) {
+  const preferenceFields = delegatedEnvelope ? [] : requestedPreferenceFields(args);
+  const targetActions = delegatedEnvelope ? { ...(delegatedEnvelope.actions.targets || {}) } : {};
+  if (!delegatedEnvelope) {
+    for (const target of args.enableTargets) targetActions[target] = 'enable-sync';
+    for (const target of args.disableTargets) targetActions[target] = 'disable';
+  }
+  const durableTargetsMayAuthorize = !delegatedEnvelope && ((!args.hook && args.syncEnabled) || (args.hook && rawState?.auto_sync_enabled === true));
+  if (durableTargetsMayAuthorize) {
+    for (const target of SUPPORTED_TARGETS) {
+      const persisted = rawState?.targets?.[target];
+      if (!targetActions[target] && persisted?.enabled === true && persisted?.explicitly_disabled !== true) {
+        targetActions[target] = 'sync';
+      }
+    }
+  }
+
+  const repoMaintenance = Boolean(
+    !args.preferenceOnly &&
+    !args.skipRepoAutoUpdate &&
+    (args.repoUpdateNow || args.hook) &&
+    rawState?.repo_auto_update_enabled === true
+  );
+  const nativeMaintenance = Boolean(
+    !args.preferenceOnly &&
+    args.hook &&
+    args.syncSource === 'codex-plugin' &&
+    rawState?.codex_plugin_auto_refresh_enabled === true
+  );
+  const reportMaintenance = Boolean(
+    !delegatedEnvelope &&
+    !args.preferenceOnly &&
+    !args.suppressUpdateReport &&
+    (args.hook || repoMaintenance || Object.keys(targetActions).length)
+  );
+  const destinations = Object.fromEntries(Object.keys(targetActions).sort().map((target) => [
+    target,
+    discoveries?.[target]?.target_path ? path.resolve(discoveries[target].target_path) : ''
+  ]));
+  const statePath = path.join(hubPath, 'state.json');
+  const manifestPath = path.join(hubPath, 'manifest.json');
+  const directReportTrigger = Boolean(args.hook || args.repoUpdateNow || args.openUpdateReport || isLegacyDelegatedRepoSync(args));
+  const reportCreateEligible = !args.preferenceOnly && !args.suppressUpdateReport && rawState?.update_report_enabled !== false && directReportTrigger && !delegatedEnvelope;
+  const noTargetPersistenceEligible = !args.preferenceOnly && args.syncEnabled && !Object.keys(targetActions).length && Boolean(
+    rawState?.hub_version || Object.keys(rawState?.bridge_versions_by_source || {}).length || rawState?.auto_sync_enabled || rawState?.repo_auto_update_enabled
+  );
+  const managedWriteCeiling = Boolean(preferenceFields.length || Object.keys(targetActions).length || repoMaintenance || nativeMaintenance || reportMaintenance || reportCreateEligible || noTargetPersistenceEligible || args.reconcileStaging);
+  const reportDir = path.resolve(updateReportDir());
+  const repoPath = path.resolve(delegatedEnvelope?.repository_result.path || args.repoPath || rawState?.repo_path || '.');
+  const bindings = {
+    hub: path.resolve(hubPath),
+    state_path: path.resolve(statePath),
+    manifest_path: path.resolve(manifestPath),
+    source_script: path.resolve(__filename),
+    source_identity: sha256(fs.readFileSync(__filename)),
+    source_repository: path.resolve(delegatedEnvelope?.child.source_repository || path.resolve(__dirname, '..', '..')),
+    source_commit: delegatedEnvelope?.child.source_commit || currentToolkitCommit({ repo_path: path.resolve(__dirname, '..', '..') }),
+    target_destinations: destinations,
+    report_directory: reportDir,
+    repository: {
+      path: delegatedEnvelope ? repoPath : (args.repoPath || rawState?.repo_path ? repoPath : ''),
+      branch: delegatedEnvelope?.repository_result.branch || args.repoBranch || rawState?.repo_branch || DEFAULT_REPO_BRANCH,
+      remote: delegatedEnvelope?.repository_result.remote || args.repoRemote || rawState?.repo_remote || DEFAULT_REPO_REMOTE
+    },
+    native_source_repository: repoPath,
+    staging_parents: args.reconcileStaging
+      ? stagingReconciliationParents(args, hubPath, normalizedState(rawState)).map((value) => path.resolve(value)).sort()
+      : []
+  };
+  if (repoMaintenance) {
+    bindings.delegated_child = {
+      entry_relative_path: BRIDGE_ENTRY_RELATIVE_PATH,
+      cwd: repoPath,
+      arguments: ['-e', RECEIPT_CHILD_BOOTSTRAP],
+      target_actions: Object.fromEntries(Object.entries(targetActions).filter(([, action]) => ['enable-sync', 'sync'].includes(action)))
+    };
+  }
+  if (delegatedEnvelope) {
+    if (path.resolve(hubPath) !== path.resolve(delegatedEnvelope.hub.path)) throw new Error('delegated hub binding mismatch');
+    const stageRootRaw = globalThis.__TOOLKIT_VERIFIED_SOURCE_STAGE_ROOT;
+    if (!args.syntheticDelegatedFixture) {
+      if (!stageRootRaw || slash(path.relative(path.resolve(stageRootRaw), path.resolve(__filename))) !== delegatedEnvelope.child.entry_relative_path) throw new Error('delegated child entry path mismatch');
+    }
+    if (bindings.source_identity !== delegatedEnvelope.child.source_identity) throw new Error('delegated child source identity mismatch');
+    if (bindings.source_commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated child source commit mismatch');
+    if (path.resolve(bindings.source_repository) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated child source repository mismatch');
+    if (path.resolve(delegatedEnvelope.repository_result.path) !== path.resolve(delegatedEnvelope.child.source_repository)) throw new Error('delegated repository result path mismatch');
+    if (delegatedEnvelope.repository_result.commit !== delegatedEnvelope.child.source_commit) throw new Error('delegated repository result commit mismatch');
+    if (delegatedEnvelope.repository_result.tree !== delegatedEnvelope.child.source_tree) throw new Error('delegated repository result tree mismatch');
+    if (delegatedEnvelope.child.receipt_id !== delegatedEnvelope.verified_source.receipt_id || delegatedEnvelope.child.source_manifest_digest !== delegatedEnvelope.verified_source.source_manifest_digest) throw new Error('delegated source receipt identity mismatch');
+    const childBranch = gitCommand(delegatedEnvelope.child.source_repository, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const childRemote = gitCommand(delegatedEnvelope.child.source_repository, ['remote', 'get-url', 'origin']);
+    if (!childBranch.ok || childBranch.stdout.trim() !== delegatedEnvelope.repository_result.branch) throw new Error('delegated repository result branch mismatch');
+    if (!childRemote.ok || childRemote.stdout.trim() !== delegatedEnvelope.repository_result.remote) throw new Error('delegated repository result remote mismatch');
+    if (canonicalJson(destinations) !== canonicalJson(delegatedEnvelope.destinations.targets || {})) throw new Error('delegated target destination binding mismatch');
+  }
+  const authority = {
+    contract: INVOCATION_AUTHORITY_CONTRACT,
+    invocation_id: delegatedEnvelope?.parent_invocation_id
+      ? `${delegatedEnvelope.parent_invocation_id}:child`
+      : crypto.randomUUID(),
+    entrypoint: args.reconcileStaging
+      ? 'staging-reconciliation'
+      : (delegatedEnvelope ? 'delegated-child' : (args.preferenceOnly ? 'preference-only' : (args.hook ? 'hook-maintenance' : (args.repoUpdateNow ? 'repo-maintenance' : 'manual')))),
+    write_requested: args.write === true,
+    sync_source: args.syncSource,
+    actions: {
+      preferences: preferenceFields,
+      targets: Object.fromEntries(Object.entries(targetActions).sort(([left], [right]) => left.localeCompare(right))),
+      hub: { state_write: managedWriteCeiling, manifest_write: managedWriteCeiling && !args.preferenceOnly },
+      repository: { update: repoMaintenance, failure_status: repoMaintenance, delegate_sync: repoMaintenance },
+      native: { cache_maintenance: nativeMaintenance, hook_repair: nativeMaintenance },
+      reports: { cleanup: reportMaintenance, create: reportCreateEligible, open: reportCreateEligible },
+      staging: { reconcile: Boolean(args.reconcileStaging), generation: args.reconcileStaging || '' }
+    },
+    bindings
+  };
+  authority.state_binding = authorityStateBinding(rawState, authority);
+  return deepFreeze(authority);
+}
+
+function scopeTargetAction(args, target) {
+  return args.executionAuthority?.actions?.targets?.[target] || '';
+}
+
+function scopeAllowsTargetState(args, target) {
+  return ['enable-sync', 'disable', 'sync'].includes(scopeTargetAction(args, target));
+}
+
+function scopeAllowsTargetSync(args, target) {
+  return ['enable-sync', 'sync'].includes(scopeTargetAction(args, target));
+}
+
+function scopeHasExecutableWrite(args) {
+  const actions = args.executionAuthority?.actions || {};
+  return Boolean(
+    actions.preferences?.length || Object.keys(actions.targets || {}).length || actions.hub?.state_write || actions.repository?.update ||
+    actions.native?.cache_maintenance || actions.reports?.cleanup || actions.reports?.create || actions.staging?.reconcile
+  );
+}
+
+function authorityStateBinding(rawState, authority) {
+  const state = rawState && typeof rawState === 'object' && !Array.isArray(rawState) ? rawState : {};
+  const binding = {};
+  if (authority.actions.repository.update) {
+    binding.repository = {
+      enabled: state.repo_auto_update_enabled === true,
+      path: state.repo_path ? path.resolve(state.repo_path) : '',
+      branch: state.repo_branch || DEFAULT_REPO_BRANCH,
+      remote: state.repo_remote || DEFAULT_REPO_REMOTE
+    };
+  }
+  if (authority.actions.native.cache_maintenance || authority.actions.native.hook_repair) {
+    binding.native = { enabled: state.codex_plugin_auto_refresh_enabled === true };
+  }
+  if (authority.actions.reports.cleanup || authority.actions.reports.create || authority.actions.reports.open) {
+    binding.reports = {
+      enabled: state.update_report_enabled !== false,
+      retention_days: state.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS
+    };
+  }
+  binding.targets = Object.fromEntries(Object.keys(authority.actions.targets || {}).sort().map((target) => {
+    const current = state.targets?.[target] || {};
+    return [target, {
+      enabled: current.enabled === true,
+      explicitly_disabled: current.explicitly_disabled === true,
+      target_path: current.target_path ? path.resolve(current.target_path) : ''
+    }];
+  }));
+  return binding;
+}
+
+function lockIsOwned(lock) {
+  if (!lock?.acquired || !lock.lockPath || !lock.token) return false;
+  try {
+    return readJsonIfExists(lock.lockPath)?.token === lock.token;
+  } catch {
+    return false;
+  }
+}
+
+function lockFileFingerprint(lockPath) {
+  try {
+    const stat = fs.lstatSync(lockPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    return {
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      birthtime_ms: String(stat.birthtimeMs),
+      ctime_ms: String(stat.ctimeMs),
+      mtime_ms: String(stat.mtimeMs),
+      size: stat.size
+    };
+  } catch {
+    return null;
+  }
+}
+
+function filesystemIdentity(filePath, expectedType) {
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) return null;
+    if (expectedType === 'file' && !stat.isFile()) return null;
+    if (expectedType === 'directory' && !stat.isDirectory()) return null;
+    if (path.resolve(fs.realpathSync.native(filePath)) !== path.resolve(filePath)) return null;
+    const identity = {
+      type: expectedType,
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      birthtime_ms: String(stat.birthtimeMs)
+    };
+    if (expectedType === 'file') {
+      identity.ctime_ms = String(stat.ctimeMs);
+      identity.size = stat.size;
+    }
+    return identity;
+  } catch {
+    return null;
+  }
+}
+
+function revalidateExecutionAuthority(args, discoveries, rawState = null) {
+  for (const target of SUPPORTED_TARGETS.filter((name) => scopeTargetAction(args, name))) {
+    const lockedDestination = discoveries?.[target]?.target_path
+      ? path.resolve(discoveries[target].target_path)
+      : '';
+    const authorisedDestination = args.executionAuthority.bindings.target_destinations[target] || '';
+    if (lockedDestination !== authorisedDestination) {
+      throw new Error(`Execution authority destination changed while waiting for the lock: ${target}`);
+    }
+  }
+  if (rawState !== null) {
+    const expected = args.expectedAuthorityStateBinding || args.executionAuthority.state_binding;
+    const actual = authorityStateBinding(rawState, args.executionAuthority);
+    if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error('authority-relevant state changed before managed mutation');
+  }
+  if (args.delegatedEnvelope) {
+    const envelope = args.delegatedEnvelope;
+    const sourceRepository = path.resolve(envelope.child.source_repository);
+    if (sha256(fs.readFileSync(__filename)) !== envelope.child.source_identity) throw new Error('delegated child source identity changed before managed mutation');
+    if (currentToolkitCommit({ repo_path: sourceRepository }) !== envelope.child.source_commit) throw new Error('delegated child source commit changed before managed mutation');
+    if (requireGitText(sourceRepository, ['rev-parse', 'HEAD^{tree}'], 'recheck delegated source tree') !== envelope.child.source_tree) throw new Error('delegated child source tree changed before managed mutation');
+    if (!args.syntheticDelegatedFixture && canonicalJson(globalThis.__TOOLKIT_VERIFIED_SOURCE_HANDSHAKE || {}) !== canonicalJson(envelope.verified_source)) throw new Error('delegated child source handshake changed before managed mutation');
+    const branch = gitCommand(sourceRepository, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const remote = gitCommand(sourceRepository, ['remote', 'get-url', 'origin']);
+    if (!branch.ok || branch.stdout.trim() !== envelope.repository_result.branch) throw new Error('delegated repository result branch changed before managed mutation');
+    if (!remote.ok || remote.stdout.trim() !== envelope.repository_result.remote) throw new Error('delegated repository result remote changed before managed mutation');
+  }
+  return true;
+}
+
+function actionAuthorised(args, kind, options = {}) {
+  const actions = args.executionAuthority?.actions || {};
+  if (kind === 'preference.field.write') return actions.preferences?.includes(options.field);
+  if (kind === 'hub.state.write') return actions.hub?.state_write === true;
+  if (kind === 'hub.manifest.write') return actions.hub?.manifest_write === true;
+  if (kind === 'hub.adapter.replace' || kind === 'target.destination.write' || kind === 'target.destination.remove') {
+    return ['enable-sync', 'sync'].includes(actions.targets?.[options.target]);
+  }
+  if (['repository.fetch', 'repository.switch', 'repository.fast-forward-merge', 'repository.validation'].includes(kind)) return actions.repository?.update === true;
+  if (kind === 'delegated.child.launch') return actions.repository?.delegate_sync === true;
+  if (kind === 'failure-status.persist') return actions.repository?.failure_status === true;
+  if (kind === 'native.cache.maintenance') return actions.native?.cache_maintenance === true;
+  if (kind === 'third-party.hook.repair') return actions.native?.hook_repair === true;
+  if (kind === 'report.cleanup') return actions.reports?.cleanup === true;
+  if (kind === 'report.create') return actions.reports?.create === true;
+  if (kind === 'report.open') return actions.reports?.open === true;
+  if (kind === 'staging.reconcile') return actions.staging?.reconcile === true;
+  return false;
+}
+
+function authorityPreferenceFields(args) {
+  return [...(args.executionAuthority?.actions?.preferences || [])].sort();
+}
+
+function derivedActionSummary(args) {
+  return {
+    preferences: authorityPreferenceFields(args),
+    targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => [target, scopeTargetAction(args, target)]).filter(([, action]) => action)),
+    repo_maintenance: args.executionAuthority?.actions?.repository?.update === true,
+    native_maintenance: args.executionAuthority?.actions?.native?.cache_maintenance === true,
+    report_maintenance: args.executionAuthority?.actions?.reports?.cleanup === true,
+    staging_reconciliation: args.executionAuthority?.actions?.staging?.reconcile ? args.reconcileStaging : ''
+  };
+}
+
+function listUpdateReportCandidates(options = {}) {
+  const reportDir = path.resolve(options.reportDir || updateReportDir());
+  const retentionDays = Number.isInteger(options.retentionDays) && options.retentionDays > 0 ? options.retentionDays : DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+  const maxReports = Number.isInteger(options.maxReports) && options.maxReports > 0 ? options.maxReports : DEFAULT_UPDATE_REPORT_MAX_FILES;
+  const cutoffMs = (options.nowMs || Date.now()) - retentionDays * 24 * 60 * 60 * 1000;
+  if (!fs.existsSync(reportDir)) return [];
+  const reports = fs.readdirSync(reportDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(entry.name))
+    .map((entry) => {
+      const filePath = path.join(reportDir, entry.name);
+      return { filePath: path.resolve(filePath), mtimeMs: fs.statSync(filePath).mtimeMs };
+    });
+  const retained = reports.filter((entry) => entry.mtimeMs >= cutoffMs).sort((left, right) => right.mtimeMs - left.mtimeMs || right.filePath.localeCompare(left.filePath));
+  return [...reports.filter((entry) => entry.mtimeMs < cutoffMs), ...retained.slice(maxReports)]
+    .map((entry) => entry.filePath)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function beginMutationPhase(args, { lock, hubPath, rawState, discoveries, testHooks = {} }) {
+  if (!lockIsOwned(lock)) throw new Error('managed mutation phase requires the exact owned lock');
+  revalidateExecutionAuthority(args, discoveries, rawState);
+  if (args.phaseContext) invalidatePhaseContext(args.phaseContext);
+  let reportCandidates = [];
+  let reportInventoryError = '';
+  if (actionAuthorised(args, 'report.cleanup')) {
+    try {
+      const inventory = testHooks.listUpdateReportCandidates || listUpdateReportCandidates;
+      reportCandidates = inventory({ retentionDays: normalizedState(rawState).update_report_retention_days });
+    } catch (error) {
+      reportInventoryError = String(error.message || error);
+    }
+  }
+  const context = deepFreeze({
+    invocation_id: args.executionAuthority.invocation_id,
+    lock_path: path.resolve(lock.lockPath),
+    lock_token: lock.token,
+    hub: path.resolve(hubPath),
+    report_candidates: reportCandidates,
+    report_inventory_error: reportInventoryError
+  });
+  phaseContextState.set(context, {
+    active: true,
+    firstMutation: false,
+    lock,
+    lockFingerprint: lockFileFingerprint(lock.lockPath),
+    args,
+    testHooks
+  });
+  if (!lock.phaseContexts) lock.phaseContexts = [];
+  lock.phaseContexts.push(context);
+  args.phaseContext = context;
+  if (testHooks.afterPhaseContextCreated) testHooks.afterPhaseContextCreated({ context, lock });
+  return context;
+}
+
+function invalidatePhaseContext(context) {
+  const state = phaseContextState.get(context);
+  if (state) state.active = false;
+}
+
+function validatePhaseContext(context) {
+  const state = phaseContextState.get(context);
+  const currentFingerprint = state?.lock ? lockFileFingerprint(state.lock.lockPath) : null;
+  if (!state?.active || !currentFingerprint || canonicalJson(currentFingerprint) !== canonicalJson(state.lockFingerprint)) {
+    if (state) state.active = false;
+    throw new Error('managed mutation phase context is expired or its lock was lost');
+  }
+  return state;
+}
+
+function revalidateBeforeFirstMutation(args) {
+  const hubPath = args.executionAuthority.bindings.hub;
+  const rawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+  // Target discovery, including optional host probes, is frozen when the
+  // mutation phase is established. Per-effect admission rechecks the exact
+  // bound destinations plus durable state without rediscovering mutable
+  // executable candidates between validation and dispatch.
+  const discoveries = Object.fromEntries(SUPPORTED_TARGETS.map((target) => [target, {
+    target_path: args.executionAuthority.bindings.target_destinations[target] || ''
+  }]));
+  revalidateExecutionAuthority(args, discoveries, rawState);
+}
+
+function assertActualMutationInput(args, kind, options = {}) {
+  const opts = options || {};
+  if (!actionAuthorised(args, kind, opts)) throw new Error(`managed mutation is not authorised: ${kind}${opts.target ? `:${opts.target}` : ''}`);
+  const details = opts.details || {};
+  const bindings = args.executionAuthority.bindings;
+  const exactPath = details.path || details.repoPath || '';
+  const requirePath = (expected, label) => {
+    if (!exactPath || path.resolve(exactPath) !== path.resolve(expected)) throw new Error(`${label} input does not match invocation authority`);
+  };
+  if (details.hubPath && path.resolve(details.hubPath) !== path.resolve(bindings.hub)) throw new Error('hub input does not match invocation authority');
+  if (kind === 'hub.state.write') requirePath(bindings.state_path, 'hub state writer');
+  if (kind === 'hub.manifest.write') requirePath(bindings.manifest_path, 'hub manifest writer');
+  if (kind === 'hub.adapter.replace') requirePath(path.join(bindings.hub, 'adapters', opts.target), 'hub adapter writer');
+  if (kind === 'target.destination.write' || kind === 'target.destination.remove') requirePath(bindings.target_destinations[opts.target], 'target writer');
+  if (kind.startsWith('repository.')) {
+    requirePath(bindings.repository.path, 'repository helper');
+    if (details.branch && details.branch !== bindings.repository.branch) throw new Error('repository branch input does not match invocation authority');
+    if (details.remote && normalizeRemoteForCompare(details.remote) !== normalizeRemoteForCompare(bindings.repository.remote)) throw new Error('repository remote input does not match invocation authority');
+    if (kind === 'repository.switch' && details.to !== bindings.repository.branch) throw new Error('repository branch input does not match invocation authority');
+  }
+  if (kind === 'delegated.child.launch') {
+    requirePath(path.join(bindings.repository.path, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), 'delegated child');
+    if (details.cwd && path.resolve(details.cwd) !== path.resolve(bindings.repository.path)) throw new Error('delegated child working directory input does not match invocation authority');
+    if (details.arguments && canonicalJson(details.arguments) !== canonicalJson(bindings.delegated_child?.arguments || [])) throw new Error('delegated child arguments do not match invocation authority');
+    const payload = details.payload;
+    if (payload) {
+      if (path.resolve(payload.child?.source_repository || '') !== path.resolve(bindings.repository.path)) throw new Error('delegated child payload source does not match invocation authority');
+      if (path.resolve(payload.hub?.path || '') !== path.resolve(bindings.hub)) throw new Error('delegated child payload hub does not match invocation authority');
+      if (canonicalJson(payload.actions?.targets || {}) !== canonicalJson(bindings.delegated_child?.target_actions || {})) throw new Error('delegated child payload actions do not match invocation authority');
+      if (details.verifiedCommit && (payload.repository_result?.commit !== details.verifiedCommit || payload.child?.source_commit !== details.verifiedCommit)) {
+        throw new Error('delegated child payload commit does not match verified repository result');
+      }
+      if (details.verifiedSourceIdentity && payload.child?.source_identity !== details.verifiedSourceIdentity) {
+        throw new Error('delegated child payload source identity does not match verified repository result');
+      }
+    }
+  }
+  if (kind === 'native.cache.maintenance' || kind === 'third-party.hook.repair') {
+    requirePath(path.resolve(defaultCodexHome()), 'native helper');
+    if (details.repoPath && path.resolve(details.repoPath) !== path.resolve(bindings.native_source_repository)) throw new Error('native source repository input does not match invocation authority');
+  }
+  if (kind === 'staging.reconcile') {
+    if (details.generation_id !== args.executionAuthority.actions.staging.generation) throw new Error('staging generation does not match invocation authority');
+    const actualParents = (details.parents || []).map((value) => path.resolve(value)).sort();
+    if (canonicalJson(actualParents) !== canonicalJson(bindings.staging_parents || [])) throw new Error('staging parent input does not match invocation authority');
+  }
+  if (kind === 'report.cleanup') {
+    const actualCandidates = (details.candidate_paths || []).map((value) => path.resolve(value)).sort();
+    const boundCandidates = (args.phaseContext?.report_candidates || []).map((value) => path.resolve(value)).sort();
+    if (canonicalJson(actualCandidates) !== canonicalJson(boundCandidates)) throw new Error('report cleanup candidates do not match invocation authority');
+  }
+  if (kind === 'report.create' || kind === 'report.open') {
+    if (!exactPath || !isInside(bindings.report_directory, path.resolve(exactPath))) throw new Error('report path does not match invocation authority');
+    if (kind === 'report.open' && path.resolve(exactPath) !== path.resolve(args.createdReportPath || '')) throw new Error('only this invocation\'s freshly created report may be opened');
+  }
+}
+
+function guardManagedMutation(args, kind, options = {}) {
+  validatePhaseContext(args.phaseContext);
+  assertActualMutationInput(args, kind, options);
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+}
+
+function guardManagedPrimitive(args, kind, options = {}) {
+  validatePhaseContext(args.phaseContext);
+  assertActualMutationInput(args, kind, options);
+}
+
+function initializeInvocationRuntime(args, testHooks = {}) {
+  args.testHooks = testHooks;
+  args.expectedAuthorityStateBinding = args.executionAuthority.state_binding;
+  args.phaseContext = null;
+  args.createdReportPath = '';
+  args.createdReportIdentity = null;
+  args.delegatedReceipt = args.delegatedEnvelope ? {
+    role: 'child',
+    parent_invocation_id: args.delegatedEnvelope.parent_invocation_id,
+    child_source_identity: args.delegatedEnvelope.child.source_identity
+  } : null;
+}
+
+function assertPreferenceBoundary(args) {
+  if (!args.preferenceOnly) return;
+  const incompatible = [];
+  if (args.hook) incompatible.push('--hook');
+  if (args.syncEnabled) incompatible.push('--sync-enabled');
+  if (args.repoUpdateNow) incompatible.push('--repo-update-now');
+  if (args.reconcileStaging) incompatible.push('--reconcile-staging');
+  if (args.enableTargets.length) incompatible.push('--enable-target');
+  if (args.disableTargets.length) incompatible.push('--disable-target');
+  if (args.scopedSyncTargets.length) incompatible.push('--scope-target-sync');
+  if (args.setAg2PythonCommand) incompatible.push('--set-ag2-python-command');
+  if (incompatible.length) throw new Error(`--preference-only cannot be combined with: ${incompatible.join(', ')}`);
+  if (!requestedPreferenceFields(args).length) {
+    throw new Error('--preference-only requires at least one explicit global preference');
+  }
+}
+
+function assertRepoAutoUpdatePrerequisite(args, state) {
+  if (args.enableRepoAutoUpdate && !(args.repoPath || state?.repo_path)) {
+    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
+  }
+}
+
 function printHelp() {
   console.log([
     'Toolkit Local Bridge updater',
@@ -271,6 +1504,8 @@ function printHelp() {
     'Options:',
     '  --enable-target opencode|ag2',
     '  --disable-target opencode|ag2',
+    '  --preference-only',
+    '  --delegated-invocation-authority  internal child mode; reads one fixed authority payload from stdin',
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
@@ -402,7 +1637,8 @@ function runCommand(command, commandArgs, options = {}) {
       encoding: 'utf8',
       timeout: options.timeout || 30000,
       windowsHide: true,
-      env: { ...process.env, ...(options.env || {}) }
+      env: { ...process.env, ...(options.env || {}) },
+      input: options.input
     });
     return {
       ok: result.status === 0,
@@ -555,6 +1791,159 @@ function runRepoValidation(repoPath, options = {}) {
   };
 }
 
+function directProcessResult(result) {
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error ? result.error.message : ''
+  };
+}
+
+function admitActionSpecificEffect(args, kind, options = {}) {
+  const phase = validatePhaseContext(args.phaseContext);
+  const detachedOptions = detachedFrozen(options);
+  if (phase.testHooks?.beforeManagedEffectAdmission) phase.testHooks.beforeManagedEffectAdmission({ kind, options: detachedOptions });
+  if (!phase.firstMutation && phase.testHooks?.beforeFirstManagedEffect) {
+    phase.testHooks.beforeFirstManagedEffect({ kind, options: detachedOptions });
+  }
+  assertActualMutationInput(args, kind, options);
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  phase.firstMutation = true;
+}
+
+function persistFailureStatus(args, state, status, details = {}) {
+  admitActionSpecificEffect(args, 'failure-status.persist', {
+    details: { status, fromCommit: details.fromCommit || '', toCommit: details.toCommit || '' }
+  });
+  return applyRepoUpdateStatus(state, status, details);
+}
+
+function switchRepositoryBranch(args, repoPath, branch, expectedRemote, currentBranch) {
+  const resolvedRepo = path.resolve(repoPath);
+  const exactBranch = String(branch);
+  const commandArgs = ['switch', exactBranch];
+  admitActionSpecificEffect(args, 'repository.switch', {
+    details: { repoPath: resolvedRepo, branch: exactBranch, remote: expectedRemote, from: currentBranch, to: exactBranch, executable: 'git', arguments: commandArgs }
+  });
+  return directProcessResult(spawnSync('git', commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: { ...process.env }
+  }));
+}
+
+function fetchRepositoryBranch(args, repoPath, branch, expectedRemote) {
+  const resolvedRepo = path.resolve(repoPath);
+  const exactBranch = String(branch);
+  const attempts = [
+    ['fetch', 'origin', exactBranch],
+    ...GIT_CREDENTIAL_HELPERS.map((helper) => ['-c', `credential.helper=${helper}`, 'fetch', 'origin', exactBranch])
+  ];
+  let lastResult = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const commandArgs = attempts[index];
+    if (index > 0 && lastResult && !isCredentialError(commandOutput(lastResult))) break;
+    admitActionSpecificEffect(args, 'repository.fetch', {
+      details: { repoPath: resolvedRepo, branch: exactBranch, remote: expectedRemote, retry: index, executable: 'git', arguments: commandArgs }
+    });
+    const result = directProcessResult(spawnSync('git', commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: 120000,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    if (result.ok) return result;
+    lastResult = result;
+  }
+  return lastResult || { ok: false, status: null, stdout: '', stderr: '', error: 'fetch was not attempted' };
+}
+
+function fastForwardRepository(args, repoPath, branch, expectedRemote, fromCommit, fetchedCommit) {
+  const resolvedRepo = path.resolve(repoPath);
+  const commandArgs = ['merge', '--ff-only', fetchedCommit];
+  admitActionSpecificEffect(args, 'repository.fast-forward-merge', {
+    details: { repoPath: resolvedRepo, branch, remote: expectedRemote, fromCommit, fetchedCommit, executable: 'git', arguments: commandArgs }
+  });
+  return directProcessResult(spawnSync('git', commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 120000,
+    windowsHide: true,
+    env: { ...process.env }
+  }));
+}
+
+function runRepositoryValidation(args, repoPath, options = {}) {
+  const resolvedRepo = path.resolve(repoPath);
+  const validations = buildValidationSuite(options);
+  const commands = [];
+  for (let index = 0; index < validations.length; index += 1) {
+    const validation = validations[index];
+    const commandArgs = [...validation.args];
+    admitActionSpecificEffect(args, 'repository.validation', {
+      details: {
+        repoPath: resolvedRepo,
+        branch: args.executionAuthority.bindings.repository.branch,
+        remote: args.executionAuthority.bindings.repository.remote,
+        executable: process.execPath,
+        arguments: commandArgs,
+        validation_index: index
+      }
+    });
+    const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: validation.timeout,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    commands.push(validation.label);
+    if (!result.ok) {
+      throw repoUpdateError('validation-failed', `${validation.label} failed: ${commandOutput(result)}`, {
+        error: validation.label,
+        validationStatus: 'failed',
+        validationCommand: validation.label
+      });
+    }
+  }
+  return { status: 'passed', commands };
+}
+
+function runNativeRepositoryValidation(args, repoPath, options = {}) {
+  const resolvedRepo = path.resolve(repoPath);
+  const validations = buildValidationSuite(options);
+  const commands = [];
+  for (let index = 0; index < validations.length; index += 1) {
+    const validation = validations[index];
+    const commandArgs = [...validation.args];
+    admitActionSpecificEffect(args, 'native.cache.maintenance', {
+      details: {
+        path: path.resolve(defaultCodexHome()),
+        repoPath: resolvedRepo,
+        executable: process.execPath,
+        arguments: commandArgs,
+        validation_index: index
+      }
+    });
+    const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+      cwd: resolvedRepo,
+      encoding: 'utf8',
+      timeout: validation.timeout,
+      windowsHide: true,
+      env: { ...process.env }
+    }));
+    commands.push(validation.label);
+    if (!result.ok) throw new Error(`${validation.label} failed: ${commandOutput(result)}`);
+  }
+  return { status: 'passed', commands };
+}
+
 function changedFilesBetween(repoPath, fromCommit, toCommit) {
   if (!fromCommit || !toCommit || fromCommit === toCommit) return [];
   const result = gitCommand(repoPath, ['diff', '--name-only', fromCommit, toCommit]);
@@ -608,7 +1997,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = gitCommand(repoPath, ['switch', branch], { timeout: 120000 });
+    const switchResult = switchRepositoryBranch(args, repoPath, branch, expectedRemote, currentBranch);
     if (!switchResult.ok) {
       throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
         error: 'branch switch failed'
@@ -617,7 +2006,7 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  const fetchResult = fetchWithCredentialFallback(repoPath, branch);
+  const fetchResult = fetchRepositoryBranch(args, repoPath, branch, expectedRemote);
   if (!fetchResult.ok) {
     const fetchError = commandOutput(fetchResult) || 'fetch failed';
     const credentialHint = isCredentialError(fetchError)
@@ -640,7 +2029,7 @@ function validateAndUpdateRepo(state, args = {}) {
     });
   }
   if (fromCommit !== fetchedCommit) {
-    const merge = gitCommand(repoPath, ['merge', '--ff-only', 'FETCH_HEAD'], { timeout: 120000 });
+    const merge = fastForwardRepository(args, repoPath, branch, expectedRemote, fromCommit, fetchedCommit);
     if (!merge.ok) {
       throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
         fromCommit,
@@ -654,7 +2043,7 @@ function validateAndUpdateRepo(state, args = {}) {
   const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);
   let validation = null;
   try {
-    validation = runRepoValidation(repoPath, { hookMode: args.hook === true });
+    validation = runRepositoryValidation(args, repoPath, { hookMode: args.hook === true });
   } catch (error) {
     throw repoUpdateError(error.repoUpdateStatus || 'validation-failed', error.message, {
       fromCommit,
@@ -666,6 +2055,12 @@ function validateAndUpdateRepo(state, args = {}) {
       validationCommand: error.repoUpdateDetails?.validationCommand || ''
     });
   }
+  const verifiedSourceReceipt = createVerifiedSourceReceipt({
+    repoPath,
+    branch,
+    remote: expectedRemote,
+    validation
+  });
   return {
     repoPath,
     fromCommit,
@@ -673,6 +2068,7 @@ function validateAndUpdateRepo(state, args = {}) {
     changedFiles,
     branchSwitchedFrom,
     validation,
+    verifiedSourceReceipt,
     status: fromCommit === toCommit ? 'up-to-date' : 'updated'
   };
 }
@@ -796,7 +2192,9 @@ function normalizedState(raw) {
     raw?.last_sync_source
   );
   state.hub_version = isValidBridgeVersion(raw?.hub_version) ? raw.hub_version : '';
-  state.targets = state.targets && typeof state.targets === 'object' ? state.targets : {};
+  state.targets = state.targets && typeof state.targets === 'object'
+    ? JSON.parse(JSON.stringify(state.targets))
+    : {};
   for (const target of SUPPORTED_TARGETS) {
     state.targets[target] = { ...defaultTargetState(), ...(state.targets[target] || {}) };
   }
@@ -1039,17 +2437,18 @@ function discoverAg2(args, targetState, hubPath) {
   }
   const internalAdapterPath = path.join(hubPath, 'adapters', 'ag2');
   const home = os.homedir();
-  const antigravityConfigDir = home ? path.join(home, '.antigravity') : '';
+  const ag2ConfigDir = home ? path.join(home, '.antigravity') : '';
   const geminiConfigDir = home ? path.join(home, '.gemini', 'config') : '';
-  const geminiPluginsDir = geminiConfigDir ? path.join(geminiConfigDir, 'plugins') : '';
-  const defaultTargetPath = geminiPluginsDir ? path.join(geminiPluginsDir, TOOLKIT_NAME) : '';
   const savedTargetPath = String(targetState.target_path || '');
-  const targetPath = savedTargetPath && path.resolve(savedTargetPath) !== path.resolve(internalAdapterPath)
-    ? savedTargetPath
-    : defaultTargetPath;
-  const antigravityConfigExists = Boolean(antigravityConfigDir && fs.existsSync(antigravityConfigDir));
+  const savedSkillsTargetPath = String(targetState.skills_target_path || '');
+  const supportedDiscovery = targetState.discovery_authority === 'supported-read-only-evidence'
+    && targetState.destination_kind === 'supported-skills-directory'
+    && targetState.skills_only === true
+    && targetState.plugin_authority === false
+    && savedSkillsTargetPath.length > 0;
+  const targetPath = supportedDiscovery ? savedSkillsTargetPath : '';
+  const ag2ConfigExists = Boolean(ag2ConfigDir && fs.existsSync(ag2ConfigDir));
   const geminiConfigExists = Boolean(geminiConfigDir && fs.existsSync(geminiConfigDir));
-  const geminiPluginsDirExists = Boolean(geminiPluginsDir && fs.existsSync(geminiPluginsDir));
   const managedAdapterExists = fs.existsSync(internalAdapterPath);
   const appTargetExists = Boolean(targetPath && fs.existsSync(targetPath));
   const persistedState = Boolean(
@@ -1063,9 +2462,8 @@ function discoverAg2(args, targetState, hubPath) {
   const ag2PackageDetected = Boolean(selected);
   const detected = (
     ag2PackageDetected ||
-    antigravityConfigExists ||
+    ag2ConfigExists ||
     geminiConfigExists ||
-    geminiPluginsDirExists ||
     managedAdapterExists ||
     appTargetExists ||
     persistedState ||
@@ -1075,20 +2473,29 @@ function discoverAg2(args, targetState, hubPath) {
     target: 'ag2',
     detected,
     target_path: targetPath,
+    legacy_target_path: savedTargetPath,
     internal_adapter_path: internalAdapterPath,
     python_command: selected?.command || '',
     ag2_package_detected: ag2PackageDetected,
+    projection_proof: ag2SkillsProjectionProof({
+      discovery: {
+        supported: supportedDiscovery,
+        destination_kind: targetState.destination_kind,
+        target_path: targetPath,
+        skills_only: targetState.skills_only,
+        plugin_authority: targetState.plugin_authority
+      }
+    }),
     signals: {
       selected_python_command: selected?.command || '',
       tried_python_commands: tried,
-      antigravity_config_dir: antigravityConfigDir,
-      antigravity_config_exists: antigravityConfigExists,
+      ag2_config_dir: ag2ConfigDir,
+      ag2_config_exists: ag2ConfigExists,
       gemini_config_dir: geminiConfigDir,
       gemini_config_exists: geminiConfigExists,
-      gemini_plugins_dir: geminiPluginsDir,
-      gemini_plugins_dir_exists: geminiPluginsDirExists,
       managed_adapter_exists: managedAdapterExists,
       app_target_exists: appTargetExists,
+      projection_discovery_supported: supportedDiscovery,
       persisted_state: persistedState,
       explicitly_enabled: explicitlyEnabled
     }
@@ -1231,42 +2638,31 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     ''
   ].join('\n');
 
-  const ag2Plugin = {
-    name: TOOLKIT_NAME,
-    version: BRIDGE_VERSION,
-    description: 'AI Agent Toolkit local bridge adapter for Antigravity 2.',
-    author: {
-      name: 'AI Agent Toolkit'
-    },
-    repository: DEFAULT_REPO_REMOTE,
-    license: 'UNLICENSED'
-  };
-
   const ag2Readme = [
-    '# AI Agent Toolkit Antigravity 2 Adapter',
+    '# AI Agent Toolkit AG2 Skills Projection',
     '',
-    'Generated by the Toolkit Local Bridge Hub after the user explicitly enables the Antigravity 2 target.',
+    'Generated by the Toolkit Local Bridge Hub only after supported read-only AG2 skills-directory discovery.',
     '',
-    'This plugin-scoped skill folder is safe to load from the Antigravity/Gemini user plugin config. It is not source of truth. Update Toolkit through the native Codex or Claude Code plugin package and let the bridge sync enabled targets.',
+    'This directory contains skills only. It is not a Toolkit plugin and it is not source of truth. The bridge must retain existing delivery and stop with AG2_PROOF_UNAVAILABLE when supported discovery is absent.',
     ''
   ].join('\n');
 
   const ag2Skill = [
     '---',
     `name: ${TOOLKIT_NAME}`,
-    'description: Use when working in Antigravity 2 with the AI Agent Toolkit local bridge. Applies source-first policy, opt-in bridge setup, and audit/sync commands without using Codex or Claude private plugin caches.',
+    'description: Use when AG2 has a supported skills-only projection of the AI Agent Toolkit. Applies source-first policy without plugin authority.',
     '---',
     '',
     '# AI Agent Toolkit AG2 Adapter',
     '',
-    'Use this skill when Antigravity 2 needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
+    'Use this skill when AG2 needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
     '',
     'Core rules:',
     '',
     '- Treat AGENTS.md and Toolkit skills/docs as portable policy. Hooks are optional automation only.',
-    '- Do not install or update Codex or Claude Code from Antigravity 2.',
+    '- Do not install or update Codex, Claude Code, AG2, or any package from this projection.',
     '- Do not read Codex or Claude private plugin cache paths as bridge source.',
-    '- Do not install npm, pip, Python, AG2, Antigravity 2, OpenCode, or any package by default.',
+    '- Do not infer an AG2 destination or plugin installation from package presence.',
     '- Do not mutate project repos by default.',
     '- Use the Toolkit Local Bridge Hub manifest and state files under the user-local hub.',
     '',
@@ -1278,20 +2674,6 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     '```',
     ''
   ].join('\n');
-
-  const ag2Metadata = {
-    name: 'ai-agent-toolkit-ag2-adapter',
-    architecture_version: ARCHITECTURE_VERSION,
-    toolkit_bridge_version: BRIDGE_VERSION,
-    description: 'Local AG2 adapter metadata generated by the Toolkit Local Bridge Hub after explicit AG2 enablement.',
-    policy: {
-      source_of_truth: 'Toolkit source, skills, docs, validators, and native plugin package state',
-      no_package_install_by_default: true,
-      no_project_repo_mutation_by_default: true,
-      no_codex_or_claude_cross_update: true,
-      hooks_are_optional_automation_only: true
-    }
-  };
 
   const adapterFiles = {
     'SKILL.md': textPayload(opencodeSkill),
@@ -1306,10 +2688,7 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     [TARGET_MANIFEST_FILE]: targetManifestPayload('opencode', managedSkillNames)
   };
   const ag2Payload = {
-    'plugin.json': textPayload(`${JSON.stringify(ag2Plugin, null, 2)}\n`),
-    'installed_version.json': textPayload(`${JSON.stringify({ version: BRIDGE_VERSION }, null, 2)}\n`),
     'README.md': textPayload(ag2Readme),
-    'ai-agent-toolkit-ag2-adapter.json': textPayload(`${JSON.stringify(ag2Metadata, null, 2)}\n`),
     [TARGET_MANIFEST_FILE]: targetManifestPayload('ag2', managedSkillNames)
   };
 
@@ -1477,6 +2856,30 @@ function cleanupUpdateReports(options = {}) {
     result.errors.push(`refusing cleanup outside Toolkit report directory: ${reportDir}`);
     return result;
   }
+  if (Array.isArray(options.candidatePaths)) {
+    for (const candidate of options.candidatePaths) {
+      const filePath = path.resolve(candidate);
+      if (!isInside(reportDir, filePath) || !/^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(path.basename(filePath))) {
+        result.error_count += 1;
+        result.errors.push(`refusing unbound report cleanup candidate: ${filePath}`);
+        continue;
+      }
+      try {
+        if (!fs.existsSync(filePath)) {
+          result.skipped_count += 1;
+          continue;
+        }
+        if (!fs.statSync(filePath).isFile()) throw new Error('candidate is not a regular file');
+        if (options.beforeDelete) options.beforeDelete({ filePath, reportDir });
+        fs.rmSync(filePath);
+        result.deleted_count += 1;
+      } catch (error) {
+        result.error_count += 1;
+        result.errors.push(`${filePath}: ${error.message}`);
+      }
+    }
+    return result;
+  }
   if (!fs.existsSync(reportDir)) return result;
 
   let entries = [];
@@ -1533,6 +2936,58 @@ function cleanupUpdateReports(options = {}) {
   return result;
 }
 
+function runAuthorisedUpdateReportCleanup(args, state) {
+  if (
+    args.write !== true ||
+    !actionAuthorised(args, 'report.cleanup')
+  ) {
+    return state.last_update_report_cleanup || null;
+  }
+  validatePhaseContext(args.phaseContext);
+  if (args.phaseContext.report_inventory_error) {
+    if (!args.hook) console.warn(`Toolkit update report cleanup warning: ${sanitizeOutputMessage(args.phaseContext.report_inventory_error)}; no cleanup performed`);
+    return state.last_update_report_cleanup || null;
+  }
+  const candidatePaths = (args.phaseContext.report_candidates || []).map((value) => path.resolve(value));
+  const reportDir = path.resolve(args.executionAuthority.bindings.report_directory);
+  const cleanupResult = {
+    retention_days: state.update_report_retention_days,
+    report_log_directory: reportDir,
+    max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
+    deleted_count: 0,
+    skipped_count: 0,
+    error_count: 0,
+    errors: []
+  };
+  for (const filePath of candidatePaths) {
+    try {
+      if (!isInside(reportDir, filePath) || !/^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(path.basename(filePath))) {
+        throw new Error('report cleanup deletion operand does not match invocation authority');
+      }
+      if (!fs.existsSync(filePath)) {
+        cleanupResult.skipped_count += 1;
+        continue;
+      }
+      const identity = filesystemIdentity(filePath, 'file');
+      if (!identity) throw new Error('candidate is not a regular file');
+      if (args.testHooks?.beforeReportCleanupDelete) args.testHooks.beforeReportCleanupDelete({ filePath, reportDir });
+      const mutationOptions = { details: { candidate_paths: candidatePaths, path: filePath } };
+      admitActionSpecificEffect(args, 'report.cleanup', mutationOptions);
+      if (canonicalJson(filesystemIdentity(filePath, 'file')) !== canonicalJson(identity)) throw new Error('report cleanup candidate identity changed before delete');
+      fs.rmSync(filePath, { force: false });
+      if (fs.existsSync(filePath)) throw new Error('report cleanup postcondition failed');
+      cleanupResult.deleted_count += 1;
+    } catch (error) {
+      cleanupResult.error_count += 1;
+      cleanupResult.errors.push(`${filePath}: ${error.message}`);
+    }
+  }
+  if (cleanupResult.error_count && !args.hook) {
+    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
+  }
+  return cleanupResult;
+}
+
 function updateReportTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, '0');
   return [
@@ -1577,6 +3032,9 @@ function openUpdateReport(reportPath, options = {}) {
   if (platform !== 'win32') return { ok: false, skipped: 'not-windows' };
   if (!isUpdateReportPath(resolved, { reportDir: options.reportDir })) return { ok: false, skipped: 'unsafe-report-path' };
   try {
+    if (options.expectedIdentity && canonicalJson(updateReportFileIdentity(resolved)) !== canonicalJson(options.expectedIdentity)) {
+      return { ok: false, skipped: 'report-identity-changed' };
+    }
     const child = spawnImpl('notepad.exe', [resolved], {
       detached: true,
       stdio: 'ignore',
@@ -1586,6 +3044,28 @@ function openUpdateReport(reportPath, options = {}) {
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
+  }
+}
+
+function updateReportFileIdentity(reportPath) {
+  const resolved = path.resolve(reportPath || '');
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) throw new Error('created update report is no longer an ordinary file');
+  return {
+    path: resolved,
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    birthtime_ms: String(stat.birthtimeMs),
+    size: stat.size,
+    sha256: sha256(fs.readFileSync(resolved))
+  };
+}
+
+function verifyCreatedUpdateReport(args, reportPath) {
+  if (!args.createdReportIdentity) throw new Error('created update report identity is unavailable');
+  const actual = updateReportFileIdentity(reportPath);
+  if (canonicalJson(actual) !== canonicalJson(args.createdReportIdentity)) {
+    throw new Error('created update report was replaced or changed before open');
   }
 }
 
@@ -1828,7 +3308,7 @@ function maybePrintAgentRulesPreflight(args) {
 }
 
 function targetDisplayName(targetName) {
-  if (targetName === 'ag2') return 'Antigravity 2';
+  if (targetName === 'ag2') return 'AG2 skills projection';
   if (targetName === 'opencode') return 'OpenCode';
   return targetName;
 }
@@ -1936,7 +3416,7 @@ function classifyUpdateReport(context) {
   const actionable = repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
-    || ['stale', 'refresh-failed'].includes(cacheStatus)
+    || ['stale', 'missing', 'user-disabled', 'refresh-failed'].includes(cacheStatus)
     || ['repair-failed', 'partial-failed'].includes(repairStatus)
     || ['failed', 'not confirmed'].includes(targetStatus)
     || Boolean(context.warning);
@@ -2014,6 +3494,9 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, st
     }
     return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   }
+  if (nativePluginCache.status === 'missing') return 'run `setup toolkit` to install and verify the Codex plugin';
+  if (nativePluginCache.status === 'unverified') return 'run `setup toolkit` after the current Codex plugin configuration and installed state can be inspected';
+  if (nativePluginCache.status === 'user-disabled') return 'enable the Toolkit plugin in Codex configuration before refreshing it';
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
@@ -2126,6 +3609,12 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
+  } else if (nativePluginCache.status === 'missing') {
+    lines.push('- Codex native plugin cache is missing or the current installed Toolkit plugin was not reported. Run `setup toolkit` to install and verify it.');
+  } else if (nativePluginCache.status === 'unverified') {
+    lines.push('- Codex native plugin cache state could not be proven from current Codex configuration and installed-plugin inspection; no refresh was attempted.');
+  } else if (nativePluginCache.status === 'user-disabled') {
+    lines.push('- Codex explicitly reports the Toolkit plugin as user-disabled; its state was preserved and no refresh was attempted.');
   } else if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       lines.push('- Codex native plugin cache is stale even though auto-refresh is enabled. The hook will retry automatic refresh on the next run; use `setup toolkit` only if this persists.');
@@ -2177,11 +3666,79 @@ function buildUpdateReport({ args, state, checksum, context }) {
   return `${lines.join('\n')}\n`;
 }
 
-function writeUpdateReportFile(markdown) {
-  const reportPath = nextUpdateReportPath();
+function writeUpdateReportFile(markdown, exactPath = '', options = {}) {
+  const reportPath = exactPath ? path.resolve(exactPath) : nextUpdateReportPath();
+  const expectedDigest = sha256(Buffer.from(markdown, 'utf8'));
+  if (options.guard) options.guard({ operation: 'mkdir', path: path.dirname(reportPath), reportPath, sha256: expectedDigest });
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, markdown, 'utf8');
-  return reportPath;
+  let handle = null;
+  try {
+    if (options.beforeCreate) options.beforeCreate({ reportPath, sha256: expectedDigest });
+    if (options.guard) options.guard({ operation: 'exclusive-create', path: reportPath, reportPath, sha256: expectedDigest });
+    handle = fs.openSync(reportPath, 'wx+', 0o600);
+    fs.writeFileSync(handle, markdown, 'utf8');
+    if (options.afterWrite) options.afterWrite({ reportPath, handle });
+    const stat = fs.fstatSync(handle);
+    const expectedBytes = Buffer.from(markdown, 'utf8');
+    const actualBytes = Buffer.alloc(stat.size);
+    fs.readSync(handle, actualBytes, 0, actualBytes.length, 0);
+    if (!actualBytes.equals(expectedBytes)) throw new Error('exclusive update report content verification failed');
+    return {
+      path: reportPath,
+      identity: {
+        path: reportPath,
+        dev: String(stat.dev),
+        ino: String(stat.ino),
+        birthtime_ms: String(stat.birthtimeMs),
+        size: stat.size,
+        sha256: sha256(actualBytes)
+      }
+    };
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(`reserved update report path is no longer available: ${reportPath}`);
+    throw error;
+  } finally {
+    if (handle !== null) fs.closeSync(handle);
+  }
+}
+
+function createRunReport(args, markdown, reportPath, classification) {
+  const candidate = path.resolve(reportPath);
+  const bytes = Buffer.from(markdown, 'utf8');
+  const digest = sha256(bytes);
+  const mutationOptions = { details: { path: candidate, classification } };
+  ensureManagedDirectory(args, 'report.create', mutationOptions, path.dirname(candidate));
+  if (args.testHooks?.beforeReportExclusiveCreate) args.testHooks.beforeReportExclusiveCreate({ reportPath: candidate, sha256: digest });
+  admitActionSpecificEffect(args, 'report.create', mutationOptions);
+  try {
+    fs.writeFileSync(candidate, bytes, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(`reserved update report path is no longer available: ${candidate}`);
+    throw error;
+  }
+  const identity = updateReportFileIdentity(candidate);
+  if (args.testHooks?.afterExclusiveReportWrite) args.testHooks.afterExclusiveReportWrite({ reportPath: candidate, identity });
+  const readback = fs.readFileSync(candidate);
+  const finalIdentity = updateReportFileIdentity(candidate);
+  if (!identity || canonicalJson(identity) !== canonicalJson(finalIdentity) || !readback.equals(bytes)) {
+    throw new Error('report creation identity does not match expected contents');
+  }
+  return detachedFrozen({
+    path: candidate,
+    identity: { ...identity, sha256: digest }
+  });
+}
+
+function openRunReport(args, reportPath) {
+  const candidate = path.resolve(reportPath);
+  verifyCreatedUpdateReport(args, candidate);
+  if (process.platform !== 'win32') return detachedFrozen({ status: 'not-supported', path: candidate });
+  const mutationOptions = { details: { path: candidate } };
+  admitActionSpecificEffect(args, 'report.open', mutationOptions);
+  verifyCreatedUpdateReport(args, candidate);
+  const child = spawn('notepad.exe', [candidate], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return detachedFrozen({ status: 'opened', path: candidate, executable: 'notepad.exe' });
 }
 
 function updateReportSignature({ args, checksum, context }) {
@@ -2238,9 +3795,12 @@ function updateReportSignature({ args, checksum, context }) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, writeReport = writeUpdateReportFile, openReport = openUpdateReport }) {
+function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
   const classification = classifyUpdateReport(context);
   if (!shouldConsiderUpdateReport(args, state) || !classification.meaningful) {
+    return { state, reportPath: '' };
+  }
+  if (!actionAuthorised(args, 'report.create')) {
     return { state, reportPath: '' };
   }
   const reportContext = {
@@ -2253,11 +3813,39 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
     return { state, reportPath: '' };
   }
   const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
-  const reportPath = writeReport(markdown);
+  let reportPath = '';
+  let lastCollision = null;
+  for (let attempt = 0; attempt < REPORT_CREATE_ATTEMPTS; attempt += 1) {
+    const candidate = path.resolve(nextUpdateReportPath(new Date(Date.now() + attempt * 1000)));
+    if (args.testHooks?.beforeReportCreation) args.testHooks.beforeReportCreation({ reportPath: candidate, classification, attempt });
+    try {
+      {
+        const creation = createRunReport(args, markdown, candidate, classification.kind);
+        if (!creation || typeof creation !== 'object' || !creation.path || !creation.identity) {
+          throw new Error('report writer did not return exclusive creation identity');
+        }
+        const writtenPath = path.resolve(creation.path);
+        if (writtenPath !== candidate || !isUpdateReportPath(writtenPath)) throw new Error('report writer did not create the exact authorised report path');
+        if (creation.identity.path !== writtenPath || creation.identity.sha256 !== sha256(Buffer.from(markdown, 'utf8'))) {
+          throw new Error('report creation identity does not match expected contents');
+        }
+        args.createdReportIdentity = deepFreeze({ ...creation.identity });
+        verifyCreatedUpdateReport(args, writtenPath);
+        reportPath = writtenPath;
+      }
+      break;
+    } catch (error) {
+      if (!/already available|reserved update report path|EEXIST/i.test(String(error.message || error))) throw error;
+      lastCollision = error;
+    }
+  }
+  if (!reportPath) throw new Error(`exclusive update report creation exhausted bounded attempts: ${lastCollision?.message || 'collision'}`);
+  args.createdReportPath = reportPath;
   state.last_update_report_path = reportPath;
   state.last_update_report_signature = signature;
-  if (args.openUpdateReport || classification.actionable) {
-    openReport(reportPath);
+  if ((args.openUpdateReport || classification.actionable) && actionAuthorised(args, 'report.open')) {
+    if (args.testHooks?.beforeReportOpen) args.testHooks.beforeReportOpen({ reportPath, identity: args.createdReportIdentity });
+    openRunReport(args, reportPath);
   }
   return { state, reportPath };
 }
@@ -2443,17 +4031,38 @@ function prepareStateForWrite(state, args) {
 
 function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = false }) {
   let nextState = normalizedState(state);
-  const sourceRoot = resolveToolkitSourceRoot(nextState);
+  const sourceRoot = args.delegatedEnvelope
+    ? path.resolve(args.delegatedEnvelope.child.source_repository)
+    : resolveToolkitSourceRoot(nextState);
+  if (args.delegatedEnvelope && sourceRoot !== path.resolve(args.executionAuthority.bindings.source_repository)) {
+    throw new Error('delegated payload source repository does not match invocation authority');
+  }
   const payloads = adapterPayloads(nextState, sourceRoot);
   const checksum = payloadChecksum(payloads);
   const discoveries = {
     opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
     ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
   };
-  updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
+  if (scopeAllowsTargetState(args, 'opencode')) {
+    updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
+  }
+  if (scopeAllowsTargetState(args, 'ag2')) {
+    updateTargetState(
+      nextState,
+      'ag2',
+      discoveries.ag2,
+      checksum,
+      false,
+      nextState.targets.ag2.enabled
+        ? (discoveries.ag2.projection_proof?.status === 'PROVEN' ? '' : 'AG2_PROOF_UNAVAILABLE')
+        : 'not enabled'
+    );
+  }
+  const needsSyncTargets = SUPPORTED_TARGETS
+    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
   const plannedTargetSyncs = SUPPORTED_TARGETS
-    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
+    .filter((target) => scopeAllowsTargetSync(args, target))
+    .filter((target) => needsSyncTargets.includes(target))
     .map((target) => targetSyncPlan(target, discoveries[target], payloads));
   const skippedTargets = SUPPORTED_TARGETS
     .filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled);
@@ -2465,88 +4074,452 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
     discoveries,
     payloads,
     checksum,
+    needsSyncTargets,
+    outOfScopeStaleTargets: needsSyncTargets.filter((target) => !scopeAllowsTargetSync(args, target)),
     plannedTargetSyncs,
     skippedTargets
   };
 }
 
-function writePayloadTree(rootDir, payload) {
+function createOwnedGenerationEntry(args, authorityKind, mutationOptions, entry) {
+  const target = path.resolve(entry.path);
+  const bytes = entry.base64 === undefined ? null : Buffer.from(entry.base64, 'base64');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (entry.type === 'directory') fs.mkdirSync(target);
+  else fs.writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
+  const identity = filesystemIdentity(target, entry.type);
+  if (!identity) throw new Error(`owned generation entry postcondition failed: ${target}`);
+  if (bytes && !fs.readFileSync(target).equals(bytes)) throw new Error(`owned generation entry readback failed: ${target}`);
+  return detachedFrozen({ action: 'createOwnedGenerationEntry', path: target, type: entry.type, identity, sha256: bytes ? sha256(bytes) : '' });
+}
+
+function removeOwnedGenerationEntry(args, authorityKind, mutationOptions, entry) {
+  const target = path.resolve(entry.path);
+  const expectedIdentity = detachedFrozen(entry.identity);
+  const phase = validatePhaseContext(args.phaseContext);
+  if (phase.testHooks?.beforeOwnedGenerationEntryRemoval) {
+    phase.testHooks.beforeOwnedGenerationEntryRemoval(detachedFrozen({ path: target, type: entry.type, identity: expectedIdentity }));
+  }
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  const actualIdentity = filesystemIdentity(target, entry.type);
+  if (!actualIdentity || canonicalJson(actualIdentity) !== canonicalJson(expectedIdentity)) {
+    throw new Error(`owned generation removal rejected identity drift: ${target}`);
+  }
+  if (entry.type === 'file') fs.rmSync(target, { force: false });
+  else fs.rmdirSync(target);
+  if (fs.existsSync(target)) throw new Error(`owned generation removal postcondition failed: ${target}`);
+  return detachedFrozen({ action: 'removeOwnedGenerationEntry', path: target, type: entry.type, identity: expectedIdentity });
+}
+
+function writeTargetManagedFile(args, authorityKind, mutationOptions, filePath, content, flags = 'wx') {
+  const target = path.resolve(filePath);
+  const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content), 'utf8');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  fs.writeFileSync(target, bytes, { flag: flags, mode: 0o600 });
+  const readback = fs.readFileSync(target);
+  if (!readback.equals(bytes)) throw new Error(`managed file write postcondition failed: ${target}`);
+  return detachedFrozen({ action: 'writeTargetManagedFile', path: target, byte_length: bytes.length, sha256: sha256(bytes) });
+}
+
+function frozenDirectoryPlan(rootPath) {
+  const root = path.resolve(rootPath);
+  const entries = [];
+  function visit(current) {
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || path.resolve(fs.realpathSync.native(current)) !== path.resolve(current)) {
+      throw new Error(`managed recursive plan rejected symlink or reparse entry: ${current}`);
+    }
+    const relative = slash(path.relative(root, current));
+    if (stat.isDirectory()) {
+      entries.push(Object.freeze({ relative_path: relative, type: 'directory', identity: filesystemIdentity(current, 'directory') }));
+      for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+        visit(path.join(current, entry.name));
+      }
+    } else if (stat.isFile()) {
+      const bytes = fs.readFileSync(current);
+      entries.push(Object.freeze({
+        relative_path: relative,
+        type: 'file',
+        identity: filesystemIdentity(current, 'file'),
+        byte_length: bytes.length,
+        sha256: sha256(bytes),
+        base64: bytes.toString('base64')
+      }));
+    } else throw new Error(`managed recursive plan rejected special entry: ${current}`);
+  }
+  visit(root);
+  return Object.freeze(entries);
+}
+
+function assertManagedReplacementPath(boundTarget, candidate) {
+  const parent = path.dirname(path.resolve(boundTarget));
+  const resolved = path.resolve(candidate);
+  if (resolved !== path.resolve(boundTarget) && !isInside(parent, resolved)) {
+    throw new Error('managed replacement operand escaped its immutable target parent');
+  }
+  return resolved;
+}
+
+function renameManagedEntry(args, authorityKind, mutationOptions, sourcePath, targetPath) {
+  const boundTarget = mutationOptions.details.path;
+  const source = assertManagedReplacementPath(boundTarget, sourcePath);
+  const target = assertManagedReplacementPath(boundTarget, targetPath);
+  const identity = filesystemIdentity(source, 'directory');
+  if (!identity) throw new Error(`managed rename source is not an ordinary directory: ${source}`);
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(source, 'directory')) !== canonicalJson(identity)) throw new Error('managed rename source identity drift');
+  fs.renameSync(source, target);
+  if (canonicalJson(filesystemIdentity(target, 'directory')) !== canonicalJson(identity)) throw new Error('managed rename postcondition failed');
+  return detachedFrozen({ action: authorityKind, operation: 'rename', source, target, identity });
+}
+
+function removeManagedDirectoryPlan(args, authorityKind, mutationOptions, rootPath) {
+  const plan = frozenDirectoryPlan(rootPath).slice().sort((left, right) => {
+    const leftDepth = left.relative_path.split('/').length;
+    const rightDepth = right.relative_path.split('/').length;
+    return rightDepth - leftDepth || right.relative_path.localeCompare(left.relative_path);
+  });
+  const root = path.resolve(rootPath);
+  for (const item of plan) {
+    const target = item.relative_path ? path.join(root, ...item.relative_path.split('/')) : root;
+    removeOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: target, type: item.type, identity: item.identity });
+  }
+}
+
+function copyManagedDirectoryPlan(args, authorityKind, mutationOptions, sourcePath, targetPath) {
+  const source = path.resolve(sourcePath);
+  const target = path.resolve(targetPath);
+  const plan = frozenDirectoryPlan(source);
+  for (const item of plan) {
+    const destination = item.relative_path ? path.join(target, ...item.relative_path.split('/')) : target;
+    if (item.type === 'directory') {
+      createOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: destination, type: 'directory' });
+    } else {
+      const bytes = Buffer.from(item.base64, 'base64');
+      if (bytes.length !== item.byte_length || sha256(bytes) !== item.sha256) throw new Error('managed recursive copy plan bytes changed');
+      writeTargetManagedFile(args, authorityKind, mutationOptions, destination, bytes, 'wx');
+    }
+  }
+}
+
+function replaceManagedDirectory(args, authorityKind, mutationOptions, sourceDir, targetDir, options = {}) {
+  const source = assertManagedReplacementPath(mutationOptions.details.path, sourceDir);
+  const target = assertManagedReplacementPath(mutationOptions.details.path, targetDir);
+  const backup = path.join(path.dirname(target), `.${path.basename(target)}.backup-${crypto.randomUUID()}`);
+  let displaced = false;
+  if (fs.existsSync(target)) {
+    renameManagedEntry(args, authorityKind, mutationOptions, target, backup);
+    displaced = true;
+  }
+  try {
+    if (options.beforeFinalRename) options.beforeFinalRename({ sourcePath: source, targetPath: target, backupPath: backup });
+    renameManagedEntry(args, authorityKind, mutationOptions, source, target);
+  } catch (renameError) {
+    const canFallback = process.platform === 'win32' && ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(renameError.code);
+    if (canFallback && !fs.existsSync(target)) {
+      try {
+        copyManagedDirectoryPlan(args, authorityKind, mutationOptions, source, target);
+        removeManagedDirectoryPlan(args, authorityKind, mutationOptions, source);
+      } catch (copyError) {
+        if (fs.existsSync(target)) removeManagedDirectoryPlan(args, authorityKind, mutationOptions, target);
+        if (displaced && fs.existsSync(backup) && !fs.existsSync(target)) renameManagedEntry(args, authorityKind, mutationOptions, backup, target);
+        const error = new Error(`managed replacement fallback failed: ${copyError.message}`);
+        error.cause = copyError;
+        throw error;
+      }
+    } else {
+      if (displaced && fs.existsSync(backup) && !fs.existsSync(target)) renameManagedEntry(args, authorityKind, mutationOptions, backup, target);
+      throw renameError;
+    }
+  }
+  if (displaced && fs.existsSync(backup)) removeManagedDirectoryPlan(args, authorityKind, mutationOptions, backup);
+  return detachedFrozen({ action: authorityKind, operation: 'replace-directory', source, target });
+}
+
+function renameManagedFile(args, authorityKind, mutationOptions, sourcePath, targetPath, expectedDigest) {
+  const source = path.resolve(sourcePath);
+  const target = path.resolve(targetPath);
+  const sourceIdentity = filesystemIdentity(source, 'file');
+  if (!sourceIdentity || sha256(fs.readFileSync(source)) !== expectedDigest) throw new Error('managed file rename source identity mismatch');
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(source, 'file')) !== canonicalJson(sourceIdentity) || sha256(fs.readFileSync(source)) !== expectedDigest) {
+    throw new Error('managed file rename source drift');
+  }
+  fs.renameSync(source, target);
+  if (sha256(fs.readFileSync(target)) !== expectedDigest) throw new Error('managed file rename postcondition failed');
+  return detachedFrozen({ action: authorityKind, operation: 'rename-file', source, target, sha256: expectedDigest });
+}
+
+function writeManagedAtomicFile(args, authorityKind, mutationOptions, filePath, content) {
+  const target = path.resolve(filePath);
+  const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content), 'utf8');
+  const digest = sha256(bytes);
+  ensureManagedDirectory(args, authorityKind, mutationOptions, path.dirname(target));
+  const tempPath = path.join(path.dirname(target), `.${path.basename(target)}.tmp-${crypto.randomUUID()}`);
+  const backupPath = path.join(path.dirname(target), `.${path.basename(target)}.backup-${crypto.randomUUID()}`);
+  writeTargetManagedFile(args, authorityKind, mutationOptions, tempPath, bytes, 'wx');
+  let displacedDigest = '';
+  if (fs.existsSync(target)) {
+    displacedDigest = sha256(fs.readFileSync(target));
+    renameManagedFile(args, authorityKind, mutationOptions, target, backupPath, displacedDigest);
+  }
+  try {
+    renameManagedFile(args, authorityKind, mutationOptions, tempPath, target, digest);
+  } catch (error) {
+    if (fs.existsSync(tempPath)) removeTargetManagedEntry(args, authorityKind, mutationOptions, tempPath);
+    if (displacedDigest && fs.existsSync(backupPath) && !fs.existsSync(target)) {
+      renameManagedFile(args, authorityKind, mutationOptions, backupPath, target, displacedDigest);
+    }
+    throw error;
+  }
+  if (authorityKind === 'hub.state.write') {
+    const persistedState = JSON.parse(bytes.toString('utf8'));
+    args.expectedAuthorityStateBinding = authorityStateBinding(persistedState, args.executionAuthority);
+  }
+  if (displacedDigest && fs.existsSync(backupPath)) removeTargetManagedEntry(args, authorityKind, mutationOptions, backupPath);
+  return detachedFrozen({ action: authorityKind, operation: 'atomic-file-write', path: target, byte_length: bytes.length, sha256: digest });
+}
+
+function writePayloadTree(rootDir, payload, options = {}) {
+  const resolvedRoot = path.resolve(rootDir);
+  const payloadDigest = filePayloadChecksum(payload);
+  if (options.guard) options.guard({ operation: 'write-payload-tree', root: resolvedRoot, payload_sha256: payloadDigest });
   for (const [rel, text] of Object.entries(payload)) {
-    const target = path.join(rootDir, rel);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, payloadBytes(text));
+    const target = path.resolve(rootDir, rel);
+    if (!isInside(resolvedRoot, target)) throw new Error('payload write escaped its immutable root');
+    const bytes = payloadBytes(text);
+    const directory = path.dirname(target);
+    if (!fs.existsSync(directory)) {
+      const relativeDirectory = path.relative(resolvedRoot, directory);
+      let current = resolvedRoot;
+      for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
+        current = path.join(current, segment);
+        if (fs.existsSync(current)) continue;
+        createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: current, type: 'directory' });
+      }
+    }
+    writeTargetManagedFile(options.args, options.authorityKind, options.mutationOptions, target, bytes, 'wx');
+  }
+}
+
+function ensureManagedDirectory(args, authorityKind, mutationOptions, directoryPath) {
+  const target = path.resolve(directoryPath);
+  const missing = [];
+  let cursor = target;
+  while (!fs.existsSync(cursor)) {
+    missing.push(cursor);
+    const parent = path.dirname(cursor);
+    if (parent === cursor) throw new Error(`managed directory has no existing ancestor: ${target}`);
+    cursor = parent;
+  }
+  const ancestorIdentity = filesystemIdentity(cursor, 'directory');
+  if (!ancestorIdentity) throw new Error(`managed directory ancestor is unsafe: ${cursor}`);
+  for (const entry of missing.reverse()) {
+    createOwnedGenerationEntry(args, authorityKind, mutationOptions, { path: entry, type: 'directory' });
   }
 }
 
 function withOwnedStaging(options, callback) {
-  const generation = createOwnedStagingGeneration({
+  if (!options.args || !options.authorityKind || !options.mutationOptions) {
+    throw new Error('managed owned staging requires an action-specific executor binding');
+  }
+  const guard = typeof options.guard === 'function' ? options.guard : () => {};
+  const parent = path.dirname(options.target);
+  ensureManagedDirectory(options.args, options.authorityKind, options.mutationOptions, parent);
+  const generation = planOwnedStagingGeneration({
     parent: path.dirname(options.target),
     target: options.target,
     stagePrefix: options.stagePrefix,
     operation: options.operation,
     sourceType: options.sourceType,
-    bridgeVersion: BRIDGE_VERSION,
-    afterRegistration: options.afterRegistration
+    bridgeVersion: BRIDGE_VERSION
   });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, {
+    path: generation.recordPath,
+    type: 'file',
+    base64: generation.recordBase64
+  });
+  if (options.afterRegistration) options.afterRegistration({ record: generation.record, recordPath: generation.recordPath, stagePath: generation.stagePath });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: generation.stagePath, type: 'directory' });
+  const stageIdentity = filesystemIdentity(generation.stagePath, 'directory');
+  const markerIdentity = { dev: stageIdentity.dev, ino: stageIdentity.ino, birthtime_ms: stageIdentity.birthtime_ms };
+  if (options.afterDirectoryCreated) options.afterDirectoryCreated({ record: generation.record, recordPath: generation.recordPath, stagePath: generation.stagePath, directoryIdentity: markerIdentity });
+  const ready = plannedStateMarker(generation, 'ready', markerIdentity);
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: ready.path, type: 'file', base64: ready.base64 });
+  createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, {
+    path: generation.recordPath.replace(/\.json$/, '.ready.json'), type: 'file', base64: ready.base64
+  });
+  const immutableGeneration = deepFreeze({
+    generation_id: generation.record.generation_id,
+    ownership_token: generation.record.ownership_token,
+    expected_parent: path.resolve(generation.record.expected_parent),
+    expected_staging_path: path.resolve(generation.record.expected_staging_path),
+    expected_final_target: path.resolve(generation.record.expected_final_target),
+    record_path: path.resolve(generation.recordPath),
+    stage_path: path.resolve(generation.stagePath)
+  });
+  const assertGenerationBinding = () => {
+    const actual = {
+      generation_id: generation.record.generation_id,
+      ownership_token: generation.record.ownership_token,
+      expected_parent: path.resolve(generation.record.expected_parent),
+      expected_staging_path: path.resolve(generation.record.expected_staging_path),
+      expected_final_target: path.resolve(generation.record.expected_final_target),
+      record_path: path.resolve(generation.recordPath),
+      stage_path: path.resolve(generation.stagePath)
+    };
+    if (canonicalJson(actual) !== canonicalJson(immutableGeneration)) {
+      throw new Error('owned staging generation operands changed after creation');
+    }
+  };
   let operationError = null;
   try {
     const result = callback(generation.stagePath, generation);
-    markOwnedStaging(generation, 'completed');
+    guard();
+    assertGenerationBinding();
+    const completed = plannedStateMarker(generation, 'completed');
+    createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: completed.path, type: 'file', base64: completed.base64 });
     return result;
   } catch (error) {
     operationError = error;
     try {
-      markOwnedStaging(generation, 'failed');
+      guard();
+      assertGenerationBinding();
+      const failed = plannedStateMarker(generation, 'failed');
+      createOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, { path: failed.path, type: 'file', base64: failed.base64 });
     } catch (markerError) {
       error.stagingMarkerError = markerError;
     }
     throw error;
   } finally {
-    const cleanup = cleanupOwnedGeneration(generation, {
-      currentOperation: true,
-      beforeDelete: options.beforeDelete
-    });
-    if (!cleanup.cleaned) {
-      const cleanupError = new Error(
-        `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
-      );
-      if (operationError) {
-        operationError.stagingCleanupError = cleanupError;
-        operationError.message = `${operationError.message}; ${cleanupError.message}`;
+    let cleanupGuarded = true;
+    try {
+      guard();
+    } catch {
+      cleanupGuarded = false;
+    }
+    if (cleanupGuarded) {
+      const cleanup = planOwnedGenerationCleanup(generation, { currentOperation: true });
+      if (options.beforeDelete) options.beforeDelete({ generation, inspection: cleanup.inspection });
+      guard();
+      assertGenerationBinding();
+      if (!cleanup.cleanable) {
+        const cleanupError = new Error(
+          `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
+        );
+        if (operationError) {
+          operationError.stagingCleanupError = cleanupError;
+          operationError.message = `${operationError.message}; ${cleanupError.message}`;
+        }
+        else throw cleanupError;
+      } else {
+        for (const entry of cleanup.entries) {
+          removeOwnedGenerationEntry(options.args, options.authorityKind, options.mutationOptions, entry);
+        }
       }
-      else throw cleanupError;
     }
   }
 }
 
-function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }, testHooks = {}) {
-  return withOwnedStaging({
-    target: hubPath,
-    stagePrefix: '.staging-',
-    operation: 'hub-snapshot-replacement',
-    sourceType: args.syncSource,
-    afterRegistration: testHooks.afterHubStagingRegistration,
-    beforeDelete: testHooks.beforeHubStagingCleanup
-  }, (stagePath, generation) => {
-    if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation });
-    if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation });
-    writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
-    writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
-    writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
-      state,
-      discoveries,
-      checksum,
-      sourceCommit,
-      syncSource: args.syncSource,
-      hubPath
-    }));
-    writeJson(path.join(stagePath, 'state.json'), state);
-    if (testHooks.afterHubPayloadWrite) testHooks.afterHubPayloadWrite({ stagePath, generation });
-    validateStagedHub(stagePath, checksum);
-    if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation });
-    if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation });
-    replaceDirectoryAtomically(stagePath, hubPath, testHooks.replaceDirectoryOptions || {});
-  });
+function scopedStateForPersistence(hubPath, state, args) {
+  const raw = readJsonIfExists(path.join(hubPath, 'state.json'));
+  const persisted = JSON.parse(JSON.stringify(state));
+  persisted.targets = persisted.targets && typeof persisted.targets === 'object' ? persisted.targets : {};
+  for (const target of SUPPORTED_TARGETS) {
+    if (scopeAllowsTargetState(args, target)) continue;
+    if (raw?.targets && Object.prototype.hasOwnProperty.call(raw.targets, target)) {
+      persisted.targets[target] = JSON.parse(JSON.stringify(raw.targets[target]));
+    } else {
+      delete persisted.targets[target];
+    }
+  }
+  return persisted;
+}
+
+function scopedManifestForPersistence({ hubPath, args, state, discoveries, checksum, sourceCommit }) {
+  const previous = readJsonIfExists(path.join(hubPath, 'manifest.json'));
+  const current = buildManifest({ state: normalizedState(state), discoveries, checksum, sourceCommit, syncSource: args.syncSource, hubPath });
+  const manifest = previous && typeof previous === 'object' && !Array.isArray(previous)
+    ? { ...previous, ...current }
+    : { ...current };
+  manifest.targets = previous?.targets && typeof previous.targets === 'object'
+    ? JSON.parse(JSON.stringify(previous.targets))
+    : {};
+  for (const target of SUPPORTED_TARGETS) {
+    if (scopeAllowsTargetState(args, target)) manifest.targets[target] = current.targets[target];
+  }
+  return manifest;
+}
+
+function validateStagedTargetAdapter(stagePath, target, payloads) {
+  const required = target === 'opencode'
+    ? path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md')
+    : path.join(stagePath, 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  if (!fs.existsSync(required)) throw new Error(`staged ${target} adapter SKILL.md missing`);
+  if (target === 'ag2') {
+    for (const obsolete of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+      if (fs.existsSync(path.join(stagePath, obsolete))) throw new Error(`staged AG2 plugin authority remains: ${obsolete}`);
+    }
+  }
+  if (!Object.keys(payloads[target] || {}).length) throw new Error(`staged ${target} adapter payload is empty`);
+  if (targetOutputChecksum(stagePath, payloads[target]) !== filePayloadChecksum(payloads[target])) {
+    throw new Error(`staged ${target} adapter content checksum mismatch`);
+  }
+}
+
+function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit, plannedTargetSyncs = [] }, testHooks = {}) {
+  revalidateExecutionAuthority(args, discoveries);
+  const plannedHubTargets = new Set(plannedTargetSyncs.map((plan) => plan.target));
+  for (const target of SUPPORTED_TARGETS.filter((name) => scopeAllowsTargetSync(args, name) && plannedHubTargets.has(name))) {
+    const targetPath = path.join(hubPath, 'adapters', target);
+    const mutationOptions = { target, action: scopeTargetAction(args, target), details: { path: targetPath, hubPath } };
+    withOwnedStaging({
+      target: targetPath,
+      stagePrefix: `.${target}.staging-`,
+      operation: 'target-directory-copy',
+      sourceType: args.syncSource,
+      args,
+      authorityKind: 'hub.adapter.replace',
+      mutationOptions,
+      afterRegistration: testHooks.afterHubStagingRegistration,
+      beforeDelete: testHooks.beforeHubStagingCleanup,
+      guard: () => guardManagedMutation(args, 'hub.adapter.replace', mutationOptions)
+    }, (stagePath, generation) => {
+      if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation, target });
+      if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation, target });
+      const intendedDigest = filePayloadChecksum(payloads[target]);
+      writePayloadTree(stagePath, payloads[target], {
+        args,
+        authorityKind: 'hub.adapter.replace',
+        mutationOptions,
+        guard(actual) {
+          guardManagedPrimitive(args, 'hub.adapter.replace', mutationOptions);
+          if (path.resolve(actual.root) !== path.resolve(stagePath) || actual.payload_sha256 !== intendedDigest) {
+            throw new Error('hub payload primitive content changed before write');
+          }
+        }
+      });
+      if (testHooks.afterHubPayloadWrite) testHooks.afterHubPayloadWrite({ stagePath, generation, target });
+      validateStagedTargetAdapter(stagePath, target, payloads);
+      if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation, target });
+      if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation, target });
+      guardManagedMutation(args, 'hub.adapter.replace', mutationOptions);
+      replaceManagedDirectory(args, 'hub.adapter.replace', mutationOptions, stagePath, targetPath, testHooks.replaceDirectoryOptions || {});
+      validateStagedTargetAdapter(targetPath, target, payloads);
+    });
+  }
+  const persistedState = scopedStateForPersistence(hubPath, state, args);
+  const manifest = scopedManifestForPersistence({ hubPath, args, state: persistedState, discoveries, checksum, sourceCommit });
+  const manifestPath = path.join(hubPath, 'manifest.json');
+  writeManagedAtomicFile(args, 'hub.manifest.write', { details: { path: manifestPath, hubPath } }, manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const statePath = path.join(hubPath, 'state.json');
+  writeManagedAtomicFile(args, 'hub.state.write', { details: { path: statePath, hubPath } }, statePath, `${JSON.stringify(persistedState, null, 2)}\n`);
+  if (testHooks.afterHubStateWrite) testHooks.afterHubStateWrite({ hubPath, persistedState });
+  const verifiedState = readJsonIfExists(path.join(hubPath, 'state.json'));
+  if (canonicalJson(verifiedState) !== canonicalJson(persistedState)) throw new Error('hub state postcondition verification failed');
+  const verifiedManifest = readJsonIfExists(path.join(hubPath, 'manifest.json'));
+  if (canonicalJson(verifiedManifest) !== canonicalJson(manifest)) throw new Error('hub manifest postcondition verification failed');
+  args.expectedAuthorityStateBinding = authorityStateBinding(persistedState, args.executionAuthority);
 }
 
 function validateStagedHub(stagePath, checksum) {
@@ -2557,8 +4530,10 @@ function validateStagedHub(stagePath, checksum) {
   if (!fs.existsSync(path.join(stagePath, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
     throw new Error('staged OpenCode adapter SKILL.md missing');
   }
-  if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'plugin.json'))) {
-    throw new Error('staged AG2 adapter plugin metadata missing');
+  for (const obsolete of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+    if (fs.existsSync(path.join(stagePath, 'adapters', 'ag2', obsolete))) {
+      throw new Error(`staged AG2 plugin authority remains: ${obsolete}`);
+    }
   }
   if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
     throw new Error('staged AG2 adapter SKILL.md missing');
@@ -3054,6 +5029,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
 // releasing.
 function releaseLock(lock) {
   if (!lock?.acquired || !lock.lockPath) return;
+  for (const context of lock.phaseContexts || []) invalidatePhaseContext(context);
   let current = null;
   try {
     current = readJsonIfExists(lock.lockPath);
@@ -3079,6 +5055,7 @@ function renameSyncWithRetry(sourcePath, targetPath, options = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
+      if (options.guard) options.guard({ operation: 'rename', sourcePath, targetPath });
       fs.renameSync(sourcePath, targetPath);
       return;
     } catch (error) {
@@ -3091,34 +5068,57 @@ function renameSyncWithRetry(sourcePath, targetPath, options = {}) {
 }
 
 function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
-  const parent = path.dirname(targetDir);
+  const immutableSource = path.resolve(sourceDir);
+  const immutableTarget = path.resolve(targetDir);
+  const parent = path.dirname(immutableTarget);
+  const guard = (details) => {
+    if (path.resolve(sourceDir) !== immutableSource || path.resolve(targetDir) !== immutableTarget) {
+      throw new Error('directory replacement operands changed before primitive');
+    }
+    if (options.guard) options.guard(details);
+  };
+  guard({ operation: 'mkdir', path: parent, sourcePath: immutableSource, targetPath: immutableTarget });
   fs.mkdirSync(parent, { recursive: true });
-  const backup = path.join(parent, `.${path.basename(targetDir)}.backup-${process.pid}-${Date.now()}`);
-  if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-  if (fs.existsSync(targetDir)) renameSyncWithRetry(targetDir, backup, options);
+  const backup = path.join(parent, `.${path.basename(immutableTarget)}.backup-${process.pid}-${Date.now()}`);
+  if (fs.existsSync(backup)) {
+    guard({ operation: 'remove-backup', path: backup, sourcePath: immutableSource, targetPath: immutableTarget });
+    fs.rmSync(backup, { recursive: true, force: true });
+  }
+  if (fs.existsSync(immutableTarget)) renameSyncWithRetry(immutableTarget, backup, { ...options, guard });
   try {
-    renameSyncWithRetry(sourceDir, targetDir, options);
+    renameSyncWithRetry(immutableSource, immutableTarget, { ...options, guard });
   } catch (error) {
-    if (isTransientRenameError(error) && fs.existsSync(sourceDir) && !fs.existsSync(targetDir)) {
+    if (isTransientRenameError(error) && fs.existsSync(immutableSource) && !fs.existsSync(immutableTarget)) {
       try {
-        fs.cpSync(sourceDir, targetDir, { recursive: true, force: false, errorOnExist: true });
-        fs.rmSync(sourceDir, { recursive: true, force: true });
-        if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+        guard({ operation: 'copy-fallback', sourcePath: immutableSource, targetPath: immutableTarget });
+        fs.cpSync(immutableSource, immutableTarget, { recursive: true, force: false, errorOnExist: true });
+        guard({ operation: 'remove-source-after-copy', path: immutableSource, sourcePath: immutableSource, targetPath: immutableTarget });
+        fs.rmSync(immutableSource, { recursive: true, force: true });
+        if (fs.existsSync(backup)) {
+          guard({ operation: 'remove-backup-after-copy', path: backup, sourcePath: immutableSource, targetPath: immutableTarget });
+          fs.rmSync(backup, { recursive: true, force: true });
+        }
         return;
       } catch (copyError) {
-        if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+        if (fs.existsSync(immutableTarget)) {
+          guard({ operation: 'remove-failed-target', path: immutableTarget, sourcePath: immutableSource, targetPath: immutableTarget });
+          fs.rmSync(immutableTarget, { recursive: true, force: true });
+        }
         const fallbackError = new Error(
-          `Failed to replace ${targetDir}: rename failed with ${error.code || error.message}; copy fallback failed with ${copyError.code || copyError.message}`
+          `Failed to replace ${immutableTarget}: rename failed with ${error.code || error.message}; copy fallback failed with ${copyError.code || copyError.message}`
         );
         fallbackError.code = copyError.code || error.code;
         fallbackError.cause = copyError;
         error = fallbackError;
       }
     }
-    if (fs.existsSync(backup) && !fs.existsSync(targetDir)) renameSyncWithRetry(backup, targetDir, options);
+    if (fs.existsSync(backup) && !fs.existsSync(immutableTarget)) renameSyncWithRetry(backup, immutableTarget, { ...options, guard });
     throw error;
   }
-  if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+  if (fs.existsSync(backup)) {
+    guard({ operation: 'remove-backup', path: backup, sourcePath: immutableSource, targetPath: immutableTarget });
+    fs.rmSync(backup, { recursive: true, force: true });
+  }
 }
 
 function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
@@ -3126,21 +5126,38 @@ function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.
     target: targetDir,
     stagePrefix: `.${path.basename(targetDir)}.staging-`,
     operation: options.operation || 'target-directory-copy',
-    sourceType: options.sourceType || 'repo'
+    sourceType: options.sourceType || 'repo',
+    guard: options.guard,
+    beforeDelete: options.beforeDelete
   }, (staging) => {
+    if (options.guard) options.guard({ operation: 'copy-stage', sourcePath: sourceDir, targetPath: staging });
     fs.cpSync(sourceDir, staging, { recursive: true });
     if (requiredRelPath && !fs.existsSync(path.join(staging, requiredRelPath))) {
       throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
     }
-    replaceDirectoryAtomically(staging, targetDir);
+    if (options.guard) options.guard({ operation: 'before-target-skill-replacement', sourcePath: staging, targetPath: targetDir });
+    replaceManagedDirectory(options.args, 'target.destination.write', mutationOptions, staging, targetDir);
   });
 }
 
-function writeFileAtomically(filePath, content) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
-  fs.writeFileSync(tempPath, payloadBytes(content));
-  fs.renameSync(tempPath, filePath);
+function writeFileAtomically(filePath, content, options = {}) {
+  const immutablePath = path.resolve(filePath);
+  const bytes = payloadBytes(content);
+  const expectedDigest = sha256(bytes);
+  const guard = (details) => {
+    if (path.resolve(filePath) !== immutablePath || sha256(payloadBytes(content)) !== expectedDigest) {
+      throw new Error('atomic file write operands changed before primitive');
+    }
+    if (options.guard) options.guard(details);
+  };
+  guard({ operation: 'mkdir', path: path.dirname(immutablePath), targetPath: immutablePath, sha256: expectedDigest });
+  fs.mkdirSync(path.dirname(immutablePath), { recursive: true });
+  const tempPath = path.join(path.dirname(immutablePath), `.${path.basename(immutablePath)}.tmp-${process.pid}-${Date.now()}`);
+  guard({ operation: 'write-temp', path: tempPath, targetPath: immutablePath, sha256: expectedDigest });
+  fs.writeFileSync(tempPath, bytes);
+  guard({ operation: 'rename-temp', sourcePath: tempPath, targetPath: immutablePath, sha256: expectedDigest });
+  fs.renameSync(tempPath, immutablePath);
+  if (sha256(fs.readFileSync(immutablePath)) !== expectedDigest) throw new Error('atomic file write postcondition failed');
 }
 
 function skillBaseRel(targetName, skillName) {
@@ -3172,53 +5189,157 @@ function rootPayloadForTarget(targetName, payload) {
   return rootPayload;
 }
 
-function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType) {
+function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType, options = {}) {
   const targetDir = path.join(targetPath, ...slash(baseRel).split('/'));
+  const mutationOptions = options.mutationOptions;
   return withOwnedStaging({
     target: targetDir,
     stagePrefix: `.${path.basename(targetDir)}.staging-`,
     operation: 'target-skill-replacement',
-    sourceType
+    sourceType,
+    args: options.args,
+    authorityKind: 'target.destination.write',
+    mutationOptions,
+    guard: options.guard,
+    beforeDelete: options.beforeDelete
   }, (staging) => {
-    writePayloadTree(staging, payload);
+    const intendedDigest = filePayloadChecksum(payload);
+    writePayloadTree(staging, payload, {
+      args: options.args,
+      authorityKind: 'target.destination.write',
+      mutationOptions,
+      guard(actual) {
+        if (options.primitiveGuard) options.primitiveGuard(actual);
+        if (path.resolve(actual.root) !== path.resolve(staging) || actual.payload_sha256 !== intendedDigest) {
+          throw new Error('target skill payload content changed before write');
+        }
+      }
+    });
     if (!fs.existsSync(path.join(staging, 'SKILL.md'))) {
       throw new Error(`staged target skill missing SKILL.md: ${staging}`);
     }
-    replaceDirectoryAtomically(staging, targetDir);
+    if (targetOutputChecksum(staging, payload) !== filePayloadChecksum(payload)) {
+      throw new Error(`staged target skill content checksum mismatch: ${baseRel}`);
+    }
+    if (options.guard) options.guard({ operation: 'before-target-skill-replacement', sourcePath: staging, targetPath: targetDir });
+    if (options.args) {
+      replaceManagedDirectory(options.args, 'target.destination.write', options.mutationOptions, staging, targetDir);
+    } else {
+      replaceDirectoryAtomically(staging, targetDir, { guard: options.primitiveGuard || options.guard }); // Standalone/non-managed compatibility path.
+    }
   });
 }
 
-function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames) {
+function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames, options = {}) {
   const current = new Set(currentNames);
   const removed = [];
   for (const name of previousNames) {
     if (current.has(name)) continue;
     const targetDir = path.join(targetPath, ...slash(skillBaseRel(targetName, name)).split('/'));
-    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+    if (fs.existsSync(targetDir)) {
+      if (options.beforeDelete) options.beforeDelete({ targetDir, skillName: name });
+      if (options.guard) options.guard({ operation: 'remove-stale-skill', path: targetDir });
+      if (options.args) removeManagedDirectoryPlan(options.args, 'target.destination.remove', options.mutationOptions, targetDir);
+      else fs.rmSync(targetDir, { recursive: true, force: true }); // Standalone/non-managed compatibility path.
+    }
     removed.push(name);
   }
   return removed.sort((left, right) => left.localeCompare(right));
 }
 
-function syncTargetPayload(targetName, targetPath, payloads, sourceType) {
+function removeTargetManagedEntry(args, authorityKind, mutationOptions, filePath) {
+  const target = path.resolve(filePath);
+  const identity = filesystemIdentity(target, 'file');
+  if (!identity) throw new Error(`managed removal target is not an ordinary file: ${target}`);
+  admitActionSpecificEffect(args, authorityKind, mutationOptions);
+  if (canonicalJson(filesystemIdentity(target, 'file')) !== canonicalJson(identity)) throw new Error('managed removal target identity drift');
+  fs.rmSync(target, { force: false });
+  if (fs.existsSync(target)) throw new Error('managed removal postcondition failed');
+  return detachedFrozen({ action: 'removeTargetManagedEntry', path: target, identity });
+}
+
+function syncTargetPayload(targetName, targetPath, payloads, sourceType, options = {}) {
   const payload = appTargetPayload(targetName, payloads);
   const skillNames = targetSkillNames(targetName, payloads);
   const previousNames = previousManagedSkillNames(targetPath);
-  fs.mkdirSync(targetPath, { recursive: true });
+  const mutationOptions = {
+    target: targetName,
+    action: options.args ? scopeTargetAction(options.args, targetName) : '',
+    details: { path: targetPath }
+  };
+  const effectGuard = (details = {}) => {
+    if (!options.args) return;
+    guardManagedPrimitive(options.args, 'target.destination.write', mutationOptions);
+    const paths = [details.path, details.sourcePath, details.targetPath].filter(Boolean).map((value) => path.resolve(value));
+    const parent = path.dirname(path.resolve(targetPath));
+    if (paths.some((value) => value !== path.resolve(targetPath) && !isInside(targetPath, value) && !isInside(parent, value))) {
+      throw new Error('target primitive escaped its immutable destination binding');
+    }
+  };
+  const operationGuard = () => {
+    if (options.args) guardManagedMutation(options.args, 'target.destination.write', mutationOptions);
+  };
+  effectGuard({ operation: 'mkdir-target', path: targetPath });
+  if (options.args) ensureManagedDirectory(options.args, 'target.destination.write', mutationOptions, targetPath);
+  else fs.mkdirSync(targetPath, { recursive: true }); // Standalone/non-managed compatibility path.
 
   for (const skillName of skillNames) {
     writeSkillPayloadAtomically(
       targetPath,
       skillBaseRel(targetName, skillName),
       skillPayloadForTarget(targetName, payload, skillName),
-      sourceType
+      sourceType,
+      {
+        args: options.args,
+        mutationOptions,
+        guard: effectGuard,
+        primitiveGuard: effectGuard,
+        beforeDelete(details) {
+          if (options.testHooks?.beforeTargetStagingCleanup) {
+            options.testHooks.beforeTargetStagingCleanup(details);
+            operationGuard();
+          }
+        }
+      }
     );
   }
 
-  const removedSkillNames = removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames);
+  const staleNames = previousNames.filter((name) => !new Set(skillNames).has(name));
+  const removalOptions = {
+    args: options.args,
+    mutationOptions: {
+      target: targetName,
+      action: options.args ? scopeTargetAction(options.args, targetName) : '',
+      details: { path: targetPath, skill_names: staleNames }
+    },
+    guard: operationGuard,
+    beforeDelete: options.testHooks?.beforeTargetStaleDelete
+  };
+  const removedSkillNames = removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames, removalOptions);
 
   for (const [rel, content] of Object.entries(rootPayloadForTarget(targetName, payload))) {
-    writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content);
+    const rootFile = path.join(targetPath, ...slash(rel).split('/'));
+    writeManagedAtomicFile(options.args, 'target.destination.write', mutationOptions, rootFile, content);
+  }
+
+  if (targetName === 'ag2' && options.proof?.status === 'PROVEN') {
+    for (const legacyFile of ['plugin.json', 'installed_version.json', 'ai-agent-toolkit-ag2-adapter.json']) {
+      const legacyPath = path.join(targetPath, legacyFile);
+      if (fs.existsSync(legacyPath)) {
+        if (options.testHooks?.beforeTargetLegacyDelete) options.testHooks.beforeTargetLegacyDelete({ legacyPath, targetName });
+        operationGuard();
+        effectGuard({ operation: 'remove-legacy-file', path: legacyPath });
+        removeTargetManagedEntry(options.args, 'target.destination.remove', {
+          target: targetName,
+          action: scopeTargetAction(options.args, targetName),
+          details: { path: targetPath, legacy_file: legacyPath }
+        }, legacyPath);
+      }
+    }
+  }
+
+  if (options.testHooks?.afterTargetPayloadWrite) {
+    options.testHooks.afterTargetPayloadWrite({ targetName, targetPath, payload, skillNames });
   }
 
   return {
@@ -3233,11 +5354,13 @@ function targetWouldSync(targetName, state, checksum, discovery, payloads) {
   const target = state.targets[targetName];
   if (!target.enabled) return false;
   if (target.explicitly_disabled) return false;
+  if (targetName === 'ag2' && discovery?.projection_proof?.status !== 'PROVEN') return false;
   const targetCurrent = discovery && payloads ? targetOutputIsCurrent(targetName, discovery, payloads) : true;
   return target.synced_version !== BRIDGE_VERSION || target.synced_checksum !== checksum || !targetCurrent;
 }
 
 function targetIsSynced(targetName, targetState, checksum, discovery, payloads) {
+  if (targetName === 'ag2' && discovery?.projection_proof?.status !== 'PROVEN') return false;
   return (
     targetState.synced_version === BRIDGE_VERSION &&
     targetState.synced_checksum === checksum &&
@@ -3255,7 +5378,17 @@ function targetStatus(targetState, discovery, checksum) {
 function updateTargetState(state, targetName, discovery, checksum, synced, skipReason) {
   const target = state.targets[targetName];
   target.detected = discovery.detected;
-  target.target_path = discovery.target_path;
+  if (discovery.target_path) target.target_path = discovery.target_path;
+  if (targetName === 'ag2' && discovery.legacy_target_path && !target.target_path) {
+    target.target_path = discovery.legacy_target_path;
+  }
+  if (targetName === 'ag2' && discovery.projection_proof?.status === 'PROVEN') {
+    target.skills_target_path = discovery.target_path;
+    target.discovery_authority = 'supported-read-only-evidence';
+    target.destination_kind = 'supported-skills-directory';
+    target.skills_only = true;
+    target.plugin_authority = false;
+  }
   target.skip_reason = skipReason || '';
   if (synced) {
     target.synced_version = BRIDGE_VERSION;
@@ -3283,13 +5416,10 @@ function stagingReconciliationParents(args, hubPath, state) {
   );
   parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
 
-  const internalAg2Adapter = path.join(hubPath, 'adapters', 'ag2');
-  const savedAg2Target = String(state.targets.ag2.target_path || '');
-  const defaultAg2Target = path.join(os.homedir(), '.gemini', 'config', 'plugins', TOOLKIT_NAME);
-  const ag2Target = savedAg2Target && path.resolve(savedAg2Target) !== path.resolve(internalAg2Adapter)
-    ? savedAg2Target
-    : defaultAg2Target;
-  parents.push(assertSafeWritePath(path.join(ag2Target, 'skills'), 'Antigravity 2 staging reconciliation parent'));
+  const savedAg2SkillsTarget = String(state.targets.ag2.skills_target_path || '');
+  if (savedAg2SkillsTarget) {
+    parents.push(assertSafeWritePath(savedAg2SkillsTarget, 'AG2 skills projection staging reconciliation parent'));
+  }
   return [...new Set(parents.map((value) => path.resolve(value)))];
 }
 
@@ -3334,11 +5464,39 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
     throw new Error(`staging reconciliation blocked: ${reconciliationLock.skipReason}`);
   }
   try {
-    const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
-      write: true,
-      liveness: testHooks.stagingLiveness,
-      beforeDelete: testHooks.beforeStagingReconciliationDelete
-    });
+    if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'staging-reconciliation', lock: reconciliationLock });
+    const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'staging-reconciliation', latestRawState });
+    const lockedParents = stagingReconciliationParents(args, hubPath, normalizedState(latestRawState));
+    beginMutationPhase(args, { lock: reconciliationLock, hubPath, rawState: latestRawState, discoveries: {}, testHooks });
+    const exact = lookupExactOwnedGeneration(lockedParents, args.reconcileStaging, { liveness: testHooks.stagingLiveness });
+    const audit = auditOwnedStaging(lockedParents, { liveness: testHooks.stagingLiveness });
+    let reconciliation;
+    if (!exact.complete || exact.candidates.length !== 1) {
+      reconciliation = {
+        reconciled: false,
+        reason: exact.complete ? (exact.candidates.length ? 'generation-id-ambiguous' : 'generation-id-not-found') : exact.reason,
+        exact_lookup: exact,
+        audit
+      };
+    } else if (!exact.candidates[0].safe_to_reconcile) {
+      reconciliation = { reconciled: false, reason: `generation-not-safe:${exact.candidates[0].classification}`, exact_lookup: exact, audit };
+    } else {
+      const recordPath = exact.candidates[0].record_path;
+      const record = readJsonIfExists(recordPath);
+      const generation = { record, recordPath, stagePath: record.expected_staging_path };
+      const cleanup = planOwnedGenerationCleanup(generation, { liveness: testHooks.stagingLiveness });
+      if (!cleanup.cleanable) {
+        reconciliation = { reconciled: false, reason: cleanup.reason, exact_lookup: exact, audit };
+      } else {
+        if (testHooks.beforeStagingReconciliationDelete) {
+          testHooks.beforeStagingReconciliationDelete(detachedFrozen({ generation, inspection: cleanup.inspection }));
+        }
+        const mutationOptions = { details: { generation_id: args.reconcileStaging, parents: lockedParents } };
+        for (const entry of cleanup.entries) removeOwnedGenerationEntry(args, 'staging.reconcile', mutationOptions, entry);
+        reconciliation = { reconciled: true, reason: '', exact_lookup: exact, generation: cleanup.inspection, audit };
+      }
+    }
     if (!reconciliation.reconciled && reconciliation.reason !== 'generation-id-not-found') {
       throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
     }
@@ -3352,6 +5510,31 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
 
 function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
   const dryRun = !args.write;
+  const targetNeedsSync = Object.fromEntries(SUPPORTED_TARGETS.map((target) => [
+    target,
+    targetWouldSync(target, state, checksum, discoveries[target], payloads)
+  ]));
+  const authorisedTargetWrites = SUPPORTED_TARGETS.filter((target) => (
+    scopeAllowsTargetSync(args, target) && targetNeedsSync[target]
+  ));
+  const outOfScopeStaleTargets = SUPPORTED_TARGETS.filter((target) => (
+    targetNeedsSync[target] && !scopeAllowsTargetSync(args, target)
+  ));
+  const plannedWrites = [];
+  for (const target of authorisedTargetWrites) {
+    plannedWrites.push({ kind: 'hub-adapter-subtree', target, path: path.join(hubPath, 'adapters', target) });
+    plannedWrites.push({ kind: 'managed-target-destination', target, path: discoveries[target].target_path });
+  }
+  for (const target of SUPPORTED_TARGETS.filter((name) => scopeTargetAction(args, name) === 'disable')) {
+    plannedWrites.push({ kind: 'target-state-disable', target, path: path.join(hubPath, 'state.json') });
+  }
+  if (authorisedTargetWrites.length || SUPPORTED_TARGETS.some((name) => scopeTargetAction(args, name))) {
+    plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'state.json') });
+    plannedWrites.push({ kind: 'hub-metadata', path: path.join(hubPath, 'manifest.json') });
+  }
+  if (actionAuthorised(args, 'report.cleanup')) {
+    plannedWrites.push({ kind: 'update-report-maintenance', path: updateReportDir() });
+  }
   return {
     architecture_version: ARCHITECTURE_VERSION,
     bridge_version: BRIDGE_VERSION,
@@ -3361,6 +5544,19 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     hub_reporting_version: state.hub_version,
     downgrade_enforcement_source: args.syncSource,
     dry_run: dryRun,
+    execution_authority: args.executionAuthority,
+    delegated_receipt: args.delegatedReceipt || null,
+    requested_authority: { entrypoint: args.executionAuthority?.entrypoint || '' },
+    authorised_actions: derivedActionSummary(args),
+    eligible_actions: {
+      target_sync: authorisedTargetWrites,
+      preferences: authorityPreferenceFields(args)
+    },
+    blocked_actions: SUPPORTED_TARGETS
+      .filter((target) => scopeAllowsTargetSync(args, target) && !targetNeedsSync[target])
+      .map((target) => ({ target, action: 'sync', reason: 'not stale or proof unavailable' })),
+    out_of_scope_stale_targets: outOfScopeStaleTargets,
+    planned_writes: plannedWrites,
     hub_path: hubPath,
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
@@ -3398,11 +5594,15 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       const targetState = state.targets[target];
       const discovery = discoveries[target];
       return [target, {
-        status: targetStatus(targetState, discovery, checksum),
+        status: target === 'ag2' && discovery.projection_proof?.status !== 'PROVEN'
+          ? 'blocked-proof'
+          : targetStatus(targetState, discovery, checksum),
         detected: discovery.detected,
         enabled: targetState.enabled,
         explicitly_disabled: targetState.explicitly_disabled,
         target_path: discovery.target_path,
+        legacy_target_path: target === 'ag2' ? discovery.legacy_target_path || '' : undefined,
+        skills_target_path: target === 'ag2' ? targetState.skills_target_path || '' : undefined,
         target_exists: targetOutputExists(target, discovery, payloads),
         internal_adapter_path: discovery.internal_adapter_path,
         internal_adapter_exists: fs.existsSync(discovery.internal_adapter_path),
@@ -3410,8 +5610,11 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
         synced_version: targetState.synced_version,
         synced_at: targetState.last_sync,
         ag2_package_detected: target === 'ag2' ? discovery.ag2_package_detected : undefined,
+        projection_proof: target === 'ag2' ? discovery.projection_proof : undefined,
         python_command: target === 'ag2' ? discovery.python_command || '' : undefined,
-        would_write: targetWouldSync(target, state, checksum, discovery, payloads),
+        needs_sync: targetNeedsSync[target],
+        authorised_would_write: scopeAllowsTargetSync(args, target) && targetNeedsSync[target],
+        would_write: scopeAllowsTargetSync(args, target) && targetNeedsSync[target],
         skip_reason: targetState.enabled ? targetState.skip_reason : 'not enabled',
         signals: discovery.signals
       }];
@@ -3421,14 +5624,12 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
 
 function isHookNoop(args, existingState) {
   if (!args.hook) return false;
-  if (!existingState || !existingState.hub_version) return true;
-  const repoAutoUpdateActive = existingState.repo_auto_update_enabled && !args.skipRepoAutoUpdate;
-  if (!repoAutoUpdateActive && !existingState.auto_sync_enabled) return true;
-  if (repoAutoUpdateActive) return false;
-  return !SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled);
+  if (actionAuthorised(args, 'repository.fetch') || actionAuthorised(args, 'native.cache.maintenance')) return false;
+  return !SUPPORTED_TARGETS.some((target) => scopeTargetAction(args, target));
 }
 
 function shouldRunRepoAutoUpdate(args, state) {
+  if (!actionAuthorised(args, 'repository.fetch')) return false;
   if (!args.write) return false;
   if (args.skipRepoAutoUpdate) return false;
   if (!state.repo_auto_update_enabled) return false;
@@ -3480,13 +5681,61 @@ function codexNativePluginCacheStatus(args, state) {
   if (!state.repo_path) return { status: '' };
   const repoPath = path.resolve(state.repo_path);
   if (!fs.existsSync(repoPath)) return { status: '' };
-  const pluginRoot = runtimeCodexPluginRoot();
-  const errors = verifyInstalledCacheFreshness(pluginRoot, repoPath);
+  const codexHome = path.resolve(defaultCodexHome());
+  const configurationProof = inspectCodexToolkitConfigurationProof({ codexHome });
+  if (configurationProof.trusted && configurationProof.user_disabled === true) {
+    return {
+      status: 'user-disabled',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      user_disabled: true,
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: []
+    };
+  }
+  if (configurationProof.trusted !== true || configurationProof.enabled !== true) {
+    return {
+      status: 'unverified',
+      host: 'codex',
+      codex_home: codexHome,
+      repo_path: repoPath,
+      plugin_id: pluginId(),
+      configuration_proof: configurationProof,
+      installed_state_proof: null,
+      errors: [configurationProof.reason || 'Current Codex Toolkit configuration could not be proven']
+        .slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    };
+  }
+
+  const installedState = inspectCodexToolkitInstalledState({
+    codexHome,
+    repoRoot: repoPath,
+    codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+  });
+  const installedStateProof = installedState.proof || null;
+  const installedErrors = installedState.errors || [];
+  const status = installedState.ok
+    ? 'fresh'
+    : (installedStateProof?.reported_version ? 'stale'
+      : (installedErrors.some((error) => /is not installed/i.test(error)) ? 'missing' : 'unverified'));
   return {
-    status: errors.length ? 'stale' : 'fresh',
-    plugin_root: pluginRoot,
+    status,
+    host: 'codex',
+    codex_home: codexHome,
+    plugin_root: installedStateProof?.cache_root || '',
     repo_path: repoPath,
-    errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    plugin_id: pluginId(),
+    version: installedStateProof?.reported_version || null,
+    fingerprint: installedStateProof?.fingerprint || null,
+    fingerprint_verified: installedStateProof?.fingerprint_verified === true,
+    bytes_verified: installedStateProof?.bytes_verified === true,
+    cache_manifest_version: installedStateProof?.cache_manifest_version || null,
+    configuration_proof: configurationProof,
+    installed_state_proof: installedStateProof,
+    errors: installedErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
   };
 }
 
@@ -3638,6 +5887,129 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   };
 }
 
+function applyNativeHookRepairFile(args, codexHome, plannedWrite) {
+  const filePath = path.resolve(plannedWrite.path);
+  if (!isInside(codexHome, filePath)) throw new Error('native hook repair plan escaped the verified Codex home');
+  const after = Buffer.from(plannedWrite.after_base64, 'base64');
+  if (after.length !== plannedWrite.after_byte_length || sha256(after) !== plannedWrite.after_sha256) {
+    throw new Error('native hook repair plan after-bytes are inconsistent');
+  }
+  const phase = validatePhaseContext(args.phaseContext);
+  if (phase.testHooks?.beforeManagedEffectAdmission) {
+    phase.testHooks.beforeManagedEffectAdmission({
+      kind: 'applyNativeHookRepairFile',
+      options: detachedFrozen({ file_path: filePath, before_sha256: plannedWrite.before_sha256, after_sha256: plannedWrite.after_sha256 })
+    });
+  }
+  assertActualMutationInput(args, 'third-party.hook.repair', { details: { path: codexHome, file_path: filePath } });
+  revalidateBeforeFirstMutation(args);
+  validatePhaseContext(args.phaseContext);
+  let before = null;
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || path.resolve(fs.realpathSync.native(filePath)) !== filePath) {
+      throw new Error('native hook repair target is not an ordinary file');
+    }
+    before = fs.readFileSync(filePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (plannedWrite.before_exists !== (before !== null)) throw new Error('native hook repair target existence changed before write');
+  if (before && (before.length !== plannedWrite.before_byte_length || sha256(before) !== plannedWrite.before_sha256)) {
+    throw new Error('native hook repair target bytes changed before write');
+  }
+  fs.writeFileSync(filePath, after, { flag: plannedWrite.before_exists ? 'w' : 'wx' });
+  const readback = fs.readFileSync(filePath);
+  if (!readback.equals(after)) throw new Error('native hook repair file postcondition failed');
+  phase.firstMutation = true;
+  return detachedFrozen({ action: 'applyNativeHookRepairFile', path: filePath, before_sha256: plannedWrite.before_sha256, after_sha256: plannedWrite.after_sha256 });
+}
+
+function launchVerifiedNativeSetupChild(args, receipt) {
+  if (!receipt || receipt.contract !== VERIFIED_SOURCE_RECEIPT_CONTRACT) throw new Error('native setup requires the verifier-owned source receipt');
+  if (!receipt.native_setup) throw new Error('verifier-owned source receipt omitted native setup identity');
+  verifySourceReceiptContinuity(receipt, 'pre-launch');
+  const resolvedRepo = path.resolve(receipt.repository.root);
+  const resolvedScript = path.resolve(resolvedRepo, receipt.native_setup.entry_relative_path);
+  if (resolvedScript !== path.join(resolvedRepo, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')) {
+    throw new Error('native setup child path does not match the verified repository');
+  }
+  const environment = { ...process.env };
+  const sourceBytes = fs.readFileSync(resolvedScript);
+  if (sha256(sourceBytes) !== receipt.native_setup.entry_sha256) throw new Error('native setup source differs from the verifier-owned receipt');
+  const nativePhaseId = crypto.randomUUID();
+  const nativePhaseLockPath = path.join(path.resolve(defaultCodexHome()), `.ai-agent-toolkit-native-phase-${nativePhaseId}.json`);
+  const delegatedAuthority = deepFreeze({
+    contract: 'toolkit.local-bridge.delegated-native-setup-authority.v1',
+    parent_invocation_id: args.executionAuthority.invocation_id,
+    action: 'native.cache.maintenance',
+    repository: resolvedRepo,
+    codex_home: path.resolve(defaultCodexHome()),
+    setup_source_sha256: receipt.native_setup.entry_sha256,
+    source_cache_fingerprint: receipt.native_setup.cache_fingerprint,
+    verified_source: {
+      receipt_id: receipt.receipt_id,
+      commit: receipt.commit,
+      tree: receipt.tree,
+      setup_source_sha256: receipt.native_setup.entry_sha256,
+      source_manifest_digest: receipt.source_manifest_digest
+    },
+    mutation_phase_id: nativePhaseId,
+    mutation_phase_lock_path: nativePhaseLockPath,
+    executable: path.resolve(process.execPath),
+    expected_version: EXPECTED_TOOLKIT_VERSION,
+    env_digest: sha256(canonicalJson(environment)),
+    allowed_effects: [
+      'codex.command.probe',
+      'codex.plugin.list',
+      'codex.marketplace.add',
+      'codex.plugin.remove',
+      'codex.plugin.add',
+      'codex.session-start.write',
+      'toml.structural.check'
+    ]
+  });
+  const delegatedArgument = Buffer.from(canonicalJson(delegatedAuthority), 'utf8').toString('base64url');
+  const commandArgs = [resolvedScript, '--write', '--json', '--repo-root', resolvedRepo, '--delegated-invocation-authority', delegatedArgument];
+  const mutationOptions = {
+    details: {
+      path: path.resolve(defaultCodexHome()),
+      repoPath: resolvedRepo,
+      executable: process.execPath,
+      source_sha256: receipt.native_setup.entry_sha256,
+      receipt_id: receipt.receipt_id,
+      source_cache_fingerprint: receipt.native_setup.cache_fingerprint,
+      arguments: commandArgs,
+      cwd: resolvedRepo,
+      env_digest: sha256(canonicalJson(environment))
+    }
+  };
+  admitActionSpecificEffect(args, 'native.cache.maintenance', mutationOptions);
+  verifySourceReceiptContinuity(receipt, 'pre-launch');
+  if (sha256(fs.readFileSync(resolvedScript)) !== mutationOptions.details.source_sha256) throw new Error('native setup child source changed before launch');
+  const result = directProcessResult(spawnSync(process.execPath, commandArgs, {
+    cwd: resolvedRepo,
+    encoding: 'utf8',
+    timeout: 180000,
+    windowsHide: true,
+    env: environment,
+    maxBuffer: 16 * 1024 * 1024
+  }));
+  return {
+    result,
+    evidence: detachedFrozen({
+      action: 'launchVerifiedNativeSetupChild',
+      source_sha256: mutationOptions.details.source_sha256,
+      executable_sha256: sha256(fs.readFileSync(process.execPath)),
+      argv_digest: sha256(canonicalJson(commandArgs)),
+      delegated_authority_digest: sha256(canonicalJson(delegatedAuthority)),
+      cwd: resolvedRepo,
+      env_digest: mutationOptions.details.env_digest,
+      exit_status: result.status
+    })
+  };
+}
+
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const windows = options.windows ?? process.platform === 'win32';
@@ -3708,10 +6080,18 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   for (const entry of targets) {
     try {
-      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
-        windows: true,
-        write
-      });
+      let repair;
+      if (write && options.managedArgs) {
+        const plan = planN8nSkillsPluginRepair(entry.plugin_root, { windows: true });
+        const evidence = plan.writes.map((plannedWrite) => applyNativeHookRepairFile(options.managedArgs, codexHome, plannedWrite));
+        const after = reconcileN8nSkillsPlugin(entry.plugin_root, { windows: true, write: false });
+        if (after.status !== 'healthy') throw new Error(`managed n8n Skills repair verification failed: ${after.status}`);
+        repair = { repaired: evidence.length > 0, actions: plan.actions, evidence };
+      } else {
+        // Explicitly standalone/non-managed compatibility path. The managed Bridge
+        // always uses the pure plan plus applyNativeHookRepairFile above.
+        repair = reconcileN8nSkillsPlugin(entry.plugin_root, { windows: true, write });
+      }
       if (repair.repaired) {
         result.repaired.push({
           ...entry,
@@ -3734,22 +6114,32 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 }
 
 function maybeRepairThirdPartyCodexPluginHooks(args, state) {
+  if (!actionAuthorised(args, 'third-party.hook.repair')) return { status: '' };
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
   return repairThirdPartyCodexPluginHooks({
     write: true,
-    currentPluginRoot: runtimeCodexPluginRoot()
+    currentPluginRoot: runtimeCodexPluginRoot(),
+    managedArgs: args
   });
 }
 
-function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
+function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false, verifiedSourceReceipt = null }) {
   const before = codexNativePluginCacheStatus(args, state);
-  if (before.status !== 'stale') return before;
+  if (!['stale', 'missing'].includes(before.status)) return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
   const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
+  let receipt = verifiedSourceReceipt;
   if (validateRepo) {
     try {
-      runRepoValidation(resolvedRepoPath, { hookMode: true });
+      const validation = runNativeRepositoryValidation(args, resolvedRepoPath, { hookMode: true });
+      receipt = createVerifiedSourceReceipt({
+        repoPath: resolvedRepoPath,
+        branch: state.repo_branch || DEFAULT_REPO_BRANCH,
+        remote: state.repo_remote || DEFAULT_REPO_REMOTE,
+        validation
+      });
+      verifySourceReceiptContinuity(receipt, 'post-verification');
     } catch (error) {
       return {
         ...before,
@@ -3757,6 +6147,20 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
         errors: [`Codex plugin cache auto-refresh skipped because trusted repo validation failed: ${error.message}`]
       };
     }
+  }
+  if (!receipt) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: ['Codex plugin cache auto-refresh has no verifier-owned source receipt']
+    };
+  }
+  if (args.testHooks?.afterNativeSourceReceipt) args.testHooks.afterNativeSourceReceipt(detachedFrozen({ receipt: verifiedSourceEvidence(receipt) }));
+  try {
+    verifySourceReceiptContinuity(receipt, 'refresh-relock');
+  } catch (error) {
+    error.sourceContinuityFailure = true;
+    throw error;
   }
   const setupScript = path.join(resolvedRepoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
   if (!fs.existsSync(setupScript)) {
@@ -3766,78 +6170,219 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
       errors: [`Codex plugin setup helper not found in trusted repo: ${setupScript}`]
     };
   }
-
-  const result = runCommand(process.execPath, [
-    setupScript,
-    '--write',
-    '--json',
-    '--repo-root',
-    resolvedRepoPath
-  ], {
-    cwd: resolvedRepoPath,
-    timeout: 180000
-  });
-  if (!result.ok) {
+  const sourceErrors = validateRepoPluginSource(resolvedRepoPath, EXPECTED_TOOLKIT_VERSION);
+  if (sourceErrors.length) {
     return {
       ...before,
       status: 'refresh-failed',
-      errors: [`Codex plugin cache auto-refresh failed: ${commandOutput(result)}`]
+      errors: sourceErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
     };
   }
-
-  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, resolvedRepoPath);
-  if (afterErrors.length) {
+  const sourceFingerprint = receipt.native_setup.cache_fingerprint;
+  if (!/^[a-f0-9]{64}$/.test(sourceFingerprint)) {
     return {
       ...before,
       status: 'refresh-failed',
-      errors: afterErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+      errors: ['Codex plugin cache auto-refresh could not establish a valid trusted repo fingerprint']
+    };
+  }
+  let refreshResult = null;
+  const sourceProof = {
+    trusted: true,
+    ambiguous: false,
+    plugin_id: pluginId(),
+    source_root: resolvedRepoPath,
+    version: EXPECTED_TOOLKIT_VERSION,
+    fingerprint: sourceFingerprint,
+    source_fingerprint: sourceFingerprint,
+    fingerprint_verified: true,
+    evidence_source: 'trusted-repo-validation'
+  };
+  const configurationProof = before.configuration_proof;
+  const recovery = recoverCodexCache({
+    expectedVersion: EXPECTED_TOOLKIT_VERSION,
+    refresh_required: true,
+    source_proof: sourceProof,
+    configuration_proof: configurationProof,
+    refreshSupported: () => {
+      verifySourceReceiptContinuity(receipt, 'refresh-relock');
+      const launched = launchVerifiedNativeSetupChild(args, receipt);
+      refreshResult = launched.result;
+      return refreshResult.ok;
+    },
+    rediscover: () => {
+      const codexHome = path.resolve(defaultCodexHome());
+      const activeState = inspectCodexToolkitInstalledState({
+        codexHome,
+        repoRoot: resolvedRepoPath,
+        codexCommand: process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+      });
+      const proof = activeState.proof || null;
+      return {
+        present: activeState.ok === true,
+        trusted: proof?.trusted === true,
+        version: proof?.reported_version || null,
+        bytes_verified: proof?.bytes_verified === true,
+        fingerprint: proof?.fingerprint || null,
+        source_fingerprint: proof?.source_fingerprint || null,
+        cache_fingerprint: proof?.cache_fingerprint || null,
+        fingerprint_verified: proof?.fingerprint_verified === true,
+        cache_root: proof?.cache_root || null,
+        installed_state_proof: proof,
+        status: activeState.ok ? 'fresh' : (proof?.reported_version ? 'stale' : 'unverified'),
+        executing: false,
+        trust_failure: proof?.trusted !== true,
+        structural_failure: proof?.ambiguous === true,
+        errors: activeState.errors || []
+      };
+    }
+  });
+  if (!recovery.healthy) {
+    const detail = refreshResult && !refreshResult.ok ? commandOutput(refreshResult) : recovery.reason_code;
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: [`Codex plugin cache auto-refresh failed: ${detail}`]
     };
   }
   return {
     ...before,
     status: 'refreshed',
+    plugin_root: recovery.cache_root,
+    version: recovery.cache_version,
+    fingerprint: recovery.cache_fingerprint,
+    fingerprint_verified: true,
+    installed_state_proof: recovery.installed_state_proof,
     errors: []
   };
 }
 
 function nativePluginCacheStatusForReport(args, state, options = {}) {
-  if (args.syncSource === 'codex-plugin') {
+  if (
+    args.syncSource === 'codex-plugin' &&
+    actionAuthorised(args, 'native.cache.maintenance')
+  ) {
     return refreshCodexNativePluginCacheFromRepo({
       args,
       state,
       repoPath: options.repoPath || state.repo_path,
-      validateRepo: options.validateRepo === true
+      validateRepo: options.validateRepo === true,
+      verifiedSourceReceipt: options.verifiedSourceReceipt || null
     });
   }
   return nativePluginCacheStatus(args, state);
 }
 
-function runDelegatedRepoSync({ args, hubPath, repoPath }) {
-  const scriptPath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`updated repo bridge script not found: ${scriptPath}`);
-  }
-  const delegateArgs = [
-    scriptPath,
-    '--sync-enabled',
-    '--write',
-    '--sync-source',
-    'repo',
-    '--hub',
-    hubPath,
-    '--skip-repo-auto-update',
-    '--suppress-update-report'
-  ];
-  const result = runCommand(process.execPath, delegateArgs, {
-    cwd: repoPath,
-    timeout: 120000
+function verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult }) {
+  const receipt = updateResult.verifiedSourceReceipt;
+  if (!receipt) throw new Error('repository verification did not originate a verified source receipt');
+  verifySourceReceiptContinuity(receipt, 'refresh-relock');
+  const verified = deepFreeze({
+    path: path.resolve(repoPath),
+    branch: args.executionAuthority.bindings.repository.branch,
+    remote: args.executionAuthority.bindings.repository.remote,
+    commit: updateResult.toCommit,
+    tree: receipt.tree,
+    entry_relative_path: receipt.entry.relative_path,
+    source_identity: receipt.entry.sha256,
+    source_manifest_digest: receipt.source_manifest_digest,
+    receipt_id: receipt.receipt_id,
+    receipt
   });
-  if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
-  if (result.stderr.trim()) console.error(result.stderr.trim());
-  if (!result.ok) {
-    throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
+  const currentCommit = currentToolkitCommit({ repo_path: repoPath });
+  const branch = gitCommand(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const remote = gitCommand(repoPath, ['remote', 'get-url', 'origin']);
+  if (currentCommit !== verified.commit || snapshot.sourceCommit !== verified.commit) {
+    throw new Error('delegated repository commit changed after verified update result');
   }
-  return { status: 0 };
+  if (!branch.ok || branch.stdout.trim() !== verified.branch) throw new Error('delegated repository branch changed after verified update result');
+  if (!remote.ok || normalizeRemoteForCompare(remote.stdout.trim()) !== normalizeRemoteForCompare(verified.remote)) {
+    throw new Error('delegated repository remote changed after verified update result');
+  }
+  return verified;
+}
+
+function buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepositoryResult }) {
+  const repoPath = verifiedRepositoryResult.path;
+  const receipt = verifiedRepositoryResult.receipt;
+  verifySourceReceiptContinuity(receipt, 'envelope-construction');
+  const targetActions = Object.fromEntries(Object.entries(args.executionAuthority.actions.targets || {})
+    .filter(([, action]) => ['enable-sync', 'sync'].includes(action)));
+  const targetDestinations = Object.fromEntries(Object.keys(targetActions).map((target) => [
+    target,
+    path.resolve(snapshot.discoveries[target].target_path)
+  ]));
+  return deepFreeze({
+    contract: DELEGATED_AUTHORITY_CONTRACT,
+    parent_invocation_id: args.executionAuthority.invocation_id,
+    actions: { targets: targetActions },
+    destinations: { targets: targetDestinations },
+    hub: { path: path.resolve(hubPath) },
+    repository_result: {
+      path: verifiedRepositoryResult.path,
+      branch: verifiedRepositoryResult.branch,
+      remote: verifiedRepositoryResult.remote,
+      commit: verifiedRepositoryResult.commit,
+      tree: verifiedRepositoryResult.tree
+    },
+    child: {
+      entry_relative_path: verifiedRepositoryResult.entry_relative_path,
+      source_identity: verifiedRepositoryResult.source_identity,
+      source_repository: verifiedRepositoryResult.path,
+      source_commit: verifiedRepositoryResult.commit,
+      source_tree: verifiedRepositoryResult.tree,
+      source_manifest_digest: verifiedRepositoryResult.source_manifest_digest,
+      receipt_id: verifiedRepositoryResult.receipt_id
+    },
+    verified_source: {
+      receipt_id: receipt.receipt_id,
+      commit: receipt.commit,
+      tree: receipt.tree,
+      entry_digest: receipt.entry.sha256,
+      source_manifest_digest: receipt.source_manifest_digest
+    }
+  });
+}
+
+function runDelegatedRepoSync({ args, hubPath, repoPath, snapshot, updateResult, testHooks = {} }) {
+  // Source staging/launch owns a separate local lock so the delegated child
+  // can independently acquire the hub mutation lock. The child revalidates
+  // the delegated durable-state and destination bindings before any write.
+  const launchLock = acquireLock(path.join(path.dirname(hubPath), '.verified-source-capsules'), args);
+  if (!launchLock.acquired) throw new Error(`delegated child launch blocked: ${launchLock.skipReason}`);
+  try {
+    const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    beginMutationPhase(args, { lock: launchLock, hubPath, rawState: lockedRawState, discoveries: snapshot.discoveries, testHooks });
+    const verifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
+    const envelope = buildDelegatedAuthorityEnvelope({ args, hubPath, snapshot, verifiedRepositoryResult });
+    if (testHooks.beforeDelegatedChildLaunch) testHooks.beforeDelegatedChildLaunch({ envelope, verifiedRepositoryResult });
+    const finalVerifiedRepositoryResult = verifyDelegatedRepositoryResult({ args, repoPath, snapshot, updateResult });
+    if (canonicalJson(verifiedSourceEvidence(finalVerifiedRepositoryResult.receipt)) !== canonicalJson(verifiedSourceEvidence(verifiedRepositoryResult.receipt))) {
+      throw new Error('delegated repository result changed before child launch');
+    }
+    const launched = launchVerifiedDelegatedChild({
+      args,
+      receipt: verifiedRepositoryResult.receipt,
+      expectedState: snapshot.state,
+      delegatedAuthority: envelope
+    });
+    const result = launched.result;
+    args.delegatedReceipt = {
+      parent_invocation_id: envelope.parent_invocation_id,
+      child_source_identity: verifiedRepositoryResult.source_identity,
+      receipt_id: verifiedRepositoryResult.receipt_id,
+      source_manifest_digest: verifiedRepositoryResult.source_manifest_digest,
+      verified_source_receipt: verifiedSourceEvidence(verifiedRepositoryResult.receipt),
+      launch_evidence: launched.evidence,
+      exit_status: result.status
+    };
+    if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
+    if (result.stderr.trim()) console.error(result.stderr.trim());
+    if (!result.ok) throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
+    return { status: 0 };
+  } finally {
+    releaseLock(launchLock);
+  }
 }
 
 function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
@@ -3847,19 +6392,35 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
   }
 
-  state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
-  assertSourceDowngradeAllowed(state, args);
-
   let statusState = state;
   let updateResult = null;
   let snapshot = null;
   let plannedTargetSyncs = [];
   let nativePluginCache = { status: '' };
   let thirdPartyHookRepair = { status: '' };
-  const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
+  let previousObservedRepoCommit = state.last_repo_update_to_commit || '';
   try {
+    if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'repo-update', lock });
+    const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'repo-update', lockedRawState });
+    state = applyRequestedState(normalizedState(lockedRawState), args);
+    assertSourceDowngradeAllowed(state, args);
+    const lockedSnapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
+    beginMutationPhase(args, { lock, hubPath, rawState: lockedRawState, discoveries: lockedSnapshot.discoveries, testHooks });
+    state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
+
+    statusState = state;
+    previousObservedRepoCommit = state.last_repo_update_to_commit || '';
     try {
       updateResult = validateAndUpdateRepo(state, args);
+      verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'post-verification');
+      if (testHooks.afterRepositoryVerification) testHooks.afterRepositoryVerification({ receipt: verifiedSourceEvidence(updateResult.verifiedSourceReceipt) });
+      try {
+        verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'post-verification');
+      } catch (error) {
+        error.sourceContinuityFailure = true;
+        throw error;
+      }
       statusState = applyRepoUpdateStatus(state, updateResult.status, {
         fromCommit: updateResult.fromCommit,
         toCommit: updateResult.toCommit
@@ -3868,8 +6429,9 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       statusState = snapshot.state;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     } catch (error) {
+      if (error.sourceContinuityFailure) throw error;
       const details = error.repoUpdateDetails || {};
-      statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      statusState = persistFailureStatus(args, state, error.repoUpdateStatus || 'skipped', {
         fromCommit: details.fromCommit || '',
         toCommit: details.toCommit || '',
         error: details.error || error.message
@@ -3917,33 +6479,42 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   const refreshLock = acquireLock(path.dirname(hubPath), args);
   try {
     if (refreshLock.acquired) {
-      statusState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
+      if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'post-repo-refresh', refreshLock });
+      const refreshRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || statusState;
+      statusState = normalizedState(refreshRawState);
       assertSourceDowngradeAllowed(statusState, args);
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
+      beginMutationPhase(args, { lock: refreshLock, hubPath, rawState: refreshRawState, discoveries: snapshot.discoveries, testHooks });
+      verifySourceReceiptContinuity(updateResult.verifiedSourceReceipt, 'refresh-relock');
       statusState = snapshot.state;
       plannedTargetSyncs = snapshot.plannedTargetSyncs;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
+        repoPath: updateResult.repoPath,
+        verifiedSourceReceipt: updateResult.verifiedSourceReceipt
+      });
+      thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
     }
   } finally {
     releaseLock(refreshLock);
   }
 
-  nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
-    repoPath: updateResult.repoPath
-  });
-  thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
-
   try {
-    runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
+    if (testHooks.beforeDelegatedRepoSync) testHooks.beforeDelegatedRepoSync({ updateResult, snapshot });
+    runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath, snapshot, updateResult, testHooks });
   } catch (error) {
     const relock = acquireLock(path.dirname(hubPath), args);
     let failedState = statusState;
     let report = { state: failedState, reportPath: '' };
     try {
       if (relock.acquired) {
-        const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
+        if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'delegated-failure', relock });
+        const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || statusState;
+        const latestState = normalizedState(latestRawState);
         assertSourceDowngradeAllowed(latestState, args);
-        failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+        let projectionSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
+        beginMutationPhase(args, { lock: relock, hubPath, rawState: latestRawState, discoveries: projectionSnapshot.discoveries, testHooks });
+        failedState = persistFailureStatus(args, latestState, 'sync-delegation-failed', {
           fromCommit: updateResult.fromCommit,
           toCommit: updateResult.toCommit,
           error: error.message
@@ -3997,9 +6568,12 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let report = { state: finalState, reportPath: '' };
   try {
     if (reportLock.acquired) {
-      const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || finalState);
+      if (testHooks.beforeRelockProjection) testHooks.beforeRelockProjection({ route: 'final-report', reportLock });
+      const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json')) || finalState;
+      const latestState = normalizedState(latestRawState);
       assertSourceDowngradeAllowed(latestState, args);
       let reportSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
+      beginMutationPhase(args, { lock: reportLock, hubPath, rawState: latestRawState, discoveries: reportSnapshot.discoveries, testHooks });
       const reportState = reportSnapshot.state;
       const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
         reportSnapshot.checksum === plannedChecksum &&
@@ -4046,7 +6620,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 function persistActiveNoTargetWrite({
   args,
   hubPath,
-  cleanupResult,
   buildReportContext,
   testHooks = {}
 }) {
@@ -4061,19 +6634,28 @@ function persistActiveNoTargetWrite({
   }
 
   try {
-    const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+    if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'no-target', lock });
+    const latestRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'no-target', latestRawState });
+    const latestState = normalizedState(latestRawState);
     assertSourceDowngradeAllowed(latestState, args);
     let state = applyRequestedState(latestState, args);
-    state.last_update_report_cleanup = cleanupResult;
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
+    beginMutationPhase(args, { lock, hubPath, rawState: latestRawState, discoveries: snapshot.discoveries, testHooks });
     state = snapshot.state;
+    state.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, state);
+    snapshot = { ...snapshot, state };
 
     // Source-version persistence is independent of optional report creation.
     writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource));
+      const syncResult = syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource, { args, testHooks });
+      if (!targetOutputIsCurrent(plan.target, snapshot.discoveries[plan.target], snapshot.payloads)) {
+        throw new Error(`target sync postcondition verification failed: ${plan.target}`);
+      }
+      targetSyncs.push(syncResult);
       updateTargetState(state, plan.target, snapshot.discoveries[plan.target], snapshot.checksum, true, '');
     }
     if (targetSyncs.length) {
@@ -4098,6 +6680,89 @@ function persistActiveNoTargetWrite({
   }
 }
 
+function applyPreferenceOnlyRawState(rawState, args) {
+  const next = rawState && typeof rawState === 'object' && !Array.isArray(rawState)
+    ? JSON.parse(JSON.stringify(rawState))
+    : {};
+  if (args.enableAutoSync) next.auto_sync_enabled = true;
+  if (args.disableAutoSync) next.auto_sync_enabled = false;
+  if (args.enableRepoAutoUpdate) next.repo_auto_update_enabled = true;
+  if (args.disableRepoAutoUpdate) next.repo_auto_update_enabled = false;
+  if (args.enableRepoAutoUpdate) {
+    next.last_repo_update_status = 'configured';
+    next.last_repo_update_error = '';
+  }
+  if (args.disableRepoAutoUpdate) {
+    next.last_repo_update_status = 'disabled';
+    next.last_repo_update_error = '';
+  }
+  if (args.repoPath) next.repo_path = path.resolve(args.repoPath);
+  if (args.repoBranch) next.repo_branch = args.repoBranch;
+  if (args.repoRemote) next.repo_remote = args.repoRemote;
+  if (args.enableUpdateReports) next.update_report_enabled = true;
+  if (args.disableUpdateReports) next.update_report_enabled = false;
+  if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
+  if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) {
+    next.legacy_update_report_open_migrated = next.update_report_open_enabled === true || next.legacy_update_report_open_migrated === true;
+    next.update_report_open_enabled = false;
+    next.update_report_open_behavior = 'action-required-only';
+  }
+  if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
+  if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
+  return next;
+}
+
+function preferenceOnlyAudit(args, hubPath, rawState) {
+  const next = applyPreferenceOnlyRawState(rawState, args);
+  return {
+    architecture_version: ARCHITECTURE_VERSION,
+    bridge_version: BRIDGE_VERSION,
+    dry_run: !args.write,
+    execution_authority: args.executionAuthority,
+    requested_authority: { entrypoint: args.executionAuthority.entrypoint },
+    authorised_actions: derivedActionSummary(args),
+    eligible_actions: { preferences: authorityPreferenceFields(args) },
+    blocked_actions: [],
+    out_of_scope_stale_targets: [],
+    planned_writes: args.write || args.executionAuthority.write_requested
+      ? [{ kind: 'preference.field.write', path: path.join(hubPath, 'state.json'), fields: authorityPreferenceFields(args) }]
+      : [],
+    preference_preview: Object.fromEntries(
+      authorityPreferenceFields(args).map((field) => [field, next[field]])
+    )
+  };
+}
+
+function runPreferenceOnly({ args, hubPath, rawState }) {
+  const audit = preferenceOnlyAudit(args, hubPath, rawState);
+  if (!args.write) {
+    console.log(JSON.stringify(audit, null, 2));
+    return { status: 0, audit };
+  }
+  const lock = acquireLock(path.dirname(hubPath), args);
+  if (!lock.acquired) {
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping preference write.`);
+    return { status: 0, audit };
+  }
+  try {
+    if (args.testHooks?.afterLockAcquired) args.testHooks.afterLockAcquired({ route: 'preference-only', lock });
+    const latestRaw = readJsonIfExists(path.join(hubPath, 'state.json'));
+    if (args.testHooks?.afterLockedStateRead) args.testHooks.afterLockedStateRead({ route: 'preference-only', latestRaw });
+    assertRepoAutoUpdatePrerequisite(args, latestRaw);
+    beginMutationPhase(args, { lock, hubPath, rawState: latestRaw, discoveries: {}, testHooks: args.testHooks });
+    const next = applyPreferenceOnlyRawState(latestRaw, args);
+    const statePath = path.join(hubPath, 'state.json');
+    const mutationOptions = { details: { path: statePath, hubPath, fields: authorityPreferenceFields(args) } };
+    writeManagedAtomicFile(args, 'hub.state.write', mutationOptions, statePath, `${JSON.stringify(next, null, 2)}\n`);
+    if (canonicalJson(readJsonIfExists(statePath)) !== canonicalJson(next)) throw new Error('preference state postcondition verification failed');
+  } finally {
+    releaseLock(lock);
+  }
+  if (args.audit) console.log(JSON.stringify({ ...audit, dry_run: false }, null, 2));
+  else console.log('Toolkit local bridge preferences updated.');
+  return { status: 0, audit: { ...audit, dry_run: false } };
+}
+
 function run(argv = process.argv.slice(2), testHooks = {}) {
   if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1' && argv.includes('--hook')) {
     return { status: 0, audit: null, capability_probe_noop: true };
@@ -4106,9 +6771,42 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     return { status: 0, audit: null, checker_session_noop: true };
   }
   const args = parseArgs(argv);
+  args.delegatedEnvelope = readDelegatedAuthority(args, testHooks);
+  assertDelegatedInvocationArgs(args);
+  if (
+    requestedPreferenceFields(args).length &&
+    !args.hook &&
+    !args.syncEnabled &&
+    !args.repoUpdateNow &&
+    !args.reconcileStaging &&
+    !args.enableTargets.length &&
+    !args.disableTargets.length &&
+    !args.scopedSyncTargets.length &&
+    !args.setAg2PythonCommand
+  ) {
+    args.preferenceOnly = true;
+  }
+  assertPreferenceBoundary(args);
   assertReconciliationCommandArgs(args);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
-  const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+  const existingRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+  const existingState = normalizedState(existingRawState);
+  assertRepoAutoUpdatePrerequisite(args, existingState);
+  const authorityDiscoveries = (args.reconcileStaging || args.preferenceOnly)
+    ? {}
+    : {
+        opencode: discoverOpenCode(args, existingState.targets.opencode, hubPath),
+        ag2: discoverAg2(args, existingState.targets.ag2, hubPath)
+      };
+  args.executionAuthority = resolveExecutionAuthority({
+    args,
+    hubPath,
+    rawState: existingRawState,
+    discoveries: authorityDiscoveries,
+    delegatedEnvelope: args.delegatedEnvelope
+  });
+  initializeInvocationRuntime(args, testHooks);
+  if (args.preferenceOnly) return runPreferenceOnly({ args, hubPath, rawState: existingRawState });
   if (args.reconcileStaging) {
     assertSourceDowngradeAllowed(existingState, args);
     return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
@@ -4116,6 +6814,15 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   maybePrintAgentRulesPreflight(args);
 
   assertSourceDowngradeAllowed(existingState, args);
+
+  if (args.write && !scopeHasExecutableWrite(args)) {
+    const nextState = normalizedState(existingState);
+    const snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
+    const audit = buildAudit({ args, hubPath, ...snapshot });
+    if (args.syncEnabled && !args.audit && !args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    else if (args.audit || !args.hook) console.log(JSON.stringify(audit, null, 2));
+    return { status: 0, audit };
+  }
 
   if (isHookNoop(args, existingState)) {
     if (existingState?.hub_version && !existingState.auto_sync_enabled) {
@@ -4125,24 +6832,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   }
 
   let nextState = applyRequestedState(existingState, args);
-  const cleanupResult = args.write
-    ? cleanupUpdateReports({ retentionDays: nextState.update_report_retention_days })
-    : (nextState.last_update_report_cleanup || {
-        retention_days: nextState.update_report_retention_days,
-        report_log_directory: updateReportDir(),
-        max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
-        deleted_count: 0,
-        skipped_count: 0,
-        error_count: 0,
-        errors: []
-      });
-  nextState.last_update_report_cleanup = cleanupResult;
-  if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
-  }
-  if (args.enableRepoAutoUpdate && !nextState.repo_path) {
-    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
-  }
+  assertRepoAutoUpdatePrerequisite(args, nextState);
   const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
   nextState = initialSnapshot.state;
   let { discoveries, payloads, checksum } = initialSnapshot;
@@ -4156,7 +6846,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   if (shouldRunRepoAutoUpdate(args, nextState)) {
     return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads, testHooks });
   }
-  const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
+  const hasTargetSync = initialSnapshot.plannedTargetSyncs.length > 0;
   if (
     args.syncEnabled &&
     !args.enableTargets.length &&
@@ -4181,7 +6871,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const report = persistActiveNoTargetWrite({
       args,
       hubPath,
-      cleanupResult,
       testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
@@ -4198,7 +6887,8 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     nextState = report.state;
     if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+    else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
     return { status: 0, audit: finalAudit };
   }
@@ -4206,7 +6896,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const report = persistActiveNoTargetWrite({
       args,
       hubPath,
-      cleanupResult,
       testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
@@ -4223,7 +6912,8 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     nextState = report.state;
     if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+    else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     return { status: 0, audit: finalAudit };
   }
 
@@ -4234,19 +6924,32 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   }
 
   try {
-    const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+    if (testHooks.afterLockAcquired) testHooks.afterLockAcquired({ route: 'managed-write', lock });
+    const lockedRawState = readJsonIfExists(path.join(hubPath, 'state.json'));
+    if (testHooks.afterLockedStateRead) testHooks.afterLockedStateRead({ route: 'managed-write', lockedRawState });
+    const lockedState = normalizedState(lockedRawState);
     assertSourceDowngradeAllowed(lockedState, args);
     nextState = applyRequestedState(lockedState, args);
-    nextState.last_update_report_cleanup = cleanupResult;
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
+    beginMutationPhase(args, { lock, hubPath, rawState: lockedRawState, discoveries: snapshot.discoveries, testHooks });
     nextState = snapshot.state;
+    nextState.last_update_report_cleanup = runAuthorisedUpdateReportCleanup(args, nextState);
+    snapshot = { ...snapshot, state: nextState };
     ({ discoveries, payloads, checksum } = snapshot);
     writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
 
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
+      const syncResult = syncTargetPayload(plan.target, targetPath, payloads, args.syncSource, {
+        proof: discoveries[plan.target].projection_proof,
+        args,
+        testHooks
+      });
+      if (!targetOutputIsCurrent(plan.target, discoveries[plan.target], payloads)) {
+        throw new Error(`target sync postcondition verification failed: ${plan.target}`);
+      }
+      targetSyncs.push(syncResult);
       updateTargetState(nextState, plan.target, discoveries[plan.target], checksum, true, '');
     }
 
@@ -4303,8 +7006,12 @@ if (require.main === module) {
 }
 
 module.exports = {
+  AG2_PROOF_CONTRACT_VERSION,
   ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
+  RECEIPT_CHILD_BOOTSTRAP,
+  canonicalJson,
+  sha256,
   acquireLock,
   defaultHubPath,
   inspectDisplacedEvidence,
@@ -4314,8 +7021,11 @@ module.exports = {
   parseArgs,
   releaseLock,
   releaseRecoveryMarker,
+  assertActualMutationInput,
+  validatePhaseContext,
   run,
   adapterPayloads,
+  ag2SkillsProjectionProof,
   payloadChecksum,
   compareSemver,
   getRepoValidationLabels,

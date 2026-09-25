@@ -30,14 +30,11 @@ const n8nDerivativePaths = Object.freeze([
 ]);
 const manualTemplatePaths = {
   agents: 'repo/contracts/agent-rules/AGENTS.template.md',
-  claude: 'repo/contracts/agent-rules/CLAUDE.template.md',
-  gemini: 'repo/contracts/agent-rules/GEMINI.template.md'
+  claude: 'repo/contracts/agent-rules/CLAUDE.template.md'
 };
 const repoLocalTemplatePaths = {
   managedAgents: 'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-  claude: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md',
-  gemini: 'repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md',
-  antigravity: 'repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md'
+  claude: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md'
 };
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
@@ -84,8 +81,6 @@ function repoLocalMarkerPairs(fileName, blockName) {
 }
 
 const claudeShimMarkerPairs = repoLocalMarkerPairs('claude', 'CLAUDE.SHIM');
-const geminiShimMarkerPairs = repoLocalMarkerPairs('gemini', 'GEMINI.SHIM');
-const antigravityBootstrapMarkerPairs = repoLocalMarkerPairs('antigravity', 'ANTIGRAVITY.BOOTSTRAP');
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -290,22 +285,6 @@ function expectedSourceTemplates(executionPrompt) {
           heading: 'Claude Code global rules example',
           path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
           commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
-        }
-      ],
-      payload: executionPrompt,
-      sourcePaths
-    }),
-    [manualTemplatePaths.gemini]: fencedTemplate({
-      title: 'GEMINI.template.md AI coding agent rules',
-      audience: 'Antigravity',
-      destinationDisplay: '`GEMINI.md`',
-      activeNameText: 'it is not named `GEMINI.md`',
-      installSubject: 'generic Antigravity rules',
-      examples: [
-        {
-          heading: 'Antigravity global rules example',
-          path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
-          commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
         }
       ],
       payload: executionPrompt,
@@ -528,17 +507,13 @@ function validateAndSync(options = {}) {
 
   const managedAgentsTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.managedAgents, errors);
   const claudeTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.claude, errors);
-  const geminiTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.gemini, errors);
-  const antigravityTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, errors);
-  if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
+  if ([managedAgentsTemplate, claudeTemplate].some((value) => value === null)) return { errors };
 
   const source = {
     root: managedPayload(executionPrompt, n8nAdapter),
     toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
     n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
-    claude: claudeTemplate,
-    gemini: geminiTemplate,
-    antigravity: antigravityTemplate
+    claude: claudeTemplate
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
   if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
@@ -552,18 +527,6 @@ function validateAndSync(options = {}) {
     importLine: '@AGENTS.md',
     markerPairs: claudeShimMarkerPairs
   }, errors), errors, runMode);
-  writeOrCheck('GEMINI.md', shimExpected('GEMINI.md', readOptional('GEMINI.md'), source.gemini, {
-    heading: '# Gemini Instructions',
-    importLine: '@./AGENTS.md',
-    markerPairs: geminiShimMarkerPairs
-  }, errors), errors, runMode);
-  writeOrCheck('.agents/rules/00-agent-toolkit-bootstrap.md', shimExpected(
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
-    readOptional('.agents/rules/00-agent-toolkit-bootstrap.md'),
-    source.antigravity,
-    { heading: '# Agent Toolkit Antigravity Bootstrap', markerPairs: antigravityBootstrapMarkerPairs },
-    errors
-  ), errors, runMode);
 
   return { errors };
 }

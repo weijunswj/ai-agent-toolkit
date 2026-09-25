@@ -17,6 +17,21 @@ const HOLDER_ATTESTATION_SCHEMA_ID = 'toolkit.github-program.holder-attestation.
 const PRE_RECOVERY_EVIDENCE_SCHEMA_ID = 'toolkit.github-program.pre-recovery-evidence.v1';
 const RECOVERY_RECORD_SCHEMA_ID = 'toolkit.github-program.recovery-record.v1';
 const V3_MIGRATION_PLAN_SCHEMA_ID = 'toolkit.github-program.v2-to-v3-migration-plan.v1';
+const BOUNDED_CONTINUATION_SCHEMA_ID = 'toolkit.github-program-reconciler.bounded-continuation-envelope.v1';
+const BOUNDED_CONTINUATION_MECHANICS = Object.freeze([
+  'read-only-reconciliation',
+  'validation',
+  'durable-receipt',
+  'exact-head-check',
+  'allowlist-check'
+]);
+const BOUNDED_CONTINUATION_RETURN_CONDITIONS = Object.freeze([
+  'GATE_REENTRY_REQUIRED',
+  'PARENT_RECONCILIATION_INCOMPLETE',
+  'UNEXPECTED_PATH_CHANGE',
+  'VALIDATION_FAILED',
+  'SECRET_EXPOSURE_DETECTED'
+]);
 const HOLDER_ATTESTATION_ALGORITHM = 'HMAC-SHA-256';
 const BROKER_RECOVERY_CLASSIFICATION = 'ORPHAN_NONADOPTABLE';
 const BROKER_RECOVERY_REASON = 'BROKER_PROTECTED_RECOVERY';
@@ -206,6 +221,49 @@ function isSafeContractId(value, max = 160) {
     && value.length > 0
     && value.length <= max
     && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function validateBoundedContinuationEnvelope(value) {
+  if (!exactKeys(value, [
+    'contract_version', 'root', 'lock', 'gate', 'authority_digest', 'scope_digest',
+    'allowed_mechanics', 'return_conditions'
+  ]) || value.contract_version !== BOUNDED_CONTINUATION_SCHEMA_ID
+    || !isSafeContractId(value.root) || !isSafeContractId(value.lock) || !isSafeContractId(value.gate)
+    || !isDigest(value.authority_digest) || !isDigest(value.scope_digest)
+    || !Array.isArray(value.allowed_mechanics) || !value.allowed_mechanics.length
+    || new Set(value.allowed_mechanics).size !== value.allowed_mechanics.length
+    || value.allowed_mechanics.some((item) => !BOUNDED_CONTINUATION_MECHANICS.includes(item))
+    || !Array.isArray(value.return_conditions) || !value.return_conditions.length
+    || new Set(value.return_conditions).size !== value.return_conditions.length
+    || value.return_conditions.some((item) => !BOUNDED_CONTINUATION_RETURN_CONDITIONS.includes(item))) {
+    fail('GPR_CONTINUATION_ENVELOPE_INVALID');
+  }
+  return deepFreeze(clone(value));
+}
+
+function createBoundedContinuationEnvelope(input = {}) {
+  const envelope = {
+    contract_version: BOUNDED_CONTINUATION_SCHEMA_ID,
+    root: input.root,
+    lock: input.lock,
+    gate: input.gate,
+    authority_digest: input.authority_digest,
+    scope_digest: input.scope_digest,
+    allowed_mechanics: [...(input.allowed_mechanics || BOUNDED_CONTINUATION_MECHANICS)],
+    return_conditions: [...(input.return_conditions || BOUNDED_CONTINUATION_RETURN_CONDITIONS)]
+  };
+  return validateBoundedContinuationEnvelope(envelope);
+}
+
+function evaluateBoundedContinuation(input = {}) {
+  const envelope = validateBoundedContinuationEnvelope(input.envelope);
+  const event = input.event;
+  if (!isRecord(event) || typeof event.kind !== 'string') fail('GPR_CONTINUATION_EVENT_INVALID');
+  if (envelope.allowed_mechanics.includes(event.kind)) return Object.freeze({ allowed: true, kind: event.kind });
+  const returnCode = typeof event.return_code === 'string' && envelope.return_conditions.includes(event.return_code)
+    ? event.return_code
+    : 'PARENT_RECONCILIATION_INCOMPLETE';
+  return Object.freeze({ allowed: false, kind: event.kind, return_to_web: returnCode });
 }
 
 function isSafeGitRef(value) {
@@ -3196,6 +3254,9 @@ if (require.main === module) {
 
 module.exports = Object.freeze({
   APPLICATION_ID,
+  BOUNDED_CONTINUATION_MECHANICS,
+  BOUNDED_CONTINUATION_RETURN_CONDITIONS,
+  BOUNDED_CONTINUATION_SCHEMA_ID,
   BUSY_TIMEOUT_MS,
   BROKER_RECOVERY_CLASSIFICATION,
   BROKER_RECOVERY_REASON,
@@ -3224,6 +3285,8 @@ module.exports = Object.freeze({
   buildFinalV3SchemaSql,
   buildV2ToV3MigrationPlan,
   createProgrammeReceiptStore,
+  createBoundedContinuationEnvelope,
+  evaluateBoundedContinuation,
   digestValue,
   canonicalSerialize,
   expectedFinalV3SchemaFingerprint,
@@ -3234,6 +3297,7 @@ module.exports = Object.freeze({
   verifyV3DurableEvidence,
   resolveDatabasePath,
   validateAuthority,
+  validateBoundedContinuationEnvelope,
   validateCandidate,
   validateHolderAttestation,
   validateOperationDescriptor,

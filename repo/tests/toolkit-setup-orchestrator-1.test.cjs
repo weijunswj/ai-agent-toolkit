@@ -87,18 +87,20 @@ test('plan mode remains read-only and exposes the existing setup journey', () =>
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false);
 });
 
-test('Claude Code plan omits unsupported automatic admission and never emits Codex config work', () => {
+test('Claude Code plan uses the versioned route contract and never emits Codex config work', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json', '--host', 'claude-code'], { env: { ...isolatedHomeEnv(root), PATH: '' } });
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
-  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
+  assert.equal(plan.preferences.route_resolution, 'versioned-role-registry -> exact-launch-record -> capability-proven-host-adapter');
+  assert.equal(plan.preferences.child_speed_default, 'standard; independent depth-1 resolution; never inherited');
+  assert.equal(plan.preferences.helper_capacity_backstop, undefined);
   assert.equal(plan.question_bank.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
-test('plain and JSON plans omit ordinary helper quantity choices', () => {
+test('plain and JSON plans omit stale helper quantity policy', () => {
   const root = tmpRoot();
   const plain = run(['--plan'], { env: isolatedHomeEnv(root) });
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -107,10 +109,11 @@ test('plain and JSON plans omit ordinary helper quantity choices', () => {
   assert.doesNotMatch(plain.stdout, /Codex helper agents|how many helper|custom number/i);
   const plan = JSON.parse(json.stdout);
   assert.equal(plan.question_bank.some((row) => row.key === 'codexHelperCapacity'), false);
-  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
+  assert.equal(plan.preferences.route_resolution, 'versioned-role-registry -> exact-launch-record -> capability-proven-host-adapter');
+  assert.equal(plan.preferences.helper_capacity_backstop, undefined);
 });
 
-test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
+test('canonical question specification has no active delegation-policy question', () => {
   const args = core.parseArgs(['--execute']);
   const current = {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
@@ -122,7 +125,8 @@ test('canonical question specification orders delegation before plugin auto-refr
   assert.deepEqual(keys, [
     'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexPluginAutoRefresh',
   ]);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  assert.equal(args.setupChoices.codexHelperCapacity, '');
+  assert.equal(core.setupQuestionSpecs(args, current).some((spec) => spec.key === 'codexHelperCapacity'), false);
 });
 
 test('agent-facing setup docs match the report question rows', () => {
@@ -210,22 +214,20 @@ test('missing wizard output fails after one render and never emits a shortcut al
   assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { return false; } }), /no approval prompt or write is allowed/i);
 });
 
-test('--yes-recommended applies the visibly recommended root-only Codex outcome', () => {
+test('--yes-recommended keeps stale Codex scheduling policy out of active setup', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const ordinaryBank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.doesNotMatch(ordinaryBank, /Codex helper agents|helper quantity/i);
-  assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
-  assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
-  assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
-  assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
-  assert.ok(backupFiles(root).length > 0);
+  assert.doesNotMatch(result.stdout, /Helper-agent capacity|Codex helper-agent runtime|Helper-capacity outcome|Normal helper capacity/i);
+  assert.match(result.stdout, /versioned-role-registry|route resolution/i);
+  assert.equal(fs.existsSync(codexConfig(root)), false);
+  assert.deepEqual(backupFiles(root), []);
 });
 
-test('explicit limit previews path and block, creates backup, and writes only after setup succeeds', () => {
+test('legacy Codex limit flags remain migration-only and do not enter active setup', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const configPath = codexConfig(root);
@@ -237,19 +239,13 @@ test('explicit limit previews path and block, creates backup, and writes only af
     '--codex-delegation-control', 'limit', '--codex-cli', createFakeCodexAppServer(root)
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, new RegExp(`Codex config path: ${escapeRegExp(configPath)}`));
-  assert.match(result.stdout, /Proposed Toolkit-managed TOML block:[\s\S]*enabled = true[\s\S]*max_concurrent_threads_per_session = 2[\s\S]*root_agent_usage_hint_text/);
-  assert.match(result.stdout, /Codex backup directory:/);
-  assert.match(result.stdout, /Normal helper capacity: 1 helper agent; 2 total session threads including the main agent/);
-  assert.match(result.stdout, /Exact backup metadata:/);
-  assert.match(result.stdout, /Exact restore command \(PowerShell\):/);
+  assert.doesNotMatch(result.stdout, /Codex config path:|Proposed Toolkit-managed TOML block|Normal helper capacity|Codex backup directory|Exact backup metadata|Exact restore command/i);
   const configured = fs.readFileSync(configPath, 'utf8');
-  assert.ok(configured.startsWith(original.toString('utf8')));
-  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-V2-ENABLEMENT v1\r?\nenabled = true\r?\n# AI-AGENT-TOOLKIT:END CODEX-V2-ENABLEMENT\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\r?\nmax_concurrent_threads_per_session = 2/);
-  assert.ok(backupFiles(root).length > 0);
+  assert.deepEqual(Buffer.from(configured), original);
+  assert.deepEqual(backupFiles(root), []);
 });
 
-test('root-only choice maps V2 to one total session thread', () => {
+test('legacy root-only choice cannot reintroduce active scheduling policy', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
@@ -257,8 +253,9 @@ test('root-only choice maps V2 to one total session thread', () => {
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'root-only'
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
-  assert.match(result.stdout, /Normal helper capacity: 0 helper agents; 1 total session threads including the main agent/);
+  assert.doesNotMatch(result.stdout, /Normal helper capacity|Codex helper-agent runtime|Helper-capacity outcome/i);
+  assert.equal(fs.existsSync(codexConfig(root)), false);
+  assert.deepEqual(backupFiles(root), []);
 });
 
 test('distinct piped answers follow the canonical question order without shifts', () => {
@@ -285,10 +282,10 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
   assert.match(result.stdout, /Question answers prompted interactively: no/);
   assert.match(result.stdout, /Question bank stopped for answers: no/);
-  assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
+  assert.deepEqual(fs.readFileSync(configPath, 'utf8'), 'model = "gpt-5.6"\n');
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
-  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
+  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --preference-only --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
 });
@@ -618,7 +615,7 @@ test('final bridge audit failure occurs before delegation config commitment', ()
   assert.deepEqual(backupFiles(root), []);
 });
 
-test('custom helper counts above one require separate RAM-risk approval', () => {
+test('legacy helper-count flags remain non-operative for active setup', () => {
   const blockedRoot = tmpRoot();
   const blockedRepo = createGitBackedSetupRepo(blockedRoot);
   const blocked = run([
@@ -638,10 +635,8 @@ test('custom helper counts above one require separate RAM-risk approval', () => 
     '--approve-high-helper-capacity', '--codex-cli', createFakeCodexAppServer(approvedRoot),
   ], { env: isolatedHomeEnv(approvedRoot), timeout: 300000 });
   assert.equal(approved.status, 0, approved.stderr || approved.stdout);
-  assert.match(approved.stdout, /RAM-risk approval for more than one helper: approved/);
-  assert.match(approved.stdout, /Normal helper capacity: 2 helper agents; 3 total session threads including the main agent/);
-  assert.match(approved.stdout, /Defined multi-worker workflow exception: Only when the user invoked that workflow/);
-  assert.match(approved.stdout, /helpers must not spawn helpers; root retains coordination and final judgment/);
-  assert.match(approved.stdout, /Never imply that an official Deep Scan can run with insufficient capacity/);
-  assert.match(fs.readFileSync(codexConfig(approvedRoot), 'utf8'), /max_concurrent_threads_per_session = 3/);
+  assert.match(approved.stdout, /Route contract: toolkit\.route-resolution\.resolved-launch-record\.v1/);
+  assert.doesNotMatch(approved.stdout, /Configuration changed this run: yes|Codex config path:|Proposed Toolkit-managed TOML block/i);
+  assert.equal(fs.existsSync(codexConfig(approvedRoot)), false);
+  assert.deepEqual(backupFiles(approvedRoot), []);
 });

@@ -244,12 +244,11 @@ test('no actionable drift skips branch and PR lifecycle steps', () => {
   );
 });
 
-test('source-watch PR notifier documents advisory actions as report-only', () => {
+test('source-watch PR notifier remains identity-only and report-only', () => {
   assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
-  assert.match(workflow, /Advisory actions, when present, are read from `repo\/source-watch\/advisory-targets\.json`\./);
-  assert.match(workflow, /No advisory tracking document was changed by this workflow\./);
-  assert.match(workflow, /If advisory action is taken, update the advisory document in a separate human-reviewed PR\./);
+  assert.doesNotMatch(workflow, /advisory-targets\.json|Advisory actions|advisory tracking document/i);
+  assert.doesNotMatch(workflow, /Host Harness Capability Drift Review|separate evidence-backed PR/i);
+  assert.match(workflow, /No source files were updated\./);
+  assert.match(workflow, /No review-state cursors were changed\./);
   assert.match(workflow, /No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted\./);
-  assert.match(workflow, /For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes\./);
-  assert.match(workflow, /separate evidence-backed PR/);
 });

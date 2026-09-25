@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.local-bridge.managed-config-migration.v1",
+  "title": "Toolkit managed configuration migration",
+  "description": "Bounded migration of obsolete Toolkit-owned policy blocks while preserving user-owned configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "status", "changed", "preserved_user_content", "policy_authority_removed", "reason_code"],
+  "properties": {
+    "contract_version": { "const": "toolkit.local-bridge.managed-config-migration.v1" },
+    "status": { "enum": ["NOOP", "MIGRATION_REQUIRED", "MIGRATED", "CONFLICT", "BLOCKED"] },
+    "changed": { "type": "boolean" },
+    "preserved_user_content": { "type": "boolean" },
+    "policy_authority_removed": { "type": "boolean" },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9._:-]{0,127}$" },
+    "block_count": { "type": "integer", "minimum": 0 },
+    "action": { "type": "string", "pattern": "^[a-z0-9-]{1,128}$" },
+    "scheduler_policy": { "type": "boolean" },
+    "resource_admission": { "type": "boolean" },
+    "queue_policy": { "type": "boolean" }
+  }
+}

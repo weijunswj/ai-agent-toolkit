@@ -6,10 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const core = require('../scripts/setup-toolkit-core.cjs');
-const control = require('../scripts/toolkit-agent-control.cjs');
+
+const control = { TOPOLOGIES: { ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'exact-launch-record', BROADER_NATIVE: 'host-native' }, CAPACITY_MODES: { ROOT_ONLY: 'not-managed', AUTO: 'not-managed', MANUAL: 'not-managed' } };
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.10.9', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.13.0', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), route_sha256: 'c'.repeat(64), adapter_sha256: 'e'.repeat(64), process_launch_sha256: 'f'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -21,11 +22,23 @@ function current(supported, profile = {}) {
   };
 }
 
+function exactResolution(topology = 'exact-launch-record') {
+  return {
+    topology,
+    capacity_mode: 'not-managed',
+    manual_maximum: 0,
+    route_contract: 'toolkit.route-resolution.resolved-launch-record.v1',
+    legacy_answers_ignored: true
+  };
+}
+
 test('one canonical question specification drives supported Claude choices without hidden menus', () => {
   const args = core.parseArgs(['--plan', '--host', 'claude-code']);
   const specs = core.setupQuestionSpecs(args, current(true));
   const topology = specs.find((row) => row.key === 'claudeTopology');
-  assert.deepEqual(topology.choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
+  const plugin = specs.find((row) => row.key === 'claudePluginBehavior');
+  assert.equal(topology, undefined);
+  assert.deepEqual(plugin.choices.map((choice) => choice.value), ['install', 'instructions', 'keep']);
   assert.equal(specs.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.equal(args.setupChoices.claudeAgentCapacity, '');
   const text = core.renderSetupQuestionBank(specs);
@@ -36,8 +49,8 @@ test('one canonical question specification drives supported Claude choices witho
 test('unverified Claude capability keeps direct as a post-approval request but defaults root-only', () => {
   const args = core.parseArgs(['--plan', '--host', 'claude-code']);
   const specs = core.setupQuestionSpecs(args, current(false));
-  assert.deepEqual(specs.find((row) => row.key === 'claudeTopology').choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
-  assert.equal(specs.find((row) => row.key === 'claudeTopology').availability.status, 'post-approval-verification-required');
+  assert.equal(specs.find((row) => row.key === 'claudeTopology'), undefined);
+  assert.deepEqual(specs.find((row) => row.key === 'claudePluginBehavior').choices.map((choice) => choice.value), ['install', 'instructions', 'keep']);
   assert.equal(specs.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.equal(args.setupChoices.claudeAgentCapacity, '');
 });
@@ -66,20 +79,16 @@ test('topology and capacity resolve to one canonical compatible outcome', () => 
   const rootUnanswered = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'root-only']);
   core.setupQuestionSpecs(rootUnanswered, directProfile);
   assert.equal(rootUnanswered.setupChoices.claudeAgentCapacity, '');
-  assert.deepEqual(core.resolveClaudeTopologyCapacity(rootUnanswered, directProfile), {
-    topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0,
-  });
+  assert.deepEqual(core.resolveClaudeTopologyCapacity(rootUnanswered, directProfile), exactResolution('root-only'));
 
   const rootKeep = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'root-only', '--claude-agent-capacity', 'keep']);
-  assert.equal(core.resolveClaudeTopologyCapacity(rootKeep, directProfile).capacity_mode, 'root-only');
+  assert.equal(core.resolveClaudeTopologyCapacity(rootKeep, directProfile).capacity_mode, 'not-managed');
 
   const automatic = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'automatic']);
-  assert.equal(core.resolveClaudeTopologyCapacity(automatic, directProfile).capacity_mode, 'automatic');
+  assert.equal(core.resolveClaudeTopologyCapacity(automatic, directProfile).capacity_mode, 'not-managed');
 
   const manual = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'manual', '--claude-agent-maximum', '2']);
-  assert.deepEqual(core.resolveClaudeTopologyCapacity(manual, directProfile), {
-    topology: 'claude-toolkit-direct', capacity_mode: 'manual', manual_maximum: 2,
-  });
+  assert.equal(core.resolveClaudeTopologyCapacity(manual, directProfile).capacity_mode, 'not-managed');
 
   const unsupported = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct']);
   assert.equal(core.resolveClaudeTopologyCapacity(unsupported, current(false)).topology, control.TOPOLOGIES.CLAUDE_DIRECT);
@@ -91,7 +100,7 @@ test('recommended plan and rendered question surfaces show the same reconciled r
   const resolved = core.resolveClaudeTopologyCapacity(planned.args, current(true));
 
   assert.equal(resolved.topology, 'root-only');
-  assert.equal(resolved.capacity_mode, 'root-only');
+  assert.equal(resolved.capacity_mode, 'not-managed');
   assert.equal(planned.specs.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.doesNotMatch(core.renderSetupQuestionBank(planned.specs), /manage agent capacity|manual maximum/i);
   assert.doesNotMatch(core.renderSetupQuestionBankTerminal(planned.specs), /manage agent capacity|manual maximum/i);
@@ -101,20 +110,20 @@ test('initial question rendering cannot seed hidden root-only capacity over a la
   const args = core.parseArgs(['--execute', '--host', 'claude-code']);
   const state = current(false);
   const initial = core.setupQuestionSpecs(args, state);
-  assert.equal(initial.find((row) => row.key === 'claudeTopology').selected, '');
+  assert.equal(initial.find((row) => row.key === 'claudePluginBehavior').selected, '');
   assert.equal(args.setupChoices.claudeAgentCapacity, '');
   args.setupChoices.claudeTopology = 'toolkit-direct';
   const resolved = core.resolveClaudeTopologyCapacity(args, state);
-  assert.deepEqual(resolved, { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0 });
+  assert.deepEqual(resolved, exactResolution());
   assert.equal(args.setupChoices.claudeTopology, 'toolkit-direct');
-  assert.equal(args.setupChoices.claudeAgentCapacity, 'automatic');
+  assert.equal(args.setupChoices.claudeAgentCapacity, '');
 
   const restricted = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'root-only']);
-  assert.equal(core.resolveClaudeTopologyCapacity(restricted, state).topology, control.TOPOLOGIES.ROOT_ONLY);
+  assert.equal(core.resolveClaudeTopologyCapacity(restricted, state).topology, control.TOPOLOGIES.CLAUDE_DIRECT);
 });
 
-test('broader-native remains distinct from root-only Toolkit capacity across flags and keep-current', () => {
-  const state = current(true, { topology: 'broader-native', capacity_mode: 'root-only', supported: true, status: 'configured' });
+test('host-native remains distinct from root-only setup while capacity stays unmanaged', () => {
+  const state = current(true, { topology: 'host-native', capacity_mode: 'not-managed', supported: true, status: 'configured' });
   for (const argv of [
     ['--plan', '--host', 'claude-code', '--claude-topology', 'broader-native', '--claude-agent-capacity', 'root-only'],
     ['--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'keep'],
@@ -122,51 +131,56 @@ test('broader-native remains distinct from root-only Toolkit capacity across fla
     ['--plan', '--host', 'claude-code', '--claude-topology=keep', '--claude-agent-capacity=root-only'],
   ]) {
     const resolved = core.resolveClaudeTopologyCapacity(core.parseArgs(argv), state);
-    assert.deepEqual(resolved, { topology: 'broader-native', capacity_mode: 'root-only', manual_maximum: 0 });
+    assert.equal(resolved.topology, argv.some((value) => value.includes('broader-native')) ? 'host-native' : 'exact-launch-record');
+    assert.equal(resolved.capacity_mode, 'not-managed');
+    assert.equal(resolved.manual_maximum, 0);
   }
 
   const interactive = core.parseArgs(['--execute', '--host', 'claude-code']);
   interactive.setupChoices.claudeTopology = 'keep';
   interactive.setupChoices.claudeAgentCapacity = 'root-only';
   const specs = core.setupQuestionSpecs(interactive, state);
-  assert.equal(specs.find((row) => row.key === 'claudeTopology').selected, 'keep');
-  assert.equal(core.resolveClaudeTopologyCapacity(interactive, state).topology, 'broader-native');
+  assert.equal(specs.find((row) => row.key === 'claudeTopology'), undefined);
+  assert.equal(core.resolveClaudeTopologyCapacity(interactive, state).topology, 'exact-launch-record');
 
   const planned = core.plannedQuestionBank(core.parseArgs([
     '--plan', '--json', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
   ]), state);
-  assert.equal(planned.args.setupChoices.claudeTopology, 'broader-native');
-  assert.match(JSON.stringify(planned), /broader-native/);
+  assert.equal(planned.args.setupChoices.claudeTopology, 'keep');
+  assert.equal(planned.specs.some((row) => row.key === 'claudeTopology'), false);
+  assert.equal(planned.specs.some((row) => row.key === 'claudeAgentCapacity'), false);
 
-  const unsupported = current(false, { topology: 'broader-native', capacity_mode: 'root-only', supported: false, status: 'unsupported-root-only' });
+  const unsupported = current(false, { topology: 'host-native', capacity_mode: 'not-managed', supported: false, status: 'unsupported-root-only' });
   assert.deepEqual(core.resolveClaudeTopologyCapacity(core.parseArgs([
     '--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
-  ]), unsupported), { topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0 });
+  ]), unsupported), exactResolution());
 });
 
-test('resource-counter loss removes direct automatic and resolves recommended setup to root-only', () => {
+test('resource-counter observations do not enter route resolution', () => {
   const state = current(true);
   state.agentCapability.resource_counter_supported = false;
   state.agentCapability.supported = false;
   const args = core.parseArgs(['--plan', '--host', 'claude-code', '--yes-recommended']);
   const planned = core.plannedQuestionBank(args, state);
-  assert.equal(planned.args.setupChoices.claudeTopology, 'root-only');
-  assert.equal(planned.args.setupChoices.claudeAgentCapacity, 'root-only');
+  assert.equal(planned.args.setupChoices.claudeTopology, '');
+  assert.equal(planned.args.setupChoices.claudeAgentCapacity, '');
   assert.equal(planned.specs.some((row) => row.key === 'claudeAgentCapacity'), false);
+  assert.deepEqual(core.resolveClaudeTopologyCapacity(planned.args, state), exactResolution());
 });
 
-test('resource-counter loss invalidates an existing automatic strict profile', async () => {
+test('resource-counter loss fails closed for an existing exact route profile', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-resource-loss-'));
   const previous = process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT;
   process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT = root;
   try {
-    const state = current(true, { topology: 'claude-toolkit-direct', capacity_mode: 'automatic', supported: true, status: 'configured' });
+    const state = current(true, { topology: 'exact-launch-record', capacity_mode: 'not-managed', supported: true, status: 'configured' });
     state.agentCapability.resource_counter_supported = false;
     state.agentCapability.supported = false;
     const args = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'keep']);
     const result = await core.applyHostDelegationControl(args, state, state.nativePlugin);
     assert.equal(result.status, 'capability-lost-root-only');
-    assert.equal(control.readProfile('claude-code', { root }).supported, false);
+    assert.equal(result.fallback, 'root-only');
+    assert.equal(result.resource_admission, false);
   } finally {
     if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT;
     else process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT = previous;
@@ -215,15 +229,31 @@ function capabilityCli(root, behavior) {
   return target;
 }
 
-test('bounded exact-argv probe succeeds even when help omits supported flags', () => {
+test('bounded version capability probe succeeds without fixed model or checker bindings', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-supported-'));
   const capability = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'supported') });
   assert.equal(capability.launch_supported, true);
   assert.equal(capability.launch_probe_status, 'supported');
-  const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
-  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort', 'medium', '--tools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', '--permission-mode', 'plan', '--no-session-persistence']);
-  assert.equal(probe.stdin, '');
-  assert.equal(probe.capabilityProbe, '1');
+  assert.equal(capability.version, '2.1.999 fixture');
+  assert.equal(capability.checker_probe_exit_status, undefined);
+  assert.equal(fs.existsSync(path.join(root, 'supported.json')), false);
+});
+
+test('capability probe fails closed on version-command failure without checker classification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-failures-'));
+  const target = path.join(root, 'claude-version-failure.cjs');
+  fs.writeFileSync(target, [
+    "'use strict';",
+    "const args=process.argv.slice(2);",
+    "if(args.includes('--version')){console.error('authentication required: sign in');process.exit(3);}",
+    'process.exit(4);',
+    '',
+  ].join('\n'));
+  const capability = core.probeClaudeAgentCapability({ claudeCli: target });
+  assert.equal(capability.launch_supported, false);
+  assert.equal(capability.launch_probe_status, 'indeterminate-runtime-failure');
+  assert.equal(capability.launch_probe_exit_status, 3);
+  assert.equal(capability.checker_probe_exit_status, undefined);
 });
 
 for (const variable of ['CLAUDE_TOOLKIT_CLAUDE_CLI', 'CLAUDE_CLI_PATH']) {
@@ -252,33 +282,4 @@ test('setup capability command precedence is explicit, AI env, helper env, legac
   assert.equal(core.probeClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.legacy);
   delete env.CLAUDE_CLI_PATH;
   assert.equal(core.probeClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.persisted);
-});
-
-test('capability probe fails closed when either sticky worker or checker model is unavailable', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-model-'));
-  const target = path.join(root, 'claude-model.cjs');
-  fs.writeFileSync(target, [
-    "'use strict';",
-    "const args=process.argv.slice(2);",
-    "if(args.includes('--version')){console.log('2.1.999 fixture');process.exit(0);}",
-    "if(args.includes('--print')&&args.includes('opus-4.8')){console.error('unknown model opus-4.8');process.exit(2);}",
-    "if(args.includes('--print')){console.log('{}');process.exit(0);}",
-    'process.exit(4);',
-    '',
-  ].join('\n'));
-  const capability = core.probeClaudeAgentCapability({ claudeCli: target });
-  assert.equal(capability.launch_supported, false);
-  assert.equal(capability.launch_probe_status, 'unsupported-syntax');
-  assert.equal(capability.launch_probe_exit_status, 0);
-  assert.equal(capability.checker_probe_exit_status, 2);
-});
-test('capability probe distinguishes unsupported syntax from unrelated runtime failure', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-failures-'));
-  const unsupported = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'unsupported') });
-  assert.equal(unsupported.launch_supported, false);
-  assert.equal(unsupported.launch_probe_status, 'unsupported-syntax');
-  const auth = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'auth') });
-  assert.equal(auth.launch_supported, false);
-  assert.equal(auth.launch_probe_status, 'indeterminate-runtime-failure');
-  assert.doesNotMatch(auth.detector, /unsupported-syntax/);
 });

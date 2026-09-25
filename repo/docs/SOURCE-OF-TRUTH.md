@@ -10,6 +10,7 @@ This repo owns reusable AI-agent toolkit assets. Direct canonical content lives 
 - Runtime and maintenance scripts under `repo/scripts/**`.
 - Focused tests under `repo/tests/**`.
 - Native plugin source contracts under `repo/contracts/toolkit-local-bridge/**` and generated native package metadata under `.codex-plugin/**` and `.claude-plugin/**`.
+- Versioned role, exact launch, capability-proof, lifecycle, cache-recovery, and public-exposure contracts under `repo/contracts/**`; the native OpenCode package is under `repo/contracts/toolkit-local-bridge/opencode-plugin/**`.
 - Active third-party provenance under `repo/source-watch/provenance/**`.
 
 ## Product-Owned
@@ -31,11 +32,13 @@ Native plugin metadata remains platform-separated:
 
 - `.codex-plugin/**` is the Codex package surface.
 - `.claude-plugin/**` is the Claude Code package surface.
+- `repo/contracts/toolkit-local-bridge/opencode-plugin/**` is the OpenCode package source surface; the local bridge is migration-only until its accepted transition.
+- AG2 has no plugin or instruction surface; it may receive only a proven skills-only projection.
 - Neither native package may install or update the other platform.
 
 ## Source Locks
 
-`repo/source-watch/provenance/**/SOURCE-LOCK.json` owns active third-party provenance: source repo, ref, locked commit, allowlisted files, exact blob pins, attribution requirement, and manual-review update policy. Source-watch is notification-only and must not copy upstream files, update pins, execute upstream code, or treat a notification PR as approval.
+`repo/source-watch/provenance/**/SOURCE-LOCK.json` owns active third-party provenance: source repo, ref, locked commit, allowlisted files, exact blob pins, attribution requirement, and manual-review update policy. Source-watch is notification-only and may report deterministic identity, attribution, deduplication, and reviewed-through state; it must not copy upstream files, update pins, execute upstream code, recreate retired advisory/semantic-review/cadence findings, or treat a notification PR as approval.
 
 Repo-wide MCP is intentionally not shipped or maintained as a generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary setup material.
 
