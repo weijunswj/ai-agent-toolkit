@@ -372,7 +372,7 @@ test('commit-required validation sequencing freezes one local candidate before c
   assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
   assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
   assert.match(architecture, /create exactly one immutable local candidate commit under the existing allowance/);
-  assert.match(architecture, /run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
+  assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
 });
 
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
