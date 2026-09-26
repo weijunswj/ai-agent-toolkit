@@ -124,6 +124,34 @@ function setup(seed = 'admission', setupOptions = {}) {
   };
 }
 
+test('Run-094 rejects proxied semantic intents before calling trusted readers', () => {
+  const gate = setup('run094-proxy-intent');
+  const before = support.receiptEffectSnapshot(gate.store);
+  let trapCount = 0;
+  const trap = () => {
+    trapCount += 1;
+    throw new Error('untrusted semantic intent trap executed');
+  };
+  const hostileIntent = new Proxy(gate.intent, {
+    defineProperty: trap,
+    deleteProperty: trap,
+    get: trap,
+    getOwnPropertyDescriptor: trap,
+    getPrototypeOf: trap,
+    has: trap,
+    isExtensible: trap,
+    ownKeys: trap,
+    preventExtensions: trap,
+    set: trap,
+    setPrototypeOf: trap,
+  });
+
+  assertCode(() => gate.store.buildCurrentPacketProjection(hostileIntent, gate.readers), 'GPR_PACKET_CURRENT_UNVERIFIED');
+  assertCode(() => gate.store.admitSemanticGate(hostileIntent, gate.readers), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(trapCount, 0, 'proxy traps remain untouched');
+  assert.deepEqual(support.receiptEffectSnapshot(gate.store), before, 'rejected intent has no packet database effects');
+});
+
 function receiptAuthority(seed) {
   return {
     child_comment_id: 1,

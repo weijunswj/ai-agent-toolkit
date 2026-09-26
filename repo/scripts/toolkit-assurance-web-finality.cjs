@@ -1,6 +1,7 @@
 'use strict';
 
 const receiptStoreRuntime = require('./toolkit-github-program-receipt.cjs');
+const { types: utilTypes } = require('node:util');
 
 const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
 const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
@@ -48,6 +49,52 @@ const FORBIDDEN_REPORT_VALUE = /(?:https?:\/\/|^(?:[A-Za-z]:[\\/]|[\\/])|(?:^|[\
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error('RECEIPT_PROOF_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw new Error('RECEIPT_PROOF_INVALID'); }
+    catch (_) { throw new Error('RECEIPT_PROOF_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('RECEIPT_PROOF_INVALID');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new Error('RECEIPT_PROOF_INVALID');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw new Error('RECEIPT_PROOF_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) throw new Error('RECEIPT_PROOF_INVALID');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw new Error('RECEIPT_PROOF_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('RECEIPT_PROOF_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('RECEIPT_PROOF_INVALID');
+        Object.defineProperty(result, String(index), { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('RECEIPT_PROOF_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('RECEIPT_PROOF_INVALID');
+      Object.defineProperty(result, name, { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
 }
 
 function exactKeys(value, keys) {
@@ -277,6 +324,10 @@ function validReceiptPredecessor(value) {
 
 function validateReceiptDependencyProof(value, expected = {}) {
   const failures = [];
+  try {
+    value = trustedDataCopy(value);
+    expected = trustedDataCopy(expected);
+  } catch (_) { return ['receipt-dependency-proof-shape-invalid']; }
   if (!isRecord(value)) {
     return ['receipt-dependency-proof-shape-invalid'];
   }

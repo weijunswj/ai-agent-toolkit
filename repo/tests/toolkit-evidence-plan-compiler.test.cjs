@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const test = require('node:test');
 const Ajv2020 = require('ajv/dist/2020');
 const {
@@ -13,6 +14,7 @@ const {
   compileEvidenceManifest,
   hashCanonical,
   mergeEvidenceResponses,
+  validateJsonCompatible,
 } = require('../scripts/toolkit-evidence-plan-compiler.cjs');
 
 const ALL_EVIDENCE_MACROS = Object.keys(EVIDENCE_MACRO_FACETS);
@@ -399,6 +401,31 @@ test('evidence packet and merge digests are deterministic and non-recursive', ()
   assert.equal(packet.packet_digest, hashCanonical(Object.fromEntries(Object.entries(withoutPlanDigest).filter(([key]) => key !== 'packet_digest'))));
 });
 
+test('evidence compiler rejects top-level and nested Proxies before caller traps', () => {
+  const counters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const handler = {
+    get(target, key, receiver) { counters.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { counters.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { counters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { counters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  };
+  const makeCrossRealm = vm.runInNewContext('(target, traps) => new Proxy(target, traps)');
+  assert.throws(() => validateJsonCompatible(makeCrossRealm(manifest(), handler)),
+    (error) => error && error.code === 'EVIDENCE_MANIFEST_INVALID');
+  assert.deepEqual(counters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+
+  const nestedCounters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const nested = manifest();
+  nested.questions[0].applicability = new Proxy(nested.questions[0].applicability, {
+    get(target, key, receiver) { nestedCounters.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { nestedCounters.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { nestedCounters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { nestedCounters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  });
+  assert.throws(() => compileEvidenceManifest(nested), (error) => error && error.code === 'EVIDENCE_MANIFEST_INVALID');
+  assert.deepEqual(nestedCounters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+});
+
 test('unavailable source verification can never become COMPLETE', () => {
   const value = bundle();
   value.context.source_contents = [];
@@ -407,7 +434,20 @@ test('unavailable source verification can never become COMPLETE', () => {
   assert.ok(reasonCodes(result).has('EVIDENCE_NOT_RETRIEVABLE'));
 });
 
-test('evidence inputs and canonical source identity remain unchanged by compilation', () => {
+test('source-byte tampering is rejected by the independent SHA-256 content binding', () => {
+  const value = bundle();
+  const originalSha256 = value.input.sources[0].content_sha256;
+  const tamperedBytes = Buffer.from(value.context.source_contents[0].content_base64, 'base64');
+  tamperedBytes[0] ^= 1;
+  value.context.source_contents[0].content_base64 = tamperedBytes.toString('base64');
+
+  const result = mergeEvidenceResponses(value.input, value.responses, value.context);
+  assert.equal(result.status, 'REJECTED');
+  assert.equal(value.input.sources[0].content_sha256, originalSha256);
+  assert.ok(reasonCodes(result).has('VERIFICATION_CONTEXT_INVALID'));
+});
+
+test('evidence inputs remain unchanged and current binding sources stay explicit', () => {
   const value = bundle();
   const beforeManifest = structuredClone(value.input);
   const beforeResponses = structuredClone(value.responses);
@@ -420,6 +460,6 @@ test('evidence inputs and canonical source identity remain unchanged by compilat
   const root = path.resolve(__dirname, '..', '..');
   const controller = fs.readFileSync(path.join(root, 'repo', 'CONTROLLER.md'), 'utf8');
   const architecture = fs.readFileSync(path.join(root, 'repo', 'ARCHITECTURE.md'), 'utf8');
-  assert.match(controller, /exact remote canonical-`main` commit/i);
-  assert.match(architecture, /remote-first/i);
+  assert.match(controller, /Before consequential mutation or integration, revalidate live base\/main and the candidate\/authority binding/i);
+  assert.match(architecture, /root model\/route selection is an out-of-band User\/Web\/controller\/harness act performed before root launch\/adoption/i);
 });

@@ -30,7 +30,7 @@
     "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "version": { "const": "human-v2" },
-    "package_version": { "const": "2.10.9" },
+    "package_version": { "const": "2.10.10" },
     "facade_export": { "const": "humanSurfaceV2" },
     "operations": {
       "const": ["readComplete", "render", "extendHistory", "planMigration"]
@@ -155,13 +155,22 @@
     "serialization": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["canonical_json", "base64url", "typed_nodes", "text_encoding", "url_rebuild"],
+      "required": ["canonical_json", "base64url", "typed_nodes", "text_encoding", "url_rebuild", "renderer_revision", "historical_dispatch"],
       "properties": {
         "canonical_json": { "const": "existing-toolkit-sort-keys-finite-safe-integers" },
         "base64url": { "const": "unpadded-canonical-json" },
         "typed_nodes": { "const": true },
         "text_encoding": { "const": "audit-first-code-point-single-pass" },
-        "url_rebuild": { "const": "https-only-whatwg-no-credentials-preserve-query-order" }
+        "url_rebuild": { "const": "https-only-whatwg-no-credentials-preserve-query-order" },
+        "renderer_revision": { "const": "human-v2-r093" },
+        "historical_dispatch": {
+          "const": {
+            "recognized_revision": "current-human-v2",
+            "absent_revision": "frozen-J-K-serializer-only",
+            "unknown_revision": "reject",
+            "historical_graphless_authority": "read-only-no-current-proof"
+          }
+        }
       }
     },
     "lifecycle": {
@@ -221,13 +230,14 @@
     "programme_graph": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["graph_schema", "metadata_schema", "identity_fields", "digest_scope", "historical_absence"],
+      "required": ["graph_schema", "metadata_schema", "identity_fields", "digest_scope", "historical_absence", "renderer_revision"],
       "properties": {
         "graph_schema": { "const": "toolkit.controller.programme-graph.v1" },
         "metadata_schema": { "const": "toolkit.github-program.programme-graph-metadata.v1" },
         "identity_fields": { "const": ["schema", "digest"] },
         "digest_scope": { "const": "canonical-serialization-with-digest-excluded" },
-        "historical_absence": { "const": "readable-without-current-proof" }
+        "historical_absence": { "const": "readable-without-current-proof" },
+        "renderer_revision": { "const": "human-v2-r093" }
       }
     },
     "phase_projection": {

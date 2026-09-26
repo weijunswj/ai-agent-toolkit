@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const canonicalA2 = require('./toolkit-capability-registry.cjs');
 const programmeV5 = require('./toolkit-github-program-state-v5.cjs');
@@ -72,13 +73,60 @@ const RED_FIRST_CASES = Object.freeze([
 function success(code, extra = {}) { return { ok: true, code, ...extra }; }
 function failure(code, extra = {}) { return { ok: false, code, ...extra }; }
 function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID'); }
+    catch (_) { throw new Error('N5_UNTRUSTED_DATA_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) {
+        throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      }
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+        Object.defineProperty(result, String(index), { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      Object.defineProperty(result, name, { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+function clone(value) { return JSON.parse(JSON.stringify(trustedDataCopy(value))); }
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((key) => [key, sortValue(value[key])]));
 }
-function canonicalJson(value) { return JSON.stringify(sortValue(value)); }
+function canonicalJson(value) { return JSON.stringify(sortValue(trustedDataCopy(value))); }
 function sha256(value) { return crypto.createHash('sha256').update(typeof value === 'string' ? value : canonicalJson(value), 'utf8').digest('hex'); }
 function isSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
 function isDigest(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
@@ -97,6 +145,7 @@ function packetHumanOwner(value) { return typeof value === 'string' && /^[A-Za-z
 function packetNodeId(value) { return typeof value === 'string' && /^[A-Za-z0-9_:-]{1,256}$/.test(value); }
 function packetTimestamp(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value)); }
 function validateAuthorityPacketSource(value, repository) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
   return packetExactKeys(value, ['repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'])
     && value.repository === repository
     && isIssue(value.issue_number)
@@ -107,6 +156,7 @@ function validateAuthorityPacketSource(value, repository) {
     && isDigest(value.body_digest);
 }
 function validateAuthorityPacketProducer(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
   return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
     && isPhysicalPacketRunId(value.run)
     && isPacketContractId(value.lock)
@@ -114,6 +164,7 @@ function validateAuthorityPacketProducer(value) {
     && isPacketContractId(value.role);
 }
 function validateAuthorityPacketCandidate(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
   return value === null || packetExactKeys(value, ['pr_number', 'branch', 'base_ref', 'base_sha', 'head_sha', 'tree_sha'])
     && (value === null || isIssue(value.pr_number)
       && isSafeLabel(value.branch)
@@ -123,6 +174,10 @@ function validateAuthorityPacketCandidate(value) {
       && isSha(value.tree_sha));
 }
 function validateAuthorityPacketCurrent(value, expected = {}) {
+  try {
+    value = trustedDataCopy(value);
+    expected = trustedDataCopy(expected);
+  } catch (_) { return false; }
   if (!packetExactKeys(value, ['schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'consumer', 'authority', 'candidate', 'predecessors'])
     || value.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA
     || !isSafeLabel(value.repository)
@@ -1048,9 +1103,10 @@ function normalizedReviewEvidenceForDigest(value = {}) {
   };
 }
 function reviewEvidenceDigest(value = {}) {
-  return sha256(normalizedReviewEvidenceForDigest(value));
+  return sha256(normalizedReviewEvidenceForDigest(trustedDataCopy(value)));
 }
 function normalizeTrustedReviewEvidence(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return null; }
   if (!isRecord(value)
     || !isSafeLabel(value.repository)
     || !isIssue(value.pr_number)

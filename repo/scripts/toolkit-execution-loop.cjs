@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { types: utilTypes } = require('node:util');
 
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const a2 = require('./toolkit-capability-registry.cjs');
@@ -88,7 +89,9 @@ function fail(code, evidence = {}) {
 }
 
 function isRecord(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (value === null || typeof value !== 'object') return false;
+  try { if (utilTypes.isProxy(value)) return false; } catch (_error) { return false; }
+  return !Array.isArray(value);
 }
 
 function hasOwn(value, key) {
@@ -102,8 +105,80 @@ function exactKeys(value, keys) {
   return actual.length === expected.size && actual.every((key) => expected.has(key));
 }
 
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) fail('CANONICAL_VALUE_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) fail('CANONICAL_VALUE_INVALID'); }
+    catch (_) { fail('CANONICAL_VALUE_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) fail('CANONICAL_VALUE_INVALID');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail('CANONICAL_VALUE_INVALID');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) fail('CANONICAL_VALUE_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) fail('CANONICAL_VALUE_INVALID');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) fail('CANONICAL_VALUE_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+        Object.defineProperty(result, String(index), { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) fail('CANONICAL_VALUE_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+      Object.defineProperty(result, name, { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+
+function trustedCallbackShell(value, code = 'GPR_PACKET_ADMISSION_REQUIRED') {
+  if (value === null || typeof value !== 'object') fail(code);
+  try { if (utilTypes.isProxy(value)) fail(code); } catch (_) { fail(code); }
+  if (Array.isArray(value)) fail(code);
+  let prototype;
+  let names;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail(code);
+  } catch (_) { fail(code); }
+  if (prototype !== Object.prototype && prototype !== null) fail(code);
+  const result = {};
+  for (const name of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail(code);
+    Object.defineProperty(result, name, { value: descriptor.value, enumerable: true, writable: true, configurable: true });
+  }
+  return result;
+}
+
+function screenTrustedCallbackInterface(value, code = 'GPR_PACKET_ADMISSION_REQUIRED') {
+  trustedCallbackShell(value, code);
+  return value;
+}
+
 function clone(value) {
-  return JSON.parse(JSON.stringify(value));
+  return JSON.parse(JSON.stringify(trustedDataCopy(value)));
 }
 
 function deepFreeze(value) {
@@ -112,7 +187,7 @@ function deepFreeze(value) {
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
 }
-function canonicalSerialize(value) {
+function canonicalSerializeTrusted(value) {
   if (value === null) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -120,9 +195,13 @@ function canonicalSerialize(value) {
     if (!Number.isFinite(value)) fail('CANONICAL_VALUE_INVALID');
     return Object.is(value, -0) ? '0' : String(value);
   }
-  if (Array.isArray(value)) return '[' + value.map(canonicalSerialize).join(',') + ']';
-  if (isRecord(value)) return '{' + Object.keys(value).sort().map((key) => canonicalSerialize(key) + ':' + canonicalSerialize(value[key])).join(',') + '}';
+  if (Array.isArray(value)) return '[' + value.map(canonicalSerializeTrusted).join(',') + ']';
+  if (isRecord(value)) return '{' + Object.keys(value).sort().map((key) => canonicalSerializeTrusted(key) + ':' + canonicalSerializeTrusted(value[key])).join(',') + '}';
   fail('CANONICAL_VALUE_INVALID');
+}
+
+function canonicalSerialize(value) {
+  return canonicalSerializeTrusted(trustedDataCopy(value));
 }
 
 function digestValue(value) {
@@ -156,6 +235,10 @@ function isSafeReceiptRunId(value) {
 }
 
 function validateExecutionBinding(binding, run) {
+  try {
+    binding = trustedDataCopy(binding);
+    run = run === undefined || run === null ? run : trustedDataCopy(run);
+  } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
   const keys = ['semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'];
   if (!isRecord(binding) || !exactKeys(binding, keys)
     || ![null, undefined].includes(binding.semantic_run) && !isSafePacketContractId(binding.semantic_run)
@@ -235,7 +318,16 @@ function receiptCall(store, methodName, args, fallbackCode, requireResult = fals
   } catch (error) {
     receiptFailure(error, fallbackCode);
   }
-  if (result && typeof result.then === 'function') fail(fallbackCode);
+  if (result !== null && (typeof result === 'object' || typeof result === 'function')) {
+    try { if (utilTypes.isProxy(result)) fail(fallbackCode); }
+    catch (_) { fail(fallbackCode); }
+    if (typeof result === 'object' && !Array.isArray(result)) trustedCallbackShell(result, fallbackCode);
+    else if (typeof result === 'object') fail(fallbackCode);
+    if (typeof result === 'object') {
+      const thenDescriptor = Object.getOwnPropertyDescriptor(result, 'then');
+      if (thenDescriptor && (!Object.hasOwn(thenDescriptor, 'value') || typeof thenDescriptor.value === 'function')) fail(fallbackCode);
+    }
+  }
   if (isRecord(result) && result.ok === false) {
     const code = result.reason_code || result.code;
     if (typeof code === 'string' && /^GPR_[A-Z0-9_]+$/.test(code)) fail(code);
@@ -252,20 +344,35 @@ function admissionToken(result, fallbackCode = 'GPR_PACKET_ADMISSION_REQUIRED') 
 }
 
 function semanticGateOptions(options = {}, requireIntent = true) {
-  const supplied = isRecord(options.semantic_gate) ? options.semantic_gate
-    : isRecord(options.semanticGate) ? options.semanticGate : null;
-  if (!supplied) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  options = trustedCallbackShell(options);
+  if (hasOwn(options, 'semantic_gate') && hasOwn(options, 'semanticGate')) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const rawSupplied = hasOwn(options, 'semantic_gate') ? options.semantic_gate : options.semanticGate;
+  const supplied = trustedCallbackShell(rawSupplied);
+  if (hasOwn(supplied, 'consumer_intent') && hasOwn(supplied, 'consumerIntent')
+    || hasOwn(supplied, 'trusted_readers') && hasOwn(supplied, 'trustedReaders')
+    || hasOwn(supplied, 'consumer_identity') && hasOwn(supplied, 'consumerIdentity')) fail('GPR_PACKET_ADMISSION_REQUIRED');
   const store = supplied.store || supplied.receipt_store || supplied.receiptStore;
-  const consumerIntent = supplied.consumer_intent || supplied.consumerIntent;
-  const trustedReaders = supplied.trusted_readers || supplied.trustedReaders;
+  const consumerIntentValue = hasOwn(supplied, 'consumer_intent') ? supplied.consumer_intent : supplied.consumerIntent;
+  const trustedReadersValue = hasOwn(supplied, 'trusted_readers') ? supplied.trusted_readers : supplied.trustedReaders;
+  let consumerIntent;
+  let consumerIdentity;
+  try {
+    if (consumerIntentValue !== undefined) consumerIntent = trustedDataCopy(consumerIntentValue);
+    const identityValue = hasOwn(supplied, 'consumer_identity') ? supplied.consumer_identity : supplied.consumerIdentity;
+    if (identityValue !== undefined) consumerIdentity = trustedDataCopy(identityValue);
+  } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  const trustedReaders = screenTrustedCallbackInterface(trustedReadersValue);
+  try { if (utilTypes.isProxy(store)) fail('GPR_PACKET_ADMISSION_REQUIRED'); } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
   if (!isRecord(store) || requireIntent && !isRecord(consumerIntent) || !isRecord(trustedReaders)) fail('GPR_PACKET_ADMISSION_REQUIRED');
   const receipt = loadReceiptRuntime();
   if (typeof receipt.assertAuthenticAuthorityPacketStore !== 'function') fail('GPR_PACKET_ADMISSION_REQUIRED');
   try { receipt.assertAuthenticAuthorityPacketStore(store); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
-  return { store, consumerIntent, trustedReaders, consumerIdentity: supplied.consumer_identity || supplied.consumerIdentity };
+  return { store, consumerIntent, trustedReaders, consumerIdentity };
 }
 
 function boundConsumerIntent(consumerIntent, run) {
+  try { consumerIntent = trustedDataCopy(consumerIntent); }
+  catch (_) { fail('GPR_PACKET_BINDING_MISMATCH'); }
   const binding = isRecord(consumerIntent.execution_binding) ? consumerIntent.execution_binding : {};
   if (!isRecord(consumerIntent.consumer) || !isSafePacketContractId(consumerIntent.consumer.run)
     || binding.semantic_run !== undefined && binding.semantic_run !== null
@@ -340,6 +447,7 @@ function recoverSemanticContext(options, run) {
 }
 
 function requireSemanticContext(options = {}, allowRecovery = false) {
+  options = trustedCallbackShell(options);
   const context = semanticContextForRun(options.run);
   if (context) return context;
   if (allowRecovery && isRecord(options.semantic_gate || options.semanticGate)) return recoverSemanticContext(options, options.run);
@@ -347,6 +455,7 @@ function requireSemanticContext(options = {}, allowRecovery = false) {
 }
 
 function revalidateRunSemanticContext(run, options = {}) {
+  options = trustedCallbackShell(options);
   const context = semanticContextForRun(run)
     || (isRecord(options.semantic_gate || options.semanticGate) ? recoverSemanticContext({ ...options, run }, run) : null);
   if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
@@ -410,6 +519,13 @@ function laneId(value) {
 }
 
 function normalizeRequest(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
+  for (const key of ['request', 'task', 'authority', 'repository']) {
+    if (hasOwn(options, key)) {
+      try { options[key] = trustedDataCopy(options[key]); }
+      catch (_) { fail('REQUEST_CONTRACT_INVALID'); }
+    }
+  }
   if (isRecord(options.request) && options.request.contract_version === CONTRACTS[0]) return validateRequest(options.request);
   const task = isRecord(options.task) ? options.task : {};
   const authority = isRecord(options.authority) ? options.authority : {};
@@ -443,6 +559,8 @@ function normalizeRequest(options = {}) {
 }
 
 function validateRequest(record) {
+  try { record = trustedDataCopy(record); }
+  catch (_) { fail('REQUEST_CONTRACT_INVALID'); }
   const keys = ['contract_version', 'request_id', 'task_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'current_authority_digest', 'delegated', 'requested_lanes', 'scope_digest'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[0] || !isSafeId(record.request_id) || !isSafeId(record.task_id)
     || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -454,6 +572,7 @@ function validateRequest(record) {
 }
 
 function readExecutionLoopConsent(options = {}) {
+  options = trustedCallbackShell(options, 'CONSENT_MALFORMED');
   if (hasOwn(options, 'executionLoopState')) return { enabled: false, state: 'unresolved', status_digest: null };
   let status;
   try {
@@ -469,6 +588,8 @@ function readExecutionLoopConsent(options = {}) {
   } catch (_error) {
     return { enabled: false, state: 'unresolved', status_digest: null };
   }
+  try { status = trustedDataCopy(status); }
+  catch (_error) { return { enabled: false, state: 'malformed', status_digest: null }; }
   if (!isRecord(status)) return { enabled: false, state: 'unresolved', status_digest: null };
   if (status.interrupted === true) return { enabled: false, state: 'interrupted', status_digest: null };
   if (hasOwn(status, 'schema_version') && status.schema_version !== 1) return { enabled: false, state: 'malformed', status_digest: null };
@@ -516,6 +637,7 @@ function adapterEvidence(adapter, spec) {
   if (!adapter) return { available: false };
   let evidence = adapter;
   if (typeof adapter.probe === 'function') evidence = invokeSync(adapter.probe, adapter, { lane_id: spec.id }, 'ADAPTER_PROBE_FAILED');
+  try { evidence = trustedDataCopy(evidence); } catch (_error) { return { available: false }; }
   if (!isRecord(evidence)) return { available: false };
   const result = {
     available: evidence.available === true,
@@ -536,6 +658,10 @@ function routeBlock(reasonCode) {
 }
 
 function createRoutePlan(request, laneRecords) {
+  try {
+    request = trustedDataCopy(request);
+    laneRecords = trustedDataCopy(laneRecords);
+  } catch (_) { fail('ROUTE_PLAN_INVALID'); }
   const rootOnly = laneRecords.length === 0;
   const base = {
     contract_version: CONTRACTS[1],
@@ -552,6 +678,7 @@ function createRoutePlan(request, laneRecords) {
 }
 
 function validateRoutePlan(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('ROUTE_PLAN_INVALID'); }
   const keys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[1] || !isSafeId(record.route_id) || !isSafeId(record.request_id)
     || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -573,6 +700,7 @@ function validateRoutePlan(record) {
 }
 
 function admitRoute(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
   let request;
   try {
     request = normalizeRequest(options);
@@ -669,6 +797,8 @@ function reconcileDispatchAttempt(context, transportId, transportResult, transpo
 }
 
 function executeAtomicLaunch(routePlan, options) {
+  routePlan = validateRoutePlan(routePlan);
+  options = trustedCallbackShell(options, 'LAUNCH_ATOMICITY_UNAVAILABLE');
   if (typeof options.prepareLaunch !== 'function' || typeof options.commitLaunchBatch !== 'function') fail('LAUNCH_ATOMICITY_UNAVAILABLE');
   const semanticContext = requireSemanticContext({ ...options, run: options.run }, true);
   const reservations = [];
@@ -719,6 +849,7 @@ function executeAtomicLaunch(routePlan, options) {
 }
 
 function createRunReceipt(options = {}) {
+  options = trustedCallbackShell(options, 'RUN_RECEIPT_INVALID');
   const request = options.request && options.request.contract_version === CONTRACTS[0] ? validateRequest(options.request) : normalizeRequest(options);
   const routePlan = options.route_plan || options.routePlan;
   if (!isRecord(routePlan) || routePlan.contract_version !== CONTRACTS[1]) fail('ROUTE_PLAN_REQUIRED');
@@ -746,6 +877,7 @@ function createRunReceipt(options = {}) {
 }
 
 function validateRunReceipt(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('RUN_RECEIPT_INVALID'); }
   const keys = ['contract_version', 'run_id', 'request_digest', 'repository_id', 'authorized_ref_digest', 'route_digest', 'authority_binding_digest', 'current_authority_digest', 'execution_state', 'current_lanes', 'workspace_receipt_digest', 'terminal_packet_digest', 'publication_state', 'workspace_disposition', 'created_at', 'updated_at'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[2] || !isSafeId(record.run_id)
     || !isDigest(record.request_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -767,7 +899,9 @@ function validateRunReceipt(record) {
 
 function transitionRun(run, nextState, options = {}) {
   const suppliedContext = semanticContextForRun(run);
-  const current = validateRunReceipt(run);
+  run = validateRunReceipt(run);
+  options = trustedCallbackShell(options, 'INVALID_STATE_TRANSITION');
+  const current = run;
   if (!EXECUTION_STATES.includes(nextState) || !TRANSITIONS[current.execution_state].includes(nextState)) fail('INVALID_STATE_TRANSITION', { from: current.execution_state, to: nextState });
   const suppliedGate = isRecord(options.semantic_gate) ? options.semantic_gate
     : isRecord(options.semanticGate) ? options.semanticGate : null;
@@ -838,6 +972,7 @@ function transitionRun(run, nextState, options = {}) {
 }
 
 function normalizeLiveRef(value) {
+  try { value = trustedDataCopy(value); } catch (_) { fail('LIVE_REF_UNAVAILABLE'); }
   if (!isRecord(value)) fail('LIVE_REF_UNAVAILABLE');
   const ref = value.ref || value.server_ref;
   const sha = value.sha || value.commit || value.server_sha;
@@ -847,6 +982,7 @@ function normalizeLiveRef(value) {
 }
 
 function createWorkspaceReceipt(options = {}) {
+  options = trustedCallbackShell(options, 'WORKSPACE_RECEIPT_INVALID');
   return validateWorkspaceReceipt(contractRecord(CONTRACTS[3], {
     run_id: options.run_id,
     repository_id: options.repository_id,
@@ -862,6 +998,7 @@ function createWorkspaceReceipt(options = {}) {
 }
 
 function validateWorkspaceReceipt(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('WORKSPACE_RECEIPT_INVALID'); }
   const keys = ['contract_version', 'run_id', 'repository_id', 'authorized_ref_digest', 'live_ref_digest', 'snapshot_commit_digest', 'snapshot_tree_digest', 'workspace_id', 'workspace_handle', 'setup_digest', 'verified'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[3] || !isSafeId(record.run_id)
     || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest) || !isDigest(record.live_ref_digest)
@@ -872,6 +1009,7 @@ function validateWorkspaceReceipt(record) {
 }
 
 function validateRunEvidence(options = {}, expectedState, prefix) {
+  options = trustedCallbackShell(options, prefix + '_RUN_EVIDENCE_REQUIRED');
   if (!isRecord(options.run) || !isRecord(options.route_plan) || !isRecord(options.workspace_receipt)) fail(prefix + '_RUN_EVIDENCE_REQUIRED');
   const suppliedContext = semanticContextForRun(options.run);
   const run = validateRunReceipt(options.run);
@@ -1067,6 +1205,7 @@ function executeTypedGitCommit(options = {}) {
 }
 
 function createTerminalPacket(options = {}) {
+  options = trustedCallbackShell(options, 'TERMINAL_PACKET_INVALID');
   if (Object.keys(options).some((key) => !['run_id', 'outcome', 'reason_code', 'evidence_digest', 'workspace_disposition', 'publication_state'].includes(key))) fail('TERMINAL_PACKET_INVALID');
   const outcome = options.outcome;
   if (!Object.prototype.hasOwnProperty.call(TERMINAL_OUTCOMES, outcome)) fail('TERMINAL_OUTCOME_INVALID');
@@ -1089,6 +1228,7 @@ function createTerminalPacket(options = {}) {
 }
 
 function validateTerminalPacket(packet) {
+  try { packet = trustedDataCopy(packet); } catch (_) { fail('TERMINAL_PACKET_INVALID'); }
   const keys = ['contract_version', 'run_id', 'outcome', 'reason_code', 'evidence_digest', 'workspace_disposition', 'publication_state', 'web_handoff'];
   if (!exactKeys(packet, keys) || packet.contract_version !== CONTRACTS[4] || !isSafeId(packet.run_id)
     || !Object.prototype.hasOwnProperty.call(TERMINAL_OUTCOMES, packet.outcome) || !isSafeId(packet.reason_code)
@@ -1103,6 +1243,7 @@ function validateTerminalPacket(packet) {
 }
 
 function completeRun(options = {}) {
+  options = trustedCallbackShell(options, 'GPR_PACKET_ADMISSION_REQUIRED');
   const suppliedContext = semanticContextForRun(options.run);
   const run = validateRunReceipt(options.run);
   if (suppliedContext) bindSemanticContext(run, suppliedContext);
@@ -1167,7 +1308,9 @@ function completeRun(options = {}) {
 }
 
 function finalizeWorkspace(options = {}) {
-  const facts = options.facts || {};
+  options = trustedCallbackShell(options, 'WORKSPACE_FACTS_INVALID');
+  let facts;
+  try { facts = trustedDataCopy(options.facts || {}); } catch (_) { fail('WORKSPACE_FACTS_INVALID'); }
   if (!isRecord(facts)) fail('WORKSPACE_FACTS_INVALID');
   const disposition = facts.uncertain === true || facts.interrupted === true || facts.terminal_evidence_durable !== true
     ? 'quarantined'
@@ -1177,6 +1320,7 @@ function finalizeWorkspace(options = {}) {
 }
 
 function cleanupWorkspace(options = {}) {
+  options = trustedCallbackShell(options, 'WORKSPACE_CLEANUP_UNAVAILABLE');
   const decision = finalizeWorkspace(options);
   if (!decision.removable) return decision;
   if (options.force === true || !isSafeHandle(options.workspace_handle)) fail('WORKSPACE_CLEANUP_UNAVAILABLE');
@@ -1614,6 +1758,7 @@ function releaseMutationLease(options = {}) {
 }
 
 function prepareRetry(options = {}) {
+  options = trustedCallbackShell(options, 'RETRY_NOT_AUTHORIZED');
   const previous = validateRunReceipt(options.previous_run);
   if (previous.publication_state === 'uncertain') return { status: 'blocked', reason_code: 'PUBLICATION_UNCERTAIN', launches: [] };
   if (!isSafeId(options.run_id) || options.run_id === previous.run_id) return { status: 'blocked', reason_code: 'FRESH_RUN_REQUIRED', launches: [] };
@@ -1635,6 +1780,7 @@ function prepareRetry(options = {}) {
 }
 
 function admitRun(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
   const route = admitRoute(options);
   if (route.status !== 'admitted') return { ...route, launches: [] };
   try {
@@ -1649,6 +1795,7 @@ function admitRun(options = {}) {
 }
 
 function startDelegatedRun(options = {}) {
+  options = trustedCallbackShell(options, 'START_RUN_EVIDENCE_REQUIRED');
   const evidence = validateRunEvidence(options, 'workspace-ready', 'START');
   if (!evidence.routePlan.delegated) fail('DELEGATED_ROUTE_REQUIRED');
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);

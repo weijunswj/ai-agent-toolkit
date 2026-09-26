@@ -328,6 +328,10 @@ function packetStringIsUnicodeScalar(value) {
 }
 
 function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, location = 'value', depth = 0) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID'); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
   state.nodes += 1;
   if (state.nodes > AUTHORITY_PACKET_LIMITS.valueNodes || depth > AUTHORITY_PACKET_LIMITS.nestingDepth) {
     packetFail('GPR_PACKET_LIMIT');
@@ -389,7 +393,12 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
         if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) {
           packetFail('GPR_PACKET_VALUE_INVALID');
         }
-        result[index] = packetClosedClone(descriptor.value, state, `${location}[${index}]`, depth + 1);
+        Object.defineProperty(result, name, {
+          value: packetClosedClone(descriptor.value, state, `${location}[${index}]`, depth + 1),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return result;
     }
@@ -400,7 +409,12 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
       if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) {
         packetFail('GPR_PACKET_VALUE_INVALID');
       }
-      result[name] = packetClosedClone(descriptor.value, state, `${location}.${name}`, depth + 1);
+      Object.defineProperty(result, name, {
+        value: packetClosedClone(descriptor.value, state, `${location}.${name}`, depth + 1),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return result;
   } finally {
@@ -410,18 +424,28 @@ function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, locatio
 
 function packetParseInput(value) {
   if (typeof value === 'string') return { value, serialized: true };
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID'); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
   let isBuffer = false;
   try { isBuffer = Buffer.isBuffer(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
   if (isBuffer) {
-    if (value.length >= 3 && value[0] === 0xef && value[1] === 0xbb && value[2] === 0xbf) {
-      packetFail('GPR_PACKET_VALUE_INVALID');
-    }
-    let decoded;
+    let bytes;
     try {
-      decoded = new TextDecoder('utf-8', { fatal: true }).decode(value);
-    } catch (_) {
-      packetFail('GPR_PACKET_VALUE_INVALID');
-    }
+      if (Object.getPrototypeOf(value) !== Buffer.prototype || Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
+      for (const name of Object.getOwnPropertyNames(value)) {
+        if (!/^(0|[1-9]\d*)$/.test(name)) packetFail('GPR_PACKET_VALUE_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true
+          || !Number.isInteger(descriptor.value) || descriptor.value < 0 || descriptor.value > 255) packetFail('GPR_PACKET_VALUE_INVALID');
+      }
+      bytes = Uint8Array.prototype.slice.call(value);
+    } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) packetFail('GPR_PACKET_VALUE_INVALID');
+    let decoded;
+    try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
     return { value: decoded, serialized: true };
   }
   return { value, serialized: false };
@@ -856,6 +880,11 @@ function packetValidateBody(value, stage) {
 }
 
 function validateAuthorityPacket(value, expected = undefined) {
+  let trustedExpected;
+  if (expected !== undefined) {
+    try { trustedExpected = packetClosedClone(expected); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
   const normalized = packetCanonicalInput(value);
   if (!isRecord(normalized) || !exactKeys(normalized, AUTHORITY_PACKET_KEYS)) packetFail('GPR_PACKET_VALUE_INVALID');
   if (normalized.schema !== AUTHORITY_PACKET_SCHEMA_ID) packetFail('GPR_PACKET_SCHEMA_UNSUPPORTED');
@@ -865,7 +894,8 @@ function validateAuthorityPacket(value, expected = undefined) {
   let canonical;
   try { canonical = canonicalSerialize(normalized); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
   if (Buffer.byteLength(canonical, 'utf8') > AUTHORITY_PACKET_LIMITS.artifactBytes) packetFail('GPR_PACKET_LIMIT');
-  if (expected !== undefined) {
+  if (trustedExpected !== undefined) {
+    expected = trustedExpected;
     if (!isRecord(expected) || !exactKeys(expected, [
       'packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'bindings', 'canonical_packet_bytes'
     ].filter((key) => Object.hasOwn(expected, key)))) packetFail('GPR_PACKET_VALUE_INVALID');
@@ -3179,7 +3209,19 @@ function packetBuildAcceptance(config, boundReaders, packetId) {
   return deepFreeze({ acceptance, acceptance_event_id: event.event_id, duplicate: event.duplicate });
 }
 
+function packetClosedConsumerIntent(value, rejectionCode) {
+  if (value === null || typeof value !== 'object') packetFail(rejectionCode);
+  let intent;
+  try { intent = packetClosedClone(value); } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_VALUE_INVALID') packetFail(rejectionCode);
+    throw error;
+  }
+  if (!isRecord(intent)) packetFail(rejectionCode);
+  return intent;
+}
+
 function packetBuildCurrentProjection(config, boundReaders, consumerIntent) {
+  consumerIntent = packetClosedConsumerIntent(consumerIntent, 'GPR_PACKET_CURRENT_UNVERIFIED');
   const authorityObservation = packetReadAuthorityObservation(boundReaders, consumerIntent);
   const candidateObservation = packetReadCandidateObservation(boundReaders, consumerIntent, consumerIntent.candidate === undefined ? null : consumerIntent.candidate);
   const candidate = candidateObservation.candidate;
@@ -3350,7 +3392,7 @@ function semanticGateAssertProof(record, proof) {
 }
 
 function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent) {
-  if (!isRecord(consumerIntent)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  consumerIntent = packetClosedConsumerIntent(consumerIntent, 'GPR_PACKET_ADMISSION_REQUIRED');
   const verification = packetVerifySemanticDependencies(config, boundReaders, consumerIntent, {
     operation: consumerIntent.operation || consumerIntent.stage || consumerIntent.consumer && consumerIntent.consumer.stage
   });
@@ -5029,22 +5071,25 @@ function validateAuthorityPacketReaders(value, requireScreen = false) {
     if (requireScreen) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     return null;
   }
-  if (!isRecord(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-  try {
-    if (utilTypes.isProxy(value) || Object.getOwnPropertySymbols(value).length > 0) {
-      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-    }
-  } catch (_) {
-    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+    catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
   }
-  for (const key of Object.keys(value)) {
+  if (!isRecord(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  let names;
+  try {
+    names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  } catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  for (const key of names) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || descriptor.get || descriptor.set) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
   for (const key of ['readAuthority', 'readStart', 'screenPacket', 'readBackfillSource']) {
-    if (Object.hasOwn(value, key) && typeof value[key] !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor && typeof descriptor.value !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
-  if (requireScreen && typeof value.screenPacket !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  if (requireScreen && typeof Object.getOwnPropertyDescriptor(value, 'screenPacket')?.value !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
   return value;
 }
 
@@ -5064,7 +5109,7 @@ function captureAuthorityPacketReaders(value) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor || descriptor.get || descriptor.set) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     values.set(key, descriptor.value);
-    bound[key] = descriptor.value;
+    Object.defineProperty(bound, key, { value: descriptor.value, enumerable: true, writable: false, configurable: false });
   }
   const snapshot = { bound: Object.freeze(bound), keys: Object.freeze(keys), values };
   AUTHORITY_PACKET_READER_OWNERS.set(value, snapshot);
@@ -5072,6 +5117,9 @@ function captureAuthorityPacketReaders(value) {
 }
 
 function authorityPacketReadersUnchanged(value, snapshot) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) return false; } catch (_) { return false; }
+  }
   if (!isRecord(value) || Object.keys(value).sort().join('\u0000') !== snapshot.keys.join('\u0000')
     || Object.getOwnPropertySymbols(value).length > 0) return false;
   for (const key of snapshot.keys) {
@@ -5088,13 +5136,16 @@ function callTrustedReaderSync(reader, argument, code) {
     if (error instanceof GprError && error.packetBoundary) throw error;
     packetFail(code);
   }
-  if (result && typeof result.then === 'function') packetFail(code);
-  return result;
+  try { return packetClosedClone(result); }
+  catch (_) { packetFail(code); }
 }
 
 function packetBindingsFromAdmission(admission) {
-  if (!isRecord(admission)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-  const candidate = admission.bindings || admission.expected_bindings;
+  let normalized;
+  try { normalized = packetClosedClone(admission); }
+  catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  if (!isRecord(normalized)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const candidate = normalized.bindings || normalized.expected_bindings;
   if (!candidate) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   let bindings;
   try { bindings = packetClosedClone(candidate); } catch (error) {
@@ -5107,6 +5158,8 @@ function packetBindingsFromAdmission(admission) {
 
 function verifyPacketProducerAdmission(packet, admission, readers) {
   if (!readers || typeof readers.readAuthority !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  try { admission = packetClosedClone(admission); }
+  catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
   const bindings = packetBindingsFromAdmission(admission);
   if (canonicalSerialize(bindings) !== canonicalSerialize(packet.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
   let observedAuthority;
@@ -5219,6 +5272,13 @@ function packetDeliveryEnvelope(identities, config, storeIdentityDigest, runtime
 }
 
 function validateAuthorityPacketDelivery(delivery, expected = {}) {
+  try {
+    delivery = packetClosedClone(delivery);
+    expected = packetClosedClone(expected);
+  } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_LIMIT') throw error;
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
   if (!isRecord(delivery) || !exactKeys(delivery, ['envelope', 'packet']) || !isRecord(delivery.envelope)) {
     packetFail('GPR_PACKET_READBACK_FAILED');
   }
@@ -5277,6 +5337,10 @@ function validateAuthorityPacketDelivery(delivery, expected = {}) {
 }
 
 function validateAuthorityPacketDeliveryProcessResult(result, expected) {
+  try {
+    result = packetClosedClone(result);
+    expected = packetClosedClone(expected);
+  } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
   if (!result || result.error || result.signal || result.status !== 0
     || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
     || Buffer.byteLength(result.stdout, 'utf8') > AUTHORITY_PACKET_LIMITS.deliveryBytes + 1

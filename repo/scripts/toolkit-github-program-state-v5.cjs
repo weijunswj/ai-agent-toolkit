@@ -2,6 +2,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 const receipt = require('./toolkit-github-program-receipt.cjs');
 const programmeSurface = require('./toolkit-programme-surface-v1.cjs');
@@ -877,6 +878,10 @@ function validateAuthorityPacketCandidate(value) {
       && isSha(value.tree_sha));
 }
 function validateHistoricalAuthorityPacketCurrent(value, expected = {}) {
+  try {
+    value = h2TrustedDataCopy(value);
+    expected = h2TrustedDataCopy(expected);
+  } catch (_error) { return false; }
   if (!packetExactKeys(value, ['schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'consumer', 'authority', 'candidate', 'predecessors'])
     || value.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA
     || value.repository !== REPOSITORY
@@ -925,6 +930,10 @@ function validateAuthorityPacketProducer(value) {
     && isPacketContractId(value.role);
 }
 function validateAuthorityPacketCurrent(value, expected = {}) {
+  try {
+    value = h2TrustedDataCopy(value);
+    expected = h2TrustedDataCopy(expected);
+  } catch (_error) { return false; }
   if (!validateHistoricalAuthorityPacketCurrent(value, expected)
     || !isPacketContractId(value.lane_id)
     || !isPacketContractId(value.consumer.run)
@@ -3725,8 +3734,18 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.10.9';
+const H2_PACKAGE_VERSION = '2.10.10';
 const H2_VERSION = 'human-v2';
+const H2_RENDERER_REVISION = 'human-v2-r093';
+const H2_J_PRODUCER_COMMIT = 'da984fbac48c5a825e8d172cb528becd50749cd2';
+const H2_J_PRODUCER_BLOB = 'c3b7a609b8945f9aaaf6b7faed4be4737f3fba31';
+const H2_J_BODY_BYTES = 29752;
+const H2_J_BODY_SHA256 = '852022dccd148282490b1ef0588de9ce55a6a9c1a01edbc68550bf9e32ed693a';
+const H2_J_CANONICAL_SHA256 = '4122eead6382d95be5e0593d2e2f35b54a6c07bf8592cf4c5a5d9a67ee8b95c2';
+const H2_K_BODY_BYTES = 4963;
+const H2_K_BODY_SHA256 = '7eda5575a502e0309bf397ba89dd9751e1e42984263b7963a346db8120bbdeff';
+const H2_K_CANONICAL_SHA256 = 'e0e2d56c874767108f8e0e7bd56a526c2421def93ad70a1f66affd8b925c14f8';
+const H2_K_GRAPH_SHA256 = 'fce04a50b5818862f2eb4dcad12195e77bc04ef1fd85c0af54304bd8ecc38ed9';
 const H2_CANONICAL_CLASS = 'canonical-programme-state';
 const H2_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';
 const H2_BIND_AUTHORITY_SCHEMA = 'github.program.bind-pr-number.v1';
@@ -3807,6 +3826,57 @@ const H2_MARKERS = Object.freeze({
 });
 
 function h2Own(value, key) { return Object.prototype.hasOwnProperty.call(value, key); }
+function h2TrustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || Object.is(value, -0)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw h2Error('INPUT_KEY_UNEXPECTED', 'INPUT'); }
+    catch (error) { if (error?.h2_code) throw error; throw h2Error('INPUT_KEY_UNEXPECTED', 'INPUT'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !h2Own(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) {
+        throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+      }
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !h2Own(descriptor, 'value') || !descriptor.enumerable) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !h2Own(descriptor, 'value') || !descriptor.enumerable) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+        Object.defineProperty(result, String(index), {
+          value: h2TrustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !h2Own(descriptor, 'value') || !descriptor.enumerable) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+      Object.defineProperty(result, name, {
+        value: h2TrustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true,
+      });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
 function h2Error(code, stage) {
   const error = new Error(code);
   error.h2_code = code;
@@ -3818,7 +3888,9 @@ function h2Require(condition, _legacyBoolean, code, stage) {
   return condition;
 }
 function h2IsPlain(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value === null || typeof value !== 'object') return false;
+  try { if (utilTypes.isProxy(value)) return false; } catch (_error) { return false; }
+  if (Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) return false;
   const names = Object.getOwnPropertyNames(value);
@@ -3863,6 +3935,10 @@ function h2ForbiddenUnicode(value) {
   return false;
 }
 function h2Canonical(value, seen = new Set()) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL'); }
+    catch (error) { if (error?.h2_code) throw error; throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL'); }
+  }
   if (value === null) return 'null';
   if (typeof value === 'string') {
     if (h2ForbiddenUnicode(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
@@ -3928,6 +4004,9 @@ function h2AuditScalar(value) {
     && !H2_STRUCTURAL_TOKENS.some((token) => value.includes(token));
 }
 function h2Audit(value, seen = new Set()) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) return false; } catch (_error) { return false; }
+  }
   if (typeof value === 'string') return h2AuditScalar(value);
   if (value === null || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isSafeInteger(value);
@@ -4294,6 +4373,22 @@ function h2ValidateToolkitState(value) {
   return true;
 }
 
+function h2NormalizeGenericOptionals(value) {
+  const state = h2Clone(value);
+  const omitEmpty = (record, key) => {
+    if (Array.isArray(record[key]) && record[key].length === 0) delete record[key];
+  };
+  for (const key of ['dependencies', 'extensions']) omitEmpty(state, key);
+  for (const child of state.children) {
+    for (const key of ['dependencies', 'holds', 'deliverables']) omitEmpty(child, key);
+  }
+  for (const lane of state.active_lanes) omitEmpty(lane, 'work_claims');
+  for (const extension of state.extensions || []) {
+    for (const outcome of extension.outcomes || []) omitEmpty(outcome, 'reference_issue_pointers');
+  }
+  return state;
+}
+
 function h2ValidateHistoryEntry(value, sourceRepository = null) {
   const keys = ['descriptor', 'bound_authority', 'registry'];
   h2Require(h2Exact(value, keys), true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
@@ -4434,7 +4529,8 @@ function h2Relationship(state, history, legacyCompatibilityOnly = false) {
   }
   return { evidence, descriptorByPr, registryByPr };
 }
-function h2ValidateState(value) {
+function h2ValidateState(value, options = {}) {
+  value = h2TrustedDataCopy(value);
   h2Require(h2IsPlain(value), true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
   h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
   const history = h2ValidateHistoryContainer(value[H2_HISTORY_KEY], value.repository || null);
@@ -4446,10 +4542,12 @@ function h2ValidateState(value) {
     h2Require(legacyCompatibilityOnly, true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
   } else {
     h2Require(h2ValidateGenericState(base), true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
-    if (programmeSurface.findGraphMetadata(base)) programmeSurface.deriveProgrammeGraph(base, history);
   }
   h2Relationship(base, history, legacyCompatibilityOnly);
-  return { state: h2Clone(value), canonical_sha256: h2Digest(value), history };
+  const preserveHistoricalIdentity = legacyCompatibilityOnly || options.historical === true;
+  const state = preserveHistoricalIdentity ? h2Clone(value) : h2NormalizeGenericOptionals(value);
+  if (!legacyCompatibilityOnly && programmeSurface.findGraphMetadata(state)) programmeSurface.deriveProgrammeGraph(state, history);
+  return { state, canonical_sha256: h2Digest(state), history };
 }
 
 function h2BoundaryCategory(value) {
@@ -4656,6 +4754,22 @@ function h2EncodeText(value, context) {
   return result;
 }
 function h2Cell(value) { return h2EncodeText(String(value), 'cell'); }
+function h2AssembleProgrammeGraph(graph) {
+  h2Require(graph && graph.schema === programmeSurface.GRAPH_SCHEMA && Array.isArray(graph.outcomes), true,
+    'PROGRAMME_GRAPH_RENDERER_INVALID', 'PUBLIC_AUDIT');
+  h2Require(h2Audit(graph), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  const lines = [
+    '## Programme Graph',
+    '',
+    '| Outcome | Status | Current gate | Current work | Complete when |',
+    '| --- | --- | --- | --- | --- |',
+  ];
+  for (const node of graph.outcomes) {
+    h2Require(Array.isArray(node.complete_when), true, 'PROGRAMME_GRAPH_RENDERER_INVALID', 'PUBLIC_AUDIT');
+    lines.push(`| ${h2Cell(node.outcome_id)} | ${h2Cell(node.status)} | ${h2Cell(node.current_gate === null ? '-' : node.current_gate)} | ${h2Cell(node.current_work === null ? '-' : node.current_work)} | ${h2Cell(node.complete_when.join('; '))} |`);
+  }
+  return lines;
+}
 function h2Paragraph(value) { return h2EncodeText(String(value), 'paragraph'); }
 function h2Heading(value) { return h2EncodeText(String(value), 'heading'); }
 function h2Bullet(value) { return '- ' + h2EncodeText(String(value), 'bullet'); }
@@ -4732,6 +4846,12 @@ function h2LinesForArray(values, empty = 'None recorded.') {
     return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text) ? h2UrlNode(text, text) : h2Bullet(item);
   }) : [h2Paragraph(empty)];
 }
+function h2AppendOptionalArraySection(lines, heading, values) {
+  if (values.length > 0) {
+    if (lines.at(-1) !== '') lines.push('');
+    lines.push(heading, ...h2LinesForArray(values));
+  }
+}
 function h2ManagedDocument(style, kind, prose, carrier) {
   const marker = style[kind];
   h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
@@ -4769,9 +4889,74 @@ function h2ParentProse(state, projection) {
     '| Finality | ' + h2Cell(projection.finality) + ' |',
     '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
   ];
-  if (graph) lines.push(...programmeSurface.renderProgrammeGraph(graph, h2Cell));
+  if (graph) lines.push(...h2AssembleProgrammeGraph(graph));
   else {
-    lines.push('## Children', '| Issue | Order | Lifecycle | Finality | Summary |', '| --- | --- | --- | --- | --- |');
+    lines.push('', '## Children', '| Issue | Order | Lifecycle | Finality | Summary |', '| --- | --- | --- | --- | --- |');
+    for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
+  }
+  lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
+  h2AppendOptionalArraySection(lines, '## Completed work', projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary));
+  h2AppendOptionalArraySection(lines, '## Boundaries', projection.boundaries.map((item) => '[' + item.category + '] ' + item.text));
+  if (projection.pr_history.length) {
+    lines.push('', '## PR history', '| PR | Child | Epoch | Outcome | Summary |', '| --- | --- | --- | --- | --- |');
+    for (const item of projection.pr_history) lines.push('| #' + h2Identifier(item.pr) + ' | #' + h2Identifier(item.child_issue) + ' | ' + h2Cell(item.epoch_id || '-') + ' | ' + h2Cell(item.outcome) + ' | ' + h2Cell(item.summary) + ' |');
+    lines.push('');
+  }
+  if (lines.at(-1) !== '') lines.push('');
+  lines.push('## ELI5', h2Paragraph('The parent is the one source of programme truth; child and PR views are derived from it.'), '');
+  lines.push('## Immediate next', h2Bullet(projection.next_action.text));
+  return lines;
+}
+function h2ChildProse(projection) {
+  const lines = [
+    '# ' + h2Heading(projection.title),
+    '',
+    '## Status / summary',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Cell(projection.repository) + ' |',
+    '| Parent | #' + h2Identifier(projection.parent_issue) + ' |',
+    '| Child | #' + h2Identifier(projection.child_issue) + ' |',
+    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
+    '| Finality | ' + h2Cell(projection.finality) + ' |',
+    '',
+    h2Paragraph(projection.summary),
+    '',
+    '## Objective', h2Paragraph(projection.objective),
+  ];
+  h2AppendOptionalArraySection(lines, '## Scope', projection.scope);
+  h2AppendOptionalArraySection(lines, '## Boundaries', projection.boundaries.map((item) => '[' + item.category + '] ' + item.text));
+  lines.push('', '## Completion criteria', ...h2LinesForArray(projection.done_when));
+  h2AppendOptionalArraySection(lines, '## Out of scope', projection.out_of_scope);
+  if (projection.epochs.length) {
+    lines.push('', '## Epochs / phases', '| Epoch | Name | State | Purpose | Outcome |', '| --- | --- | --- | --- | --- |');
+    for (const epoch of projection.epochs) lines.push('| ' + h2Cell(epoch.id) + ' | ' + h2Cell(epoch.name) + ' | ' + h2Cell(epoch.state) + ' | ' + h2Cell(epoch.purpose) + ' | ' + h2Cell(epoch.outcome) + ' |');
+  }
+  if (projection.pr_history.length) {
+    lines.push('', '## PR history', '| PR | Epoch | Outcome | Summary |', '| --- | --- | --- | --- |');
+    for (const row of projection.pr_history) lines.push('| #' + h2Identifier(row.pr) + ' | ' + h2Cell(row.epoch_id || '-') + ' | ' + h2Cell(row.outcome) + ' | ' + h2Cell(row.summary) + ' |');
+  }
+  lines.push('', '## ELI5', h2Paragraph(projection.eli5), '', '## Immediate next', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text));
+  return lines;
+}
+function h2ParentProseHistorical(state, projection) {
+  const graph = projection.programme_graph
+    ? programmeSurface.deriveProgrammeGraph(state, h2ValidateHistoryContainer(state[H2_HISTORY_KEY], state.repository)) : null;
+  const lines = [
+    '# AI Agent Toolkit Programme',
+    '',
+    '## Programme status',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Cell(projection.repository) + ' |',
+    '| Parent issue | #' + h2Identifier(projection.parent_issue) + ' |',
+    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
+    '| Finality | ' + h2Cell(projection.finality) + ' |',
+    '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
+  ];
+  if (graph) lines.push(...h2AssembleProgrammeGraph(graph));
+  else {
+    lines.push('', '## Children', '| Issue | Order | Lifecycle | Finality | Summary |', '| --- | --- | --- | --- | --- |');
     for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
   }
   lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
@@ -4784,7 +4969,7 @@ function h2ParentProse(state, projection) {
   lines.push('## Immediate next', h2Bullet(projection.next_action.text));
   return lines;
 }
-function h2ChildProse(projection) {
+function h2ChildProseHistorical(projection) {
   const lines = [
     '# ' + h2Heading(projection.title),
     '',
@@ -5087,6 +5272,72 @@ function h2BuildPrTypedDocument(projection) {
     '### Summary', h2Paragraph(descriptor.summary),
     '',
     '### Purpose', h2Paragraph(descriptor.purpose),
+  ];
+  for (const [field, heading] of [
+    ['changed_surfaces', '### Changed surfaces'],
+    ['scope', '### Scope'],
+    ['out_of_scope', '### Out of scope'],
+    ['design_constraints', '### Design constraints'],
+    ['validation_requirements', '### Validation requirements'],
+    ['evidence_refs', '### Evidence references'],
+    ['repair_history', '### Repair history'],
+    ['before_after', '### Before and after'],
+    ['repair_budget', '### Repair budget'],
+    ['hosted_qualification', '### Hosted qualification'],
+    ['recovery_evidence', '### Recovery evidence'],
+  ]) h2AppendOptionalArraySection(lines, heading, descriptor[field]);
+  lines.push('', '### ELI5 at creation', h2Paragraph(descriptor.eli5_at_creation), '', '## What happens next', h2Bullet(current.next_action));
+  return lines;
+}
+function h2BuildPrTypedDocumentHistorical(projection) {
+  const checked = h2ValidatePrPhaseProjection(projection);
+  const current = checked.current_derived;
+  const structural = checked.structural_provenance;
+  const descriptor = checked.descriptor_at_creation;
+  return [
+    '# Pull request candidate',
+    '',
+    '## Current phase',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Phase | ' + h2Cell(checked.phase) + ' |',
+    '| Authority | ' + h2Cell(current.authority_presence) + ' |',
+    '| Number state | ' + h2Cell(current.number_state) + ' |',
+    '| PR number | ' + (current.pr_number === null ? h2Cell('pending provider assignment') : '#' + h2Identifier(current.pr_number)) + ' |',
+    '',
+    '## Programme position',
+    'These fields identify programme and candidate provenance only. They do not assert current provider state, gate activation, reviews, checks, Draft, Ready, merge, or finality.',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Root | ' + h2Cell(structural.root) + ' |',
+    '| Lock | ' + h2Cell(structural.lock) + ' |',
+    '| Repository | ' + h2Cell(structural.repository) + ' |',
+    '| Parent | #' + h2Identifier(structural.parent_issue) + ' |',
+    '| Child | #' + h2Identifier(structural.child_issue) + ' |',
+    '| Epoch | ' + h2Cell(structural.epoch_id) + ' |',
+    '| Gate | ' + h2Cell(structural.gate) + ' |',
+    '| Role | ' + h2Cell(structural.role) + ' |',
+    '| Completes child | ' + h2Cell(String(structural.completes_child)) + ' |',
+    '',
+    '## Candidate / lineage',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Lineage(structural.candidate.repository, 'repository') + ' |',
+    '| Branch | ' + h2Lineage(structural.candidate.branch, 'branch') + ' |',
+    '| Base ref | ' + h2Lineage(structural.candidate.base_ref, 'base_ref') + ' |',
+    '| Base SHA | ' + h2Lineage(structural.candidate.base_sha, 'base_sha') + ' |',
+    '| Head | ' + h2Lineage(structural.candidate.head, 'head') + ' |',
+    '| Tree | ' + h2Lineage(structural.candidate.tree, 'tree') + ' |',
+    '| Version | ' + h2Lineage(structural.candidate.version, 'version') + ' |',
+    '| Descriptor digest | ' + h2Cell(structural.descriptor_sha256) + ' |',
+    '| Candidate digest | ' + h2Cell(structural.candidate_sha256) + ' |',
+    '',
+    descriptor.heading,
+    h2Paragraph(descriptor.preamble),
+    '',
+    '### Summary', h2Paragraph(descriptor.summary),
+    '',
+    '### Purpose', h2Paragraph(descriptor.purpose),
     '',
     '### Changed surfaces', ...h2LinesForArray(descriptor.changed_surfaces),
     '',
@@ -5114,7 +5365,6 @@ function h2BuildPrTypedDocument(projection) {
     '',
     '## What happens next', h2Bullet(current.next_action),
   ];
-  return lines;
 }
 function h2PrProse(projection) {
   return h2BuildPrTypedDocument(projection);
@@ -5125,6 +5375,34 @@ function h2BuildParentDoc(state, options = {}) {
   if (options.historicalGraphless === true) delete projection.programme_graph;
   if (options.requireGraph === true && !projection.programme_graph) throw h2Error('PROGRAMME_GRAPH_METADATA_REQUIRED', 'CANONICAL');
   const style = h2MarkerStyleForState(checked.state);
+  const graphIdentity = projection.programme_graph ? programmeSurface.programmeGraphIdentity(
+    programmeSurface.deriveProgrammeGraph(checked.state, checked.history),
+  ) : null;
+  const carrier = {
+    schema: H2_PARENT_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    renderer_revision: H2_RENDERER_REVISION,
+    kind: 'parent',
+    repository: checked.state.repository,
+    parent_issue: checked.state.parent.issue,
+    canonical: { schema: checked.state.schema, class: H2_CANONICAL_CLASS, digest: checked.canonical_sha256, state: h2Clone(checked.state) },
+    ...(graphIdentity ? { programme_graph: graphIdentity } : {}),
+    projection: {
+      schema: H2_PARENT_PROJECTION_SCHEMA,
+      digest: h2Digest(projection),
+      ...(graphIdentity ? { programme_graph: graphIdentity } : {}),
+    },
+    public_prose_sha256: null,
+  };
+  const prose = h2ParentProse(checked.state, projection);
+  const document = h2ManagedDocument(style, 'parent', prose, carrier);
+  h2Require(document.carrier.projection.digest === h2Digest(projection), true, 'PROJECTION_DIGEST_INVALID', 'PUBLIC_AUDIT');
+  return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), kind: 'parent', format: 'human-v2' };
+}
+function h2BuildParentDocHistorical(state, options = {}) {
+  const checked = h2ValidateState(state, { historical: true });
+  const projection = h2ProjectionState(checked.state, checked.history);
+  if (options.historicalGraphless === true) delete projection.programme_graph;
   const graphIdentity = projection.programme_graph ? programmeSurface.programmeGraphIdentity(
     programmeSurface.deriveProgrammeGraph(checked.state, checked.history),
   ) : null;
@@ -5143,15 +5421,32 @@ function h2BuildParentDoc(state, options = {}) {
     },
     public_prose_sha256: null,
   };
-  const prose = h2ParentProse(checked.state, projection);
-  const document = h2ManagedDocument(style, 'parent', prose, carrier);
-  h2Require(document.carrier.projection.digest === h2Digest(projection), true, 'PROJECTION_DIGEST_INVALID', 'PUBLIC_AUDIT');
+  const document = h2ManagedDocument(h2MarkerStyleForState(checked.state), 'parent', h2ParentProseHistorical(checked.state, projection), carrier);
   return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), kind: 'parent', format: 'human-v2' };
 }
 function h2BuildChildDoc(state, issue) {
   const checked = h2ValidateState(state);
   const projection = h2ProjectionChild(checked.state, checked.history, issue);
   const style = h2MarkerStyleForState(checked.state);
+  const carrier = {
+    schema: H2_CHILD_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    renderer_revision: H2_RENDERER_REVISION,
+    kind: 'child',
+    repository: checked.state.repository,
+    parent_issue: checked.state.parent.issue,
+    child_issue: issue,
+    canonical: { schema: checked.state.schema, class: H2_CANONICAL_CLASS, digest: checked.canonical_sha256 },
+    projection: { schema: H2_CHILD_PROJECTION_SCHEMA, digest: h2Digest(projection) },
+    public_prose_sha256: null,
+  };
+  const prose = h2ChildProse(projection);
+  const document = h2ManagedDocument(style, 'child', prose, carrier);
+  return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), child_issue: issue, kind: 'child', format: 'human-v2' };
+}
+function h2BuildChildDocHistorical(state, issue) {
+  const checked = h2ValidateState(state, { historical: true });
+  const projection = h2ProjectionChild(checked.state, checked.history, issue);
   const carrier = {
     schema: H2_CHILD_CARRIER_SCHEMA,
     version: H2_VERSION,
@@ -5163,8 +5458,7 @@ function h2BuildChildDoc(state, issue) {
     projection: { schema: H2_CHILD_PROJECTION_SCHEMA, digest: h2Digest(projection) },
     public_prose_sha256: null,
   };
-  const prose = h2ChildProse(projection);
-  const document = h2ManagedDocument(style, 'child', prose, carrier);
+  const document = h2ManagedDocument(h2MarkerStyleForState(checked.state), 'child', h2ChildProseHistorical(projection), carrier);
   return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), child_issue: issue, kind: 'child', format: 'human-v2' };
 }
 function h2RenderArtifact(document, number, action) {
@@ -5207,6 +5501,7 @@ function h2BuildPrDoc(descriptor, authority) {
   const carrier = {
     schema: H2_PR_CARRIER_SCHEMA,
     version: H2_VERSION,
+    renderer_revision: H2_RENDERER_REVISION,
     kind: 'pr',
     repository: normalized.repository,
     pr_number: projection.current_derived.pr_number,
@@ -5229,11 +5524,34 @@ function h2BuildPrDoc(descriptor, authority) {
     format: 'human-v2',
   };
 }
+function h2BuildPrDocHistorical(descriptor, authority) {
+  const normalized = h2Descriptor(descriptor, 'AUTHORITY');
+  const bound = authority === null ? null : h2BoundAuthority(authority, normalized, 'AUTHORITY');
+  const projection = h2BuildPrPhaseProjection(normalized, bound);
+  const style = h2MarkerStyleForRepository(normalized.repository);
+  const carrier = {
+    schema: H2_PR_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    kind: 'pr',
+    repository: normalized.repository,
+    pr_number: projection.current_derived.pr_number,
+    number_state: projection.current_derived.number_state,
+    descriptor: { schema: H2_DESCRIPTOR_SCHEMA, digest: projection.structural_provenance.descriptor_sha256 },
+    candidate: { digest: projection.structural_provenance.candidate_sha256 },
+    authority_sha256: projection.structural_provenance.authority_sha256,
+    projection: { schema: H2_PR_PHASE_PROJECTION_SCHEMA, phase: projection.phase, digest: h2Digest(projection) },
+    public_prose_sha256: null,
+  };
+  const document = h2ManagedDocument(style, 'pr', h2BuildPrTypedDocumentHistorical(projection), carrier);
+  return { ...document, descriptor: normalized, bound_authority: bound, projection, projection_sha256: h2Digest(projection), kind: 'pr', format: 'human-v2' };
+}
 function h2ValidateCarrierShape(carrier, kind) {
   const common = ['schema', 'version', 'kind', 'repository'];
   if (!h2IsPlain(carrier) || carrier.version !== H2_VERSION || carrier.kind !== kind || !h2Repository(carrier.repository)) throw h2Error('CARRIER_INVALID', 'PARSE');
+  const revisionPresent = h2Own(carrier, 'renderer_revision');
+  h2Require(!revisionPresent || carrier.renderer_revision === H2_RENDERER_REVISION, true, 'CARRIER_INVALID', 'PARSE');
   if (kind === 'parent') {
-    h2Require(h2HasOnly(carrier, [...common, 'parent_issue', 'canonical', 'projection', 'public_prose_sha256'], ['programme_graph'])
+    h2Require(h2HasOnly(carrier, [...common, 'parent_issue', 'canonical', 'projection', 'public_prose_sha256'], ['programme_graph', 'renderer_revision'])
       && carrier.schema === H2_PARENT_CARRIER_SCHEMA && h2Issue(carrier.parent_issue), true, 'CARRIER_INVALID', 'PARSE');
     h2Require(h2Exact(carrier.canonical, ['schema', 'class', 'digest', 'state']) && carrier.canonical.class === H2_CANONICAL_CLASS
       && h2SafeLine(carrier.canonical.schema) && h2Hash(carrier.canonical.digest), true, 'CARRIER_INVALID', 'PARSE');
@@ -5245,13 +5563,13 @@ function h2ValidateCarrierShape(carrier, kind) {
         && carrier.programme_graph.schema === programmeSurface.GRAPH_SCHEMA && h2Hash(carrier.programme_graph.digest)
         && h2Comparable(carrier.programme_graph, carrier.projection.programme_graph)), true, 'CARRIER_INVALID', 'PARSE');
   } else if (kind === 'child') {
-    h2Require(h2Exact(carrier, [...common, 'parent_issue', 'child_issue', 'canonical', 'projection', 'public_prose_sha256'])
+    h2Require(h2Exact(carrier, [...common, 'parent_issue', 'child_issue', 'canonical', 'projection', 'public_prose_sha256', ...(revisionPresent ? ['renderer_revision'] : [])])
       && carrier.schema === H2_CHILD_CARRIER_SCHEMA && h2Issue(carrier.parent_issue) && h2Issue(carrier.child_issue), true, 'CARRIER_INVALID', 'PARSE');
     h2Require(h2Exact(carrier.canonical, ['schema', 'class', 'digest']) && carrier.canonical.class === H2_CANONICAL_CLASS
       && h2SafeLine(carrier.canonical.schema) && h2Hash(carrier.canonical.digest), true, 'CARRIER_INVALID', 'PARSE');
     h2Require(h2Exact(carrier.projection, ['schema', 'digest']) && carrier.projection.schema === H2_CHILD_PROJECTION_SCHEMA && h2Hash(carrier.projection.digest), true, 'CARRIER_INVALID', 'PARSE');
   } else {
-    h2Require(h2Exact(carrier, [...common, 'pr_number', 'number_state', 'descriptor', 'candidate', 'authority_sha256', 'projection', 'public_prose_sha256'])
+    h2Require(h2Exact(carrier, [...common, 'pr_number', 'number_state', 'descriptor', 'candidate', 'authority_sha256', 'projection', 'public_prose_sha256', ...(revisionPresent ? ['renderer_revision'] : [])])
       && carrier.schema === H2_PR_CARRIER_SCHEMA && (carrier.pr_number === null || h2Issue(carrier.pr_number))
       && ['PRE_NUMBER', 'BOUND'].includes(carrier.number_state), true, 'CARRIER_INVALID', 'PARSE');
     h2Require(h2Exact(carrier.descriptor, ['schema', 'digest']) && carrier.descriptor.schema === H2_DESCRIPTOR_SCHEMA && h2Hash(carrier.descriptor.digest)
@@ -5293,6 +5611,18 @@ function h2Expect(value) {
 function h2ParsedResult(envelope, kind, extra = {}) {
   return { ...extra, kind, format: envelope.classification.format, read: h2Clone(envelope.read), body: envelope.read.body, body_sha256: envelope.read.body_sha256 };
 }
+function h2HistoricalParentRevision(body, carrier) {
+  const bodyBytes = Buffer.byteLength(body, 'utf8');
+  const bodyDigest = sha256Text(body);
+  const canonicalDigest = carrier.canonical.digest;
+  if (bodyBytes === H2_J_BODY_BYTES && bodyDigest === H2_J_BODY_SHA256
+    && canonicalDigest === H2_J_CANONICAL_SHA256 && !h2Own(carrier, 'programme_graph')) return 'J';
+  if (bodyBytes === H2_K_BODY_BYTES && bodyDigest === H2_K_BODY_SHA256
+    && canonicalDigest === H2_K_CANONICAL_SHA256
+    && h2Own(carrier, 'programme_graph') && carrier.programme_graph.schema === programmeSurface.GRAPH_SCHEMA
+    && carrier.programme_graph.digest === H2_K_GRAPH_SHA256) return 'K';
+  throw h2Error('READBACK_MISMATCH', 'READBACK');
+}
 function h2ParseParentEnvelope(envelope, expected = null) {
   if (envelope.classification.format === 'legacy-v5') {
     h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
@@ -5301,17 +5631,21 @@ function h2ParseParentEnvelope(envelope, expected = null) {
     const valid = h2ValidateState(parsed.state);
     h2Require(valid.canonical_sha256 === parsed.envelope.canonical_digest, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
     if (expected) h2Require(parsed.state.repository === expected.repository && parsed.state.parent.issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
-    return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, legacy_compatibility_only: true, projection: h2ProjectionState(valid.state, valid.history), legacy_envelope: parsed.envelope });
+    return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, legacy_compatibility_only: true, historical_read_only: true, renderer_revision: null, projection: h2ProjectionState(valid.state, valid.history), legacy_envelope: parsed.envelope });
   }
   h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
   const parts = h2CarrierParts(envelope, 'parent');
-  const valid = h2ValidateState(parts.carrier.canonical.state);
+  const historical = !h2Own(parts.carrier, 'renderer_revision');
+  const historicalRevision = historical ? h2HistoricalParentRevision(envelope.read.body, parts.carrier) : null;
+  const valid = h2ValidateState(parts.carrier.canonical.state, { historical });
   h2Require(parts.carrier.canonical.schema === valid.state.schema && parts.carrier.canonical.digest === valid.canonical_sha256
     && parts.carrier.parent_issue === valid.state.parent.issue, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
   if (expected) h2Require(valid.state.repository === expected.repository && valid.state.parent.issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
-  const expectedDoc = h2BuildParentDoc(valid.state, { historicalGraphless: !h2Own(parts.carrier, 'programme_graph') });
+  const expectedDoc = historical
+    ? h2BuildParentDocHistorical(valid.state, { historicalGraphless: historicalRevision === 'J' })
+    : h2BuildParentDoc(valid.state, { requireGraph: valid.state.schema !== STATE_SCHEMA });
   h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, parts.carrier), true, 'READBACK_MISMATCH', 'READBACK');
-  return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier: parts.carrier });
+  return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier: parts.carrier, renderer_revision: historical ? null : H2_RENDERER_REVISION, historical_revision: historicalRevision, historical_read_only: historical });
 }
 function h2ParseChildEnvelope(envelope, expected = null, parentParsed = null) {
   if (envelope.classification.format === 'legacy-v5') {
@@ -5322,20 +5656,24 @@ function h2ParseChildEnvelope(envelope, expected = null, parentParsed = null) {
     if (expected) h2Require(parsed.envelope.repository === expected.repository && parsed.envelope.parent_issue === expected.parent_issue
       && parsed.envelope.number === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
     if (parentParsed) h2Require(parsed.envelope.canonical_digest === parentParsed.canonical_sha256, true, 'CHILD_SOURCE_MISMATCH', 'RELATIONSHIP');
-    return h2ParsedResult(envelope, 'child', { state: parentParsed?.state || null, canonical_sha256: parsed.envelope.canonical_digest, child_issue: parsed.envelope.number, legacy_compatibility_only: true, legacy_envelope: parsed.envelope, parent_state: parentParsed?.state || null });
+    return h2ParsedResult(envelope, 'child', { state: parentParsed?.state || null, canonical_sha256: parsed.envelope.canonical_digest, child_issue: parsed.envelope.number, legacy_compatibility_only: true, historical_read_only: true, renderer_revision: null, legacy_envelope: parsed.envelope, parent_state: parentParsed?.state || null });
   }
   h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
   const parts = h2CarrierParts(envelope, 'child');
   const carrier = parts.carrier;
+  const historical = !h2Own(carrier, 'renderer_revision');
   h2Require(carrier.canonical.schema && carrier.canonical.class === H2_CANONICAL_CLASS, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
   if (expected) h2Require(carrier.repository === expected.repository && carrier.parent_issue === expected.parent_issue && carrier.child_issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
   if (parentParsed) {
     h2Require(carrier.repository === parentParsed.state.repository && carrier.parent_issue === parentParsed.state.parent.issue
       && carrier.canonical.schema === parentParsed.state.schema && carrier.canonical.digest === parentParsed.canonical_sha256, true, 'CHILD_SOURCE_MISMATCH', 'RELATIONSHIP');
-    const expectedDoc = h2BuildChildDoc(parentParsed.state, carrier.child_issue);
+    const expectedDoc = historical
+      ? h2BuildChildDocHistorical(parentParsed.state, carrier.child_issue)
+      : h2BuildChildDoc(parentParsed.state, carrier.child_issue);
     h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, carrier), true, 'READBACK_MISMATCH', 'READBACK');
-    return h2ParsedResult(envelope, 'child', { state: parentParsed.state, parent_state: parentParsed.state, canonical_sha256: parentParsed.canonical_sha256, child_issue: carrier.child_issue, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier });
+    return h2ParsedResult(envelope, 'child', { state: parentParsed.state, parent_state: parentParsed.state, canonical_sha256: parentParsed.canonical_sha256, child_issue: carrier.child_issue, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier, renderer_revision: historical ? null : H2_RENDERER_REVISION, historical_read_only: historical || parentParsed.historical_read_only === true });
   }
+  if (historical) throw h2Error('CHILD_SOURCE_MISMATCH', 'RELATIONSHIP');
   h2Require(h2Hash(carrier.canonical.digest), true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
   return h2ParsedResult(envelope, 'child', { canonical_sha256: carrier.canonical.digest, child_issue: carrier.child_issue, carrier });
 }
@@ -5344,7 +5682,8 @@ function h2ParsePrEnvelope(envelope, descriptor, authority) {
   const parts = h2CarrierParts(envelope, 'pr');
   const normalized = h2Descriptor(descriptor, 'AUTHORITY');
   const bound = authority === null ? null : h2BoundAuthority(authority, normalized, 'AUTHORITY');
-  const expectedDoc = h2BuildPrDoc(normalized, bound);
+  const historical = !h2Own(parts.carrier, 'renderer_revision');
+  const expectedDoc = historical ? h2BuildPrDocHistorical(normalized, bound) : h2BuildPrDoc(normalized, bound);
   const expectedProjectionDigest = h2Digest(expectedDoc.projection);
   h2Require(expectedDoc.projection_sha256 === expectedProjectionDigest, true, 'PROJECTION_DIGEST_MISMATCH', 'READBACK');
   h2Require(parts.carrier.projection.schema === H2_PR_PHASE_PROJECTION_SCHEMA
@@ -5366,6 +5705,8 @@ function h2ParsePrEnvelope(envelope, descriptor, authority) {
     carrier: parts.carrier,
     pr_number: expectedDoc.projection.current_derived.pr_number,
     number_state: expectedDoc.projection.current_derived.number_state,
+    renderer_revision: historical ? null : H2_RENDERER_REVISION,
+    historical_read_only: historical,
   });
 }
 function h2ReadInternal(read, expected) {
@@ -5549,6 +5890,7 @@ function h2PublicReadProjection(projection) {
 function h2ReadCompletePublic(input) {
   return h2Call('readComplete', () => {
     h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    input = h2TrustedDataCopy(input);
     h2Require(h2IsPlain(input) && h2Exact(input, ['read', 'expect']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
     const parsed = h2ReadInternal(input.read, input.expect);
     const result = {
@@ -5556,6 +5898,8 @@ function h2ReadCompletePublic(input) {
       format: parsed.format,
       repository: parsed.kind === 'pr' ? parsed.descriptor.repository : parsed.state.repository,
       issue: parsed.kind === 'pr' ? (parsed.pr_number || null) : parsed.kind === 'parent' ? parsed.state.parent.issue : parsed.child_issue,
+      renderer_revision: parsed.renderer_revision || null,
+      historical_read_only: parsed.historical_read_only === true || parsed.legacy_compatibility_only === true,
       canonical_sha256: parsed.canonical_sha256 || null,
       body_sha256: parsed.body_sha256,
       read: parsed.read,
@@ -5581,6 +5925,7 @@ function h2ReadCompletePublic(input) {
 function h2RenderPublic(input) {
   return h2Call('render', () => {
     h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    input = h2TrustedDataCopy(input);
     h2Require(h2IsPlain(input) && h2Exact(input, ['source', 'target']) && h2IsPlain(input.source) && h2IsPlain(input.target), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
     const source = input.source;
     const target = input.target;
@@ -5590,6 +5935,9 @@ function h2RenderPublic(input) {
       h2Require(h2Exact(source, ['type', 'parent_read']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       h2Require(h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind']) || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
       const parent = h2ReadParentUnbound(source.parent_read);
+      if (parent.format === 'human-v2' && parent.historical_read_only === true && !parent.carrier?.programme_graph) {
+        throw h2Error('PROGRAMME_GRAPH_METADATA_REQUIRED', 'CANONICAL');
+      }
       document = target.kind === 'parent'
         ? h2BuildParentDoc(parent.state, { requireGraph: parent.state.schema !== STATE_SCHEMA })
         : h2BuildChildDoc(parent.state, target.issue);
@@ -5623,9 +5971,13 @@ function h2RenderPublic(input) {
 function h2ExtendHistoryPublic(input) {
   return h2Call('extendHistory', () => {
     h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    input = h2TrustedDataCopy(input);
     h2Require(h2IsPlain(input) && h2Exact(input, ['parent_read', 'decision', 'provider_observations'])
       && h2IsPlain(input.decision) && (input.provider_observations === null || Array.isArray(input.provider_observations)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
     const source = h2ReadParentUnbound(input.parent_read);
+    if (source.format === 'human-v2' && source.historical_read_only === true && !source.carrier?.programme_graph) {
+      throw h2Error('PROGRAMME_GRAPH_METADATA_REQUIRED', 'CANONICAL');
+    }
     const decision = h2ValidateDecision(input.decision, source);
     const target = h2ApplyHistory(source.state, decision);
     const targetValid = h2ValidateState(target);
@@ -5655,11 +6007,15 @@ function h2WritePlan(kind, issue, document) {
 function h2PlanMigrationPublic(input) {
   return h2Call('planMigration', () => {
     h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    input = h2TrustedDataCopy(input);
     h2Require(h2IsPlain(input) && h2Exact(input, ['parent_read', 'child_read', 'history_decision', 'provider_observations'])
       && h2IsPlain(input.parent_read) && h2IsPlain(input.child_read)
       && (input.history_decision === null || h2IsPlain(input.history_decision))
       && (input.provider_observations === null || Array.isArray(input.provider_observations)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
     const parent = h2ReadParentUnbound(input.parent_read);
+    if (parent.format === 'human-v2' && parent.historical_read_only === true && !parent.carrier?.programme_graph) {
+      throw h2Error('PROGRAMME_GRAPH_METADATA_REQUIRED', 'MIGRATION');
+    }
     const childEnvelope = h2ReadEnvelope(input.child_read);
     h2Require(childEnvelope.classification.kind === 'child', true, 'MIGRATION_INPUT_INVALID', 'MIGRATION');
     const childIssue = parent.state.children.find((item) => item.lifecycle === 'CURRENT')?.issue || CHILD_ISSUE;
@@ -5687,9 +6043,11 @@ function h2PlanMigrationPublic(input) {
         const document = h2BuildChildDoc(parent.state, childIssue);
         return h2Success('planMigration', 'MIGRATION_CHILD_WRITE_READY', 'MIGRATION', { action: 'WRITE_CHILD', writes: [h2WritePlan('child', childIssue, document)], write_count: 1, source_parent_format: parent.format, source_child_format: child.format, provider_observations: observations });
       }
-      const parsedChild = h2ParseChildEnvelope(childEnvelope, null, null);
+       const parsedChild = h2ParseChildEnvelope(childEnvelope, null, parent);
       h2Require(parsedChild.child_issue === childIssue, true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
-      const expected = h2BuildChildDoc(parent.state, childIssue);
+       const expected = parent.renderer_revision === null
+         ? h2BuildChildDocHistorical(parent.state, childIssue)
+         : h2BuildChildDoc(parent.state, childIssue);
       h2Require(expected.body === childEnvelope.read.body && h2Comparable(expected.carrier, parsedChild.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
       observations = h2ValidateProviderAssertions(input.provider_observations, parent.state, h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository));
       return h2Success('planMigration', 'MIGRATION_RECONCILED', 'MIGRATION', { action: 'RECONCILED', writes: [], write_count: 0, source_parent_format: parent.format, source_child_format: childEnvelope.classification.format, child_issue: childIssue, provider_observations: observations });

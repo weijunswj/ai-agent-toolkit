@@ -4,12 +4,14 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { types: utilTypes } = require('node:util');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.9';
+const CONTROL_VERSION = '2.10.10';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -37,8 +39,23 @@ const MAX_PROMPT_BYTES = 1024 * 1024;
 const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
 const MAX_CHECKER_INPUT_BYTES = 1024 * 1024;
 const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
+const REPOSITORY_TEST_RESOURCE_INVOCATION = 'toolkit.repository-test.resource.v1';
+const RESOURCE_TEST_CONTEXT = new AsyncLocalStorage();
+const NATIVE_RESOURCE_STATES = new WeakSet();
+const TEST_RESOURCE_STATES = new WeakSet();
+const REPOSITORY_TEST_RESOURCE_FIXTURE = Object.freeze({
+  source: 'repository-test-fixture',
+  fixture_id: 'healthy-resource-v1',
+  physical_total: 17179869184,
+  physical_available: 8589934592,
+  commit_total: 34359738368,
+  commit_available: 17179869184,
+  host_responsive: true,
+});
 
 function controlRoot(options = {}) {
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext) return testContext.root;
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
 }
 
@@ -74,6 +91,93 @@ function createPrivateFile(filePath, content = '') {
     fs.fchmodSync(fd, 0o600);
   } finally { fs.closeSync(fd); }
   verifyPrivateRegularFile(filePath);
+}
+
+function resourceDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error('Resource evidence is malformed.');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw new Error('Resource evidence is malformed.'); }
+    catch (_) { throw new Error('Resource evidence is malformed.'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('Resource evidence is malformed.');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new Error('Resource evidence is malformed.');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw new Error('Resource evidence is malformed.');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) throw new Error('Resource evidence is malformed.');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw new Error('Resource evidence is malformed.');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+        Object.defineProperty(result, String(index), { value: resourceDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('Resource evidence is malformed.');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+      Object.defineProperty(result, name, { value: resourceDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+
+function resourceOptionShell(options = {}) {
+  if (options === null || typeof options !== 'object') throw new Error('Resource options are malformed.');
+  try { if (utilTypes.isProxy(options)) throw new Error('Resource options are malformed.'); }
+  catch (_) { throw new Error('Resource options are malformed.'); }
+  if (Array.isArray(options)) throw new Error('Resource options are malformed.');
+  const prototype = Object.getPrototypeOf(options);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error('Resource options are malformed.');
+  const names = Object.getOwnPropertyNames(options);
+  if (Object.getOwnPropertySymbols(options).length > 0) throw new Error('Resource options are malformed.');
+  const result = {};
+  for (const name of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(options, name);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource options are malformed.');
+    Object.defineProperty(result, name, { value: descriptor.value, enumerable: true, writable: true, configurable: true });
+  }
+  return result;
+}
+
+function withRepositoryTestResourceInvocation(invocation, root, callback) {
+  let trustedInvocation;
+  try { trustedInvocation = resourceDataCopy(invocation); }
+  catch (_) { throw new Error('Repository-test resource invocation is invalid.'); }
+  if (!trustedInvocation || typeof trustedInvocation !== 'object'
+    || Object.keys(trustedInvocation).sort().join('\u0000') !== ['fixture_id', 'invocation'].join('\u0000')
+    || trustedInvocation.invocation !== REPOSITORY_TEST_RESOURCE_INVOCATION
+    || trustedInvocation.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE.fixture_id
+    || typeof callback !== 'function') throw new Error('Repository-test resource invocation is invalid.');
+  if (typeof root !== 'string' || typeof callback !== 'function') throw new Error('Repository-test resource invocation is invalid.');
+  const target = path.resolve(root);
+  const tempRoot = path.resolve(os.tmpdir());
+  if (path.dirname(target) !== tempRoot) throw new Error('Repository-test resource root must be a direct owned temporary directory.');
+  const stat = fs.lstatSync(target);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Repository-test resource root must be a real temporary directory.');
+  const context = Object.freeze({
+    invocation: Object.freeze(trustedInvocation),
+    root: target,
+    fixture: REPOSITORY_TEST_RESOURCE_FIXTURE,
+  });
+  return RESOURCE_TEST_CONTEXT.run(context, callback);
 }
 
 function readJson(filePath, fallback = null) {
@@ -352,16 +456,26 @@ function readProfile(host = 'claude-code', options = {}) {
   const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
     && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof)
     && typeof raw.claude_cli === 'string' && raw.claude_cli.length > 0 && (() => { try { processLaunch.validateExecutable(raw.claude_cli); return true; } catch { return false; } })());
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  const currentResources = raw.topology === TOPOLOGIES.CLAUDE_DIRECT && !testContext
+    ? inspectResources() : null;
   const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
-    || (raw.resource_counter_verified === true && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source));
+    || (raw.resource_counter_verified === true
+      && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source)
+      && (testContext || NATIVE_RESOURCE_STATES.has(currentResources) && validResourceState(currentResources)
+        && currentResources.source === raw.resource_counter_source));
   if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
     return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
   }
-  return { ...raw, status: 'configured', supported: true };
+  return { ...raw, status: 'configured', supported: true,
+    ...(testContext ? { resource_evidence_context: 'repository-test-fixture', production_supported: false } : { production_supported: true }) };
 }
 
 function configureProfile(host, selected, options = {}) {
   if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
+  if (RESOURCE_TEST_CONTEXT.getStore()) throw new Error('Repository-test resource context cannot configure a production profile.');
+  try { selected = resourceDataCopy(selected); options = resourceOptionShell(options); }
+  catch (_) { throw new Error('The selected Toolkit profile is malformed.'); }
   const topology = selected.topology;
   const capacityMode = selected.capacity_mode;
   if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
@@ -382,9 +496,12 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
-  const resourceSource = selected.resource_counter_source || resourceCapability.source;
-  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
+  if (Object.hasOwn(selected, 'resource_state') || Object.hasOwn(selected, 'resourceState')) {
+    throw new Error('Caller-provided resource evidence cannot configure a production profile.');
+  }
+  const resourceCapability = topology === TOPOLOGIES.CLAUDE_DIRECT ? inspectResourceCapability() : { supported: false, source: 'not-applicable' };
+  const resourceSource = resourceCapability.source;
+  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (!resourceCapability.supported
     || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
     throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
   }
@@ -414,28 +531,99 @@ function invalidateProfile(host, reason, options = {}) {
   atomicWriteJson(profilePath(host, options), profile);
   return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
 }
+function nativeResourceState(value, source) {
+  const state = Object.freeze({
+    physical_total: value.physical_total,
+    physical_available: value.physical_available,
+    commit_total: value.commit_total,
+    commit_available: value.commit_available,
+    source,
+    host_responsive: value.host_responsive === true,
+  });
+  if (!validResourceState(state) || !['proc-meminfo', 'win32-operating-system'].includes(state.source)) return null;
+  NATIVE_RESOURCE_STATES.add(state);
+  return state;
+}
+
 function linuxResources() {
   const text = fs.readFileSync('/proc/meminfo', 'utf8');
   const values = Object.fromEntries([...text.matchAll(/^(\w+):\s+(\d+)\s+kB$/gm)].map((m) => [m[1], Number(m[2]) * 1024]));
-  return {
+  return nativeResourceState({
     physical_total: values.MemTotal,
     physical_available: values.MemAvailable,
     commit_total: values.CommitLimit,
     commit_available: values.CommitLimit - values.Committed_AS,
-    source: 'proc-meminfo',
     host_responsive: true,
-  };
+  }, 'proc-meminfo');
 }
 
 function windowsResources() {
   const command = '$o=Get-CimInstance Win32_OperatingSystem; [pscustomobject]@{physical_total=[double]$o.TotalVisibleMemorySize*1024;physical_available=[double]$o.FreePhysicalMemory*1024;commit_total=[double]$o.TotalVirtualMemorySize*1024;commit_available=[double]$o.FreeVirtualMemory*1024}|ConvertTo-Json -Compress';
   const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   if (result.status !== 0) throw new Error('Windows memory counters are unavailable.');
-  return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
+  return nativeResourceState({ ...JSON.parse(result.stdout), host_responsive: true }, 'win32-operating-system');
+}
+
+function testResourceFixture(value) {
+  if (!value || typeof value !== 'object'
+    || Object.keys(value).sort().join('\u0000') !== ['commit_available', 'commit_total', 'fixture_id', 'host_responsive', 'physical_available', 'physical_total', 'source'].join('\u0000')
+    || value.source !== REPOSITORY_TEST_RESOURCE_FIXTURE.source
+    || value.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE.fixture_id
+    || value.physical_total !== REPOSITORY_TEST_RESOURCE_FIXTURE.physical_total
+    || value.physical_available !== REPOSITORY_TEST_RESOURCE_FIXTURE.physical_available
+    || value.commit_total !== REPOSITORY_TEST_RESOURCE_FIXTURE.commit_total
+    || value.commit_available !== REPOSITORY_TEST_RESOURCE_FIXTURE.commit_available
+    || value.host_responsive !== true) return false;
+  return true;
+}
+
+function selectResourceEvidence(options = {}, positionalProvided = false, positionalResources = undefined) {
+  let selected;
+  try { selected = resourceOptionShell(options); } catch (_) { return { ok: false, resources: null, options: {} }; }
+  const context = RESOURCE_TEST_CONTEXT.getStore();
+  const invocationKeys = ['repository_test_invocation', 'repositoryTestInvocation'];
+  const invocationPresent = invocationKeys.filter((key) => Object.hasOwn(selected, key));
+  if (invocationPresent.length > 1) return { ok: false, resources: null, options: selected };
+  if (invocationPresent.length === 1) {
+    let invocation;
+    try { invocation = resourceDataCopy(selected[invocationPresent[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!context || !invocation || invocation.invocation !== context.invocation.invocation
+      || invocation.fixture_id !== context.invocation.fixture_id
+      || Object.keys(invocation).sort().join('\u0000') !== 'fixture_id\u0000invocation') {
+      return { ok: false, resources: null, options: selected };
+    }
+  }
+  if (Object.hasOwn(selected, 'resource') || Object.hasOwn(selected, 'resources')) return { ok: false, resources: null, options: selected };
+  const evidenceKeys = ['resourceState', 'resource_state'];
+  const suppliedEvidenceKeys = evidenceKeys.filter((key) => Object.hasOwn(selected, key));
+  if (suppliedEvidenceKeys.length > 1) return { ok: false, resources: null, options: selected };
+  const hasOptionEvidence = suppliedEvidenceKeys.length === 1;
+  if (positionalProvided && hasOptionEvidence) {
+    let left;
+    let right;
+    try { left = resourceDataCopy(positionalResources); right = resourceDataCopy(selected[suppliedEvidenceKeys[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!testResourceFixture(left) || !testResourceFixture(right)) return { ok: false, resources: null, options: selected };
+  }
+  const evidenceProvided = positionalProvided || hasOptionEvidence;
+  if (evidenceProvided) {
+    if (!context) return { ok: false, resources: null, options: selected };
+    let evidence;
+    try { evidence = resourceDataCopy(positionalProvided ? positionalResources : selected[suppliedEvidenceKeys[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!testResourceFixture(evidence)) return { ok: false, resources: null, options: selected };
+    const fixture = Object.freeze({ ...REPOSITORY_TEST_RESOURCE_FIXTURE });
+    TEST_RESOURCE_STATES.add(fixture);
+    return { ok: true, resources: fixture, options: selected, context };
+  }
+  return { ok: true, resources: null, options: selected, context };
 }
 
 function inspectResources(options = {}) {
-  if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+  const selected = selectResourceEvidence(options);
+  if (!selected.ok) return null;
+  if (selected.resources) return selected.resources;
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -444,6 +632,7 @@ function inspectResources(options = {}) {
 }
 
 function validResourceState(resources) {
+  try { resources = resourceDataCopy(resources); } catch (_) { return false; }
   return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
     .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
     && resources.physical_available <= resources.physical_total
@@ -453,7 +642,9 @@ function validResourceState(resources) {
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  const supported = Boolean(validResourceState(resources)
+    && (NATIVE_RESOURCE_STATES.has(resources) || TEST_RESOURCE_STATES.has(resources)
+      && RESOURCE_TEST_CONTEXT.getStore()));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -685,6 +876,12 @@ function validAdmissionProfile(profile) {
 }
 
 function admissionDecision(specInput, options = {}) {
+  try {
+    specInput = resourceDataCopy(specInput);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext && options.root && path.resolve(options.root) !== testContext.root) return refusal('Repository-test state must remain inside its owned temporary root.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -693,7 +890,10 @@ function admissionDecision(specInput, options = {}) {
   const host = String(options.host || spec.host || HOSTS.CLAUDE);
   if (!Object.values(HOSTS).includes(host)) return refusal('The requested host adapter is unsupported.');
   if (host !== spec.host) return refusal('The native host adapter does not match the validated child host contract.');
-  const profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  let profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  if (options.profile) {
+    try { profile = resourceDataCopy(profile); } catch (_) { return refusal('The selected host admission profile could not be verified safely.'); }
+  }
   if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
   if (host === HOSTS.CLAUDE) {
@@ -704,12 +904,23 @@ function admissionDecision(specInput, options = {}) {
   } else {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
-  const resources = inspectResources(options);
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  const selectedResources = selectResourceEvidence(options);
+  if (!selectedResources.ok) return refusal('Resource state could not be verified safely.');
+  const resources = selectedResources.resources || inspectResources({});
+  if (!validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+    && !(TEST_RESOURCE_STATES.has(resources) && selectedResources.context)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
 function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  const positionalProvided = arguments.length >= 3;
+  try {
+    specInput = resourceDataCopy(specInput);
+    profile = resourceDataCopy(profile);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext && options.root && path.resolve(options.root) !== testContext.root) return refusal('Repository-test state must remain inside its owned temporary root.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -717,7 +928,11 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  const selectedResources = selectResourceEvidence(options, positionalProvided, resources);
+  if (!selectedResources.ok) return refusal('Resource state could not be verified safely.');
+  resources = selectedResources.resources || inspectResources({});
+  if (!validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+    && !(TEST_RESOURCE_STATES.has(resources) && selectedResources.context)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
 
@@ -995,6 +1210,7 @@ function readCheckerWorkflowInput(inputPath, options = {}) {
 }
 
 function launch(specInput, options = {}) {
+  if (RESOURCE_TEST_CONTEXT.getStore()) return refusal('Repository-test resource context cannot launch production workers.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -1120,6 +1336,6 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
-  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
+  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker, withRepositoryTestResourceInvocation,
   checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

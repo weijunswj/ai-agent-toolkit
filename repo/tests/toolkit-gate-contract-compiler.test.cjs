@@ -5,10 +5,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const vm = require('node:vm');
 const test = require('node:test');
 const Ajv2020 = require('ajv/dist/2020');
 const {
   SUPPORTED_MACROS,
+  canonicalize,
   compileGateContract,
   hashCanonical,
   renderG3ExecutionPacket,
@@ -325,6 +327,32 @@ test('gate compiler preserves admitted values through serialization and does not
   assert.equal(rendered.packet_digest, packet.packet_digest);
 });
 
+test('gate compiler and canonicalizer reject Proxies before observing their traps', () => {
+  const counters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const handler = {
+    get(target, key, receiver) { counters.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { counters.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { counters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { counters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  };
+  const makeCrossRealm = vm.runInNewContext('(target, traps) => new Proxy(target, traps)');
+  const hostile = makeCrossRealm(ir(), handler);
+  rejectedBy(() => compileGateContract(hostile));
+  assert.throws(() => canonicalize(hostile), (error) => error && error.code === 'GATE_CONTRACT_IR_INVALID');
+  assert.deepEqual(counters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+
+  const nestedCounters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const nested = singleMacro('EXACT_ALLOWLIST');
+  nested.requirements[0].macros[0].params = new Proxy(nested.requirements[0].macros[0].params, {
+    get(target, key, receiver) { nestedCounters.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { nestedCounters.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { nestedCounters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { nestedCounters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  });
+  rejectedBy(() => compileGateContract(nested));
+  assert.deepEqual(nestedCounters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+});
+
 test('gate CLI enforces the same admission semantics as the compiler', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-gate-'));
   const filename = path.join(directory, 'contract.json');
@@ -334,17 +362,17 @@ test('gate CLI enforces the same admission semantics as the compiler', () => {
   assert.match(result.stderr, /GATE_CONTRACT_IR_INVALID|zero concrete cases/);
 });
 
-test('human-bound routing and remote-first source binding remain intact', () => {
+test('human-bound routing and worker-independent model identity remain intact', () => {
   const root = path.resolve(__dirname, '..', '..');
   const controller = fs.readFileSync(path.join(root, 'repo', 'CONTROLLER.md'), 'utf8');
   const architecture = fs.readFileSync(path.join(root, 'repo', 'ARCHITECTURE.md'), 'utf8');
   for (const text of [controller, architecture]) {
     assert.match(text, /human|launcher/i);
-    assert.match(text, /missing runtime model metadata is (?:never|not) a HOLD/i);
-    assert.match(text, /silent (?:route\/model )?fallback/i);
   }
-  assert.match(controller, /executor\/LLM must never inspect, prove, attest, infer, reject, or block on its own provider\/model\/reasoning identity/i);
-  assert.match(controller, /canonical repository `weijunswj\/ai-agent-toolkit`/i);
-  assert.match(controller, /local Toolkit repository.*never governance authority/i);
+  assert.match(controller, /Once the root worker is launched\/adopted, inability to introspect its own model can never create either HOLD/i);
+  assert.match(architecture, /root semantic worker never verifies or attests its own model identity and cannot HOLD because runtime model metadata is absent/i);
+  assert.match(controller, /no default stack and no silent fallback/i);
+  assert.match(controller, /Before deciding whether Toolkit governance applies, bind the exact repository named by the user as the controller repository fence/i);
+  assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed/i);
   assert.doesNotMatch(controller, /launcher\/runtime must verify the resolved route/i);
 });

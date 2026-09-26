@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 
 const MACRO_NAMES = [
   'EXACT_ALLOWLIST',
@@ -30,6 +31,68 @@ function own(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function trustedJsonCopy(value, seen = new WeakSet(), location = 'value') {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) fail(`${location} contains a non-serializable number`);
+    return value;
+  }
+  if (typeof value === 'function' || typeof value === 'object') {
+    if (utilTypes.isProxy(value)) fail(`${location} is a Proxy`);
+  }
+  if (typeof value !== 'object') fail(`${location} contains a value that cannot be represented in JSON`);
+  if (seen.has(value)) fail(`${location} contains a cycle`);
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail(`${location} contains symbol properties`);
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) fail(`${location} has a custom prototype`);
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !own(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) {
+        fail(`${location} has an invalid array length descriptor`);
+      }
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) {
+          fail(`${location} contains an array property that JSON would not preserve`);
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !own(descriptor, 'value') || descriptor.enumerable !== true) fail(`${location}[${name}] is not an enumerable data property`);
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !own(descriptor, 'value') || descriptor.enumerable !== true) fail(`${location} is sparse or contains an accessor`);
+        Object.defineProperty(result, String(index), {
+          value: trustedJsonCopy(descriptor.value, seen, `${location}[${index}]`),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) fail(`${location} has a custom prototype`);
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !own(descriptor, 'value') || descriptor.enumerable !== true) fail(`${location}.${name} is not an enumerable data property`);
+      Object.defineProperty(result, name, {
+        value: trustedJsonCopy(descriptor.value, seen, `${location}.${name}`),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return result;
+  } finally {
+    seen.delete(value);
+  }
+}
+
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -37,6 +100,10 @@ function isPlainObject(value) {
 }
 
 function validateJsonCompatible(value, seen = new WeakSet(), location = 'value') {
+  if (seen === undefined || seen === null) fail(`${location} has invalid validation state`);
+  trustedJsonCopy(value, new WeakSet(), location);
+  return;
+  /* istanbul ignore next */
   if (value === null) return;
 
   switch (typeof value) {
@@ -122,8 +189,7 @@ function cloneCanonical(value) {
 }
 
 function canonicalize(value) {
-  validateJsonCompatible(value);
-  return cloneCanonical(value);
+  return cloneCanonical(trustedJsonCopy(value));
 }
 
 function stableStringify(value) {
@@ -523,7 +589,7 @@ function compareCodeUnits(left, right) {
 }
 
 function validateG3ExecutionPacket(packet) {
-  validateJsonCompatible(packet);
+  packet = trustedJsonCopy(packet, new WeakSet(), 'packet');
   object(packet, 'packet');
   checkKeys(packet, [
     'schema',
@@ -615,7 +681,7 @@ function validateG3ExecutionPacket(packet) {
 }
 
 function compileGateContract(ir) {
-  validateJsonCompatible(ir);
+  ir = trustedJsonCopy(ir, new WeakSet(), 'ir');
   object(ir, 'ir');
   checkKeys(
     ir,

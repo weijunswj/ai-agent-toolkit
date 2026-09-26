@@ -43,27 +43,28 @@ function reviewEvidence(overrides = {}) {
     complete: true,
     server_authoritative: true,
     verifiable: true,
-    ...overrides,
   };
-  if (!hasOwn(overrides, 'authoritative_counts')) {
-    evidence.authoritative_counts = {
-      pull_requests: Array.isArray(evidence.pull_requests) ? evidence.pull_requests.length : 0,
-      submitted_reviews: Array.isArray(evidence.submitted_reviews) ? evidence.submitted_reviews.length : 0,
-      inline_conversations: Array.isArray(evidence.inline_conversations) ? evidence.inline_conversations.length : 0,
-    };
-  }
-  if (!hasOwn(overrides, 'pagination_evidence')) {
-    evidence.pagination_evidence = Object.fromEntries(Object.keys(evidence.pagination || {}).map((key) => [
+  evidence.authoritative_counts = {
+    pull_requests: evidence.pull_requests.length,
+    submitted_reviews: evidence.submitted_reviews.length,
+    inline_conversations: evidence.inline_conversations.length,
+  };
+  evidence.pagination_evidence = Object.fromEntries(Object.keys(evidence.pagination).map((key) => [
       key,
       {
         complete: evidence.pagination[key],
         pages: 1,
         cursor: null,
-        count: Array.isArray(evidence[key]) ? evidence[key].length : 0,
+        count: evidence[key].length,
       },
     ]));
+  const validEvidenceDigest = n5.reviewEvidenceDigest(evidence);
+  Object.assign(evidence, overrides);
+  if (!hasOwn(overrides, 'evidence_digest')) {
+    evidence.evidence_digest = Object.values(overrides).some((value) => value === undefined)
+      ? validEvidenceDigest
+      : n5.reviewEvidenceDigest(evidence);
   }
-  if (!hasOwn(overrides, 'evidence_digest')) evidence.evidence_digest = n5.reviewEvidenceDigest(evidence);
   return evidence;
 }
 
@@ -239,6 +240,16 @@ test('RUN-185 review inventory has one trusted adapter boundary and no caller fa
   assert.equal(result.inventory.evidence_binding_digest, trusted.evidence_digest);
   assert.equal(result.inventory.inventory_digest, trusted.evidence_digest);
   assert.deepEqual(result.inventory.authoritative_counts, trusted.authoritative_counts);
+});
+
+test('RUN-185 review evidence digest rejects programmable input before observing it', () => {
+  let observations = 0;
+  const programmable = new Proxy({}, {
+    ownKeys() { observations += 1; return []; },
+    getPrototypeOf() { observations += 1; return Object.prototype; },
+  });
+  assert.throws(() => n5.reviewEvidenceDigest({ nested: programmable }), /N5_UNTRUSTED_DATA_INVALID/);
+  assert.equal(observations, 0);
 });
 
 test('RUN-185 caller review arrays counts pagination facts and digests are assertions only', () => {

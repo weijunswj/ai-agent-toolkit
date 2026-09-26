@@ -13,6 +13,31 @@ const support = require('./toolkit-authority-packet-test-support.cjs');
 
 test.afterEach(() => support.cleanup());
 
+test('execution request and semantic consumer ingress reject Proxies before observation', () => {
+  const counts = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const handler = {
+    get(target, key, receiver) { counts.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { counts.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { counts.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { counts.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  };
+  const validOptions = {
+    ...common,
+    authority: { delegated: false, lanes: [] },
+    run_id: 'run-proxy-boundary',
+  };
+  const requestProxy = new Proxy({ task: validOptions.task }, handler);
+  expectCode(() => runtime.normalizeRequest(requestProxy), 'REQUEST_CONTRACT_INVALID');
+  assert.deepEqual(counts, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+
+  const gate = semanticGate('run-proxy-consumer');
+  gate.consumer_intent = new Proxy(gate.consumer_intent, handler);
+  const result = runtime.admitRun({ ...validOptions, run_id: 'run-proxy-consumer', semantic_gate: gate });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.deepEqual(counts, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+});
+
 function semanticGate(seed = 'boundary') {
   return support.semanticGate(seed);
 }

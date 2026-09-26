@@ -134,3 +134,37 @@ test('completion waits for the boundary observation and cannot be certified by a
   const completion = await pending;
   assert.equal(support.verifySupplementalCompletion(completion).executed_count, 4);
 });
+
+test('waiter-first completion remains unissued after a later observation failure', async () => {
+  const compiled = support.compileSupplementalFixture();
+  const registered = support.registerSupplementalCases(compiled);
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const waiting = new Promise((resolve) => { entered = resolve; });
+  const pending = support.executeSupplementalOracle(registered, {
+    afterProduction: async (observation) => {
+      if (observation.case_id === support.REQUIRED_CASE_IDS[0]) {
+        entered();
+        await gate;
+        throw new Error('late-observation-failure');
+      }
+    },
+  });
+  await waiting;
+  assert.equal(support.verifySupplementalCompletion(pending), null);
+  assert.equal(support.verifySupplementalCompletion({ executed_count: 4 }), null);
+  release();
+  await assert.rejects(pending, /late-observation-failure/);
+  assert.equal(support.verifySupplementalCompletion(pending), null);
+});
+
+test('one non-zero Proxy trap counter prevents supplemental completion', async () => {
+  const compiled = support.compileSupplementalFixture();
+  const registered = support.registerSupplementalCases(compiled);
+  await assert.rejects(
+    support.executeSupplementalOracle(registered, { inject_nonzero_hook_case_id: support.REQUIRED_CASE_IDS[0] }),
+    /SUPPLEMENTAL_RECIPE_HOOK_EXECUTED/,
+  );
+  assert.equal(support.verifySupplementalCompletion(null), null);
+});

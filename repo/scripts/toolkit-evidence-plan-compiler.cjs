@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 
 const PROVENANCE_FIELDS = Object.freeze([
   'REPOSITORY',
@@ -103,6 +104,59 @@ function own(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function trustedDataCopy(value, seen = new WeakSet(), location = 'value') {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) fail(`${location} contains a non-serializable number`);
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) fail(`${location} is a Proxy`); }
+    catch (_) { fail(`${location} cannot be inspected safely`); }
+  }
+  if (typeof value !== 'object') fail(`${location} contains a value that cannot be represented in JSON`);
+  if (seen.has(value)) fail(`${location} contains a cycle`);
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail(`${location} contains symbol properties`);
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) fail(`${location} has a custom prototype`);
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !own(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) {
+        fail(`${location} has an invalid array length descriptor`);
+      }
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) fail(`${location} contains a non-serializable array property`);
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !own(descriptor, 'value') || !descriptor.enumerable) fail(`${location}[${name}] is not an enumerable data property`);
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !own(descriptor, 'value') || !descriptor.enumerable) fail(`${location} is sparse or contains an accessor`);
+        Object.defineProperty(result, String(index), {
+          value: trustedDataCopy(descriptor.value, seen, `${location}[${index}]`), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) fail(`${location} has a custom prototype`);
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !own(descriptor, 'value') || !descriptor.enumerable) fail(`${location}.${name} is not an enumerable data property`);
+      Object.defineProperty(result, name, {
+        value: trustedDataCopy(descriptor.value, seen, `${location}.${name}`), enumerable: true, writable: true, configurable: true,
+      });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -110,6 +164,8 @@ function isPlainObject(value) {
 }
 
 function validateJsonCompatible(value, seen = new WeakSet(), location = 'value') {
+  trustedDataCopy(value, new WeakSet(), location);
+  return;
   if (value === null) return;
   switch (typeof value) {
     case 'string':
@@ -175,8 +231,7 @@ function cloneCanonical(value) {
 }
 
 function canonicalize(value) {
-  validateJsonCompatible(value);
-  return cloneCanonical(value);
+  return cloneCanonical(trustedDataCopy(value));
 }
 
 function stableStringify(value) {
@@ -274,6 +329,7 @@ function validateStopRule(value, location) {
 }
 
 function validateManifest(manifest) {
+  manifest = trustedDataCopy(manifest, new WeakSet(), 'manifest');
   validateJsonCompatible(manifest);
   object(manifest, 'manifest');
   checkKeys(manifest, ['schema', 'id', 'required_provenance', 'sources', 'questions'], [], 'manifest');
@@ -420,6 +476,7 @@ function buildQuestionPacket(question, manifest, sourceManifestDigest) {
 }
 
 function compileEvidenceManifest(manifest) {
+  manifest = trustedDataCopy(manifest, new WeakSet(), 'manifest');
   validateManifest(manifest);
   const sourceManifestDigest = hashCanonical(manifest);
   const packets = manifest.questions
@@ -512,6 +569,7 @@ function validateIssue(value, location) {
 }
 
 function validateResponseModel(response) {
+  response = trustedDataCopy(response, new WeakSet(), 'response');
   validateJsonCompatible(response);
   object(response, 'response');
   checkKeys(response, [
@@ -624,6 +682,7 @@ function validateParentReview(review, location) {
 }
 
 function validateVerificationContext(context) {
+  context = trustedDataCopy(context, new WeakSet(), 'verificationContext');
   validateJsonCompatible(context);
   object(context, 'verificationContext');
   checkKeys(context, ['schema', 'manifest_id', 'source_manifest_digest', 'plan_digest', 'source_contents', 'reviews'], [], 'verificationContext');
@@ -673,6 +732,9 @@ function responseWithoutDigest(response) {
 
 function gitBlobSha1(bytes) {
   const header = Buffer.from(`blob ${bytes.length}\0`, 'utf8');
+  // SHA-1 is required for Git blob object-ID compatibility;
+  // SHA-256 independently verifies content integrity.
+  // codeql[js/weak-cryptographic-algorithm]
   return crypto.createHash('sha1').update(Buffer.concat([header, bytes])).digest('hex');
 }
 
@@ -846,6 +908,9 @@ function processQuestion(state, packet, response, review, manifest, sourceState)
 }
 
 function mergeEvidenceResponses(manifest, responses, verificationContext) {
+  manifest = trustedDataCopy(manifest, new WeakSet(), 'manifest');
+  responses = trustedDataCopy(responses, new WeakSet(), 'responses');
+  verificationContext = trustedDataCopy(verificationContext, new WeakSet(), 'verificationContext');
   const plan = compileEvidenceManifest(manifest);
   const packets = [...plan.leaf_packets, ...plan.serial_packets].sort((left, right) => (left.question_id < right.question_id ? -1 : left.question_id > right.question_id ? 1 : 0));
   const states = new Map(packets.map((packet) => [packet.question_id, {

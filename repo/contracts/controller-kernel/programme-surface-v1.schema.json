@@ -29,7 +29,9 @@
         "planning_class": { "enum": ["INVESTIGATION", "PLANNING", "DELIVERY", "REFERENCE"] },
         "planning_admission": { "enum": ["G1_READ_ONLY_AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
         "implementation_admission": { "enum": ["AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
-        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true }
+        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true, "description": "Optional empty arrays are normalized to absence before graph identity and digest calculation." },
+        "current_gate": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n\\t]*$", "description": "Typed current gate/planning context; it does not change canonical lifecycle." },
+        "current_work": { "$ref": "#/$defs/safeLine", "description": "Typed current work/planning context; it does not change canonical lifecycle." }
       }
     },
     "metadataExtension": {
@@ -76,7 +78,7 @@
         "planning_class": { "enum": ["INVESTIGATION", "PLANNING", "DELIVERY", "REFERENCE"] },
         "planning_admission": { "enum": ["G1_READ_ONLY_AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
         "implementation_admission": { "enum": ["AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
-        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true }
+        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true, "description": "Optional empty arrays are normalized to absence before graph identity and digest calculation." }
       }
     },
     "programmeGraph": {

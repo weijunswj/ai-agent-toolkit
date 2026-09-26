@@ -55,6 +55,18 @@ test('A4 source shape does not absorb the A3 five-contract set or live execution
   assert.equal(runtime.G4A_MODEL, 'GPT-5.6 Sol Max');
 });
 
+test('receipt dependency proof ingress rejects proxies without observing their traps', () => {
+  const traps = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const proof = new Proxy({}, {
+    get(target, key, receiver) { traps.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { traps.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { traps.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { traps.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  });
+  assert.deepEqual(runtime.validateReceiptDependencyProof(proof), ['receipt-dependency-proof-shape-invalid']);
+  assert.deepEqual(traps, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+});
+
 test('privacy-safe report contains the required human companion and one action', () => {
   const result = runtime.createReport({
     verdict: 'PASS_AND_STOP',

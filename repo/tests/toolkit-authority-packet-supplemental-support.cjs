@@ -24,6 +24,33 @@ const REGISTERED = new WeakMap();
 const CASE_RECEIPTS = new WeakMap();
 const COMPLETION_RECEIPTS = new WeakMap();
 const TRUSTED_RECIPES = new Map();
+const PROXY_TRAP_NAMES = Object.freeze([
+  'get', 'set', 'has', 'deleteProperty', 'defineProperty', 'getOwnPropertyDescriptor', 'ownKeys',
+  'getPrototypeOf', 'setPrototypeOf', 'isExtensible', 'preventExtensions', 'apply', 'construct',
+]);
+
+function hookCounters() {
+  return {
+    getters: 0,
+    setters: 0,
+    toJSON: 0,
+    toString: 0,
+    valueOf: 0,
+    symbolToPrimitive: 0,
+    proxy_traps: 0,
+    proxy_traps_by_name: Object.fromEntries(PROXY_TRAP_NAMES.map((name) => [name, 0])),
+  };
+}
+
+function hooksAreZero(counters) {
+  return counters.getters === 0 && counters.setters === 0 && counters.toJSON === 0
+    && counters.toString === 0 && counters.valueOf === 0 && counters.symbolToPrimitive === 0
+    && counters.proxy_traps === 0 && PROXY_TRAP_NAMES.every((name) => counters.proxy_traps_by_name[name] === 0);
+}
+
+function snapshotHooks(counters) {
+  return Object.freeze({ ...counters, proxy_traps_by_name: Object.freeze({ ...counters.proxy_traps_by_name }) });
+}
 
 function fail(code) {
   const error = new Error(code);
@@ -211,17 +238,26 @@ function createHostileRecipe(counters) {
     enumerable: true,
     value() { counters.toJSON += 1; return {}; },
   });
-  return new Proxy(target, {
-    get(object, key, receiver) { counters.proxy_traps += 1; return Reflect.get(object, key, receiver); },
-    ownKeys(object) { counters.proxy_traps += 1; return Reflect.ownKeys(object); },
-    getOwnPropertyDescriptor(object, key) { counters.proxy_traps += 1; return Reflect.getOwnPropertyDescriptor(object, key); },
-    getPrototypeOf(object) { counters.proxy_traps += 1; return Reflect.getPrototypeOf(object); },
-  });
+  Object.defineProperty(target, 'toString', { enumerable: true, value() { counters.toString += 1; return ''; } });
+  Object.defineProperty(target, 'valueOf', { enumerable: true, value() { counters.valueOf += 1; return ''; } });
+  Object.defineProperty(target, Symbol.toPrimitive, { enumerable: true, value() { counters.symbolToPrimitive += 1; return ''; } });
+  Object.defineProperty(target, 'setterOnly', { enumerable: true, set() { counters.setters += 1; } });
+  const handler = {};
+  for (const name of PROXY_TRAP_NAMES) {
+    handler[name] = (...args) => {
+      counters.proxy_traps += 1;
+      counters.proxy_traps_by_name[name] += 1;
+      if (name === 'apply') return Reflect.apply(...args);
+      if (name === 'construct') return Reflect.construct(...args);
+      return Reflect[name](...args);
+    };
+  }
+  return new Proxy(target, handler);
 }
 
 function createTrustedRecipe(entry) {
   const { item, plan, registration } = entry;
-  const counters = { getters: 0, proxy_traps: 0, toJSON: 0 };
+  const counters = hookCounters();
   let argument;
   if (plan.recipe_variant === 'hostile-proxy-recipe') {
     argument = createHostileRecipe(counters);
@@ -262,10 +298,10 @@ async function executeOne(entry, ledger, options) {
   const recipe = createTrustedRecipe(entry);
   const argument = recipe.argument;
   const argumentBindingDigest = bindTrustedRecipe(plan, recipe, argument);
-  if (recipe.counters.getters !== 0 || recipe.counters.proxy_traps !== 0 || recipe.counters.toJSON !== 0) {
+  if (!hooksAreZero(recipe.counters)) {
     fail(`SUPPLEMENTAL_RECIPE_BINDING_EXECUTED_HOOK:${item.id}`);
   }
-  const bindingHookCounts = Object.freeze({ ...recipe.counters });
+  const bindingHookCounts = snapshotHooks(recipe.counters);
   const attempt = {
     sequence: ledger.attempts.length + 1,
     case_identity: plan.identity,
@@ -281,20 +317,32 @@ async function executeOne(entry, ledger, options) {
   let value;
   let error = null;
   try {
-    value = await Promise.resolve().then(() => plan.method.call(plan.target, argument));
+    value = await Promise.resolve().then(() => {
+      if (options.force_untyped_exception_case_id === declaredCaseId(item)) throw new Error('injected-untyped-boundary-exception');
+      return plan.method.call(plan.target, argument);
+    });
   } catch (caught) {
     error = caught;
   }
+  if (error && (error.packetBoundary !== true || !runtime.AUTHORITY_PACKET_REASON_CODES.includes(error.reason_code || error.code))) {
+    fail(`SUPPLEMENTAL_UNTYPED_EXCEPTION:${item.id}`);
+  }
   attempt.outcome = error ? 'REJECT' : 'ACCEPT';
-  attempt.reason_code = error ? (error.reason_code || error.code || 'GPR_PACKET_VALUE_INVALID') : null;
+  attempt.reason_code = error ? error.reason_code || error.code : null;
   if (typeof options.afterProduction === 'function') {
         await options.afterProduction(Object.freeze({ case_id: declaredCaseId(item), outcome: attempt.outcome }));
+  }
+  if (options.inject_nonzero_hook_case_id === declaredCaseId(item)) {
+    recipe.counters.proxy_traps += 1;
+    recipe.counters.proxy_traps_by_name.get += 1;
   }
   const expected = plan.expected;
   if (attempt.outcome !== expected.outcome || (expected.reason_code && attempt.reason_code !== expected.reason_code)) {
     fail(`SUPPLEMENTAL_PRODUCTION_OUTCOME_MISMATCH:${item.id}`);
   }
-  if (recipe.counters.getters !== 0 || recipe.counters.toJSON !== 0) fail(`SUPPLEMENTAL_RECIPE_HOOK_EXECUTED:${item.id}`);
+  if (!hooksAreZero(recipe.counters)) {
+    fail(`SUPPLEMENTAL_RECIPE_HOOK_EXECUTED:${item.id}`);
+  }
   if (plan.role !== 'required' || attempt.sequence !== plan.order || attempt.target_id !== plan.target_id
     || attempt.method_name !== plan.method_name || ledger.attempts.filter((row) => row.case_identity === plan.identity).length !== 1) {
     fail(`SUPPLEMENTAL_PLAN_TRACE_MISMATCH:${item.id}`);
@@ -312,7 +360,7 @@ async function executeOne(entry, ledger, options) {
     recipe_id: recipe.recipe_id,
     argument_binding_digest: argumentBindingDigest,
     binding_hook_counts: bindingHookCounts,
-    production_hook_counts: Object.freeze({ ...recipe.counters }),
+    production_hook_counts: snapshotHooks(recipe.counters),
     value_observed: !error,
     exception_observed: Boolean(error),
   }));
@@ -359,7 +407,20 @@ function verifySupplementalCompletion(receipt) {
   const record = receipt && COMPLETION_RECEIPTS.get(receipt);
   if (!record || record.registered_count !== REQUIRED_CASE_IDS.length || record.executed_count !== REQUIRED_CASE_IDS.length
     || record.attempts.length !== REQUIRED_CASE_IDS.length || record.cases.length !== REQUIRED_CASE_IDS.length
-    || record.attempts.some((item) => item.outcome === 'PENDING' || item.role !== 'required')) return null;
+    || record.attempts.some((item) => item.outcome === 'PENDING' || item.role !== 'required')
+    || record.cases.some((item, index) => item.case_id !== REQUIRED_CASE_IDS[index]
+      || !['ACCEPT', 'REJECT'].includes(item.outcome)
+      || item.value_observed === item.exception_observed
+      || item.binding_hook_counts.getters !== 0 || item.binding_hook_counts.setters !== 0
+      || item.binding_hook_counts.toJSON !== 0 || item.binding_hook_counts.toString !== 0
+      || item.binding_hook_counts.valueOf !== 0 || item.binding_hook_counts.symbolToPrimitive !== 0
+      || item.binding_hook_counts.proxy_traps !== 0
+      || PROXY_TRAP_NAMES.some((name) => item.binding_hook_counts.proxy_traps_by_name[name] !== 0)
+      || item.production_hook_counts.getters !== 0 || item.production_hook_counts.setters !== 0
+      || item.production_hook_counts.toJSON !== 0 || item.production_hook_counts.toString !== 0
+      || item.production_hook_counts.valueOf !== 0 || item.production_hook_counts.symbolToPrimitive !== 0
+      || item.production_hook_counts.proxy_traps !== 0
+      || PROXY_TRAP_NAMES.some((name) => item.production_hook_counts.proxy_traps_by_name[name] !== 0))) return null;
   return Object.freeze({
     state: 'ACTUALLY_EXECUTED',
     registered_count: record.registered_count,

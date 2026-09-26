@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G0-A', 'G0-B', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -42,12 +42,12 @@ test('controller stage policy is provider/model agnostic', () => {
   }
 });
 
-test('stack registry has explicit complete symbolic routes and only G0-B/G3 subagent bindings', () => {
+test('stack registry has explicit complete symbolic routes and only G0/G3 subagent bindings', () => {
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
   assert.equal(registry.version, 2);
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
     assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredRoutes].sort(), stackId);
-    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0-B', 'G3'], stackId);
+    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0', 'G3'], stackId);
     for (const route of Object.values(stack.routes)) {
       assert.equal(typeof route.provider, 'string');
       assert.ok(route.provider.length > 0);
@@ -72,13 +72,13 @@ test('named stacks support explicit cross-harness selection without harness auth
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
 
-test('root workers never self-verify model identity while G0-B/G3 parents configure child routes before launch', () => {
+test('root workers never self-verify model identity while G0/G3 parents configure child routes before launch', () => {
   assert.match(controller, /Root execution threads are bound.*out of band by User\/Web\/controller\/harness before launch or adoption/s);
   assert.match(controller, /root semantic worker must never resolve, inspect, verify, attest, compare, reject, or HOLD on its own provider\/model\/reasoning identity/i);
   assert.match(controller, /regardless of whether the harness exposes model metadata/i);
   assert.match(controller, /inability to introspect its own model can never create either HOLD/i);
   assert.doesNotMatch(controller, /current harness cannot launch and verify it/i);
-  assert.match(controller, /Only `G0-B` and `G3` may resolve semantic subagent routes/);
+  assert.match(controller, /Only `G0` and `G3` may resolve semantic subagent routes/);
   assert.match(controller, /parent\/launcher resolves the concrete child provider\/model\/reasoning route.*before child creation/s);
   assert.match(controller, /spawned child never self-attests after launch/i);
   assert.match(controller, /Silent provider\/model\/reasoning substitution remains prohibited.*controller\/launcher boundary/s);
@@ -100,9 +100,13 @@ test('ordinary semantic executors receive bounded authority instead of being tol
 test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
-  assert.equal(claude.routes['G0-A'].reasoning, 'high');
-  assert.equal(claude.routes['G0-B'].reasoning, 'medium');
+  assert.equal(claude.routes['G_FRAME'].reasoning, 'high');
+  assert.equal(claude.routes['G0'].reasoning, 'medium');
   assert.equal(claude.routes.G1.reasoning, 'high');
+  const openai = registry.stacks['owner-openai-default'];
+  for (const [role, route] of Object.entries(openai.routes)) {
+    if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'xhigh', `OpenAI Sol route must be xhigh: ${role}`);
+  }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'high');
@@ -111,10 +115,10 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.LOOP.reasoning, 'medium');
-  assert.equal(claude.routes.RECONVERGENCE.reasoning, 'high');
+  assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
-  assert.equal(claude.subagents['G0-B'].reasoning, 'medium');
+  assert.equal(claude.subagents['G0'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
 });
 
@@ -128,9 +132,9 @@ test('G2 escalation is a stronger route category, not a new gate', () => {
 });
 
 test('delegation capability is stage law, not model law', () => {
-  assert.match(controller, /G0-B.*G3.*only subagent-capable stages\/roles/s);
+  assert.match(controller, /G0.*G3.*only subagent-capable stages\/roles/s);
   assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
-  assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
+  assert.match(architecture, /Only G0 and G3 may use semantic depth-1 subagents/);
 });
 
 test('git publication transport probes do not manufacture publication certainty', () => {
@@ -168,13 +172,13 @@ test('stack registry has no default stack or authoritative service tier', () => 
 });
 
 test('convergence-first roles are represented without widening delegation', () => {
-  assert.match(controller, /G0-A.*problem framing/s);
+  assert.match(controller, /G_FRAME.*problem framing/s);
   assert.match(controller, /G2.*adversarial executable-contract closure/s);
-  assert.match(controller, /RECONVERGENCE.*read-only.*not a gate/s);
+  assert.match(controller, /G1_RECONVERGENCE.*read-only.*not a gate/s);
   assert.match(architecture, /Reconverged correction exception/);
   assert.match(architecture, /Web-directed continuation after autonomous exhaustion/);
   assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
-  assert.match(controller, /does not automatically spend a higher-model `RECONVERGENCE` call/);
+  assert.match(controller, /does not automatically spend a higher-model `G1_RECONVERGENCE` call/);
 });
 
 test('shipping-first policy is singular, ordered, and retains canonical Shipping Law', () => {
@@ -223,6 +227,9 @@ test('post-Web-directed G4 amend defaults to targeted G2 reclosure before anothe
   assert.match(controller, /standard G2 route normally applies/);
   assert.match(controller, /Narrow G2-reuse exception/);
   assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
+  assert.match(controller, /`MECHANISM_COMPLETENESS_ALREADY_BOUND=YES`/);
+  assert.match(controller, /mechanism covers the counterexample family/);
+  assert.match(controller, /`MECHANISM_COMPLETENESS_UNPROVEN` forces targeted G2\./);
   assert.match(controller, /`G3_IMPLEMENTATION_MISS` label alone is insufficient/);
   assert.match(controller, /G2 reclosure grants no mutation authority, budget reset, new lineage or automatic follow-on/);
 });
@@ -239,6 +246,166 @@ test('G3 leaf guidance preserves fixed interfaces, isolation, and serial parent 
   assert.match(controller, /depth-one leaves only for genuinely independent slices with fixed interfaces, explicit expected results, disjoint mutation ownership, isolated workspaces, tests and an integration order/);
   assert.match(controller, /parent owns serial integration, combined validation and candidate publication; leaves do not race to push the delivery branch/);
   assert.match(controller, /Serial execution is valid when fan-out is unsupported or not useful, and active worker contracts are not retroactively widened/);
+});
+
+test('G0 differential evidence starts from known-good and keeps incidental environment failures out of the root model', () => {
+  assert.match(controller, /Known-good vs production differential/);
+  assert.match(controller, /when a qualified path works but production fails and the causal question is not already sufficiently framed, `G_FRAME` records the material differences/);
+  assert.match(controller, /known-good positive control/);
+  assert.match(controller, /real production entry point/);
+  assert.match(controller, /`G0` then prefers one bounded differential experiment/);
+  assert.match(controller, /When the supplied framing already contains those facts, G0 may proceed directly without a ceremonial G_FRAME invocation\./);
+  assert.match(controller, /Serial one-delta probes are fallback-only when a prior boundary blocks deeper observation/);
+  assert.match(controller, /Incidental environment\/check\/transport failure does not replace the causal question/);
+  assert.match(architecture, /known-good qualified path succeeds while the real production path fails/);
+});
+
+test('active legacy lineages adopt current governance only at safe boundaries without resetting history', () => {
+  assert.match(controller, /still-required lineage admitted under older governance.*next safe terminal\/reconciliation boundary/s);
+  assert.match(controller, /never by rewriting an in-flight worker/);
+  assert.match(controller, /Preserve child\/root\/continuation identity, consumed budgets\/attempts, historical evidence\/candidates and original gate outcomes/);
+  assert.match(controller, /Newer governance alone does not reopen accepted architecture\/contract or reset history/);
+  assert.match(architecture, /compatible stricter current governance is adopted prospectively/);
+});
+
+test('later-required candidates and evidence survive disposable execution teardown', () => {
+  assert.match(controller, /Before disposable execution teardown/);
+  assert.match(controller, /preserve every later-required exact candidate and non-repository evidence/);
+  assert.match(controller, /prove the later consumer can recover it/);
+  assert.match(controller, /Temporary paths, chat memory, digest-only evidence or disappearing uncommitted state are insufficient/);
+  assert.match(controller, /publication is not implied/i);
+  assert.match(architecture, /Before a disposable execution surface is destroyed/);
+});
+
+test('ordinary coding path keeps exception mechanics exceptional', () => {
+  assert.match(controller, /ordinary coding path is `G1 -> G2 -> G3 in-gate convergence -> G4 -> Web finality`/);
+  assert.match(controller, /G0, targeted re-entry, G1_RECONVERGENCE, HOLD recovery and Web-directed continuation are exception mechanics/);
+  assert.match(controller, /Repeated exception use without material blocker\/root reduction returns to the responsible root\/Owner boundary/);
+});
+
+test('causal negative controls cannot manufacture the consequential outcome they claim to prove', () => {
+  assert.match(controller, /Causal negative-control oracle/);
+  assert.match(controller, /instrumentation may expose\/synchronise X but must not manufacture Y/);
+  assert.match(controller, /missing observation fails/i);
+  assert.match(controller, /constructed\/fallback\/cleanup\/fault-injection evidence from another actor cannot substitute/);
+  assert.match(architecture, /causal negative-control requirements that prove the named production actor caused the consequential observation/);
+});
+
+test('async waiters and deferred work require adversarial progress and truthful outstanding-work accounting', () => {
+  assert.match(controller, /Async\/liveness validation/);
+  assert.match(controller, /deterministic waiter-first control/);
+  assert.match(controller, /later completion requires event-loop\/I\/O\/timer\/callback progress/);
+  assert.match(controller, /Already-complete-before-waiter is insufficient alone/);
+  assert.match(controller, /non-zero outstanding work without a progress signal fails loudly/);
+  assert.match(controller, /Deferred-work accounting/);
+  assert.match(controller, /remains outstanding until real consequential completion/);
+  assert.match(controller, /Cancelling its scheduler does not erase it/);
+  assert.match(controller, /Flush either permits the normal dispatch or takes ownership of that same work/);
+});
+
+test('logical identities that alias one consequential resource are closed before G3', () => {
+  assert.match(controller, /Resource-equivalence identity/);
+  assert.match(controller, /distinct accepted identities can address the same resource/);
+  assert.match(controller, /one resource-equivalence identity or explicit alias semantics before G3/);
+  assert.match(controller, /do not generalise beyond the resource's actual rules/);
+  assert.match(architecture, /distinct accepted logical identities can address the same underlying resource/);
+});
+
+test('universal invariants require mechanism-complete enforcement and observable boundaries', () => {
+  assert.match(controller, /Mechanism completeness \/ observability/);
+  assert.match(controller, /universal\/arbitrary\/unknown claims/);
+  assert.match(controller, /name the enforcement mechanism and prove it complete under actual runtime observability/);
+  assert.match(controller, /Finite hooks\/detectors\/brands\/APIs\/events do not prove universal coverage unless exhaustiveness is established/);
+  assert.match(controller, /required post-exposure state is not generically observable/);
+  assert.match(controller, /complete trusted boundary/);
+  assert.match(controller, /post-hoc detection cannot substitute/);
+  assert.match(architecture, /Mechanism completeness is distinct from semantic correctness/);
+  assert.match(architecture, /Post-hoc detector coverage is not a substitute for observability the platform does not provide/);
+});
+
+test('fresh G4 attacks the enforcement mechanism itself and routes observer incompleteness back to G2', () => {
+  assert.match(controller, /MECHANISM_COMPLETENESS_UNPROVEN/);
+  assert.match(controller, /detector\/interceptor\/hook\/brand\/parser\/ledger mechanisms/);
+  assert.match(controller, /equivalent violating path that avoids the candidate observer/);
+  assert.match(controller, /targeted G2 re-entry, not a new gate/);
+  assert.match(architecture, /vary how the same forbidden semantic state is produced, not only the input value/);
+  assert.match(architecture, /different lexical identity/);
+  assert.match(architecture, /ordinary construction instead of an intercepted API/);
+  assert.match(architecture, /state change that leaves watched shape\/prototype evidence unchanged/);
+  assert.match(architecture, /return to targeted G2 before another G3/);
+});
+
+test('G2 cannot drop mandatory requirements when freezing the candidate contract', () => {
+  assert.match(controller, /Mandatory requirement coverage closure/);
+  assert.match(controller, /every current mandatory acceptance criterion, inherited blocker\/defect family and still-required contract obligation exactly once/);
+  assert.match(controller, /IMPLEMENT_IN_THIS_CANDIDATE/);
+  assert.match(controller, /ALREADY_SATISFIED_WITH_EXACT_EVIDENCE/);
+  assert.match(controller, /UNCHANGED_REQUIRED_CONSUMER/);
+  assert.match(controller, /OUT_OF_SCOPE_WITH_EXPLICIT_CONTINUING_OWNER/);
+  assert.match(controller, /Missing, duplicate\/conflicting, unevidenced or proof-less current rows are `G2_CONTRACT_COVERAGE_MISS`/);
+  assert.match(architecture, /one complete current-requirement coverage manifest/);
+  assert.match(architecture, /requirement -> invariant -> consequential boundary -> affected consumers\/surfaces -> negative regression -> positive control -> G3 executable proof -> G4 assurance surface/);
+});
+
+test('public-boundary and compatibility claims close bypasses and use predecessor-produced evidence', () => {
+  assert.match(controller, /Public-surface \/ predecessor-compatibility closure/);
+  assert.match(controller, /enumerate exported\/callable aliases and materially reachable alternate routes/);
+  assert.match(controller, /every public\/reachable route must use the accepted enforcement/);
+  assert.match(controller, /immutable bytes\/artifacts produced by an exact accepted predecessor producer and consumed unchanged by the candidate/);
+  assert.match(controller, /candidate-regenerated equivalents are insufficient/);
+  assert.match(architecture, /callable-surface inventory/);
+  assert.match(architecture, /predecessor-produced bytes\/artifacts from an exact accepted producer revision consumed unchanged by the candidate/);
+});
+
+test('canonical equivalence and rejection noninterference are consequential evidence, not eventual-error checks', () => {
+  assert.match(controller, /Canonical equivalence \/ rejection noninterference/);
+  assert.match(controller, /semantically equivalent accepted representations canonicalise before consequential identity\/digest\/hash\/signature comparison/);
+  assert.match(controller, /eventual rejection is insufficient/);
+  assert.match(controller, /getters, Proxy traps, coercion, iterators, serialization hooks or callbacks/);
+  assert.match(controller, /zero prohibited executions at the real boundary/);
+  assert.match(architecture, /canonicalisation rule applied before identity\/digest\/hash\/signature/);
+  assert.match(architecture, /instrumentation proving zero prohibited execution at the real boundary/);
+  assert.match(architecture, /final error code alone cannot prove zero execution/);
+});
+
+test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
+  assert.match(controller, /State-transition adversarial closure/);
+  assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
+  assert.match(controller, /relevant interruption\/replacement\/cancellation\/late-completion windows/);
+  assert.match(controller, /G3 PASS maps every material G2 invariant to a named executable regression or production-boundary check/);
+  assert.match(controller, /green suite without that transition mapping is insufficient/);
+  assert.match(architecture, /each material stateful\/async transition, a named deterministic negative transition regression plus positive control/);
+  assert.match(architecture, /invariant-to-regression map/);
+  assert.match(architecture, /Aggregate suite-green status cannot substitute for this mapping/);
+  assert.match(architecture, /pre-commit, partial commit, cleanup, and retry after interruption/);
+  assert.match(architecture, /pre-wait, during-wait, replacement\/cancellation, late arrival, and completion after a snapshot\/decision point/);
+  assert.match(architecture, /not a mandatory combinatorial matrix/);
+});
+
+test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
+  assert.match(controller, /Conditional G3 adversarial pre-publication validation/);
+  assert.match(controller, /sufficiently complex\/STRICT G3 involving concurrency, async\/deferred work, causal controls, lifecycle coordination or identity\/resource mapping/);
+  assert.match(controller, /optional depth-1 read-only validation leaf/);
+  assert.match(controller, /leaf never mutates or declares completion/);
+  assert.match(controller, /parent remains sole integrator\/revalidator/);
+  assert.match(controller, /Settled-behaviour RED stays in G3/);
+  assert.match(controller, /missing product\/compatibility semantics return to G2/);
+  assert.match(controller, /changed root\/trust\/architecture returns to G1/);
+  assert.match(architecture, /It is not another gate/);
+});
+
+test('commit-required validation sequencing freezes one local candidate before clean-head validators without publishing it', () => {
+  assert.match(controller, /Commit-required validation sequencing/);
+  assert.match(controller, /accepted validator materially requires immutable commit identity or a clean committed working tree/);
+  assert.match(controller, /all meaningful non-commit-dependent checks are green and candidate contents\/mutation scope are frozen/);
+  assert.match(controller, /Bind the exact commit\/tree\/parent/);
+  assert.match(controller, /prohibit source amendment, amend\/rebase\/reconstruction or replacement candidate inside that episode/);
+  assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
+  assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
+  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
+  assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
+  assert.match(architecture, /create exactly one immutable local candidate commit under the existing allowance/);
+  assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
 });
 
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
@@ -270,7 +437,7 @@ test('shipping policy remains symbolic and preserves existing policy boundaries'
       assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
     }
   }
-  assert.match(controller, /G0-B.*G3.*only subagent-capable stages\/roles/s);
+  assert.match(controller, /G0.*G3.*only subagent-capable stages\/roles/s);
   assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
-  assert.match(architecture, /Only G0-B and G3 may use semantic depth-1 subagents/);
+  assert.match(architecture, /Only G0 and G3 may use semantic depth-1 subagents/);
 });

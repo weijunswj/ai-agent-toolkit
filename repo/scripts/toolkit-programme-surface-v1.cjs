@@ -1,6 +1,7 @@
 'use strict';
 
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
+const { types: utilTypes } = require('node:util');
 
 const GRAPH_SCHEMA = 'toolkit.controller.programme-graph.v1';
 const METADATA_SCHEMA = 'toolkit.github-program.programme-graph-metadata.v1';
@@ -18,6 +19,56 @@ function fail(code) {
   const error = new Error(code);
   error.code = code;
   throw error;
+}
+
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || Object.is(value, -0)) fail('PROGRAMME_GRAPH_STATE_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) fail('PROGRAMME_GRAPH_STATE_INVALID'); }
+    catch (_) { fail('PROGRAMME_GRAPH_STATE_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) fail('PROGRAMME_GRAPH_STATE_INVALID');
+  seen.add(value);
+  try {
+    const isArray = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length) fail('PROGRAMME_GRAPH_STATE_INVALID');
+    if (isArray) {
+      if (prototype !== Array.prototype && prototype !== null) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value)) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) fail('PROGRAMME_GRAPH_STATE_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('PROGRAMME_GRAPH_STATE_INVALID');
+        Object.defineProperty(result, String(index), {
+          value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) fail('PROGRAMME_GRAPH_STATE_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      Object.defineProperty(result, name, {
+        value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true,
+      });
+    }
+    return result;
+  } finally { seen.delete(value); }
 }
 
 function isPlain(value) {
@@ -43,6 +94,38 @@ function deepFreezeGraph(value) {
   return Object.freeze(value);
 }
 
+function normalizeOptionalCollections(value) {
+  const state = trustedDataCopy(value);
+  const omitEmpty = (record, key, code) => {
+    if (!Object.hasOwn(record, key)) return;
+    if (!Array.isArray(record[key])) fail(code);
+    if (record[key].length === 0) delete record[key];
+  };
+  for (const key of ['dependencies', 'extensions']) omitEmpty(state, key, 'PROGRAMME_GRAPH_STATE_INVALID');
+  if (Array.isArray(state.children)) {
+    for (const child of state.children) {
+      if (!isPlain(child)) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      for (const key of ['dependencies', 'holds', 'deliverables']) omitEmpty(child, key, 'PROGRAMME_GRAPH_STATE_INVALID');
+      if (Object.hasOwn(child, 'dependencies') && (!child.dependencies.every(issueNumber)
+        || new Set(child.dependencies).size !== child.dependencies.length)) fail('PROGRAMME_GRAPH_DEPENDENCY_INVALID');
+    }
+  }
+  if (Array.isArray(state.active_lanes)) {
+    for (const lane of state.active_lanes) {
+      if (!isPlain(lane)) fail('PROGRAMME_GRAPH_STATE_INVALID');
+      omitEmpty(lane, 'work_claims', 'PROGRAMME_GRAPH_STATE_INVALID');
+    }
+  }
+  for (const extension of state.extensions || []) {
+    if (!isPlain(extension) || !Array.isArray(extension.outcomes)) continue;
+    for (const outcome of extension.outcomes) {
+      if (!isPlain(outcome)) continue;
+      omitEmpty(outcome, 'reference_issue_pointers', 'PROGRAMME_GRAPH_METADATA_INVALID');
+    }
+  }
+  return state;
+}
+
 function safeText(value, max = 4096) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
     && !/[\u0000-\u001f\u007f\r\n]/.test(value)
@@ -52,6 +135,7 @@ function safeText(value, max = 4096) {
 }
 
 function findGraphMetadata(state) {
+  state = trustedDataCopy(state);
   if (!isPlain(state) || !Array.isArray(state.extensions)) return null;
   const selected = state.extensions.filter((item) => isPlain(item) && item.schema === METADATA_SCHEMA);
   if (selected.length === 0) {
@@ -67,7 +151,7 @@ function findGraphMetadata(state) {
   const outcomeIds = new Set();
   const metadataByIssue = new Map();
   for (const item of extension.outcomes) {
-    const optional = ['priority', 'planning_class', 'planning_admission', 'implementation_admission', 'reference_issue_pointers'];
+    const optional = ['priority', 'planning_class', 'planning_admission', 'implementation_admission', 'reference_issue_pointers', 'current_gate', 'current_work'];
     if (!exactKeys(item, ['child_issue', 'outcome_id'], optional)
       || !issueNumber(item.child_issue) || !safeText(item.outcome_id, 64)
       || !/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)?$/.test(item.outcome_id)
@@ -78,6 +162,8 @@ function findGraphMetadata(state) {
     if (Object.hasOwn(item, 'planning_class') && !PLANNING_CLASSES.has(item.planning_class)) fail('PROGRAMME_GRAPH_METADATA_INVALID');
     if (Object.hasOwn(item, 'planning_admission') && !PLANNING_ADMISSIONS.has(item.planning_admission)) fail('PROGRAMME_GRAPH_METADATA_INVALID');
     if (Object.hasOwn(item, 'implementation_admission') && !IMPLEMENTATION_ADMISSIONS.has(item.implementation_admission)) fail('PROGRAMME_GRAPH_METADATA_INVALID');
+    if (Object.hasOwn(item, 'current_gate') && !safeText(item.current_gate, 512)) fail('PROGRAMME_GRAPH_METADATA_INVALID');
+    if (Object.hasOwn(item, 'current_work') && !safeText(item.current_work)) fail('PROGRAMME_GRAPH_METADATA_INVALID');
     if (Object.hasOwn(item, 'reference_issue_pointers')) {
       const refs = item.reference_issue_pointers;
       if (!Array.isArray(refs) || refs.some((ref) => !exactKeys(ref, ['repository', 'issue'])
@@ -95,6 +181,7 @@ function findGraphMetadata(state) {
     fail('PROGRAMME_GRAPH_CHILD_MAPPING_MISSING');
   }
   if (state.parent?.issue === 421) {
+    if (childByIssue.has(467)) fail('PROGRAMME_GRAPH_REFERENCE_ONLY_ISSUE_IN_MEMBERSHIP');
     const actual = [...outcomeIds].sort();
     const expected = [...CURRENT_421_OUTCOMES].sort();
     if (canonicalSerialize(actual) !== canonicalSerialize(expected)) fail('PROGRAMME_GRAPH_OUTCOME_SET_INVALID');
@@ -102,7 +189,6 @@ function findGraphMetadata(state) {
     const c1 = byId.get('C1');
     const w2a = byId.get('W2-A');
     if (!c1 || c1.child_issue !== 435 || !w2a || w2a.child_issue !== 455) fail('PROGRAMME_GRAPH_SOURCE_MAPPING_INVALID');
-    if (childByIssue.has(467)) fail('PROGRAMME_GRAPH_REFERENCE_ONLY_ISSUE_IN_MEMBERSHIP');
     const c1Child = childByIssue.get(435);
     const w2aChild = childByIssue.get(455);
     if (c1Child.lifecycle !== 'CURRENT' || w2aChild.lifecycle !== 'QUEUED'
@@ -132,6 +218,8 @@ function selectDeliveryPr(state, history, child) {
 }
 
 function deriveProgrammeGraph(state, history = { pr_history: [] }) {
+  state = normalizeOptionalCollections(state);
+  history = trustedDataCopy(history);
   const metadata = findGraphMetadata(state);
   if (!metadata) fail('PROGRAMME_GRAPH_METADATA_REQUIRED');
   if (!safeText(state.repository, 512) || !/^[^/\s]+\/[^/\s]+$/.test(state.repository)
@@ -167,8 +255,10 @@ function deriveProgrammeGraph(state, history = { pr_history: [] }) {
       dependencies: translated,
       native_issue: { repository: state.repository, number: child.issue },
       delivery_pr: selectDeliveryPr(state, history, child),
-      current_gate: gateValues.length ? [...new Set(gateValues)].sort().join(', ') : null,
-      current_work: workValues.length ? [...new Set(workValues)].sort().join('; ') : null,
+      current_gate: gateValues.length ? [...new Set(gateValues)].sort().join(', ')
+        : Object.hasOwn(meta, 'current_gate') ? meta.current_gate : null,
+      current_work: workValues.length ? [...new Set(workValues)].sort().join('; ')
+        : Object.hasOwn(meta, 'current_work') ? meta.current_work : null,
       complete_when: child.done_when.slice(),
     };
     for (const key of ['priority', 'planning_class', 'planning_admission', 'implementation_admission', 'reference_issue_pointers']) {
@@ -198,23 +288,37 @@ function deriveProgrammeGraph(state, history = { pr_history: [] }) {
 }
 
 function programmeGraphIdentity(graph) {
-  if (!graph || graph.schema !== GRAPH_SCHEMA || !/^[a-f0-9]{64}$/.test(graph.digest)) fail('PROGRAMME_GRAPH_IDENTITY_INVALID');
+  graph = trustedDataCopy(graph);
+  if (!isPlain(graph) || graph.schema !== GRAPH_SCHEMA || !/^[a-f0-9]{64}$/.test(graph.digest)) {
+    fail('PROGRAMME_GRAPH_IDENTITY_INVALID');
+  }
+  const keys = Object.keys(graph).sort().join('\u0000');
+  if (keys === ['digest', 'schema'].sort().join('\u0000')) return { schema: GRAPH_SCHEMA, digest: graph.digest };
+  if (keys !== ['digest', 'outcomes', 'parent_issue', 'repository', 'schema'].sort().join('\u0000')
+    || digestValue({ schema: graph.schema, repository: graph.repository, parent_issue: graph.parent_issue, outcomes: graph.outcomes }) !== graph.digest) {
+    fail('PROGRAMME_GRAPH_IDENTITY_INVALID');
+  }
   return { schema: GRAPH_SCHEMA, digest: graph.digest };
 }
 
-function renderProgrammeGraph(graph, encodeCell) {
-  if (typeof encodeCell !== 'function') fail('PROGRAMME_GRAPH_RENDERER_INVALID');
-  const cell = (value) => encodeCell(value === null ? '-' : String(value));
-  const lines = [
-    '## Programme Graph',
-    '',
-    '| Outcome | Status | Current gate | Current work | Complete when |',
-    '| --- | --- | --- | --- | --- |',
-  ];
-  for (const node of graph.outcomes) {
-    lines.push(`| ${cell(node.outcome_id)} | ${cell(node.status)} | ${cell(node.current_gate)} | ${cell(node.current_work)} | ${cell(node.complete_when.join('; '))} |`);
+function renderProgrammeGraph(canonicalState) {
+  if (arguments.length !== 1) fail('PROGRAMME_GRAPH_RENDERER_INVALID');
+  const state = trustedDataCopy(canonicalState);
+  const humanSurface = require('./toolkit-github-program-state-v5.cjs').humanSurfaceV2;
+  const rendered = humanSurface.render({ source: { type: 'CANONICAL_STATE', state }, target: { kind: 'parent' } });
+  if (!rendered.ok) fail(rendered.code);
+  if (!rendered.programme_graph || rendered.programme_graph.schema !== GRAPH_SCHEMA) fail('PROGRAMME_GRAPH_METADATA_REQUIRED');
+  const lines = rendered.body.split('\n');
+  const start = lines.indexOf('## Programme Graph');
+  const end = lines.indexOf('## Current action');
+  if (start < 0 || end <= start) fail('PROGRAMME_GRAPH_RENDERER_INVALID');
+  const result = lines.slice(start, end - 1);
+  if (result[2] !== '| Outcome | Status | Current gate | Current work | Complete when |'
+    || result[3] !== '| --- | --- | --- | --- | --- |'
+    || result.some((line) => !line.startsWith('|') && line !== '' && line !== '## Programme Graph')) {
+    fail('PROGRAMME_GRAPH_RENDERER_INVALID');
   }
-  return lines;
+  return result;
 }
 
 module.exports = Object.freeze({

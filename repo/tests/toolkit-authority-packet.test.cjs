@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
+const vm = require('node:vm');
 const test = require('node:test');
 let Ajv2020 = null;
 try { Ajv2020 = require('ajv/dist/2020'); } catch (_) { /* Optional in dependency-light checkouts. */ }
@@ -32,6 +33,29 @@ function assertCode(callback, code) {
 
 function packetFixture(seed = 'packet') {
   return support.packet({ seed, bindings: support.bindings(seed) });
+}
+
+const PROXY_TRAP_NAMES = Object.freeze([
+  'get', 'set', 'has', 'deleteProperty', 'defineProperty', 'getOwnPropertyDescriptor', 'ownKeys',
+  'getPrototypeOf', 'setPrototypeOf', 'isExtensible', 'preventExtensions', 'apply', 'construct',
+]);
+
+function observedProxy(target, counters, shouldThrow = false) {
+  const handler = {};
+  for (const name of PROXY_TRAP_NAMES) {
+    handler[name] = (...args) => {
+      counters[name] += 1;
+      if (shouldThrow) throw new Error(`trap:${name}`);
+      if (name === 'apply') return Reflect.apply(...args);
+      if (name === 'construct') return Reflect.construct(...args);
+      return Reflect[name](...args);
+    };
+  }
+  return new Proxy(target, handler);
+}
+
+function proxyTrapCounters() {
+  return Object.fromEntries(PROXY_TRAP_NAMES.map((name) => [name, 0]));
 }
 
 function initialise(packetValue, root = support.stateRoot()) {
@@ -92,6 +116,13 @@ test('authority packet producer RUN uses the physical Loop intersection', { skip
 test('authority packet validation rejects noncanonical, sparse, accessor, custom-value, and privacy inputs', () => {
   const value = packetFixture();
   assertCode(() => runtime.validateAuthorityPacket(JSON.stringify(value)), 'GPR_PACKET_VALUE_INVALID');
+  const canonicalBytes = Buffer.from(runtime.canonicalSerialize(value), 'utf8');
+  assert.equal(runtime.validateAuthorityPacket(canonicalBytes).schema, runtime.AUTHORITY_PACKET_SCHEMA_ID);
+  let bufferGetterCalls = 0;
+  const decoratedBuffer = Buffer.from(canonicalBytes);
+  Object.defineProperty(decoratedBuffer, 'toJSON', { enumerable: true, get() { bufferGetterCalls += 1; return () => ({}); } });
+  assertCode(() => runtime.validateAuthorityPacket(decoratedBuffer), 'GPR_PACKET_VALUE_INVALID');
+  assert.equal(bufferGetterCalls, 0);
   const sparse = structuredClone(value);
   delete sparse.body.sections[1];
   assertCode(() => runtime.validateAuthorityPacket(sparse), 'GPR_PACKET_VALUE_INVALID');
@@ -110,6 +141,79 @@ test('authority packet validation rejects noncanonical, sparse, accessor, custom
   const pathValue = structuredClone(value);
   pathValue.body.decision = 'The private file is C:\\Users\\owner\\secret.txt';
   assertCode(() => runtime.validateAuthorityPacket(pathValue), 'GPR_PACKET_PRIVACY_REJECTED');
+});
+
+test('authority packet ingestion rejects Proxies before every trap, including revoked and cross-realm targets', () => {
+  const calibration = proxyTrapCounters();
+  const object = observedProxy({}, calibration);
+  void object.missing;
+  object.value = 1;
+  assert.equal('value' in object, true);
+  delete object.value;
+  Object.defineProperty(object, 'value', { value: 1, configurable: true });
+  Object.getOwnPropertyDescriptor(object, 'value');
+  Reflect.ownKeys(object);
+  Object.getPrototypeOf(object);
+  Object.setPrototypeOf(object, null);
+  Object.isExtensible(object);
+  Object.preventExtensions(object);
+  const callable = observedProxy(function callableTarget() {}, calibration);
+  callable();
+  Reflect.construct(callable, []);
+  assert.deepEqual(PROXY_TRAP_NAMES.filter((name) => calibration[name] > 0).sort(), [...PROXY_TRAP_NAMES].sort());
+
+  const assertRejectedWithoutTraps = (input, expected, label) => {
+    const counters = proxyTrapCounters();
+    const proxy = observedProxy(input, counters);
+    assertCode(() => runtime.validateAuthorityPacket(proxy, expected), 'GPR_PACKET_VALUE_INVALID');
+    assert.deepEqual(counters, proxyTrapCounters(), label);
+  };
+  assertRejectedWithoutTraps(packetFixture('proxy-root'), undefined, 'ordinary object target');
+  assertRejectedWithoutTraps([], undefined, 'array target');
+  assertRejectedWithoutTraps(function hostileTarget() {}, undefined, 'callable function target');
+  assertRejectedWithoutTraps(Buffer.from(runtime.canonicalSerialize(packetFixture('buffer-proxy'))), undefined, 'Buffer target');
+
+  const nestedCounters = proxyTrapCounters();
+  const nested = packetFixture('proxy-nested');
+  nested.body.sections = observedProxy(nested.body.sections, nestedCounters);
+  assertCode(() => runtime.validateAuthorityPacket(nested), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(nestedCounters, proxyTrapCounters(), 'nested array placement');
+
+  const expectedCounters = proxyTrapCounters();
+  const clean = packetFixture('proxy-expected');
+  const identities = runtime.authorityPacketIdentities(clean);
+  const expected = observedProxy({ bindings: clean.bindings, packet_id: identities.packet_id }, expectedCounters);
+  assertCode(() => runtime.validateAuthorityPacket(clean, expected), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(expectedCounters, proxyTrapCounters(), 'expected binding placement');
+
+  const revokedCounters = proxyTrapCounters();
+  const revoked = Proxy.revocable(packetFixture('proxy-revoked'), observedProxy({}, revokedCounters));
+  revoked.revoke();
+  assertCode(() => runtime.validateAuthorityPacket(revoked.proxy), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(revokedCounters, proxyTrapCounters(), 'revoked target');
+
+  const crossRealmCounters = proxyTrapCounters();
+  const makeCrossRealmProxy = vm.runInNewContext('(target, handler) => new Proxy(target, handler)');
+  const crossRealm = makeCrossRealmProxy(packetFixture('proxy-cross-realm'), observedProxy({}, crossRealmCounters));
+  assertCode(() => runtime.validateAuthorityPacket(crossRealm), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(crossRealmCounters, proxyTrapCounters(), 'cross-realm target');
+
+  const throwingCounters = proxyTrapCounters();
+  const throwing = observedProxy(packetFixture('proxy-throwing'), throwingCounters, true);
+  assertCode(() => runtime.validateAuthorityPacket(throwing), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(throwingCounters, proxyTrapCounters(), 'throwing traps remain unobserved');
+});
+
+test('authority packet copying rejects conversion hooks without invoking caller getters or methods', () => {
+  const counts = { getter: 0, setter: 0, toJSON: 0, toString: 0, valueOf: 0, toPrimitive: 0 };
+  const value = packetFixture('conversion-hooks');
+  Object.defineProperty(value.body, 'toJSON', { enumerable: true, get() { counts.getter += 1; counts.toJSON += 1; return () => ({}); } });
+  Object.defineProperty(value.body, 'toString', { enumerable: true, value() { counts.toString += 1; return ''; } });
+  Object.defineProperty(value.body, 'valueOf', { enumerable: true, value() { counts.valueOf += 1; return ''; } });
+  Object.defineProperty(value.body, Symbol.toPrimitive, { enumerable: true, value() { counts.toPrimitive += 1; return ''; } });
+  Object.defineProperty(value.body, 'setterOnly', { enumerable: true, set() { counts.setter += 1; } });
+  assertCode(() => runtime.validateAuthorityPacket(value), 'GPR_PACKET_VALUE_INVALID');
+  assert.deepEqual(counts, { getter: 0, setter: 0, toJSON: 0, toString: 0, valueOf: 0, toPrimitive: 0 });
 });
 
 test('packet identities are deterministic and producer identity is independent of body content', () => {
@@ -268,6 +372,24 @@ test('fresh-process delivery returns a full packet larger than the legacy 16 KiB
     runtime_identity_digest: delivery.envelope.runtime_identity_digest,
     namespace_digest: runtime.namespaceDigest({ repository: 'weijunswj/ai-agent-toolkit', parent_issue: 435, child_issue: 435 })
   }), delivery);
+  const oversizedDelivery = structuredClone(delivery);
+  oversizedDelivery.envelope.canonical_packet_bytes = 'x'.repeat(runtime.AUTHORITY_PACKET_LIMITS.deliveryBytes + 1);
+  assertCode(() => runtime.validateAuthorityPacketDelivery(oversizedDelivery), 'GPR_PACKET_LIMIT');
+
+  const traps = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const handler = {
+    get(target, key, receiver) { traps.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { traps.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { traps.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { traps.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  };
+  assertCode(() => runtime.validateAuthorityPacketDelivery(new Proxy(delivery, handler)), 'GPR_PACKET_READBACK_FAILED');
+  assert.deepEqual(traps, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+  assertCode(() => runtime.validateAuthorityPacketDelivery(delivery, new Proxy({ bindings: packetValue.bindings }, handler)), 'GPR_PACKET_READBACK_FAILED');
+  assert.deepEqual(traps, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+  const processResult = { error: null, signal: null, status: 0, stdout: runtime.canonicalSerialize(delivery) + '\n', stderr: '' };
+  assertCode(() => runtime.validateAuthorityPacketDeliveryProcessResult(new Proxy(processResult, handler), {}), 'GPR_PACKET_READBACK_FAILED');
+  assert.deepEqual(traps, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
 });
 
 test('authority packet event identities are append-only and duplicate-safe', () => {
