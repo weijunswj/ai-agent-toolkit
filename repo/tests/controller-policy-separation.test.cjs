@@ -149,11 +149,16 @@ test('web owns CURRENT reconciliation while semantic workers receive compiled bo
   assert.match(controller, /issue body is not itself the semantic worker packet/);
 });
 
-test('generic interim Controller law is source-canonicalised at the next safe boundary', () => {
+test('generic interim Controller law is canonicalised only by the Toolkit source-owning controller', () => {
   assert.match(controller, /Interim Controller-law canonicalisation/);
   assert.match(controller, /generic Owner\/Web interim rule that changes Controller behaviour across chats, workers or Toolkit-managed repositories/);
-  assert.match(controller, /stage the rule into `repo\/CONTROLLER\.md` at that safe boundary/);
-  assert.match(controller, /do not allow generic Controller law to remain indefinitely comment-only/);
+  assert.match(controller, /Canonicalisation into `weijunswj\/ai-agent-toolkit:repo\/CONTROLLER\.md` is owned only by the Web Controller currently bound to the Toolkit repository/);
+  assert.match(controller, /explicitly authorised Toolkit executor operating under that controller/);
+  assert.match(controller, /Web Controller bound to another repository must not cross its repository fence/);
+  assert.match(controller, /must not.*stage Toolkit source.*open\/update a Toolkit source PR.*treat this clause as mutation authority/s);
+  assert.match(controller, /surface the reusable gap\/feedback or exact handoff to the Toolkit source-owning controller\/durable owner/);
+  assert.match(controller, /next safe Toolkit source boundary/);
+  assert.match(controller, /does not remain indefinitely comment-only/);
   assert.match(controller, /Repository\/task-specific facts, receipts and implementation contracts remain on their owning programme\/child surfaces/);
 });
 
