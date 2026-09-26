@@ -137,6 +137,26 @@ test('root workers never self-verify model identity while G0/G3 parents configur
   assert.match(architecture, /spawned children never self-attest after launch/i);
 });
 
+test('web owns CURRENT reconciliation while semantic workers receive compiled bounded context', () => {
+  assert.match(controller, /Web\/controller CURRENT ownership/);
+  assert.match(controller, /Update and read back CURRENT after every material transition that changes a projected current fact/);
+  assert.match(controller, /Do not write merely because another chat turn occurred when no current fact changed/);
+  assert.match(controller, /CURRENT-first bounded worker context/);
+  assert.match(controller, /bounded stage\/task\/authority packet compiled from CURRENT/);
+  assert.match(controller, /full programme-parent body, Delivery Child body, issue\/PR chronology, historical authority list/);
+  assert.match(controller, /are not default worker context/);
+  assert.match(controller, /If CURRENT is insufficient, reconcile CURRENT; never compensate by dumping chronology into the worker prompt/);
+  assert.match(controller, /issue body is not itself the semantic worker packet/);
+});
+
+test('generic interim Controller law is source-canonicalised at the next safe boundary', () => {
+  assert.match(controller, /Interim Controller-law canonicalisation/);
+  assert.match(controller, /generic Owner\/Web interim rule that changes Controller behaviour across chats, workers or Toolkit-managed repositories/);
+  assert.match(controller, /stage the rule into `repo\/CONTROLLER\.md` at that safe boundary/);
+  assert.match(controller, /do not allow generic Controller law to remain indefinitely comment-only/);
+  assert.match(controller, /Repository\/task-specific facts, receipts and implementation contracts remain on their owning programme\/child surfaces/);
+});
+
 test('ordinary semantic executors receive bounded authority instead of being told to read the full Controller', () => {
   assert.match(controller, /Full `repo\/CONTROLLER\.md` retrieval is a control-plane responsibility/);
   assert.match(controller, /Ordinary G0\/G1\/G2\/G3\/G4 root executors and subagents must not be instructed to read\/apply the full Controller as a prerequisite/);
