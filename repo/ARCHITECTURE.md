@@ -101,11 +101,13 @@ Governance stage semantics are provider/model agnostic.
 - `G2` = adversarial executable implementation-contract closure.
 - `G3` = implementation/validation.
 - `G4` = fresh isolated exact-head independent assurance.
-- `LOOP`, `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. G1_RECONVERGENCE is read-only and non-gating.
+- `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. G1_RECONVERGENCE is read-only and non-gating and uses exactly the selected stack's G1 provider/model/reasoning route.
 
 Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
 Concrete provider/model/reasoning choices are selected through an explicitly named stack registry binding and are configuration, not architecture law. There is no authoritative default stack. Stack selection and physical harness selection are orthogonal. Root model/route selection is an out-of-band User/Web/controller/harness act performed before root launch/adoption; the root semantic worker never verifies or attests its own model identity and cannot HOLD because runtime model metadata is absent. A genuine root-route handoff is therefore a pre-launch orchestration decision when the selected route cannot actually be established, not a worker self-check. One logical lane may hand off between qualified harnesses without changing semantic gate identity, RUN/Lock, ownership, correction accounting or candidate identity. Service treatment/speed is non-authoritative observed metadata. A route or harness change that preserves these stage semantics and authority boundaries does not require an architecture redesign.
+
+Web may also issue an evidence-backed `WEB_ROUTE_RECOMMENDATION` when current-run evidence shows the selected route may be materially too light for the accepted stage. The recommendation has no authority effect. An exact provider/model/reasoning override may be applied only after explicit Owner approval, only for the recorded RUN + stage/episode scope, and only at a safe worker launch/adoption/replacement boundary. Preserve the named stack and registry revision as baseline provenance plus the approval receipt and exact override. This is a bounded orchestration overlay, not a new stack, fallback chain or semantic escalation stage. It never changes gate authority, scope, candidate allowance, correction accounting or re-entry obligations.
 
 Parallelism is optional rather than a topology obligation. Programme lanes may progress concurrently in different harnesses, and G0/G3 may fan out only when work is genuinely separable and the expected latency/usage benefit justifies orchestration overhead. When G0/G3 launches a semantic child, the parent/launcher resolves the concrete child route from the selected stack and supplies the model/reasoning configuration to the harness before child creation. Root and child semantic prompts do not own model names, and spawned children never self-attest after launch. Semantic executors consume bounded stage/task authority and the smallest relevant repository instruction surface; the full Controller is control-plane source material and is not a default worker prerequisite.
 
@@ -149,6 +151,12 @@ Toolkit G1 must prove conformance to this document or explicitly obtain authorit
 
 G2 independently challenges the accepted G1 boundary before mutation. It may inspect primary sources and reject a flawed G1 assumption.
 
+One admitted same-root G2 episode owns its own read-only contract convergence. It performs bounded `challenge -> refine -> challenge` over the proposed enforcement mechanism/completeness proof, state machine, protocol/schema, recovery behavior, evidence/validation contract and mutation/candidate boundary. Discovering a defect in that proposed contract is not itself a terminal AMEND and does not justify a fresh same-root G2 identity while root/trust/Owner decisions, evidence sufficiency and authorised scope remain unchanged.
+
+Before PASS, G2 also acts as the adversarial reviewer of its own proposed contract. It deliberately searches for a materially plausible implementation or interpretation that satisfies the written plan while violating the accepted invariant, plus competing semantic models, equivalent/bypass consumers, replay/reordering/duplication, interruption/recovery, actor/identity substitution and evidence-oracle weaknesses. The contract survives only when challenged assumptions are explicitly bound, the state/protocol/proof model is refined where material, and consequential challenges map to G3 negatives plus positive controls. This is the design/contract analogue of G4 attacking the realised candidate, not a requirement that G2 prove code already works.
+
+G2 terminates as `G2_PASS`, genuine evidence/environment `G2_HOLD`, `G2_REENTRY_REQUIRED` for changed root/trust/Owner/upstream semantics, or `G2_NONCONVERGED`. A `G2_NONCONVERGED` packet names the surviving contradiction, challenged alternatives and smallest missing decision/evidence boundary and returns to Web. Renaming RUN/Lock without materially changed input does not create another admissible G2 episode.
+
 G2 binds:
 
 - acceptance criteria and invariants;
@@ -159,18 +167,27 @@ G2 binds:
 - causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
 - async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
 - for each material stateful/async transition, a named deterministic negative transition regression plus positive control, covering the interruption/replacement/cancellation/late-completion windows that are actually relevant to the state machine;
+- for material async/deferred mechanisms, an explicit temporal-semantics model that states whether intermediate work is independently consequential or latest/coalesced only; debounce/coalescing; replacement/supersession/cancellation; retry/idempotency ownership; queue-time versus execution-time/current-state lookup; ordering/duplicates/late completion; and obligation creation/transfer/merge/supersession/cancellation/completion semantics;
+- when validation cases share a materially bounded/mutable resource, the resource/equivalence identity, material capacity/window/state semantics, per-case consumption/mutation, later-oracle prerequisite state and one explicit non-interference strategy; prefer faithful isolation, then deterministic reset, then explicit shared-state ordering/ownership, using bounded pacing/window separation only when the real accepted resource is inherently time-windowed and cannot be safely isolated/reset;
 - for universal/arbitrary/unknown-behaviour invariants, the concrete enforcement mechanism plus a completeness argument under the actual language/runtime model, including what state/events are observable and which material paths bypass any finite observer;
+- for universal/arbitrary/no-bypass/complete-provenance claims, a `MECHANISM_COMPLETENESS_PROOF_MODEL` containing: (a) complete trusted-boundary inventory across executable ingress/egress, exported/callable aliases, receipt producers/consumers, parsers/serializers and binding/admission paths; (b) a material state-machine artefact naming states, transitions, actors/roles, transition authority, duplicate/retry/replacement rules, terminal states and consequential effects; (c) a protocol-schema artefact binding accepted receipt/message/evidence shapes, cardinality, multiplicity, cross-message identities and malformed/unknown-field behaviour; (d) enforcement mapping from every model edge/state/schema obligation to concrete trusted enforcement and production-boundary evidence; and (e) explicit falsifiable runtime/language/provider assumptions. Existing canonical schemas may be referenced rather than duplicated when complete;
 - one complete current-requirement coverage manifest: every mandatory acceptance criterion, inherited blocker/defect family and still-required obligation has exactly one disposition (`IMPLEMENT_IN_THIS_CANDIDATE`, `ALREADY_SATISFIED_WITH_EXACT_EVIDENCE`, `UNCHANGED_REQUIRED_CONSUMER`, or `OUT_OF_SCOPE_WITH_EXPLICIT_CONTINUING_OWNER`), and every implemented row maps requirement -> invariant -> consequential boundary -> affected consumers/surfaces -> negative regression -> positive control -> G3 executable proof -> G4 assurance surface;
 - for one-screened-boundary/no-bypass claims, a callable-surface inventory covering exported aliases and materially reachable alternate routes, with every public/reachable path bound to the accepted enforcement and internal-only paths explicit;
 - for backward/readback/serialization compatibility, immutable predecessor-produced bytes/artifacts from an exact accepted producer revision consumed unchanged by the candidate, rather than candidate-regenerated approximations;
 - for semantically equivalent input/state representations, the canonicalisation rule applied before identity/digest/hash/signature and the equivalence regressions that prove identical canonical identity;
 - where rejection promises zero user-controlled execution or side effects, the material language/runtime hooks reachable before rejection and the instrumentation proving zero prohibited execution at the real boundary;
 
+For async/deferred work, timer/queue/promise/callback mechanics are evidence about implementation shape, not authority for product semantics. G2 must settle the temporal model from accepted product evidence/Owner authority before G3. Under latest-state debounce/coalescing, replacement may validly supersede an earlier intermediate item because the obligation transfers/merges into the latest consequential state; under each-state-required semantics, replacement/cancellation must preserve or truthfully fail the individual obligation. G3 implements that frozen model and G4 attacks whether the candidate honours it; neither stage may invent a different temporal interpretation from observed mechanics.
+
 For transactional/state-machine work, relevant windows commonly include pre-commit, partial commit, cleanup, and retry after interruption. For async work they commonly include pre-wait, during-wait, replacement/cancellation, late arrival, and completion after a snapshot/decision point. G2 selects the windows that can materially violate the accepted invariant; this is not a mandatory combinatorial matrix.
+
+Validation itself must not manufacture a false candidate failure by perturbing a prerequisite resource used by a later oracle. Examples include rate-limit/quota windows, shared session state, queues, caches, database fixtures/counters, exclusive leases/locks, ports/sockets, provider/API quotas and finite test identities. Isolation/reset must remain faithful to production semantics; do not rotate/spoof identities, disable limits or reset production state in a way that bypasses the invariant. Where the resource is genuinely time-windowed and no faithful isolation/reset exists, use one explicit bounded group/window boundary with attributable evidence rather than scattered sleeps. If the shared interference is itself the behavior under test, declare that intentionally instead of suppressing it. Proven validation self-interference is harness/evidence failure rather than product failure absent separate candidate-defect evidence.
 
 A complete contract is also distinct from a green subset of tests: omission of a still-required criterion/defect family is a contract-coverage failure, even when every implemented row passes. A safe wrapper cannot establish a no-bypass public-boundary claim while another exported/reachable route avoids it. Compatibility is proven with predecessor-produced artifacts, not by regenerating historical-looking bytes with candidate code. Canonical identity is computed only after accepted representation equivalence is normalised. A rejection oracle that requires noninterference observes side effects/hooks before the rejection point; the final error code alone cannot prove zero execution.
 
 Mechanism completeness is distinct from semantic correctness. A finite denylist, observer, hook, lexical brand, parser route, intercepted API or event list cannot implement a universal `any/arbitrary/unknown` invariant unless the runtime model proves that mechanism sees every relevant violating path. If the platform cannot generically introspect the required state after arbitrary/untrusted code has acted, G2 must move enforcement to a complete trusted boundary: invalidate or expire provenance at exposure, copy/normalise into trusted state, re-establish trust after the boundary, or return to G1/Owner when the trust model itself must change. Post-hoc detector coverage is not a substitute for observability the platform does not provide.
+
+A dense finite regression matrix remains necessary falsification/implementation evidence but is not a completeness proof. For an exhaustive claim, the proof model must explain why the trusted boundary is finite and exhaustive and must distinguish materially different execution identities (for example coordinator versus actual executor) when substitution would change the guarantee. State-machine and protocol-schema artefacts may be embedded in an existing canonical contract/IR/schema when that representation is complete; do not manufacture duplicate documentation. G4 directly challenges the proof model by seeking an executable route, multiplicity/replay/reordering, malformed child evidence, identity substitution or state transition absent from the model. A successful such counterexample is `MECHANISM_COMPLETENESS_UNPROVEN` unless it is demonstrably an ordinary implementation defect already inside an accepted complete model.
 - validation and evidence requirements;
 - reversal/recovery behaviour;
 - correction limits.
@@ -183,11 +200,13 @@ For expressly simple/low-uncertainty work, one invocation may establish logicall
 
 G3 implements and validates the complete bounded child candidate within the accepted contract and demonstrates closure at actual consequential/public boundaries, not only helper-level tests.
 
-A repository validator may itself require immutable commit identity or a clean committed working tree. When G2/G3 explicitly binds `COMMIT_REQUIRED_VALIDATION=YES`, run all meaningful checks that do not require commit identity first; after they pass and candidate contents/scope are frozen, create exactly one immutable local candidate commit under the existing allowance and bind its commit/tree/parent. The candidate is then byte-stable for that episode: do not amend, rebase, reconstruct or replace it. Run the identity/clean-tree-dependent and remaining floor against that exact commit, and publish only after the complete floor passes. The local commit is construction/custody, not a separate G4 lifecycle or publication event. Candidate failure returns through normal correction/re-entry; environment/transport/evidence failure preserves the exact commit.
+A repository validator may itself require immutable commit identity or a clean committed working tree. When G2/G3 explicitly binds `COMMIT_REQUIRED_VALIDATION=YES`, run all meaningful checks that do not require commit identity first; after they pass and candidate contents/scope are frozen, create the ordinary immutable local candidate commit under the existing allowance and bind its commit/tree/parent. That candidate identity is byte-stable: do not amend, rebase or reconstruct it. Run the identity/clean-tree-dependent and remaining floor against that exact commit, and publish only after the complete floor passes. The local commit is construction/custody, not a separate G4 lifecycle or publication event. Candidate/product failure returns through normal correction/re-entry; environment/transport/evidence failure preserves the exact commit. A later distinct replacement candidate in the same G3 episode is permitted only under the bounded hosted non-product reclosure rule below and never rewrites this candidate.
 
 For stateful/async work, G3 PASS includes an invariant-to-regression map: every material G2 invariant names the executable regression or production-boundary check that proves it, including the relevant transition/interruption case. Aggregate suite-green status cannot substitute for this mapping.
 
 Ordinary implementation choices inside the contract remain G3 work. A discovery that changes the governing invariant, trust boundary or material contract HOLDs for the appropriate re-entry.
+
+Candidate immutability is per exact candidate identity, not a requirement that the entire G3 episode contain only one candidate. After a published/hosted candidate fails required validation, Web may keep the same RUN/Lock/G3 episode and authorise a distinct immutable replacement candidate only after causal ownership is established as HARNESS, TOOLKIT or ENVIRONMENT with `PRODUCT_SEMANTICS_PROVEN_BAD=NO`, while product semantics, root/trust, accepted G2 contract and assurance floor remain unchanged. The correction must be bounded to the exact validation/harness/tooling/environment mechanism. Every failed candidate remains immutable durable evidence; every replacement gets a new commit/tree identity and exact revalidation boundary. This is validation reclosure, not product correction: it consumes no product/G3 correction attempt and resets no budget. Product RED stays in ordinary G3 convergence; contract changes return G2; root/trust changes return G1. Repeating materially equivalent non-product RED without improved causal evidence returns to Web diagnosis rather than candidate churn.
 
 For sufficiently complex/STRICT work involving concurrency, async completion, deferred consequential work, causal negative controls, lifecycle coordination or identity/resource equivalence, G3 performs a pre-publication adversarial validation episode inside the same G3. When separable and useful this may use one depth-1 read-only validation leaf; otherwise the parent performs it serially. The challenge tries to falsify the regression oracle, causal attribution, liveness/progress, outstanding-work accounting, resource-equivalence handling and false-green controls. It is not another gate: the parent remains sole integrator, ordinary RED stays inside G3, missing product/compatibility semantics return to G2, and changed root/trust/architecture returns to G1.
 
@@ -207,13 +226,26 @@ For every material detector/interceptor/hook/brand/parser/ledger enforcement mec
 
 A material G4 finding may record one primary learning classification: `G1_ROOT_MODEL_MISS`, `G2_CONTRACT_COVERAGE_MISS`, `MECHANISM_COMPLETENESS_UNPROVEN`, `G3_IMPLEMENTATION_MISS`, or `G4_NOVEL_EDGE_CASE`. `MECHANISM_COMPLETENESS_UNPROVEN` means the accepted semantics may be correct but the enforcement/observability proof is incomplete; it requires targeted G2 before another G3. Classification is diagnostic evidence, not a score or authority grant.
 
+Blocking findings also carry causal ownership independent of that learning classification:
+
+- `OWNER=PRODUCT`: the candidate/product itself is proven to violate an accepted invariant through a valid evidence path; only this ownership supports `PRODUCT_SEMANTICS_PROVEN_BAD=YES` and product/G3 correction attribution.
+- `OWNER=CONTRACT`: G2 contract, proof model, completeness boundary, acceptance criterion or executable evidence contract is missing/incorrect.
+- `OWNER=TOOLKIT`: reusable Toolkit governance/runtime/control-plane machinery is defective independently of the target product semantics.
+- `OWNER=HARNESS`: verifier, test runner, launcher, host integration or equivalent evidence machinery is defective.
+- `OWNER=ENVIRONMENT`: provider, transport, capability, runtime or validation environment prevents trustworthy evidence without proving the product bad.
+- `OWNER=UNKNOWN`: causal ownership is not yet established; remain blocked where required and run bounded diagnosis rather than mutating the candidate speculatively.
+
+Every blocking receipt records `PRODUCT_SEMANTICS_PROVEN_BAD=YES|NO`. Until candidate semantics are independently shown bad, the value is NO. A finding may retain secondary durable defect ownership, but one smallest primary causal owner drives immediate routing/correction accounting so product convergence and delivery-machinery convergence remain distinguishable.
+
+A known-broken canonical verifier may be replaced by bounded equivalent evidence only when the verifier is evidence machinery rather than itself an unresolved required shipped/product/security/finality outcome. The substitute must preserve the accepted invariant unchanged, exercise the same consequential production boundary or a proven faithful equivalent, reproduce the required positive/negative/adversarial and effect/zero-effect semantics, bind exact candidate/evidence provenance, and receive normal independent assurance. Successful substitute evidence may establish product correctness and allow product delivery to continue, while the verifier/Toolkit/harness defect remains separately owned and unresolved. If equivalent evidence cannot establish product correctness, the state remains a validation/evidence block with product semantics not proven bad.
+
 G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.
 
 ### G1 re-convergence
 
-G1_RECONVERGENCE is a read-only, leaf-only, non-gating G1-class root-model reconsideration/synthesis role that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. The Loop does not invoke it automatically merely to avoid a Web return.
+G1_RECONVERGENCE is a read-only, leaf-only, non-gating G1-class root-model reconsideration/synthesis role that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. It is not invoked automatically merely to avoid Web adjudication.
 
 Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_REQUIRED`, `OWNER_DECISION_REQUIRED`, or `NONCONVERGED`. It grants no authority. `CONTINUE_CURRENT_CONTRACT` is actionable only when existing authority and fresh state already permit the named work; `NONCONVERGED` remains an Owner/Web decision state.
 
@@ -294,7 +326,7 @@ Owner/Web may explicitly grant a `WEB_DIRECTED_CONTINUATION` for the same contin
 - gives no automatic follow-on authority after a material G4 result;
 - returns any material ambiguity, scope expansion or G4 AMEND to Owner/Web.
 
-This is an explicit human/Web authority path, not an autonomous Loop retry mechanism. It therefore does not require inventing a material architecture boundary merely to continue required same-scope work.
+This is an explicit human/Web authority path, not an autonomous retry mechanism. It therefore does not require inventing a material architecture boundary merely to continue required same-scope work.
 
 ### Delivery Child lifecycle and non-convergence
 
@@ -307,16 +339,13 @@ Normal execution events do not imply either disposition. In particular, worker f
 
 Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception is the final autonomous same-scope exception. A later same-scope `WEB_DIRECTED_CONTINUATION` is possible only through a new explicit Owner/Web grant under the section above and never resets the exhausted accounting.
 
-Repository Loop bounded-convergence rules govern executor persistence inside the existing child, but do not require an automatic higher-model referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
+Bounded-convergence rules govern executor persistence inside the existing child without requiring an automatic separate reconvergence referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
 
 ## Roles
 
 - **User/Web** — architecture, material scope/risk/authority changes, topology decisions, waivers, consequential authority and finality.
-- **Loop Manager** — deterministic/reconciled progression of already-authorised work; no silent scope or authority expansion.
 - **Worker/executor** — implementation or bounded analysis; no ownership/finality authority.
 - **Deterministic runtime** — state, admission, routing, identity, recovery, publication/readback and safety enforcement.
-
-The Loop should automate the simple delivery system, not preserve obsolete process complexity.
 
 ## Context and token architecture
 
@@ -341,11 +370,11 @@ Durability must not require repeatedly copying large evidence through model-visi
 
 The target terminal shape is:
 
-- compact typed decision record containing every material finding, qualification, unresolved risk, disposition, exact identity and other fact needed for the receiving Loop/Web decision;
+- compact typed decision record containing every material finding, qualification, unresolved risk, disposition, exact identity and other fact needed for the receiving Web/assurance decision;
 - immutable evidence manifest containing identity, binding, custody/retrieval information and required consumers;
 - supporting evidence retained under the authorised policy, with external retrieval used only where the accepted contract guarantees access by the intended consumer.
 
-A producer must not assume that Web, Loop or another later consumer has its filesystem, shell, session/process state, hidden logs, host-only tools, or independent ability to refetch/recompute missing facts. Decision-relevant content required for immediate adjudication travels in the terminal packet. Pointers and retrieval instructions are supplementary, not substitutes.
+A producer must not assume that Web or another later consumer has its filesystem, shell, session/process state, hidden logs, host-only tools, or independent ability to refetch/recompute missing facts. Decision-relevant content required for immediate adjudication travels in the terminal packet. Pointers and retrieval instructions are supplementary, not substitutes.
 
 If required supporting evidence cannot be durably and verifiably retrieved by the intended consumer, deliver the relevant material with the packet/authorised attachment or hold with `EVIDENCE_NOT_RETRIEVABLE`.
 
