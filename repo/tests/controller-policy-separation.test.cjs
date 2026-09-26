@@ -589,31 +589,37 @@ test('stateful and async contracts close on named transition regressions, not pr
   assert.match(architecture, /not a mandatory combinatorial matrix/);
 });
 
-test('complex G3 work requires stronger adversarial pre-publication re-challenge without adding a gate', () => {
-  assert.match(controller, /Complex\/STRICT G3 adversarial pre-publication validation/);
-  assert.match(controller, /must launch a depth-1 read-only adversarial challenge leaf/);
+test('complex G3 uses paired implementation and strong-review convergence attempts without adding a gate', () => {
+  assert.match(controller, /Complex\/STRICT G3 paired convergence \+ adversarial pre-publication validation/);
+  assert.match(controller, /each substantive G3 convergence attempt as one paired cycle/);
+  assert.match(controller, /parent implementation\/correction -> complete affected integrated validation green -> fresh depth-1 read-only adversarial challenge leaf/);
   assert.match(controller, /separately registered G3 `adversarial_subagent` route/);
   assert.match(controller, /deliberately stronger reasoning route/);
   assert.match(controller, /privilege\/context boundaries/);
   assert.match(controller, /production-boundary reachability/);
   assert.match(controller, /validation false-greens/);
   assert.match(controller, /leaf never mutates, publishes, grants authority or declares G3 completion/);
-  assert.match(controller, /material settled in-contract implementation finding/);
-  assert.match(controller, /reruns the complete affected integrated validation floor to green, then launches a fresh adversarial challenge leaf/);
-  assert.match(controller, /Repeat this challenge -> correct -> revalidate -> re-challenge cycle/);
+  assert.match(controller, /clean challenge closes that paired attempt successfully/);
+  assert.match(controller, /material settled in-contract implementation finding.*paired attempt is unsuccessful/s);
+  assert.match(controller, /next materially distinct correction attempt inside the same RUN\/Lock/);
+  assert.match(controller, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(controller, /no separate reviewer retry budget beyond the G3 attempt budget/);
   assert.match(controller, /no one-leaf-per-G3 ceiling/);
-  assert.match(controller, /do not create new G3 episodes or nested delegation/);
+  assert.match(controller, /unchanged-byte rechecks, evidence gathering and typed non-product HOLD recovery do not manufacture or consume a substantive attempt/);
   assert.match(controller, /simple\/low-risk G3.*leaf remains optional/s);
   assert.match(controller, /must not silently fall back to the ordinary G3 implementer or ordinary G3 `subagent` route/);
   assert.match(controller, /pre-publication route\/harness HOLD/);
   assert.match(controller, /Settled-behaviour RED stays in G3/);
   assert.match(controller, /missing product\/compatibility semantics return to G2/);
   assert.match(controller, /changed root\/trust\/architecture returns to G1/);
-  assert.match(architecture, /mandatory pre-publication adversarial validation episode/);
-  assert.match(architecture, /launches a depth-1 read-only adversarial challenge leaf/);
-  assert.match(architecture, /separately configured G3 adversarial-subagent route/);
-  assert.match(architecture, /intentionally stronger than the ordinary G3 implementation route/);
-  assert.match(architecture, /launches a fresh read-only adversarial challenge leaf against the updated implementation/);
+
+  assert.match(architecture, /paired convergence cycle inside the same G3 episode/);
+  assert.match(architecture, /One substantive attempt consists of parent implementation\/correction/);
+  assert.match(architecture, /complete affected integrated validation floor reaching green/);
+  assert.match(architecture, /fresh depth-1 read-only adversarial challenge leaf against those exact current bytes/);
+  assert.match(architecture, /clean challenge closes that attempt successfully/);
+  assert.match(architecture, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(architecture, /no independent reviewer retry budget/);
   assert.match(architecture, /no one-leaf-per-G3 ceiling/);
   assert.match(architecture, /no new G3 RUN\/Lock/);
   assert.match(architecture, /It is not another gate/);
