@@ -430,6 +430,24 @@ test('universal and no-bypass claims require an explicit mechanism-completeness 
   assert.match(architecture, /G4 directly challenges the proof model/);
 });
 
+test('validation cases cannot manufacture later false RED by consuming a shared bounded resource', () => {
+  assert.match(controller, /Validation resource non-interference/);
+  assert.match(controller, /shared resource\/equivalence identity/);
+  assert.match(controller, /which cases consume or mutate it/);
+  assert.match(controller, /later oracle's prerequisite state/);
+  assert.match(controller, /isolation first, then deterministic reset, then explicit shared-state ordering\/ownership/);
+  assert.match(controller, /bounded pacing\/window separation only when the real resource is inherently time-windowed/);
+  assert.match(controller, /Do not spoof identities, disable limits, bypass production controls or scatter sleeps/);
+  assert.match(controller, /must not make an otherwise-valid later oracle fail merely by consuming its prerequisite shared resource/);
+
+  assert.match(architecture, /validation cases share a materially bounded\/mutable resource/);
+  assert.match(architecture, /per-case consumption\/mutation/);
+  assert.match(architecture, /rate-limit\/quota windows/);
+  assert.match(architecture, /one explicit bounded group\/window boundary/);
+  assert.match(architecture, /If the shared interference is itself the behavior under test, declare that intentionally/);
+  assert.match(architecture, /validation self-interference is harness\/evidence failure rather than product failure/);
+});
+
 test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
   assert.match(controller, /State-transition adversarial closure/);
   assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
