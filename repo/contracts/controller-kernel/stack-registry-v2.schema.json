@@ -96,7 +96,7 @@
               "$ref": "#/$defs/route"
             },
             "G3": {
-              "$ref": "#/$defs/routeWithSubagent"
+              "$ref": "#/$defs/g3Route"
             },
             "G4": {
               "$ref": "#/$defs/route"
@@ -135,6 +135,37 @@
         },
         "subagent": {
           "$ref": "#/$defs/nullableRoute"
+        }
+      }
+    },
+    "g3Route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "reasoning",
+        "subagent",
+        "adversarial_subagent"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subagent": {
+          "$ref": "#/$defs/nullableRoute"
+        },
+        "adversarial_subagent": {
+          "$ref": "#/$defs/route"
         }
       }
     }
