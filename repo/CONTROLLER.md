@@ -249,7 +249,9 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 
 ## Holds
 
-- Provider, check-system, authentication, transport, route, and evidence-availability failures are typed holds unless they reveal a candidate defect.
+- Provider, check-system, authentication, transport, route, executor/runtime/harness permission or safety interruption, environment, and evidence-availability failures are typed holds unless they reveal a candidate defect.
+- Task/stage prompts may enumerate semantic terminal outcomes, including wording such as `return exactly one`, but those lists do not implicitly suppress Controller-defined typed non-product HOLDs. The prompt must either include the applicable typed HOLD or state that Controller-defined `HARNESS`/`ENVIRONMENT`/`TRANSPORT`/provider/route/auth/evidence/executor-runtime HOLDs remain admissible in addition to the listed semantic outcomes.
+- A pure non-product interruption does not consume product/G3 correction budget unless it independently establishes a candidate defect. Its terminal packet preserves the exact RUN/Lock/candidate identity as applicable, blocked action and evidence, typed primary owner, `PRODUCT_SEMANTICS_PROVEN_BAD`, candidate-defect status, budget impact, reusable evidence, and next safe action.
 - Classify the failure before retrying.
 - A HOLD is neither PASS nor implementation failure.
 - Holds affect the affected lane only unless an explicit dependency propagates them.
