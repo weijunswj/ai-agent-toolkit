@@ -101,7 +101,7 @@ Governance stage semantics are provider/model agnostic.
 - `G2` = adversarial executable implementation-contract closure.
 - `G3` = implementation/validation.
 - `G4` = fresh isolated exact-head independent assurance.
-- `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. Repository Loop Manager is retired from current route selection; historical Loop protocol/evidence remains compatibility-readable. G1_RECONVERGENCE is read-only and non-gating and uses exactly the selected stack's G1 provider/model/reasoning route.
+- `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. G1_RECONVERGENCE is read-only and non-gating and uses exactly the selected stack's G1 provider/model/reasoning route.
 
 Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 

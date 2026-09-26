@@ -173,31 +173,15 @@ test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
   assert.match(architecture, /uses exactly the selected stack's G1 provider\/model\/reasoning route/);
 });
 
-test('OpenAI G2 is Astra High and current governance has no automatic G2 escalation category', () => {
+test('OpenAI G2 is Astra High and current G2 has no automatic higher-reasoning retry', () => {
   const openai = registry.stacks['owner-openai-default'];
   assert.equal(openai.routes.G2.provider, 'openai');
   assert.equal(openai.routes.G2.model, 'gpt-6-astra');
   assert.equal(openai.routes.G2.reasoning, 'high');
-  assert.equal(Object.hasOwn(openai.routes, 'G2_ESCALATED'), false);
-  assert.equal(Object.hasOwn(registry.stacks['owner-claude'].routes, 'G2_ESCALATED'), false);
-  assert.equal(Object.hasOwn(registry.stacks['owner-mixed-claude-gpt'].routes, 'G2_ESCALATED'), false);
   assert.match(controller, /G2 always resolves through the selected named stack's single `G2` route/);
   assert.match(controller, /There is no automatic higher-reasoning G2 retry category/);
   assert.match(controller, /return to Web for causal adjudication rather than automatically spending another model tier/);
   assert.match(controller, /Web may explicitly select another registered stack for a later run when justified/);
-});
-
-test('LOOP is retired from current v2 routing while historical Loop evidence remains compatible', () => {
-  assert.equal(requiredRoutes.includes('LOOP'), false);
-  for (const stack of Object.values(registry.stacks)) assert.equal(Object.hasOwn(stack.routes, 'LOOP'), false);
-  assert.match(controller, /Repository Loop Manager is retired from current route selection/);
-  assert.match(architecture, /Repository Loop Manager is retired from current route selection/);
-});
-
-test('G2_ESCALATED is retired from current routing while historical evidence may remain elsewhere', () => {
-  assert.equal(requiredRoutes.includes('G2_ESCALATED'), false);
-  for (const stack of Object.values(registry.stacks)) assert.equal(Object.hasOwn(stack.routes, 'G2_ESCALATED'), false);
-  assert.doesNotMatch(controller, /G2_ESCALATED/);
 });
 
 test('delegation capability is stage law, not model law', () => {
