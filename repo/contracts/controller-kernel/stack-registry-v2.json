@@ -143,6 +143,77 @@
           "reasoning": "medium"
         }
       }
+    },
+    "owner-mixed-claude-gpt": {
+      "routes": {
+        "G_FRAME": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "G0": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "G1": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "G2": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "high"
+        },
+        "G3": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "medium"
+        },
+        "G4": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "high"
+        },
+        "LOOP": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "G1_RECONVERGENCE": {
+          "provider": "openai",
+          "model": "gpt-6-sol",
+          "reasoning": "xhigh"
+        },
+        "FINAL_AUDIT": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "max"
+        },
+        "BROWSER": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "medium"
+        },
+        "G2_ESCALATED": {
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "reasoning": "xhigh"
+        }
+      },
+      "subagents": {
+        "G0": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "G3": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "medium"
+        }
+      }
     }
   }
 }

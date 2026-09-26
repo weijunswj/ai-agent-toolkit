@@ -60,7 +60,7 @@ test('stack registry has explicit complete symbolic routes and only G0/G3 subage
 });
 
 test('named stacks support explicit cross-harness selection without harness authority', () => {
-  for (const stackId of ['owner-openai-default', 'owner-claude']) {
+  for (const stackId of ['owner-openai-default', 'owner-claude', 'owner-mixed-claude-gpt']) {
     assert.ok(registry.stacks[stackId], `missing named stack: ${stackId}`);
   }
   assert.equal(Object.hasOwn(registry.stacks, 'owner-deepseek'), false);
@@ -120,6 +120,22 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
   assert.equal(claude.subagents['G0'].reasoning, 'medium');
   assert.equal(claude.subagents.G3.reasoning, 'medium');
+});
+
+test('mixed Claude/GPT stack overrides only framing, G1, and G3 from the OpenAI stack', () => {
+  const openai = registry.stacks['owner-openai-default'];
+  const mixed = registry.stacks['owner-mixed-claude-gpt'];
+  assert.ok(mixed);
+
+  assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G3, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' });
+  assert.deepEqual(mixed.subagents.G3, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' });
+
+  for (const role of requiredRoutes.filter((role) => !['G_FRAME', 'G1', 'G3'].includes(role))) {
+    assert.deepEqual(mixed.routes[role], openai.routes[role], `mixed route must mirror OpenAI for ${role}`);
+  }
+  assert.deepEqual(mixed.subagents.G0, openai.subagents.G0);
 });
 
 test('OpenAI normal G2 is Astra High and escalated G2 remains strictly stronger', () => {
