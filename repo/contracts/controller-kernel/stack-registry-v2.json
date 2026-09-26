@@ -42,6 +42,11 @@
             "provider": "openai",
             "model": "gpt-6-luna",
             "reasoning": "max"
+          },
+          "adversarial_subagent": {
+            "provider": "openai",
+            "model": "gpt-6-sol",
+            "reasoning": "max"
           }
         },
         "G4": {
@@ -101,6 +106,11 @@
             "provider": "anthropic",
             "model": "opus-5.5",
             "reasoning": "medium"
+          },
+          "adversarial_subagent": {
+            "provider": "anthropic",
+            "model": "opus-5.5",
+            "reasoning": "high"
           }
         },
         "G4": {
@@ -160,6 +170,11 @@
             "provider": "anthropic",
             "model": "opus-5.5",
             "reasoning": "medium"
+          },
+          "adversarial_subagent": {
+            "provider": "anthropic",
+            "model": "opus-5.5",
+            "reasoning": "high"
           }
         },
         "G4": {
