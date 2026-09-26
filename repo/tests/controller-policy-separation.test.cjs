@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G3', 'G4', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -32,11 +32,9 @@ test('controller stage policy is provider/model agnostic', () => {
     for (const route of Object.values(stack.routes)) {
       assert.equal(controller.includes(route.model), false, `model leaked into Controller law: ${route.model}`);
       assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
-    }
-    for (const route of Object.values(stack.subagents)) {
-      if (route) {
-        assert.equal(controller.includes(route.model), false, `subagent model leaked into Controller law: ${route.model}`);
-        assert.equal(architecture.includes(route.model), false, `subagent model leaked into Architecture law: ${route.model}`);
+      if (route.subagent) {
+        assert.equal(controller.includes(route.subagent.model), false, `subagent model leaked into Controller law: ${route.subagent.model}`);
+        assert.equal(architecture.includes(route.subagent.model), false, `subagent model leaked into Architecture law: ${route.subagent.model}`);
       }
     }
   }
@@ -46,15 +44,33 @@ test('stack registry has explicit complete symbolic routes and only G0/G3 subage
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
   assert.equal(registry.version, 2);
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
-    assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredRoutes].sort(), stackId);
-    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0', 'G3'], stackId);
-    for (const route of Object.values(stack.routes)) {
+    assert.deepEqual(Object.keys(stack.routes), requiredRoutes, `${stackId} route presentation order`);
+    assert.equal(Object.hasOwn(stack, 'subagents'), false, `${stackId} must use stage-local subagent routes`);
+    for (const [role, route] of Object.entries(stack.routes)) {
       assert.equal(typeof route.provider, 'string');
       assert.ok(route.provider.length > 0);
       assert.equal(typeof route.model, 'string');
       assert.ok(route.model.length > 0);
       assert.equal(typeof route.reasoning, 'string');
       assert.ok(route.reasoning.length > 0);
+      if (['G0', 'G3'].includes(role)) {
+        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.${role} must expose its child route locally`);
+      } else {
+        assert.equal(Object.hasOwn(route, 'subagent'), false, `${stackId}.${role} cannot expose a semantic child route`);
+      }
+    }
+  }
+});
+
+test('stack registry keeps reconvergence next to G1 and nests child routes under G0/G3', () => {
+  assert.deepEqual(requiredRoutes, ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER']);
+  for (const [stackId, stack] of Object.entries(registry.stacks)) {
+    assert.deepEqual(Object.keys(stack.routes), requiredRoutes, stackId);
+    assert.equal(Object.hasOwn(stack, 'subagents'), false, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G0, 'subagent'), true, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G3, 'subagent'), true, stackId);
+    for (const role of requiredRoutes.filter((role) => !['G0', 'G3'].includes(role))) {
+      assert.equal(Object.hasOwn(stack.routes[role], 'subagent'), false, `${stackId}.${role}`);
     }
   }
 });
@@ -133,8 +149,8 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
-  assert.equal(claude.subagents['G0'].reasoning, 'medium');
-  assert.equal(claude.subagents.G3.reasoning, 'medium');
+  assert.equal(claude.routes.G0.subagent.reasoning, 'medium');
+  assert.equal(claude.routes.G3.subagent.reasoning, 'medium');
 });
 
 test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max worker slot', () => {
@@ -146,24 +162,30 @@ test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max 
   assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G1_RECONVERGENCE, mixed.routes.G1);
 
-  for (const [role, route] of Object.entries(openai.routes)) {
+  for (const role of requiredRoutes) {
     if (['G_FRAME', 'G1', 'G1_RECONVERGENCE'].includes(role)) continue;
-    if (route.provider === 'openai' && route.model === 'gpt-6-luna' && route.reasoning === 'max') {
-      assert.deepEqual(mixed.routes[role], { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
-    } else {
-      assert.deepEqual(mixed.routes[role], route, `mixed route must mirror OpenAI for ${role}`);
-    }
-  }
+    const openaiRoute = openai.routes[role];
+    const mixedRoute = mixed.routes[role];
+    const openaiRoot = { provider: openaiRoute.provider, model: openaiRoute.model, reasoning: openaiRoute.reasoning };
+    const mixedRoot = { provider: mixedRoute.provider, model: mixedRoute.model, reasoning: mixedRoute.reasoning };
 
-  for (const [role, route] of Object.entries(openai.subagents)) {
-    if (route && route.provider === 'openai' && route.model === 'gpt-6-luna' && route.reasoning === 'max') {
-      assert.deepEqual(mixed.subagents[role], { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna subagent replacement mismatch: ${role}`);
+    if (openaiRoot.provider === 'openai' && openaiRoot.model === 'gpt-6-luna' && openaiRoot.reasoning === 'max') {
+      assert.deepEqual(mixedRoot, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
     } else {
-      assert.deepEqual(mixed.subagents[role], route, `mixed subagent route must mirror OpenAI for ${role}`);
+      assert.deepEqual(mixedRoot, openaiRoot, `mixed route must mirror OpenAI for ${role}`);
+    }
+
+    if (['G0', 'G3'].includes(role)) {
+      const openaiSubagent = openaiRoute.subagent;
+      const mixedSubagent = mixedRoute.subagent;
+      if (openaiSubagent && openaiSubagent.provider === 'openai' && openaiSubagent.model === 'gpt-6-luna' && openaiSubagent.reasoning === 'max') {
+        assert.deepEqual(mixedSubagent, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna subagent replacement mismatch: ${role}`);
+      } else {
+        assert.deepEqual(mixedSubagent, openaiSubagent, `mixed subagent route must mirror OpenAI for ${role}`);
+      }
     }
   }
 });
-
 test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
     assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1, stackId);
@@ -218,8 +240,9 @@ test('github presentation mechanics stay in renderer automation, not Controller 
 test('stack registry has no default stack or authoritative service tier', () => {
   assert.equal(Object.hasOwn(registry, 'default_stack'), false);
   for (const stack of Object.values(registry.stacks)) {
-    for (const route of [...Object.values(stack.routes), ...Object.values(stack.subagents)]) {
-      if (route) assert.equal(Object.hasOwn(route, 'tier'), false);
+    for (const route of Object.values(stack.routes)) {
+      assert.equal(Object.hasOwn(route, 'tier'), false);
+      if (route.subagent) assert.equal(Object.hasOwn(route.subagent, 'tier'), false);
     }
   }
 });

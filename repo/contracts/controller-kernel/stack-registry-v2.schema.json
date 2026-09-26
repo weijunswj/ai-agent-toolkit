@@ -62,8 +62,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "routes",
-        "subagents"
+        "routes"
       ],
       "properties": {
         "routes": {
@@ -73,10 +72,10 @@
             "G_FRAME",
             "G0",
             "G1",
+            "G1_RECONVERGENCE",
             "G2",
             "G3",
             "G4",
-            "G1_RECONVERGENCE",
             "FINAL_AUDIT",
             "BROWSER"
           ],
@@ -85,21 +84,21 @@
               "$ref": "#/$defs/route"
             },
             "G0": {
-              "$ref": "#/$defs/route"
+              "$ref": "#/$defs/routeWithSubagent"
             },
             "G1": {
+              "$ref": "#/$defs/route"
+            },
+            "G1_RECONVERGENCE": {
               "$ref": "#/$defs/route"
             },
             "G2": {
               "$ref": "#/$defs/route"
             },
             "G3": {
-              "$ref": "#/$defs/route"
+              "$ref": "#/$defs/routeWithSubagent"
             },
             "G4": {
-              "$ref": "#/$defs/route"
-            },
-            "G1_RECONVERGENCE": {
               "$ref": "#/$defs/route"
             },
             "FINAL_AUDIT": {
@@ -109,22 +108,33 @@
               "$ref": "#/$defs/route"
             }
           }
+        }
+      }
+    },
+    "routeWithSubagent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "reasoning",
+        "subagent"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
         },
-        "subagents": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "G0",
-            "G3"
-          ],
-          "properties": {
-            "G0": {
-              "$ref": "#/$defs/nullableRoute"
-            },
-            "G3": {
-              "$ref": "#/$defs/nullableRoute"
-            }
-          }
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subagent": {
+          "$ref": "#/$defs/nullableRoute"
         }
       }
     }
