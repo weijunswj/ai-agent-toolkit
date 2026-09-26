@@ -36,6 +36,10 @@ test('controller stage policy is provider/model agnostic', () => {
         assert.equal(controller.includes(route.subagent.model), false, `subagent model leaked into Controller law: ${route.subagent.model}`);
         assert.equal(architecture.includes(route.subagent.model), false, `subagent model leaked into Architecture law: ${route.subagent.model}`);
       }
+      if (route.adversarial_subagent) {
+        assert.equal(controller.includes(route.adversarial_subagent.model), false, `adversarial subagent model leaked into Controller law: ${route.adversarial_subagent.model}`);
+        assert.equal(architecture.includes(route.adversarial_subagent.model), false, `adversarial subagent model leaked into Architecture law: ${route.adversarial_subagent.model}`);
+      }
     }
   }
 });
@@ -53,10 +57,15 @@ test('stack registry has explicit complete symbolic routes and only G0/G3 subage
       assert.ok(route.model.length > 0);
       assert.equal(typeof route.reasoning, 'string');
       assert.ok(route.reasoning.length > 0);
-      if (['G0', 'G3'].includes(role)) {
-        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.${role} must expose its child route locally`);
+      if (role === 'G0') {
+        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.G0 must expose its child route locally`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), false, `${stackId}.G0 cannot expose the G3 adversarial route`);
+      } else if (role === 'G3') {
+        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.G3 must expose its ordinary child route locally`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), true, `${stackId}.G3 must expose its adversarial child route locally`);
       } else {
         assert.equal(Object.hasOwn(route, 'subagent'), false, `${stackId}.${role} cannot expose a semantic child route`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), false, `${stackId}.${role} cannot expose a G3 adversarial child route`);
       }
     }
   }
@@ -68,9 +77,12 @@ test('stack registry keeps reconvergence next to G1 and nests child routes under
     assert.deepEqual(Object.keys(stack.routes), requiredRoutes, stackId);
     assert.equal(Object.hasOwn(stack, 'subagents'), false, stackId);
     assert.equal(Object.hasOwn(stack.routes.G0, 'subagent'), true, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G0, 'adversarial_subagent'), false, stackId);
     assert.equal(Object.hasOwn(stack.routes.G3, 'subagent'), true, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G3, 'adversarial_subagent'), true, stackId);
     for (const role of requiredRoutes.filter((role) => !['G0', 'G3'].includes(role))) {
       assert.equal(Object.hasOwn(stack.routes[role], 'subagent'), false, `${stackId}.${role}`);
+      assert.equal(Object.hasOwn(stack.routes[role], 'adversarial_subagent'), false, `${stackId}.${role}`);
     }
   }
 });
@@ -113,7 +125,9 @@ test('root workers never self-verify model identity while G0/G3 parents configur
   assert.match(controller, /inability to introspect its own model can never create either HOLD/i);
   assert.doesNotMatch(controller, /current harness cannot launch and verify it/i);
   assert.match(controller, /Only `G0` and `G3` may resolve semantic subagent routes/);
-  assert.match(controller, /parent\/launcher resolves the concrete child provider\/model\/reasoning route.*before child creation/s);
+  assert.match(controller, /ordinary subagent.*stage-local `subagent` provider\/model\/reasoning route/s);
+  assert.match(controller, /mandatory complex\/STRICT G3 adversarial pre-publication challenge.*`adversarial_subagent` route/s);
+  assert.match(controller, /parent\/launcher resolves.*before child creation/s);
   assert.match(controller, /spawned child never self-attests after launch/i);
   assert.match(controller, /Silent provider\/model\/reasoning substitution remains prohibited.*controller\/launcher boundary/s);
   assert.match(controller, /root semantic prompts.*do not carry concrete provider\/model\/reasoning verification obligations/i);
@@ -575,16 +589,34 @@ test('stateful and async contracts close on named transition regressions, not pr
   assert.match(architecture, /not a mandatory combinatorial matrix/);
 });
 
-test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
-  assert.match(controller, /Conditional G3 adversarial pre-publication validation/);
-  assert.match(controller, /sufficiently complex\/STRICT G3 involving concurrency, async\/deferred work, causal controls, lifecycle coordination or identity\/resource mapping/);
-  assert.match(controller, /optional depth-1 read-only validation leaf/);
-  assert.match(controller, /leaf never mutates or declares completion/);
-  assert.match(controller, /parent remains sole integrator\/revalidator/);
+test('complex G3 work requires one stronger adversarial pre-publication leaf without adding a gate', () => {
+  assert.match(controller, /Complex\/STRICT G3 adversarial pre-publication validation/);
+  assert.match(controller, /must launch exactly one depth-1 read-only adversarial challenge leaf/);
+  assert.match(controller, /separately registered G3 `adversarial_subagent` route/);
+  assert.match(controller, /deliberately stronger reasoning route/);
+  assert.match(controller, /privilege\/context boundaries/);
+  assert.match(controller, /production-boundary reachability/);
+  assert.match(controller, /validation false-greens/);
+  assert.match(controller, /leaf never mutates, publishes, grants authority or declares G3 completion/);
+  assert.match(controller, /parent consumes its findings.*reruns the complete affected integrated validation floor.*only then may publish/s);
+  assert.match(controller, /simple\/low-risk G3.*leaf remains optional/s);
+  assert.match(controller, /must not silently fall back to the ordinary G3 implementer or ordinary G3 `subagent` route/);
+  assert.match(controller, /pre-publication route\/harness HOLD/);
   assert.match(controller, /Settled-behaviour RED stays in G3/);
   assert.match(controller, /missing product\/compatibility semantics return to G2/);
   assert.match(controller, /changed root\/trust\/architecture returns to G1/);
+  assert.match(architecture, /mandatory pre-publication adversarial validation episode/);
+  assert.match(architecture, /exactly one depth-1 read-only adversarial challenge leaf/);
+  assert.match(architecture, /separately configured G3 adversarial-subagent route/);
+  assert.match(architecture, /intentionally stronger than the ordinary G3 implementation route/);
   assert.match(architecture, /It is not another gate/);
+
+  const openai = registry.stacks['owner-openai-default'].routes.G3.adversarial_subagent;
+  assert.deepEqual(openai, { provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' });
+  const claude = registry.stacks['owner-claude'].routes.G3.adversarial_subagent;
+  assert.deepEqual(claude, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  const mixed = registry.stacks['owner-mixed-claude-gpt'].routes.G3.adversarial_subagent;
+  assert.deepEqual(mixed, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
 });
 
 test('commit-required validation sequencing freezes each candidate identity before clean-head validators without publishing it', () => {
