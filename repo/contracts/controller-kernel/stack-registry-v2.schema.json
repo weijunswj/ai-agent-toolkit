@@ -74,7 +74,6 @@
             "G0",
             "G1",
             "G2",
-            "G2_ESCALATED",
             "G3",
             "G4",
             "LOOP",
@@ -111,9 +110,6 @@
               "$ref": "#/$defs/route"
             },
             "BROWSER": {
-              "$ref": "#/$defs/route"
-            },
-            "G2_ESCALATED": {
               "$ref": "#/$defs/route"
             }
           }

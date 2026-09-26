@@ -53,11 +53,6 @@
           "provider": "openai",
           "model": "gpt-6-astra",
           "reasoning": "medium"
-        },
-        "G2_ESCALATED": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "xhigh"
         }
       },
       "subagents": {
@@ -124,11 +119,6 @@
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "high"
-        },
-        "G2_ESCALATED": {
-          "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "xhigh"
         }
       },
       "subagents": {
@@ -152,9 +142,9 @@
           "reasoning": "high"
         },
         "G0": {
-          "provider": "openai",
-          "model": "gpt-6-luna",
-          "reasoning": "max"
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "medium"
         },
         "G1": {
           "provider": "anthropic",
@@ -177,9 +167,9 @@
           "reasoning": "high"
         },
         "LOOP": {
-          "provider": "openai",
-          "model": "gpt-6-luna",
-          "reasoning": "max"
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "medium"
         },
         "G1_RECONVERGENCE": {
           "provider": "openai",
@@ -195,18 +185,13 @@
           "provider": "openai",
           "model": "gpt-6-astra",
           "reasoning": "medium"
-        },
-        "G2_ESCALATED": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "xhigh"
         }
       },
       "subagents": {
         "G0": {
-          "provider": "openai",
-          "model": "gpt-6-luna",
-          "reasoning": "max"
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "medium"
         },
         "G3": {
           "provider": "anthropic",

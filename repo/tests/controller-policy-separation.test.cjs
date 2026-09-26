@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -109,9 +109,7 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G2.reasoning, 'high');
-  assert.equal(claude.routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.LOOP.reasoning, 'medium');
@@ -122,39 +120,50 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.subagents.G3.reasoning, 'medium');
 });
 
-test('mixed Claude/GPT stack overrides only framing, G1, and G3 from the OpenAI stack', () => {
+test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max worker slot', () => {
   const openai = registry.stacks['owner-openai-default'];
   const mixed = registry.stacks['owner-mixed-claude-gpt'];
   assert.ok(mixed);
 
   assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
-  assert.deepEqual(mixed.routes.G3, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' });
-  assert.deepEqual(mixed.subagents.G3, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' });
 
-  for (const role of requiredRoutes.filter((role) => !['G_FRAME', 'G1', 'G3'].includes(role))) {
-    assert.deepEqual(mixed.routes[role], openai.routes[role], `mixed route must mirror OpenAI for ${role}`);
+  for (const [role, route] of Object.entries(openai.routes)) {
+    if (['G_FRAME', 'G1'].includes(role)) continue;
+    if (route.provider === 'openai' && route.model === 'gpt-6-luna' && route.reasoning === 'max') {
+      assert.deepEqual(mixed.routes[role], { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
+    } else {
+      assert.deepEqual(mixed.routes[role], route, `mixed route must mirror OpenAI for ${role}`);
+    }
   }
-  assert.deepEqual(mixed.subagents.G0, openai.subagents.G0);
+
+  for (const [role, route] of Object.entries(openai.subagents)) {
+    if (route && route.provider === 'openai' && route.model === 'gpt-6-luna' && route.reasoning === 'max') {
+      assert.deepEqual(mixed.subagents[role], { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna subagent replacement mismatch: ${role}`);
+    } else {
+      assert.deepEqual(mixed.subagents[role], route, `mixed subagent route must mirror OpenAI for ${role}`);
+    }
+  }
 });
 
-test('OpenAI normal G2 is Astra High and escalated G2 remains strictly stronger', () => {
+test('OpenAI G2 is Astra High and current governance has no automatic G2 escalation category', () => {
   const openai = registry.stacks['owner-openai-default'];
   assert.equal(openai.routes.G2.provider, 'openai');
   assert.equal(openai.routes.G2.model, 'gpt-6-astra');
   assert.equal(openai.routes.G2.reasoning, 'high');
-  assert.equal(openai.routes.G2_ESCALATED.provider, 'openai');
-  assert.equal(openai.routes.G2_ESCALATED.model, 'gpt-6-astra');
-  assert.equal(openai.routes.G2_ESCALATED.reasoning, 'xhigh');
+  assert.equal(Object.hasOwn(openai.routes, 'G2_ESCALATED'), false);
+  assert.equal(Object.hasOwn(registry.stacks['owner-claude'].routes, 'G2_ESCALATED'), false);
+  assert.equal(Object.hasOwn(registry.stacks['owner-mixed-claude-gpt'].routes, 'G2_ESCALATED'), false);
+  assert.match(controller, /G2 always resolves through the selected named stack's single `G2` route/);
+  assert.match(controller, /There is no automatic higher-reasoning G2 retry category/);
+  assert.match(controller, /return to Web for causal adjudication rather than automatically spending another model tier/);
+  assert.match(controller, /Web may explicitly select another registered stack for a later run when justified/);
 });
 
-test('G2 escalation is a stronger route category, not a new gate', () => {
-  assert.match(controller, /`G2_ESCALATED` is a stronger route category for the same semantic `G2` gate/);
-  assert.match(controller, /fresh G4 has classified a material blocker as `G2_CONTRACT_COVERAGE_MISS`/);
-  assert.match(controller, /normal G2 route returned HOLD.*remaining blocker is adversarial executable-contract closure/s);
-  assert.match(controller, /once for the same G2 root\/contract/);
-  assert.match(controller, /does not authorise mutation or bypass missing evidence/);
-  assert.match(controller, /Do not auto-escalate merely because.*G3 implementation failed/s);
+test('G2_ESCALATED is retired from current routing while historical evidence may remain elsewhere', () => {
+  assert.equal(requiredRoutes.includes('G2_ESCALATED'), false);
+  for (const stack of Object.values(registry.stacks)) assert.equal(Object.hasOwn(stack.routes, 'G2_ESCALATED'), false);
+  assert.doesNotMatch(controller, /G2_ESCALATED/);
 });
 
 test('delegation capability is stage law, not model law', () => {
@@ -249,8 +258,7 @@ test('post-Web-directed G4 amend defaults to targeted G2 reclosure before anothe
   assert.match(controller, /deterministic regressions plus positive controls/);
   assert.match(controller, /production-boundary evidence/);
   assert.match(controller, /changed root\/trust\/architecture model requires G1 re-entry/);
-  assert.match(controller, /`G2_CONTRACT_COVERAGE_MISS` requires targeted G2 re-entry and may use `G2_ESCALATED`/);
-  assert.match(controller, /standard G2 route normally applies/);
+  assert.match(controller, /`G2_CONTRACT_COVERAGE_MISS` requires targeted G2 re-entry under the selected stack's normal `G2` route/);
   assert.match(controller, /Narrow G2-reuse exception/);
   assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
   assert.match(controller, /`MECHANISM_COMPLETENESS_ALREADY_BOUND=YES`/);
