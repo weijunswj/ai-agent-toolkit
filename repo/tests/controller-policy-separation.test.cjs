@@ -72,6 +72,24 @@ test('named stacks support explicit cross-harness selection without harness auth
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
 
+test('Web route recommendations are advisory and exact Owner-approved overrides do not change semantic authority', () => {
+  assert.match(controller, /Web route recommendation/);
+  assert.match(controller, /concrete current-run evidence that the selected provider\/model\/reasoning route may be materially too light/);
+  assert.match(controller, /AUTHORITY_EFFECT=NONE/);
+  assert.match(controller, /OWNER_APPROVAL_REQUIRED=YES/);
+  assert.match(controller, /Recommendation alone never changes routing/);
+  assert.match(controller, /After explicit Owner approval/);
+  assert.match(controller, /one-run\/stage-episode route override/);
+  assert.match(controller, /safe worker launch\/adoption\/replacement boundary/);
+  assert.match(controller, /not a new named stack or silent fallback/);
+  assert.match(controller, /must not hot-swap a running semantic worker/);
+  assert.match(controller, /resets no attempt\/budget/);
+  assert.match(controller, /does not recreate `G2_ESCALATED`/);
+  assert.match(architecture, /recommendation has no authority effect/);
+  assert.match(architecture, /explicit Owner approval/);
+  assert.match(architecture, /bounded orchestration overlay, not a new stack, fallback chain or semantic escalation stage/);
+});
+
 test('root workers never self-verify model identity while G0/G3 parents configure child routes before launch', () => {
   assert.match(controller, /Root execution threads are bound.*out of band by User\/Web\/controller\/harness before launch or adoption/s);
   assert.match(controller, /root semantic worker must never resolve, inspect, verify, attest, compare, reject, or HOLD on its own provider\/model\/reasoning identity/i);
