@@ -416,6 +416,15 @@ test('blocking findings attribute the causal layer instead of collapsing everyth
   assert.match(architecture, /product convergence and delivery-machinery convergence remain distinguishable/);
 });
 
+test('task-specific terminal vocabularies cannot suppress controller typed non-product holds', () => {
+  assert.match(controller, /Task\/stage prompts may enumerate semantic terminal outcomes/);
+  assert.match(controller, /`return exactly one`/);
+  assert.match(controller, /do not implicitly suppress Controller-defined typed non-product HOLDs/);
+  assert.match(controller, /executor\/runtime\/harness permission or safety interruption/);
+  assert.match(controller, /pure non-product interruption does not consume product\/G3 correction budget unless it independently establishes a candidate defect/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD/);
+});
+
 test('broken verifier substitution preserves the invariant and separate defect ownership', () => {
   assert.match(controller, /Equivalent evidence for a broken verifier/);
   assert.match(controller, /not itself an unresolved required product\/security\/finality deliverable/);
