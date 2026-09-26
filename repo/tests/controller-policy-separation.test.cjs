@@ -589,16 +589,20 @@ test('stateful and async contracts close on named transition regressions, not pr
   assert.match(architecture, /not a mandatory combinatorial matrix/);
 });
 
-test('complex G3 work requires one stronger adversarial pre-publication leaf without adding a gate', () => {
+test('complex G3 work requires stronger adversarial pre-publication re-challenge without adding a gate', () => {
   assert.match(controller, /Complex\/STRICT G3 adversarial pre-publication validation/);
-  assert.match(controller, /must launch exactly one depth-1 read-only adversarial challenge leaf/);
+  assert.match(controller, /must launch a depth-1 read-only adversarial challenge leaf/);
   assert.match(controller, /separately registered G3 `adversarial_subagent` route/);
   assert.match(controller, /deliberately stronger reasoning route/);
   assert.match(controller, /privilege\/context boundaries/);
   assert.match(controller, /production-boundary reachability/);
   assert.match(controller, /validation false-greens/);
   assert.match(controller, /leaf never mutates, publishes, grants authority or declares G3 completion/);
-  assert.match(controller, /parent consumes its findings.*reruns the complete affected integrated validation floor.*only then may publish/s);
+  assert.match(controller, /material settled in-contract implementation finding/);
+  assert.match(controller, /reruns the complete affected integrated validation floor to green, then launches a fresh adversarial challenge leaf/);
+  assert.match(controller, /Repeat this challenge -> correct -> revalidate -> re-challenge cycle/);
+  assert.match(controller, /no one-leaf-per-G3 ceiling/);
+  assert.match(controller, /do not create new G3 episodes or nested delegation/);
   assert.match(controller, /simple\/low-risk G3.*leaf remains optional/s);
   assert.match(controller, /must not silently fall back to the ordinary G3 implementer or ordinary G3 `subagent` route/);
   assert.match(controller, /pre-publication route\/harness HOLD/);
@@ -606,9 +610,12 @@ test('complex G3 work requires one stronger adversarial pre-publication leaf wit
   assert.match(controller, /missing product\/compatibility semantics return to G2/);
   assert.match(controller, /changed root\/trust\/architecture returns to G1/);
   assert.match(architecture, /mandatory pre-publication adversarial validation episode/);
-  assert.match(architecture, /exactly one depth-1 read-only adversarial challenge leaf/);
+  assert.match(architecture, /launches a depth-1 read-only adversarial challenge leaf/);
   assert.match(architecture, /separately configured G3 adversarial-subagent route/);
   assert.match(architecture, /intentionally stronger than the ordinary G3 implementation route/);
+  assert.match(architecture, /launches a fresh read-only adversarial challenge leaf against the updated implementation/);
+  assert.match(architecture, /no one-leaf-per-G3 ceiling/);
+  assert.match(architecture, /no new G3 RUN\/Lock/);
   assert.match(architecture, /It is not another gate/);
 
   const openai = registry.stacks['owner-openai-default'].routes.G3.adversarial_subagent;
