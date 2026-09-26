@@ -373,9 +373,9 @@ test('async waiters and deferred work require adversarial progress and truthful 
   assert.match(controller, /Already-complete-before-waiter is insufficient alone/);
   assert.match(controller, /non-zero outstanding work without a progress signal fails loudly/);
   assert.match(controller, /Deferred-work accounting/);
-  assert.match(controller, /remains outstanding until real consequential completion/);
-  assert.match(controller, /Cancelling its scheduler does not erase it/);
-  assert.match(controller, /Flush either permits the normal dispatch or takes ownership of that same work/);
+  assert.match(controller, /accepted temporal model classifies as a still-required obligation.*remains outstanding until real consequential completion/s);
+  assert.match(controller, /Cancelling or replacing a scheduler cannot erase an independently required obligation/);
+  assert.match(controller, /latest-state debounce\/coalescing\/supersession semantics.*not automatically lost work/s);
 });
 
 test('logical identities that alias one consequential resource are closed before G3', () => {
@@ -455,6 +455,31 @@ test('same-root G2 contract defects converge inside one G2 episode instead of ch
   assert.match(controller, /do not manufacture another materially equivalent G2 merely by issuing a new RUN\/Lock/);
   assert.match(architecture, /Discovering a defect in that proposed contract is not itself a terminal AMEND/);
   assert.match(architecture, /Renaming RUN\/Lock without materially changed input does not create another admissible G2 episode/);
+});
+
+test('G2 adversarially tries to falsify its own contract before PASS', () => {
+  assert.match(controller, /G2 adversarial contract falsification/);
+  assert.match(controller, /implementation that follows the written mechanism yet violates the invariant/);
+  assert.match(controller, /competing semantic models/);
+  assert.match(controller, /validation\/evidence false positives or false greens/);
+  assert.match(controller, /Surviving assumptions must be explicitly bound/);
+  assert.match(controller, /mapped to deterministic G3 negative regressions plus positive controls/);
+  assert.match(controller, /G2 proves the contract\/design is adversarially coherent enough to implement; it does not prove the implementation itself/);
+  assert.match(architecture, /adversarial reviewer of its own proposed contract/);
+  assert.match(architecture, /design\/contract analogue of G4 attacking the realised candidate/);
+});
+
+test('async/deferred contracts freeze temporal semantics instead of inferring them from timers', () => {
+  assert.match(controller, /Async\/deferred temporal-semantics closure/);
+  assert.match(controller, /individually consequential or latest\/coalesced only/);
+  assert.match(controller, /debounce\/coalescing/);
+  assert.match(controller, /replacement\/supersession\/cancellation/);
+  assert.match(controller, /queue-time snapshot versus execution-time\/current-state lookup/);
+  assert.match(controller, /G3 and G4 must not infer product semantics merely from timers, queues, promises, callbacks/);
+  assert.match(controller, /Replacing a timer is not lost required work unless the accepted temporal model says that individual obligation remained consequential/);
+  assert.match(architecture, /timer\/queue\/promise\/callback mechanics are evidence about implementation shape, not authority for product semantics/);
+  assert.match(architecture, /latest-state debounce\/coalescing.*obligation transfers\/merges into the latest consequential state/s);
+  assert.match(architecture, /under each-state-required semantics, replacement\/cancellation must preserve or truthfully fail the individual obligation/);
 });
 
 test('G2 cannot drop mandatory requirements when freezing the candidate contract', () => {
