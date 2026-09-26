@@ -142,6 +142,11 @@ test('web owns CURRENT reconciliation while semantic workers receive compiled bo
   assert.match(controller, /Update and read back CURRENT after every material transition that changes a projected current fact/);
   assert.match(controller, /Do not write merely because another chat turn occurred when no current fact changed/);
   assert.match(controller, /CURRENT-first bounded worker context/);
+  assert.match(controller, /Before worker launch\/adoption, Web\/controller must reconcile stale, missing or contradictory CURRENT facts/);
+  assert.match(controller, /must not be emitted wholesale into an ordinary worker packet/);
+  assert.match(controller, /Current-facing body sections that still claim an obsolete RUN\/Lock\/gate\/NEXT\/route or prior CURRENT state are presentation drift/);
+  assert.match(controller, /repair them from canonical CURRENT at the next safe reconciliation boundary/);
+
   assert.match(controller, /bounded stage\/task\/authority packet compiled from CURRENT/);
   assert.match(controller, /full programme-parent body, Delivery Child body, issue\/PR chronology, historical authority list/);
   assert.match(controller, /are not default worker context/);
