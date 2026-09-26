@@ -643,6 +643,12 @@ test('complex G3 uses paired implementation and strong-review convergence attemp
   assert.match(controller, /simple\/low-risk G3.*leaf remains optional/s);
   assert.match(controller, /must not silently fall back to the ordinary G3 implementer or ordinary G3 `subagent` route/);
   assert.match(controller, /pre-publication route\/harness HOLD/);
+  assert.match(controller, /G3 anti-bounce \/ Web-return boundary/);
+  assert.match(controller, /ordinary settled in-contract RED, strong-review RED, diagnosis, correction and revalidation are internal to the already-admitted G3 RUN\/Lock/);
+  assert.match(controller, /must not emit `NEXT=RETURN_TO_WEB`/);
+  assert.match(controller, /request a fresh continuation receipt/);
+  assert.match(controller, /manufacture a new G3 RUN\/Lock/);
+  assert.match(controller, /Historical issue text, old continuation receipts, obsolete NEXT instructions or prior Web-directed examples never grant current return authority/);
   assert.match(controller, /Settled-behaviour RED stays in G3/);
   assert.match(controller, /missing product\/compatibility semantics return to G2/);
   assert.match(controller, /changed root\/trust\/architecture returns to G1/);
