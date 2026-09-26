@@ -603,6 +603,15 @@ test('complex G3 uses paired implementation and strong-review convergence attemp
   assert.match(controller, /material settled in-contract implementation finding.*paired attempt is unsuccessful/s);
   assert.match(controller, /next materially distinct correction attempt inside the same RUN\/Lock/);
   assert.match(controller, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(controller, /Strong G3 challenge packet \/ implementation handoff/);
+  assert.match(controller, /self-sufficient diagnostic packet, not only `PASS`\/`RED`/);
+  assert.match(controller, /exact accepted G2 invariant\/contract obligation violated/);
+  assert.match(controller, /smallest suggested in-contract correction mechanism\/direction/);
+  assert.match(controller, /deterministic negative regression plus same-boundary positive control and effect\/zero-effect oracle/);
+  assert.match(controller, /scope guard\/what must remain unchanged/);
+  assert.match(controller, /Suggested fixes are diagnostic guidance, not mutation\/contract authority/);
+  assert.match(controller, /primary handoff for the next parent correction attempt/);
+  assert.match(controller, /cheaper G3 route can verify\/adapt the proposed direction instead of repeating open-ended root-cause discovery/);
   assert.match(controller, /no separate reviewer retry budget beyond the G3 attempt budget/);
   assert.match(controller, /no one-leaf-per-G3 ceiling/);
   assert.match(controller, /unchanged-byte rechecks, evidence gathering and typed non-product HOLD recovery do not manufacture or consume a substantive attempt/);
@@ -619,6 +628,10 @@ test('complex G3 uses paired implementation and strong-review convergence attemp
   assert.match(architecture, /fresh depth-1 read-only adversarial challenge leaf against those exact current bytes/);
   assert.match(architecture, /clean challenge closes that attempt successfully/);
   assert.match(architecture, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(architecture, /implementation-ready diagnostic handoff rather than a bare verdict/);
+  assert.match(architecture, /smallest suggested in-contract correction direction/);
+  assert.match(architecture, /negative regression plus same-boundary positive control and effect\/zero-effect oracle/);
+  assert.match(architecture, /cheaper G3 parent to consume findings and implement\/verify the next in-contract correction without reconstructing the reviewer's root-cause analysis from scratch/);
   assert.match(architecture, /no independent reviewer retry budget/);
   assert.match(architecture, /no one-leaf-per-G3 ceiling/);
   assert.match(architecture, /no new G3 RUN\/Lock/);
