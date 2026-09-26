@@ -254,7 +254,7 @@ test('convergence-first roles are represented without widening delegation', () =
   assert.match(architecture, /Reconverged correction exception/);
   assert.match(architecture, /Web-directed continuation after autonomous exhaustion/);
   assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
-  assert.match(controller, /does not automatically spend a higher-model `G1_RECONVERGENCE` call/);
+  assert.match(controller, /Web may optionally invoke one read-only `G1_RECONVERGENCE` synthesis/);
 });
 
 test('shipping-first policy is singular, ordered, and retains canonical Shipping Law', () => {
@@ -578,7 +578,7 @@ test('complex G3 work gets conditional adversarial pre-publication validation wi
   assert.match(architecture, /It is not another gate/);
 });
 
-test('commit-required validation sequencing freezes one local candidate before clean-head validators without publishing it', () => {
+test('commit-required validation sequencing freezes each candidate identity before clean-head validators without publishing it', () => {
   assert.match(controller, /Commit-required validation sequencing/);
   assert.match(controller, /accepted validator materially requires immutable commit identity or a clean committed working tree/);
   assert.match(controller, /all meaningful non-commit-dependent checks are green and candidate contents\/mutation scope are frozen/);
@@ -586,7 +586,7 @@ test('commit-required validation sequencing freezes one local candidate before c
   assert.match(controller, /prohibit amendment\/rebase\/reconstruction of that candidate identity/);
   assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
   assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
-  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
+  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit/);
   assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
   assert.match(architecture, /create the ordinary immutable local candidate commit under the existing allowance/);
   assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
