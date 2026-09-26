@@ -7,6 +7,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+
+function semanticGate(seed = 'run163') {
+  return support.semanticGate(seed);
+}
 
 const common = {
   task: { id: 'task-run163-red', digest: 'a'.repeat(64) },
@@ -15,6 +20,7 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
   authority: { delegated: false, lanes: [] },
+  semantic_gate: semanticGate('common'),
 };
 const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
 
@@ -32,6 +38,7 @@ function releaseOptions(stateRoot, run, lease, overrides = {}) {
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'none',
+    run,
     ...overrides,
   };
 }

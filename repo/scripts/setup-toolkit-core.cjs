@@ -1313,7 +1313,11 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
         cachePath: nativeCache.cache_path,
       });
     const launchCapable = current.agentCapability?.launch_supported === true;
-    const resourceCapable = current.agentCapability?.resource_counter_supported === true;
+    const nativeResources = agentControl.inspectResourceCapability();
+    const resourceCapable = current.agentCapability?.resource_counter_supported === true
+      && current.agentCapability?.resource_counter_source === nativeResources.source
+      && nativeResources.supported === true
+      && ['proc-meminfo', 'win32-operating-system'].includes(nativeResources.source);
     const directEnforceable = launchCapable && installedEnforcement && resourceCapable;
     const enforceable = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? directEnforceable : installedEnforcement;
     if (topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT && !directEnforceable) {

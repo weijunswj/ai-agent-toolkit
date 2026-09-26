@@ -8,12 +8,31 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const processLaunch = require('../scripts/claude-process-launch.cjs');
+const resourceTest = require('./toolkit-resource-test-support.cjs');
 
-function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-checker-')); }
+function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB,
-    commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
+  return { ...resourceTest.FIXTURE, ...overrides };
 }
+
+const rawAdmissionDecision = control.admissionDecision;
+control.admissionDecision = (specInput, launchOptions = {}) => {
+  const supplied = launchOptions.resourceState ?? launchOptions.resource_state;
+  if (!resourceTest.isFixture(supplied)) return rawAdmissionDecision(specInput, launchOptions);
+  const rootPath = launchOptions.root || root();
+  return resourceTest.withFixture(rootPath, () => rawAdmissionDecision(specInput, resourceTest.options(rootPath, launchOptions)));
+};
+const rawResourceAdmissionDecision = control.resourceAdmissionDecision;
+control.resourceAdmissionDecision = (specInput, selectedProfile, resourceEvidence, launchOptions = {}) => {
+  const supplied = launchOptions.resourceState ?? launchOptions.resource_state;
+  if (!resourceTest.isFixture(resourceEvidence) && !resourceTest.isFixture(supplied)) {
+    return rawResourceAdmissionDecision(specInput, selectedProfile, resourceEvidence, launchOptions);
+  }
+  const rootPath = launchOptions.root || root();
+  return resourceTest.withFixture(rootPath, () => rawResourceAdmissionDecision(
+    specInput, selectedProfile, resourceEvidence, resourceTest.options(rootPath, launchOptions),
+  ));
+};
 function ready(overrides = {}) {
   return { implementation_complete: true, focused_validation_passed: true, diff_ready: true,
     changed_files: ['repo/scripts/example.cjs'], change_kind: 'behavior', ...overrides };
@@ -46,7 +65,8 @@ function workerFields() {
 function options(host, work, overrides = {}) {
   return { host, root: work, enforcementVerified: true, adapter: `toolkit-controlled-${host}`,
     resourceState: resources(), ...overrides };
-}function decision(spec, launchOptions) {
+}
+function decision(spec, launchOptions) {
   const profile = launchOptions.profile || { capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST };
   return control.resourceAdmissionDecision(spec, profile, launchOptions.resourceState, launchOptions);
 }
@@ -292,7 +312,7 @@ test('memory remains the hard gate and CPU cannot override it', () => {
     resourceState: resources({ physical_available: control.GIB, commit_available: control.GIB, cpu_idle_percent: 100 }),
   }));
   assert.equal(denied.result, control.RESULTS.REFUSE);
-  assert.match(denied.reason, /memory/i);
+  assert.match(denied.reason, /resource state/i);
   assert.equal(fs.existsSync(control.statePath({ root: deniedRoot })), false);
   const unknown = decision(spec, options(control.HOSTS.CODEX, root(), { resourceState: null }));
   assert.equal(unknown.result, control.RESULTS.REFUSE);
@@ -302,30 +322,39 @@ test('memory remains the hard gate and CPU cannot override it', () => {
 
 test('existing reservations reduce headroom and concurrent admissions cannot overbook', async () => {
   const work = root();
-  const expensive = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'expensive', estimated_memory_bytes: 7 * control.GIB });
-  assert.equal(decision(expensive, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
-  const worker = { ...expensive, ...workerFields(), role: control.ROLES.WORKER, review_id: undefined };
-  assert.equal(decision(worker, options(control.HOSTS.CODEX, work)).result, control.RESULTS.QUEUE);
+  const expensive = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'expensive', estimated_memory_bytes: 3 * control.GIB });
+  const admitted = decision(expensive, options(control.HOSTS.CODEX, work));
+  assert.equal(admitted.result, control.RESULTS.START, JSON.stringify(admitted));
+  const worker = { ...expensive, ...workerFields(), role: control.ROLES.WORKER };
+  delete worker.review_id;
+  const queued = decision(worker, options(control.HOSTS.CODEX, work));
+  assert.equal(queued.result, control.RESULTS.QUEUE, JSON.stringify(queued));
 });
 
 test('queue tickets are bound to the original host and child role', () => {
   const work = root();
   const checker = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'queue-worker' });
-  const worker = { ...checker, ...workerFields(), role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker, review_id: undefined };
-  const pressured = options(control.HOSTS.CODEX, work, { resourceState: resources({ physical_available: 9 * control.GIB }) });
-  const queued = decision(worker, pressured);
+  const worker = { ...checker, ...workerFields(), role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker, estimated_memory_bytes: 3 * control.GIB };
+  delete worker.review_id;
+  const manual = { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 1, worker_estimate_bytes: control.DEFAULT_WORKER_COST };
+  const first = decision(worker, options(control.HOSTS.CODEX, work, { profile: manual }));
+  assert.equal(first.result, control.RESULTS.START);
+  const queued = decision(worker, options(control.HOSTS.CODEX, work, { profile: manual }));
   assert.equal(queued.result, control.RESULTS.QUEUE);
   const wrongHost = { ...worker, host: control.HOSTS.OPENCODE, model: control.MODEL_CONTRACT[control.HOSTS.OPENCODE].worker, queue_id: queued.queue_id };
-  assert.equal(decision(wrongHost, options(control.HOSTS.OPENCODE, work)).result, control.RESULTS.REFUSE);
+  assert.equal(decision(wrongHost, options(control.HOSTS.OPENCODE, work, { profile: manual })).result, control.RESULTS.REFUSE);
   const wrongRole = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'queue-checker', queue_id: queued.queue_id });
-  assert.equal(decision(wrongRole, options(control.HOSTS.CODEX, work)).result, control.RESULTS.REFUSE);
-  assert.equal(decision({ ...worker, queue_id: queued.queue_id }, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
+  assert.equal(decision(wrongRole, options(control.HOSTS.CODEX, work, { profile: manual })).result, control.RESULTS.REFUSE);
+  assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
+  assert.equal(decision({ ...worker, queue_id: queued.queue_id }, options(control.HOSTS.CODEX, work, { profile: manual })).result, control.RESULTS.START);
 });
 test('legacy role-less queue tickets migrate to worker and remain retryable', () => {
   const work = root();
   const checker = control.checkerLaunchSpec(control.HOSTS.CODEX, context({ diff: 'legacy queue migration diff' }));
-  const worker = { ...checker, ...workerFields(), role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker, review_id: undefined, checker_context_digest: undefined };
-  const queued = decision(worker, options(control.HOSTS.CODEX, work, { resourceState: resources({ physical_available: 9 * control.GIB }) }));
+  const worker = { ...checker, ...workerFields(), role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker };
+  delete worker.review_id;
+  delete worker.checker_context_digest;
+  const queued = decision({ ...worker, estimated_memory_bytes: 16 * control.GIB }, options(control.HOSTS.CODEX, work));
   assert.equal(queued.result, control.RESULTS.QUEUE);
   const state = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
   delete state.queue[0].role;
@@ -381,7 +410,8 @@ test('manual limits can further restrict but never weaken hard memory admission'
   const restrictive = { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 1, worker_estimate_bytes: control.DEFAULT_WORKER_COST };
   const work = root();
   assert.equal(decision(spec, options(host, work, { profile: restrictive })).result, control.RESULTS.START);
-  const another = { ...spec, ...workerFields(), role: control.ROLES.WORKER, review_id: undefined };
+  const another = { ...spec, ...workerFields(), role: control.ROLES.WORKER };
+  delete another.review_id;
   assert.equal(decision(another, options(host, work, { profile: restrictive })).result, control.RESULTS.QUEUE);
   assert.equal(decision(spec, options(host, root(), { profile: restrictive, resourceState: resources({ physical_available: control.GIB, commit_available: control.GIB }) })).result, control.RESULTS.REFUSE);
 });

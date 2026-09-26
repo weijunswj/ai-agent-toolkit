@@ -1,0 +1,563 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.local/contracts/controller-kernel/evidence-manifest-v1.schema.json",
+  "title": "Toolkit G0-B Evidence Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "required_provenance",
+    "sources",
+    "questions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "toolkit.evidence-manifest.v1"
+    },
+    "id": {
+      "$ref": "#/$defs/S"
+    },
+    "required_provenance": {
+      "$ref": "#/$defs/RequiredProvenance"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/SourceBinding"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Question"
+      }
+    }
+  },
+  "$defs": {
+    "S": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Sha1": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "J": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string"},
+        {
+          "type": "array",
+          "items": {"$ref": "#/$defs/J"}
+        },
+        {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/J"}
+        }
+      ]
+    },
+    "SSet": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/S"}
+    },
+    "SSet0": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/S"}
+    },
+    "ProvenanceFacet": {
+      "enum": [
+        "REPOSITORY",
+        "REVISION",
+        "PATH",
+        "BLOB_SHA1",
+        "CONTENT_SHA256",
+        "BYTE_RANGE"
+      ]
+    },
+    "RequiredProvenance": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/ProvenanceFacet"},
+      "allOf": [
+        {"contains": {"const": "REPOSITORY"}},
+        {"contains": {"const": "REVISION"}},
+        {"contains": {"const": "PATH"}},
+        {"contains": {"const": "BLOB_SHA1"}},
+        {"contains": {"const": "CONTENT_SHA256"}},
+        {"contains": {"const": "BYTE_RANGE"}}
+      ]
+    },
+    "SourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "repository",
+        "revision",
+        "path",
+        "blob_sha1",
+        "content_sha256"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "repository": {"$ref": "#/$defs/S"},
+        "revision": {"$ref": "#/$defs/Sha1"},
+        "path": {
+          "$ref": "#/$defs/S",
+          "pattern": "^(?=.*\\S)(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$).+"
+        },
+        "blob_sha1": {"$ref": "#/$defs/Sha1"},
+        "content_sha256": {"$ref": "#/$defs/Digest"}
+      }
+    },
+    "Applicability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "surface"],
+      "properties": {
+        "target": {"$ref": "#/$defs/S"},
+        "surface": {"$ref": "#/$defs/S"}
+      }
+    },
+    "StopRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "description"],
+      "properties": {
+        "rule": {"const": "ALL_REQUIRED_EVIDENCE_VERIFIED_NO_OPEN_ISSUES"},
+        "description": {"$ref": "#/$defs/S"}
+      }
+    },
+    "ExplicitOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "instruction"],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "instruction": {"$ref": "#/$defs/S"}
+      }
+    },
+    "EvidenceMacro": {
+      "enum": [
+        "SYMBOL_CONSUMER_SEARCH",
+        "PUBLIC_SURFACE_INVENTORY",
+        "STATE_ROUNDTRIP_INVENTORY",
+        "AUTHORITY_ALIAS_INVENTORY",
+        "DESCRIPTOR_BOUNDARY_INVENTORY",
+        "SECRET_PATTERN_INVENTORY",
+        "CONFIG_PRECEDENCE_INVENTORY"
+      ]
+    },
+    "Question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "question",
+        "targets",
+        "surfaces",
+        "applicability",
+        "source_ids",
+        "macros",
+        "stop_when"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "question": {"$ref": "#/$defs/S"},
+        "targets": {"$ref": "#/$defs/SSet"},
+        "surfaces": {"$ref": "#/$defs/SSet"},
+        "applicability": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/Applicability"}
+        },
+        "source_ids": {"$ref": "#/$defs/SSet"},
+        "macros": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/EvidenceMacro"}
+        },
+        "stop_when": {"$ref": "#/$defs/StopRule"},
+        "operations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ExplicitOperation"}
+        },
+        "required_provenance": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/ProvenanceFacet"}
+        },
+        "parallelizable": {"type": "boolean"}
+      }
+    },
+    "Observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "macro",
+        "facet",
+        "target",
+        "surface",
+        "finding",
+        "provenance_ids"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "macro": {
+          "enum": [
+            "SYMBOL_CONSUMER_SEARCH",
+            "PUBLIC_SURFACE_INVENTORY",
+            "STATE_ROUNDTRIP_INVENTORY",
+            "AUTHORITY_ALIAS_INVENTORY",
+            "DESCRIPTOR_BOUNDARY_INVENTORY",
+            "SECRET_PATTERN_INVENTORY",
+            "CONFIG_PRECEDENCE_INVENTORY",
+            "EXPLICIT"
+          ]
+        },
+        "facet": {"$ref": "#/$defs/S"},
+        "target": {"$ref": "#/$defs/S"},
+        "surface": {"$ref": "#/$defs/S"},
+        "finding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "summary"],
+          "properties": {
+            "kind": {"enum": ["PRESENT", "ABSENT"]},
+            "summary": {"$ref": "#/$defs/S"}
+          }
+        },
+        "provenance_ids": {"$ref": "#/$defs/SSet"}
+      }
+    },
+    "Base64": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_id",
+        "scope",
+        "start_byte",
+        "end_byte",
+        "excerpt_base64",
+        "excerpt_sha256"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "source_id": {"$ref": "#/$defs/S"},
+        "scope": {"enum": ["EXCERPT", "WHOLE_SOURCE"]},
+        "start_byte": {"type": "integer", "minimum": 0},
+        "end_byte": {"type": "integer", "minimum": 0},
+        "excerpt_base64": {"$ref": "#/$defs/Base64"},
+        "excerpt_sha256": {"$ref": "#/$defs/Digest"}
+      }
+    },
+    "Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "applicability",
+        "description",
+        "state",
+        "resolution_observation_ids"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/S"},
+        "applicability": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/Applicability"}
+        },
+        "description": {"$ref": "#/$defs/S"},
+        "state": {"enum": ["OPEN", "RESOLVED"]},
+        "resolution_observation_ids": {"$ref": "#/$defs/SSet0"}
+      }
+    },
+    "EvidenceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "manifest_id",
+        "source_manifest_digest",
+        "plan_digest",
+        "question_id",
+        "question_digest",
+        "packet_id",
+        "packet_digest",
+        "targets",
+        "surfaces",
+        "applicability",
+        "source_ids",
+        "evidence_status",
+        "observations",
+        "inspected_targets",
+        "inspected_surfaces",
+        "inspected_source_ids",
+        "provenance",
+        "contradictions",
+        "gaps",
+        "stop_condition_status",
+        "response_digest"
+      ],
+      "properties": {
+        "schema": {"const": "toolkit.g0b-evidence-response.v1"},
+        "manifest_id": {"$ref": "#/$defs/S"},
+        "source_manifest_digest": {"$ref": "#/$defs/Digest"},
+        "plan_digest": {"$ref": "#/$defs/Digest"},
+        "question_id": {"$ref": "#/$defs/S"},
+        "question_digest": {"$ref": "#/$defs/Digest"},
+        "packet_id": {"$ref": "#/$defs/S"},
+        "packet_digest": {"$ref": "#/$defs/Digest"},
+        "targets": {"$ref": "#/$defs/SSet"},
+        "surfaces": {"$ref": "#/$defs/SSet"},
+        "applicability": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/Applicability"}
+        },
+        "source_ids": {"$ref": "#/$defs/SSet"},
+        "evidence_status": {"enum": ["COMPLETE", "INCOMPLETE"]},
+        "observations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Observation"}
+        },
+        "inspected_targets": {"$ref": "#/$defs/SSet0"},
+        "inspected_surfaces": {"$ref": "#/$defs/SSet0"},
+        "inspected_source_ids": {"$ref": "#/$defs/SSet0"},
+        "provenance": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Provenance"}
+        },
+        "contradictions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Issue"}
+        },
+        "gaps": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Issue"}
+        },
+        "stop_condition_status": {"enum": ["SATISFIED", "UNSATISFIED", "UNKNOWN"]},
+        "response_digest": {"$ref": "#/$defs/Digest"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "evidence_status": {"const": "COMPLETE"}
+            }
+          },
+          "then": {
+            "properties": {
+              "observations": {"minItems": 1},
+              "provenance": {"minItems": 1},
+              "inspected_targets": {"minItems": 1},
+              "inspected_surfaces": {"minItems": 1},
+              "inspected_source_ids": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "SourceContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "content_base64"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/S"},
+        "content_base64": {"$ref": "#/$defs/Base64"}
+      }
+    },
+    "ObservationReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "verdict", "reason"],
+      "properties": {
+        "observation_id": {"$ref": "#/$defs/S"},
+        "verdict": {"enum": ["SUPPORTED", "UNSUPPORTED"]},
+        "reason": {"$ref": "#/$defs/S"}
+      }
+    },
+    "IssueReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_id", "verdict", "reason"],
+      "properties": {
+        "issue_id": {"$ref": "#/$defs/S"},
+        "verdict": {"enum": ["RESOLVED", "UNRESOLVED"]},
+        "reason": {"$ref": "#/$defs/S"}
+      }
+    },
+    "ParentReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_id",
+        "question_digest",
+        "packet_id",
+        "packet_digest",
+        "response_digest",
+        "observation_reviews",
+        "issue_reviews",
+        "stop_condition_review"
+      ],
+      "properties": {
+        "question_id": {"$ref": "#/$defs/S"},
+        "question_digest": {"$ref": "#/$defs/Digest"},
+        "packet_id": {"$ref": "#/$defs/S"},
+        "packet_digest": {"$ref": "#/$defs/Digest"},
+        "response_digest": {"$ref": "#/$defs/Digest"},
+        "observation_reviews": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ObservationReview"}
+        },
+        "issue_reviews": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IssueReview"}
+        },
+        "stop_condition_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["verdict", "reason"],
+          "properties": {
+            "verdict": {"enum": ["SATISFIED", "UNSATISFIED", "UNKNOWN"]},
+            "reason": {"$ref": "#/$defs/S"}
+          }
+        }
+      }
+    },
+    "VerificationContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "manifest_id",
+        "source_manifest_digest",
+        "plan_digest",
+        "source_contents",
+        "reviews"
+      ],
+      "properties": {
+        "schema": {"const": "toolkit.g0b-evidence-verification-context.v1"},
+        "manifest_id": {"$ref": "#/$defs/S"},
+        "source_manifest_digest": {"$ref": "#/$defs/Digest"},
+        "plan_digest": {"$ref": "#/$defs/Digest"},
+        "source_contents": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SourceContent"}
+        },
+        "reviews": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ParentReview"}
+        }
+      }
+    },
+    "ReasonCode": {
+      "enum": [
+        "RESPONSE_SCHEMA_INVALID",
+        "RESPONSE_DIGEST_MISMATCH",
+        "IDENTITY_MISMATCH",
+        "APPLICABILITY_MISMATCH",
+        "UNEXPECTED_QUESTION",
+        "DUPLICATE_RESPONSE",
+        "DUPLICATE_ITEM",
+        "UNEXPECTED_OBSERVATION",
+        "INVALID_PROVENANCE",
+        "PROVENANCE_DIGEST_MISMATCH",
+        "VERIFICATION_CONTEXT_INVALID",
+        "VERIFICATION_IDENTITY_MISMATCH",
+        "MISSING_RESPONSE",
+        "MISSING_OBSERVATION",
+        "TARGET_COVERAGE_INCOMPLETE",
+        "SURFACE_COVERAGE_INCOMPLETE",
+        "SOURCE_COVERAGE_INCOMPLETE",
+        "EVIDENCE_NOT_RETRIEVABLE",
+        "EVIDENCE_REVIEW_REQUIRED",
+        "OBSERVATION_UNSUPPORTED",
+        "UNRESOLVED_CONTRADICTION",
+        "UNRESOLVED_GAP",
+        "STOP_CONDITION_UNSATISFIED",
+        "LEAF_REPORTED_INCOMPLETE"
+      ]
+    },
+    "Reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "question_id", "item_id"],
+      "properties": {
+        "code": {"$ref": "#/$defs/ReasonCode"},
+        "question_id": {"type": ["string", "null"]},
+        "item_id": {"type": ["string", "null"]}
+      }
+    },
+    "EvidenceMergeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "manifest_id",
+        "source_manifest_digest",
+        "plan_digest",
+        "status",
+        "questions",
+        "reasons",
+        "merge_digest"
+      ],
+      "properties": {
+        "schema": {"const": "toolkit.g0b-evidence-merge.v1"},
+        "manifest_id": {"$ref": "#/$defs/S"},
+        "source_manifest_digest": {"$ref": "#/$defs/Digest"},
+        "plan_digest": {"$ref": "#/$defs/Digest"},
+        "status": {"enum": ["COMPLETE", "EVIDENCE_INCOMPLETE", "REJECTED"]},
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question_id", "response_digest", "status", "missing_obligation_ids", "reasons"],
+            "properties": {
+              "question_id": {"$ref": "#/$defs/S"},
+              "response_digest": {"type": ["string", "null"]},
+              "status": {"enum": ["COMPLETE", "EVIDENCE_INCOMPLETE", "REJECTED"]},
+              "missing_obligation_ids": {"$ref": "#/$defs/SSet0"},
+              "reasons": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/Reason"}
+              }
+            }
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Reason"}
+        },
+        "merge_digest": {"$ref": "#/$defs/Digest"}
+      }
+    }
+  }
+}

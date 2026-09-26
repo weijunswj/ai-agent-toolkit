@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { types: utilTypes } = require('node:util');
 const { spawnSync } = require('node:child_process');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 
@@ -13,6 +14,65 @@ const MIN_NODE_VERSION = '22.13.0';
 const APPLICATION_ID = 1196446257;
 const USER_VERSION = 2;
 const V3_USER_VERSION = 3;
+const AUTHORITY_PACKET_USER_VERSION = 4;
+const AUTHORITY_PACKET_SCHEMA_ID = 'toolkit.github-program.authority-packet.v1';
+const AUTHORITY_PACKET_DELIVERY_SCHEMA_ID = 'toolkit.github-program.authority-packet-delivery.v1';
+const AUTHORITY_PACKET_EVENT_SCHEMA_ID = 'toolkit.github-program.authority-packet-event.v1';
+const SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID = 'toolkit.github-program.semantic-gate-admission-event.v1';
+const AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID = 'toolkit.github-program.authority-packet-acceptance.v1';
+const AUTHORITY_PACKET_CURRENT_SCHEMA_ID = 'toolkit.github-program.authority-packet-current.v1';
+const SEMANTIC_GATE_ADMISSION_SCHEMA_ID = 'toolkit.github-program.semantic-gate-admission.v1';
+const PACKET_TERMINAL_FAILURE_CODE = 'TERMINAL_PACKET_DURABILITY_UNVERIFIED';
+const AUTHORITY_PACKET_STAGES = Object.freeze([
+  'G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'
+]);
+const AUTHORITY_PACKET_CONSUMER_CLASSES = Object.freeze([...AUTHORITY_PACKET_STAGES, 'WEB', 'FINALITY']);
+const AUTHORITY_PACKET_VERDICTS = Object.freeze(['PASS', 'HOLD', 'AMEND', 'REENTRY_REQUIRED', 'COMPLETE']);
+const AUTHORITY_PACKET_FINDING_DISPOSITIONS = Object.freeze(['BLOCKING', 'NON_BLOCKING', 'RESOLVED']);
+const AUTHORITY_PACKET_ID_PATTERN = /^ap1-[a-f0-9]{64}$/;
+const AUTHORITY_PACKET_REASON_CODES = Object.freeze([
+  'GPR_PACKET_VALUE_INVALID',
+  'GPR_PACKET_SCHEMA_UNSUPPORTED',
+  'GPR_PACKET_PRIVACY_REJECTED',
+  'GPR_PACKET_LIMIT',
+  'GPR_PACKET_STORE_UNAVAILABLE',
+  'GPR_PACKET_STORE_IDENTITY_MISMATCH',
+  'GPR_PACKET_SCHEMA_UNAVAILABLE',
+  'GPR_PACKET_MIGRATION_SOURCE_INVALID',
+  'GPR_PACKET_MIGRATION_NOT_QUIESCENT',
+  'GPR_PACKET_WRITE_FAILED',
+  'GPR_PACKET_NOT_FOUND',
+  'GPR_PACKET_CONTENT_MISMATCH',
+  'GPR_PACKET_IDENTITY_MISMATCH',
+  'GPR_PACKET_BINDING_MISMATCH',
+  'GPR_PACKET_CONFLICT',
+  'GPR_PACKET_READBACK_FAILED',
+  'GPR_PACKET_AUTHORITY_UNVERIFIED',
+  'GPR_PACKET_ACCEPTANCE_UNVERIFIED',
+  'GPR_PACKET_CURRENT_UNVERIFIED',
+  'GPR_PACKET_CONSUMER_NOT_PERMITTED',
+  'GPR_PACKET_ADMISSION_REQUIRED',
+  'GPR_PACKET_STALE_REPLAY',
+  'GPR_PACKET_DISPATCH_UNRESOLVED',
+  'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED',
+  'GPR_PACKET_LEGACY_RERUN_REQUIRED',
+  'GPR_PACKET_RETENTION_REQUIRED',
+  'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+  'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH'
+]);
+const AUTHORITY_PACKET_LIMITS = Object.freeze({
+  artifactBytes: 1024 * 1024,
+  nestingDepth: 32,
+  valueNodes: 65536,
+  proseBytes: 262144,
+  findings: 256,
+  evidenceRefs: 64,
+  requiredConsumers: 16,
+  currentPredecessors: 16,
+  currentProjectionBytes: 65536,
+  // The delivery contains the envelope, canonical bytes, and decoded packet.
+  deliveryBytes: 3 * 1024 * 1024 + 880
+});
 const HOLDER_ATTESTATION_SCHEMA_ID = 'toolkit.github-program.holder-attestation.v1';
 const PRE_RECOVERY_EVIDENCE_SCHEMA_ID = 'toolkit.github-program.pre-recovery-evidence.v1';
 const RECOVERY_RECORD_SCHEMA_ID = 'toolkit.github-program.recovery-record.v1';
@@ -42,7 +102,17 @@ const LIMITS = Object.freeze({
   operationsPerNamespace: 10000,
   operationEventsPerNamespace: 50000,
   targetIdentityBytes: 2048,
-  outcomeEvidenceBytes: 4096
+  outcomeEvidenceBytes: 4096,
+  authorityPacketBytes: AUTHORITY_PACKET_LIMITS.artifactBytes,
+  authorityPacketNestingDepth: AUTHORITY_PACKET_LIMITS.nestingDepth,
+  authorityPacketValueNodes: AUTHORITY_PACKET_LIMITS.valueNodes,
+  authorityPacketProseBytes: AUTHORITY_PACKET_LIMITS.proseBytes,
+  authorityPacketFindings: AUTHORITY_PACKET_LIMITS.findings,
+  authorityPacketEvidenceRefs: AUTHORITY_PACKET_LIMITS.evidenceRefs,
+  authorityPacketConsumers: AUTHORITY_PACKET_LIMITS.requiredConsumers,
+  authorityPacketCurrentPredecessors: AUTHORITY_PACKET_LIMITS.currentPredecessors,
+  authorityPacketCurrentProjectionBytes: AUTHORITY_PACKET_LIMITS.currentProjectionBytes,
+  authorityPacketDeliveryBytes: AUTHORITY_PACKET_LIMITS.deliveryBytes
 });
 const OPERATION_KINDS = Object.freeze([
   'GIT_REF_UPDATE',
@@ -140,6 +210,40 @@ const MIGRATION_OBSERVATION_KEYS = Object.freeze([
   'chain_verified', 'high_water_verified', 'unresolved_operation_count',
   'unexpired_unreleased_allocation_count', 'observed_at'
 ]);
+const AUTHORITY_PACKET_KEYS = Object.freeze(['schema', 'bindings', 'body']);
+const AUTHORITY_PACKET_BINDING_KEYS = Object.freeze([
+  'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'producer',
+  'authority', 'governance', 'candidate', 'applicability'
+]);
+const AUTHORITY_PACKET_PRODUCER_KEYS = Object.freeze(['run', 'lock', 'stage', 'role']);
+const AUTHORITY_PACKET_AUTHORITY_KEYS = Object.freeze([
+  'repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'
+]);
+const AUTHORITY_PACKET_GOVERNANCE_KEYS = Object.freeze([
+  'repository', 'main_commit', 'controller_blob', 'stack_registry_blob'
+]);
+const AUTHORITY_PACKET_APPLICABILITY_KEYS = Object.freeze([
+  'scope_digest', 'required_consumers', 'retain_through_child_finality', 'retain_through_candidate_finality'
+]);
+const AUTHORITY_PACKET_CONSUMER_KEYS = Object.freeze(['class', 'dependency_id', 'scope_digest']);
+const AUTHORITY_PACKET_BODY_KEYS = Object.freeze([
+  'verdict', 'decision', 'findings', 'qualifications', 'next_state', 'sections', 'evidence_refs', 'gate_contract_ir'
+]);
+const AUTHORITY_PACKET_FINDING_KEYS = Object.freeze([
+  'id', 'requirement', 'observed', 'required', 'consequence', 'disposition', 'evidence_ids'
+]);
+const AUTHORITY_PACKET_SECTION_KEYS = Object.freeze(['name', 'text']);
+const AUTHORITY_PACKET_SOURCE_KEYS = Object.freeze([
+  'repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'
+]);
+const AUTHORITY_PACKET_EVIDENCE_KEYS = Object.freeze(['id', 'kind']);
+const AUTHORITY_PACKET_EVENT_TYPES = Object.freeze([
+  'READBACK_VERIFIED', 'WEB_ACCEPTANCE_BOUND', 'CURRENT_READBACK',
+  'CONSUMER_COMPLETED', 'FINALITY_OBSERVED', 'BACKFILL_AUTHORISED'
+]);
+const SEMANTIC_GATE_ADMISSION_EVENT_TYPES = Object.freeze([
+  'DISPATCH_INTENT', 'DISPATCH_CONFIRMED', 'DISPATCH_NOT_STARTED', 'CONSUMER_COMPLETED'
+]);
 const PAYLOAD_KEYS = Object.freeze([
   'classification', 'reason_code', 'outcome_digest', 'evidence_digest',
   'operation_digest', 'detail_digest', 'mutation_outcome', 'evidence_refs'
@@ -147,7 +251,17 @@ const PAYLOAD_KEYS = Object.freeze([
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
+const PENDING_ALLOCATION_PREFLIGHT = Symbol('pending-allocation-preflight');
+const PENDING_ALLOCATION_COMMIT = Symbol('pending-allocation-commit');
 const ADMISSION_OWNERS = new WeakMap();
+const SEMANTIC_GATE_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_STORE_OWNERS = new WeakMap();
+const PROGRAMME_RECEIPT_STORE_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_READER_OWNERS = new WeakMap();
+const AUTHORITY_PACKET_READER_KEYS = Object.freeze([
+  'readAuthority', 'readStart', 'screenPacket', 'readBackfillSource',
+  'readCandidate', 'readCurrent', 'readWebDecision', 'readDispatchOutcome'
+]);
 
 class GprError extends Error {
   constructor(code, details = {}) {
@@ -174,6 +288,219 @@ function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
+  return value;
+}
+
+function packetFail(reasonCode) {
+  if (!AUTHORITY_PACKET_REASON_CODES.includes(reasonCode)) reasonCode = 'GPR_PACKET_VALUE_INVALID';
+  const error = new GprError(reasonCode);
+  error.packetBoundary = true;
+  error.reason_code = reasonCode;
+  throw error;
+}
+
+function packetFailureEnvelope(error) {
+  const reasonCode = error && AUTHORITY_PACKET_REASON_CODES.includes(error.reason_code || error.code)
+    ? error.reason_code || error.code
+    : 'GPR_PACKET_VALUE_INVALID';
+  return deepFreeze({
+    ok: false,
+    code: PACKET_TERMINAL_FAILURE_CODE,
+    reason_code: reasonCode,
+    accepted: false,
+    consumable: false,
+    next_gate_admitted: false
+  });
+}
+
+function packetStringIsUnicodeScalar(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!Number.isInteger(next) || next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function packetClosedClone(value, state = { seen: new Set(), nodes: 0 }, location = 'value', depth = 0) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID'); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
+  state.nodes += 1;
+  if (state.nodes > AUTHORITY_PACKET_LIMITS.valueNodes || depth > AUTHORITY_PACKET_LIMITS.nestingDepth) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  if (value === null) return null;
+  if (typeof value === 'string') {
+    if (!packetStringIsUnicodeScalar(value)) packetFail('GPR_PACKET_VALUE_INVALID');
+    if (Buffer.byteLength(value, 'utf8') > AUTHORITY_PACKET_LIMITS.proseBytes) packetFail('GPR_PACKET_LIMIT');
+    return value;
+  }
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || !Number.isFinite(value) || Object.is(value, -0)) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
+    return value;
+  }
+  if (typeof value !== 'object' || state.seen.has(value)) packetFail('GPR_PACKET_VALUE_INVALID');
+  state.seen.add(value);
+  try {
+    let prototype;
+    let names;
+    let symbols;
+    try {
+      if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID');
+    } catch (_) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
+    try {
+      prototype = Object.getPrototypeOf(value);
+      names = Object.getOwnPropertyNames(value);
+      symbols = Object.getOwnPropertySymbols(value);
+    } catch (_) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
+    if (symbols.length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
+    if (Array.isArray(value)) {
+      if (prototype !== Array.prototype && prototype !== null) packetFail('GPR_PACKET_VALUE_INVALID');
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!lengthDescriptor || lengthDescriptor.get || lengthDescriptor.set
+        || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0) {
+        packetFail('GPR_PACKET_VALUE_INVALID');
+      }
+      const result = [];
+      result.length = lengthDescriptor.value;
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= lengthDescriptor.value) {
+          packetFail('GPR_PACKET_VALUE_INVALID');
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) {
+          packetFail('GPR_PACKET_VALUE_INVALID');
+        }
+      }
+      for (let index = 0; index < result.length; index += 1) {
+        const name = String(index);
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) {
+          packetFail('GPR_PACKET_VALUE_INVALID');
+        }
+        Object.defineProperty(result, name, {
+          value: packetClosedClone(descriptor.value, state, `${location}[${index}]`, depth + 1),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) packetFail('GPR_PACKET_VALUE_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) {
+        packetFail('GPR_PACKET_VALUE_INVALID');
+      }
+      Object.defineProperty(result, name, {
+        value: packetClosedClone(descriptor.value, state, `${location}.${name}`, depth + 1),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return result;
+  } finally {
+    state.seen.delete(value);
+  }
+}
+
+function packetParseInput(value) {
+  if (typeof value === 'string') return { value, serialized: true };
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID'); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
+  let isBuffer = false;
+  try { isBuffer = Buffer.isBuffer(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  if (isBuffer) {
+    let bytes;
+    try {
+      if (Object.getPrototypeOf(value) !== Buffer.prototype || Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
+      for (const name of Object.getOwnPropertyNames(value)) {
+        if (!/^(0|[1-9]\d*)$/.test(name)) packetFail('GPR_PACKET_VALUE_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true
+          || !Number.isInteger(descriptor.value) || descriptor.value < 0 || descriptor.value > 255) packetFail('GPR_PACKET_VALUE_INVALID');
+      }
+      bytes = Uint8Array.prototype.slice.call(value);
+    } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) packetFail('GPR_PACKET_VALUE_INVALID');
+    let decoded;
+    try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+    return { value: decoded, serialized: true };
+  }
+  return { value, serialized: false };
+}
+
+function packetCanonicalInput(value) {
+  const input = packetParseInput(value);
+  if (!input.serialized) return packetClosedClone(input.value);
+  if (input.value.charCodeAt(0) === 0xfeff) packetFail('GPR_PACKET_VALUE_INVALID');
+  let parsed;
+  try { parsed = JSON.parse(input.value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  const normalized = packetClosedClone(parsed);
+  let canonical;
+  try { canonical = canonicalSerialize(normalized); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  if (canonical !== input.value) packetFail('GPR_PACKET_VALUE_INVALID');
+  return normalized;
+}
+
+function packetProse(value, allowEmpty = false) {
+  if (typeof value !== 'string' || (!allowEmpty && value.trim().length === 0)
+    || Buffer.byteLength(value, 'utf8') > AUTHORITY_PACKET_LIMITS.proseBytes) {
+    packetFail(value && typeof value === 'string' && Buffer.byteLength(value, 'utf8') > AUTHORITY_PACKET_LIMITS.proseBytes
+      ? 'GPR_PACKET_LIMIT' : 'GPR_PACKET_VALUE_INVALID');
+  }
+  return value;
+}
+
+function packetPrivacyString(value) {
+  if (SENSITIVE_VALUE.test(value)
+    || /(?:^|[\s"'`(])(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/]|\/(?:Users|home|root|private|tmp|var\/folders)(?:[\\/]|$))/i.test(value)
+    || /(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s/@:]+:[^\s/@]+@/i.test(value)
+    || /\b(?:password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|secret)\b\s*[:=]\s*(?!<redacted>|\[redacted\]|redacted\b|none\b|absent\b|not[ -]?stored\b)\S+/i.test(value)
+    || /\b[A-Z][A-Z0-9_]{2,}\s*=\s*(?!<redacted>|\[redacted\]|redacted\b|none\b|absent\b|not[ -]?stored\b)\S+/u.test(value)) {
+    packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  }
+}
+
+function assertAuthorityPacketPrivacy(value) {
+  const visit = (current) => {
+    if (typeof current === 'string') {
+      packetPrivacyString(current);
+      return;
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item);
+      return;
+    }
+    if (isRecord(current)) {
+      for (const [key, item] of Object.entries(current)) {
+        if (SENSITIVE_KEY.test(key)) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+        visit(item);
+      }
+    }
+  };
+  visit(value);
   return value;
 }
 
@@ -336,6 +663,289 @@ function validateCandidate(value) {
   for (const key of ['base_sha', 'head_sha', 'tree_sha']) if (!isSha(value[key])) fail('GPR_CANDIDATE_INVALID', { field: key });
   assertPrivacySafe(value);
   return clone(value);
+}
+
+function packetSafeContractId(value) {
+  return isSafeContractId(value, 160);
+}
+
+function packetSafePhysicalLoopRunId(value) {
+  return packetSafeContractId(value) && isSafeId(value, 128);
+}
+
+function packetSortedUnique(values) {
+  if (!Array.isArray(values)) return false;
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index - 1] >= values[index]) return false;
+  }
+  return true;
+}
+
+function packetValidateSourceReference(value, code = 'GPR_PACKET_VALUE_INVALID') {
+  if (!exactKeys(value, AUTHORITY_PACKET_SOURCE_KEYS)
+    || !isCanonicalRepository(value.repository)
+    || !Number.isSafeInteger(value.issue_number) || value.issue_number < 1
+    || !Number.isSafeInteger(value.comment_id) || value.comment_id < 1
+    || !isSafeId(value.node_id, 160)
+    || typeof value.author_login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(value.author_login)
+    || !isTimestamp(value.updated_at) || !isDigest(value.body_digest)) {
+    if (AUTHORITY_PACKET_REASON_CODES.includes(code)) packetFail(code);
+    fail(code);
+  }
+  return value;
+}
+
+function packetValidateProducer(value) {
+  if (!exactKeys(value, AUTHORITY_PACKET_PRODUCER_KEYS)
+    || !packetSafePhysicalLoopRunId(value.run)
+    || !packetSafeContractId(value.lock)
+    || !AUTHORITY_PACKET_STAGES.includes(value.stage)
+    || value.role !== value.stage) packetFail('GPR_PACKET_VALUE_INVALID');
+  return value;
+}
+
+function packetValidateProducerAuthority(value) {
+  if (!isRecord(value) || !exactKeys(value, ['lane_id', 'human_owner', 'producer'])
+    || !packetSafeContractId(value.lane_id)
+    || typeof value.human_owner !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(value.human_owner)) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  try { packetValidateProducer(packetClosedClone(value.producer)); } catch (_) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  return deepFreeze(packetClosedClone(value));
+}
+
+function packetValidateGovernance(value, repository) {
+  if (!exactKeys(value, AUTHORITY_PACKET_GOVERNANCE_KEYS)
+    || value.repository !== repository
+    || !isSha(value.main_commit) || !isSha(value.controller_blob) || !isSha(value.stack_registry_blob)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  return value;
+}
+
+function packetValidateApplicability(value, producerStage) {
+  if (!exactKeys(value, AUTHORITY_PACKET_APPLICABILITY_KEYS)
+    || !isDigest(value.scope_digest)
+    || !Array.isArray(value.required_consumers)
+    || value.required_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+    || typeof value.retain_through_child_finality !== 'boolean'
+    || typeof value.retain_through_candidate_finality !== 'boolean') packetFail('GPR_PACKET_VALUE_INVALID');
+  const seen = new Set();
+  const producerIndex = AUTHORITY_PACKET_STAGES.indexOf(producerStage);
+  for (const consumer of value.required_consumers) {
+    if (!exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id)
+      || !isDigest(consumer.scope_digest)) packetFail('GPR_PACKET_VALUE_INVALID');
+    const identity = `${consumer.class}\u0000${consumer.dependency_id}`;
+    if (seen.has(identity)) packetFail('GPR_PACKET_VALUE_INVALID');
+    seen.add(identity);
+  }
+  if (!packetSortedUnique(value.required_consumers.map((item) => `${item.class}\u0000${item.dependency_id}`))) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  const hasLaterConsumer = value.required_consumers.some((consumer) => {
+    if (consumer.class === 'WEB' || consumer.class === 'FINALITY') return true;
+    return AUTHORITY_PACKET_STAGES.indexOf(consumer.class) > producerIndex;
+  });
+  if (!hasLaterConsumer && !value.retain_through_child_finality && !value.retain_through_candidate_finality) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  return value;
+}
+
+function packetValidateBindings(value) {
+  if (!exactKeys(value, AUTHORITY_PACKET_BINDING_KEYS)
+    || !isCanonicalRepository(value.repository)
+    || !Number.isSafeInteger(value.parent_issue) || value.parent_issue < 1
+    || !Number.isSafeInteger(value.child_issue) || value.child_issue < 1
+    || !packetSafeContractId(value.lane_id)
+    || typeof value.human_owner !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(value.human_owner)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  packetValidateSourceReference(value.authority);
+  packetValidateProducer(value.producer);
+  packetValidateGovernance(value.governance, value.repository);
+  if (value.candidate !== null) {
+    try { validateCandidate(value.candidate); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
+  packetValidateApplicability(value.applicability, value.producer.stage);
+  if (value.authority.repository !== value.repository || value.authority.issue_number !== value.child_issue) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  if (value.authority.author_login !== value.human_owner) packetFail('GPR_PACKET_VALUE_INVALID');
+  return value;
+}
+
+function packetExpectedSectionNames(stage) {
+  const names = {
+    'G0-A': ['framing', 'unknowns', 'evidence_questions', 'stop_condition'],
+    'G0-B': ['questions', 'observations', 'provenance', 'coverage'],
+    G1: ['causal_model', 'alternatives', 'invariants', 'architecture', 'assumptions'],
+    G2: ['implementation_contract', 'mutation_boundary', 'oracle_matrix', 'validation', 'publication_boundary'],
+    G3: ['implementation', 'candidate_identity', 'validation_results', 'remaining_obligations'],
+    G4: ['candidate_identity', 'coverage', 'findings_and_reproducers', 'validation_results', 'disposition'],
+    RECONVERGENCE: ['root_synthesis', 'prior_failures', 'retained_decisions', 'reentry_boundary'],
+    FINAL_AUDIT: ['programme_coverage', 'remaining_obligations', 'validation_results', 'disposition'],
+    LOOP: ['reconciliation', 'observations', 'handoff'],
+    BROWSER: ['scope', 'observations', 'validation_results', 'disposition']
+  };
+  return names[stage];
+}
+
+function packetValidateEvidenceReference(value) {
+  if (!isRecord(value) || !Object.hasOwn(value, 'id') || !Object.hasOwn(value, 'kind')
+    || !packetSafeContractId(value.id)
+    || !['GIT_BLOB', 'GITHUB_COMMENT', 'AUTHORITY_PACKET'].includes(value.kind)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  if (value.kind === 'GIT_BLOB') {
+    if (!exactKeys(value, ['id', 'kind', 'repository', 'commit', 'path', 'blob', 'content_digest'])
+      || !isCanonicalRepository(value.repository) || !isSha(value.commit) || !isSha(value.blob)
+      || !isDigest(value.content_digest) || typeof value.path !== 'string'
+      || value.path.length === 0 || value.path.length > 512 || value.path.startsWith('/')
+      || value.path.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(value.path)
+      || value.path.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('-'))
+      || value.path.includes('\\') || value.path.includes('://')) packetFail('GPR_PACKET_VALUE_INVALID');
+  } else if (value.kind === 'GITHUB_COMMENT') {
+    if (!exactKeys(value, ['id', 'kind', 'source'])) packetFail('GPR_PACKET_VALUE_INVALID');
+    packetValidateSourceReference(value.source);
+  } else if (!exactKeys(value, ['id', 'kind', 'packet_id', 'packet_digest', 'binding_digest'])
+    || !AUTHORITY_PACKET_ID_PATTERN.test(value.packet_id)
+    || !isDigest(value.packet_digest) || !isDigest(value.binding_digest)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  return value;
+}
+
+function packetValidateBody(value, stage) {
+  if (!exactKeys(value, AUTHORITY_PACKET_BODY_KEYS)
+    || !AUTHORITY_PACKET_VERDICTS.includes(value.verdict)) packetFail('GPR_PACKET_VALUE_INVALID');
+  packetProse(value.decision);
+  packetProse(value.next_state);
+  if (!Array.isArray(value.qualifications)) packetFail('GPR_PACKET_VALUE_INVALID');
+  for (const qualification of value.qualifications) packetProse(qualification);
+  if (!Array.isArray(value.findings) || value.findings.length > AUTHORITY_PACKET_LIMITS.findings) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  for (const finding of value.findings) {
+    if (!exactKeys(finding, AUTHORITY_PACKET_FINDING_KEYS)
+      || !packetSafeContractId(finding.id)
+      || !AUTHORITY_PACKET_FINDING_DISPOSITIONS.includes(finding.disposition)
+      || !Array.isArray(finding.evidence_ids) || finding.evidence_ids.length > AUTHORITY_PACKET_LIMITS.evidenceRefs
+      || !packetSortedUnique(finding.evidence_ids)) packetFail('GPR_PACKET_VALUE_INVALID');
+    packetProse(finding.requirement);
+    packetProse(finding.observed);
+    packetProse(finding.required);
+    packetProse(finding.consequence);
+    for (const evidenceId of finding.evidence_ids) if (!packetSafeContractId(evidenceId)) packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  const expectedSections = packetExpectedSectionNames(stage);
+  if (!expectedSections || !Array.isArray(value.sections) || value.sections.length !== expectedSections.length) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  for (let index = 0; index < expectedSections.length; index += 1) {
+    const section = value.sections[index];
+    if (!exactKeys(section, AUTHORITY_PACKET_SECTION_KEYS) || section.name !== expectedSections[index]) {
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
+    packetProse(section.text);
+  }
+  if (!Array.isArray(value.evidence_refs) || value.evidence_refs.length > AUTHORITY_PACKET_LIMITS.evidenceRefs) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  const evidenceIds = new Set();
+  for (const evidence of value.evidence_refs) {
+    packetValidateEvidenceReference(evidence);
+    if (evidenceIds.has(evidence.id)) packetFail('GPR_PACKET_VALUE_INVALID');
+    evidenceIds.add(evidence.id);
+  }
+  for (const finding of value.findings) {
+    for (const evidenceId of finding.evidence_ids) if (!evidenceIds.has(evidenceId)) packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  if (value.gate_contract_ir !== null) {
+    if (stage !== 'G2' || value.verdict !== 'PASS') packetFail('GPR_PACKET_VALUE_INVALID');
+    try {
+      const compiler = require('./toolkit-gate-contract-compiler.cjs');
+      compiler.compileGateContract(value.gate_contract_ir);
+    } catch (_) {
+      packetFail('GPR_PACKET_SCHEMA_UNSUPPORTED');
+    }
+  } else if (stage === 'G2' && value.verdict === 'PASS') {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  return value;
+}
+
+function validateAuthorityPacket(value, expected = undefined) {
+  let trustedExpected;
+  if (expected !== undefined) {
+    try { trustedExpected = packetClosedClone(expected); }
+    catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  }
+  const normalized = packetCanonicalInput(value);
+  if (!isRecord(normalized) || !exactKeys(normalized, AUTHORITY_PACKET_KEYS)) packetFail('GPR_PACKET_VALUE_INVALID');
+  if (normalized.schema !== AUTHORITY_PACKET_SCHEMA_ID) packetFail('GPR_PACKET_SCHEMA_UNSUPPORTED');
+  packetValidateBindings(normalized.bindings);
+  packetValidateBody(normalized.body, normalized.bindings.producer.stage);
+  assertAuthorityPacketPrivacy(normalized);
+  let canonical;
+  try { canonical = canonicalSerialize(normalized); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  if (Buffer.byteLength(canonical, 'utf8') > AUTHORITY_PACKET_LIMITS.artifactBytes) packetFail('GPR_PACKET_LIMIT');
+  if (trustedExpected !== undefined) {
+    expected = trustedExpected;
+    if (!isRecord(expected) || !exactKeys(expected, [
+      'packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'bindings', 'canonical_packet_bytes'
+    ].filter((key) => Object.hasOwn(expected, key)))) packetFail('GPR_PACKET_VALUE_INVALID');
+    const packetDigest = digestValue({ schema: normalized.schema, bindings: normalized.bindings, body: normalized.body });
+    const identities = {
+      packet_id: `ap1-${packetDigest}`,
+      packet_digest: packetDigest,
+      content_digest: digestValue(normalized.body),
+      binding_digest: digestValue(normalized.bindings),
+    };
+    if (Object.hasOwn(expected, 'canonical_packet_bytes')
+      && expected.canonical_packet_bytes !== canonical) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    if (Object.hasOwn(expected, 'bindings')) {
+      let bindings;
+      try { bindings = packetClosedClone(expected.bindings); packetValidateBindings(bindings); } catch (_) {
+        packetFail('GPR_PACKET_BINDING_MISMATCH');
+      }
+      if (canonicalSerialize(bindings) !== canonicalSerialize(normalized.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+    }
+    for (const key of ['packet_id', 'packet_digest', 'content_digest']) {
+      if (Object.hasOwn(expected, key) && expected[key] !== identities[key]) packetFail('GPR_PACKET_IDENTITY_MISMATCH');
+    }
+    if (Object.hasOwn(expected, 'binding_digest') && expected.binding_digest !== identities.binding_digest) {
+      packetFail('GPR_PACKET_BINDING_MISMATCH');
+    }
+  }
+  return deepFreeze(normalized);
+}
+
+function authorityPacketIdentities(value) {
+  const packet = validateAuthorityPacket(value);
+  const contentDigest = digestValue(packet.body);
+  const bindingDigest = digestValue(packet.bindings);
+  const packetDigest = digestValue({ schema: packet.schema, bindings: packet.bindings, body: packet.body });
+  const producerKey = digestValue({
+    repository: packet.bindings.repository,
+    parent_issue: packet.bindings.parent_issue,
+    child_issue: packet.bindings.child_issue,
+    lane_id: packet.bindings.lane_id,
+    producer_run: packet.bindings.producer.run
+  });
+  return deepFreeze({
+    packet,
+    packet_id: `ap1-${packetDigest}`,
+    packet_digest: packetDigest,
+    content_digest: contentDigest,
+    binding_digest: bindingDigest,
+    producer_key: producerKey,
+    canonical_packet_bytes: canonicalSerialize(packet)
+  });
 }
 
 function validateTargetIdentity(value) {
@@ -757,9 +1367,10 @@ function verifyWindowsPrivateAcl(stateRoot) {
   }
   const script = [
     '$ErrorActionPreference="Stop"',
-    '$acl=Get-Acl -LiteralPath $env:GPR_ACL_PATH',
+    '$dir=[System.IO.DirectoryInfo]::new($env:GPR_ACL_PATH)',
+    '$acl=$dir.GetAccessControl()',
     '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    '$owner=(New-Object System.Security.Principal.NTAccount($acl.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value',
+    '$owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
     '$rules=@($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]) | ForEach-Object { [pscustomobject]@{ sid=$_.IdentityReference.Value; type=[string]$_.AccessControlType; rights=[string]$_.FileSystemRights } })',
     '$root=[System.IO.Path]::GetPathRoot($env:GPR_ACL_PATH)',
     'if ($root -notmatch "^[A-Za-z]:\\\\$") { throw "non-local-root" }',
@@ -1329,6 +1940,135 @@ CREATE TRIGGER receipt_chain_digests_no_delete BEFORE DELETE ON receipt_chain_di
 `;
 
 const FINAL_V3_SCHEMA_SQL = `${SCHEMA_SQL}\n${V3_SCHEMA_SQL}`;
+const AUTHORITY_PACKET_SCHEMA_SQL = `
+CREATE TABLE authority_packets (
+  packet_id TEXT PRIMARY KEY CHECK (
+    length(packet_id) = 68
+    AND substr(packet_id, 1, 4) = 'ap1-'
+    AND substr(packet_id, 5) NOT GLOB '*[^0-9a-f]*'
+  ),
+  producer_key TEXT UNIQUE NOT NULL CHECK (
+    length(producer_key) = 64
+    AND producer_key NOT GLOB '*[^0-9a-f]*'
+  ),
+  packet_digest TEXT NOT NULL CHECK (
+    length(packet_digest) = 64
+    AND packet_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  content_digest TEXT NOT NULL CHECK (
+    length(content_digest) = 64
+    AND content_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  binding_digest TEXT NOT NULL CHECK (
+    length(binding_digest) = 64
+    AND binding_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  canonical_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE authority_packet_events (
+  event_id TEXT PRIMARY KEY CHECK (
+    length(event_id) = 64
+    AND event_id NOT GLOB '*[^0-9a-f]*'
+  ),
+  packet_id TEXT NOT NULL REFERENCES authority_packets(packet_id),
+  event_key TEXT UNIQUE NOT NULL CHECK (
+    length(event_key) = 64
+    AND event_key NOT GLOB '*[^0-9a-f]*'
+  ),
+  sequence INTEGER NOT NULL CHECK (sequence >= 1),
+  prior_event_id TEXT REFERENCES authority_packet_events(event_id),
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'READBACK_VERIFIED', 'WEB_ACCEPTANCE_BOUND', 'CURRENT_READBACK',
+    'CONSUMER_COMPLETED', 'FINALITY_OBSERVED', 'BACKFILL_AUTHORISED'
+  )),
+  canonical_json TEXT NOT NULL,
+  UNIQUE(packet_id, sequence)
+) STRICT;
+CREATE TABLE semantic_gate_admissions (
+  admission_id TEXT PRIMARY KEY,
+  consumer_key TEXT UNIQUE NOT NULL,
+  canonical_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE semantic_gate_admission_events (
+  event_id TEXT PRIMARY KEY CHECK (
+    length(event_id) = 64
+    AND event_id NOT GLOB '*[^0-9a-f]*'
+  ),
+  admission_id TEXT NOT NULL REFERENCES semantic_gate_admissions(admission_id),
+  sequence INTEGER NOT NULL CHECK (sequence >= 1),
+  prior_event_id TEXT REFERENCES semantic_gate_admission_events(event_id),
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'DISPATCH_INTENT', 'DISPATCH_CONFIRMED', 'DISPATCH_NOT_STARTED', 'CONSUMER_COMPLETED'
+  )),
+  canonical_json TEXT NOT NULL,
+  UNIQUE(admission_id, sequence)
+) STRICT;
+CREATE INDEX authority_packet_events_packet_sequence ON authority_packet_events(packet_id, sequence);
+CREATE INDEX semantic_gate_admission_events_admission_sequence ON semantic_gate_admission_events(admission_id, sequence);
+CREATE TRIGGER authority_packets_no_update BEFORE UPDATE ON authority_packets BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packets_no_delete BEFORE DELETE ON authority_packets BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packets_no_replace BEFORE INSERT ON authority_packets
+WHEN EXISTS (
+  SELECT 1 FROM authority_packets
+  WHERE packet_id = NEW.packet_id OR producer_key = NEW.producer_key OR packet_digest = NEW.packet_digest
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packet_events_no_update BEFORE UPDATE ON authority_packet_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packet_events_no_delete BEFORE DELETE ON authority_packet_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packet_events_no_replace BEFORE INSERT ON authority_packet_events
+WHEN EXISTS (
+  SELECT 1 FROM authority_packet_events
+  WHERE event_id = NEW.event_id OR event_key = NEW.event_key
+     OR (packet_id = NEW.packet_id AND sequence = NEW.sequence)
+     OR (NEW.prior_event_id IS NOT NULL AND prior_event_id = NEW.prior_event_id)
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER authority_packet_events_chain_guard BEFORE INSERT ON authority_packet_events
+WHEN NEW.sequence != 1 AND (
+  NEW.prior_event_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM authority_packet_events prior
+    WHERE prior.event_id = NEW.prior_event_id
+      AND prior.packet_id = NEW.packet_id
+      AND prior.sequence = NEW.sequence - 1
+  )
+)
+OR NEW.sequence = 1 AND NEW.prior_event_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'GPR_PACKET_EVENT_CHAIN'); END;
+CREATE TRIGGER semantic_gate_admissions_no_update BEFORE UPDATE ON semantic_gate_admissions BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admissions_no_delete BEFORE DELETE ON semantic_gate_admissions BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admissions_no_replace BEFORE INSERT ON semantic_gate_admissions
+WHEN EXISTS (
+  SELECT 1 FROM semantic_gate_admissions
+  WHERE admission_id = NEW.admission_id OR consumer_key = NEW.consumer_key
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admission_events_no_update BEFORE UPDATE ON semantic_gate_admission_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admission_events_no_delete BEFORE DELETE ON semantic_gate_admission_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admission_events_no_replace BEFORE INSERT ON semantic_gate_admission_events
+WHEN EXISTS (
+  SELECT 1 FROM semantic_gate_admission_events
+  WHERE event_id = NEW.event_id
+     OR (admission_id = NEW.admission_id AND sequence = NEW.sequence)
+     OR (NEW.prior_event_id IS NOT NULL AND prior_event_id = NEW.prior_event_id)
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER semantic_gate_admission_events_chain_guard BEFORE INSERT ON semantic_gate_admission_events
+WHEN NEW.sequence != 1 AND (
+  NEW.prior_event_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM semantic_gate_admission_events prior
+    WHERE prior.event_id = NEW.prior_event_id
+      AND prior.admission_id = NEW.admission_id
+      AND prior.sequence = NEW.sequence - 1
+  )
+)
+OR NEW.sequence = 1 AND NEW.prior_event_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'GPR_PACKET_EVENT_CHAIN'); END;
+`;
+const FINAL_AUTHORITY_PACKET_SCHEMA_SQL = `${SCHEMA_SQL}\n${AUTHORITY_PACKET_SCHEMA_SQL}`;
 const METADATA_NO_UPDATE_TRIGGER_SQL = "CREATE TRIGGER metadata_no_update BEFORE UPDATE ON metadata BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;";
 const MIGRATION_STEPS = Object.freeze([
   Object.freeze({ step: 1, action: 'RECOGNIZE_EXACT_CANONICAL_V2' }),
@@ -1342,6 +2082,22 @@ const MIGRATION_STEPS = Object.freeze([
   Object.freeze({ step: 9, action: 'RESTORE_METADATA_NO_UPDATE' }),
   Object.freeze({ step: 10, action: 'SET_USER_VERSION_3' }),
   Object.freeze({ step: 11, action: 'VERIFY_FINAL_V3_SCHEMA_FINGERPRINT' }),
+  Object.freeze({ step: 12, action: 'REVERIFY_INTEGRITY_FK_HISTORICAL_DIGESTS_AND_HIGH_WATER' }),
+  Object.freeze({ step: 13, action: 'COMMIT' }),
+  Object.freeze({ step: 14, action: 'INDEPENDENT_REOPEN_AND_READBACK' })
+]);
+const AUTHORITY_PACKET_MIGRATION_STEPS = Object.freeze([
+  Object.freeze({ step: 1, action: 'RECOGNIZE_EXACT_CANONICAL_V2' }),
+  Object.freeze({ step: 2, action: 'VERIFY_NAMESPACE_INTEGRITY_FK_HISTORICAL_DIGESTS_AND_CHAIN' }),
+  Object.freeze({ step: 3, action: 'CHECK_MIGRATION_QUIESCENCE' }),
+  Object.freeze({ step: 4, action: 'BEGIN_IMMEDIATE' }),
+  Object.freeze({ step: 5, action: 'REVERIFY_V2_SOURCE_INSIDE_TRANSACTION' }),
+  Object.freeze({ step: 6, action: 'REMOVE_METADATA_NO_UPDATE' }),
+  Object.freeze({ step: 7, action: 'ADD_AUTHORITY_PACKET_TABLES_INDEXES_AND_GUARDS' }),
+  Object.freeze({ step: 8, action: 'WRITE_EXPECTED_AUTHORITY_PACKET_FINGERPRINT' }),
+  Object.freeze({ step: 9, action: 'RESTORE_METADATA_NO_UPDATE' }),
+  Object.freeze({ step: 10, action: 'SET_USER_VERSION_4' }),
+  Object.freeze({ step: 11, action: 'VERIFY_EXACT_AUTHORITY_PACKET_SCHEMA_FINGERPRINT' }),
   Object.freeze({ step: 12, action: 'REVERIFY_INTEGRITY_FK_HISTORICAL_DIGESTS_AND_HIGH_WATER' }),
   Object.freeze({ step: 13, action: 'COMMIT' }),
   Object.freeze({ step: 14, action: 'INDEPENDENT_REOPEN_AND_READBACK' })
@@ -1396,6 +2152,7 @@ function expectedSchemaFingerprint(DatabaseSync) {
 }
 
 let expectedFinalV3SchemaFingerprintCache = null;
+let expectedAuthorityPacketSchemaFingerprintCache = null;
 
 function sqliteDatabaseConstructor(DatabaseSync) {
   if (typeof DatabaseSync === 'function') return DatabaseSync;
@@ -1421,8 +2178,26 @@ function expectedFinalV3SchemaFingerprint(DatabaseSync) {
   }
 }
 
+function expectedAuthorityPacketSchemaFingerprint(DatabaseSync) {
+  if (expectedAuthorityPacketSchemaFingerprintCache) return expectedAuthorityPacketSchemaFingerprintCache;
+  const Constructor = sqliteDatabaseConstructor(DatabaseSync);
+  const db = new Constructor(':memory:');
+  try {
+    db.exec('PRAGMA trusted_schema=OFF');
+    db.exec(FINAL_AUTHORITY_PACKET_SCHEMA_SQL);
+    expectedAuthorityPacketSchemaFingerprintCache = schemaFingerprint(db);
+    return expectedAuthorityPacketSchemaFingerprintCache;
+  } finally {
+    db.close();
+  }
+}
+
 function buildFinalV3SchemaSql() {
   return FINAL_V3_SCHEMA_SQL;
+}
+
+function buildAuthorityPacketSchemaSql() {
+  return AUTHORITY_PACKET_SCHEMA_SQL;
 }
 
 function validateV2MigrationObservation(value) {
@@ -1497,6 +2272,1648 @@ function createDatabase(db, namespace, digest, now, expectedFingerprint) {
     );
     db.prepare('INSERT INTO coordination_state VALUES (1, 0)').run();
   });
+}
+
+function createAuthorityPacketDatabase(db, namespace, digest, now, expectedFingerprint) {
+  transaction(db, () => {
+    db.exec(FINAL_AUTHORITY_PACKET_SCHEMA_SQL);
+    db.exec(`PRAGMA application_id=${APPLICATION_ID}`);
+    db.exec(`PRAGMA user_version=${AUTHORITY_PACKET_USER_VERSION}`);
+    const fingerprint = schemaFingerprint(db);
+    if (fingerprint !== expectedFingerprint) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+    db.prepare('INSERT INTO metadata VALUES (1, ?, ?, ?, ?, ?, ?, ?)').run(
+      SCHEMA_ID, digest, namespace.repository, namespace.parent_issue, namespace.child_issue, fingerprint, now
+    );
+    db.prepare('INSERT INTO coordination_state VALUES (1, 0)').run();
+  });
+}
+
+function parseAuthorityPacketJson(value) {
+  if (typeof value === 'string' && Buffer.byteLength(value, 'utf8') > AUTHORITY_PACKET_LIMITS.artifactBytes) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  let parsed;
+  try { parsed = JSON.parse(value); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+  let normalized;
+  try { normalized = packetClosedClone(parsed); } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  try {
+    if (canonicalSerialize(normalized) !== value) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+  return normalized;
+}
+
+function packetValidateEventPayload(eventType, payload) {
+  let normalized;
+  try { normalized = packetClosedClone(payload); } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  if (!isRecord(normalized)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  if (eventType === 'READBACK_VERIFIED') {
+    if (!exactKeys(normalized, ['namespace_digest', 'store_identity_digest', 'runtime_identity_digest', 'challenge'])
+      || !isDigest(normalized.namespace_digest) || !isDigest(normalized.store_identity_digest)
+      || !isDigest(normalized.runtime_identity_digest) || !/^[a-f0-9]{64}$/.test(normalized.challenge)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+  } else if (eventType === 'CURRENT_READBACK') {
+    if (!exactKeys(normalized, ['projection_digest', 'body_digest', 'revision', 'acceptance_event_ids'])
+      || !isDigest(normalized.projection_digest) || !isDigest(normalized.body_digest)
+      || !Number.isSafeInteger(normalized.revision) || normalized.revision < 1
+      || !Array.isArray(normalized.acceptance_event_ids)
+      || normalized.acceptance_event_ids.length > AUTHORITY_PACKET_LIMITS.currentPredecessors
+      || !packetSortedUnique(normalized.acceptance_event_ids)
+      || normalized.acceptance_event_ids.some((value) => !isDigest(value))) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  } else if (eventType === 'FINALITY_OBSERVED') {
+    if (!exactKeys(normalized, ['boundary', 'authority_ref', 'dependent_consumers_complete'])
+      || !['CHILD', 'CANDIDATE'].includes(normalized.boundary)
+      || typeof normalized.dependent_consumers_complete !== 'boolean') packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateSourceReference(normalized.authority_ref, 'GPR_PACKET_CONTENT_MISMATCH');
+  } else if (eventType === 'BACKFILL_AUTHORISED') {
+    if (!exactKeys(normalized, ['authority_ref', 'source_ref', 'source_packet_digest', 'source_binding_digest'])
+      || !isDigest(normalized.source_packet_digest)
+      || !isDigest(normalized.source_binding_digest)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateSourceReference(normalized.authority_ref, 'GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateSourceReference(normalized.source_ref, 'GPR_PACKET_CONTENT_MISMATCH');
+  } else if (eventType === 'WEB_ACCEPTANCE_BOUND') {
+    if (!exactKeys(normalized, [
+      'schema', 'packet_id', 'packet_digest', 'binding_digest', 'web_source',
+      'disposition', 'permitted_consumers', 'applicability', 'successor_applicability', 'readback_event_id'
+    ]) || normalized.schema !== 'toolkit.github-program.authority-packet-acceptance.v1'
+      || !AUTHORITY_PACKET_ID_PATTERN.test(normalized.packet_id)
+      || !isDigest(normalized.packet_digest) || !isDigest(normalized.binding_digest)
+      || normalized.disposition !== 'ACCEPTED_FOR_CONSUMPTION'
+      || !Array.isArray(normalized.permitted_consumers)
+      || normalized.permitted_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+      || !isDigest(normalized.readback_event_id)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateSourceReference(normalized.web_source, 'GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateApplicability(normalized.applicability, 'G2');
+    packetValidateSuccessorApplicability(normalized.successor_applicability, 'GPR_PACKET_CONTENT_MISMATCH');
+    for (const consumer of normalized.permitted_consumers) {
+      if (!exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+  } else if (eventType === 'CONSUMER_COMPLETED') {
+    if (!exactKeys(normalized, ['admission_id', 'consumer', 'outcome_ref'])
+      || !packetSafeContractId(normalized.admission_id) || !isDigest(normalized.outcome_ref)
+      || !isRecord(normalized.consumer)
+      || !exactKeys(normalized.consumer, ['run', 'lock', 'stage', 'role', 'scope_digest'])
+      || !packetSafeContractId(normalized.consumer.run) || !packetSafeContractId(normalized.consumer.lock)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(normalized.consumer.stage)
+      || normalized.consumer.role !== normalized.consumer.stage
+      || !isDigest(normalized.consumer.scope_digest)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  } else {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  assertAuthorityPacketPrivacy(normalized);
+  return normalized;
+}
+
+function packetValidateEventBinding(db, packetId, eventType, payload) {
+  const row = db.prepare('SELECT * FROM authority_packets WHERE packet_id = ?').get(packetId);
+  if (!row) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  let identities;
+  try { identities = authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json)); } catch (_) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  if (eventType === 'WEB_ACCEPTANCE_BOUND') {
+    if (payload.packet_id !== identities.packet_id || payload.packet_digest !== identities.packet_digest
+      || payload.binding_digest !== identities.binding_digest) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    const declared = new Set(identities.packet.bindings.applicability.required_consumers.map((item) =>
+      `${item.class}\u0000${item.dependency_id}\u0000${item.scope_digest}`));
+    if (canonicalSerialize(payload.applicability) !== canonicalSerialize(identities.packet.bindings.applicability)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+    for (const consumer of payload.permitted_consumers) {
+      if (!declared.has(`${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`)) {
+        packetFail('GPR_PACKET_CONTENT_MISMATCH');
+      }
+    }
+    const readback = db.prepare(
+      'SELECT event_id FROM authority_packet_events WHERE packet_id = ? AND event_id = ? AND event_type = ?'
+    ).get(packetId, payload.readback_event_id, 'READBACK_VERIFIED');
+    if (!readback) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  } else if (eventType === 'CURRENT_READBACK') {
+    for (const eventId of payload.acceptance_event_ids) {
+      const acceptance = db.prepare(
+        'SELECT event_id FROM authority_packet_events WHERE packet_id = ? AND event_id = ? AND event_type = ?'
+      ).get(packetId, eventId, 'WEB_ACCEPTANCE_BOUND');
+      if (!acceptance) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+  } else if (eventType === 'BACKFILL_AUTHORISED') {
+    if (payload.source_packet_digest !== identities.packet_digest
+      || payload.source_binding_digest !== identities.binding_digest
+      || canonicalSerialize(payload.authority_ref) !== canonicalSerialize(identities.packet.bindings.authority)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+  } else if (eventType === 'FINALITY_OBSERVED'
+    && canonicalSerialize(payload.authority_ref) !== canonicalSerialize(identities.packet.bindings.authority)) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  } else if (eventType === 'CONSUMER_COMPLETED') {
+    const producer = identities.packet.bindings.producer;
+    if (payload.outcome_ref !== identities.packet_digest
+      || payload.consumer.run !== producer.run
+      || payload.consumer.lock !== producer.lock
+      || payload.consumer.stage !== producer.stage
+      || payload.consumer.role !== producer.role) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+  }
+  return true;
+}
+
+function packetEventObject(packetId, sequence, priorEventId, eventType, payload, createdAt) {
+  const event = {
+    schema: AUTHORITY_PACKET_EVENT_SCHEMA_ID,
+    packet_id: packetId,
+    sequence,
+    prior_event_id: priorEventId,
+    event_type: eventType,
+    payload,
+    created_at: createdAt
+  };
+  return deepFreeze(event);
+}
+
+function packetEventKey(packetId, eventType, payload) {
+  return digestValue({ schema: AUTHORITY_PACKET_EVENT_SCHEMA_ID, packet_id: packetId, event_type: eventType, payload });
+}
+
+function verifyAuthorityPacketEventRows(db) {
+  const rows = db.prepare('SELECT * FROM authority_packet_events ORDER BY packet_id, sequence').all();
+  const byPacket = new Map();
+  const eventKeys = new Set();
+  for (const row of rows) {
+    if (!AUTHORITY_PACKET_ID_PATTERN.test(row.packet_id) || !isDigest(row.event_id) || !isDigest(row.event_key)
+      || !Number.isSafeInteger(row.sequence) || row.sequence < 1 || !AUTHORITY_PACKET_EVENT_TYPES.includes(row.event_type)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+    const event = parseAuthorityPacketJson(row.canonical_json);
+    if (!exactKeys(event, ['schema', 'packet_id', 'sequence', 'prior_event_id', 'event_type', 'payload', 'created_at'])
+      || event.schema !== AUTHORITY_PACKET_EVENT_SCHEMA_ID || event.packet_id !== row.packet_id
+      || event.sequence !== row.sequence || event.prior_event_id !== row.prior_event_id
+      || event.event_type !== row.event_type || !isTimestamp(event.created_at)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    if (event.prior_event_id !== null && !isDigest(event.prior_event_id)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetValidateEventPayload(event.event_type, event.payload);
+    packetValidateEventBinding(db, row.packet_id, event.event_type, event.payload);
+    if (row.event_id !== digestValue(event)
+      || row.event_key !== packetEventKey(row.packet_id, row.event_type, event.payload)
+      || eventKeys.has(row.event_key)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    eventKeys.add(row.event_key);
+    const prior = byPacket.get(row.packet_id) || [];
+    const expectedSequence = prior.length + 1;
+    const expectedPrior = prior.length ? prior[prior.length - 1].event_id : null;
+    if (row.sequence !== expectedSequence || row.prior_event_id !== expectedPrior
+      || Date.parse(event.created_at) < Date.parse(prior.length ? prior[prior.length - 1].created_at : event.created_at)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+    prior.push({ ...row, ...event });
+    byPacket.set(row.packet_id, prior);
+  }
+  return rows.length;
+}
+
+function verifySemanticGateAdmissionRows(db) {
+  const admissions = db.prepare('SELECT * FROM semantic_gate_admissions ORDER BY admission_id').all();
+  const admissionIds = new Set();
+  for (const row of admissions) {
+    if (!row.admission_id || typeof row.admission_id !== 'string' || !row.consumer_key
+      || typeof row.consumer_key !== 'string' || admissionIds.has(row.admission_id)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    const value = validateSemanticGateAdmission(parseAuthorityPacketJson(row.canonical_json));
+    if (!isRecord(value) || value.admission_id !== row.admission_id || value.consumer_key !== row.consumer_key
+      || row.canonical_json !== canonicalSerialize(value)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    if (isTimestamp(row.created_at) === false) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    admissionIds.add(row.admission_id);
+  }
+  const events = db.prepare('SELECT * FROM semantic_gate_admission_events ORDER BY admission_id, sequence').all();
+  const byAdmission = new Map();
+  for (const row of events) {
+    if (!admissionIds.has(row.admission_id) || !isDigest(row.event_id)
+      || !Number.isSafeInteger(row.sequence) || row.sequence < 1
+      || !SEMANTIC_GATE_ADMISSION_EVENT_TYPES.includes(row.event_type)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    const event = parseAuthorityPacketJson(row.canonical_json);
+    if (!exactKeys(event, [
+      'schema', 'admission_id', 'sequence', 'prior_event_id', 'event_type',
+      'created_at', 'transport_evidence_digest'
+    ]) || event.schema !== SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID
+      || event.admission_id !== row.admission_id || event.sequence !== row.sequence
+      || event.prior_event_id !== row.prior_event_id || event.event_type !== row.event_type
+      || !isTimestamp(event.created_at) || !isDigest(event.transport_evidence_digest)
+      || row.event_id !== digestValue(event)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    const prior = byAdmission.get(row.admission_id) || [];
+    if (row.sequence !== prior.length + 1 || row.prior_event_id !== (prior.length ? prior[prior.length - 1].event_id : null)) {
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+    prior.push({ ...row, ...event });
+    byAdmission.set(row.admission_id, prior);
+  }
+  return { admissions: admissions.length, events: events.length };
+}
+
+function verifyAuthorityPacketDurableEvidence(db, namespace, expectedNamespaceDigest, databasePath) {
+  const canonicalNamespace = namespaceValue(namespace);
+  if (namespaceDigest(canonicalNamespace) !== expectedNamespaceDigest) packetFail('GPR_PACKET_STORE_IDENTITY_MISMATCH');
+  try {
+    verifyRowDigests(db);
+    const runIds = db.prepare('SELECT run_id FROM runs ORDER BY run_id').all();
+    for (const row of runIds) readChainDb(db, row.run_id, true);
+  } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  const packetRows = db.prepare('SELECT * FROM authority_packets ORDER BY packet_id').all();
+  const producerKeys = new Set();
+  for (const row of packetRows) {
+    if (!AUTHORITY_PACKET_ID_PATTERN.test(row.packet_id) || !isDigest(row.producer_key)
+      || !isDigest(row.packet_digest) || !isDigest(row.content_digest) || !isDigest(row.binding_digest)
+      || !isTimestamp(row.created_at)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    let identities;
+    try { identities = authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json)); } catch (error) {
+      if (error instanceof GprError && error.code === 'GPR_PACKET_LIMIT') packetFail('GPR_PACKET_LIMIT');
+      if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+      packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    }
+    if (row.packet_id !== identities.packet_id || row.producer_key !== identities.producer_key
+      || row.packet_digest !== identities.packet_digest || row.content_digest !== identities.content_digest
+      || row.binding_digest !== identities.binding_digest || row.canonical_json !== identities.canonical_packet_bytes
+      || identities.packet.bindings.repository !== canonicalNamespace.repository
+      || identities.packet.bindings.parent_issue !== canonicalNamespace.parent_issue
+      || identities.packet.bindings.child_issue !== canonicalNamespace.child_issue
+      || producerKeys.has(row.producer_key)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    producerKeys.add(row.producer_key);
+  }
+  verifyAuthorityPacketEventRows(db);
+  verifySemanticGateAdmissionRows(db);
+  if (databasePath && fs.statSync(databasePath).size > LIMITS.databaseBytes) packetFail('GPR_PACKET_LIMIT');
+  return true;
+}
+
+function packetValidateCurrentConsumer(value, code = 'GPR_PACKET_CURRENT_UNVERIFIED') {
+  if (!isRecord(value) || !exactKeys(value, ['run', 'lock', 'stage', 'role', 'scope_digest'])
+    || !packetSafeContractId(value.run) || !packetSafeContractId(value.lock)
+    || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(value.stage) || value.role !== value.stage
+    || !isDigest(value.scope_digest)) packetFail(code);
+  return value;
+}
+
+function packetValidateCurrentPredecessor(value, code = 'GPR_PACKET_CURRENT_UNVERIFIED') {
+  if (!isRecord(value) || !exactKeys(value, [
+    'packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'producer', 'candidate',
+    'dependency_id', 'acceptance_event_id', 'web_source', 'readback_event_id', 'store_identity_digest'
+  ]) || !AUTHORITY_PACKET_ID_PATTERN.test(value.packet_id)
+    || value.packet_id !== `ap1-${value.packet_digest}` || !isDigest(value.packet_digest)
+    || !isDigest(value.content_digest) || !isDigest(value.binding_digest)
+    || !isRecord(value.producer) || !isSafeId(value.dependency_id)
+    || !isDigest(value.acceptance_event_id) || !isDigest(value.readback_event_id)
+    || !isDigest(value.store_identity_digest)) packetFail(code);
+  packetValidateProducer(value.producer);
+  if (value.candidate !== null) {
+    try { validateCandidate(value.candidate); } catch (_) { packetFail(code); }
+  }
+  packetValidateSourceReference(value.web_source, code);
+  return value;
+}
+
+function validateAuthorityPacketCurrent(value) {
+  let normalized;
+  try { normalized = packetClosedClone(value); } catch (_) { packetFail('GPR_PACKET_CURRENT_UNVERIFIED'); }
+  if (!isRecord(normalized) || !exactKeys(normalized, [
+    'schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner',
+    'consumer', 'authority', 'candidate', 'predecessors'
+  ]) || normalized.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA_ID
+    || !isCanonicalRepository(normalized.repository)
+    || !Number.isSafeInteger(normalized.parent_issue) || normalized.parent_issue < 1
+    || !Number.isSafeInteger(normalized.child_issue) || normalized.child_issue < 1
+    || !packetSafeContractId(normalized.lane_id)
+    || typeof normalized.human_owner !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(normalized.human_owner)
+    || !Array.isArray(normalized.predecessors)
+    || normalized.predecessors.length > AUTHORITY_PACKET_LIMITS.currentPredecessors
+    || Buffer.byteLength(canonicalSerialize(normalized), 'utf8') > AUTHORITY_PACKET_LIMITS.currentProjectionBytes) {
+    packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  }
+  packetValidateCurrentConsumer(normalized.consumer);
+  packetValidateSourceReference(normalized.authority, 'GPR_PACKET_CURRENT_UNVERIFIED');
+  if (normalized.authority.repository !== normalized.repository
+    || normalized.authority.issue_number !== normalized.child_issue
+    || normalized.authority.author_login !== normalized.human_owner) {
+    packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  }
+  if (normalized.candidate !== null) {
+    try { validateCandidate(normalized.candidate); } catch (_) { packetFail('GPR_PACKET_CURRENT_UNVERIFIED'); }
+  }
+  let previous;
+  const dependencies = new Set();
+  for (const predecessor of normalized.predecessors) {
+    packetValidateCurrentPredecessor(predecessor);
+    if (dependencies.has(predecessor.dependency_id)
+      || previous !== undefined && predecessor.dependency_id <= previous) {
+      packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+    }
+    dependencies.add(predecessor.dependency_id);
+    previous = predecessor.dependency_id;
+  }
+  return deepFreeze(normalized);
+}
+
+function validateAuthorityPacketAcceptance(value) {
+  let normalized;
+  try { normalized = packetClosedClone(value); } catch (_) { packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED'); }
+  if (!isRecord(normalized) || !exactKeys(normalized, [
+    'schema', 'packet_id', 'packet_digest', 'binding_digest', 'web_source', 'disposition',
+    'permitted_consumers', 'applicability', 'successor_applicability', 'readback_event_id'
+  ]) || normalized.schema !== AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID
+    || !AUTHORITY_PACKET_ID_PATTERN.test(normalized.packet_id)
+    || normalized.packet_id !== `ap1-${normalized.packet_digest}`
+    || !isDigest(normalized.packet_digest) || !isDigest(normalized.binding_digest)
+    || normalized.disposition !== 'ACCEPTED_FOR_CONSUMPTION'
+    || !Array.isArray(normalized.permitted_consumers)
+    || normalized.permitted_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+    || !isDigest(normalized.readback_event_id)) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  packetValidateSourceReference(normalized.web_source, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  try { packetValidateApplicability(normalized.applicability, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED'); } catch (_) {
+    packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  }
+  packetValidateSuccessorApplicability(normalized.successor_applicability, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  let previous;
+  const seen = new Set();
+  for (const consumer of normalized.permitted_consumers) {
+    if (!isRecord(consumer) || !exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id) || !isDigest(consumer.scope_digest)) {
+      packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+    }
+    const identity = `${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`;
+    if (seen.has(identity) || previous !== undefined && identity <= previous) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+    seen.add(identity);
+    previous = identity;
+  }
+  return deepFreeze(normalized);
+}
+
+function packetValidateSuccessorApplicability(value, code = 'GPR_PACKET_ACCEPTANCE_UNVERIFIED') {
+  if (!Array.isArray(value) || value.length > AUTHORITY_PACKET_LIMITS.requiredConsumers) packetFail(code);
+  let previous;
+  for (const successor of value) {
+    if (!isRecord(successor) || !exactKeys(successor, ['scope_digest', 'candidate']) || !isDigest(successor.scope_digest)) {
+      packetFail(code);
+    }
+    if (successor.candidate !== null) {
+      try { validateCandidate(successor.candidate); } catch (_) { packetFail(code); }
+    }
+    const identity = `${successor.scope_digest}\u0000${canonicalSerialize(successor.candidate)}`;
+    if (previous !== undefined && identity <= previous) packetFail(code);
+    previous = identity;
+  }
+  return value;
+}
+
+function packetRequireReaderSet(boundReaders, suppliedReaders, required = []) {
+  if (!boundReaders) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  if (suppliedReaders !== boundReaders) {
+    const owner = suppliedReaders && AUTHORITY_PACKET_READER_OWNERS.get(suppliedReaders);
+    if (!owner || owner.bound !== boundReaders || !authorityPacketReadersUnchanged(suppliedReaders, owner)) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+  }
+  validateAuthorityPacketReaders(boundReaders, required.includes('screenPacket'));
+  for (const key of required) if (typeof boundReaders[key] !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  return boundReaders;
+}
+
+function packetReadAuthorityObservation(readers, argument) {
+  const raw = callTrustedReaderSync(readers.readAuthority, argument, 'GPR_PACKET_AUTHORITY_UNVERIFIED');
+  if (!isRecord(raw)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const source = raw.authority || raw.source || raw;
+  try { packetValidateSourceReference(packetClosedClone(source), 'GPR_PACKET_AUTHORITY_UNVERIFIED'); } catch (_) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  if (Array.isArray(raw.later_controlling_comments) && raw.later_controlling_comments.length > 0) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  const declared = raw.required_consumers || raw.consumer_dependencies
+    || raw.applicability && raw.applicability.required_consumers;
+  if (declared !== undefined && !Array.isArray(declared)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  return {
+    raw,
+    source: packetClosedClone(source),
+    required_consumers: declared ? packetClosedClone(declared) : null,
+    no_predecessor: raw.no_predecessor_classification === true
+      || raw.no_predecessor === true || raw.dependency_state === 'NO_PREDECESSOR'
+  };
+}
+
+function packetReadCandidateObservation(readers, argument, fallback) {
+  if (typeof readers.readCandidate !== 'function') {
+    return { candidate: fallback === undefined ? null : fallback };
+  }
+  const raw = callTrustedReaderSync(readers.readCandidate, argument, 'GPR_PACKET_BINDING_MISMATCH');
+  const candidate = isRecord(raw) && Object.hasOwn(raw, 'candidate') ? raw.candidate : raw;
+  if (candidate !== null) {
+    try { validateCandidate(candidate); } catch (_) { packetFail('GPR_PACKET_BINDING_MISMATCH'); }
+  }
+  return {
+    candidate
+  };
+}
+
+function packetSuccessorApplicabilityPermits(acceptance, scopeDigest, candidate) {
+  return acceptance.successor_applicability.some((successor) =>
+    successor.scope_digest === scopeDigest
+      && canonicalSerialize(successor.candidate) === canonicalSerialize(candidate));
+}
+
+function packetReadCurrentObservation(readers, argument) {
+  const raw = callTrustedReaderSync(readers.readCurrent, argument, 'GPR_PACKET_CURRENT_UNVERIFIED');
+  if (!isRecord(raw)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  const projection = raw.current || raw.projection || raw;
+  let current;
+  try { current = validateAuthorityPacketCurrent(projection); } catch (_) {
+    packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  }
+  const revision = raw.revision !== undefined ? raw.revision : raw.current_revision;
+  const bodyDigest = raw.body_digest;
+  const projectionDigest = raw.projection_digest || digestValue(current);
+  if (!isDigest(bodyDigest) || !isDigest(projectionDigest) || projectionDigest !== digestValue(current)
+    || !(Number.isSafeInteger(revision) && revision >= 1 || typeof revision === 'string' && revision.length > 0)) {
+    packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  }
+  return deepFreeze({ current, projection_digest: projectionDigest, body_digest: bodyDigest, revision });
+}
+
+function packetConsumerIntent(value, authority, candidate) {
+  if (!isRecord(value)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  const consumer = value.consumer || {
+    run: value.run,
+    lock: value.lock,
+    stage: value.stage,
+    role: value.role,
+    scope_digest: value.scope_digest
+  };
+  try { packetValidateCurrentConsumer(consumer, 'GPR_PACKET_ADMISSION_REQUIRED'); } catch (_) {
+    packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  const result = {
+    repository: value.repository,
+    parent_issue: value.parent_issue,
+    child_issue: value.child_issue,
+    lane_id: value.lane_id,
+    human_owner: value.human_owner,
+    consumer: packetClosedClone(consumer),
+    authority: packetClosedClone(authority),
+    candidate: candidate === undefined ? null : candidate,
+    execution_binding: packetClosedClone(value.execution_binding)
+  };
+  if (!isCanonicalRepository(result.repository)
+    || !Number.isSafeInteger(result.parent_issue) || result.parent_issue < 1
+    || !Number.isSafeInteger(result.child_issue) || result.child_issue < 1
+    || !packetSafeContractId(result.lane_id)
+    || typeof result.human_owner !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(result.human_owner)
+    || result.authority.repository !== result.repository
+    || result.authority.issue_number !== result.child_issue
+    || result.authority.author_login !== result.human_owner) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  if (result.candidate !== null) {
+    try { validateCandidate(result.candidate); } catch (_) { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  }
+  if (!isRecord(result.execution_binding) || !exactKeys(result.execution_binding, [
+    'semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'
+  ]) || ![null, undefined].includes(result.execution_binding.semantic_run)
+    && !packetSafeContractId(result.execution_binding.semantic_run)
+    || ![null, undefined].includes(result.execution_binding.receipt_run_id)
+    && !isSafeId(result.execution_binding.receipt_run_id, 160)
+    || ![null, undefined].includes(result.execution_binding.loop_run_id)
+    && !packetSafePhysicalLoopRunId(result.execution_binding.loop_run_id)
+    || !isDigest(result.execution_binding.repository_id)
+    || !isDigest(result.execution_binding.authorized_ref_digest)
+    || !isDigest(result.execution_binding.current_authority_digest)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  return deepFreeze(result);
+}
+
+function packetReadEventsDb(db, packetId) {
+  return db.prepare('SELECT * FROM authority_packet_events WHERE packet_id = ? ORDER BY sequence').all(packetId).map((row) => {
+    const event = parseAuthorityPacketJson(row.canonical_json);
+    if (!exactKeys(event, ['schema', 'packet_id', 'sequence', 'prior_event_id', 'event_type', 'payload', 'created_at'])
+      || row.event_id !== digestValue(event) || event.packet_id !== packetId) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    return { ...row, ...event };
+  });
+}
+
+function packetReadIdentityDb(db, packetId) {
+  const row = db.prepare('SELECT * FROM authority_packets WHERE packet_id = ?').get(packetId);
+  if (!row) packetFail('GPR_PACKET_NOT_FOUND');
+  let identities;
+  try {
+    identities = readAuthorityPacketRow(db, packetId, authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json)).packet.bindings);
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  return identities;
+}
+
+function packetFindEvent(events, eventId, eventType) {
+  const event = events.find((item) => item.event_id === eventId && (!eventType || item.event_type === eventType));
+  if (!event) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  return event;
+}
+
+function packetReadbackPayload(delivery) {
+  return {
+    namespace_digest: delivery.envelope.namespace_digest,
+    store_identity_digest: delivery.envelope.store_identity_digest,
+    runtime_identity_digest: delivery.envelope.runtime_identity_digest,
+    challenge: delivery.envelope.challenge
+  };
+}
+
+function packetAppendReadbackEvent(config, packetId, delivery) {
+  const db = openAuthorityPacketVerified(config, false, false);
+  try {
+    return transaction(db, () => appendAuthorityPacketEventDb(
+      db, packetId, 'READBACK_VERIFIED', packetReadbackPayload(delivery), isoAt()
+    ));
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally { db.close(); }
+}
+
+function packetAcceptanceFromDecision(packet, decision, readbackEventId) {
+  if (!isRecord(decision)) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  const identity = isRecord(decision.packet_identity) ? decision.packet_identity : decision;
+  if (identity.packet_id !== packet.packet_id
+    || identity.packet_digest !== packet.packet_digest
+    || identity.binding_digest !== packet.binding_digest) {
+    packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  }
+  const source = decision.web_source || decision.source;
+  const acceptance = {
+    schema: AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID,
+    packet_id: packet.packet_id,
+    packet_digest: packet.packet_digest,
+    binding_digest: packet.binding_digest,
+    web_source: source,
+    disposition: decision.disposition,
+    permitted_consumers: decision.permitted_consumers,
+    applicability: decision.applicability,
+    successor_applicability: decision.successor_applicability,
+    readback_event_id: readbackEventId
+  };
+  try { return validateAuthorityPacketAcceptance(acceptance); } catch (_) {
+    packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  }
+}
+
+function packetBuildPredecessorDb(db, packetSpec, current, storeIdentity) {
+  if (!isRecord(packetSpec) || !isSafeId(packetSpec.dependency_id)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  const identities = packetReadIdentityDb(db, packetSpec.packet_id);
+  const events = packetReadEventsDb(db, identities.packet_id);
+  const acceptanceEvent = packetSpec.acceptance_event_id
+    ? packetFindEvent(events, packetSpec.acceptance_event_id, 'WEB_ACCEPTANCE_BOUND')
+    : events.find((item) => item.event_type === 'WEB_ACCEPTANCE_BOUND');
+  if (!acceptanceEvent) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  const acceptance = validateAuthorityPacketAcceptance(acceptanceEvent.payload);
+  if (acceptance.packet_id !== identities.packet_id
+    || acceptance.packet_digest !== identities.packet_digest
+    || acceptance.binding_digest !== identities.binding_digest) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  const readback = packetFindEvent(events, acceptance.readback_event_id, 'READBACK_VERIFIED');
+  const predecessor = {
+    packet_id: identities.packet_id,
+    packet_digest: identities.packet_digest,
+    content_digest: identities.content_digest,
+    binding_digest: identities.binding_digest,
+    producer: identities.packet.bindings.producer,
+    candidate: identities.packet.bindings.candidate,
+    dependency_id: packetSpec.dependency_id,
+    acceptance_event_id: acceptanceEvent.event_id,
+    web_source: acceptance.web_source,
+    readback_event_id: readback.event_id,
+    store_identity_digest: storeIdentity
+  };
+  packetValidateCurrentPredecessor(predecessor);
+  return deepFreeze(predecessor);
+}
+
+function packetDeclaredConsumerIds(authorityObservation, current) {
+  const declared = authorityObservation.required_consumers;
+  if (!Array.isArray(declared)) {
+    if (current.predecessors.length === 0 && authorityObservation.no_predecessor) return [];
+    packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  const values = declared.map((item) => {
+    if (!isRecord(item) || !packetSafeContractId(item.dependency_id) || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(item.class)
+      || !isDigest(item.scope_digest)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+    return `${item.class}\u0000${item.dependency_id}\u0000${item.scope_digest}`;
+  }).sort();
+  return values;
+}
+
+function packetCurrentConsumerIds(current) {
+  return current.predecessors.map((item) => `${current.consumer.stage}\u0000${item.dependency_id}\u0000${current.consumer.scope_digest}`).sort();
+}
+
+function packetVerifyCurrentReadbackDb(db, currentObservation, current) {
+  if (current.predecessors.length === 0) return true;
+  for (const predecessor of current.predecessors) {
+    const events = packetReadEventsDb(db, predecessor.packet_id);
+    const match = events.find((event) => event.event_type === 'CURRENT_READBACK'
+        && event.payload.projection_digest === currentObservation.projection_digest
+        && event.payload.body_digest === currentObservation.body_digest
+        && event.payload.revision === currentObservation.revision
+        && JSON.stringify(event.payload.acceptance_event_ids) === JSON.stringify([predecessor.acceptance_event_id]));
+    if (!match) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  }
+  return true;
+}
+
+function packetVerifySemanticDependencies(config, readers, consumerIntent, expected = {}) {
+  const authorityObservation = packetReadAuthorityObservation(readers, consumerIntent);
+  const currentObservation = packetReadCurrentObservation(readers, consumerIntent);
+  const current = currentObservation.current;
+  if (current.repository !== consumerIntent.repository || current.parent_issue !== consumerIntent.parent_issue
+    || current.child_issue !== consumerIntent.child_issue || current.lane_id !== consumerIntent.lane_id
+    || current.human_owner !== consumerIntent.human_owner
+    || canonicalSerialize(current.authority) !== canonicalSerialize(authorityObservation.source)) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  const candidateObservation = packetReadCandidateObservation(readers, consumerIntent, current.candidate);
+  const candidate = candidateObservation.candidate;
+  if (canonicalSerialize(candidate) !== canonicalSerialize(current.candidate)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+  const consumer = packetConsumerIntent({ ...consumerIntent, candidate }, authorityObservation.source, candidate);
+  if (canonicalSerialize(consumer.consumer) !== canonicalSerialize(current.consumer)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+  const declaredIds = packetDeclaredConsumerIds(authorityObservation, current);
+  const currentIds = packetCurrentConsumerIds(current);
+  if (JSON.stringify(declaredIds) !== JSON.stringify(currentIds)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+
+  const db = openAuthorityPacketVerified(config, false, true);
+  try {
+    const storeIdentity = authorityPacketStoreIdentityDb(db, config);
+    packetVerifyCurrentReadbackDb(db, currentObservation, current);
+    const predecessors = [];
+    for (const predecessor of current.predecessors) {
+      const identities = packetReadIdentityDb(db, predecessor.packet_id);
+      if (identities.packet_id !== predecessor.packet_id || identities.packet_digest !== predecessor.packet_digest
+        || identities.content_digest !== predecessor.content_digest || identities.binding_digest !== predecessor.binding_digest
+        || identities.packet.bindings.repository !== current.repository
+        || identities.packet.bindings.parent_issue !== current.parent_issue
+        || identities.packet.bindings.child_issue !== current.child_issue
+        || identities.packet.bindings.lane_id !== current.lane_id
+        || identities.packet.bindings.human_owner !== current.human_owner
+        || canonicalSerialize(identities.packet.bindings.producer) !== canonicalSerialize(predecessor.producer)
+        || canonicalSerialize(identities.packet.bindings.candidate) !== canonicalSerialize(predecessor.candidate)
+        || predecessor.store_identity_digest !== storeIdentity) packetFail('GPR_PACKET_BINDING_MISMATCH');
+      const delivery = verifyAuthorityPacketFreshProcess(config, predecessor.packet_id, identities.packet.bindings);
+      if (delivery.envelope.packet_digest !== identities.packet_digest
+        || delivery.envelope.content_digest !== identities.content_digest
+        || delivery.envelope.binding_digest !== identities.binding_digest
+        || canonicalSerialize(delivery.packet) !== identities.canonical_packet_bytes) {
+        packetFail('GPR_PACKET_READBACK_FAILED');
+      }
+      packetScreenPersistedPacket(readers, delivery.packet, identities.packet_digest);
+      const events = packetReadEventsDb(db, predecessor.packet_id);
+      const acceptanceEvent = packetFindEvent(events, predecessor.acceptance_event_id, 'WEB_ACCEPTANCE_BOUND');
+      const acceptance = validateAuthorityPacketAcceptance(acceptanceEvent.payload);
+      if (canonicalSerialize(acceptance.applicability) !== canonicalSerialize(identities.packet.bindings.applicability)) {
+        packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+      }
+      const permitted = acceptance.permitted_consumers.some((item) =>
+        item.class === current.consumer.stage
+          && item.dependency_id === predecessor.dependency_id
+          && item.scope_digest === current.consumer.scope_digest);
+      if (!permitted) packetFail('GPR_PACKET_CONSUMER_NOT_PERMITTED');
+      if (canonicalSerialize(predecessor.candidate) !== canonicalSerialize(candidate)
+        && !packetSuccessorApplicabilityPermits(acceptance, current.consumer.scope_digest, candidate)) {
+        packetFail('GPR_PACKET_BINDING_MISMATCH');
+      }
+      const readback = packetFindEvent(events, predecessor.readback_event_id, 'READBACK_VERIFIED');
+      if (acceptance.readback_event_id !== readback.event_id) packetFail('GPR_PACKET_READBACK_FAILED');
+      const decision = callTrustedReaderSync(readers.readWebDecision, predecessor, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+      const observedAcceptance = packetAcceptanceFromDecision(identities, decision, readback.event_id);
+      if (canonicalSerialize(observedAcceptance) !== canonicalSerialize(acceptance)) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+      predecessors.push(predecessor);
+    }
+    const operation = expected.operation || consumerIntent.operation || current.consumer.stage;
+    if (!packetSafeContractId(operation)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+    const proof = {
+      schema: 'toolkit.assurance-web-finality.receipt-dependency.v1',
+      fresh: true,
+      operation,
+      consumer: { candidate, scope_digest: current.consumer.scope_digest },
+      execution_binding: packetClosedClone(consumerIntent.execution_binding),
+      dependency_state: predecessors.length ? 'PREDECESSORS_VERIFIED' : 'NO_PREDECESSOR',
+      checks: predecessors.length
+        ? { packet: 'verified', acceptance: 'verified', current: 'verified' }
+        : { packet: 'not_applicable', acceptance: 'not_applicable', current: 'verified' },
+      current: {
+        projection_digest: currentObservation.projection_digest,
+        body_digest: currentObservation.body_digest,
+        revision: currentObservation.revision
+      },
+      predecessors
+    };
+    return { consumer, currentObservation, proof, storeIdentity };
+  } finally { db.close(); }
+}
+
+function authorityPacketStoreState(store) {
+  const state = store && AUTHORITY_PACKET_STORE_OWNERS.get(store);
+  if (!state || state.processId !== process.pid) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  verifyPendingAuthorityPacketMigration(state.config);
+  return state;
+}
+
+function programmeReceiptStoreState(store) {
+  const state = store && PROGRAMME_RECEIPT_STORE_OWNERS.get(store);
+  if (!state || state.processId !== process.pid) fail('GPR_OWNERSHIP_LOST');
+  return state;
+}
+
+function assertAuthenticAuthorityPacketStore(store) {
+  authorityPacketStoreState(store);
+  return true;
+}
+
+function semanticGateAdmissionState(store, admission) {
+  const storeState = authorityPacketStoreState(store);
+  const state = admission && SEMANTIC_GATE_OWNERS.get(admission);
+  if (!state || state.storeInstanceId !== storeState.instanceId || state.processId !== process.pid) {
+    packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  return state;
+}
+
+function assertAuthenticSemanticGateAdmission(store, admission) {
+  semanticGateAdmissionState(store, admission);
+  return true;
+}
+
+function semanticGateEventObject(admissionId, sequence, priorEventId, eventType, transportEvidenceDigest, createdAt) {
+  return deepFreeze({
+    schema: SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID,
+    admission_id: admissionId,
+    sequence,
+    prior_event_id: priorEventId,
+    event_type: eventType,
+    created_at: createdAt,
+    transport_evidence_digest: transportEvidenceDigest
+  });
+}
+
+function appendSemanticGateEventDb(db, admissionId, eventType, evidence) {
+  if (!packetSafeContractId(admissionId) || !SEMANTIC_GATE_ADMISSION_EVENT_TYPES.includes(eventType)) {
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  const row = db.prepare('SELECT * FROM semantic_gate_admissions WHERE admission_id = ?').get(admissionId);
+  if (!row) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  const previous = db.prepare('SELECT * FROM semantic_gate_admission_events WHERE admission_id = ? ORDER BY sequence DESC LIMIT 1').get(admissionId);
+  if (eventType === 'DISPATCH_INTENT') {
+    if (previous && previous.event_type !== 'DISPATCH_NOT_STARTED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  } else if (eventType === 'DISPATCH_CONFIRMED' || eventType === 'DISPATCH_NOT_STARTED') {
+    if (!previous || previous.event_type !== 'DISPATCH_INTENT') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  } else if (eventType === 'CONSUMER_COMPLETED') {
+    if (!previous || previous.event_type !== 'DISPATCH_CONFIRMED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  const normalizedEvidence = packetClosedClone(evidence);
+  assertAuthorityPacketPrivacy(normalizedEvidence);
+  const transportEvidenceDigest = digestValue(normalizedEvidence);
+  const sequence = previous ? previous.sequence + 1 : 1;
+  const event = semanticGateEventObject(admissionId, sequence, previous ? previous.event_id : null, eventType, transportEvidenceDigest, isoAt());
+  db.prepare('INSERT INTO semantic_gate_admission_events VALUES (?, ?, ?, ?, ?, ?)').run(
+    digestValue(event), admissionId, sequence, event.prior_event_id, event.event_type, canonicalSerialize(event)
+  );
+  return deepFreeze({ event_id: digestValue(event), event_type: eventType, sequence, transport_evidence_digest: transportEvidenceDigest });
+}
+
+function packetScreenPersistedPacket(readers, packet, expectedDigest) {
+  const screening = callTrustedReaderSync(readers.screenPacket, {
+    packet,
+    packet_digest: expectedDigest
+  }, 'GPR_PACKET_PRIVACY_REJECTED');
+  if (!isRecord(screening) || screening.packet_digest !== expectedDigest) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  const allowed = screening.allowed === true || screening.decision === 'ALLOW' || screening.decision === 'ACCEPTED';
+  if (!allowed) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  for (const key of ['policy_digest', 'disclosure_policy_digest', 'retention_policy_digest']) {
+    if (screening[key] !== undefined && !isDigest(screening[key])) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  }
+  try { assertAuthorityPacketPrivacy(screening); } catch (_) { packetFail('GPR_PACKET_PRIVACY_REJECTED'); }
+  return screening;
+}
+
+function validateSemanticGateAdmission(value) {
+  let normalized;
+  try { normalized = packetClosedClone(value); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+  if (!isRecord(normalized) || !exactKeys(normalized, [
+    'schema', 'admission_id', 'consumer_key', 'consumer', 'repository', 'parent_issue', 'child_issue',
+    'lane_id', 'human_owner', 'authority', 'candidate', 'scope_digest', 'current_projection_digest',
+    'current_body_digest', 'current_revision', 'predecessors', 'execution_binding'
+  ]) || normalized.schema !== SEMANTIC_GATE_ADMISSION_SCHEMA_ID
+    || !packetSafeContractId(normalized.admission_id) || !isDigest(normalized.consumer_key)
+    || !isCanonicalRepository(normalized.repository)
+    || !Number.isSafeInteger(normalized.parent_issue) || normalized.parent_issue < 1
+    || !Number.isSafeInteger(normalized.child_issue) || normalized.child_issue < 1
+    || !packetSafeContractId(normalized.lane_id)
+    || typeof normalized.human_owner !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(normalized.human_owner)
+    || !isDigest(normalized.scope_digest) || !isDigest(normalized.current_projection_digest)
+    || !isDigest(normalized.current_body_digest)
+    || !(Number.isSafeInteger(normalized.current_revision) && normalized.current_revision >= 1
+      || typeof normalized.current_revision === 'string' && normalized.current_revision.length > 0)
+    || !Array.isArray(normalized.predecessors)
+    || normalized.predecessors.length > AUTHORITY_PACKET_LIMITS.currentPredecessors) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  packetValidateCurrentConsumer(normalized.consumer, 'GPR_PACKET_CONTENT_MISMATCH');
+  packetValidateSourceReference(normalized.authority, 'GPR_PACKET_CONTENT_MISMATCH');
+  if (normalized.authority.repository !== normalized.repository
+    || normalized.authority.issue_number !== normalized.child_issue
+    || normalized.authority.author_login !== normalized.human_owner
+    || normalized.scope_digest !== normalized.consumer.scope_digest) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  if (normalized.candidate !== null) {
+    try { validateCandidate(normalized.candidate); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+  }
+  let previous;
+  for (const predecessor of normalized.predecessors) {
+    packetValidateCurrentPredecessor(predecessor, 'GPR_PACKET_CONTENT_MISMATCH');
+    if (previous !== undefined && predecessor.dependency_id <= previous) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    previous = predecessor.dependency_id;
+  }
+  if (!isRecord(normalized.execution_binding) || !exactKeys(normalized.execution_binding, [
+    'semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'
+  ]) || ![null, undefined].includes(normalized.execution_binding.semantic_run)
+    && !packetSafeContractId(normalized.execution_binding.semantic_run)
+    || ![null, undefined].includes(normalized.execution_binding.receipt_run_id)
+    && !isSafeId(normalized.execution_binding.receipt_run_id, 160)
+    || ![null, undefined].includes(normalized.execution_binding.loop_run_id)
+    && !packetSafePhysicalLoopRunId(normalized.execution_binding.loop_run_id)
+    || !isDigest(normalized.execution_binding.repository_id)
+    || !isDigest(normalized.execution_binding.authorized_ref_digest)
+    || !isDigest(normalized.execution_binding.current_authority_digest)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  const expectedConsumerKey = digestValue({
+    repository: normalized.repository,
+    parent_issue: normalized.parent_issue,
+    child_issue: normalized.child_issue,
+    lane_id: normalized.lane_id,
+    consumer: normalized.consumer,
+    candidate: normalized.candidate,
+    scope_digest: normalized.consumer.scope_digest,
+    execution_binding: normalized.execution_binding
+  });
+  if (normalized.consumer_key !== expectedConsumerKey) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  assertAuthorityPacketPrivacy(normalized);
+  return deepFreeze(normalized);
+}
+
+function packetBuildAcceptance(config, boundReaders, packetId) {
+  const db = openAuthorityPacketVerified(config, false, true);
+  let identities;
+  let events;
+  let existing;
+  try {
+    identities = packetReadIdentityDb(db, packetId);
+    events = packetReadEventsDb(db, packetId);
+    existing = events.find((event) => event.event_type === 'WEB_ACCEPTANCE_BOUND');
+  } finally { db.close(); }
+  if (existing) {
+    packetFindEvent(events, existing.payload.readback_event_id, 'READBACK_VERIFIED');
+    packetScreenPersistedPacket(boundReaders, identities.packet, identities.packet_digest);
+    const decision = callTrustedReaderSync(boundReaders.readWebDecision, {
+      packet: identities.packet,
+      packet_id: identities.packet_id,
+      packet_digest: identities.packet_digest,
+      binding_digest: identities.binding_digest
+    }, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+    const observed = packetAcceptanceFromDecision(identities, decision, existing.payload.readback_event_id);
+    if (canonicalSerialize(observed) !== canonicalSerialize(existing.payload)) packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+    return deepFreeze({ acceptance: existing.payload, acceptance_event_id: existing.event_id, duplicate: true });
+  }
+  const delivery = verifyAuthorityPacketFreshProcess(config, packetId, identities.packet.bindings);
+  packetScreenPersistedPacket(boundReaders, delivery.packet, identities.packet_digest);
+  const readback = packetAppendReadbackEvent(config, packetId, delivery);
+  const decision = callTrustedReaderSync(boundReaders.readWebDecision, {
+    packet: identities.packet,
+    packet_id: identities.packet_id,
+    packet_digest: identities.packet_digest,
+    binding_digest: identities.binding_digest,
+    readback_event_id: readback.event_id
+  }, 'GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+  const acceptance = packetAcceptanceFromDecision(identities, decision, readback.event_id);
+  const dbWrite = openAuthorityPacketVerified(config, false, false);
+  let event;
+  try {
+    event = transaction(dbWrite, () => appendAuthorityPacketEventDb(
+      dbWrite, packetId, 'WEB_ACCEPTANCE_BOUND', acceptance, isoAt()
+    ));
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally { dbWrite.close(); }
+  return deepFreeze({ acceptance, acceptance_event_id: event.event_id, duplicate: event.duplicate });
+}
+
+function packetClosedConsumerIntent(value, rejectionCode) {
+  if (value === null || typeof value !== 'object') packetFail(rejectionCode);
+  let intent;
+  try { intent = packetClosedClone(value); } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_VALUE_INVALID') packetFail(rejectionCode);
+    throw error;
+  }
+  if (!isRecord(intent)) packetFail(rejectionCode);
+  return intent;
+}
+
+function packetBuildCurrentProjection(config, boundReaders, consumerIntent) {
+  consumerIntent = packetClosedConsumerIntent(consumerIntent, 'GPR_PACKET_CURRENT_UNVERIFIED');
+  const authorityObservation = packetReadAuthorityObservation(boundReaders, consumerIntent);
+  const candidateObservation = packetReadCandidateObservation(boundReaders, consumerIntent, consumerIntent.candidate === undefined ? null : consumerIntent.candidate);
+  const candidate = candidateObservation.candidate;
+  const intent = packetConsumerIntent({ ...consumerIntent, candidate }, authorityObservation.source, candidate);
+  const specs = consumerIntent.predecessors || consumerIntent.required_predecessors;
+  if (!Array.isArray(specs)) {
+    if (!authorityObservation.no_predecessor) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  const db = openAuthorityPacketVerified(config, false, true);
+  try {
+    const storeIdentity = authorityPacketStoreIdentityDb(db, config);
+    const predecessors = [];
+    for (const spec of specs || []) predecessors.push(packetBuildPredecessorDb(db, spec, null, storeIdentity));
+    const projection = {
+      schema: AUTHORITY_PACKET_CURRENT_SCHEMA_ID,
+      repository: intent.repository,
+      parent_issue: intent.parent_issue,
+      child_issue: intent.child_issue,
+      lane_id: intent.lane_id,
+      human_owner: intent.human_owner,
+      consumer: intent.consumer,
+      authority: intent.authority,
+      candidate: intent.candidate,
+      predecessors: predecessors.sort((left, right) => left.dependency_id < right.dependency_id ? -1 : 1)
+    };
+    const current = validateAuthorityPacketCurrent(projection);
+    const declaredIds = packetDeclaredConsumerIds(authorityObservation, current);
+    if (JSON.stringify(declaredIds) !== JSON.stringify(packetCurrentConsumerIds(current))) {
+      packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+    }
+    return current;
+  } finally { db.close(); }
+}
+
+function packetConfirmCurrentProjection(config, boundReaders, expectedProjection) {
+  const projection = validateAuthorityPacketCurrent(expectedProjection);
+  const observed = packetReadCurrentObservation(boundReaders, projection);
+  if (canonicalSerialize(observed.current) !== canonicalSerialize(projection)) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+  const events = [];
+  if (projection.predecessors.length > 0) {
+    const db = openAuthorityPacketVerified(config, false, false);
+    try {
+      events.push(...transaction(db, () => {
+        const payloads = projection.predecessors.map((predecessor) => {
+          const identities = packetReadIdentityDb(db, predecessor.packet_id);
+          if (identities.packet_id !== predecessor.packet_id
+            || identities.packet_digest !== predecessor.packet_digest
+            || identities.content_digest !== predecessor.content_digest
+            || identities.binding_digest !== predecessor.binding_digest
+            || identities.packet.bindings.repository !== projection.repository
+            || identities.packet.bindings.parent_issue !== projection.parent_issue
+            || identities.packet.bindings.child_issue !== projection.child_issue
+            || identities.packet.bindings.lane_id !== projection.lane_id
+            || identities.packet.bindings.human_owner !== projection.human_owner) {
+            packetFail('GPR_PACKET_BINDING_MISMATCH');
+          }
+          const packetEvents = packetReadEventsDb(db, predecessor.packet_id);
+          const acceptanceEvent = packetEvents.find((event) =>
+            event.event_id === predecessor.acceptance_event_id && event.event_type === 'WEB_ACCEPTANCE_BOUND');
+          if (!acceptanceEvent) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+          const acceptance = validateAuthorityPacketAcceptance(acceptanceEvent.payload);
+          if (acceptance.packet_id !== identities.packet_id
+            || acceptance.packet_digest !== identities.packet_digest
+            || acceptance.binding_digest !== identities.binding_digest
+            || acceptance.readback_event_id !== predecessor.readback_event_id) {
+            packetFail('GPR_PACKET_ACCEPTANCE_UNVERIFIED');
+          }
+          packetFindEvent(packetEvents, predecessor.readback_event_id, 'READBACK_VERIFIED');
+          const payload = {
+            projection_digest: observed.projection_digest,
+            body_digest: observed.body_digest,
+            revision: observed.revision,
+            acceptance_event_ids: [predecessor.acceptance_event_id]
+          };
+          packetValidateEventPayload('CURRENT_READBACK', payload);
+          packetValidateEventBinding(db, predecessor.packet_id, 'CURRENT_READBACK', payload);
+          return payload;
+        });
+        return projection.predecessors.map((predecessor, index) => appendAuthorityPacketEventDb(
+          db,
+          predecessor.packet_id,
+          'CURRENT_READBACK',
+          payloads[index],
+          isoAt()
+        ));
+      }));
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+      packetFail('GPR_PACKET_WRITE_FAILED');
+    } finally { db.close(); }
+  }
+  return deepFreeze({
+    schema: AUTHORITY_PACKET_CURRENT_SCHEMA_ID,
+    projection,
+    projection_digest: observed.projection_digest,
+    body_digest: observed.body_digest,
+    revision: observed.revision,
+    readback_event_ids: events.map((event) => event.event_id)
+  });
+}
+
+function semanticGateRecordDb(db, admissionId) {
+  const row = db.prepare('SELECT * FROM semantic_gate_admissions WHERE admission_id = ?').get(admissionId);
+  if (!row) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  let record;
+  try { record = packetClosedClone(JSON.parse(row.canonical_json)); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+  if (!isRecord(record) || record.admission_id !== row.admission_id || record.consumer_key !== row.consumer_key
+    || record.schema !== SEMANTIC_GATE_ADMISSION_SCHEMA_ID) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  return validateSemanticGateAdmission(record);
+}
+
+function semanticGateAssertRecordContext(record, intent, consumerKey) {
+  if (!isRecord(intent) || !isRecord(intent.consumer) || !Array.isArray(intent.predecessors)) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  const expectedKey = digestValue({
+    repository: intent.repository,
+    parent_issue: intent.parent_issue,
+    child_issue: intent.child_issue,
+    lane_id: intent.lane_id,
+    consumer: intent.consumer,
+    candidate: intent.candidate,
+    scope_digest: intent.consumer.scope_digest,
+    execution_binding: intent.execution_binding
+  });
+  const durable = {
+    repository: record.repository,
+    parent_issue: record.parent_issue,
+    child_issue: record.child_issue,
+    lane_id: record.lane_id,
+    human_owner: record.human_owner,
+    consumer: record.consumer,
+    authority: record.authority,
+    candidate: record.candidate,
+    scope_digest: record.scope_digest,
+    predecessors: record.predecessors,
+    execution_binding: record.execution_binding
+  };
+  const reconstructed = {
+    repository: intent.repository,
+    parent_issue: intent.parent_issue,
+    child_issue: intent.child_issue,
+    lane_id: intent.lane_id,
+    human_owner: intent.human_owner,
+    consumer: intent.consumer,
+    authority: intent.authority,
+    candidate: intent.candidate,
+    scope_digest: intent.consumer.scope_digest,
+    predecessors: intent.predecessors,
+    execution_binding: intent.execution_binding
+  };
+  if (record.consumer_key !== consumerKey || consumerKey !== expectedKey
+    || canonicalSerialize(durable) !== canonicalSerialize(reconstructed)) {
+    packetFail('GPR_PACKET_STALE_REPLAY');
+  }
+  return true;
+}
+
+function semanticGateAssertProof(record, proof) {
+  if (proof.current.projection_digest !== record.current_projection_digest
+    || proof.current.body_digest !== record.current_body_digest
+    || `${proof.current.revision}` !== `${record.current_revision}`
+    || canonicalSerialize(proof.predecessors) !== canonicalSerialize(record.predecessors)
+    || canonicalSerialize(proof.execution_binding) !== canonicalSerialize(record.execution_binding)) {
+    packetFail('GPR_PACKET_STALE_REPLAY');
+  }
+  return proof;
+}
+
+function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent) {
+  consumerIntent = packetClosedConsumerIntent(consumerIntent, 'GPR_PACKET_ADMISSION_REQUIRED');
+  const verification = packetVerifySemanticDependencies(config, boundReaders, consumerIntent, {
+    operation: consumerIntent.operation || consumerIntent.stage || consumerIntent.consumer && consumerIntent.consumer.stage
+  });
+  const proof = verification.proof;
+  const consumer = verification.consumer;
+  const packetDb = openAuthorityPacketVerified(config, false, true);
+  try {
+    for (const predecessor of proof.predecessors) {
+      const identities = packetReadIdentityDb(packetDb, predecessor.packet_id);
+      packetScreenPersistedPacket(boundReaders, identities.packet, predecessor.packet_digest);
+    }
+  } finally { packetDb.close(); }
+  const consumerKey = digestValue({
+    repository: consumer.repository,
+    parent_issue: consumer.parent_issue,
+    child_issue: consumer.child_issue,
+    lane_id: consumer.lane_id,
+    consumer: consumer.consumer,
+    candidate: consumer.candidate,
+    scope_digest: consumer.consumer.scope_digest,
+    execution_binding: consumer.execution_binding
+  });
+  const record = {
+    schema: SEMANTIC_GATE_ADMISSION_SCHEMA_ID,
+    admission_id: randomId('semantic-admission'),
+    consumer_key: consumerKey,
+    consumer: consumer.consumer,
+    repository: consumer.repository,
+    parent_issue: consumer.parent_issue,
+    child_issue: consumer.child_issue,
+    lane_id: consumer.lane_id,
+    human_owner: consumer.human_owner,
+    authority: consumer.authority,
+    candidate: consumer.candidate,
+    scope_digest: consumer.consumer.scope_digest,
+    current_projection_digest: proof.current.projection_digest,
+    current_body_digest: proof.current.body_digest,
+    current_revision: proof.current.revision,
+    predecessors: proof.predecessors,
+    execution_binding: consumer.execution_binding
+  };
+  validateSemanticGateAdmission(record);
+  assertAuthorityPacketPrivacy(record);
+  const db = openAuthorityPacketVerified(config, false, false);
+  let inserted = false;
+  try {
+    transaction(db, () => {
+      const existing = db.prepare('SELECT * FROM semantic_gate_admissions WHERE consumer_key = ?').get(consumerKey);
+      if (existing) {
+        const prior = semanticGateRecordDb(db, existing.admission_id);
+        if (canonicalSerialize(prior) !== canonicalSerialize(record)) packetFail('GPR_PACKET_STALE_REPLAY');
+        record.admission_id = prior.admission_id;
+        return;
+      }
+      db.prepare('INSERT INTO semantic_gate_admissions VALUES (?, ?, ?, ?)').run(
+        record.admission_id, record.consumer_key, canonicalSerialize(record), isoAt()
+      );
+      inserted = true;
+    });
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally { db.close(); }
+  const tokenState = {
+    storeInstanceId: store.instanceId,
+    processId: process.pid,
+    admissionId: record.admission_id,
+    consumerKey,
+    consumerIntent: { ...consumerIntent, ...consumer, predecessors: proof.predecessors },
+    readers: boundReaders,
+    config
+  };
+  const token = Object.freeze({
+    toJSON() { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  });
+  SEMANTIC_GATE_OWNERS.set(token, tokenState);
+  return deepFreeze({
+    admission: token,
+    proof,
+    admission_id: record.admission_id,
+    execution_binding: packetClosedClone(record.execution_binding),
+    duplicate: !inserted
+  });
+}
+
+function semanticGateRevalidate(config, store, boundReaders, token, expected = {}) {
+  const state = semanticGateAdmissionState(store, token);
+  const db = openAuthorityPacketVerified(config, false, true);
+  let record;
+  try { record = semanticGateRecordDb(db, state.admissionId); } finally { db.close(); }
+  semanticGateAssertRecordContext(record, state.consumerIntent, state.consumerKey);
+  if (expected.execution_binding !== undefined
+    && canonicalSerialize(expected.execution_binding) !== canonicalSerialize(record.execution_binding)) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  const { execution_binding: _executionBinding, ...dependencyExpected } = expected;
+  const verification = packetVerifySemanticDependencies(config, boundReaders, state.consumerIntent, dependencyExpected);
+  return semanticGateAssertProof(record, verification.proof);
+}
+
+function semanticGateDispatchState(config, admissionId) {
+  const db = openAuthorityPacketVerified(config, false, true);
+  try {
+    semanticGateRecordDb(db, admissionId);
+    return db.prepare('SELECT * FROM semantic_gate_admission_events WHERE admission_id = ? ORDER BY sequence').all(admissionId).map((row) => {
+      let event;
+      try { event = packetClosedClone(JSON.parse(row.canonical_json)); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
+      if (!isRecord(event) || !exactKeys(event, [
+        'schema', 'admission_id', 'sequence', 'prior_event_id', 'event_type', 'created_at', 'transport_evidence_digest'
+      ]) || event.schema !== SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID
+        || event.admission_id !== admissionId || event.sequence !== row.sequence
+        || event.event_id !== undefined || !isDigest(event.transport_evidence_digest)
+        || row.event_id !== digestValue(event) || row.event_type !== event.event_type) {
+        packetFail('GPR_PACKET_CONTENT_MISMATCH');
+      }
+      return deepFreeze({ ...event, event_id: row.event_id });
+    });
+  } finally { db.close(); }
+}
+
+function semanticGateTransportId(admissionId, consumerKey, attempt) {
+  return digestValue({
+    schema: 'toolkit.github-program.semantic-dispatch-transport.v1',
+    admission_id: admissionId,
+    consumer_key: consumerKey,
+    attempt
+  });
+}
+
+function semanticGateDispatchIntent(events, state) {
+  const intent = events.at(-1);
+  if (!intent || intent.event_type !== 'DISPATCH_INTENT') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  const attempt = events.filter((event) => event.event_type === 'DISPATCH_INTENT').length;
+  const transportId = semanticGateTransportId(state.admissionId, state.consumerKey, attempt);
+  const intentEvidence = {
+    admission_id: state.admissionId,
+    consumer_key: state.consumerKey,
+    action: 'DISPATCH_INTENT',
+    attempt,
+    transport_id: transportId
+  };
+  if (intent.transport_evidence_digest !== digestValue(intentEvidence)) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  return { event: intent, attempt, transport_id: transportId };
+}
+
+function semanticGateDispatchOutcome(reader, state, intent, transportInput, recovery = false) {
+  const transportDigest = recovery
+    ? null
+    : digestValue({
+      transport_id: transportInput.transport_id,
+      transport_result: transportInput.transport_result === undefined ? null : transportInput.transport_result,
+      transport_error: transportInput.transport_error === undefined ? null : transportInput.transport_error
+    });
+  const observed = callTrustedReaderSync(reader, {
+    admission_id: state.admissionId,
+    consumer_key: state.consumerKey,
+    intent_event_id: intent.event.event_id,
+    attempt: intent.attempt,
+    transport_id: intent.transport_id,
+    transport_digest: transportDigest,
+    transport_result: recovery ? null : transportInput.transport_result === undefined ? null : transportInput.transport_result,
+    transport_error: recovery ? null : transportInput.transport_error === undefined ? null : transportInput.transport_error,
+    recovery
+  }, 'GPR_PACKET_DISPATCH_UNRESOLVED');
+  const keys = [
+    'admission_id', 'consumer_key', 'intent_event_id', 'attempt', 'transport_id',
+    'transport_digest', 'outcome', 'delayed_completion_excluded'
+  ];
+  if (!isRecord(observed) || !exactKeys(observed, keys)
+    || observed.admission_id !== state.admissionId
+    || observed.consumer_key !== state.consumerKey
+    || observed.intent_event_id !== intent.event.event_id
+    || observed.attempt !== intent.attempt
+    || observed.transport_id !== intent.transport_id
+    || !isDigest(observed.transport_digest)
+    || !['confirmed', 'not-started', 'ambiguous'].includes(observed.outcome)
+    || typeof observed.delayed_completion_excluded !== 'boolean'
+    || transportDigest !== null && observed.transport_digest !== transportDigest
+    || observed.outcome === 'not-started' && observed.delayed_completion_excluded !== true
+    || observed.outcome !== 'not-started' && observed.delayed_completion_excluded) {
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  return deepFreeze(packetClosedClone(observed));
+}
+
+function semanticGateBeginDispatch(config, store, token) {
+  const state = semanticGateAdmissionState(store, token);
+  semanticGateRevalidate(config, store, state.readers, token, {});
+  const db = openAuthorityPacketVerified(config, false, false);
+  try {
+    return transaction(db, () => {
+      const previous = db.prepare('SELECT * FROM semantic_gate_admission_events WHERE admission_id = ? ORDER BY sequence').all(state.admissionId);
+      const attempt = previous.filter((event) => event.event_type === 'DISPATCH_INTENT').length + 1;
+      const transportId = semanticGateTransportId(state.admissionId, state.consumerKey, attempt);
+      const event = appendSemanticGateEventDb(db, state.admissionId, 'DISPATCH_INTENT', {
+        admission_id: state.admissionId,
+        consumer_key: state.consumerKey,
+        action: 'DISPATCH_INTENT',
+        attempt,
+        transport_id: transportId
+      });
+      return deepFreeze({ ...event, attempt, transport_id: transportId });
+    });
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  } finally { db.close(); }
+}
+
+function semanticGateRecordDispatch(config, store, token, evidence) {
+  const state = semanticGateAdmissionState(store, token);
+  semanticGateRevalidate(config, store, state.readers, token, {});
+  let transport;
+  try { transport = packetClosedClone(evidence); } catch (_) { packetFail('GPR_PACKET_DISPATCH_UNRESOLVED'); }
+  if (!isRecord(transport) || !exactKeys(transport, ['transport_id', 'transport_result', 'transport_error'])
+    || !isDigest(transport.transport_id) || transport.transport_error !== null && !isRecord(transport.transport_error)) {
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  const intent = semanticGateDispatchIntent(semanticGateDispatchState(config, state.admissionId), state);
+  if (transport.transport_id !== intent.transport_id) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  const observed = semanticGateDispatchOutcome(state.readers.readDispatchOutcome, state, intent, transport);
+  const eventType = observed.outcome === 'confirmed' ? 'DISPATCH_CONFIRMED'
+    : observed.outcome === 'not-started' ? 'DISPATCH_NOT_STARTED' : null;
+  if (!eventType) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  const db = openAuthorityPacketVerified(config, false, false);
+  try {
+    const event = transaction(db, () => appendSemanticGateEventDb(db, state.admissionId, eventType, observed));
+    return deepFreeze({ ...event, ...observed });
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  } finally { db.close(); }
+}
+
+function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
+  let consumerKey;
+  if (typeof consumerIdentity === 'string') consumerKey = consumerIdentity;
+  else if (isRecord(consumerIdentity) && typeof consumerIdentity.consumer_key === 'string') consumerKey = consumerIdentity.consumer_key;
+  else if (isRecord(consumerIdentity) && isRecord(consumerIdentity.record)) consumerKey = consumerIdentity.record.consumer_key;
+  if (!isDigest(consumerKey)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  const db = openAuthorityPacketVerified(config, false, true);
+  let record;
+  let events;
+  try {
+    const admission = db.prepare('SELECT admission_id FROM semantic_gate_admissions WHERE consumer_key = ?').get(consumerKey);
+    if (!admission) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+    record = semanticGateRecordDb(db, admission.admission_id);
+  } finally { db.close(); }
+  events = semanticGateDispatchState(config, record.admission_id);
+  let last = events.at(-1);
+  const intent = {
+    repository: record.repository,
+    parent_issue: record.parent_issue,
+    child_issue: record.child_issue,
+    lane_id: record.lane_id,
+    human_owner: record.human_owner,
+    consumer: record.consumer,
+    authority: record.authority,
+    candidate: record.candidate,
+    execution_binding: record.execution_binding,
+    predecessors: record.predecessors,
+    operation: record.consumer.stage
+  };
+  semanticGateAssertRecordContext(record, intent, consumerKey);
+  const verification = packetVerifySemanticDependencies(config, boundReaders, intent, {
+    operation: record.consumer.stage
+  });
+  const proof = semanticGateAssertProof(record, verification.proof);
+  if (last && last.event_type === 'DISPATCH_CONFIRMED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  let recoveryOutcome = null;
+  let recoveryIntent = null;
+  if (last && last.event_type === 'DISPATCH_INTENT') {
+    const recoveryState = { admissionId: record.admission_id, consumerKey, readers: boundReaders };
+    recoveryIntent = semanticGateDispatchIntent(events, recoveryState);
+    recoveryOutcome = semanticGateDispatchOutcome(boundReaders.readDispatchOutcome, recoveryState, recoveryIntent, null, true);
+    if (recoveryOutcome.outcome !== 'not-started' || recoveryOutcome.delayed_completion_excluded !== true) {
+      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+    }
+  }
+  if (recoveryOutcome) {
+    const dbWrite = openAuthorityPacketVerified(config, false, false);
+    try {
+      transaction(dbWrite, () => {
+        const liveRecord = semanticGateRecordDb(dbWrite, record.admission_id);
+        if (canonicalSerialize(liveRecord) !== canonicalSerialize(record)) packetFail('GPR_PACKET_STALE_REPLAY');
+        const tail = dbWrite.prepare('SELECT * FROM semantic_gate_admission_events WHERE admission_id = ? ORDER BY sequence DESC LIMIT 1').get(record.admission_id);
+        if (!tail || tail.event_id !== recoveryIntent.event.event_id || tail.event_type !== 'DISPATCH_INTENT'
+          || tail.sequence !== recoveryIntent.event.sequence) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+        appendSemanticGateEventDb(dbWrite, record.admission_id, 'DISPATCH_NOT_STARTED', recoveryOutcome);
+      });
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+      packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+    } finally { dbWrite.close(); }
+    events = semanticGateDispatchState(config, record.admission_id);
+    last = events.at(-1);
+    if (!last || last.event_type !== 'DISPATCH_NOT_STARTED') packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  const tokenState = {
+    storeInstanceId: store.instanceId,
+    processId: process.pid,
+    admissionId: record.admission_id,
+    consumerKey,
+    consumerIntent: intent,
+    readers: boundReaders,
+    config
+  };
+  const token = Object.freeze({ toJSON() { packetFail('GPR_PACKET_ADMISSION_REQUIRED'); } });
+  SEMANTIC_GATE_OWNERS.set(token, tokenState);
+  return deepFreeze({
+    admission: token,
+    proof,
+    admission_id: record.admission_id,
+    execution_binding: packetClosedClone(record.execution_binding),
+    recovered: true
+  });
+}
+
+function semanticCompletionApplicability(store, admission) {
+  const state = semanticGateAdmissionState(store, admission);
+  const observation = packetReadAuthorityObservation(state.readers, {
+    admission_id: state.admissionId,
+    consumer_key: state.consumerKey,
+    consumer: state.consumerIntent.consumer,
+    execution_binding: state.consumerIntent.execution_binding
+  });
+  if (canonicalSerialize(observation.source) !== canonicalSerialize(state.consumerIntent.authority)) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  const value = observation.raw.completion_applicability;
+  const code = 'GPR_PACKET_AUTHORITY_UNVERIFIED';
+  if (!isRecord(value) || !exactKeys(value, [
+    'schema', 'scope_digest', 'candidate', 'required_consumers',
+    'retain_through_child_finality', 'retain_through_candidate_finality'
+  ]) || value.schema !== 'toolkit.github-program.semantic-completion-applicability.v1'
+    || !isDigest(value.scope_digest) || !Array.isArray(value.required_consumers)
+    || value.required_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+    || typeof value.retain_through_child_finality !== 'boolean'
+    || typeof value.retain_through_candidate_finality !== 'boolean') packetFail(code);
+  if (value.candidate !== null) {
+    try { validateCandidate(value.candidate); } catch (_) { packetFail(code); }
+  }
+  const seen = new Set();
+  for (const consumer of value.required_consumers) {
+    if (!isRecord(consumer) || !exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id) || !isDigest(consumer.scope_digest)) packetFail(code);
+    const id = `${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`;
+    if (seen.has(id)) packetFail(code);
+    seen.add(id);
+  }
+  const normalized = deepFreeze(packetClosedClone(value));
+  return deepFreeze({
+    required: normalized.required_consumers.length > 0
+      || normalized.retain_through_child_finality
+      || normalized.retain_through_candidate_finality,
+    applicability: normalized
+  });
+}
+
+function validateSemanticCompletionArtifact(state, applicability, packetInput) {
+  let identities;
+  try { identities = authorityPacketIdentities(packetInput); } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  const packet = identities.packet;
+  const consumer = state.consumerIntent.consumer;
+  const execution = state.consumerIntent.execution_binding;
+  const packetApplicability = packet.bindings.applicability;
+  if (packet.bindings.repository !== state.consumerIntent.repository
+    || packet.bindings.parent_issue !== state.consumerIntent.parent_issue
+    || packet.bindings.child_issue !== state.consumerIntent.child_issue
+    || packet.bindings.lane_id !== state.consumerIntent.lane_id
+    || packet.bindings.human_owner !== state.consumerIntent.human_owner
+    || canonicalSerialize(packet.bindings.authority) !== canonicalSerialize(state.consumerIntent.authority)
+    || packet.bindings.producer.run !== execution.loop_run_id
+    || packet.bindings.producer.lock !== consumer.lock
+    || packet.bindings.producer.stage !== consumer.stage
+    || packet.bindings.producer.role !== consumer.role
+    || packetApplicability.scope_digest !== applicability.scope_digest
+    || canonicalSerialize(packetApplicability.required_consumers) !== canonicalSerialize(applicability.required_consumers)
+    || packetApplicability.retain_through_child_finality !== applicability.retain_through_child_finality
+    || packetApplicability.retain_through_candidate_finality !== applicability.retain_through_candidate_finality
+    || canonicalSerialize(packet.bindings.candidate) !== canonicalSerialize(applicability.candidate)) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  return identities;
+}
+
+function semanticCompletionEventPayload(state, identities) {
+  const consumer = state.consumerIntent.consumer;
+  return {
+    admission_id: state.admissionId,
+    consumer: {
+      run: state.consumerIntent.execution_binding.loop_run_id,
+      lock: consumer.lock,
+      stage: consumer.stage,
+      role: consumer.role,
+      scope_digest: consumer.scope_digest
+    },
+    outcome_ref: identities.packet_digest
+  };
+}
+
+function appendSemanticCompletionEvent(config, packetId, payload) {
+  const db = openAuthorityPacketVerified(config, false, false);
+  try {
+    return transaction(db, () => appendAuthorityPacketEventDb(
+      db, packetId, 'CONSUMER_COMPLETED', payload, isoAt()
+    ));
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally { db.close(); }
+}
+
+function semanticCompletionEvent(config, state, outcomeRef) {
+  const db = openAuthorityPacketVerified(config, false, true);
+  try {
+    const rows = db.prepare("SELECT DISTINCT packet_id FROM authority_packet_events WHERE event_type = 'CONSUMER_COMPLETED' ORDER BY packet_id").all();
+    const matches = [];
+    const expected = {
+      admission_id: state.admissionId,
+      consumer: {
+        run: state.consumerIntent.execution_binding.loop_run_id,
+        lock: state.consumerIntent.consumer.lock,
+        stage: state.consumerIntent.consumer.stage,
+        role: state.consumerIntent.consumer.role,
+        scope_digest: state.consumerIntent.consumer.scope_digest
+      },
+      outcome_ref: outcomeRef
+    };
+    for (const row of rows) {
+      const event = packetReadEventsDb(db, row.packet_id).find((item) => item.event_type === 'CONSUMER_COMPLETED'
+        && canonicalSerialize(item.payload) === canonicalSerialize(expected));
+      if (event) matches.push({ packet_id: row.packet_id, event });
+    }
+    if (matches.length !== 1) packetFail('GPR_PACKET_CURRENT_UNVERIFIED');
+    const identities = packetReadIdentityDb(db, matches[0].packet_id);
+    const payload = matches[0].event.payload;
+    packetValidateEventBinding(db, identities.packet_id, 'CONSUMER_COMPLETED', payload);
+    return { identities, event: matches[0].event };
+  } finally { db.close(); }
+}
+
+function confirmSemanticCompletion(store, admission, outputStore, packetInput, producerAdmission) {
+  const state = semanticGateAdmissionState(store, admission);
+  semanticGateRevalidate(state.config, store, state.readers, admission, {
+    execution_binding: state.consumerIntent.execution_binding
+  });
+  const applicable = semanticCompletionApplicability(store, admission);
+  if (!applicable.required) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  const outputState = authorityPacketStoreState(outputStore);
+  const identities = validateSemanticCompletionArtifact(state, applicable.applicability, packetInput);
+  const persisted = outputStore.persistAuthorityPacket(identities.packet, producerAdmission);
+  if (persisted.packet_id !== identities.packet_id || persisted.packet_digest !== identities.packet_digest
+    || canonicalSerialize(persisted.packet) !== identities.canonical_packet_bytes) packetFail('GPR_PACKET_READBACK_FAILED');
+  const delivery = verifyAuthorityPacketFreshProcess(outputState.config, identities.packet_id, identities.packet.bindings);
+  if (delivery.envelope.packet_digest !== identities.packet_digest
+    || delivery.envelope.content_digest !== identities.content_digest
+    || delivery.envelope.binding_digest !== identities.binding_digest
+    || canonicalSerialize(delivery.packet) !== identities.canonical_packet_bytes) packetFail('GPR_PACKET_READBACK_FAILED');
+  packetScreenPersistedPacket(outputState.readers, delivery.packet, identities.packet_digest);
+  const payload = semanticCompletionEventPayload(state, identities);
+  const event = appendSemanticCompletionEvent(outputState.config, identities.packet_id, payload);
+  return deepFreeze({
+    packet_id: identities.packet_id,
+    packet_digest: identities.packet_digest,
+    content_digest: identities.content_digest,
+    binding_digest: identities.binding_digest,
+    outcome_ref: identities.packet_digest,
+    event_id: event.event_id
+  });
+}
+
+function verifySemanticCompletion(store, admission, outputStore, outcomeRef) {
+  const state = semanticGateAdmissionState(store, admission);
+  semanticGateRevalidate(state.config, store, state.readers, admission, {
+    execution_binding: state.consumerIntent.execution_binding
+  });
+  const applicable = semanticCompletionApplicability(store, admission);
+  if (!applicable.required || !isDigest(outcomeRef)) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
+  const outputState = authorityPacketStoreState(outputStore);
+  const found = semanticCompletionEvent(outputState.config, state, outcomeRef);
+  const identities = validateSemanticCompletionArtifact(state, applicable.applicability, found.identities.packet);
+  if (identities.packet_digest !== outcomeRef) packetFail('GPR_PACKET_IDENTITY_MISMATCH');
+  const delivery = verifyAuthorityPacketFreshProcess(outputState.config, identities.packet_id, identities.packet.bindings);
+  if (delivery.envelope.packet_digest !== identities.packet_digest
+    || delivery.envelope.content_digest !== identities.content_digest
+    || delivery.envelope.binding_digest !== identities.binding_digest
+    || canonicalSerialize(delivery.packet) !== identities.canonical_packet_bytes) packetFail('GPR_PACKET_READBACK_FAILED');
+  packetScreenPersistedPacket(outputState.readers, delivery.packet, identities.packet_digest);
+  return deepFreeze({ outcome_ref: identities.packet_digest, packet_id: identities.packet_id, verified: true });
+}
+
+function verifyAuthorityPacketDatabase(db, namespace, digest, databasePath, expectedFingerprint, options = {}) {
+  if (fs.statSync(databasePath).size > LIMITS.databaseBytes) packetFail('GPR_PACKET_LIMIT');
+  if (Number(oneValue(db, 'PRAGMA application_id', 'application_id')) !== APPLICATION_ID
+    || Number(oneValue(db, 'PRAGMA user_version', 'user_version')) !== AUTHORITY_PACKET_USER_VERSION) {
+    packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  }
+  const metadata = db.prepare('SELECT * FROM metadata WHERE singleton = 1').get();
+  if (!metadata || metadata.schema_id !== SCHEMA_ID) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  if (metadata.namespace_digest !== digest
+    || metadata.repository !== namespace.repository
+    || metadata.parent_issue !== namespace.parent_issue
+    || metadata.child_issue !== namespace.child_issue) {
+    packetFail(options.identityBoundary ? 'GPR_PACKET_STORE_IDENTITY_MISMATCH' : 'GPR_PACKET_SCHEMA_UNAVAILABLE');
+  }
+  if (metadata.schema_fingerprint !== expectedFingerprint || schemaFingerprint(db) !== expectedFingerprint) {
+    packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+  }
+  const integrity = db.prepare('PRAGMA integrity_check').all();
+  if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+  const state = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get();
+  const max = db.prepare('SELECT COALESCE(MAX(fence_sequence), 0) AS value FROM allocations').get().value;
+  if (!state || state.high_water !== max) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  verifyAuthorityPacketDurableEvidence(db, namespace, digest, databasePath);
+  return true;
 }
 
 function verifyRowDigests(db) {
@@ -2211,12 +4628,69 @@ function openVerified(config, create = true, readOnly = false) {
       createDatabase(db, config.namespace, config.namespaceDigest, isoAt(), expectedFingerprint);
       if (process.platform !== 'win32') fs.chmodSync(databasePath, 0o600);
     }
+    if (Number(oneValue(db, 'PRAGMA user_version', 'user_version')) === AUTHORITY_PACKET_USER_VERSION) {
+      verifyAuthorityPacketDatabase(
+        db,
+        config.namespace,
+        config.namespaceDigest,
+        databasePath,
+        expectedAuthorityPacketSchemaFingerprint(DatabaseSync)
+      );
+      return db;
+    }
     verifyDatabase(db, config.namespace, config.namespaceDigest, databasePath, expectedFingerprint);
     return db;
   } catch (error) {
     try { db.close(); } catch (_) { /* Preserve the original failure. */ }
     if (error instanceof GprError) throw error;
     fail('GPR_STORE_INVALID', { cause: error && error.code ? error.code : 'sqlite-error' });
+  }
+}
+
+function openAuthorityPacketVerified(config, create = false, readOnly = false, verificationOptions = {}) {
+  assertRuntimeSupport();
+  const databasePath = config.databasePath;
+  const existed = fs.existsSync(databasePath);
+  if (existed) {
+    const stat = fs.lstatSync(databasePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync.native(databasePath) !== databasePath) {
+      packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+    }
+    if (stat.size > LIMITS.databaseBytes) packetFail('GPR_PACKET_LIMIT');
+  } else if (!create) {
+    packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+  }
+  const { DatabaseSync } = assertRuntimeSupport();
+  let db;
+  try {
+    db = readOnly ? new DatabaseSync(databasePath, { readOnly: true }) : new DatabaseSync(databasePath);
+    configureDatabase(db, readOnly);
+    if (!existed) {
+      if (!create || readOnly) packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+      createAuthorityPacketDatabase(
+        db,
+        config.namespace,
+        config.namespaceDigest,
+        isoAt(),
+        expectedAuthorityPacketSchemaFingerprint(DatabaseSync)
+      );
+      if (process.platform !== 'win32') fs.chmodSync(databasePath, 0o600);
+    }
+    verifyAuthorityPacketDatabase(
+      db,
+      config.namespace,
+      config.namespaceDigest,
+      databasePath,
+      expectedAuthorityPacketSchemaFingerprint(DatabaseSync),
+      verificationOptions
+    );
+    return db;
+  } catch (error) {
+    if (db) {
+      try { db.close(); } catch (_) { /* Preserve the original failure. */ }
+    }
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_STORE_UNAVAILABLE');
   }
 }
 
@@ -2230,6 +4704,202 @@ function createStoreConfig(options) {
     repositoryRoot: path.resolve(options.repositoryRoot),
     databasePath: path.join(stateRoot, `github-program-receipt-${namespaceDigest(namespace)}.sqlite`)
   });
+}
+
+function authorityPacketStoreIdentityDb(db, config) {
+  const metadata = db.prepare(
+    'SELECT schema_id, namespace_digest, repository, parent_issue, child_issue, schema_fingerprint, created_at FROM metadata WHERE singleton = 1'
+  ).get();
+  if (!metadata || metadata.schema_fingerprint !== expectedAuthorityPacketSchemaFingerprint()) {
+    packetFail('GPR_PACKET_STORE_IDENTITY_MISMATCH');
+  }
+  return digestValue({
+    database_realpath_digest: digestValue(fs.realpathSync.native(config.databasePath)),
+    namespace: config.namespace,
+    application_id: Number(oneValue(db, 'PRAGMA application_id', 'application_id')),
+    metadata_creation_identity: metadata,
+    schema_fingerprint: metadata.schema_fingerprint
+  });
+}
+
+function authorityPacketStoreIdentity(options) {
+  const config = createStoreConfig(options);
+  const db = openAuthorityPacketVerified(config, false, true, { identityBoundary: true });
+  try { return authorityPacketStoreIdentityDb(db, config); } finally { db.close(); }
+}
+
+function migrationQuiescence(db, observedAt) {
+  const unresolved = db.prepare(`
+    SELECT COUNT(*) AS value
+    FROM mutation_operations o
+    JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+    WHERE e.sequence = (
+      SELECT MAX(inner_event.sequence)
+      FROM mutation_operation_events inner_event
+      WHERE inner_event.operation_id = o.operation_id
+    ) AND e.state IN ('IN_FLIGHT', 'UNKNOWN')
+  `).get().value;
+  const unreleased = db.prepare(`
+    SELECT COUNT(*) AS value
+    FROM allocations a
+    WHERE a.expires_at > ?
+      AND NOT EXISTS (
+        SELECT 1 FROM lease_events e
+        WHERE e.allocation_id = a.allocation_id AND e.event_type = 'RELEASED'
+      )
+  `).get(observedAt).value;
+  return { unresolved_operation_count: Number(unresolved), unexpired_unreleased_allocation_count: Number(unreleased) };
+}
+
+function readAuthorityPacketMigrationSource(config) {
+  if (!fs.existsSync(config.databasePath)) packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+  const { DatabaseSync } = assertRuntimeSupport();
+  let db;
+  try {
+    db = new DatabaseSync(config.databasePath, { readOnly: true });
+    configureDatabase(db, true);
+    const observedAt = isoAt();
+    try {
+      verifyDatabase(db, config.namespace, config.namespaceDigest, config.databasePath, expectedV2SchemaFingerprint());
+    } catch (_) {
+      packetFail('GPR_PACKET_MIGRATION_SOURCE_INVALID');
+    }
+    const quiescence = migrationQuiescence(db, observedAt);
+    if (quiescence.unresolved_operation_count !== 0 || quiescence.unexpired_unreleased_allocation_count !== 0) {
+      packetFail('GPR_PACKET_MIGRATION_NOT_QUIESCENT');
+    }
+    return {
+      application_id: APPLICATION_ID,
+      user_version: USER_VERSION,
+      schema_fingerprint: expectedV2SchemaFingerprint(),
+      namespace_verified: true,
+      integrity_verified: true,
+      foreign_keys_verified: true,
+      historical_digests_verified: true,
+      chain_verified: true,
+      high_water_verified: true,
+      unresolved_operation_count: quiescence.unresolved_operation_count,
+      unexpired_unreleased_allocation_count: quiescence.unexpired_unreleased_allocation_count,
+      observed_at: observedAt
+    };
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_MIGRATION_SOURCE_INVALID');
+  } finally {
+    if (db) db.close();
+  }
+}
+
+function buildAuthorityPacketMigrationPlan(observation) {
+  if (!isRecord(observation)
+    || observation.application_id !== APPLICATION_ID
+    || observation.user_version !== USER_VERSION
+    || observation.schema_fingerprint !== expectedV2SchemaFingerprint()
+    || observation.namespace_verified !== true
+    || observation.integrity_verified !== true
+    || observation.foreign_keys_verified !== true
+    || observation.historical_digests_verified !== true
+    || observation.chain_verified !== true
+    || observation.high_water_verified !== true
+    || observation.unresolved_operation_count !== 0
+    || observation.unexpired_unreleased_allocation_count !== 0
+    || !isTimestamp(observation.observed_at)) {
+    if (isRecord(observation)
+      && (observation.unresolved_operation_count !== 0 || observation.unexpired_unreleased_allocation_count !== 0)) {
+      packetFail('GPR_PACKET_MIGRATION_NOT_QUIESCENT');
+    }
+    packetFail('GPR_PACKET_MIGRATION_SOURCE_INVALID');
+  }
+  const source = deepFreeze(clone(observation));
+  return deepFreeze({
+    schema: 'toolkit.github-program.v2-to-v4-authority-packet-migration-plan.v1',
+    source_application_id: APPLICATION_ID,
+    source_user_version: USER_VERSION,
+    source_schema_fingerprint: source.schema_fingerprint,
+    target_application_id: APPLICATION_ID,
+    target_user_version: AUTHORITY_PACKET_USER_VERSION,
+    target_schema_fingerprint: expectedAuthorityPacketSchemaFingerprint(),
+    source_observation_digest: digestValue(source),
+    quiescence: {
+      unresolved_operation_count: source.unresolved_operation_count,
+      unexpired_unreleased_allocation_count: source.unexpired_unreleased_allocation_count,
+      observed_at: source.observed_at
+    },
+    schema_sql: AUTHORITY_PACKET_SCHEMA_SQL,
+    metadata_no_update_trigger_sql: METADATA_NO_UPDATE_TRIGGER_SQL,
+    steps: AUTHORITY_PACKET_MIGRATION_STEPS
+  });
+}
+
+function planAuthorityPacketMigration(options) {
+  const config = createStoreConfig(options || {});
+  return buildAuthorityPacketMigrationPlan(readAuthorityPacketMigrationSource(config));
+}
+
+function migrateAuthorityPacketStore(options, trustedAuthorityReaders) {
+  const config = createStoreConfig(options || {});
+  const plan = planAuthorityPacketMigration(options);
+  createAuthorityPacketVerificationHold(config);
+  const { DatabaseSync } = assertRuntimeSupport();
+  let db;
+  try {
+    db = new DatabaseSync(config.databasePath);
+    configureDatabase(db, false);
+    transaction(db, () => {
+      try {
+        verifyDatabase(db, config.namespace, config.namespaceDigest, config.databasePath, expectedV2SchemaFingerprint());
+      } catch (_) {
+        packetFail('GPR_PACKET_MIGRATION_SOURCE_INVALID');
+      }
+      const quiescence = migrationQuiescence(db, isoAt());
+      if (quiescence.unresolved_operation_count !== 0 || quiescence.unexpired_unreleased_allocation_count !== 0) {
+        packetFail('GPR_PACKET_MIGRATION_NOT_QUIESCENT');
+      }
+      db.exec('DROP TRIGGER metadata_no_update');
+      db.exec(plan.schema_sql);
+      db.prepare('UPDATE metadata SET schema_fingerprint = ? WHERE singleton = 1').run(plan.target_schema_fingerprint);
+      db.exec(plan.metadata_no_update_trigger_sql);
+      db.exec(`PRAGMA user_version=${AUTHORITY_PACKET_USER_VERSION}`);
+      if (schemaFingerprint(db) !== plan.target_schema_fingerprint) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+      const integrity = db.prepare('PRAGMA integrity_check').all();
+      if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok'
+        || db.prepare('PRAGMA foreign_key_check').all().length !== 0) packetFail('GPR_PACKET_STORE_UNAVAILABLE');
+      verifyAuthorityPacketDurableEvidence(db, config.namespace, config.namespaceDigest, config.databasePath);
+    });
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally {
+    if (db) db.close();
+  }
+  const reopened = openAuthorityPacketVerified(config, false, true);
+  reopened.close();
+  verifyAuthorityPacketStoreFreshProcess(config);
+  clearAuthorityPacketVerificationHold(config);
+  return createAuthorityPacketStore(options, trustedAuthorityReaders);
+}
+
+function initialiseAuthorityPacketStore(options, trustedAuthorityReaders) {
+  const config = createStoreConfig(options || {});
+  if (fs.existsSync(config.databasePath)) {
+    const { DatabaseSync } = assertRuntimeSupport();
+    let db;
+    try {
+      db = new DatabaseSync(config.databasePath, { readOnly: true });
+      configureDatabase(db, true);
+      const version = Number(oneValue(db, 'PRAGMA user_version', 'user_version'));
+      if (version !== AUTHORITY_PACKET_USER_VERSION) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+      packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
+    } finally {
+      if (db) db.close();
+    }
+  } else {
+    const db = openAuthorityPacketVerified(config, true, false);
+    db.close();
+  }
+  return createAuthorityPacketStore(options, trustedAuthorityReaders);
 }
 
 function sha256File(filePath) {
@@ -2265,6 +4935,726 @@ function runtimeIdentity(nodeExecutable = process.execPath, runtimePath = __file
     nodeRealpath,
     runtimeRealpath
   });
+}
+
+function authorityPacketRuntimeIdentity(nodeExecutable = process.execPath, runtimePath = __filename) {
+  const base = runtimeIdentity(nodeExecutable, runtimePath);
+  const compilerRealpath = canonicalRegularFile(path.resolve(__dirname, 'toolkit-gate-contract-compiler.cjs'));
+  const { nodeRealpath, runtimeRealpath, runtime_identity_digest: _legacyDigest, ...baseIdentity } = base;
+  const identity = {
+    ...baseIdentity,
+    gate_contract_compiler_realpath_digest: digestValue(compilerRealpath),
+    gate_contract_compiler_digest: sha256File(compilerRealpath)
+  };
+  return deepFreeze({
+    ...identity,
+    runtime_identity_digest: digestValue(identity),
+    nodeRealpath,
+    runtimeRealpath
+  });
+}
+
+function verifyAuthorityPacketStoreFreshProcess(config) {
+  const identity = authorityPacketRuntimeIdentity();
+  const env = { ...process.env };
+  const nodeInjectionKeys = new Set([
+    'NODE_OPTIONS', 'NODE_PATH', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE',
+    'NODE_REPL_EXTERNAL_MODULE', 'NODE_COMPILE_CACHE', 'NODE_V8_COVERAGE'
+  ]);
+  for (const key of Object.keys(env)) if (nodeInjectionKeys.has(key.toUpperCase())) delete env[key];
+  let result;
+  try {
+    result = spawnSync(identity.nodeRealpath, [
+      '--no-warnings', identity.runtimeRealpath, 'verify-authority-packet-store',
+      '--repository', config.namespace.repository,
+      '--parent-issue', String(config.namespace.parent_issue),
+      '--child-issue', String(config.namespace.child_issue),
+      '--state-root', config.stateRoot,
+      '--repository-root', config.repositoryRoot
+    ], {
+      cwd: config.repositoryRoot,
+      encoding: 'utf8',
+      env,
+      shell: false,
+      windowsHide: true,
+      timeout: VERIFIER_TIMEOUT_MS,
+      maxBuffer: VERIFIER_STREAM_BYTES
+    });
+  } catch (_) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  if (!result || result.error || result.signal || result.status !== 0
+    || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || result.stderr !== '' || !result.stdout.endsWith('\n')
+    || result.stdout.slice(0, -1).includes('\n')) packetFail('GPR_PACKET_READBACK_FAILED');
+  let observed;
+  try { observed = JSON.parse(result.stdout.slice(0, -1)); } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  const expected = {
+    ok: true,
+    schema: AUTHORITY_PACKET_SCHEMA_ID,
+    namespace_digest: config.namespaceDigest
+  };
+  if (canonicalSerialize(observed) !== canonicalSerialize({
+    ...expected,
+    store_identity_digest: observed.store_identity_digest
+  }) || !isDigest(observed.store_identity_digest)) packetFail('GPR_PACKET_READBACK_FAILED');
+  return deepFreeze(observed);
+}
+
+function authorityPacketVerificationHoldPath(config) {
+  return `${config.databasePath}.migration-verification-hold.json`;
+}
+
+function authorityPacketVerificationHoldBytes(config) {
+  return `${canonicalSerialize({
+    schema: 'toolkit.github-program.authority-packet-migration-verification-hold.v1',
+    namespace_digest: config.namespaceDigest,
+    database_identity_digest: digestValue(config.databasePath)
+  })}\n`;
+}
+
+function readAuthorityPacketVerificationHold(config) {
+  const filePath = authorityPacketVerificationHoldPath(config);
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync.native(filePath) !== filePath
+      || stat.size > 1024 || fs.readFileSync(filePath, 'utf8') !== authorityPacketVerificationHoldBytes(config)) {
+      packetFail('GPR_PACKET_READBACK_FAILED');
+    }
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  return true;
+}
+
+function createAuthorityPacketVerificationHold(config) {
+  const filePath = authorityPacketVerificationHoldPath(config);
+  if (readAuthorityPacketVerificationHold(config)) return;
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'wx', 0o600);
+    fs.writeFileSync(fd, authorityPacketVerificationHoldBytes(config), 'utf8');
+    fs.fsyncSync(fd);
+  } catch (error) {
+    if (error && error.code === 'EEXIST' && readAuthorityPacketVerificationHold(config)) return;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* Preserve the original failure. */ }
+    }
+  }
+  if (!readAuthorityPacketVerificationHold(config)) packetFail('GPR_PACKET_READBACK_FAILED');
+}
+
+function clearAuthorityPacketVerificationHold(config) {
+  const filePath = authorityPacketVerificationHoldPath(config);
+  if (!readAuthorityPacketVerificationHold(config)) return;
+  try { fs.unlinkSync(filePath); } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  if (fs.existsSync(filePath)) packetFail('GPR_PACKET_READBACK_FAILED');
+}
+
+function verifyPendingAuthorityPacketMigration(config) {
+  if (!readAuthorityPacketVerificationHold(config)) return true;
+  try {
+    verifyAuthorityPacketStoreFreshProcess(config);
+    clearAuthorityPacketVerificationHold(config);
+    return true;
+  } catch (_) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+}
+
+function validateAuthorityPacketReaders(value, requireScreen = false) {
+  if (value === undefined || value === null) {
+    if (requireScreen) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    return null;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+    catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  }
+  if (!isRecord(value)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  let names;
+  try {
+    names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  } catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  for (const key of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  for (const key of ['readAuthority', 'readStart', 'screenPacket', 'readBackfillSource']) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor && typeof descriptor.value !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  if (requireScreen && typeof Object.getOwnPropertyDescriptor(value, 'screenPacket')?.value !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  return value;
+}
+
+function captureAuthorityPacketReaders(value) {
+  if (value === undefined || value === null) return null;
+  validateAuthorityPacketReaders(value, false);
+  const existing = AUTHORITY_PACKET_READER_OWNERS.get(value);
+  if (existing) {
+    if (!authorityPacketReadersUnchanged(value, existing)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    return existing.bound;
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const keys = Object.keys(value).sort();
+  const values = new Map();
+  const bound = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    values.set(key, descriptor.value);
+    Object.defineProperty(bound, key, { value: descriptor.value, enumerable: true, writable: false, configurable: false });
+  }
+  const snapshot = { bound: Object.freeze(bound), keys: Object.freeze(keys), values };
+  AUTHORITY_PACKET_READER_OWNERS.set(value, snapshot);
+  return snapshot.bound;
+}
+
+function authorityPacketReadersUnchanged(value, snapshot) {
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    try { if (utilTypes.isProxy(value)) return false; } catch (_) { return false; }
+  }
+  if (!isRecord(value) || Object.keys(value).sort().join('\u0000') !== snapshot.keys.join('\u0000')
+    || Object.getOwnPropertySymbols(value).length > 0) return false;
+  for (const key of snapshot.keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set || descriptor.value !== snapshot.values.get(key)) return false;
+  }
+  return true;
+}
+
+function callTrustedReaderSync(reader, argument, code) {
+  if (typeof reader !== 'function') packetFail(code);
+  let result;
+  try { result = reader(argument); } catch (error) {
+    if (error instanceof GprError && error.packetBoundary) throw error;
+    packetFail(code);
+  }
+  try { return packetClosedClone(result); }
+  catch (_) { packetFail(code); }
+}
+
+function packetBindingsFromAdmission(admission) {
+  let normalized;
+  try { normalized = packetClosedClone(admission); }
+  catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  if (!isRecord(normalized)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  const candidate = normalized.bindings || normalized.expected_bindings;
+  if (!candidate) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  let bindings;
+  try { bindings = packetClosedClone(candidate); } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  packetValidateBindings(bindings);
+  return bindings;
+}
+
+function verifyPacketProducerAdmission(packet, admission, readers) {
+  if (!readers || typeof readers.readAuthority !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  try { admission = packetClosedClone(admission); }
+  catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+  const bindings = packetBindingsFromAdmission(admission);
+  if (canonicalSerialize(bindings) !== canonicalSerialize(packet.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+  let observedAuthority;
+  let observedProducerAuthority;
+  {
+    const observed = callTrustedReaderSync(readers.readAuthority, { packet_id: `ap1-${digestValue(packet)}` }, 'GPR_PACKET_AUTHORITY_UNVERIFIED');
+    observedAuthority = observed && isRecord(observed) && Object.hasOwn(observed, 'authority') ? observed.authority : observed;
+    if (observed && Array.isArray(observed.later_controlling_comments) && observed.later_controlling_comments.length > 0) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+    observedProducerAuthority = observed && isRecord(observed) ? observed.producer_authority : undefined;
+  }
+  if (observedAuthority === undefined) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  try { packetValidateSourceReference(packetClosedClone(observedAuthority)); } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  if (canonicalSerialize(observedAuthority) !== canonicalSerialize(packet.bindings.authority)) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  const producerAuthority = packetValidateProducerAuthority(observedProducerAuthority);
+  if (producerAuthority.lane_id !== packet.bindings.lane_id
+    || producerAuthority.human_owner !== packet.bindings.human_owner
+    || canonicalSerialize(producerAuthority.producer) !== canonicalSerialize(packet.bindings.producer)) {
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  if (Object.hasOwn(admission, 'producer')) {
+    try {
+      packetValidateProducer(packetClosedClone(admission.producer));
+    } catch (error) {
+      if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+    if (canonicalSerialize(admission.producer) !== canonicalSerialize(packet.bindings.producer)) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+  }
+  if (Object.hasOwn(admission, 'candidate')) {
+    const candidate = admission.candidate;
+    if (candidate !== null && candidate !== undefined) {
+      try { validateCandidate(candidate); } catch (_) { packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED'); }
+    }
+    if (canonicalSerialize(candidate === undefined ? null : candidate) !== canonicalSerialize(packet.bindings.candidate)) {
+      packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+    }
+  }
+  return true;
+}
+
+function verifyPacketScreening(packetIdentities, admission, readers) {
+  if (!readers || typeof readers.screenPacket !== 'function') packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  const screening = callTrustedReaderSync(readers.screenPacket, {
+    packet: packetIdentities.packet,
+    packet_digest: packetIdentities.packet_digest
+  }, 'GPR_PACKET_PRIVACY_REJECTED');
+  if (!isRecord(screening)) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  let normalized;
+  try { normalized = packetClosedClone(screening); } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+    packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  }
+  const allowed = normalized.allowed === true || normalized.decision === 'ALLOW' || normalized.decision === 'ACCEPTED';
+  if (normalized.packet_digest !== packetIdentities.packet_digest || !allowed) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  for (const key of ['policy_digest', 'disclosure_policy_digest', 'retention_policy_digest']) {
+    if (normalized[key] !== undefined && !isDigest(normalized[key])) packetFail('GPR_PACKET_PRIVACY_REJECTED');
+  }
+  return normalized;
+}
+
+function readAuthorityPacketRow(db, packetId, expectedBindings) {
+  if (typeof packetId !== 'string' || !AUTHORITY_PACKET_ID_PATTERN.test(packetId)) packetFail('GPR_PACKET_IDENTITY_MISMATCH');
+  let expected;
+  try { expected = packetClosedClone(expectedBindings); } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_BINDING_MISMATCH');
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  packetValidateBindings(expected);
+  const row = db.prepare('SELECT * FROM authority_packets WHERE packet_id = ?').get(packetId);
+  if (!row) packetFail('GPR_PACKET_NOT_FOUND');
+  let identities;
+  try {
+    identities = authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json));
+  } catch (error) {
+    if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  if (row.packet_id !== identities.packet_id || row.producer_key !== identities.producer_key
+    || row.packet_digest !== identities.packet_digest || row.content_digest !== identities.content_digest
+    || row.binding_digest !== identities.binding_digest || row.canonical_json !== identities.canonical_packet_bytes) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  if (canonicalSerialize(identities.packet.bindings) !== canonicalSerialize(expected)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+  return identities;
+}
+
+function packetDeliveryEnvelope(identities, config, storeIdentityDigest, runtimeIdentityDigest, challenge) {
+  return {
+    schema: AUTHORITY_PACKET_DELIVERY_SCHEMA_ID,
+    packet_id: identities.packet_id,
+    packet_digest: identities.packet_digest,
+    content_digest: identities.content_digest,
+    binding_digest: identities.binding_digest,
+    producer_key: identities.producer_key,
+    namespace_digest: config.namespaceDigest,
+    store_identity_digest: storeIdentityDigest,
+    runtime_identity_digest: runtimeIdentityDigest,
+    challenge,
+    canonical_packet_bytes: identities.canonical_packet_bytes
+  };
+}
+
+function validateAuthorityPacketDelivery(delivery, expected = {}) {
+  try {
+    delivery = packetClosedClone(delivery);
+    expected = packetClosedClone(expected);
+  } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_LIMIT') throw error;
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  if (!isRecord(delivery) || !exactKeys(delivery, ['envelope', 'packet']) || !isRecord(delivery.envelope)) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  const envelopeKeys = [
+    'schema', 'packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'producer_key',
+    'namespace_digest', 'store_identity_digest', 'runtime_identity_digest', 'challenge', 'canonical_packet_bytes'
+  ];
+  if (!exactKeys(delivery.envelope, envelopeKeys)
+    || delivery.envelope.schema !== AUTHORITY_PACKET_DELIVERY_SCHEMA_ID
+    || !AUTHORITY_PACKET_ID_PATTERN.test(delivery.envelope.packet_id)
+    || !isDigest(delivery.envelope.packet_digest) || !isDigest(delivery.envelope.content_digest)
+    || !isDigest(delivery.envelope.binding_digest) || !isDigest(delivery.envelope.producer_key)
+    || !isDigest(delivery.envelope.namespace_digest) || !isDigest(delivery.envelope.store_identity_digest)
+    || !isDigest(delivery.envelope.runtime_identity_digest) || !/^[a-f0-9]{64}$/.test(delivery.envelope.challenge)
+    || typeof delivery.envelope.canonical_packet_bytes !== 'string'
+    || !packetStringIsUnicodeScalar(delivery.envelope.canonical_packet_bytes)) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  if (Buffer.byteLength(delivery.envelope.canonical_packet_bytes, 'utf8') > AUTHORITY_PACKET_LIMITS.artifactBytes) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  let identities;
+  try { identities = authorityPacketIdentities(delivery.packet); } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  if (delivery.envelope.packet_id !== identities.packet_id
+    || delivery.envelope.packet_digest !== identities.packet_digest
+    || delivery.envelope.content_digest !== identities.content_digest
+    || delivery.envelope.binding_digest !== identities.binding_digest
+    || delivery.envelope.producer_key !== identities.producer_key
+    || delivery.envelope.canonical_packet_bytes !== identities.canonical_packet_bytes) {
+    packetFail('GPR_PACKET_IDENTITY_MISMATCH');
+  }
+  const expectedBindings = expected.expectedBindings || expected.bindings;
+  if (expectedBindings !== undefined) {
+    try {
+      const normalized = packetClosedClone(expectedBindings);
+      packetValidateBindings(normalized);
+      if (canonicalSerialize(normalized) !== canonicalSerialize(identities.packet.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+      packetFail('GPR_PACKET_BINDING_MISMATCH');
+    }
+  }
+  for (const [key, expectedKey] of [
+    ['packet_id', 'packet_id'], ['store_identity_digest', 'store_identity_digest'],
+    ['runtime_identity_digest', 'runtime_identity_digest'], ['namespace_digest', 'namespace_digest'], ['challenge', 'challenge']
+  ]) {
+    if (expected[expectedKey] !== undefined && delivery.envelope[key] !== expected[expectedKey]) packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  if (expected.packet !== undefined && canonicalSerialize(expected.packet) !== identities.canonical_packet_bytes) {
+    packetFail('GPR_PACKET_CONTENT_MISMATCH');
+  }
+  if (Buffer.byteLength(canonicalSerialize(delivery), 'utf8') > AUTHORITY_PACKET_LIMITS.deliveryBytes) {
+    packetFail('GPR_PACKET_LIMIT');
+  }
+  return deepFreeze(delivery);
+}
+
+function validateAuthorityPacketDeliveryProcessResult(result, expected) {
+  try {
+    result = packetClosedClone(result);
+    expected = packetClosedClone(expected);
+  } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  if (!result || result.error || result.signal || result.status !== 0
+    || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || Buffer.byteLength(result.stdout, 'utf8') > AUTHORITY_PACKET_LIMITS.deliveryBytes + 1
+    || Buffer.byteLength(result.stderr, 'utf8') > 16 * 1024 || result.stderr !== ''
+    || !result.stdout.endsWith('\n') || result.stdout.slice(0, -1).includes('\n')) packetFail('GPR_PACKET_READBACK_FAILED');
+  let parsed;
+  try { parsed = JSON.parse(result.stdout.slice(0, -1)); } catch (_) { packetFail('GPR_PACKET_READBACK_FAILED'); }
+  validateAuthorityPacketDelivery(parsed, expected);
+  if (`${canonicalSerialize(parsed)}\n` !== result.stdout) packetFail('GPR_PACKET_READBACK_FAILED');
+  return parsed;
+}
+
+function appendAuthorityPacketEventDb(db, packetId, eventType, payload, createdAt) {
+  if (!AUTHORITY_PACKET_ID_PATTERN.test(packetId) || !AUTHORITY_PACKET_EVENT_TYPES.includes(eventType)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  const normalizedPayload = packetValidateEventPayload(eventType, payload);
+  const existingKey = packetEventKey(packetId, eventType, normalizedPayload);
+  const existing = db.prepare('SELECT * FROM authority_packet_events WHERE event_key = ?').get(existingKey);
+  if (existing) {
+    if (existing.packet_id !== packetId || existing.event_type !== eventType) packetFail('GPR_PACKET_CONFLICT');
+    return { event_id: existing.event_id, event_key: existing.event_key, sequence: existing.sequence, duplicate: true };
+  }
+  packetValidateEventBinding(db, packetId, eventType, normalizedPayload);
+  const prior = db.prepare('SELECT * FROM authority_packet_events WHERE packet_id = ? ORDER BY sequence DESC LIMIT 1').get(packetId);
+  const sequence = prior ? prior.sequence + 1 : 1;
+  const event = packetEventObject(packetId, sequence, prior ? prior.event_id : null, eventType, normalizedPayload, isoAt(createdAt));
+  const eventId = digestValue(event);
+  db.prepare('INSERT INTO authority_packet_events VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    eventId, packetId, existingKey, sequence, event.prior_event_id, event.event_type, canonicalSerialize(event)
+  );
+  return { event_id: eventId, event_key: existingKey, sequence, duplicate: false };
+}
+
+function persistAuthorityPacketWithReaders(config, readers, artifactInput, producerAdmission) {
+  let identities;
+  try { identities = authorityPacketIdentities(artifactInput); } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  if (identities.packet.bindings.repository !== config.namespace.repository
+    || identities.packet.bindings.parent_issue !== config.namespace.parent_issue
+    || identities.packet.bindings.child_issue !== config.namespace.child_issue) {
+    packetFail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  verifyPacketProducerAdmission(identities.packet, producerAdmission, readers);
+  verifyPacketScreening(identities, producerAdmission, readers);
+  const db = openAuthorityPacketVerified(config, false, false);
+  let duplicate = false;
+  try {
+    transaction(db, () => {
+      if (identities.packet.bindings.repository !== config.namespace.repository
+        || identities.packet.bindings.parent_issue !== config.namespace.parent_issue
+        || identities.packet.bindings.child_issue !== config.namespace.child_issue) {
+        packetFail('GPR_PACKET_BINDING_MISMATCH');
+      }
+      verifyPacketProducerAdmission(identities.packet, producerAdmission, readers);
+      const existing = db.prepare(
+        'SELECT * FROM authority_packets WHERE producer_key = ? OR packet_id = ? ORDER BY packet_id LIMIT 1'
+      ).get(identities.producer_key, identities.packet_id);
+      if (existing) {
+        if (existing.producer_key !== identities.producer_key || existing.packet_id !== identities.packet_id
+          || existing.packet_digest !== identities.packet_digest || existing.content_digest !== identities.content_digest
+          || existing.binding_digest !== identities.binding_digest || existing.canonical_json !== identities.canonical_packet_bytes) {
+          packetFail('GPR_PACKET_CONFLICT');
+        }
+        duplicate = true;
+        return;
+      }
+      if (Buffer.byteLength(identities.canonical_packet_bytes, 'utf8') > AUTHORITY_PACKET_LIMITS.artifactBytes) {
+        packetFail('GPR_PACKET_LIMIT');
+      }
+      const createdAt = isoAt();
+      db.prepare('INSERT INTO authority_packets VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        identities.packet_id, identities.producer_key, identities.packet_digest, identities.content_digest,
+        identities.binding_digest, identities.canonical_packet_bytes, createdAt
+      );
+    });
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    if (error && (error.code === 'SQLITE_FULL' || error.code === 'SQLITE_BUSY')) packetFail('GPR_PACKET_LIMIT');
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally {
+    db.close();
+  }
+  const readback = openAuthorityPacketVerified(config, false, true);
+  let readIdentities;
+  try { readIdentities = readAuthorityPacketRow(readback, identities.packet_id, identities.packet.bindings); }
+  finally { readback.close(); }
+  if (readIdentities.canonical_packet_bytes !== identities.canonical_packet_bytes
+    || readIdentities.packet_id !== identities.packet_id) packetFail('GPR_PACKET_READBACK_FAILED');
+  return deepFreeze({
+    packet: readIdentities.packet,
+    packet_id: readIdentities.packet_id,
+    packet_digest: readIdentities.packet_digest,
+    content_digest: readIdentities.content_digest,
+    binding_digest: readIdentities.binding_digest,
+    producer_key: readIdentities.producer_key,
+    duplicate
+  });
+}
+
+function backfillAuthorityPacketWithReaders(config, readers, artifactInput) {
+  const packetIdentities = authorityPacketIdentities(artifactInput);
+  if (!readers || typeof readers.readBackfillSource !== 'function') packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+  const source = callTrustedReaderSync(readers.readBackfillSource, {
+    packet_id: packetIdentities.packet_id,
+    packet_digest: packetIdentities.packet_digest,
+    binding_digest: packetIdentities.binding_digest
+  }, 'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED');
+  if (!isRecord(source)) packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+  let sourceRef;
+  try { sourceRef = packetClosedClone(source.source_ref); } catch (_) { packetFail('GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED'); }
+  packetValidateSourceReference(sourceRef, 'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED');
+  if (source.source_packet_digest !== packetIdentities.packet_digest
+    || source.source_binding_digest !== packetIdentities.binding_digest
+    || source.producer_key !== packetIdentities.producer_key
+    || source.source_packet === undefined && source.source_artifact === undefined) {
+    packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+  }
+  const sourceArtifact = source.source_packet || source.source_artifact;
+  let sourceIdentities;
+  try { sourceIdentities = authorityPacketIdentities(sourceArtifact); } catch (_) { packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED'); }
+  if (sourceIdentities.canonical_packet_bytes !== packetIdentities.canonical_packet_bytes
+    || sourceIdentities.packet_digest !== packetIdentities.packet_digest
+    || sourceIdentities.binding_digest !== packetIdentities.binding_digest) packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+  const admission = {
+    bindings: packetIdentities.packet.bindings,
+    authority: packetIdentities.packet.bindings.authority,
+    producer: packetIdentities.packet.bindings.producer,
+    candidate: packetIdentities.packet.bindings.candidate,
+    screening: source.screening
+  };
+  const persisted = persistAuthorityPacketWithReaders(config, readers, packetIdentities.packet, admission);
+  const delivery = verifyAuthorityPacketFreshProcess(config, packetIdentities.packet_id, packetIdentities.packet.bindings);
+  if (delivery.envelope.packet_digest !== packetIdentities.packet_digest
+    || delivery.envelope.content_digest !== packetIdentities.content_digest
+    || delivery.envelope.binding_digest !== packetIdentities.binding_digest
+    || canonicalSerialize(delivery.packet) !== packetIdentities.canonical_packet_bytes) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  packetScreenPersistedPacket(readers, delivery.packet, packetIdentities.packet_digest);
+  const readback = packetAppendReadbackEvent(config, packetIdentities.packet_id, delivery);
+  const db = openAuthorityPacketVerified(config, false, false);
+  let event;
+  try {
+    event = transaction(db, () => appendAuthorityPacketEventDb(db, packetIdentities.packet_id, 'BACKFILL_AUTHORISED', {
+      authority_ref: packetIdentities.packet.bindings.authority,
+      source_ref: sourceRef,
+      source_packet_digest: packetIdentities.packet_digest,
+      source_binding_digest: packetIdentities.binding_digest
+    }, isoAt()));
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_WRITE_FAILED');
+  } finally { db.close(); }
+  return deepFreeze({
+    ...persisted,
+    readback_event_id: readback.event_id,
+    backfill_event_id: event.event_id,
+    backfill_duplicate: event.duplicate
+  });
+}
+
+function verifyAuthorityPacketFreshProcess(config, packetId, expectedBindings) {
+  const expectedDb = openAuthorityPacketVerified(config, false, true);
+  let identities;
+  let storeIdentity;
+  try {
+    identities = readAuthorityPacketRow(expectedDb, packetId, expectedBindings);
+    storeIdentity = authorityPacketStoreIdentityDb(expectedDb, config);
+  } finally { expectedDb.close(); }
+  const identity = authorityPacketRuntimeIdentity();
+  const challenge = crypto.randomBytes(32).toString('hex');
+  const expectedDelivery = {
+    envelope: packetDeliveryEnvelope(identities, config, storeIdentity, identity.runtime_identity_digest, challenge),
+    packet: identities.packet
+  };
+  const env = { ...process.env };
+  const nodeInjectionKeys = new Set([
+    'NODE_OPTIONS', 'NODE_PATH', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE', 'NODE_REPL_EXTERNAL_MODULE',
+    'NODE_COMPILE_CACHE', 'NODE_V8_COVERAGE'
+  ]);
+  for (const key of Object.keys(env)) if (nodeInjectionKeys.has(key.toUpperCase())) delete env[key];
+  let result;
+  try {
+    result = spawnSync(identity.nodeRealpath, [
+      '--no-warnings', identity.runtimeRealpath, 'read-authority-packet',
+      '--repository', config.namespace.repository,
+      '--parent-issue', String(config.namespace.parent_issue),
+      '--child-issue', String(config.namespace.child_issue),
+      '--state-root', config.stateRoot,
+      '--repository-root', config.repositoryRoot,
+      '--packet-id', packetId,
+      '--expected-bindings', canonicalSerialize(expectedBindings),
+      '--challenge', challenge
+    ], {
+      cwd: config.repositoryRoot,
+      encoding: 'utf8',
+      env,
+      shell: false,
+      windowsHide: true,
+      timeout: VERIFIER_TIMEOUT_MS,
+      maxBuffer: AUTHORITY_PACKET_LIMITS.deliveryBytes + 1
+    });
+  } catch (_) {
+    packetFail('GPR_PACKET_READBACK_FAILED');
+  }
+  return validateAuthorityPacketDeliveryProcessResult(result, {
+    expectedBindings,
+    packet_id: packetId,
+    store_identity_digest: storeIdentity,
+    runtime_identity_digest: identity.runtime_identity_digest,
+    namespace_digest: config.namespaceDigest,
+    challenge,
+    packet: identities.packet
+  });
+}
+
+function createAuthorityPacketStore(options, trustedAuthorityReaders) {
+  const config = createStoreConfig(options || {});
+  const readers = captureAuthorityPacketReaders(trustedAuthorityReaders);
+  const check = openAuthorityPacketVerified(config, false, true);
+  check.close();
+  verifyPendingAuthorityPacketMigration(config);
+  const instanceId = randomId('authority-store');
+  const store = {
+    instanceId,
+    databasePath: config.databasePath,
+    namespace: config.namespace,
+    storeIdentityDigest() {
+      const owner = authorityPacketStoreState(this);
+      const db = openAuthorityPacketVerified(owner.config, false, true);
+      try { return authorityPacketStoreIdentityDb(db, owner.config); } finally { db.close(); }
+    },
+    persistAuthorityPacket(artifact, producerAdmission) {
+      const owner = authorityPacketStoreState(this);
+      return persistAuthorityPacketWithReaders(owner.config, owner.readers, artifact, producerAdmission);
+    },
+    readAuthorityPacket(packetId, expectedBindings) {
+      const owner = authorityPacketStoreState(this);
+      const db = openAuthorityPacketVerified(owner.config, false, true);
+      try { return readAuthorityPacketRow(db, packetId, expectedBindings).packet; } finally { db.close(); }
+    },
+    verifyAuthorityPacketFresh(packetId, expectedBindings) {
+      const owner = authorityPacketStoreState(this);
+      return verifyAuthorityPacketFreshProcess(owner.config, packetId, expectedBindings);
+    },
+    backfillAuthorityPacket(artifact, backfillReaders = readers) {
+      const owner = authorityPacketStoreState(this);
+      if (!owner.readers || typeof owner.readers.readBackfillSource !== 'function') {
+        packetFail('GPR_PACKET_LEGACY_RERUN_REQUIRED');
+      }
+      const boundReaders = packetRequireReaderSet(owner.readers, backfillReaders, ['readBackfillSource']);
+      return backfillAuthorityPacketWithReaders(owner.config, boundReaders, artifact);
+    },
+    bindWebPacketAcceptance(packetId, suppliedReaders = readers) {
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readWebDecision', 'screenPacket']);
+      return packetBuildAcceptance(owner.config, boundReaders, packetId);
+    },
+    buildCurrentPacketProjection(consumerIntent, suppliedReaders = readers) {
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readAuthority', 'readCandidate']);
+      return packetBuildCurrentProjection(owner.config, boundReaders, consumerIntent);
+    },
+    confirmCurrentPacketProjection(expectedProjection, suppliedReaders = readers) {
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, ['readCurrent']);
+      return packetConfirmCurrentProjection(owner.config, boundReaders, expectedProjection);
+    },
+    admitSemanticGate(consumerIntent, suppliedReaders) {
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, [
+        'readAuthority', 'readCurrent', 'readWebDecision', 'readCandidate', 'readDispatchOutcome', 'screenPacket'
+      ]);
+      return semanticGateAdmissionRecord(owner.config, this, boundReaders, consumerIntent);
+    },
+    revalidateSemanticGate(admission, expected = {}) {
+      const owner = authorityPacketStoreState(this);
+      const state = semanticGateAdmissionState(this, admission);
+      return semanticGateRevalidate(owner.config, this, state.readers, admission, expected);
+    },
+    beginSemanticGateDispatch(admission) {
+      const owner = authorityPacketStoreState(this);
+      return semanticGateBeginDispatch(owner.config, this, admission);
+    },
+    recordSemanticGateDispatch(admission, evidence) {
+      const owner = authorityPacketStoreState(this);
+      return semanticGateRecordDispatch(owner.config, this, admission, evidence);
+    },
+    recoverSemanticGateAdmission(consumerIdentity, suppliedReaders) {
+      const owner = authorityPacketStoreState(this);
+      const boundReaders = packetRequireReaderSet(owner.readers, suppliedReaders, [
+        'readAuthority', 'readCurrent', 'readWebDecision', 'readCandidate', 'readDispatchOutcome', 'screenPacket'
+      ]);
+      return semanticGateRecover(owner.config, this, boundReaders, consumerIdentity);
+    },
+    semanticCompletionApplicability(admission) {
+      authorityPacketStoreState(this);
+      return semanticCompletionApplicability(this, admission);
+    },
+    confirmSemanticCompletion(admission, outputStore, packet, producerAdmission) {
+      authorityPacketStoreState(this);
+      return confirmSemanticCompletion(this, admission, outputStore, packet, producerAdmission);
+    },
+    verifySemanticCompletion(admission, outputStore, outcomeRef) {
+      authorityPacketStoreState(this);
+      return verifySemanticCompletion(this, admission, outputStore, outcomeRef);
+    }
+  };
+  Object.freeze(store);
+  AUTHORITY_PACKET_STORE_OWNERS.set(store, { config, readers, instanceId, processId: process.pid });
+  return store;
 }
 
 function storeStateFactsDb(db) {
@@ -2586,6 +5976,44 @@ function createReceipt(allocation, config, input) {
   return validateReceiptObject(receipt);
 }
 
+function verifyReceiptTerminalCustody(store, sessionOwner, allocation, input, payload) {
+  const gate = sessionOwner.semanticGate;
+  if (!gate) {
+    if (sessionOwner.semanticRequired === true) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    return false;
+  }
+  verifyReceiptSemanticBinding(gate, {
+    receiptMetadataVerified: true,
+    receiptStoreInstanceId: store.instanceId,
+    lock_id: allocation.lock_id,
+    run_id: allocation.run_id
+  });
+  let result;
+  try {
+    result = semanticCompletionApplicability(gate.store, gate.admission);
+  } catch (error) {
+    if (error instanceof GprError && ['GPR_PACKET_BINDING_MISMATCH', 'GPR_PACKET_ADMISSION_REQUIRED'].includes(error.code)) throw error;
+    packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  }
+  const supplied = Object.hasOwn(input, 'semantic_completion') ? input.semantic_completion : undefined;
+  if (!result.required) {
+    if (supplied !== undefined) packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+    return false;
+  }
+  if (!isRecord(supplied) || !exactKeys(supplied, ['store', 'outcome_ref'])
+    || !supplied.store || !isDigest(supplied.outcome_ref) || !isDigest(payload.evidence_digest)) {
+    packetFail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+  }
+  if (payload.evidence_digest !== supplied.outcome_ref) packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  try {
+    verifySemanticCompletion(gate.store, gate.admission, supplied.store, supplied.outcome_ref);
+  } catch (error) {
+    if (error instanceof GprError && error.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED') throw error;
+    packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  }
+  return true;
+}
+
 function appendReceiptInternal(store, session, input) {
   const state = sessionState(store, session);
   if (!isRecord(input) || !RECEIPT_TYPES.includes(input.receipt_type) || input.receipt_type === 'RUN_STARTED') fail('GPR_RECEIPT_INPUT_INVALID');
@@ -2601,6 +6029,12 @@ function appendReceiptInternal(store, session, input) {
   const db = openVerified(store.config);
   try {
     const allocation = allocationFromStateDb(db, state);
+    verifyReceiptSemanticBinding(state.semanticGate, {
+      receiptMetadataVerified: true,
+      receiptStoreInstanceId: store.instanceId,
+      lock_id: allocation.lock_id,
+      run_id: allocation.run_id
+    });
     const chain = readChainDb(db, state.runId);
     const prior = chain[chain.length - 1];
     if (Date.parse(createdAt) < Date.parse(allocation.issued_at)
@@ -2610,6 +6044,9 @@ function appendReceiptInternal(store, session, input) {
       && prior.created_at === createdAt
       && canonicalSerialize(prior.payload) === canonicalSerialize(payload)
       && canonicalSerialize(prior.candidate) === canonicalSerialize(repeatedCandidate)) {
+      if (TERMINAL_TYPES.includes(input.receipt_type)) {
+        verifyReceiptTerminalCustody(store, state, allocation, input, payload);
+      }
       return deepFreeze({ receipt: prior, duplicate: true });
     }
     if (TERMINAL_TYPES.includes(prior.receipt_type)) fail('GPR_RUN_TERMINAL');
@@ -2639,6 +6076,9 @@ function appendReceiptInternal(store, session, input) {
       verifyFenceDb(db, state, isoAt());
       const liveChain = readChainDb(db, state.runId);
       if (liveChain.length !== chain.length || liveChain[liveChain.length - 1].receipt_id !== prior.receipt_id) fail('GPR_CHAIN_CONFLICT');
+      if (TERMINAL_TYPES.includes(receipt.receipt_type)) {
+        verifyReceiptTerminalCustody(store, state, allocation, input, payload);
+      }
       if (['EXECUTOR_TERMINAL', 'G4_TERMINAL'].includes(receipt.receipt_type)) assertNoUnresolvedOperationDb(db);
       db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
@@ -2662,6 +6102,183 @@ function verifyAuthoritySnapshot(expected, snapshot) {
   const observed = validateAuthority(snapshot.authority);
   if (canonicalSerialize(observed) !== canonicalSerialize(expected) || snapshot.later_controlling_comments.length > 0) fail('GPR_AUTHORITY_CHANGED');
   return observed;
+}
+
+function receiptSemanticGate(input, receiptStore) {
+  if (input === undefined) return null;
+  if (!isRecord(input) || !exactKeys(input, ['store', 'admission']) || !isRecord(input.store)) {
+    fail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  const receiptState = programmeReceiptStoreState(receiptStore);
+  const state = semanticGateAdmissionState(input.store, input.admission);
+  const intent = state.consumerIntent;
+  const execution = intent && intent.execution_binding;
+  if (!isRecord(intent) || !isRecord(intent.consumer) || !isRecord(execution)
+    || !packetSafeContractId(intent.consumer.run)
+    || execution.semantic_run !== intent.consumer.run
+    || !isSafeId(execution.receipt_run_id, 160)
+    || !packetSafeContractId(execution.loop_run_id)) {
+    fail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  return {
+    store: input.store,
+    admission: input.admission,
+    state,
+    intent,
+    execution,
+    receiptConfig: receiptState.config,
+    receiptStoreInstanceId: receiptStore.instanceId
+  };
+}
+
+function receiptDeclaredConsumers(snapshot) {
+  const declaredValues = [
+    snapshot.required_consumers,
+    snapshot.consumer_dependencies,
+    snapshot.applicability && snapshot.applicability.required_consumers
+  ].filter((value) => value !== undefined);
+  if (declaredValues.length === 0) return [];
+  if (declaredValues.some((value) => !Array.isArray(value))) fail('GPR_AUTHORITY_UNVERIFIED');
+  const canonical = declaredValues.map((value) => canonicalSerialize(value));
+  if (canonical.some((value) => value !== canonical[0])) fail('GPR_AUTHORITY_UNVERIFIED');
+  const consumers = declaredValues[0];
+  const seen = new Set();
+  for (const consumer of consumers) {
+    if (!isRecord(consumer) || !exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id) || !isDigest(consumer.scope_digest)) {
+      fail('GPR_AUTHORITY_UNVERIFIED');
+    }
+    const id = `${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`;
+    if (seen.has(id)) fail('GPR_AUTHORITY_UNVERIFIED');
+    seen.add(id);
+  }
+  return consumers;
+}
+
+function receiptCompletionApplicability(snapshot) {
+  const values = [
+    snapshot.completion_applicability,
+    snapshot.applicability && snapshot.applicability.completion_applicability
+  ].filter((value) => value !== undefined);
+  if (values.length === 0 || values.some((value) => !isRecord(value))
+    || values.some((value) => canonicalSerialize(value) !== canonicalSerialize(values[0]))) {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  const value = values[0];
+  if (!exactKeys(value, [
+    'schema', 'scope_digest', 'candidate', 'required_consumers',
+    'retain_through_child_finality', 'retain_through_candidate_finality'
+  ]) || value.schema !== 'toolkit.github-program.semantic-completion-applicability.v1'
+    || !isDigest(value.scope_digest) || !Array.isArray(value.required_consumers)
+    || value.required_consumers.length > AUTHORITY_PACKET_LIMITS.requiredConsumers
+    || typeof value.retain_through_child_finality !== 'boolean'
+    || typeof value.retain_through_candidate_finality !== 'boolean') {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  if (value.candidate !== null) {
+    try { validateCandidate(value.candidate); } catch (_) { fail('GPR_AUTHORITY_UNVERIFIED'); }
+  }
+  const seen = new Set();
+  for (const consumer of value.required_consumers) {
+    if (!isRecord(consumer) || !exactKeys(consumer, AUTHORITY_PACKET_CONSUMER_KEYS)
+      || !AUTHORITY_PACKET_CONSUMER_CLASSES.includes(consumer.class)
+      || !packetSafeContractId(consumer.dependency_id) || !isDigest(consumer.scope_digest)) {
+      fail('GPR_AUTHORITY_UNVERIFIED');
+    }
+    const id = `${consumer.class}\u0000${consumer.dependency_id}\u0000${consumer.scope_digest}`;
+    if (seen.has(id)) fail('GPR_AUTHORITY_UNVERIFIED');
+    seen.add(id);
+  }
+  return deepFreeze({
+    required: value.required_consumers.length > 0
+      || value.retain_through_child_finality
+      || value.retain_through_candidate_finality,
+    applicability: deepFreeze(packetClosedClone(value))
+  });
+}
+
+function verifyReceiptSemanticBinding(gate, expected = {}) {
+  if (!gate) return null;
+  const state = semanticGateAdmissionState(gate.store, gate.admission);
+  if (state !== gate.state || !gate.receiptConfig || !gate.receiptConfig.namespace
+    || expected.receiptStoreInstanceId !== undefined
+      && expected.receiptStoreInstanceId !== gate.receiptStoreInstanceId) {
+    fail('GPR_PACKET_ADMISSION_REQUIRED');
+  }
+  if (!expected.receiptMetadataVerified && fs.existsSync(gate.receiptConfig.databasePath)) {
+    const db = openVerified(gate.receiptConfig, false, true);
+    db.close();
+  }
+  semanticGateRevalidate(state.config, gate.store, state.readers, gate.admission, {});
+  const packetDb = openAuthorityPacketVerified(state.config, false, true);
+  let record;
+  try { record = semanticGateRecordDb(packetDb, state.admissionId); } finally { packetDb.close(); }
+  semanticGateAssertRecordContext(record, state.consumerIntent, state.consumerKey);
+  const namespace = gate.receiptConfig.namespace;
+  if (record.repository !== namespace.repository
+    || record.parent_issue !== namespace.parent_issue
+    || record.child_issue !== namespace.child_issue
+    || record.execution_binding.semantic_run !== record.consumer.run) {
+    fail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  if (expected.lock !== undefined && expected.lock !== record.consumer.lock
+    || expected.lock_id !== undefined && expected.lock_id !== record.consumer.lock
+    || expected.run_id !== undefined && expected.run_id !== record.execution_binding.receipt_run_id) {
+    fail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  return record;
+}
+
+function revalidateReceiptSemanticGate(gate, expected = {}) {
+  if (!gate) return;
+  verifyReceiptSemanticBinding(gate, expected);
+}
+
+function verifyReceiptSemanticAuthority(snapshot, sessionOwner, allocation) {
+  const consumers = receiptDeclaredConsumers(snapshot);
+  const gate = sessionOwner.semanticGate;
+  if (!gate) {
+    if (consumers.length > 0) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    const completion = receiptCompletionApplicability(snapshot);
+    if (completion.required) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    return false;
+  }
+  sessionOwner.semanticRequired = true;
+  verifyReceiptSemanticBinding(gate, {
+    receiptStoreInstanceId: sessionOwner.storeInstanceId,
+    lock_id: allocation && allocation.lock_id || sessionOwner.lockId,
+    run_id: allocation && allocation.run_id || sessionOwner.runId
+  });
+  semanticCompletionApplicability(gate.store, gate.admission);
+  if (consumers.length === 0) return true;
+  const binding = snapshot.semantic_binding;
+  const requiredForConsumer = consumers.filter((item) => item.class === gate.intent.consumer.stage);
+  const admittedDependencies = gate.intent.predecessors.map((item) => ({
+    class: gate.intent.consumer.stage,
+    dependency_id: item.dependency_id,
+    scope_digest: gate.intent.consumer.scope_digest
+  })).sort((left, right) => `${left.class}\u0000${left.dependency_id}\u0000${left.scope_digest}`
+    .localeCompare(`${right.class}\u0000${right.dependency_id}\u0000${right.scope_digest}`));
+  const authorityDependencies = requiredForConsumer.slice().sort((left, right) =>
+    `${left.class}\u0000${left.dependency_id}\u0000${left.scope_digest}`
+      .localeCompare(`${right.class}\u0000${right.dependency_id}\u0000${right.scope_digest}`));
+  if (!isRecord(binding) || !exactKeys(binding, ['semantic_run', 'receipt_run_id', 'loop_run_id'])
+    || binding.semantic_run !== gate.intent.consumer.run
+    || binding.receipt_run_id !== sessionOwner.runId
+    || binding.receipt_run_id !== gate.execution.receipt_run_id
+    || binding.loop_run_id !== gate.execution.loop_run_id
+    || gate.execution.receipt_run_id !== sessionOwner.runId
+    || requiredForConsumer.length === 0
+    || canonicalSerialize(authorityDependencies) !== canonicalSerialize(admittedDependencies)) {
+    fail('GPR_PACKET_BINDING_MISMATCH');
+  }
+  revalidateReceiptSemanticGate(gate, {
+    receiptStoreInstanceId: sessionOwner.storeInstanceId,
+    lock_id: allocation && allocation.lock_id || sessionOwner.lockId,
+    run_id: allocation && allocation.run_id || sessionOwner.runId
+  });
+  return true;
 }
 
 async function callReader(reader, errorCode) {
@@ -2747,14 +6364,39 @@ function createProgrammeReceiptStore(options) {
     instanceId: randomId('store'),
     config,
     get databasePath() { return config.databasePath; },
-    allocateRun(input) {
+    allocateRun(input, internalMode = null) {
+      programmeReceiptStoreState(this);
+      if (internalMode !== null && internalMode !== PENDING_ALLOCATION_PREFLIGHT
+        && internalMode !== PENDING_ALLOCATION_COMMIT) fail('GPR_ALLOCATION_INVALID');
       if (isRecord(input) && ('lease' in input || 'fence_id' in input || 'fence_sequence' in input || 'lease_id' in input)) fail('GPR_CALLER_FENCE_FORBIDDEN');
-      if (!exactKeys(input, ['lock', 'authority', 'start', 'candidate', 'lease_ms'])
+      const hasSemanticGate = isRecord(input) && Object.hasOwn(input, 'semantic_gate');
+      const allowedKeys = ['lock', 'authority', 'start', 'candidate', 'lease_ms', ...(hasSemanticGate ? ['semantic_gate'] : [])];
+      if (!exactKeys(input, allowedKeys)
         || !isSafeId(input.lock) || !Number.isSafeInteger(input.lease_ms)
         || input.lease_ms < LIMITS.leaseMinMs || input.lease_ms > LIMITS.leaseMaxMs) fail('GPR_ALLOCATION_INVALID');
+      const semanticGate = hasSemanticGate ? receiptSemanticGate(input.semantic_gate, store) : null;
+      if (semanticGate) verifyReceiptSemanticBinding(semanticGate, {
+        receiptStoreInstanceId: store.instanceId,
+        lock: input.lock,
+        run_id: semanticGate.execution.receipt_run_id
+      });
       const authority = validateAuthority(input.authority);
       const start = validateStart(input.start);
       if (input.candidate !== undefined && input.candidate !== null) fail('GPR_FAKE_START_CANDIDATE');
+      if (!semanticGate && internalMode !== PENDING_ALLOCATION_COMMIT) {
+        const session = deepFreeze({ status: 'PENDING_AUTHORITY_PREFLIGHT' });
+        SESSION_OWNERS.set(session, {
+          storeInstanceId: this.instanceId,
+          ownerInstanceId: null,
+          processId: process.pid,
+          allocationId: null,
+          runId: null,
+          lockId: input.lock,
+          semanticGate: null,
+          pendingInput: deepFreeze(clone(input)),
+        });
+        return session;
+      }
       const ownerInstanceId = randomId('owner');
       const db = openVerified(config);
       let allocation;
@@ -2769,9 +6411,18 @@ function createProgrammeReceiptStore(options) {
           const previous = latestAllocationDb(db);
           const highWater = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
           const fenceSequence = highWater + 1;
+          if (semanticGate) verifyReceiptSemanticBinding(semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock: input.lock,
+            run_id: semanticGate.execution.receipt_run_id
+          });
+          if (semanticGate && db.prepare('SELECT 1 AS value FROM allocations WHERE run_id = ?').get(semanticGate.execution.receipt_run_id)) {
+            fail('GPR_PACKET_BINDING_MISMATCH');
+          }
           const row = {
             allocation_id: randomId('allocation'),
-            run_id: randomId('run'),
+            run_id: semanticGate ? semanticGate.execution.receipt_run_id : randomId('run'),
             lock_id: input.lock,
             lease_id: randomId('lease'),
             fence_id: randomId('fence'),
@@ -2829,12 +6480,29 @@ function createProgrammeReceiptStore(options) {
         ownerInstanceId,
         processId: process.pid,
         allocationId: allocation.allocation_id,
-        runId: allocation.run_id
+        runId: allocation.run_id,
+        lockId: allocation.lock_id,
+        semanticGate
       });
       return session;
     },
     async startAllocatedRun(session, readers) {
-      const state = sessionState(store, session);
+      programmeReceiptStoreState(this);
+      let state = sessionState(store, session);
+      let pendingPreflightComplete = false;
+      if (state.pendingInput) {
+        const pendingAuthority = validateAuthority(state.pendingInput.authority);
+        const pendingStart = validateStart(state.pendingInput.start);
+        const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+        verifyAuthoritySnapshot(pendingAuthority, authoritySnapshot);
+        verifyReceiptSemanticAuthority(authoritySnapshot, state, null);
+        const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
+        if (canonicalSerialize(observedStart) !== canonicalSerialize(pendingStart)) fail('GPR_START_CHANGED');
+        revalidateReceiptSemanticGate(state.semanticGate);
+        const persistedSession = store.allocateRun(state.pendingInput, PENDING_ALLOCATION_COMMIT);
+        state = sessionState(store, persistedSession);
+        pendingPreflightComplete = true;
+      }
       const db = openVerified(config);
       let allocation;
       try {
@@ -2845,9 +6513,14 @@ function createProgrammeReceiptStore(options) {
       }
       const authority = JSON.parse(allocation.authority_json);
       const start = JSON.parse(allocation.start_json);
-      verifyAuthoritySnapshot(authority, await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
-      const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
-      if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
+      if (!pendingPreflightComplete) {
+        const authoritySnapshot = await callReader(readers && readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+        verifyAuthoritySnapshot(authority, authoritySnapshot);
+        verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
+        const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
+        if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
+        revalidateReceiptSemanticGate(state.semanticGate);
+      }
       let receipt;
       let expectedVerification;
       const writeDb = openVerified(config);
@@ -2855,6 +6528,12 @@ function createProgrammeReceiptStore(options) {
         transaction(writeDb, () => {
           const transactionNow = isoAt();
           allocation = verifyFenceDb(writeDb, state, transactionNow);
+          verifyReceiptSemanticBinding(state.semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock_id: allocation.lock_id,
+            run_id: allocation.run_id
+          });
           if (readChainDb(writeDb, state.runId, true).length > 0) fail('GPR_RUN_ALREADY_STARTED');
           receipt = createReceipt(allocation, config, {
             receipt_type: 'RUN_STARTED',
@@ -2879,26 +6558,38 @@ function createProgrammeReceiptStore(options) {
       return started;
     },
     async startRun(input, readers) {
-      const allocated = store.allocateRun(input);
+      programmeReceiptStoreState(this);
+      const trustedPreflightRequired = isRecord(input) && input.semantic_gate === undefined;
+      const allocated = store.allocateRun(input,
+        trustedPreflightRequired ? PENDING_ALLOCATION_PREFLIGHT : null);
       return store.startAllocatedRun(allocated, readers);
     },
     appendReceipt(session, input) {
+      programmeReceiptStoreState(this);
+      const owner = sessionState(store, session);
+      if (owner.semanticRequired === true && !owner.semanticGate) fail('GPR_PACKET_ADMISSION_REQUIRED');
+      revalidateReceiptSemanticGate(owner.semanticGate);
+      if (!owner.startVerificationDigest) fail('GPR_PACKET_ADMISSION_REQUIRED');
       return appendReceiptInternal(store, session, input);
     },
     interruptRun(session, input = {}) {
+      programmeReceiptStoreState(this);
       return appendReceiptInternal(store, session, {
         receipt_type: 'RUN_INTERRUPTED',
         candidate: input.candidate,
         payload: input.payload || { classification: 'RUN_INTERRUPTED' },
-        created_at: input.created_at
+        created_at: input.created_at,
+        ...(Object.hasOwn(input, 'semantic_completion') ? { semantic_completion: input.semantic_completion } : {})
       });
     },
     readReceiptChain(runId) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(runId)) fail('GPR_RUN_ID_INVALID');
       const db = openVerified(config, false);
       try { return readChainDb(db, runId); } finally { db.close(); }
     },
     classifyRecovery(runId, now = Date.now()) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(runId)) fail('GPR_RUN_ID_INVALID');
       const observedAt = isoAt(now);
       const db = openVerified(config, false);
@@ -2915,6 +6606,7 @@ function createProgrammeReceiptStore(options) {
       }
     },
     async admitMutationOperation(session, descriptorInput, trustedReadersInput) {
+      programmeReceiptStoreState(this);
       const state = sessionState(store, session);
       if (!state.startVerificationDigest) fail('GPR_RUN_NOT_FRESHLY_VERIFIED');
       const descriptor = validateOperationDescriptor(descriptorInput);
@@ -2922,7 +6614,10 @@ function createProgrammeReceiptStore(options) {
       let allocation;
       const initialDb = openVerified(config, false);
       try { allocation = allocationFromStateDb(initialDb, state); } finally { initialDb.close(); }
-      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), await callReader(trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
+      const authoritySnapshot = await callReader(trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), authoritySnapshot);
+      verifyReceiptSemanticAuthority(authoritySnapshot, state, allocation);
+      revalidateReceiptSemanticGate(state.semanticGate);
       const source = validateSourceSnapshot(await callReader(trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
       if (source.source_digest !== descriptor.expected_source_digest || source.cas_digest !== descriptor.cas_digest) fail('GPR_SOURCE_CHANGED');
       const operationId = randomId('operation');
@@ -2941,6 +6636,12 @@ function createProgrammeReceiptStore(options) {
         operation = transaction(db, () => {
           const createdAt = isoAt();
           allocation = verifyFenceDb(db, state, createdAt);
+          verifyReceiptSemanticBinding(state.semanticGate, {
+            receiptMetadataVerified: true,
+            receiptStoreInstanceId: store.instanceId,
+            lock_id: allocation.lock_id,
+            run_id: allocation.run_id
+          });
           const chain = readChainDb(db, state.runId);
           if (chain[0].receipt_type !== 'RUN_STARTED' || chain[0].sequence !== 1) fail('GPR_RUN_NOT_STARTED');
           if (TERMINAL_TYPES.includes(chain[chain.length - 1].receipt_type)) fail('GPR_RUN_TERMINAL');
@@ -3022,16 +6723,26 @@ function createProgrammeReceiptStore(options) {
       return admission;
     },
     async authorizeMutationDispatch(session, admission) {
+      programmeReceiptStoreState(this);
       const { sessionOwner, state } = admissionState(store, session, admission);
       if (state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
       const dbBefore = openVerified(config, false);
       let allocation;
       try { allocation = allocationFromStateDb(dbBefore, sessionOwner); } finally { dbBefore.close(); }
-      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), await callReader(state.trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
+      const authoritySnapshot = await callReader(state.trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
+      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), authoritySnapshot);
+      verifyReceiptSemanticAuthority(authoritySnapshot, sessionOwner, allocation);
+      revalidateReceiptSemanticGate(sessionOwner.semanticGate);
       const source = validateSourceSnapshot(await callReader(state.trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
       const db = openVerified(config, false);
       try {
         allocation = verifyFenceDb(db, sessionOwner, isoAt());
+        verifyReceiptSemanticBinding(sessionOwner.semanticGate, {
+          receiptMetadataVerified: true,
+          receiptStoreInstanceId: store.instanceId,
+          lock_id: allocation.lock_id,
+          run_id: allocation.run_id
+        });
         const current = operationWithStateDb(db, state.operationId);
         if (current.event.state !== 'IN_FLIGHT'
           || current.operation.run_id !== allocation.run_id
@@ -3046,6 +6757,7 @@ function createProgrammeReceiptStore(options) {
       }
     },
     async recordMutationOutcome(session, admission, evidenceInput) {
+      programmeReceiptStoreState(this);
       const { state } = admissionState(store, session, admission);
       if (!state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
       let operation;
@@ -3092,6 +6804,7 @@ function createProgrammeReceiptStore(options) {
       return store.readMutationOperation(state.operationId);
     },
     readMutationOperation(operationId) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(operationId)) fail('GPR_OPERATION_NOT_FOUND');
       const db = openVerified(config, false);
       try {
@@ -3100,6 +6813,7 @@ function createProgrammeReceiptStore(options) {
       } finally { db.close(); }
     },
     async reconcileMutationOperation(operationId, authorityReader, providerReader) {
+      programmeReceiptStoreState(this);
       if (!isSafeId(operationId) || typeof authorityReader !== 'function' || typeof providerReader !== 'function') fail('GPR_RECONCILIATION_INVALID');
       let operation;
       let currentState;
@@ -3129,7 +6843,9 @@ function createProgrammeReceiptStore(options) {
     }
   };
   openVerified(config).close();
-  return Object.freeze(store);
+  Object.freeze(store);
+  PROGRAMME_RECEIPT_STORE_OWNERS.set(store, { config, instanceId: store.instanceId, processId: process.pid });
+  return store;
 }
 
 function parseArgs(args) {
@@ -3144,6 +6860,47 @@ function parseArgs(args) {
     }
   }
   return result;
+}
+
+function readAuthorityPacketCli(args) {
+  const config = createStoreConfig({
+    repository: args.repository,
+    parent_issue: Number(args.parent_issue),
+    child_issue: Number(args.child_issue),
+    stateRoot: args.state_root,
+    repositoryRoot: args.repository_root
+  });
+  if (typeof args.packet_id !== 'string' || typeof args.expected_bindings !== 'string'
+    || typeof args.challenge !== 'string' || !/^[a-f0-9]{64}$/.test(args.challenge)) {
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  let expectedBindings;
+  try { expectedBindings = packetCanonicalInput(args.expected_bindings); } catch (error) {
+    if (error instanceof GprError) throw error;
+    packetFail('GPR_PACKET_VALUE_INVALID');
+  }
+  packetValidateBindings(expectedBindings);
+  if (canonicalSerialize(expectedBindings) !== args.expected_bindings) packetFail('GPR_PACKET_VALUE_INVALID');
+  const db = openAuthorityPacketVerified(config, false, true);
+  let delivery;
+  try {
+    const identities = readAuthorityPacketRow(db, args.packet_id, expectedBindings);
+    const storeIdentity = authorityPacketStoreIdentityDb(db, config);
+    const identity = authorityPacketRuntimeIdentity();
+    delivery = {
+      envelope: packetDeliveryEnvelope(identities, config, storeIdentity, identity.runtime_identity_digest, args.challenge),
+      packet: identities.packet
+    };
+    validateAuthorityPacketDelivery(delivery, {
+      expectedBindings,
+      packet_id: args.packet_id,
+      store_identity_digest: storeIdentity,
+      runtime_identity_digest: identity.runtime_identity_digest,
+      namespace_digest: config.namespaceDigest,
+      challenge: args.challenge
+    });
+  } finally { db.close(); }
+  process.stdout.write(`${canonicalSerialize(delivery)}\n`);
 }
 
 function main() {
@@ -3169,6 +6926,29 @@ function main() {
     process.stdout.write(`${canonicalSerialize(packet)}\n`);
     return;
   }
+  if (args._[0] === 'read-authority-packet') {
+    readAuthorityPacketCli(args);
+    return;
+  }
+  if (args._[0] === 'verify-authority-packet-store') {
+    const config = createStoreConfig({
+      repository: args.repository,
+      parent_issue: Number(args.parent_issue),
+      child_issue: Number(args.child_issue),
+      stateRoot: args.state_root,
+      repositoryRoot: args.repository_root
+    });
+    const db = openAuthorityPacketVerified(config, false, true);
+    let storeIdentity;
+    try { storeIdentity = authorityPacketStoreIdentityDb(db, config); } finally { db.close(); }
+    process.stdout.write(`${canonicalSerialize({
+      ok: true,
+      schema: AUTHORITY_PACKET_SCHEMA_ID,
+      namespace_digest: config.namespaceDigest,
+      store_identity_digest: storeIdentity
+    })}\n`);
+    return;
+  }
   if (args._[0] === 'inspect') {
     const config = createStoreConfig({
       repository: args.repository,
@@ -3188,14 +6968,27 @@ function main() {
 
 if (require.main === module) {
   try { main(); } catch (error) {
-    const code = error instanceof GprError ? error.code : 'GPR_INTERNAL_ERROR';
-    process.stderr.write(`${JSON.stringify({ ok: false, code })}\n`);
+    if (error && error.packetBoundary) process.stderr.write(`${canonicalSerialize(packetFailureEnvelope(error))}\n`);
+    else {
+      const code = error instanceof GprError ? error.code : 'GPR_INTERNAL_ERROR';
+      process.stderr.write(`${JSON.stringify({ ok: false, code })}\n`);
+    }
     process.exitCode = 1;
   }
 }
 
 module.exports = Object.freeze({
   APPLICATION_ID,
+  AUTHORITY_PACKET_CONSUMER_CLASSES,
+  AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID,
+  AUTHORITY_PACKET_CURRENT_SCHEMA_ID,
+  AUTHORITY_PACKET_DELIVERY_SCHEMA_ID,
+  AUTHORITY_PACKET_EVENT_SCHEMA_ID,
+  AUTHORITY_PACKET_LIMITS,
+  AUTHORITY_PACKET_REASON_CODES,
+  AUTHORITY_PACKET_SCHEMA_ID,
+  AUTHORITY_PACKET_STAGES,
+  AUTHORITY_PACKET_USER_VERSION,
   BUSY_TIMEOUT_MS,
   BROKER_RECOVERY_CLASSIFICATION,
   BROKER_RECOVERY_REASON,
@@ -3213,23 +7006,43 @@ module.exports = Object.freeze({
   RECOVERY_RECORD_SCHEMA_ID,
   SAFETY_CLASSES,
   SCHEMA_ID,
+  SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID,
+  SEMANTIC_GATE_ADMISSION_SCHEMA_ID,
   TERMINAL_TYPES,
   USER_VERSION,
   ZERO_OPERATION_INVENTORY_DIGEST,
   V3_MIGRATION_PLAN_SCHEMA_ID,
   V3_USER_VERSION,
   GprError,
+  assertAuthenticAuthorityPacketStore,
+  assertAuthenticSemanticGateAdmission,
   assertRuntimeSupport,
   appendV3ReceiptWithChainDigest,
+  authorityPacketIdentities,
+  authorityPacketRuntimeIdentity,
+  authorityPacketStoreIdentity,
+  buildAuthorityPacketMigrationPlan,
+  buildAuthorityPacketSchemaSql,
   buildFinalV3SchemaSql,
   buildV2ToV3MigrationPlan,
+  createAuthorityPacketStore,
   createProgrammeReceiptStore,
   digestValue,
   canonicalSerialize,
   expectedFinalV3SchemaFingerprint,
+  expectedAuthorityPacketSchemaFingerprint,
   expectedV2SchemaFingerprint,
+  initialiseAuthorityPacketStore,
+  migrateAuthorityPacketStore,
   namespaceDigest,
+  packetFailureEnvelope,
+  planAuthorityPacketMigration,
   preRecoveryEvidenceDigest,
+  validateAuthorityPacket,
+  validateAuthorityPacketAcceptance,
+  validateAuthorityPacketCurrent,
+  validateAuthorityPacketDelivery,
+  validateAuthorityPacketDeliveryProcessResult,
   verifyFinalV3Database,
   verifyV3DurableEvidence,
   resolveDatabasePath,
@@ -3243,6 +7056,7 @@ module.exports = Object.freeze({
   validateReceiptObject,
   validateRecoveryRecord,
   validateReservedOrphanPayload,
+  validateSemanticGateAdmission,
   validateStart,
   validateVerificationPacket,
   validateVerifierProcessResult,

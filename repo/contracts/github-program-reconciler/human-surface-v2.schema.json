@@ -22,14 +22,15 @@
     "migration",
     "safety",
     "phase_projection",
-    "executable_proof"
+    "executable_proof",
+    "programme_graph"
   ],
   "properties": {
     "schema": { "const": "toolkit.github-program.human-surface.v2" },
     "root": { "const": "S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "lock": { "const": "DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008" },
     "version": { "const": "human-v2" },
-    "package_version": { "const": "2.10.9" },
+    "package_version": { "const": "2.10.10" },
     "facade_export": { "const": "humanSurfaceV2" },
     "operations": {
       "const": ["readComplete", "render", "extendHistory", "planMigration"]
@@ -71,13 +72,22 @@
         "render": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["parent_child_source", "pr_source", "targets"],
+          "required": ["parent_child_source", "canonical_state_source", "pr_source", "targets"],
           "properties": {
             "parent_child_source": {
               "type": "object",
               "additionalProperties": false,
               "required": ["type", "parent_read"],
               "properties": { "type": { "const": "PARENT_READ" }, "parent_read": { "$ref": "#/$defs/completeRead" } }
+            },
+            "canonical_state_source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "state"],
+              "properties": {
+                "type": { "const": "CANONICAL_STATE" },
+                "state": { "$ref": "#/$defs/genericCanonicalState" }
+              }
             },
             "pr_source": {
               "type": "object",
@@ -145,13 +155,22 @@
     "serialization": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["canonical_json", "base64url", "typed_nodes", "text_encoding", "url_rebuild"],
+      "required": ["canonical_json", "base64url", "typed_nodes", "text_encoding", "url_rebuild", "renderer_revision", "historical_dispatch"],
       "properties": {
         "canonical_json": { "const": "existing-toolkit-sort-keys-finite-safe-integers" },
         "base64url": { "const": "unpadded-canonical-json" },
         "typed_nodes": { "const": true },
         "text_encoding": { "const": "audit-first-code-point-single-pass" },
-        "url_rebuild": { "const": "https-only-whatwg-no-credentials-preserve-query-order" }
+        "url_rebuild": { "const": "https-only-whatwg-no-credentials-preserve-query-order" },
+        "renderer_revision": { "const": "human-v2-r093" },
+        "historical_dispatch": {
+          "const": {
+            "recognized_revision": "current-human-v2",
+            "absent_revision": "frozen-J-K-serializer-only",
+            "unknown_revision": "reject",
+            "historical_graphless_authority": "read-only-no-current-proof"
+          }
+        }
       }
     },
     "lifecycle": {
@@ -169,7 +188,7 @@
     "migration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null"],
+      "required": ["max_write_plans", "legacy_legacy", "human_legacy", "human_human", "human_drift", "legacy_human", "human_parent_history_null", "graphless_generic_parent"],
       "properties": {
         "max_write_plans": { "const": 1 },
         "legacy_legacy": { "const": "WRITE_PARENT" },
@@ -177,7 +196,8 @@
         "human_human": { "const": "RECONCILED" },
         "human_drift": { "const": "MIGRATION_CHILD_DRIFT" },
         "legacy_human": { "const": "MIGRATION_ORDER_INVALID" },
-        "human_parent_history_null": { "const": true }
+        "human_parent_history_null": { "const": true },
+        "graphless_generic_parent": { "const": "WRITE_PARENT_IF_COMPLETE_METADATA" }
       }
     },
     "safety": {
@@ -205,6 +225,19 @@
         "metadata_only_aggregate": { "const": false },
         "selective_aggregate": { "const": "selected family only" },
         "false_positive_probes": { "const": ["missing", "duplicate", "unknown", "failed-case", "entrypoint-mismatch", "metadata-tampering"] }
+      }
+    },
+    "programme_graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["graph_schema", "metadata_schema", "identity_fields", "digest_scope", "historical_absence", "renderer_revision"],
+      "properties": {
+        "graph_schema": { "const": "toolkit.controller.programme-graph.v1" },
+        "metadata_schema": { "const": "toolkit.github-program.programme-graph-metadata.v1" },
+        "identity_fields": { "const": ["schema", "digest"] },
+        "digest_scope": { "const": "canonical-serialization-with-digest-excluded" },
+        "historical_absence": { "const": "readable-without-current-proof" },
+        "renderer_revision": { "const": "human-v2-r093" }
       }
     },
     "phase_projection": {
@@ -409,6 +442,123 @@
         "body_sha256": { "$ref": "#/$defs/digest" },
         "revision": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
       }
+    },
+    "programmeGraphIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "digest"],
+      "properties": {
+        "schema": { "const": "toolkit.controller.programme-graph.v1" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "genericCanonicalState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active_lanes", "children", "evidence_refs", "historical_transitions", "parent", "prs", "repository", "schema", "extensions"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.state.generic.v1" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "parent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["goal", "issue", "title"],
+          "properties": {
+            "goal": { "$ref": "#/$defs/safeLine" },
+            "issue": { "$ref": "#/$defs/issue" },
+            "title": { "$ref": "#/$defs/safeLine" }
+          }
+        },
+        "children": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/genericCanonicalChild" } },
+        "active_lanes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "oneOf": [
+              { "required": ["child_issue"], "properties": { "child_issue": { "$ref": "#/$defs/issue" } } },
+              { "required": ["child"], "properties": { "child": { "$ref": "#/$defs/issue" } } }
+            ],
+            "properties": {
+              "child_issue": { "$ref": "#/$defs/issue" },
+              "child": { "$ref": "#/$defs/issue" },
+              "gate": { "$ref": "#/$defs/safeLine" },
+              "gate_id": { "$ref": "#/$defs/safeLine" },
+              "epoch_id": { "$ref": "#/$defs/safeLine" },
+              "epoch": { "$ref": "#/$defs/safeLine" },
+              "current_work": { "$ref": "#/$defs/safeLine" },
+              "work": { "$ref": "#/$defs/safeLine" },
+              "work_claims": { "$ref": "#/$defs/stringArray" }
+            }
+          }
+        },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "historical_transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } },
+        "prs": { "type": "array", "items": { "type": "object" } },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/programmeGraphMetadataExtension" }
+        },
+        "design_lock": { "$ref": "#/$defs/safeLine" },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/issue" } },
+        "human_surface_v2_history": { "type": "object" }
+      }
+    },
+    "genericCanonicalChild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundaries", "done_when", "eli5", "epochs", "finality", "issue", "lifecycle", "objective", "order", "out_of_scope", "pr_registry", "scope", "summary", "title"],
+      "properties": {
+        "boundaries": { "$ref": "#/$defs/stringArray" },
+        "done_when": { "$ref": "#/$defs/stringArray" },
+        "eli5": { "$ref": "#/$defs/safeLine" },
+        "epochs": { "type": "array", "items": { "type": "object" } },
+        "finality": { "type": "object" },
+        "issue": { "$ref": "#/$defs/issue" },
+        "lifecycle": { "enum": ["COMPLETED", "CURRENT", "QUEUED"] },
+        "objective": { "$ref": "#/$defs/safeLine" },
+        "order": { "type": "integer", "minimum": 1 },
+        "out_of_scope": { "$ref": "#/$defs/stringArray" },
+        "pr_registry": { "type": "array", "items": { "type": "object" } },
+        "scope": { "$ref": "#/$defs/stringArray" },
+        "summary": { "$ref": "#/$defs/safeLine" },
+        "title": { "$ref": "#/$defs/safeLine" },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/issue" } },
+        "holds": { "type": "array", "items": { "type": "object" } },
+        "deliverables": { "$ref": "#/$defs/stringArray" },
+        "authority_packet_current": { "type": "object" }
+      }
+    },
+    "programmeGraphMetadataExtension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "outcomes"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.programme-graph-metadata.v1" },
+        "outcomes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/programmeGraphMetadataOutcome" } }
+      }
+    },
+    "programmeGraphMetadataOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["child_issue", "outcome_id"],
+      "properties": {
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "outcome_id": { "enum": ["C1", "W2-A", "S1-A", "C2", "C3", "S1", "S2", "H1", "H2", "H3", "H4", "W1", "W2", "D1", "A1", "N1", "N2", "N3", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "V1", "V2", "A4", "A5", "Q"] },
+        "priority": { "enum": ["URGENT", "HIGH", "NORMAL", "LOW"] },
+        "planning_class": { "enum": ["INVESTIGATION", "PLANNING", "DELIVERY", "REFERENCE"] },
+        "planning_admission": { "enum": ["G1_READ_ONLY_AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "implementation_admission": { "enum": ["AUTHORIZED", "DEFERRED", "NOT_APPLICABLE"] },
+        "reference_issue_pointers": { "type": "array", "items": { "$ref": "#/$defs/referenceIssue" }, "uniqueItems": true }
+      }
+    },
+    "referenceIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue"],
+      "properties": { "repository": { "$ref": "#/$defs/repository" }, "issue": { "$ref": "#/$defs/issue" } }
     },
     "renderArtifact": {
       "type": "object",

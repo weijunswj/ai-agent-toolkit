@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { types: utilTypes } = require('node:util');
 
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const a2 = require('./toolkit-capability-registry.cjs');
@@ -25,6 +26,23 @@ const POLICY = Object.freeze({
   default_mode: 'root-only',
   a2_capability: 'execution_loop',
   a2_consent: Object.freeze({ enabled_required: true, revalidate_before_running: true, revalidate_before_atomic_batch: true, blocked_run_state: 'workspace-ready', fail_closed_states: Object.freeze(['disabled', 'unresolved', 'malformed', 'interrupted']) }),
+  semantic_admission: Object.freeze({
+    owner: 'receipt-runtime',
+    trusted_reader_bound: true,
+    opaque_process_local: true,
+    context_storage: 'private-weakmap',
+    lazy_receipt_import: true,
+    synchronous_guarded_calls: true,
+    caller_verified_bypass: false,
+    legacy_bypass: false,
+    environment_bypass: false,
+    chronology_substitution: false,
+    lifecycle_summary_substitution: false,
+    required_receipt_apis: Object.freeze(['admitSemanticGate', 'revalidateSemanticGate', 'beginSemanticGateDispatch', 'recordSemanticGateDispatch', 'recoverSemanticGateAdmission']),
+    trusted_readers: Object.freeze(['readAuthority', 'readCurrent', 'readWebDecision', 'readCandidate', 'readDispatchOutcome', 'screenPacket']),
+    guarded_paths: Object.freeze(['admitRun', 'prepareRetry', 'transitionRun:admitted', 'transitionRun:running', 'startDelegatedRun', 'executeAtomicLaunch', 'executeTypedGitCommit', 'commitExact', 'completeRun', 'releaseMutationLease', 'restart', 'takeover']),
+  }),
+  dispatch_recovery: Object.freeze({ intent: 'beginSemanticGateDispatch', confirmed: 'recordSemanticGateDispatch', not_started: 'recordSemanticGateDispatch', ambiguous: 'hold', automatic_relaunch: false, promise_in_sync_guard: 'fail_closed' }),
   a1_operation: 'git.commit',
   a1: Object.freeze({ sole_operation_authority: true, public_issuer: false, a3_ticket_format: false, git_stage_operation: false }),
   routing: Object.freeze({ workspace_receipt_required_before_substantive_start: true, substantive_start_state: 'workspace-ready', exact_start_binding: Object.freeze(['run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest', 'route_plan', 'workspace_receipt', 'snapshot_commit', 'snapshot_tree']) }),
@@ -53,6 +71,8 @@ const TERMINAL_OUTCOMES = Object.freeze({ success: 'terminal-success', failure: 
 const SAFE_SETUP_OPERATIONS = Object.freeze(['fetch', 'safe-directory-check', 'checkout-detached', 'verify-snapshot']);
 const DURABLE_ARTIFACT_TYPES = Object.freeze(['workspace-receipt', 'terminal-packet']);
 const FORBIDDEN_DURABLE_KEYS = /^(raw|absolute|private|secret|credential|password|prompt|model_output|tool_output|repository_contents|environment|env|a1_ticket|ticket|issuer|token|remote_url|remote_userinfo|path)$/i;
+const SEMANTIC_CONTEXTS = new WeakMap();
+let receiptRuntime;
 
 
 class ExecutionLoopError extends Error {
@@ -69,7 +89,9 @@ function fail(code, evidence = {}) {
 }
 
 function isRecord(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (value === null || typeof value !== 'object') return false;
+  try { if (utilTypes.isProxy(value)) return false; } catch (_error) { return false; }
+  return !Array.isArray(value);
 }
 
 function hasOwn(value, key) {
@@ -83,8 +105,80 @@ function exactKeys(value, keys) {
   return actual.length === expected.size && actual.every((key) => expected.has(key));
 }
 
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) fail('CANONICAL_VALUE_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) fail('CANONICAL_VALUE_INVALID'); }
+    catch (_) { fail('CANONICAL_VALUE_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) fail('CANONICAL_VALUE_INVALID');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail('CANONICAL_VALUE_INVALID');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) fail('CANONICAL_VALUE_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) fail('CANONICAL_VALUE_INVALID');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) fail('CANONICAL_VALUE_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+        Object.defineProperty(result, String(index), { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) fail('CANONICAL_VALUE_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail('CANONICAL_VALUE_INVALID');
+      Object.defineProperty(result, name, { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+
+function trustedCallbackShell(value, code = 'GPR_PACKET_ADMISSION_REQUIRED') {
+  if (value === null || typeof value !== 'object') fail(code);
+  try { if (utilTypes.isProxy(value)) fail(code); } catch (_) { fail(code); }
+  if (Array.isArray(value)) fail(code);
+  let prototype;
+  let names;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) fail(code);
+  } catch (_) { fail(code); }
+  if (prototype !== Object.prototype && prototype !== null) fail(code);
+  const result = {};
+  for (const name of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) fail(code);
+    Object.defineProperty(result, name, { value: descriptor.value, enumerable: true, writable: true, configurable: true });
+  }
+  return result;
+}
+
+function screenTrustedCallbackInterface(value, code = 'GPR_PACKET_ADMISSION_REQUIRED') {
+  trustedCallbackShell(value, code);
+  return value;
+}
+
 function clone(value) {
-  return JSON.parse(JSON.stringify(value));
+  return JSON.parse(JSON.stringify(trustedDataCopy(value)));
 }
 
 function deepFreeze(value) {
@@ -93,7 +187,7 @@ function deepFreeze(value) {
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
 }
-function canonicalSerialize(value) {
+function canonicalSerializeTrusted(value) {
   if (value === null) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -101,9 +195,13 @@ function canonicalSerialize(value) {
     if (!Number.isFinite(value)) fail('CANONICAL_VALUE_INVALID');
     return Object.is(value, -0) ? '0' : String(value);
   }
-  if (Array.isArray(value)) return '[' + value.map(canonicalSerialize).join(',') + ']';
-  if (isRecord(value)) return '{' + Object.keys(value).sort().map((key) => canonicalSerialize(key) + ':' + canonicalSerialize(value[key])).join(',') + '}';
+  if (Array.isArray(value)) return '[' + value.map(canonicalSerializeTrusted).join(',') + ']';
+  if (isRecord(value)) return '{' + Object.keys(value).sort().map((key) => canonicalSerializeTrusted(key) + ':' + canonicalSerializeTrusted(value[key])).join(',') + '}';
   fail('CANONICAL_VALUE_INVALID');
+}
+
+function canonicalSerialize(value) {
+  return canonicalSerializeTrusted(trustedDataCopy(value));
 }
 
 function digestValue(value) {
@@ -124,6 +222,35 @@ function isSafeId(value, allowSlash = false) {
   if (!allowSlash && /[\\/]/.test(value)) return false;
   if (allowSlash && (value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:/.test(value))) return false;
   return /^[A-Za-z0-9._:/-]+$/.test(value);
+}
+
+function isSafePacketContractId(value, max = 160) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function isSafeReceiptRunId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^[A-Za-z0-9._:/-]+$/.test(value) && !value.startsWith('-') && !value.includes('..');
+}
+
+function validateExecutionBinding(binding, run) {
+  try {
+    binding = trustedDataCopy(binding);
+    run = run === undefined || run === null ? run : trustedDataCopy(run);
+  } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  const keys = ['semantic_run', 'receipt_run_id', 'loop_run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest'];
+  if (!isRecord(binding) || !exactKeys(binding, keys)
+    || ![null, undefined].includes(binding.semantic_run) && !isSafePacketContractId(binding.semantic_run)
+    || ![null, undefined].includes(binding.receipt_run_id) && !isSafeReceiptRunId(binding.receipt_run_id)
+    || ![null, undefined].includes(binding.loop_run_id) && !isSafePacketContractId(binding.loop_run_id)
+    || !isDigest(binding.repository_id) || !isDigest(binding.authorized_ref_digest)
+    || !isDigest(binding.current_authority_digest)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  if (run && (binding.loop_run_id !== run.run_id
+    || binding.repository_id !== run.repository_id
+    || binding.authorized_ref_digest !== run.authorized_ref_digest
+    || binding.current_authority_digest !== run.current_authority_digest)) fail('GPR_PACKET_BINDING_MISMATCH');
+  return deepFreeze(clone(binding));
 }
 
 function isSafeRelativePath(value) {
@@ -162,6 +289,212 @@ function invokeSync(fn, receiver, argument, code) {
   return result;
 }
 
+function loadReceiptRuntime() {
+  if (!receiptRuntime) receiptRuntime = require('./toolkit-github-program-receipt.cjs');
+  return receiptRuntime;
+}
+
+function receiptFailure(error, fallbackCode) {
+  if (error instanceof ExecutionLoopError) throw error;
+  let code = error && typeof error.code === 'string' ? error.code : null;
+  try {
+    const receipt = loadReceiptRuntime();
+    if (!(receipt.GprError && error instanceof receipt.GprError)) code = null;
+  } catch (_error) {
+    code = null;
+  }
+  if (code && /^GPR_[A-Z0-9_]+$/.test(code)) fail(code);
+  fail(fallbackCode);
+}
+
+function receiptCall(store, methodName, args, fallbackCode, requireResult = false) {
+  const receipt = loadReceiptRuntime();
+  if (typeof receipt.assertAuthenticAuthorityPacketStore !== 'function') fail(fallbackCode);
+  try { receipt.assertAuthenticAuthorityPacketStore(store); } catch (error) { receiptFailure(error, fallbackCode); }
+  if (!isRecord(store) || typeof store[methodName] !== 'function') fail(fallbackCode);
+  let result;
+  try {
+    result = store[methodName](...args);
+  } catch (error) {
+    receiptFailure(error, fallbackCode);
+  }
+  if (result !== null && (typeof result === 'object' || typeof result === 'function')) {
+    try { if (utilTypes.isProxy(result)) fail(fallbackCode); }
+    catch (_) { fail(fallbackCode); }
+    if (typeof result === 'object' && !Array.isArray(result)) trustedCallbackShell(result, fallbackCode);
+    else if (typeof result === 'object') fail(fallbackCode);
+    if (typeof result === 'object') {
+      const thenDescriptor = Object.getOwnPropertyDescriptor(result, 'then');
+      if (thenDescriptor && (!Object.hasOwn(thenDescriptor, 'value') || typeof thenDescriptor.value === 'function')) fail(fallbackCode);
+    }
+  }
+  if (isRecord(result) && result.ok === false) {
+    const code = result.reason_code || result.code;
+    if (typeof code === 'string' && /^GPR_[A-Z0-9_]+$/.test(code)) fail(code);
+    fail(fallbackCode);
+  }
+  if (result === false || result === null || requireResult && result === undefined) fail(fallbackCode);
+  return result;
+}
+
+function admissionToken(result, fallbackCode = 'GPR_PACKET_ADMISSION_REQUIRED') {
+  const token = isRecord(result) && hasOwn(result, 'admission') ? result.admission : result;
+  if ((typeof token !== 'object' || token === null) && typeof token !== 'function') fail(fallbackCode);
+  return token;
+}
+
+function semanticGateOptions(options = {}, requireIntent = true) {
+  options = trustedCallbackShell(options);
+  if (hasOwn(options, 'semantic_gate') && hasOwn(options, 'semanticGate')) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const rawSupplied = hasOwn(options, 'semantic_gate') ? options.semantic_gate : options.semanticGate;
+  const supplied = trustedCallbackShell(rawSupplied);
+  if (hasOwn(supplied, 'consumer_intent') && hasOwn(supplied, 'consumerIntent')
+    || hasOwn(supplied, 'trusted_readers') && hasOwn(supplied, 'trustedReaders')
+    || hasOwn(supplied, 'consumer_identity') && hasOwn(supplied, 'consumerIdentity')) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const store = supplied.store || supplied.receipt_store || supplied.receiptStore;
+  const consumerIntentValue = hasOwn(supplied, 'consumer_intent') ? supplied.consumer_intent : supplied.consumerIntent;
+  const trustedReadersValue = hasOwn(supplied, 'trusted_readers') ? supplied.trusted_readers : supplied.trustedReaders;
+  let consumerIntent;
+  let consumerIdentity;
+  try {
+    if (consumerIntentValue !== undefined) consumerIntent = trustedDataCopy(consumerIntentValue);
+    const identityValue = hasOwn(supplied, 'consumer_identity') ? supplied.consumer_identity : supplied.consumerIdentity;
+    if (identityValue !== undefined) consumerIdentity = trustedDataCopy(identityValue);
+  } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  const trustedReaders = screenTrustedCallbackInterface(trustedReadersValue);
+  try { if (utilTypes.isProxy(store)) fail('GPR_PACKET_ADMISSION_REQUIRED'); } catch (_) { fail('GPR_PACKET_ADMISSION_REQUIRED'); }
+  if (!isRecord(store) || requireIntent && !isRecord(consumerIntent) || !isRecord(trustedReaders)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const receipt = loadReceiptRuntime();
+  if (typeof receipt.assertAuthenticAuthorityPacketStore !== 'function') fail('GPR_PACKET_ADMISSION_REQUIRED');
+  try { receipt.assertAuthenticAuthorityPacketStore(store); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  return { store, consumerIntent, trustedReaders, consumerIdentity };
+}
+
+function boundConsumerIntent(consumerIntent, run) {
+  try { consumerIntent = trustedDataCopy(consumerIntent); }
+  catch (_) { fail('GPR_PACKET_BINDING_MISMATCH'); }
+  const binding = isRecord(consumerIntent.execution_binding) ? consumerIntent.execution_binding : {};
+  if (!isRecord(consumerIntent.consumer) || !isSafePacketContractId(consumerIntent.consumer.run)
+    || binding.semantic_run !== undefined && binding.semantic_run !== null
+      && binding.semantic_run !== consumerIntent.consumer.run) fail('GPR_PACKET_BINDING_MISMATCH');
+  const intent = {
+    ...consumerIntent,
+    execution_binding: {
+      ...binding,
+      semantic_run: consumerIntent.consumer.run,
+      loop_run_id: run.run_id,
+      repository_id: run.repository_id,
+      authorized_ref_digest: run.authorized_ref_digest,
+      current_authority_digest: run.current_authority_digest,
+    },
+  };
+  validateExecutionBinding(intent.execution_binding, run);
+  return intent;
+}
+
+function bindSemanticContext(run, context) {
+  if (!isRecord(run) || !context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  SEMANTIC_CONTEXTS.set(run, context);
+  return context;
+}
+
+function semanticContextForRun(run) {
+  return isRecord(run) ? SEMANTIC_CONTEXTS.get(run) : undefined;
+}
+
+function admitSemanticContext(options, run) {
+  const gate = semanticGateOptions(options);
+  const consumerIntent = boundConsumerIntent(gate.consumerIntent, run);
+  const result = receiptCall(gate.store, 'admitSemanticGate', [consumerIntent, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  const executionBinding = validateExecutionBinding(result.execution_binding || consumerIntent.execution_binding, run);
+  const context = Object.freeze({
+    store: gate.store,
+    admission: admissionToken(result),
+    trusted_readers: gate.trustedReaders,
+    consumer_intent: consumerIntent,
+    execution_binding: executionBinding,
+  });
+  bindSemanticContext(run, context);
+  return context;
+}
+
+function revalidateSemanticContext(context, run) {
+  if (!context || !isRecord(context.store)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(context.store, context.admission); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  const executionBinding = validateExecutionBinding(context.execution_binding, run);
+  return receiptCall(context.store, 'revalidateSemanticGate', [context.admission, { execution_binding: executionBinding }], 'GPR_PACKET_ADMISSION_REQUIRED');
+}
+
+function recoverSemanticContext(options, run) {
+  const gate = semanticGateOptions(options, false);
+  if (!isRecord(gate.consumerIdentity)) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  const result = receiptCall(gate.store, 'recoverSemanticGateAdmission', [gate.consumerIdentity, gate.trustedReaders], 'GPR_PACKET_ADMISSION_REQUIRED', true);
+  const receipt = loadReceiptRuntime();
+  try { receipt.assertAuthenticSemanticGateAdmission(gate.store, admissionToken(result)); } catch (error) { receiptFailure(error, 'GPR_PACKET_ADMISSION_REQUIRED'); }
+  const executionBinding = validateExecutionBinding(result.execution_binding, run);
+  const context = Object.freeze({
+    store: gate.store,
+    admission: admissionToken(result),
+    trusted_readers: gate.trustedReaders,
+    consumer_intent: null,
+    execution_binding: executionBinding,
+  });
+  if (run) bindSemanticContext(run, context);
+  return context;
+}
+
+function requireSemanticContext(options = {}, allowRecovery = false) {
+  options = trustedCallbackShell(options);
+  const context = semanticContextForRun(options.run);
+  if (context) return context;
+  if (allowRecovery && isRecord(options.semantic_gate || options.semanticGate)) return recoverSemanticContext(options, options.run);
+  fail('GPR_PACKET_ADMISSION_REQUIRED');
+}
+
+function revalidateRunSemanticContext(run, options = {}) {
+  options = trustedCallbackShell(options);
+  const context = semanticContextForRun(run)
+    || (isRecord(options.semantic_gate || options.semanticGate) ? recoverSemanticContext({ ...options, run }, run) : null);
+  if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  revalidateSemanticContext(context, run);
+  return context;
+}
+
+function terminalApplicability(context) {
+  const applicability = receiptCall(
+    context.store,
+    'semanticCompletionApplicability',
+    [context.admission],
+    'GPR_PACKET_AUTHORITY_UNVERIFIED',
+    true
+  );
+  if (!isRecord(applicability) || typeof applicability.required !== 'boolean'
+    || !isRecord(applicability.applicability)) fail('GPR_PACKET_AUTHORITY_UNVERIFIED');
+  return applicability;
+}
+
+function validateTerminalPreconditions(run, terminalPacket, context, options = {}, verifyCustody = true) {
+  revalidateSemanticContext(context, run);
+  const applicability = terminalApplicability(context);
+  if (applicability.required && verifyCustody) {
+    const supplied = options.substantive_result;
+    const outputStore = isRecord(supplied) && isRecord(supplied.store)
+      ? supplied.store : context.completion_custody && context.completion_custody.store;
+    if (!outputStore || !isDigest(terminalPacket.evidence_digest)) fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+    receiptCall(
+      context.store,
+      'verifySemanticCompletion',
+      [context.admission, outputStore, terminalPacket.evidence_digest],
+      'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+      true
+    );
+  }
+  return applicability;
+}
+
 function assertPrivacySafe(value, location = 'record', seen = new Set()) {
   if (!value || typeof value !== 'object') {
     if (typeof value === 'string' && (/https?:\/\//i.test(value) || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('/'))) fail('DURABLE_PRIVACY_VIOLATION', { location });
@@ -186,6 +519,13 @@ function laneId(value) {
 }
 
 function normalizeRequest(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
+  for (const key of ['request', 'task', 'authority', 'repository']) {
+    if (hasOwn(options, key)) {
+      try { options[key] = trustedDataCopy(options[key]); }
+      catch (_) { fail('REQUEST_CONTRACT_INVALID'); }
+    }
+  }
   if (isRecord(options.request) && options.request.contract_version === CONTRACTS[0]) return validateRequest(options.request);
   const task = isRecord(options.task) ? options.task : {};
   const authority = isRecord(options.authority) ? options.authority : {};
@@ -219,6 +559,8 @@ function normalizeRequest(options = {}) {
 }
 
 function validateRequest(record) {
+  try { record = trustedDataCopy(record); }
+  catch (_) { fail('REQUEST_CONTRACT_INVALID'); }
   const keys = ['contract_version', 'request_id', 'task_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'current_authority_digest', 'delegated', 'requested_lanes', 'scope_digest'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[0] || !isSafeId(record.request_id) || !isSafeId(record.task_id)
     || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -230,6 +572,7 @@ function validateRequest(record) {
 }
 
 function readExecutionLoopConsent(options = {}) {
+  options = trustedCallbackShell(options, 'CONSENT_MALFORMED');
   if (hasOwn(options, 'executionLoopState')) return { enabled: false, state: 'unresolved', status_digest: null };
   let status;
   try {
@@ -245,6 +588,8 @@ function readExecutionLoopConsent(options = {}) {
   } catch (_error) {
     return { enabled: false, state: 'unresolved', status_digest: null };
   }
+  try { status = trustedDataCopy(status); }
+  catch (_error) { return { enabled: false, state: 'malformed', status_digest: null }; }
   if (!isRecord(status)) return { enabled: false, state: 'unresolved', status_digest: null };
   if (status.interrupted === true) return { enabled: false, state: 'interrupted', status_digest: null };
   if (hasOwn(status, 'schema_version') && status.schema_version !== 1) return { enabled: false, state: 'malformed', status_digest: null };
@@ -292,6 +637,7 @@ function adapterEvidence(adapter, spec) {
   if (!adapter) return { available: false };
   let evidence = adapter;
   if (typeof adapter.probe === 'function') evidence = invokeSync(adapter.probe, adapter, { lane_id: spec.id }, 'ADAPTER_PROBE_FAILED');
+  try { evidence = trustedDataCopy(evidence); } catch (_error) { return { available: false }; }
   if (!isRecord(evidence)) return { available: false };
   const result = {
     available: evidence.available === true,
@@ -312,6 +658,10 @@ function routeBlock(reasonCode) {
 }
 
 function createRoutePlan(request, laneRecords) {
+  try {
+    request = trustedDataCopy(request);
+    laneRecords = trustedDataCopy(laneRecords);
+  } catch (_) { fail('ROUTE_PLAN_INVALID'); }
   const rootOnly = laneRecords.length === 0;
   const base = {
     contract_version: CONTRACTS[1],
@@ -328,6 +678,7 @@ function createRoutePlan(request, laneRecords) {
 }
 
 function validateRoutePlan(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('ROUTE_PLAN_INVALID'); }
   const keys = ['contract_version', 'route_id', 'request_id', 'task_digest', 'repository_id', 'authorized_ref_digest', 'delegated', 'root_only', 'lanes', 'route_digest'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[1] || !isSafeId(record.route_id) || !isSafeId(record.request_id)
     || !isDigest(record.task_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -349,6 +700,7 @@ function validateRoutePlan(record) {
 }
 
 function admitRoute(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
   let request;
   try {
     request = normalizeRequest(options);
@@ -418,8 +770,37 @@ function exactIdSet(actual, expected) {
     && [...actual].sort().every((item, index) => item === [...expected].sort()[index]);
 }
 
+function dispatchWasNotStarted(evidence) {
+  return isRecord(evidence) && evidence.outcome === 'not-started'
+    && evidence.delayed_completion_excluded === true;
+}
+
+function recordTrustedDispatchOutcome(context, transportId, transportResult, transportError) {
+  return receiptCall(context.store, 'recordSemanticGateDispatch', [context.admission, {
+    transport_id: transportId,
+    transport_result: transportResult === undefined ? null : transportResult,
+    transport_error: transportError ? { code: isSafeId(transportError.code) ? transportError.code : 'TRANSPORT_FAILED' } : null,
+  }], 'GPR_PACKET_DISPATCH_UNRESOLVED');
+}
+
+function reconcileDispatchAttempt(context, transportId, transportResult, transportError, originalError) {
+  let evidence;
+  try {
+    evidence = recordTrustedDispatchOutcome(context, transportId, transportResult, transportError);
+  } catch (error) {
+    if (error instanceof ExecutionLoopError && error.code === 'GPR_PACKET_DISPATCH_UNRESOLVED') throw error;
+    fail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  }
+  if (!dispatchWasNotStarted(evidence)) fail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  if (originalError) throw originalError;
+  return evidence;
+}
+
 function executeAtomicLaunch(routePlan, options) {
+  routePlan = validateRoutePlan(routePlan);
+  options = trustedCallbackShell(options, 'LAUNCH_ATOMICITY_UNAVAILABLE');
   if (typeof options.prepareLaunch !== 'function' || typeof options.commitLaunchBatch !== 'function') fail('LAUNCH_ATOMICITY_UNAVAILABLE');
+  const semanticContext = requireSemanticContext({ ...options, run: options.run }, true);
   const reservations = [];
   for (const lane of routePlan.lanes) {
     const reservation = invokeAtomicLaunch(options.prepareLaunch, options, lane, 'LAUNCH_PREPARATION_FAILED');
@@ -439,21 +820,36 @@ function executeAtomicLaunch(routePlan, options) {
     }
     if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
   }
-  const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
-    route_plan: routePlan,
-    reservations: deepFreeze(reservations.slice()),
-    run_id: options.run && options.run.run_id,
-    repository_id: options.run && options.run.repository_id,
-    authorized_ref_digest: options.run && options.run.authorized_ref_digest,
-    current_authority_digest: options.run && options.run.current_authority_digest,
-    workspace_receipt: options.workspace_receipt,
-  }, 'LAUNCH_BATCH_FAILED');
+  revalidateSemanticContext(semanticContext);
+  const dispatchIntent = receiptCall(semanticContext.store, 'beginSemanticGateDispatch', [semanticContext.admission], 'GPR_PACKET_DISPATCH_UNRESOLVED', true);
+  if (!isRecord(dispatchIntent) || !isDigest(dispatchIntent.transport_id)) fail('GPR_PACKET_DISPATCH_UNRESOLVED');
+  let committed;
+  try {
+    committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
+      route_plan: routePlan,
+      reservations: deepFreeze(reservations.slice()),
+      run_id: options.run && options.run.run_id,
+      transport_id: dispatchIntent.transport_id,
+      repository_id: options.run && options.run.repository_id,
+      authorized_ref_digest: options.run && options.run.authorized_ref_digest,
+      current_authority_digest: options.run && options.run.current_authority_digest,
+      workspace_receipt: options.workspace_receipt,
+    }, 'LAUNCH_BATCH_FAILED');
+  } catch (error) {
+    reconcileDispatchAttempt(semanticContext, dispatchIntent.transport_id, null, error, error);
+  }
   const expected = routePlan.lanes.map((lane) => lane.lane_id);
-  if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) fail('LAUNCH_BATCH_INVALID');
+  if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) {
+    reconcileDispatchAttempt(semanticContext, dispatchIntent.transport_id, committed, { code: 'LAUNCH_BATCH_INVALID' }, null);
+    fail('LAUNCH_BATCH_INVALID');
+  }
+  const evidence = recordTrustedDispatchOutcome(semanticContext, dispatchIntent.transport_id, committed, null);
+  if (!isRecord(evidence) || evidence.outcome !== 'confirmed') fail('GPR_PACKET_DISPATCH_UNRESOLVED');
   return { launches: expected };
 }
 
 function createRunReceipt(options = {}) {
+  options = trustedCallbackShell(options, 'RUN_RECEIPT_INVALID');
   const request = options.request && options.request.contract_version === CONTRACTS[0] ? validateRequest(options.request) : normalizeRequest(options);
   const routePlan = options.route_plan || options.routePlan;
   if (!isRecord(routePlan) || routePlan.contract_version !== CONTRACTS[1]) fail('ROUTE_PLAN_REQUIRED');
@@ -481,6 +877,7 @@ function createRunReceipt(options = {}) {
 }
 
 function validateRunReceipt(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('RUN_RECEIPT_INVALID'); }
   const keys = ['contract_version', 'run_id', 'request_digest', 'repository_id', 'authorized_ref_digest', 'route_digest', 'authority_binding_digest', 'current_authority_digest', 'execution_state', 'current_lanes', 'workspace_receipt_digest', 'terminal_packet_digest', 'publication_state', 'workspace_disposition', 'created_at', 'updated_at'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[2] || !isSafeId(record.run_id)
     || !isDigest(record.request_digest) || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest)
@@ -501,8 +898,41 @@ function validateRunReceipt(record) {
 }
 
 function transitionRun(run, nextState, options = {}) {
-  const current = validateRunReceipt(run);
+  const suppliedContext = semanticContextForRun(run);
+  run = validateRunReceipt(run);
+  options = trustedCallbackShell(options, 'INVALID_STATE_TRANSITION');
+  const current = run;
   if (!EXECUTION_STATES.includes(nextState) || !TRANSITIONS[current.execution_state].includes(nextState)) fail('INVALID_STATE_TRANSITION', { from: current.execution_state, to: nextState });
+  const suppliedGate = isRecord(options.semantic_gate) ? options.semantic_gate
+    : isRecord(options.semanticGate) ? options.semanticGate : null;
+  const admissionState = ['admitted', 'running'].includes(nextState);
+  const terminalState = ['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'].includes(nextState);
+  const gateIntent = suppliedGate && (suppliedGate.consumer_intent || suppliedGate.consumerIntent);
+  const canRecover = suppliedGate && isRecord(suppliedGate.consumer_identity || suppliedGate.consumerIdentity);
+  const context = suppliedContext || semanticContextForRun(current)
+    || (admissionState && suppliedGate
+      ? (isRecord(gateIntent)
+        ? admitSemanticContext({ ...options, run: current }, current)
+        : canRecover ? recoverSemanticContext({ ...options, run: current }, current) : null)
+      : terminalState && canRecover && !isRecord(gateIntent)
+        ? recoverSemanticContext({ ...options, run: current }, current) : null);
+  if (['admitted', 'running'].includes(nextState)) {
+    if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    revalidateSemanticContext(context, current);
+  }
+  if (terminalState) {
+    if (!context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+    if (!options.terminal_packet) fail('TERMINAL_PACKET_REQUIRED');
+    const terminalPacket = validateTerminalPacket(options.terminal_packet);
+    if (terminalPacket.run_id !== current.run_id || TERMINAL_OUTCOMES[terminalPacket.outcome] !== nextState) fail('TERMINAL_RUN_MISMATCH');
+    validateTerminalPreconditions(current, terminalPacket, context, options, true);
+    options = {
+      ...options,
+      terminal_packet_digest: digestValue(terminalPacket),
+      publication_state: terminalPacket.publication_state,
+      workspace_disposition: terminalPacket.workspace_disposition,
+    };
+  }
   const next = clone(current);
   next.execution_state = nextState;
   next.updated_at = isoNow(options.now);
@@ -533,6 +963,7 @@ function transitionRun(run, nextState, options = {}) {
   if (nextState === 'terminal-success' && next.publication_state === 'uncertain') fail('PUBLICATION_UNCERTAIN');
   if (nextState === 'interrupted' && (next.publication_state !== 'uncertain' || !['preserved', 'quarantined'].includes(next.workspace_disposition))) fail('INTERRUPTION_EVIDENCE_REQUIRED');
   const result = validateRunReceipt(next);
+  if (context) bindSemanticContext(result, context);
   if (options.state_root !== undefined) {
     if (!['running', 'validating', 'publication-pending'].includes(nextState)) fail('DURABLE_STATE_TRANSITION_INVALID');
     persistGovernedTransition({ state_root: options.state_root, previous_run: current, next_run: result });
@@ -541,6 +972,7 @@ function transitionRun(run, nextState, options = {}) {
 }
 
 function normalizeLiveRef(value) {
+  try { value = trustedDataCopy(value); } catch (_) { fail('LIVE_REF_UNAVAILABLE'); }
   if (!isRecord(value)) fail('LIVE_REF_UNAVAILABLE');
   const ref = value.ref || value.server_ref;
   const sha = value.sha || value.commit || value.server_sha;
@@ -550,6 +982,7 @@ function normalizeLiveRef(value) {
 }
 
 function createWorkspaceReceipt(options = {}) {
+  options = trustedCallbackShell(options, 'WORKSPACE_RECEIPT_INVALID');
   return validateWorkspaceReceipt(contractRecord(CONTRACTS[3], {
     run_id: options.run_id,
     repository_id: options.repository_id,
@@ -565,6 +998,7 @@ function createWorkspaceReceipt(options = {}) {
 }
 
 function validateWorkspaceReceipt(record) {
+  try { record = trustedDataCopy(record); } catch (_) { fail('WORKSPACE_RECEIPT_INVALID'); }
   const keys = ['contract_version', 'run_id', 'repository_id', 'authorized_ref_digest', 'live_ref_digest', 'snapshot_commit_digest', 'snapshot_tree_digest', 'workspace_id', 'workspace_handle', 'setup_digest', 'verified'];
   if (!exactKeys(record, keys) || record.contract_version !== CONTRACTS[3] || !isSafeId(record.run_id)
     || !isDigest(record.repository_id) || !isDigest(record.authorized_ref_digest) || !isDigest(record.live_ref_digest)
@@ -575,8 +1009,11 @@ function validateWorkspaceReceipt(record) {
 }
 
 function validateRunEvidence(options = {}, expectedState, prefix) {
+  options = trustedCallbackShell(options, prefix + '_RUN_EVIDENCE_REQUIRED');
   if (!isRecord(options.run) || !isRecord(options.route_plan) || !isRecord(options.workspace_receipt)) fail(prefix + '_RUN_EVIDENCE_REQUIRED');
+  const suppliedContext = semanticContextForRun(options.run);
   const run = validateRunReceipt(options.run);
+  if (suppliedContext) bindSemanticContext(run, suppliedContext);
   if (run.execution_state !== expectedState) fail(prefix + '_LIFECYCLE_INVALID');
   if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail(prefix + '_BINDING_INVALID');
   if (options.run_id !== run.run_id || options.repository_id !== run.repository_id || options.authorized_ref_digest !== run.authorized_ref_digest || options.current_authority_digest !== run.current_authority_digest) fail(prefix + '_RUN_BINDING_MISMATCH');
@@ -599,7 +1036,9 @@ function readLiveRef(provider) {
 }
 
 function admitWorkspace(options = {}) {
+  const suppliedContext = semanticContextForRun(options.run);
   const run = validateRunReceipt(options.run);
+  if (suppliedContext) bindSemanticContext(run, suppliedContext);
   if (run.execution_state !== 'admitted') fail('WORKSPACE_ADMISSION_STATE_INVALID');
   const expected = normalizeLiveRef(options.expected_live || options.live || {});
   const current = readLiveRef(options.liveRefProvider);
@@ -743,6 +1182,7 @@ function executeTypedGitCommit(options = {}) {
   if (initial.staged_paths.length !== 0) fail('GIT_COMMIT_PREEXISTING_STAGE');
   assertWorktreeScope(initial, operation.authorized_paths);
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
+  const semanticContext = revalidateRunSemanticContext(evidence.run, options);
   const authority = authorizeA1Operation({ ...options, operation });
   verifyOwnedMutationLease(options);
   const staged = invokeSync(git.stageExact, git, { paths: operation.authorized_paths }, 'GIT_STAGE_FAILED');
@@ -751,6 +1191,7 @@ function executeTypedGitCommit(options = {}) {
   assertWorktreeScope(afterStage, operation.authorized_paths);
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   verifyOwnedMutationLease(options);
+  revalidateSemanticContext(semanticContext);
   const committed = invokeSync(git.commit, git, { message: operation.commit_message, amend: false, allow_empty: false, options: [], paths: operation.authorized_paths }, 'GIT_COMMIT_EXECUTION_FAILED');
   const finalStatus = normalizeGitStatus(committed && isRecord(committed.status) ? committed.status : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   const resultingTree = committed && committed.tree ? committed.tree : finalStatus.tree;
@@ -764,6 +1205,7 @@ function executeTypedGitCommit(options = {}) {
 }
 
 function createTerminalPacket(options = {}) {
+  options = trustedCallbackShell(options, 'TERMINAL_PACKET_INVALID');
   if (Object.keys(options).some((key) => !['run_id', 'outcome', 'reason_code', 'evidence_digest', 'workspace_disposition', 'publication_state'].includes(key))) fail('TERMINAL_PACKET_INVALID');
   const outcome = options.outcome;
   if (!Object.prototype.hasOwnProperty.call(TERMINAL_OUTCOMES, outcome)) fail('TERMINAL_OUTCOME_INVALID');
@@ -786,6 +1228,7 @@ function createTerminalPacket(options = {}) {
 }
 
 function validateTerminalPacket(packet) {
+  try { packet = trustedDataCopy(packet); } catch (_) { fail('TERMINAL_PACKET_INVALID'); }
   const keys = ['contract_version', 'run_id', 'outcome', 'reason_code', 'evidence_digest', 'workspace_disposition', 'publication_state', 'web_handoff'];
   if (!exactKeys(packet, keys) || packet.contract_version !== CONTRACTS[4] || !isSafeId(packet.run_id)
     || !Object.prototype.hasOwnProperty.call(TERMINAL_OUTCOMES, packet.outcome) || !isSafeId(packet.reason_code)
@@ -800,7 +1243,10 @@ function validateTerminalPacket(packet) {
 }
 
 function completeRun(options = {}) {
+  options = trustedCallbackShell(options, 'GPR_PACKET_ADMISSION_REQUIRED');
+  const suppliedContext = semanticContextForRun(options.run);
   const run = validateRunReceipt(options.run);
+  if (suppliedContext) bindSemanticContext(run, suppliedContext);
   if (!options.terminal_packet) fail('TERMINAL_PACKET_REQUIRED');
   const packet = validateTerminalPacket(options.terminal_packet);
   if (packet.run_id !== run.run_id) fail('TERMINAL_RUN_MISMATCH');
@@ -812,16 +1258,59 @@ function completeRun(options = {}) {
   } else if (!['validating', 'publication-pending'].includes(run.execution_state)) {
     fail('INVALID_STATE_TRANSITION');
   }
-  const terminalRun = transitionRun(run, state, { now: options.now, terminal_packet_digest: digestValue(packet), publication_state: packet.publication_state, workspace_disposition: packet.workspace_disposition });
+  const semanticContext = revalidateRunSemanticContext(run, options);
+  const completionApplicability = validateTerminalPreconditions(run, packet, semanticContext, options, false);
+  let completionCustody = null;
+  if (completionApplicability.required) {
+    const result = options.substantive_result;
+    if (!isRecord(result) || !exactKeys(result, ['store', 'packet', 'producer_admission'])
+      || !isRecord(result.store) || !isRecord(result.packet) || !isRecord(result.producer_admission)) {
+      fail('GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+    }
+    completionCustody = receiptCall(
+      semanticContext.store,
+      'confirmSemanticCompletion',
+      [semanticContext.admission, result.store, result.packet, result.producer_admission],
+      'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED',
+      true
+    );
+    if (!isRecord(completionCustody) || !isDigest(completionCustody.outcome_ref)
+      || packet.evidence_digest !== completionCustody.outcome_ref) fail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  }
+  const terminalRun = transitionRun(run, state, {
+    now: options.now,
+    terminal_packet_digest: digestValue(packet),
+    publication_state: packet.publication_state,
+    workspace_disposition: packet.workspace_disposition,
+    terminal_packet: packet,
+    substantive_result: options.substantive_result,
+  });
   if (options.state_root !== undefined) {
-    const persisted = persistGovernedCompletion({ state_root: options.state_root, previous_run: run, terminal_run: terminalRun, terminal_packet: packet });
+    const completionContext = completionCustody
+      ? Object.freeze({ ...semanticContext, completion_custody: Object.freeze({ store: options.substantive_result.store, outcome_ref: completionCustody.outcome_ref }) })
+      : semanticContext;
+    const persisted = persistGovernedCompletion({
+      state_root: options.state_root,
+      previous_run: run,
+      terminal_run: terminalRun,
+      terminal_packet: packet,
+      semantic_context: completionContext,
+      substantive_result: options.substantive_result
+    });
+    bindSemanticContext(persisted, completionContext);
     return persisted;
   }
+  if (completionCustody) bindSemanticContext(terminalRun, Object.freeze({
+    ...semanticContext,
+    completion_custody: Object.freeze({ store: options.substantive_result.store, outcome_ref: completionCustody.outcome_ref })
+  }));
   return terminalRun;
 }
 
 function finalizeWorkspace(options = {}) {
-  const facts = options.facts || {};
+  options = trustedCallbackShell(options, 'WORKSPACE_FACTS_INVALID');
+  let facts;
+  try { facts = trustedDataCopy(options.facts || {}); } catch (_) { fail('WORKSPACE_FACTS_INVALID'); }
   if (!isRecord(facts)) fail('WORKSPACE_FACTS_INVALID');
   const disposition = facts.uncertain === true || facts.interrupted === true || facts.terminal_evidence_durable !== true
     ? 'quarantined'
@@ -831,6 +1320,7 @@ function finalizeWorkspace(options = {}) {
 }
 
 function cleanupWorkspace(options = {}) {
+  options = trustedCallbackShell(options, 'WORKSPACE_CLEANUP_UNAVAILABLE');
   const decision = finalizeWorkspace(options);
   if (!decision.removable) return decision;
   if (options.force === true || !isSafeHandle(options.workspace_handle)) fail('WORKSPACE_CLEANUP_UNAVAILABLE');
@@ -1122,7 +1612,10 @@ function persistGovernedCompletion(options = {}) {
   const workspaceReceipt = readDurableWorkspaceReceipt(base);
   if (!workspaceReceipt || !isDigest(previousRun.workspace_receipt_digest)
     || digestValue(workspaceReceipt) !== previousRun.workspace_receipt_digest) fail('DURABLE_WORKSPACE_EVIDENCE_REQUIRED');
+  if (!options.semantic_context) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  validateTerminalPreconditions(previousRun, packet, options.semantic_context, options, true);
   writeOrAssertDurableArtifact(base, 'terminal-packet', packet);
+  validateTerminalPreconditions(previousRun, packet, options.semantic_context, options, true);
   return writeDurableRunRecord({ ...base, run: terminalRun, expected_digest: digestValue(previousRun) });
 }
 function mutationLeasePath(stateRoot, repositoryId, authorizedRefDigest) {
@@ -1141,17 +1634,37 @@ function validateMutationLeaseRecord(record) {
   return deepFreeze(clone(record));
 }
 
-function readMutationLease(options = {}) {
+function mutationLeaseBytes(record) {
+  return Buffer.from(JSON.stringify({
+    kind: record.kind,
+    lease_id: record.lease_id,
+    repository_id: record.repository_id,
+    authorized_ref_digest: record.authorized_ref_digest,
+    run_id: record.run_id,
+    acquired_at: record.acquired_at,
+    expires_at: record.expires_at,
+  }), 'utf8');
+}
+
+function readMutationLeaseEntry(options = {}) {
   if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest)) fail('LEASE_BINDING_INVALID');
   const root = durableStateRoot(options.state_root);
   ensureStateRoot(root);
-  let record;
-  try {
-    record = JSON.parse(fs.readFileSync(mutationLeasePath(root, options.repository_id, options.authorized_ref_digest), 'utf8'));
-  } catch (_error) {
-    fail('LEASE_REQUIRED');
-  }
-  return validateMutationLeaseRecord(record);
+  const leasePath = mutationLeasePath(root, options.repository_id, options.authorized_ref_digest);
+  let stat;
+  try { stat = fs.lstatSync(leasePath); } catch (_error) { fail('LEASE_REQUIRED'); }
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('LEASE_RECORD_INVALID');
+  let bytes;
+  try { bytes = fs.readFileSync(leasePath); } catch (_error) { fail('LEASE_REQUIRED'); }
+  let parsed;
+  try { parsed = JSON.parse(bytes.toString('utf8')); } catch (_error) { fail('LEASE_RECORD_INVALID'); }
+  const record = validateMutationLeaseRecord(parsed);
+  if (!mutationLeaseBytes(record).equals(bytes)) fail('LEASE_RECORD_INVALID');
+  return { record, bytes, leasePath };
+}
+
+function readMutationLease(options = {}) {
+  return readMutationLeaseEntry(options).record;
 }
 
 function verifyOwnedMutationLease(options = {}) {
@@ -1185,35 +1698,35 @@ function acquireMutationLease(options = {}) {
   };
   assertPrivacySafe(lease);
   try {
-    fs.writeFileSync(leasePath, JSON.stringify(lease), { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(leasePath, mutationLeaseBytes(lease), { flag: 'wx', mode: 0o600 });
   } catch (_error) {
     fail('CONFLICTING_RUN');
   }
   let readback;
-  try {
-    readback = JSON.parse(fs.readFileSync(leasePath, 'utf8'));
-  } catch (_error) {
-    fail('LEASE_READBACK_FAILED');
-  }
-  if (digestValue(readback) !== digestValue(lease)) fail('LEASE_READBACK_FAILED');
+  try { readback = readMutationLeaseEntry(options); } catch (_error) { fail('LEASE_READBACK_FAILED'); }
+  if (!readback.bytes.equals(mutationLeaseBytes(lease)) || digestValue(readback.record) !== digestValue(lease)) fail('LEASE_READBACK_FAILED');
   return deepFreeze(lease);
 }
 
 function releaseMutationLease(options = {}) {
-  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id) || !isSafeId(options.lease_id)) fail('LEASE_BINDING_INVALID');
-  const leasePath = mutationLeasePath(options.state_root, options.repository_id, options.authorized_ref_digest);
-  const lease = readMutationLease(options);
-  if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.lease_id)
+    || options.run_id !== undefined && !isSafeId(options.run_id)) fail('LEASE_BINDING_INVALID');
+  const leaseEntry = readMutationLeaseEntry(options);
+  const lease = leaseEntry.record;
+  const runId = options.run_id === undefined ? lease.run_id : options.run_id;
+  if (lease.lease_id !== options.lease_id || lease.run_id !== runId) fail('LEASE_TOKEN_MISMATCH');
   let durableRun;
   let workspaceReceipt;
   let terminalPacket;
   try {
-    durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
-    workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
-    terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+    durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
+    workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
+    terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: runId });
   } catch (_error) {
     fail('LEASE_RELEASE_UNSAFE');
   }
+  if (!durableRun || durableRun.run_id !== lease.run_id || durableRun.repository_id !== lease.repository_id
+    || durableRun.authorized_ref_digest !== lease.authorized_ref_digest) fail('LEASE_RELEASE_UNSAFE');
   if (!durableRun || !['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(durableRun.execution_state) || !isDigest(durableRun.workspace_receipt_digest) || !isDigest(durableRun.terminal_packet_digest) || durableRun.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
   if (!workspaceReceipt || !terminalPacket) fail('LEASE_RELEASE_UNSAFE');
   if (workspaceReceipt.run_id !== durableRun.run_id || workspaceReceipt.repository_id !== durableRun.repository_id || workspaceReceipt.authorized_ref_digest !== durableRun.authorized_ref_digest || terminalPacket.run_id !== durableRun.run_id) fail('LEASE_RELEASE_UNSAFE');
@@ -1221,8 +1734,23 @@ function releaseMutationLease(options = {}) {
   const expectedOutcome = { 'terminal-success': 'success', 'terminal-failure': 'failure', 'terminal-blocked': 'blocked' }[durableRun.execution_state];
   if (terminalPacket.outcome !== expectedOutcome || terminalPacket.publication_state !== durableRun.publication_state || terminalPacket.workspace_disposition !== durableRun.workspace_disposition) fail('LEASE_RELEASE_UNSAFE');
   if ((hasOwn(options, 'terminal_state') && options.terminal_state !== durableRun.execution_state) || (hasOwn(options, 'workspace_disposition') && options.workspace_disposition !== durableRun.workspace_disposition) || (hasOwn(options, 'publication_state') && options.publication_state !== durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
+  let targetRun = durableRun;
+  if (options.run !== undefined) {
+    let suppliedRun;
+    try { suppliedRun = validateRunReceipt(options.run); } catch (_error) { fail('GPR_PACKET_BINDING_MISMATCH'); }
+    if (canonicalSerialize(suppliedRun) !== canonicalSerialize(durableRun)) fail('GPR_PACKET_BINDING_MISMATCH');
+    targetRun = options.run;
+  }
+  const semanticContext = semanticContextForRun(targetRun)
+    || (isRecord(options.semantic_gate || options.semanticGate)
+      ? recoverSemanticContext({ ...options, run: durableRun }, durableRun) : null);
+  if (!semanticContext) fail('GPR_PACKET_ADMISSION_REQUIRED');
+  validateTerminalPreconditions(durableRun, terminalPacket, semanticContext, options, true);
+  const finalLeaseEntry = readMutationLeaseEntry(options);
+  if (!finalLeaseEntry.bytes.equals(leaseEntry.bytes) || finalLeaseEntry.record.lease_id !== options.lease_id
+    || finalLeaseEntry.record.run_id !== durableRun.run_id) fail('LEASE_TOKEN_MISMATCH');
   try {
-    fs.unlinkSync(leasePath);
+    fs.unlinkSync(leaseEntry.leasePath);
   } catch (_error) {
     fail('LEASE_RELEASE_FAILED');
   }
@@ -1230,6 +1758,7 @@ function releaseMutationLease(options = {}) {
 }
 
 function prepareRetry(options = {}) {
+  options = trustedCallbackShell(options, 'RETRY_NOT_AUTHORIZED');
   const previous = validateRunReceipt(options.previous_run);
   if (previous.publication_state === 'uncertain') return { status: 'blocked', reason_code: 'PUBLICATION_UNCERTAIN', launches: [] };
   if (!isSafeId(options.run_id) || options.run_id === previous.run_id) return { status: 'blocked', reason_code: 'FRESH_RUN_REQUIRED', launches: [] };
@@ -1240,6 +1769,7 @@ function prepareRetry(options = {}) {
   let workspace;
   try {
     const planned = createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: options.run_id, now: options.now });
+    admitSemanticContext(options, planned);
     const admitted = transitionRun(planned, 'admitted', { now: options.now });
     workspace = admitWorkspace({ ...options, run: admitted });
   } catch (error) {
@@ -1250,20 +1780,28 @@ function prepareRetry(options = {}) {
 }
 
 function admitRun(options = {}) {
+  options = trustedCallbackShell(options, 'REQUEST_CONTRACT_INVALID');
   const route = admitRoute(options);
   if (route.status !== 'admitted') return { ...route, launches: [] };
-  const planned = createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: options.run_id, now: options.now });
-  const run = transitionRun(planned, 'admitted', { now: options.now });
-  return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: [], consent: route.consent };
+  try {
+    const planned = createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: options.run_id, now: options.now });
+    admitSemanticContext(options, planned);
+    const run = transitionRun(planned, 'admitted', { now: options.now });
+    return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: [], consent: route.consent };
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) return { status: 'blocked', reason_code: error.code, request: route.request, route_plan: route.route_plan, launches: [], consent: route.consent };
+    throw error;
+  }
 }
 
 function startDelegatedRun(options = {}) {
+  options = trustedCallbackShell(options, 'START_RUN_EVIDENCE_REQUIRED');
   const evidence = validateRunEvidence(options, 'workspace-ready', 'START');
   if (!evidence.routePlan.delegated) fail('DELEGATED_ROUTE_REQUIRED');
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   const consentBeforeRunning = readExecutionLoopConsent(options);
   if (!consentBeforeRunning.enabled) return { ...consentBlock(consentBeforeRunning), route_plan: evidence.routePlan, run: evidence.run, workspace_receipt: evidence.workspaceReceipt, consent: consentBeforeRunning };
-  const running = transitionRun(evidence.run, 'running', { now: options.now, state_root: options.state_root });
+  const running = transitionRun(evidence.run, 'running', { now: options.now, state_root: options.state_root, semantic_gate: options.semantic_gate || options.semanticGate });
   let launchConsent = consentBeforeRunning;
   try {
     const launch = executeAtomicLaunch(evidence.routePlan, {

@@ -155,6 +155,7 @@ G2 binds:
 - consequential entry/copy/serialization/consumer boundaries;
 - affected consumers;
 - permitted and forbidden behaviour;
+- exact mutation allowlist;
 - positive, negative and adversarial regression oracles;
 - causal negative-control requirements that prove the named production actor caused the consequential observation rather than test instrumentation manufacturing it;
 - async/liveness and deferred-work accounting requirements when drains/waits/flushes/queues/completion trackers or equivalent boundaries are material;
@@ -165,15 +166,15 @@ G2 binds:
 - for backward/readback/serialization compatibility, immutable predecessor-produced bytes/artifacts from an exact accepted producer revision consumed unchanged by the candidate, rather than candidate-regenerated approximations;
 - for semantically equivalent input/state representations, the canonicalisation rule applied before identity/digest/hash/signature and the equivalence regressions that prove identical canonical identity;
 - where rejection promises zero user-controlled execution or side effects, the material language/runtime hooks reachable before rejection and the instrumentation proving zero prohibited execution at the real boundary;
+- validation and evidence requirements;
+- reversal/recovery behaviour;
+- correction limits.
 
 For transactional/state-machine work, relevant windows commonly include pre-commit, partial commit, cleanup, and retry after interruption. For async work they commonly include pre-wait, during-wait, replacement/cancellation, late arrival, and completion after a snapshot/decision point. G2 selects the windows that can materially violate the accepted invariant; this is not a mandatory combinatorial matrix.
 
 A complete contract is also distinct from a green subset of tests: omission of a still-required criterion/defect family is a contract-coverage failure, even when every implemented row passes. A safe wrapper cannot establish a no-bypass public-boundary claim while another exported/reachable route avoids it. Compatibility is proven with predecessor-produced artifacts, not by regenerating historical-looking bytes with candidate code. Canonical identity is computed only after accepted representation equivalence is normalised. A rejection oracle that requires noninterference observes side effects/hooks before the rejection point; the final error code alone cannot prove zero execution.
 
 Mechanism completeness is distinct from semantic correctness. A finite denylist, observer, hook, lexical brand, parser route, intercepted API or event list cannot implement a universal `any/arbitrary/unknown` invariant unless the runtime model proves that mechanism sees every relevant violating path. If the platform cannot generically introspect the required state after arbitrary/untrusted code has acted, G2 must move enforcement to a complete trusted boundary: invalidate or expire provenance at exposure, copy/normalise into trusted state, re-establish trust after the boundary, or return to G1/Owner when the trust model itself must change. Post-hoc detector coverage is not a substitute for observability the platform does not provide.
-- validation and evidence requirements;
-- reversal/recovery behaviour;
-- correction limits.
 
 For material difficult/diagnostic/security/authority-sensitive work, G2 should use a fresh context and ask how an implementation could satisfy the proposed instructions while still violate the accepted invariant.
 
@@ -191,7 +192,7 @@ Ordinary implementation choices inside the contract remain G3 work. A discovery 
 
 For sufficiently complex/STRICT work involving concurrency, async completion, deferred consequential work, causal negative controls, lifecycle coordination or identity/resource equivalence, G3 performs a pre-publication adversarial validation episode inside the same G3. When separable and useful this may use one depth-1 read-only validation leaf; otherwise the parent performs it serially. The challenge tries to falsify the regression oracle, causal attribution, liveness/progress, outstanding-work accounting, resource-equivalence handling and false-green controls. It is not another gate: the parent remains sole integrator, ordinary RED stays inside G3, missing product/compatibility semantics return to G2, and changed root/trust/architecture returns to G1.
 
-Async validation for a changed drain/wait/flush/join/poll/quiesce/retry/completion boundary includes a waiter-first control where required completion occurs later and depends on event-loop/I/O/timer/callback progress. Required deferred work remains outstanding from scheduling through consequential completion; clearing its scheduling primitive is not completion. Flush semantics either permit the normal dispatch or take ownership of the same work and complete it through the normal consequential path.
+Async validation for a changed drain/wait/flush/join/poll/quiesce/retry/completion boundary includes a waiter-first control where required completion occurs later and depends on event-loop/I/O/timer/callback progress. Required deferred work remains outstanding from scheduling through consequential completion; clearing its scheduling primitive is not completion. Flush semantics either permit the normal dispatch or take ownership of that same work and complete it through the normal consequential path.
 
 Ordinary commits or internal increments do not create separate G4 lifecycles.
 

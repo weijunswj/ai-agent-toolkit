@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-assurance-web-finality.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
 const {
   CONTRACT_VERSION,
@@ -15,6 +16,11 @@ const {
 
 const sha = (letter) => letter.repeat(40);
 const digest = (letter) => letter.repeat(64);
+
+function receiptContext() {
+  const fixture = support.assuranceReceiptAdmission();
+  return runtime.bindReceiptAdmission(fixture.store, fixture.admission);
+}
 
 const candidate = Object.freeze({
   head: sha('a'),
@@ -255,8 +261,14 @@ test('an unknown extra property cannot replace missing required evidence', () =>
 });
 
 test('Run-172 RED C: valid exact accepted candidate tuple remains verifiable', () => {
-  const result = evaluateFinality(finalityEvidence());
+  const result = evaluateFinality(finalityEvidence(), receiptContext());
   assert.equal(result.code, 'FINALITY_VERIFIED');
+});
+
+test('finality fails closed without a receipt-owned admission', () => {
+  const result = evaluateFinality(finalityEvidence());
+  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  assert.deepEqual(result.reasons, ['receipt-admission-required']);
 });
 
 test('Run-172 RED C: unexpected PR binding is rejected', () => {

@@ -20,6 +20,56 @@
     "revalidate_immediately_before_atomic_batch": true,
     "disabled_unresolved_malformed_or_interrupted_at_start": "remain_workspace_ready"
   },
+  "semantic_admission": {
+    "owner": "receipt-runtime",
+    "trusted_reader_bound": true,
+    "opaque_process_local": true,
+    "context_storage": "private-weakmap",
+    "lazy_receipt_import": true,
+    "synchronous_guarded_calls": true,
+    "caller_verified_bypass": false,
+    "legacy_bypass": false,
+    "environment_bypass": false,
+    "chronology_substitution": false,
+    "lifecycle_summary_substitution": false,
+    "required_receipt_apis": [
+      "admitSemanticGate",
+      "revalidateSemanticGate",
+      "beginSemanticGateDispatch",
+      "recordSemanticGateDispatch",
+      "recoverSemanticGateAdmission"
+    ],
+    "trusted_readers": [
+      "readAuthority",
+      "readCurrent",
+      "readWebDecision",
+      "readCandidate",
+      "readDispatchOutcome",
+      "screenPacket"
+    ],
+    "guarded_paths": [
+      "admitRun",
+      "prepareRetry",
+      "transitionRun:admitted",
+      "transitionRun:running",
+      "startDelegatedRun",
+      "executeAtomicLaunch",
+      "executeTypedGitCommit",
+      "commitExact",
+      "completeRun",
+      "releaseMutationLease",
+      "restart",
+      "takeover"
+    ]
+  },
+  "dispatch_recovery": {
+    "intent": "beginSemanticGateDispatch",
+    "confirmed": "recordSemanticGateDispatch",
+    "not_started": "recordSemanticGateDispatch",
+    "ambiguous": "hold",
+    "automatic_relaunch": false,
+    "promise_in_sync_guard": "fail_closed"
+  },
   "routing": {
     "delegation_requires_current_authority": true,
     "complete_route_required_before_launch": true,

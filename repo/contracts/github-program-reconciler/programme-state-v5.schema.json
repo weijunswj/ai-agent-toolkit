@@ -376,6 +376,9 @@
           },
           "title": {
             "type": "string"
+          },
+          "authority_packet_current": {
+            "$ref": "#/$defs/authorityPacketCurrent"
           }
         }
       }
@@ -776,6 +779,126 @@
             }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "safeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "maxLength": 512
+    },
+    "githubLogin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^[A-Za-z0-9-]+$"
+    },
+    "stage": {
+      "enum": ["G0-A", "G0-B", "G1", "G2", "G3", "G4", "LOOP", "RECONVERGENCE", "FINAL_AUDIT", "BROWSER", "WEB", "FINALITY"]
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue_number", "comment_id", "node_id", "author_login", "updated_at", "body_digest"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "issue_number": { "$ref": "#/$defs/issue" },
+        "comment_id": { "$ref": "#/$defs/issue" },
+        "node_id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_:-]+$" },
+        "author_login": { "$ref": "#/$defs/githubLogin" },
+        "updated_at": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+        "body_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "lock", "stage", "role"],
+      "properties": {
+        "run": { "$ref": "#/$defs/safeId" },
+        "lock": { "$ref": "#/$defs/safeId" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "role": { "$ref": "#/$defs/safeId" }
+      }
+    },
+    "candidate": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["pr_number", "branch", "base_ref", "base_sha", "head_sha", "tree_sha"],
+      "properties": {
+        "pr_number": { "$ref": "#/$defs/issue" },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\r\\n]+$" },
+        "base_ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "head_sha": { "$ref": "#/$defs/sha" },
+        "tree_sha": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "lock", "stage", "role", "scope_digest"],
+      "properties": {
+        "run": { "$ref": "#/$defs/safeId" },
+        "lock": { "$ref": "#/$defs/safeId" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "role": { "$ref": "#/$defs/safeId" },
+        "scope_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "predecessor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packet_id", "packet_digest", "content_digest", "binding_digest", "producer", "candidate", "dependency_id", "acceptance_event_id", "web_source", "readback_event_id", "store_identity_digest"],
+      "properties": {
+        "packet_id": { "$ref": "#/$defs/safeId" },
+        "packet_digest": { "$ref": "#/$defs/digest" },
+        "content_digest": { "$ref": "#/$defs/digest" },
+        "binding_digest": { "$ref": "#/$defs/digest" },
+        "producer": { "$ref": "#/$defs/producer" },
+        "candidate": { "$ref": "#/$defs/candidate" },
+        "dependency_id": { "$ref": "#/$defs/safeId" },
+        "acceptance_event_id": { "$ref": "#/$defs/safeId" },
+        "web_source": { "$ref": "#/$defs/sourceReference" },
+        "readback_event_id": { "$ref": "#/$defs/safeId" },
+        "store_identity_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "authorityPacketCurrent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "repository", "parent_issue", "child_issue", "lane_id", "human_owner", "consumer", "authority", "candidate", "predecessors"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.authority-packet-current.v1" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "parent_issue": { "$ref": "#/$defs/issue" },
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "lane_id": { "$ref": "#/$defs/safeId" },
+        "human_owner": { "$ref": "#/$defs/githubLogin" },
+        "consumer": { "$ref": "#/$defs/consumer" },
+        "authority": { "$ref": "#/$defs/sourceReference" },
+        "candidate": { "$ref": "#/$defs/candidate" },
+        "predecessors": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/predecessor" } }
       }
     }
   }

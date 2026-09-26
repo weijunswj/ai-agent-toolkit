@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const canonicalA2 = require('./toolkit-capability-registry.cjs');
 const programmeV5 = require('./toolkit-github-program-state-v5.cjs');
@@ -19,6 +20,9 @@ const MUTATION_ACTIONS = Object.freeze({
 });
 const RESOURCE_KINDS = Object.freeze(['parent', 'child', 'pr']);
 const LIFECYCLES = Object.freeze(['pending', 'current', 'terminal']);
+const AUTHORITY_PACKET_CURRENT_SCHEMA = 'toolkit.github-program.authority-packet-current.v1';
+const AUTHORITY_PACKET_STAGES = Object.freeze(['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER', 'WEB', 'FINALITY']);
+const AUTHORITY_PACKET_CURRENT_MAX_BYTES = 65536;
 const A4_MATERIAL_PREDICATES = Object.freeze([
   'applies_to_current_candidate', 'identifies_accepted_requirement', 'concrete_current_failure',
   'evidence_reproducible', 'material_impact', 'in_scope_current',
@@ -31,6 +35,7 @@ const OBJECTIVE_STATUSES = Object.freeze(['completed', 'disposed']);
 const NON_DELIVERY_PR_STATES = new Set(['closed', 'closed_unmerged', 'failed', 'rejected', 'superseded', 'outdated']);
 const MUTATION_TARGET_KINDS = Object.freeze({ managed_parent_block: 'n5-managed-parent-block', legacy_parent_block: 'n5-legacy-parent-block' });
 const sharedTransactionOwners = new Map();
+const currentPacketTransitionProofs = new WeakMap();
 const FINDING_EVIDENCE_VERSION = 'toolkit.n5.finding-evidence.v1';
 const REVIEW_EVIDENCE_VERSION = 'toolkit.n5.review-evidence.v1';
 const TERMINAL_EVIDENCE_VERSION = 'toolkit.n5.terminal-evidence.v1';
@@ -50,7 +55,7 @@ const FAILURE_CODES = Object.freeze([
   'PARENT_CONCURRENCY_CONFLICT', 'PARENT_BYTE_DRIFT', 'PARENT_BODY_LIMIT', 'PARENT_RECONCILIATION_INCOMPLETE',
   'N5_REPOSITORY_IDENTITY_MISMATCH', 'N5_CONSENT_REQUIRED', 'N5_AUTHORITY_REQUIRED', 'N5_TRACKER_VERSION_UNSUPPORTED',
   'N5_REVIEW_INVENTORY_INCOMPLETE', 'N5_DF_AMBIGUOUS', 'N5_REVIEW_MUTATION_DENIED', 'N5_REVIEW_DISPOSITION_INCOMPLETE',
-  'N5_GOVERNANCE_UNREADY', 'N5_SCOPE_REJECTED', 'N5_SECRET_OR_PRIVATE_DATA_REJECTED', 'PUBLISH_SOURCE_MISMATCH',
+  'N5_GOVERNANCE_UNREADY', 'N5_SCOPE_REJECTED', 'N5_AUTHORITY_PACKET_CURRENT_REQUIRED', 'N5_SECRET_OR_PRIVATE_DATA_REJECTED', 'PUBLISH_SOURCE_MISMATCH',
   'AUTO_CODE_GOVERNANCE_UNREADY',
 ]);
 const SUCCESS_CODES = Object.freeze(['N5_INSPECTION_READY', 'N5_PREVIEW_READY', 'N5_VALID', 'N5_SHOW_READY', 'N5_NOOP', 'N5_RECONCILED', 'N5_REMOVED', 'N5_DF_REGISTERED']);
@@ -68,19 +73,151 @@ const RED_FIRST_CASES = Object.freeze([
 function success(code, extra = {}) { return { ok: true, code, ...extra }; }
 function failure(code, extra = {}) { return { ok: false, code, ...extra }; }
 function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function trustedDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID'); }
+    catch (_) { throw new Error('N5_UNTRUSTED_DATA_INVALID'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) {
+        throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      }
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+        Object.defineProperty(result, String(index), { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('N5_UNTRUSTED_DATA_INVALID');
+      Object.defineProperty(result, name, { value: trustedDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+function clone(value) { return JSON.parse(JSON.stringify(trustedDataCopy(value))); }
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((key) => [key, sortValue(value[key])]));
 }
-function canonicalJson(value) { return JSON.stringify(sortValue(value)); }
+function canonicalJson(value) { return JSON.stringify(sortValue(trustedDataCopy(value))); }
 function sha256(value) { return crypto.createHash('sha256').update(typeof value === 'string' ? value : canonicalJson(value), 'utf8').digest('hex'); }
 function isSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
 function isDigest(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
 function isSafeId(value) { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value); }
+function isPacketContractId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+function isPhysicalPacketRunId(value) { return isPacketContractId(value) && value.length <= 128; }
 function isSafeLabel(value) { return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\r\n]/.test(value); }
 function isIssue(value) { return Number.isSafeInteger(value) && value >= 1; }
+function packetExactKeys(value, expected) {
+  return isRecord(value) && Object.keys(value).length === expected.length && expected.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+function packetHumanOwner(value) { return typeof value === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(value); }
+function packetNodeId(value) { return typeof value === 'string' && /^[A-Za-z0-9_:-]{1,256}$/.test(value); }
+function packetTimestamp(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value)); }
+function validateAuthorityPacketSource(value, repository) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
+  return packetExactKeys(value, ['repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'])
+    && value.repository === repository
+    && isIssue(value.issue_number)
+    && isIssue(value.comment_id)
+    && packetNodeId(value.node_id)
+    && packetHumanOwner(value.author_login)
+    && packetTimestamp(value.updated_at)
+    && isDigest(value.body_digest);
+}
+function validateAuthorityPacketProducer(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
+  return packetExactKeys(value, ['run', 'lock', 'stage', 'role'])
+    && isPhysicalPacketRunId(value.run)
+    && isPacketContractId(value.lock)
+    && AUTHORITY_PACKET_STAGES.includes(value.stage)
+    && isPacketContractId(value.role);
+}
+function validateAuthorityPacketCandidate(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return false; }
+  return value === null || packetExactKeys(value, ['pr_number', 'branch', 'base_ref', 'base_sha', 'head_sha', 'tree_sha'])
+    && (value === null || isIssue(value.pr_number)
+      && isSafeLabel(value.branch)
+      && isSafeLabel(value.base_ref)
+      && isSha(value.base_sha)
+      && isSha(value.head_sha)
+      && isSha(value.tree_sha));
+}
+function validateAuthorityPacketCurrent(value, expected = {}) {
+  try {
+    value = trustedDataCopy(value);
+    expected = trustedDataCopy(expected);
+  } catch (_) { return false; }
+  if (!packetExactKeys(value, ['schema', 'repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner', 'consumer', 'authority', 'candidate', 'predecessors'])
+    || value.schema !== AUTHORITY_PACKET_CURRENT_SCHEMA
+    || !isSafeLabel(value.repository)
+    || expected.repository !== undefined && value.repository !== expected.repository
+    || !isIssue(value.parent_issue)
+    || expected.parent_issue !== undefined && value.parent_issue !== expected.parent_issue
+    || !isIssue(value.child_issue)
+    || expected.child_issue !== undefined && value.child_issue !== expected.child_issue
+    || !isPacketContractId(value.lane_id)
+    || !packetHumanOwner(value.human_owner)
+    || !packetExactKeys(value.consumer, ['run', 'lock', 'stage', 'role', 'scope_digest'])
+    || !isPacketContractId(value.consumer.run)
+    || !isPacketContractId(value.consumer.lock)
+    || !AUTHORITY_PACKET_STAGES.includes(value.consumer.stage)
+    || !isPacketContractId(value.consumer.role)
+    || !isDigest(value.consumer.scope_digest)
+    || !validateAuthorityPacketSource(value.authority, value.repository)
+    || value.human_owner !== value.authority.author_login
+    || !validateAuthorityPacketCandidate(value.candidate)
+    || !Array.isArray(value.predecessors)
+    || value.predecessors.length > 16) return false;
+  let previousDependency = '';
+  for (const predecessor of value.predecessors) {
+    if (!packetExactKeys(predecessor, ['packet_id', 'packet_digest', 'content_digest', 'binding_digest', 'producer', 'candidate', 'dependency_id', 'acceptance_event_id', 'web_source', 'readback_event_id', 'store_identity_digest'])
+      || !isPacketContractId(predecessor.packet_id)
+      || !isDigest(predecessor.packet_digest)
+      || !isDigest(predecessor.content_digest)
+      || !isDigest(predecessor.binding_digest)
+      || !validateAuthorityPacketProducer(predecessor.producer)
+      || !validateAuthorityPacketCandidate(predecessor.candidate)
+      || !isPacketContractId(predecessor.dependency_id)
+      || predecessor.dependency_id <= previousDependency
+      || !isPacketContractId(predecessor.acceptance_event_id)
+      || !validateAuthorityPacketSource(predecessor.web_source, value.repository)
+      || !isPacketContractId(predecessor.readback_event_id)
+      || !isDigest(predecessor.store_identity_digest)) return false;
+    previousDependency = predecessor.dependency_id;
+  }
+  try { return Buffer.byteLength(canonicalJson(value), 'utf8') <= AUTHORITY_PACKET_CURRENT_MAX_BYTES; } catch (_error) { return false; }
+}
 function forbiddenEvidence(value) {
   return typeof value === 'string' && /```|https?:\/\/|(?:^|[\\/])(?:Users|home|private|secrets?)(?:[\\/]|$)|(?:^|\s)(?:token|password|secret|api[_-]?key)\s*[:=]|provider[-_ ]?(?:name|token|secret)/i.test(value);
 }
@@ -191,6 +328,8 @@ function validateParent(state) {
     childIds.add(entry.child_id);
     issueNumbers.add(entry.issue_number);
     if (entry.queue !== undefined || entry.subqueue !== undefined || entry.queues !== undefined) return failure('N5_GOVERNANCE_UNREADY');
+    if (hasOwn(entry, 'authority_packet_current')
+      && (entry.lifecycle !== 'current' || !validateAuthorityPacketCurrent(entry.authority_packet_current, { repository: state.repository, parent_issue: state.parent_issue, child_issue: entry.issue_number }))) return failure('N5_GOVERNANCE_UNREADY');
     if (entry.lifecycle === 'terminal' && !terminalObjectiveValid(entry)) return failure('N5_GOVERNANCE_UNREADY');
   }
   const orders = state.pending_work.map((item) => item.queue_order);
@@ -209,6 +348,8 @@ function validateChild(state) {
   if (state.tracker_version !== TRACKER_VERSION) return failure('N5_TRACKER_VERSION_UNSUPPORTED');
   if (!isSafeLabel(state.repository) || !isIssue(state.issue_number) || !LIFECYCLES.includes(state.lifecycle) || !publicSafeText(state.objective || '')) return failure('N5_GOVERNANCE_UNREADY');
   if (!Array.isArray(state.progress_checklist) || !isRecord(state.scope) || !Array.isArray(state.blockers) || typeof state.next_gate !== 'string') return failure('N5_GOVERNANCE_UNREADY');
+  if (hasOwn(state, 'authority_packet_current')
+    && (state.lifecycle !== 'current' || !validateAuthorityPacketCurrent(state.authority_packet_current, { repository: state.repository, parent_issue: state.parent_issue, child_issue: state.issue_number }))) return failure('N5_GOVERNANCE_UNREADY');
   if (state.lifecycle === 'terminal' && !terminalObjectiveValid(state)) return failure('N5_GOVERNANCE_UNREADY');
   if (state.progress_checklist.some((item) => !isSafeId(item.id) || typeof item.checked !== 'boolean' || !publicSafeText(item.text || ''))) return failure('N5_GOVERNANCE_UNREADY');
   return success('N5_VALID', { state });
@@ -289,7 +430,127 @@ function replaceManagedBlock(body, kind, nextState, options = {}) {
   const nextBody = parsed.prefix + nextManaged + parsed.suffix;
   return success('N5_VALID', { body: nextBody, prefix: parsed.prefix, suffix: parsed.suffix, outside_bytes_preserved: true, body_digest: sha256(nextBody), managed_digest: sha256(nextManaged) });
 }
-function applyBoundedUpdate(state, target, update = {}) {
+
+function verifyAuthorityPacketLifecycleTransition(state, target, update, input = {}) {
+  if (update.type !== 'set_lifecycle') return { ok: true, proof: null };
+  const found = targetRef(state, target);
+  if (!found.ok) return found;
+  const current = found.item;
+  const retiring = current.lifecycle === 'current' && update.lifecycle !== 'current'
+    && hasOwn(current, 'authority_packet_current');
+  const installing = current.lifecycle !== 'current' && update.lifecycle === 'current';
+  if (!retiring && !installing) return { ok: true, proof: null };
+  const supplied = input.current_packet_transition;
+  if (!isRecord(supplied) || !isRecord(supplied.store) || !isRecord(supplied.trusted_readers)) {
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  }
+  let receipt;
+  try { receipt = require('./toolkit-github-program-receipt.cjs'); } catch (_error) {
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  }
+  const store = supplied.store;
+  const readers = supplied.trusted_readers;
+  try {
+    receipt.assertAuthenticAuthorityPacketStore(store);
+    if (installing) {
+      if (!isRecord(supplied.consumer_intent)) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      const projection = store.buildCurrentPacketProjection(supplied.consumer_intent, readers);
+      const confirmed = store.confirmCurrentPacketProjection(projection, readers);
+      if (!isRecord(confirmed) || canonicalJson(confirmed.projection) !== canonicalJson(projection)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const admitted = store.admitSemanticGate(supplied.consumer_intent, readers);
+      receipt.assertAuthenticSemanticGateAdmission(store, admitted && admitted.admission);
+      const admissionProof = admitted.proof;
+      if (!isRecord(admissionProof) || !isRecord(admissionProof.current)
+        || admissionProof.current.projection_digest !== confirmed.projection_digest
+        || admissionProof.current.body_digest !== confirmed.body_digest
+        || `${admissionProof.current.revision}` !== `${confirmed.revision}`) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const applicability = store.semanticCompletionApplicability(admitted.admission);
+      if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      const proof = Object.freeze({});
+      currentPacketTransitionProofs.set(proof, {
+        action: 'install',
+        projection: clone(confirmed.projection),
+        store,
+        admission: admitted.admission,
+        current: { projection_digest: confirmed.projection_digest, body_digest: confirmed.body_digest, revision: confirmed.revision },
+        substantive_result: supplied.substantive_result || null,
+      });
+      return { ok: true, proof };
+    }
+    receipt.assertAuthenticSemanticGateAdmission(store, supplied.admission);
+    const semanticProof = store.revalidateSemanticGate(supplied.admission);
+    const confirmed = store.confirmCurrentPacketProjection(current.authority_packet_current, readers);
+    if (!isRecord(semanticProof) || !isRecord(semanticProof.current) || !isRecord(confirmed)
+      || canonicalJson(confirmed.projection) !== canonicalJson(current.authority_packet_current)
+      || confirmed.projection_digest !== semanticProof.current.projection_digest
+      || confirmed.body_digest !== semanticProof.current.body_digest
+      || `${confirmed.revision}` !== `${semanticProof.current.revision}`) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    const applicability = store.semanticCompletionApplicability(supplied.admission);
+    if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (applicability.required) {
+      const result = supplied.substantive_result;
+      if (!isRecord(result) || !isRecord(result.store) || !isDigest(result.outcome_ref)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      store.verifySemanticCompletion(supplied.admission, result.store, result.outcome_ref);
+    }
+    const proof = Object.freeze({});
+    currentPacketTransitionProofs.set(proof, {
+      action: 'retire',
+      projection: clone(confirmed.projection),
+      store,
+      admission: supplied.admission,
+      current: { projection_digest: confirmed.projection_digest, body_digest: confirmed.body_digest, revision: confirmed.revision },
+      substantive_result: supplied.substantive_result || null,
+    });
+    return { ok: true, proof };
+  } catch (error) {
+    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
+      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
+  }
+}
+
+function revalidateAuthorityPacketLifecycleProof(proof) {
+  if (!proof || typeof proof !== 'object') return { ok: true };
+  const state = currentPacketTransitionProofs.get(proof);
+  if (!state) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  try {
+    const fresh = state.store.revalidateSemanticGate(state.admission);
+    if (!isRecord(fresh) || !isRecord(fresh.current)
+      || fresh.current.projection_digest !== state.current.projection_digest
+      || fresh.current.body_digest !== state.current.body_digest
+      || `${fresh.current.revision}` !== `${state.current.revision}`) return failure('PARENT_CONCURRENCY_CONFLICT');
+    const applicability = state.store.semanticCompletionApplicability(state.admission);
+    if (!isRecord(applicability) || typeof applicability.required !== 'boolean' || !isRecord(applicability.applicability)) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (applicability.required) {
+      const result = state.substantive_result;
+      if (!isRecord(result) || !isRecord(result.store) || !isDigest(result.outcome_ref)) {
+        return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+      }
+      state.store.verifySemanticCompletion(state.admission, result.store, result.outcome_ref);
+    }
+    return { ok: true };
+  } catch (error) {
+    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
+      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
+  }
+}
+
+function applyBoundedUpdate(state, target, update = {}, authorizationProof = null) {
   const ownerOnly = update.type === 'set_field' && update.field === 'owner_detail' && (!target || (!target.child_id && !target.issue_number));
   const found = ownerOnly ? success('N5_VALID', { item: null, section: 'parent' }) : targetRef(state, target);
   if (!found.ok) return found;
@@ -304,8 +565,23 @@ function applyBoundedUpdate(state, target, update = {}) {
     } else return failure('N5_SCOPE_REJECTED');
   } else if (update.type === 'set_lifecycle') {
     if (!ref || !LIFECYCLES.includes(update.lifecycle)) return failure('N5_SCOPE_REJECTED');
+    if (!validateTracker(state).ok) return failure('N5_SCOPE_REJECTED');
+    const transition = authorizationProof && currentPacketTransitionProofs.get(authorizationProof);
+    const retiring = ref.item.lifecycle === 'current' && update.lifecycle !== 'current'
+      && hasOwn(ref.item, 'authority_packet_current');
+    const installing = ref.item.lifecycle !== 'current' && update.lifecycle === 'current';
+    if (retiring && (!transition || transition.action !== 'retire'
+      || canonicalJson(transition.projection) !== canonicalJson(ref.item.authority_packet_current))) {
+      return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+    }
+    if (installing && (!transition || transition.action !== 'install'
+      || !validateAuthorityPacketCurrent(transition.projection, {
+        repository: state.repository, parent_issue: state.parent_issue, child_issue: ref.item.issue_number
+      }))) return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
     for (const section of ['current_work', 'pending_work', 'terminal']) next[section] = next[section].filter((item) => item.child_id !== ref.item.child_id);
     ref.item.lifecycle = update.lifecycle;
+    if (retiring) delete ref.item.authority_packet_current;
+    if (installing) ref.item.authority_packet_current = clone(transition.projection);
     if (update.lifecycle !== 'pending') delete ref.item.queue_order;
     if (update.lifecycle === 'current') {
       if (next.current_work.length) return failure('N5_GOVERNANCE_UNREADY');
@@ -322,16 +598,22 @@ function applyBoundedUpdate(state, target, update = {}) {
   return valid.ok ? success('N5_VALID', { state: next, changed: canonicalJson(next) !== canonicalJson(state) }) : valid;
 }
 function boundedProjection(state, metadata = {}) {
-  return {
+  const projection = {
     repository: state.repository, parent_issue: state.parent_issue, tracker_version: state.tracker_version,
     body_digest: metadata.body_digest || null, managed_digest: metadata.managed_digest || null,
-    current_work: (state.current_work || []).map((item) => ({ child_id: item.child_id, issue_number: item.issue_number, lifecycle: item.lifecycle, pr_number: item.implementation_pr?.number || item.pr_number || null })),
+    current_work: (state.current_work || []).map((item) => {
+      const current = { child_id: item.child_id, issue_number: item.issue_number, lifecycle: item.lifecycle, pr_number: item.implementation_pr?.number || item.pr_number || null };
+      if (hasOwn(item, 'authority_packet_current')) current.authority_packet_current = clone(item.authority_packet_current);
+      return current;
+    }),
     pending_work: (state.pending_work || []).map((item) => ({ child_id: item.child_id, issue_number: item.issue_number, queue_order: item.queue_order, lifecycle: item.lifecycle })),
     other_open_prs: (state.other_open_prs || []).map((item) => ({ pr_number: item.pr_number || item.implementation_pr?.number || null, disposition: item.disposition || null })),
     terminal: (state.terminal || []).map((item) => ({ child_id: item.child_id, issue_number: item.issue_number, lifecycle: item.lifecycle, outcome: item.outcome || null })),
     deferred_findings: (state.deferred_findings || []).map((item) => ({ df_id: item.df_id, component: item.component, disposition: item.disposition, linked_child: item.linked_child ?? null })),
     owner_detail_digest: sha256(state.owner_detail || ''),
   };
+  if (state.kind === 'child' && hasOwn(state, 'authority_packet_current')) projection.authority_packet_current = clone(state.authority_packet_current);
+  return projection;
 }
 function classifyBodyLimit(body, limit) {
   const bytes = Buffer.byteLength(String(body), 'utf8');
@@ -443,7 +725,8 @@ function normalizeMutationUpdate(value, intent, target) {
   }
   if (Object.keys(update).length === 0) return null;
   if (update.type === 'set_field') {
-    if (!exactMutationKeys(update, ['type', 'field', 'value']) || !['owner_detail', 'next_gate', 'technical_detail', 'repository_detail'].includes(update.field) || !publicSafeText(update.value)) return null;
+    if (!exactMutationKeys(update, ['type', 'field', 'value'])) return null;
+    if (!['owner_detail', 'next_gate', 'technical_detail', 'repository_detail'].includes(update.field) || !publicSafeText(update.value)) return null;
     if (update.field !== 'owner_detail' && Object.keys(target).length === 0) return null;
     return { type: 'set_field', field: update.field, value: update.value };
   }
@@ -820,9 +1103,10 @@ function normalizedReviewEvidenceForDigest(value = {}) {
   };
 }
 function reviewEvidenceDigest(value = {}) {
-  return sha256(normalizedReviewEvidenceForDigest(value));
+  return sha256(normalizedReviewEvidenceForDigest(trustedDataCopy(value)));
 }
 function normalizeTrustedReviewEvidence(value) {
+  try { value = trustedDataCopy(value); } catch (_) { return null; }
   if (!isRecord(value)
     || !isSafeLabel(value.repository)
     || !isIssue(value.pr_number)
@@ -1303,7 +1587,9 @@ function createRuntime(options = {}) {
       const parsed = parseManagedBlock(first.fetched.body, 'parent', { complete: first.fetched.complete !== false });
       if (!parsed.ok) return parsed;
       if (parsed.state.repository !== input.repository || parsed.state.parent_issue !== input.parent_issue) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
-      const applied = applyBoundedUpdate(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
+      let packetTransition = verifyAuthorityPacketLifecycleTransition(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update, input);
+    if (!packetTransition.ok) return packetTransition;
+    const applied = applyBoundedUpdate(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update, packetTransition.proof);
       if (!applied.ok) return applied;
       if (!applied.changed) return success('N5_NOOP', { projection: boundedProjection(parsed.state, parsed), transition_id: sha256({ repository: input.repository, parent_issue: input.parent_issue, before: parsed.body_digest }) });
       let sourceBody = first.fetched.body;
@@ -1321,7 +1607,10 @@ function createRuntime(options = {}) {
         if (moved(sourceBinding, fresh.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
         const freshParsed = parseManagedBlock(fresh.fetched.body, 'parent', { complete: fresh.fetched.complete !== false });
         if (!freshParsed.ok) return freshParsed;
-        const freshApplied = applyBoundedUpdate(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
+        const freshTransition = verifyAuthorityPacketLifecycleTransition(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update, input);
+        if (!freshTransition.ok) return freshTransition;
+        packetTransition = freshTransition;
+        const freshApplied = applyBoundedUpdate(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update, freshTransition.proof);
         if (!freshApplied.ok) return freshApplied;
         const compacted = compactTerminal(freshApplied.state, { durable_evidence: input.durable_evidence, evidence_adapter: input.evidence_adapter || state.github });
         if (!compacted.ok) return compacted;
@@ -1336,6 +1625,8 @@ function createRuntime(options = {}) {
       const preWrite = fetchParent(state.github, input);
       if (!preWrite.ok) return preWrite;
       if (moved(sourceBinding, preWrite.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
+      const packetFreshness = revalidateAuthorityPacketLifecycleProof(packetTransition.proof);
+      if (!packetFreshness.ok) return packetFreshness;
       if (typeof state.github?.updateParent !== 'function') return failure('PARENT_RECONCILIATION_INCOMPLETE');
       try { state.github.updateParent({ repository: input.repository, parent_issue: input.parent_issue, body: replaced.body, revision: preWrite.fetched.revision || null }); } catch (_error) { return failure('PARENT_RECONCILIATION_INCOMPLETE'); }
       const readback = fetchParent(state.github, input);
@@ -1528,11 +1819,12 @@ function createRuntime(options = {}) {
 
 module.exports = Object.freeze({
   CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, REVIEW_EVIDENCE_VERSION, TRACKER_VERSION, LEGACY_V0_VERSION, DESIGN_LOCK, INTENTS, RESOURCE_KINDS, LIFECYCLES,
+  AUTHORITY_PACKET_CURRENT_SCHEMA, AUTHORITY_PACKET_STAGES,
   OBJECTIVE_STATUSES, MUTATION_TARGET_KINDS,
   A4_MATERIAL_PREDICATES, A4_EXCLUSIONS, DF_TRIGGERS, DF_DISPOSITIONS, REVIEW_DISPOSITIONS, MANAGED_MARKERS,
   SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, canonicalJson, sha256, isDigest, isSha,
   isPublicSafeEvidence, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
-  replaceManagedBlock, validateTracker, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
+  replaceManagedBlock, validateTracker, validateAuthorityPacketCurrent, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
   findingEvidenceDigest, deferredRootDigest, reviewEvidenceDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,

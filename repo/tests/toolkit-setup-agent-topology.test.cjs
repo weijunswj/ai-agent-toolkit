@@ -9,14 +9,15 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.10.9', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const nativeResources = control.inspectResourceCapability();
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION, cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
     runtime: { runtime: 'unknown' },
     delegation: { status: 'unsupported' },
     nativePlugin: { status: 'fresh', strict_enforcement_verified: supported, trusted: supported, hook_active: supported, activation_proof: supported ? proof : null },
-    agentCapability: { supported, launch_supported: supported, resource_counter_supported: supported, resource_counter_source: supported ? 'win32-operating-system' : 'unsupported-or-malformed' },
+    agentCapability: { supported, launch_supported: supported, resource_counter_supported: supported && nativeResources.supported, resource_counter_source: nativeResources.source },
     agentProfile: { topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0, ...profile },
   };
 }
