@@ -154,6 +154,22 @@ test('web owns CURRENT reconciliation while semantic workers receive compiled bo
   assert.match(controller, /issue body is not itself the semantic worker packet/);
 });
 
+test('Toolkit controller future-owns reusable improvements instead of expanding the CURRENT delivery child', () => {
+  assert.match(controller, /Toolkit-controller active-child improvement quarantine/);
+  assert.match(controller, /applies only when the Web Controller repository fence is exactly `weijunswj\/ai-agent-toolkit`/);
+  assert.match(controller, /defaults to `FUTURE_OWNED_NONBLOCKING`/);
+  assert.match(controller, /smallest compatible existing durable future child\/shared carrier\/seed/);
+  assert.match(controller, /does not by itself widen that child's scope, mutation ceiling, prerequisite graph, RUN\/Lock lineage or repair budget/);
+  assert.match(controller, /CURRENT_CHILD_INVARIANT_AFFECTED/);
+  assert.match(controller, /CURRENT_CHILD_ASSURANCE_INVALIDATED/);
+  assert.match(controller, /SAFE_DEFERRAL_IMPOSSIBLE/);
+  assert.match(controller, /SMALLEST_CURRENT_CORRECTION/);
+  assert.match(controller, /Missing any field means future-own the improvement and continue the current child/);
+  assert.match(controller, /never launders a real current-child defect into follow-up work/);
+  assert.match(controller, /Controllers bound to SQAG, Platform, Design, Automation or any other repository do not inherit this Toolkit programme-topology rule/);
+  assert.match(controller, /may surface reusable `TOOLKIT_FEEDBACK`/);
+});
+
 test('generic interim Controller law is canonicalised only by the Toolkit source-owning controller', () => {
   assert.match(controller, /Interim Controller-law canonicalisation/);
   assert.match(controller, /generic Owner\/Web interim rule that changes Controller behaviour across chats, workers or Toolkit-managed repositories/);
