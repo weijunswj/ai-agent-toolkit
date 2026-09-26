@@ -84,7 +84,7 @@ test('Web route recommendations are advisory and exact Owner-approved overrides 
   assert.match(controller, /not a new named stack or silent fallback/);
   assert.match(controller, /must not hot-swap a running semantic worker/);
   assert.match(controller, /resets no attempt\/budget/);
-  assert.match(controller, /does not recreate `G2_ESCALATED`/);
+  assert.match(controller, /cannot substitute for missing G1\/G2\/evidence authority or create an automatic escalation stage/);
   assert.match(architecture, /recommendation has no authority effect/);
   assert.match(architecture, /explicit Owner approval/);
   assert.match(architecture, /bounded orchestration overlay, not a new stack, fallback chain or semantic escalation stage/);
