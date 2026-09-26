@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G3', 'G4', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -112,7 +112,6 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
-  assert.equal(claude.routes.LOOP.reasoning, 'medium');
   assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
@@ -127,9 +126,10 @@ test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max 
 
   assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G1_RECONVERGENCE, mixed.routes.G1);
 
   for (const [role, route] of Object.entries(openai.routes)) {
-    if (['G_FRAME', 'G1'].includes(role)) continue;
+    if (['G_FRAME', 'G1', 'G1_RECONVERGENCE'].includes(role)) continue;
     if (route.provider === 'openai' && route.model === 'gpt-6-luna' && route.reasoning === 'max') {
       assert.deepEqual(mixed.routes[role], { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
     } else {
@@ -146,6 +146,15 @@ test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max 
   }
 });
 
+test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
+  for (const [stackId, stack] of Object.entries(registry.stacks)) {
+    assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1, stackId);
+  }
+  assert.match(controller, /G1_RECONVERGENCE.*uses exactly the selected stack's `G1` provider\/model\/reasoning route/);
+  assert.match(controller, /not an independent model-strength tier/);
+  assert.match(architecture, /uses exactly the selected stack's G1 provider\/model\/reasoning route/);
+});
+
 test('OpenAI G2 is Astra High and current governance has no automatic G2 escalation category', () => {
   const openai = registry.stacks['owner-openai-default'];
   assert.equal(openai.routes.G2.provider, 'openai');
@@ -158,6 +167,13 @@ test('OpenAI G2 is Astra High and current governance has no automatic G2 escalat
   assert.match(controller, /There is no automatic higher-reasoning G2 retry category/);
   assert.match(controller, /return to Web for causal adjudication rather than automatically spending another model tier/);
   assert.match(controller, /Web may explicitly select another registered stack for a later run when justified/);
+});
+
+test('LOOP is retired from current v2 routing while historical Loop evidence remains compatible', () => {
+  assert.equal(requiredRoutes.includes('LOOP'), false);
+  for (const stack of Object.values(registry.stacks)) assert.equal(Object.hasOwn(stack.routes, 'LOOP'), false);
+  assert.match(controller, /Repository Loop Manager is retired from current route selection/);
+  assert.match(architecture, /Repository Loop Manager is retired from current route selection/);
 });
 
 test('G2_ESCALATED is retired from current routing while historical evidence may remain elsewhere', () => {
@@ -400,6 +416,20 @@ test('fresh G4 attacks the enforcement mechanism itself and routes observer inco
   assert.match(architecture, /ordinary construction instead of an intercepted API/);
   assert.match(architecture, /state change that leaves watched shape\/prototype evidence unchanged/);
   assert.match(architecture, /return to targeted G2 before another G3/);
+});
+
+test('same-root G2 contract defects converge inside one G2 episode instead of chaining fresh G2 runs', () => {
+  assert.match(controller, /G2 in-gate convergence/);
+  assert.match(controller, /challenge -> refine -> challenge/);
+  assert.match(controller, /defect found in G2's own draft contract is ordinary in-gate refinement/);
+  assert.match(controller, /not by itself `G2_AMEND` or authority for a fresh same-root G2 RUN\/Lock/);
+  assert.match(controller, /G2_PASS/);
+  assert.match(controller, /G2_HOLD/);
+  assert.match(controller, /G2_REENTRY_REQUIRED/);
+  assert.match(controller, /G2_NONCONVERGED/);
+  assert.match(controller, /do not manufacture another materially equivalent G2 merely by issuing a new RUN\/Lock/);
+  assert.match(architecture, /Discovering a defect in that proposed contract is not itself a terminal AMEND/);
+  assert.match(architecture, /Renaming RUN\/Lock without materially changed input does not create another admissible G2 episode/);
 });
 
 test('G2 cannot drop mandatory requirements when freezing the candidate contract', () => {

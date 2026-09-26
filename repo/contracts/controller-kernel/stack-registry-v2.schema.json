@@ -76,7 +76,6 @@
             "G2",
             "G3",
             "G4",
-            "LOOP",
             "G1_RECONVERGENCE",
             "FINAL_AUDIT",
             "BROWSER"
@@ -98,9 +97,6 @@
               "$ref": "#/$defs/route"
             },
             "G4": {
-              "$ref": "#/$defs/route"
-            },
-            "LOOP": {
               "$ref": "#/$defs/route"
             },
             "G1_RECONVERGENCE": {

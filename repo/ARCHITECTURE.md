@@ -101,7 +101,7 @@ Governance stage semantics are provider/model agnostic.
 - `G2` = adversarial executable implementation-contract closure.
 - `G3` = implementation/validation.
 - `G4` = fresh isolated exact-head independent assurance.
-- `LOOP`, `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. G1_RECONVERGENCE is read-only and non-gating.
+- `G1_RECONVERGENCE`, `FINAL_AUDIT` and `BROWSER` are named execution roles outside the G1-G4 decision sequence. Repository Loop Manager is retired from current route selection; historical Loop protocol/evidence remains compatibility-readable. G1_RECONVERGENCE is read-only and non-gating and uses exactly the selected stack's G1 provider/model/reasoning route.
 
 Only G0 and G3 may use semantic depth-1 subagents. All spawned subagents are leaf-only. G0 fan-out is read-only evidence acquisition; G3 fan-out must remain inside the accepted G2 separation/mutation contract.
 
@@ -148,6 +148,10 @@ Toolkit G1 must prove conformance to this document or explicitly obtain authorit
 ### G2 — Adversarial executable implementation contract
 
 G2 independently challenges the accepted G1 boundary before mutation. It may inspect primary sources and reject a flawed G1 assumption.
+
+One admitted same-root G2 episode owns its own read-only contract convergence. It performs bounded `challenge -> refine -> challenge` over the proposed enforcement mechanism/completeness proof, state machine, protocol/schema, recovery behavior, evidence/validation contract and mutation/candidate boundary. Discovering a defect in that proposed contract is not itself a terminal AMEND and does not justify a fresh same-root G2 identity while root/trust/Owner decisions, evidence sufficiency and authorised scope remain unchanged.
+
+G2 terminates as `G2_PASS`, genuine evidence/environment `G2_HOLD`, `G2_REENTRY_REQUIRED` for changed root/trust/Owner/upstream semantics, or `G2_NONCONVERGED`. A `G2_NONCONVERGED` packet names the surviving contradiction, challenged alternatives and smallest missing decision/evidence boundary and returns to Web. Renaming RUN/Lock without materially changed input does not create another admissible G2 episode.
 
 G2 binds:
 
@@ -326,7 +330,7 @@ Normal execution events do not imply either disposition. In particular, worker f
 
 Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception is the final autonomous same-scope exception. A later same-scope `WEB_DIRECTED_CONTINUATION` is possible only through a new explicit Owner/Web grant under the section above and never resets the exhausted accounting.
 
-Repository Loop bounded-convergence rules govern executor persistence inside the existing child, but do not require an automatic higher-model referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
+Repository Loop bounded-convergence rules govern executor persistence inside the existing child, but do not require an automatic separate reconvergence referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
 
 ## Roles
 

@@ -34,11 +34,6 @@
           "model": "gpt-6-astra",
           "reasoning": "high"
         },
-        "LOOP": {
-          "provider": "openai",
-          "model": "gpt-6-luna",
-          "reasoning": "max"
-        },
         "G1_RECONVERGENCE": {
           "provider": "openai",
           "model": "gpt-6-sol",
@@ -99,11 +94,6 @@
           "provider": "anthropic",
           "model": "opus-5.5",
           "reasoning": "xhigh"
-        },
-        "LOOP": {
-          "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium"
         },
         "G1_RECONVERGENCE": {
           "provider": "anthropic",
@@ -166,15 +156,10 @@
           "model": "gpt-6-astra",
           "reasoning": "high"
         },
-        "LOOP": {
+        "G1_RECONVERGENCE": {
           "provider": "anthropic",
           "model": "opus-5.5",
-          "reasoning": "medium"
-        },
-        "G1_RECONVERGENCE": {
-          "provider": "openai",
-          "model": "gpt-6-sol",
-          "reasoning": "xhigh"
+          "reasoning": "high"
         },
         "FINAL_AUDIT": {
           "provider": "openai",
