@@ -109,7 +109,7 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'max');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
@@ -129,7 +129,7 @@ test('OpenAI normal G2 is Astra High and escalated G2 remains strictly stronger'
   assert.equal(openai.routes.G2.reasoning, 'high');
   assert.equal(openai.routes.G2_ESCALATED.provider, 'openai');
   assert.equal(openai.routes.G2_ESCALATED.model, 'gpt-6-astra');
-  assert.equal(openai.routes.G2_ESCALATED.reasoning, 'max');
+  assert.equal(openai.routes.G2_ESCALATED.reasoning, 'xhigh');
 });
 
 test('G2 escalation is a stronger route category, not a new gate', () => {

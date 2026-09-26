@@ -57,7 +57,7 @@
         "G2_ESCALATED": {
           "provider": "openai",
           "model": "gpt-6-astra",
-          "reasoning": "max"
+          "reasoning": "xhigh"
         }
       },
       "subagents": {
