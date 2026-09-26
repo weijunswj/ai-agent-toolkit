@@ -558,12 +558,12 @@ test('commit-required validation sequencing freezes one local candidate before c
   assert.match(controller, /accepted validator materially requires immutable commit identity or a clean committed working tree/);
   assert.match(controller, /all meaningful non-commit-dependent checks are green and candidate contents\/mutation scope are frozen/);
   assert.match(controller, /Bind the exact commit\/tree\/parent/);
-  assert.match(controller, /prohibit source amendment, amend\/rebase\/reconstruction or replacement candidate inside that episode/);
+  assert.match(controller, /prohibit amendment\/rebase\/reconstruction of that candidate identity/);
   assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
   assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
   assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
   assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
-  assert.match(architecture, /create exactly one immutable local candidate commit under the existing allowance/);
+  assert.match(architecture, /create the ordinary immutable local candidate commit under the existing allowance/);
   assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
 });
 
@@ -580,6 +580,22 @@ test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-roo
   assert.match(controller, /Before Web admits fresh G4/);
   assert.match(controller, /zero unresolved required in-contract roots/);
   assert.match(controller, /worker's `G3_PASS` label alone never authorises G4/);
+});
+
+test('hosted non-product validation reclosure stays inside G3 while every candidate remains immutable', () => {
+  assert.match(controller, /Hosted non-product reclosure inside G3/);
+  assert.match(controller, /candidate immutability is per exact candidate identity, not a singleton constraint on the G3 episode/i);
+  assert.match(controller, /same RUN\/Lock\/G3 episode/);
+  assert.match(controller, /primary owner is `HARNESS`, `TOOLKIT` or `ENVIRONMENT`/);
+  assert.match(controller, /`PRODUCT_SEMANTICS_PROVEN_BAD=NO`/);
+  assert.match(controller, /failed candidate remains immutable and preserved as evidence/);
+  assert.match(controller, /does not consume a product\/G3 correction attempt or reset any historical budget/);
+  assert.match(controller, /Product RED remains ordinary G3 convergence/);
+  assert.match(controller, /Repeated materially equivalent non-product hosted RED.*returns to Web diagnosis/s);
+  assert.match(controller, /hosted non-product reclosure rule.*same G3 RUN\/Lock.*without manufacturing another semantic continuation grant/s);
+  assert.match(architecture, /Candidate immutability is per exact candidate identity, not a requirement that the entire G3 episode contain only one candidate/);
+  assert.match(architecture, /This is validation reclosure, not product correction/);
+  assert.match(architecture, /Every failed candidate remains immutable durable evidence/);
 });
 
 test('candidate acceptance, child completion, and per-repository wait removal stay distinct', () => {
