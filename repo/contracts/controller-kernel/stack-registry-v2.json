@@ -7,7 +7,7 @@
         "G_FRAME": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "xhigh"
+          "reasoning": "max"
         },
         "G0": {
           "provider": "openai",
@@ -17,7 +17,7 @@
         "G1": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "xhigh"
+          "reasoning": "max"
         },
         "G2": {
           "provider": "openai",
@@ -37,7 +37,7 @@
         "G1_RECONVERGENCE": {
           "provider": "openai",
           "model": "gpt-6-sol",
-          "reasoning": "xhigh"
+          "reasoning": "max"
         },
         "FINAL_AUDIT": {
           "provider": "openai",
