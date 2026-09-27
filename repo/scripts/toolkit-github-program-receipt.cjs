@@ -6,6 +6,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { types: utilTypes } = require('node:util');
+
+const CapturedNativeError = Error;
+const CapturedObjectDefineProperty = Object.defineProperty;
+const CapturedObjectFreeze = Object.freeze;
+const CapturedObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const CapturedObjectSetPrototypeOf = Object.setPrototypeOf;
+const CapturedWeakMapGet = WeakMap.prototype.get;
+const CapturedWeakMapSet = WeakMap.prototype.set;
+const CapturedSetHas = Set.prototype.has;
+const CapturedIsProxy = utilTypes.isProxy;
+const CapturedIsNativeError = utilTypes.isNativeError;
 const { spawnSync } = require('node:child_process');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 
@@ -260,7 +271,11 @@ const PAYLOAD_KEYS = Object.freeze([
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
-const GPR_ERROR_INSTANCES = new WeakSet();
+const TRUSTED_GPR_ERROR_SEMANTICS = new WeakMap();
+const trustedGprErrorGet = CapturedWeakMapGet.bind(TRUSTED_GPR_ERROR_SEMANTICS);
+const trustedGprErrorSet = CapturedWeakMapSet.bind(TRUSTED_GPR_ERROR_SEMANTICS);
+const AUTHORITY_PACKET_REASON_CODE_SET = new Set(AUTHORITY_PACKET_REASON_CODES);
+const hasAuthorityPacketReasonCode = CapturedSetHas.bind(AUTHORITY_PACKET_REASON_CODE_SET);
 const PENDING_ALLOCATION_PREFLIGHT = Symbol('pending-allocation-preflight');
 const PENDING_ALLOCATION_COMMIT = Symbol('pending-allocation-commit');
 const ADMISSION_OWNERS = new WeakMap();
@@ -276,15 +291,85 @@ const AUTHORITY_PACKET_READER_KEYS = Object.freeze([
 class GprError extends Error {
   constructor(code, details = {}) {
     super(code);
-    this.name = 'GprError';
-    this.code = code;
-    this.details = details;
-    GPR_ERROR_INSTANCES.add(this);
+    CapturedObjectDefineProperty(this, 'name', { value: 'GprError', writable: true, configurable: true, enumerable: true });
+    CapturedObjectDefineProperty(this, 'code', { value: code, writable: true, configurable: true, enumerable: true });
+    CapturedObjectDefineProperty(this, 'details', { value: details, writable: true, configurable: true, enumerable: true });
+  }
+}
+
+const CAPTURED_GPR_ERROR_PROTOTYPE = GprError.prototype;
+
+function defineWritableErrorField(error, key, value) {
+  CapturedObjectDefineProperty(error, key, {
+    value,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+}
+
+function createTrustedGprError(code, details = {}, packetReason = null, packetBoundary = false) {
+  const safeCode = typeof code === 'string' ? code : 'GPR_INTERNAL_ERROR';
+  const safePacketReason = typeof packetReason === 'string' && hasAuthorityPacketReasonCode(packetReason)
+    ? packetReason
+    : null;
+  const safePacketBoundary = packetBoundary === true && safePacketReason !== null;
+  const error = new CapturedNativeError(safeCode);
+  CapturedObjectSetPrototypeOf(error, CAPTURED_GPR_ERROR_PROTOTYPE);
+  defineWritableErrorField(error, 'name', 'GprError');
+  defineWritableErrorField(error, 'code', safeCode);
+  defineWritableErrorField(error, 'details', details === undefined ? {} : details);
+  if (safePacketBoundary) {
+    defineWritableErrorField(error, 'packetBoundary', true);
+    defineWritableErrorField(error, 'reason_code', safePacketReason);
+  }
+  const semantics = CapturedObjectFreeze({
+    code: safeCode,
+    packet_reason: safePacketReason,
+    packet_boundary: safePacketBoundary,
+  });
+  trustedGprErrorSet(error, semantics);
+  return error;
+}
+
+function trustedGprErrorRecord(value) {
+  return trustedGprErrorGet(value) || null;
+}
+
+function trustedGprErrorInfo(value) {
+  const semantics = trustedGprErrorRecord(value);
+  if (!semantics) return null;
+  return CapturedObjectFreeze({
+    code: semantics.code,
+    packet_reason: semantics.packet_reason,
+    packet_boundary: semantics.packet_boundary,
+  });
+}
+
+function reissueTrustedGprError(value) {
+  const semantics = trustedGprErrorRecord(value);
+  if (!semantics) return null;
+  return createTrustedGprError(
+    semantics.code,
+    {},
+    semantics.packet_reason,
+    semantics.packet_boundary
+  );
+}
+
+function nativeErrorCodeAtProducerBoundary(error) {
+  if (error === null || typeof error !== 'object') return null;
+  try {
+    if (CapturedIsProxy(error) || !CapturedIsNativeError(error)) return null;
+    const descriptor = CapturedObjectGetOwnPropertyDescriptor(error, 'code');
+    return descriptor && typeof descriptor.value === 'string' ? descriptor.value : null;
+  } catch (_) {
+    return null;
   }
 }
 
 function fail(code, details) {
-  throw new GprError(code, details);
+  throw createTrustedGprError(code, details);
 }
 
 function isRecord(value) {
@@ -303,18 +388,18 @@ function deepFreeze(value) {
 }
 
 function packetFail(reasonCode) {
-  if (!AUTHORITY_PACKET_REASON_CODES.includes(reasonCode)) reasonCode = 'GPR_PACKET_VALUE_INVALID';
-  const error = new GprError(reasonCode);
-  error.packetBoundary = true;
-  error.reason_code = reasonCode;
-  throw error;
+  if (typeof reasonCode !== 'string' || !hasAuthorityPacketReasonCode(reasonCode)) {
+    reasonCode = 'GPR_PACKET_VALUE_INVALID';
+  }
+  throw createTrustedGprError(reasonCode, {}, reasonCode, true);
 }
 
 function packetFailureEnvelope(error) {
-  const reasonCode = GPR_ERROR_INSTANCES.has(error) && AUTHORITY_PACKET_REASON_CODES.includes(error.reason_code || error.code)
-    ? error.reason_code || error.code
+  const semantics = trustedGprErrorRecord(error);
+  const reasonCode = semantics && semantics.packet_reason !== null
+    ? semantics.packet_reason
     : 'GPR_PACKET_VALUE_INVALID';
-  return deepFreeze({
+  return CapturedObjectFreeze({
     ok: false,
     code: PACKET_TERMINAL_FAILURE_CODE,
     reason_code: reasonCode,
@@ -461,7 +546,7 @@ function packetParseInput(value) {
       bytes = new PACKET_UINT8_ARRAY(length);
       PACKET_REFLECT_APPLY(PACKET_UINT8_ARRAY_SET, bytes, [source]);
     } catch (error) {
-      if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) throw error;
+      if (trustedGprErrorRecord(error)?.packet_boundary) throw reissueTrustedGprError(error);
       packetFail('GPR_PACKET_VALUE_INVALID');
     }
     if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) packetFail('GPR_PACKET_VALUE_INVALID');
@@ -627,7 +712,7 @@ function assertRuntimeSupport(options = {}) {
     try {
       sqlite = require('node:sqlite');
     } catch (error) {
-      fail('GPR_SQLITE_UNAVAILABLE', { cause: error && error.code ? error.code : 'load-failed' });
+      fail('GPR_SQLITE_UNAVAILABLE', { cause: 'load-failed' });
     }
   }
   if (!sqlite || typeof sqlite.DatabaseSync !== 'function') fail('GPR_SQLITE_UNAVAILABLE');
@@ -711,7 +796,7 @@ function packetValidateSourceReference(value, code = 'GPR_PACKET_VALUE_INVALID')
     || !isSafeId(value.node_id, 160)
     || typeof value.author_login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(value.author_login)
     || !isTimestamp(value.updated_at) || !isDigest(value.body_digest)) {
-    if (AUTHORITY_PACKET_REASON_CODES.includes(code)) packetFail(code);
+    if (hasAuthorityPacketReasonCode(code)) packetFail(code);
     fail(code);
   }
   return value;
@@ -2318,7 +2403,7 @@ function parseAuthorityPacketJson(value) {
   try { parsed = JSON.parse(value); } catch (_) { packetFail('GPR_PACKET_CONTENT_MISMATCH'); }
   let normalized;
   try { normalized = packetClosedClone(parsed); } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_CONTENT_MISMATCH');
   }
   try {
@@ -2330,7 +2415,7 @@ function parseAuthorityPacketJson(value) {
 function packetValidateEventPayload(eventType, payload) {
   let normalized;
   try { normalized = packetClosedClone(payload); } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_CONTENT_MISMATCH');
   }
   if (!isRecord(normalized)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
@@ -2541,7 +2626,6 @@ function verifyAuthorityPacketDurableEvidence(db, namespace, expectedNamespaceDi
     const runIds = db.prepare('SELECT run_id FROM runs ORDER BY run_id').all();
     for (const row of runIds) readChainDb(db, row.run_id, true);
   } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
     packetFail('GPR_PACKET_CONTENT_MISMATCH');
   }
   const packetRows = db.prepare('SELECT * FROM authority_packets ORDER BY packet_id').all();
@@ -2552,8 +2636,7 @@ function verifyAuthorityPacketDurableEvidence(db, namespace, expectedNamespaceDi
       || !isTimestamp(row.created_at)) packetFail('GPR_PACKET_CONTENT_MISMATCH');
     let identities;
     try { identities = authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json)); } catch (error) {
-      if (error instanceof GprError && error.code === 'GPR_PACKET_LIMIT') packetFail('GPR_PACKET_LIMIT');
-      if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
+      if (trustedGprErrorRecord(error)?.code === 'GPR_PACKET_LIMIT') packetFail('GPR_PACKET_LIMIT');
       packetFail('GPR_PACKET_CONTENT_MISMATCH');
     }
     if (row.packet_id !== identities.packet_id || row.producer_key !== identities.producer_key
@@ -2827,7 +2910,7 @@ function packetReadIdentityDb(db, packetId) {
   try {
     identities = readAuthorityPacketRow(db, packetId, authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json)).packet.bindings);
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_CONTENT_MISMATCH');
   }
   return identities;
@@ -2855,7 +2938,7 @@ function packetAppendReadbackEvent(config, packetId, delivery) {
       db, packetId, 'READBACK_VERIFIED', packetReadbackPayload(delivery), isoAt()
     ));
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { db.close(); }
 }
@@ -3225,7 +3308,7 @@ function packetBuildAcceptance(config, boundReaders, packetId) {
       dbWrite, packetId, 'WEB_ACCEPTANCE_BOUND', acceptance, isoAt()
     ));
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { dbWrite.close(); }
   return deepFreeze({ acceptance, acceptance_event_id: event.event_id, duplicate: event.duplicate });
@@ -3235,8 +3318,9 @@ function packetClosedConsumerIntent(value, rejectionCode) {
   if (value === null || typeof value !== 'object') packetFail(rejectionCode);
   let intent;
   try { intent = packetClosedClone(value); } catch (error) {
-    if (error instanceof GprError && error.code === 'GPR_PACKET_VALUE_INVALID') packetFail(rejectionCode);
-    throw error;
+    const semantics = trustedGprErrorRecord(error);
+    if (!semantics || semantics.code === 'GPR_PACKET_VALUE_INVALID') packetFail(rejectionCode);
+    throw reissueTrustedGprError(error);
   }
   if (!isRecord(intent)) packetFail(rejectionCode);
   return intent;
@@ -3331,7 +3415,7 @@ function packetConfirmCurrentProjection(config, boundReaders, expectedProjection
         ));
       }));
     } catch (error) {
-      if (error instanceof GprError) throw error;
+      if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
       packetFail('GPR_PACKET_WRITE_FAILED');
     } finally { db.close(); }
   }
@@ -3475,7 +3559,7 @@ function semanticGateAdmissionRecord(config, store, boundReaders, consumerIntent
       inserted = true;
     });
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { db.close(); }
   const tokenState = {
@@ -3619,7 +3703,7 @@ function semanticGateBeginDispatch(config, store, token) {
       return deepFreeze({ ...event, attempt, transport_id: transportId });
     });
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
   } finally { db.close(); }
 }
@@ -3644,7 +3728,7 @@ function semanticGateRecordDispatch(config, store, token, evidence) {
     const event = transaction(db, () => appendSemanticGateEventDb(db, state.admissionId, eventType, observed));
     return deepFreeze({ ...event, ...observed });
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
   } finally { db.close(); }
 }
@@ -3706,7 +3790,7 @@ function semanticGateRecover(config, store, boundReaders, consumerIdentity) {
         appendSemanticGateEventDb(dbWrite, record.admission_id, 'DISPATCH_NOT_STARTED', recoveryOutcome);
       });
     } catch (error) {
-      if (error instanceof GprError) throw error;
+      if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
       packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
     } finally { dbWrite.close(); }
     events = semanticGateDispatchState(config, record.admission_id);
@@ -3778,7 +3862,7 @@ function semanticCompletionApplicability(store, admission) {
 function validateSemanticCompletionArtifact(state, applicability, packetInput) {
   let identities;
   try { identities = authorityPacketIdentities(packetInput); } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_VALUE_INVALID');
   }
   const packet = identities.packet;
@@ -3827,7 +3911,7 @@ function appendSemanticCompletionEvent(config, packetId, payload) {
       db, packetId, 'CONSUMER_COMPLETED', payload, isoAt()
     ));
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { db.close(); }
 }
@@ -4664,8 +4748,8 @@ function openVerified(config, create = true, readOnly = false) {
     return db;
   } catch (error) {
     try { db.close(); } catch (_) { /* Preserve the original failure. */ }
-    if (error instanceof GprError) throw error;
-    fail('GPR_STORE_INVALID', { cause: error && error.code ? error.code : 'sqlite-error' });
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
+    fail('GPR_STORE_INVALID', { cause: 'sqlite-error' });
   }
 }
 
@@ -4711,7 +4795,7 @@ function openAuthorityPacketVerified(config, create = false, readOnly = false, v
     if (db) {
       try { db.close(); } catch (_) { /* Preserve the original failure. */ }
     }
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_STORE_UNAVAILABLE');
   }
 }
@@ -4805,7 +4889,7 @@ function readAuthorityPacketMigrationSource(config) {
       observed_at: observedAt
     };
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_MIGRATION_SOURCE_INVALID');
   } finally {
     if (db) db.close();
@@ -4889,7 +4973,7 @@ function migrateAuthorityPacketStore(options, trustedAuthorityReaders) {
       verifyAuthorityPacketDurableEvidence(db, config.namespace, config.namespaceDigest, config.databasePath);
     });
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally {
     if (db) db.close();
@@ -4912,7 +4996,7 @@ function initialiseAuthorityPacketStore(options, trustedAuthorityReaders) {
       const version = Number(oneValue(db, 'PRAGMA user_version', 'user_version'));
       if (version !== AUTHORITY_PACKET_USER_VERSION) packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
     } catch (error) {
-      if (error instanceof GprError) throw error;
+      if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
       packetFail('GPR_PACKET_SCHEMA_UNAVAILABLE');
     } finally {
       if (db) db.close();
@@ -5045,7 +5129,7 @@ function readAuthorityPacketVerificationHold(config) {
       packetFail('GPR_PACKET_READBACK_FAILED');
     }
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_READBACK_FAILED');
   }
   return true;
@@ -5060,7 +5144,7 @@ function createAuthorityPacketVerificationHold(config) {
     fs.writeFileSync(fd, authorityPacketVerificationHoldBytes(config), 'utf8');
     fs.fsyncSync(fd);
   } catch (error) {
-    if (error && error.code === 'EEXIST' && readAuthorityPacketVerificationHold(config)) return;
+    if (nativeErrorCodeAtProducerBoundary(error) === 'EEXIST' && readAuthorityPacketVerificationHold(config)) return;
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally {
     if (fd !== undefined) {
@@ -5155,7 +5239,7 @@ function callTrustedReaderSync(reader, argument, code) {
   if (typeof reader !== 'function') packetFail(code);
   let result;
   try { result = reader(argument); } catch (error) {
-    if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) throw error;
+    if (trustedGprErrorRecord(error)?.packet_boundary) throw reissueTrustedGprError(error);
     packetFail(code);
   }
   try { return packetClosedClone(result); }
@@ -5171,7 +5255,6 @@ function packetBindingsFromAdmission(admission) {
   if (!candidate) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   let bindings;
   try { bindings = packetClosedClone(candidate); } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
   packetValidateBindings(bindings);
@@ -5196,7 +5279,6 @@ function verifyPacketProducerAdmission(packet, admission, readers) {
   }
   if (observedAuthority === undefined) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   try { packetValidateSourceReference(packetClosedClone(observedAuthority)); } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
   if (canonicalSerialize(observedAuthority) !== canonicalSerialize(packet.bindings.authority)) {
@@ -5212,7 +5294,6 @@ function verifyPacketProducerAdmission(packet, admission, readers) {
     try {
       packetValidateProducer(packetClosedClone(admission.producer));
     } catch (error) {
-      if (error instanceof GprError) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
       packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
     }
     if (canonicalSerialize(admission.producer) !== canonicalSerialize(packet.bindings.producer)) {
@@ -5240,7 +5321,6 @@ function verifyPacketScreening(packetIdentities, admission, readers) {
   if (!isRecord(screening)) packetFail('GPR_PACKET_PRIVACY_REJECTED');
   let normalized;
   try { normalized = packetClosedClone(screening); } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_PRIVACY_REJECTED');
     packetFail('GPR_PACKET_PRIVACY_REJECTED');
   }
   const allowed = normalized.allowed === true || normalized.decision === 'ALLOW' || normalized.decision === 'ACCEPTED';
@@ -5255,7 +5335,6 @@ function readAuthorityPacketRow(db, packetId, expectedBindings) {
   if (typeof packetId !== 'string' || !AUTHORITY_PACKET_ID_PATTERN.test(packetId)) packetFail('GPR_PACKET_IDENTITY_MISMATCH');
   let expected;
   try { expected = packetClosedClone(expectedBindings); } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_BINDING_MISMATCH');
     packetFail('GPR_PACKET_BINDING_MISMATCH');
   }
   packetValidateBindings(expected);
@@ -5265,7 +5344,6 @@ function readAuthorityPacketRow(db, packetId, expectedBindings) {
   try {
     identities = authorityPacketIdentities(parseAuthorityPacketJson(row.canonical_json));
   } catch (error) {
-    if (error instanceof GprError) packetFail('GPR_PACKET_CONTENT_MISMATCH');
     packetFail('GPR_PACKET_CONTENT_MISMATCH');
   }
   if (row.packet_id !== identities.packet_id || row.producer_key !== identities.producer_key
@@ -5298,7 +5376,7 @@ function validateAuthorityPacketDelivery(delivery, expected = {}) {
     delivery = packetClosedClone(delivery);
     expected = packetClosedClone(expected);
   } catch (error) {
-    if (error instanceof GprError && error.code === 'GPR_PACKET_LIMIT') throw error;
+    if (trustedGprErrorRecord(error)?.code === 'GPR_PACKET_LIMIT') throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_READBACK_FAILED');
   }
   if (!isRecord(delivery) || !exactKeys(delivery, ['envelope', 'packet']) || !isRecord(delivery.envelope)) {
@@ -5339,7 +5417,7 @@ function validateAuthorityPacketDelivery(delivery, expected = {}) {
       packetValidateBindings(normalized);
       if (canonicalSerialize(normalized) !== canonicalSerialize(identities.packet.bindings)) packetFail('GPR_PACKET_BINDING_MISMATCH');
     } catch (error) {
-      if (error instanceof GprError) throw error;
+      if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
       packetFail('GPR_PACKET_BINDING_MISMATCH');
     }
   }
@@ -5400,7 +5478,7 @@ function appendAuthorityPacketEventDb(db, packetId, eventType, payload, createdA
 function persistAuthorityPacketWithReaders(config, readers, artifactInput, producerAdmission) {
   let identities;
   try { identities = authorityPacketIdentities(artifactInput); } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_VALUE_INVALID');
   }
   if (identities.packet.bindings.repository !== config.namespace.repository
@@ -5442,8 +5520,9 @@ function persistAuthorityPacketWithReaders(config, readers, artifactInput, produ
       );
     });
   } catch (error) {
-    if (error instanceof GprError) throw error;
-    if (error && (error.code === 'SQLITE_FULL' || error.code === 'SQLITE_BUSY')) packetFail('GPR_PACKET_LIMIT');
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
+    const nativeCode = nativeErrorCodeAtProducerBoundary(error);
+    if (nativeCode === 'SQLITE_FULL' || nativeCode === 'SQLITE_BUSY') packetFail('GPR_PACKET_LIMIT');
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally {
     db.close();
@@ -5516,7 +5595,7 @@ function backfillAuthorityPacketWithReaders(config, readers, artifactInput) {
       source_binding_digest: packetIdentities.binding_digest
     }, isoAt()));
   } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_WRITE_FAILED');
   } finally { db.close(); }
   return deepFreeze({
@@ -6014,7 +6093,10 @@ function verifyReceiptTerminalCustody(store, sessionOwner, allocation, input, pa
   try {
     result = semanticCompletionApplicability(gate.store, gate.admission);
   } catch (error) {
-    if (error instanceof GprError && ['GPR_PACKET_BINDING_MISMATCH', 'GPR_PACKET_ADMISSION_REQUIRED'].includes(error.code)) throw error;
+    const semantics = trustedGprErrorRecord(error);
+    if (semantics && (semantics.code === 'GPR_PACKET_BINDING_MISMATCH' || semantics.code === 'GPR_PACKET_ADMISSION_REQUIRED')) {
+      throw reissueTrustedGprError(error);
+    }
     packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
   }
   const supplied = Object.hasOwn(input, 'semantic_completion') ? input.semantic_completion : undefined;
@@ -6030,7 +6112,7 @@ function verifyReceiptTerminalCustody(store, sessionOwner, allocation, input, pa
   try {
     verifySemanticCompletion(gate.store, gate.admission, supplied.store, supplied.outcome_ref);
   } catch (error) {
-    if (error instanceof GprError && error.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED') throw error;
+    if (trustedGprErrorRecord(error)?.code === 'GPR_PACKET_AUTHORITY_UNVERIFIED') throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
   }
   return true;
@@ -6308,8 +6390,8 @@ async function callReader(reader, errorCode) {
   try {
     return await reader();
   } catch (error) {
-    if (error instanceof GprError) throw error;
-    fail(errorCode, { cause: error && error.code ? error.code : 'reader-failed' });
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
+    fail(errorCode, { cause: 'reader-failed' });
   }
 }
 
@@ -6803,7 +6885,7 @@ function createProgrammeReceiptStore(options) {
           });
         } finally { db.close(); }
         state.outcomeRecorded = true;
-        fail('GPR_OUTCOME_EVIDENCE_INVALID', { cause: error && error.code ? error.code : 'adapter-evidence-invalid' });
+        fail('GPR_OUTCOME_EVIDENCE_INVALID', { cause: 'adapter-evidence-invalid' });
       }
       const db = openVerified(config, false);
       try {
@@ -6898,7 +6980,7 @@ function readAuthorityPacketCli(args) {
   }
   let expectedBindings;
   try { expectedBindings = packetCanonicalInput(args.expected_bindings); } catch (error) {
-    if (error instanceof GprError) throw error;
+    if (trustedGprErrorRecord(error)) throw reissueTrustedGprError(error);
     packetFail('GPR_PACKET_VALUE_INVALID');
   }
   packetValidateBindings(expectedBindings);
@@ -6990,9 +7072,10 @@ function main() {
 
 if (require.main === module) {
   try { main(); } catch (error) {
-    if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) process.stderr.write(`${canonicalSerialize(packetFailureEnvelope(error))}\n`);
+    const semantics = trustedGprErrorRecord(error);
+    if (semantics && semantics.packet_boundary) process.stderr.write(`${canonicalSerialize(packetFailureEnvelope(error))}\n`);
     else {
-      const code = GPR_ERROR_INSTANCES.has(error) ? error.code : 'GPR_INTERNAL_ERROR';
+      const code = semantics ? semantics.code : 'GPR_INTERNAL_ERROR';
       process.stderr.write(`${JSON.stringify({ ok: false, code })}\n`);
     }
     process.exitCode = 1;
@@ -7036,6 +7119,7 @@ module.exports = Object.freeze({
   V3_MIGRATION_PLAN_SCHEMA_ID,
   V3_USER_VERSION,
   GprError,
+  trustedGprErrorInfo,
   assertAuthenticAuthorityPacketStore,
   assertAuthenticSemanticGateAdmission,
   assertRuntimeSupport,

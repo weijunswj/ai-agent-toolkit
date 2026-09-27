@@ -515,8 +515,10 @@ function verifyAuthorityPacketLifecycleTransition(state, target, update, input =
     });
     return { ok: true, proof };
   } catch (error) {
-    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
-      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    const receipt = require('./toolkit-github-program-receipt.cjs');
+    const semantics = receipt.trustedGprErrorInfo(error);
+    const reason = semantics && typeof semantics.packet_reason === 'string'
+      ? semantics.packet_reason : 'GPR_PACKET_ADMISSION_REQUIRED';
     return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
   }
 }
@@ -544,8 +546,10 @@ function revalidateAuthorityPacketLifecycleProof(proof) {
     }
     return { ok: true };
   } catch (error) {
-    const reason = error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)
-      ? error.code : 'GPR_PACKET_ADMISSION_REQUIRED';
+    const receipt = require('./toolkit-github-program-receipt.cjs');
+    const semantics = receipt.trustedGprErrorInfo(error);
+    const reason = semantics && typeof semantics.packet_reason === 'string'
+      ? semantics.packet_reason : 'GPR_PACKET_ADMISSION_REQUIRED';
     return failure('N5_AUTHORITY_PACKET_CURRENT_REQUIRED', { reason_code: reason });
   }
 }

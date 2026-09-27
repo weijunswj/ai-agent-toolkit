@@ -295,11 +295,11 @@ function loadReceiptRuntime() {
 }
 
 function receiptFailure(error, fallbackCode) {
-  if (error instanceof ExecutionLoopError) throw error;
-  let code = error && typeof error.code === 'string' ? error.code : null;
+  let code = null;
   try {
     const receipt = loadReceiptRuntime();
-    if (!(receipt.GprError && error instanceof receipt.GprError)) code = null;
+    const semantics = receipt.trustedGprErrorInfo(error);
+    if (semantics && typeof semantics.code === 'string') code = semantics.code;
   } catch (_error) {
     code = null;
   }

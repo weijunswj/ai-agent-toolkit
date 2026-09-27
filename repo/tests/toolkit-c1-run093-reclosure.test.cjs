@@ -61,6 +61,32 @@ const RUN099_ALLOWED_PATHS = Object.freeze([
   'repo/tests/toolkit-local-bridge.test.cjs',
   'repo/tests/toolkit-setup-test-support.cjs',
 ]);
+const RUN102_BASE_Q = 'e28bb8bbeaca49e424c9f0a80dc276d75c23b6a2';
+const RUN102_Q_TREE = '8b791fddbb04b29d5fbb70009c33bdb674ad359c';
+const RUN102_CANONICAL_MAIN = 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a';
+const RUN102_CONTROLLER_BLOB = 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8';
+const RUN102_PACKAGE_VERSION = '2.10.12';
+const RUN102_ALLOWED_PATHS = Object.freeze([
+  'repo/scripts/toolkit-github-program-receipt.cjs',
+  'repo/scripts/toolkit-execution-loop.cjs',
+  'repo/scripts/toolkit-assurance-web-finality.cjs',
+  'repo/scripts/toolkit-github-governance-review-reconciler.cjs',
+  'repo/tests/toolkit-authority-packet.test.cjs',
+  'repo/tests/toolkit-authority-packet-test-support.cjs',
+  'repo/tests/toolkit-c1-run093-reclosure.test.cjs',
+  'repo/contracts/toolkit-local-bridge/version.json',
+  'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
+  'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json',
+  '.codex-plugin/plugin.json',
+  '.claude-plugin/plugin.json',
+  'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/codex-delegation-config.cjs',
+  'repo/scripts/toolkit-agent-control.cjs',
+  'repo/docs/published-surface-audit-baseline.json',
+  'repo/tests/toolkit-local-bridge.test.cjs',
+  'repo/tests/toolkit-setup-test-support.cjs',
+]);
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 // Preserve the Run-094 fixture; append only Run-095's two authorized paths in-memory.
 const RUN095_ADDITIONAL_PATHS = Object.freeze([
@@ -1800,4 +1826,45 @@ test('Run-094 reclosure fixture registers, executes, and verifies every Run-093 
   assert.equal(verifyCompletion({ executed_count: 80 }), null);
   assert.equal(verifyCompletion(null), null);
   process.stdout.write(`RUN093_REClosure=${result.executed_count}/${result.declared_count}; positives=${positiveControls}; identity_deferred=${identityDeferred}; evidence_holds=${evidenceHolds}\n`);
+});
+
+
+test('Run-102 successor preserves immutable Run-093 evidence and binds the exact Q-to-successor scope', () => {
+  assert.equal(RUN, 'toolkit-c1-run093-six-finding-integration-g3-20260926-094');
+  assert.equal(LOCK, 'DL-C1-RUN093-SIX-FINDING-INTEGRATION-G3-094');
+  assert.equal(P_TREE, '14b95d34fcd8183f4b8317a71d02c4f73996f798');
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(FIXTURE_PATH)).digest('hex'), 'b71276b5bfc9d8cff4161e315de81044d0854809bdfd4ec203536c5481bf8d04');
+  assert.equal(Object.isFrozen(RUN099_ALLOWED_PATHS), true);
+  assert.equal(RUN102_BASE_Q, 'e28bb8bbeaca49e424c9f0a80dc276d75c23b6a2');
+  assert.equal(RUN102_Q_TREE, '8b791fddbb04b29d5fbb70009c33bdb674ad359c');
+  assert.equal(RUN102_CANONICAL_MAIN, 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a');
+  assert.equal(RUN102_CONTROLLER_BLOB, 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8');
+  assert.equal(RUN102_PACKAGE_VERSION, '2.10.12');
+  assert.equal(new Set(RUN102_ALLOWED_PATHS).size, 19);
+
+  const root = path.resolve(__dirname, '..', '..');
+  const changed = spawnSync('git', ['diff', '--name-only', RUN102_BASE_Q, '--'], {
+    cwd: root, encoding: 'utf8', windowsHide: true,
+  });
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.deepEqual(changed.stdout.split(/\r?\n/).filter(Boolean).sort(), [...RUN102_ALLOWED_PATHS].sort());
+
+  const manifests = [
+    'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
+    'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json',
+    '.codex-plugin/plugin.json',
+    '.claude-plugin/plugin.json',
+  ];
+  for (const manifest of manifests) {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8')).version, RUN102_PACKAGE_VERSION, manifest);
+  }
+  assert.equal(require('../scripts/toolkit-local-bridge.cjs').BRIDGE_VERSION, RUN102_PACKAGE_VERSION);
+  assert.equal(require('../scripts/setup-codex-toolkit-plugin.cjs').EXPECTED_TOOLKIT_VERSION, RUN102_PACKAGE_VERSION);
+  assert.equal(require('../scripts/toolkit-agent-control.cjs').CONTROL_VERSION, RUN102_PACKAGE_VERSION);
+  assert.match(fs.readFileSync(path.join(root, 'repo/scripts/codex-delegation-config.cjs'), 'utf8'), /const TOOLKIT_CLIENT_VERSION = '2\.10\.12'/);
+  assert.match(fs.readFileSync(path.join(root, 'repo/tests/toolkit-local-bridge.test.cjs'), 'utf8'), /const expectedBridgeVersion = '2\.10\.12'/);
+  assert.match(fs.readFileSync(path.join(root, 'repo/tests/toolkit-setup-test-support.cjs'), 'utf8'), /2\.10\.12/);
+  const baseline = JSON.parse(fs.readFileSync(path.join(root, 'repo/docs/published-surface-audit-baseline.json'), 'utf8'));
+  assert.equal(baseline.native_plugins.codex.version, RUN102_PACKAGE_VERSION);
+  assert.equal(baseline.native_plugins.claude.version, RUN102_PACKAGE_VERSION);
 });

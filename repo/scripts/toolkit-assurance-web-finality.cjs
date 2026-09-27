@@ -444,7 +444,8 @@ function receiptDependencyFailures(context, expected) {
   try {
     proof = owner.revalidateSemanticGate(owner.admission, Object.freeze(boundExpected));
   } catch (error) {
-    if (error && typeof error.code === 'string' && /^GPR_PACKET_[A-Z0-9_]+$/.test(error.code)) return [error.code];
+    const semantics = receiptStoreRuntime.trustedGprErrorInfo(error);
+    if (semantics && typeof semantics.packet_reason === 'string') return [semantics.packet_reason];
     return ['receipt-dependency-unverified'];
   }
   try {

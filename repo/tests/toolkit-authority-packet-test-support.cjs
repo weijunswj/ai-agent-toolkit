@@ -4304,8 +4304,11 @@ function oracleRejectAcceptanceSurface(caseValue, context) {
   const badReaders = caseValue.input.variant === 'web-pass-before-readback'
     ? readers(context.packetValue, {
       screenPacket: () => {
-        const error = new runtime.GprError('GPR_PACKET_READBACK_FAILED');
-        error.packetBoundary = true;
+        let error;
+        try { runtime.validateAuthorityPacketDelivery({}, {}); } catch (caught) { error = caught; }
+        if (!error || runtime.trustedGprErrorInfo(error)?.packet_reason !== 'GPR_PACKET_READBACK_FAILED') {
+          throw new Error('F14_PRODUCTION_READBACK_ERROR_REQUIRED');
+        }
         throw error;
       },
     })
