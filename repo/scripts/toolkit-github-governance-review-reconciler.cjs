@@ -1254,6 +1254,8 @@ function buildReviewInventory(input = {}) {
   } catch (_error) {
     return incompleteReviewInventory('adapter-read-failed');
   }
+  try { result = trustedDataCopy(result); }
+  catch (_error) { return incompleteReviewInventory('adapter-result-invalid'); }
   if (!isRecord(result) || result.ok === false) return incompleteReviewInventory('adapter-result-invalid');
   const evidence = result.ok === true ? result.evidence : result;
   if (!isRecord(evidence)) return incompleteReviewInventory('adapter-evidence-missing');

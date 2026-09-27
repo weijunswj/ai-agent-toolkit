@@ -9,6 +9,15 @@ const { types: utilTypes } = require('node:util');
 const { spawnSync } = require('node:child_process');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
 
+const PACKET_BUFFER_PROTOTYPE = Buffer.prototype;
+const PACKET_UINT8_ARRAY = Uint8Array;
+const PACKET_UINT8_ARRAY_SET = Uint8Array.prototype.set;
+const PACKET_REFLECT_APPLY = Reflect.apply;
+const PACKET_TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
+const PACKET_TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(PACKET_TYPED_ARRAY_PROTOTYPE, 'buffer').get;
+const PACKET_TYPED_ARRAY_BYTE_OFFSET_GETTER = Object.getOwnPropertyDescriptor(PACKET_TYPED_ARRAY_PROTOTYPE, 'byteOffset').get;
+const PACKET_TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(PACKET_TYPED_ARRAY_PROTOTYPE, 'byteLength').get;
+
 const SCHEMA_ID = 'toolkit.github-program.run-receipt.v1';
 const MIN_NODE_VERSION = '22.13.0';
 const APPLICATION_ID = 1196446257;
@@ -251,6 +260,7 @@ const PAYLOAD_KEYS = Object.freeze([
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
+const GPR_ERROR_INSTANCES = new WeakSet();
 const PENDING_ALLOCATION_PREFLIGHT = Symbol('pending-allocation-preflight');
 const PENDING_ALLOCATION_COMMIT = Symbol('pending-allocation-commit');
 const ADMISSION_OWNERS = new WeakMap();
@@ -269,6 +279,7 @@ class GprError extends Error {
     this.name = 'GprError';
     this.code = code;
     this.details = details;
+    GPR_ERROR_INSTANCES.add(this);
   }
 }
 
@@ -300,7 +311,7 @@ function packetFail(reasonCode) {
 }
 
 function packetFailureEnvelope(error) {
-  const reasonCode = error && AUTHORITY_PACKET_REASON_CODES.includes(error.reason_code || error.code)
+  const reasonCode = GPR_ERROR_INSTANCES.has(error) && AUTHORITY_PACKET_REASON_CODES.includes(error.reason_code || error.code)
     ? error.reason_code || error.code
     : 'GPR_PACKET_VALUE_INVALID';
   return deepFreeze({
@@ -428,20 +439,31 @@ function packetParseInput(value) {
     try { if (utilTypes.isProxy(value)) packetFail('GPR_PACKET_VALUE_INVALID'); }
     catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
   }
-  let isBuffer = false;
-  try { isBuffer = Buffer.isBuffer(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
-  if (isBuffer) {
+  if (typeof value === 'function') packetFail('GPR_PACKET_VALUE_INVALID');
+  let isUint8Array = false;
+  try { isUint8Array = utilTypes.isUint8Array(value); } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+  if (isUint8Array) {
     let bytes;
     try {
-      if (Object.getPrototypeOf(value) !== Buffer.prototype || Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
+      if (Object.getPrototypeOf(value) !== PACKET_BUFFER_PROTOTYPE || Object.getOwnPropertySymbols(value).length > 0) packetFail('GPR_PACKET_VALUE_INVALID');
+      const backing = PACKET_REFLECT_APPLY(PACKET_TYPED_ARRAY_BUFFER_GETTER, value, []);
+      const offset = PACKET_REFLECT_APPLY(PACKET_TYPED_ARRAY_BYTE_OFFSET_GETTER, value, []);
+      const length = PACKET_REFLECT_APPLY(PACKET_TYPED_ARRAY_BYTE_LENGTH_GETTER, value, []);
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0
+        || length > AUTHORITY_PACKET_LIMITS.artifactBytes) packetFail('GPR_PACKET_LIMIT');
       for (const name of Object.getOwnPropertyNames(value)) {
         if (!/^(0|[1-9]\d*)$/.test(name)) packetFail('GPR_PACKET_VALUE_INVALID');
         const descriptor = Object.getOwnPropertyDescriptor(value, name);
         if (!descriptor || descriptor.get || descriptor.set || descriptor.enumerable !== true
           || !Number.isInteger(descriptor.value) || descriptor.value < 0 || descriptor.value > 255) packetFail('GPR_PACKET_VALUE_INVALID');
       }
-      bytes = Uint8Array.prototype.slice.call(value);
-    } catch (_) { packetFail('GPR_PACKET_VALUE_INVALID'); }
+      const source = new PACKET_UINT8_ARRAY(backing, offset, length);
+      bytes = new PACKET_UINT8_ARRAY(length);
+      PACKET_REFLECT_APPLY(PACKET_UINT8_ARRAY_SET, bytes, [source]);
+    } catch (error) {
+      if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) throw error;
+      packetFail('GPR_PACKET_VALUE_INVALID');
+    }
     if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) packetFail('GPR_PACKET_VALUE_INVALID');
     let decoded;
     try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
@@ -5133,7 +5155,7 @@ function callTrustedReaderSync(reader, argument, code) {
   if (typeof reader !== 'function') packetFail(code);
   let result;
   try { result = reader(argument); } catch (error) {
-    if (error instanceof GprError && error.packetBoundary) throw error;
+    if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) throw error;
     packetFail(code);
   }
   try { return packetClosedClone(result); }
@@ -6968,9 +6990,9 @@ function main() {
 
 if (require.main === module) {
   try { main(); } catch (error) {
-    if (error && error.packetBoundary) process.stderr.write(`${canonicalSerialize(packetFailureEnvelope(error))}\n`);
+    if (GPR_ERROR_INSTANCES.has(error) && error.packetBoundary) process.stderr.write(`${canonicalSerialize(packetFailureEnvelope(error))}\n`);
     else {
-      const code = error instanceof GprError ? error.code : 'GPR_INTERNAL_ERROR';
+      const code = GPR_ERROR_INSTANCES.has(error) ? error.code : 'GPR_INTERNAL_ERROR';
       process.stderr.write(`${JSON.stringify({ ok: false, code })}\n`);
     }
     process.exitCode = 1;

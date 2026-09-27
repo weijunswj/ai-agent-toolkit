@@ -252,6 +252,96 @@ test('RUN-185 review evidence digest rejects programmable input before observing
   assert.equal(observations, 0);
 });
 
+test('RUN-185 adapter return is screened before envelope, evidence, normalization, or digest observation', () => {
+  const trapNames = [
+    'get', 'set', 'has', 'deleteProperty', 'defineProperty', 'getOwnPropertyDescriptor', 'ownKeys',
+    'getPrototypeOf', 'setPrototypeOf', 'isExtensible', 'preventExtensions', 'apply', 'construct',
+  ];
+  const makeCounters = () => ({ reads: 0, traps: Object.fromEntries(trapNames.map((name) => [name, 0])) });
+  const programmable = (counters, value = {}) => new Proxy(value, Object.fromEntries(trapNames.map((name) => [name, (...args) => {
+    counters.traps[name] += 1;
+    if (name === 'apply') return Reflect.apply(...args);
+    if (name === 'construct') return Reflect.construct(...args);
+    return Reflect[name](...args);
+  }])));
+  const clean = reviewEvidence();
+  const nestedEvidence = reviewEvidence();
+  const nestedCounters = makeCounters();
+  nestedEvidence.pull_requests = programmable(nestedCounters, nestedEvidence.pull_requests);
+  const accessorCounters = makeCounters();
+  const accessorResult = {};
+  Object.defineProperty(accessorResult, 'ok', {
+    enumerable: true,
+    get() { accessorCounters.reads += 1; throw new Error('returned-envelope-getter'); },
+  });
+  const hostilePrototypeCounters = makeCounters();
+  const hostilePrototypeResult = Object.create(Object.create(programmable(hostilePrototypeCounters)));
+  const revokedCounters = makeCounters();
+  const revoked = Proxy.revocable({}, Object.fromEntries(trapNames.map((name) => [name, () => { revokedCounters.traps[name] += 1; throw new Error('revoked-trap'); }])));
+  revoked.revoke();
+  const directCounters = makeCounters();
+  const nestedCountersForEnvelope = makeCounters();
+  const thrownCounters = makeCounters();
+  const thrownValue = programmable(thrownCounters);
+  const cases = [
+    ['direct Proxy return', programmable(directCounters)],
+    ['Proxy nested in evidence envelope', { ok: true, evidence: programmable(nestedCountersForEnvelope) }],
+    ['nested Proxy collection', nestedEvidence],
+    ['accessor envelope', accessorResult],
+    ['hostile prototype chain', hostilePrototypeResult],
+    ['revoked Proxy return', revoked.proxy],
+  ];
+
+  for (const [label, returned] of cases) {
+    let adapterCalls = 0;
+    const result = n5.buildReviewInventory({
+      ...clean,
+      evidence_adapter: {
+        getReviewEvidence() {
+          adapterCalls += 1;
+          return returned;
+        },
+      },
+    });
+    assert.equal(adapterCalls, 1, `${label} reaches the actual adapter callback exactly once`);
+    assert.equal(result.code, 'N5_REVIEW_INVENTORY_INCOMPLETE', label);
+  }
+  let thrownAdapterCalls = 0;
+  const thrownResult = n5.buildReviewInventory({
+    ...clean,
+    evidence_adapter: {
+      getReviewEvidence() {
+        thrownAdapterCalls += 1;
+        throw thrownValue;
+      },
+    },
+  });
+  assert.equal(thrownAdapterCalls, 1);
+  assert.equal(thrownResult.code, 'N5_REVIEW_INVENTORY_INCOMPLETE');
+
+  for (const counters of [directCounters, nestedCountersForEnvelope, nestedCounters, accessorCounters, hostilePrototypeCounters, revokedCounters, thrownCounters]) {
+    assert.equal(counters.reads, 0);
+    assert.deepEqual(counters.traps, Object.fromEntries(trapNames.map((name) => [name, 0])));
+  }
+
+  let bareCalls = 0;
+  let envelopeCalls = 0;
+  const bare = n5.buildReviewInventory({
+    ...clean,
+    evidence_adapter: { getReviewEvidence() { bareCalls += 1; return clean; } },
+  });
+  const envelope = n5.buildReviewInventory({
+    ...clean,
+    evidence_adapter: { getReviewEvidence() { envelopeCalls += 1; return { ok: true, evidence: clean, evidence_digest: clean.evidence_digest }; } },
+  });
+  assert.equal(bareCalls, 1);
+  assert.equal(envelopeCalls, 1);
+  assert.equal(bare.ok, true);
+  assert.equal(envelope.ok, true);
+  assert.equal(bare.inventory.inventory_digest, n5.reviewEvidenceDigest(clean));
+  assert.equal(envelope.inventory.inventory_digest, bare.inventory.inventory_digest);
+});
+
 test('RUN-185 caller review arrays counts pagination facts and digests are assertions only', () => {
   const trusted = reviewEvidence();
   const mismatches = [

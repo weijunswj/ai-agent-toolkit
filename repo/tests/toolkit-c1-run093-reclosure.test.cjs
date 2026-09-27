@@ -5,13 +5,14 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const zlib = require('node:zlib');
 const Ajv2020 = require('ajv/dist/2020');
 
 const packetRuntime = require('../scripts/toolkit-github-program-receipt.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
+const claudePluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 const setupCore = require('../scripts/setup-toolkit-core.cjs');
 const gateCompiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
 const graphSurface = require('../scripts/toolkit-programme-surface-v1.cjs');
@@ -28,6 +29,38 @@ const RUN = 'toolkit-c1-run093-six-finding-integration-g3-20260926-094';
 const LOCK = 'DL-C1-RUN093-SIX-FINDING-INTEGRATION-G3-094';
 const K = '41a79a0fa2f1d0e73347ee01cfeed429c8373f92';
 const M2 = 'b017f39f0fe50697d22c95c1c0e463f53c5a707c';
+const P = '46010ff72f5bca94c703872679b8f9a0315a1318';
+const CANONICAL_MAIN = 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a';
+const CONTROLLER_BLOB = 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8';
+const ARCHITECTURE_BLOB = '1218076a7e84179f375d45ff497f534ce6de5dd9';
+const STACK_REGISTRY_BLOB = '01dfe152208338a552c892cb44ef28d064aa743d';
+const STACK_REGISTRY_SCHEMA_BLOB = '60a21737e0947befe8c60997b308109e8ba7d238';
+const P_TREE = '14b95d34fcd8183f4b8317a71d02c4f73996f798';
+const RUN099_ALLOWED_PATHS = Object.freeze([
+  'repo/scripts/toolkit-github-program-receipt.cjs',
+  'repo/scripts/toolkit-agent-control.cjs',
+  'repo/scripts/toolkit-github-governance-review-reconciler.cjs',
+  'repo/tests/toolkit-c1-run093-reclosure.test.cjs',
+  'repo/tests/toolkit-authority-packet.test.cjs',
+  'repo/tests/toolkit-github-governance-review-reconciler.run185-adversarial.test.cjs',
+  'repo/ARCHITECTURE.md',
+  'repo/CONTROLLER.md',
+  'repo/contracts/controller-kernel/stack-registry-v2.json',
+  'repo/contracts/controller-kernel/stack-registry-v2.schema.json',
+  'repo/tests/controller-lifecycle-law.test.cjs',
+  'repo/tests/controller-policy-separation.test.cjs',
+  'repo/contracts/toolkit-local-bridge/version.json',
+  'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
+  'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json',
+  '.codex-plugin/plugin.json',
+  '.claude-plugin/plugin.json',
+  'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/codex-delegation-config.cjs',
+  'repo/docs/published-surface-audit-baseline.json',
+  'repo/tests/toolkit-local-bridge.test.cjs',
+  'repo/tests/toolkit-setup-test-support.cjs',
+]);
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 // Preserve the Run-094 fixture; append only Run-095's two authorized paths in-memory.
 const RUN095_ADDITIONAL_PATHS = Object.freeze([
@@ -39,10 +72,10 @@ function sha256Text(value) { return crypto.createHash('sha256').update(value, 'u
 function completeRead(body, revision = null) {
   return { body, complete: true, byte_length: Buffer.byteLength(body, 'utf8'), body_sha256: sha256Text(body), revision };
 }
-const MAIN_ONLY_PATHS = Object.freeze([
+const CURRENT_MAIN_EXACT_PATHS = Object.freeze([
   'repo/contracts/controller-kernel/stack-registry-v2.json',
   'repo/contracts/controller-kernel/stack-registry-v2.schema.json',
-  'repo/tests/controller-policy-separation.test.cjs',
+  'repo/tests/controller-lifecycle-law.test.cjs',
 ]);
 const TRAP_NAMES = Object.freeze([
   'get', 'set', 'has', 'deleteProperty', 'defineProperty', 'getOwnPropertyDescriptor', 'ownKeys',
@@ -116,8 +149,20 @@ function validateFixture(ir = loadFixture()) {
     .find((requirement) => requirement.id === 'R093-INTEGRATION')
     .cases.find((item) => item.id === 'R093-I-UNDECLARED-PATH');
   assert.equal(pathManifestCase.expected.maximum_paths, 49);
-  pathManifestCase.input.variant = 'compare-exact-run095-path-manifest';
-  pathManifestCase.expected.maximum_paths = RUN095_MAXIMUM_CHANGED_PATHS;
+  run095Ir.mutation.allow_paths = [...RUN099_ALLOWED_PATHS];
+  pathManifestCase.input.variant = 'compare-exact-run099-path-manifest';
+  pathManifestCase.expected.maximum_paths = RUN099_ALLOWED_PATHS.length;
+  const integrationCase = run095Ir.requirements
+    .find((requirement) => requirement.id === 'R093-INTEGRATION')
+    .cases.find((item) => item.id === 'R093-I-MAIN-SEMANTIC-LOSS');
+  integrationCase.input.variant = 'integrated-current-main-plus-accepted-C1';
+  const topologyCase = run095Ir.requirements
+    .find((requirement) => requirement.id === 'R093-INTEGRATION')
+    .cases.find((item) => item.id === 'R093-I-PARENT-TOPOLOGY');
+  topologyCase.input.variant = 'N-ordered-parents-P-current-main';
+  for (const item of run095Ir.requirements.find((requirement) => requirement.id === 'R093-INTEGRATION').cases) {
+    if (item.id === 'R093-I-VERSION-SPLIT' || item.id === 'R093-I-PACKAGE-ALIGNMENT-POS') item.expected.version = '2.10.11';
+  }
   const declared = ir.requirements.flatMap((requirement) => requirement.cases.map(caseId));
   assert.equal(declared.length, 81);
   assert.equal(new Set(declared).size, 81);
@@ -261,6 +306,91 @@ function hostileHookValue(counters) {
   return target;
 }
 
+function executeIngressRepresentationMatrix() {
+  const cases = [];
+  const hostileCounters = [];
+  const add = (label, value) => cases.push({ label, value });
+  const objectProxyCounters = hookCounters();
+  add('object proxy outer form', observedProxy(packetSupport.packet({ seed: 'run099-f1-object-proxy' }), objectProxyCounters));
+  hostileCounters.push(objectProxyCounters);
+  const arrayProxyCounters = hookCounters();
+  add('array proxy outer form', observedProxy([], arrayProxyCounters));
+  hostileCounters.push(arrayProxyCounters);
+  const sparseArray = [];
+  sparseArray.length = 1;
+  add('sparse array outer form', sparseArray);
+  const functionProxyCounters = hookCounters();
+  add('function proxy outer form', observedProxy(function hostileOuter() {}, functionProxyCounters));
+  hostileCounters.push(functionProxyCounters);
+  const revokedCounters = hookCounters();
+  const revoked = Proxy.revocable(Buffer.from('{}'), {});
+  revoked.revoke();
+  add('revoked Buffer proxy outer form', revoked.proxy);
+  hostileCounters.push(revokedCounters);
+  const prototypeCounters = hookCounters();
+  const deepestProxy = observedProxy({}, prototypeCounters);
+  const deeperPrototype = Object.create(deepestProxy);
+  const directHostilePrototype = Object.create(deeperPrototype);
+  const hostileRecord = Object.create(directHostilePrototype);
+  Object.defineProperty(hostileRecord, 'toString', {
+    enumerable: true,
+    get() { prototypeCounters.getters += 1; throw new Error('hostile-prototype-getter'); },
+  });
+  add('deeper hostile prototype chain', hostileRecord);
+  hostileCounters.push(prototypeCounters);
+  const arrayPrototypeCounters = hookCounters();
+  const hostileArray = [];
+  Object.setPrototypeOf(hostileArray, Object.create(Array.prototype));
+  add('hostile array prototype', hostileArray);
+  hostileCounters.push(arrayPrototypeCounters);
+  const bufferImpostorCounters = hookCounters();
+  const bufferImpostor = Object.create(Buffer.prototype);
+  Object.defineProperty(bufferImpostor, '0', {
+    enumerable: true,
+    get() { bufferImpostorCounters.getters += 1; throw new Error('buffer-impostor-getter'); },
+  });
+  add('Buffer prototype impostor', bufferImpostor);
+  hostileCounters.push(bufferImpostorCounters);
+  const speciesCounters = hookCounters();
+  const speciesBuffer = Buffer.from('{}');
+  Object.defineProperty(speciesBuffer, 'constructor', {
+    configurable: true,
+    get() { speciesCounters.getters += 1; throw new Error('hostile-buffer-constructor'); },
+  });
+  add('species-sensitive Buffer constructor', speciesBuffer);
+  hostileCounters.push(speciesCounters);
+  const nestedCounters = hookCounters();
+  const nested = packetSupport.packet({ seed: 'run099-f1-nested-hostile-prototype' });
+  nested.body.sections[0].text = Object.create(Object.create(observedProxy({}, nestedCounters)));
+  add('nested hostile prototype placement', nested);
+  hostileCounters.push(nestedCounters);
+  const nestedProxyCounters = hookCounters();
+  const nestedProxyPacket = packetSupport.packet({ seed: 'run099-f1-nested-proxy' });
+  nestedProxyPacket.body.sections[0].text = observedProxy(hostileHookValue(nestedProxyCounters), nestedProxyCounters);
+  add('nested programmable proxy placement', nestedProxyPacket);
+  hostileCounters.push(nestedProxyCounters);
+  const accessorCounters = hookCounters();
+  const accessor = {};
+  Object.defineProperty(accessor, 'schema', {
+    enumerable: true,
+    get() { accessorCounters.getters += 1; throw new Error('hostile-outer-getter'); },
+  });
+  add('outer accessor record', accessor);
+  hostileCounters.push(accessorCounters);
+
+  for (const item of cases) {
+    let productionCalls = 0;
+    const rejected = packetFailure(() => {
+      productionCalls += 1;
+      return packetRuntime.validateAuthorityPacket(item.value);
+    }, 'GPR_PACKET_VALUE_INVALID');
+    assert.equal(productionCalls, 1, `the original ${item.label} reaches validateAuthorityPacket`);
+    assert.equal(rejected.outcome, 'REJECT');
+  }
+  for (const counters of hostileCounters) assert.ok(hooksAreZero(counters), 'all prohibited hooks remain zero');
+  return { production_boundary_calls: cases.length, hooks: 'ZERO' };
+}
+
 async function executeSupplementalFailure(variant) {
   const compiled = supplementalSupport.compileSupplementalFixture();
   const registered = supplementalSupport.registerSupplementalCases(compiled);
@@ -323,9 +453,14 @@ function executePacketProxyCase(variant) {
   } else if (variant === 'throwing-proxy-all-13-traps') {
     result = packetFailure(() => packetRuntime.validateAuthorityPacket(observedProxy(packet, counters, true)), 'GPR_PACKET_VALUE_INVALID');
   } else if (variant === 'revoked-object-array-function-buffer-proxies') {
-    const revocable = Proxy.revocable(packet, observedProxy({}, counters));
-    revocable.revoke();
-    result = packetFailure(() => packetRuntime.validateAuthorityPacket(revocable.proxy), 'GPR_PACKET_VALUE_INVALID');
+    const revokedValues = [packet, [], function revokedFunction() {}, Buffer.from('{}')].map((value) => {
+      const revocable = Proxy.revocable(value, observedProxy({}, counters));
+      revocable.revoke();
+      return revocable.proxy;
+    });
+    for (const value of revokedValues) {
+      result = packetFailure(() => packetRuntime.validateAuthorityPacket(value), 'GPR_PACKET_VALUE_INVALID');
+    }
   } else if (variant === 'nested-getter-setter-toJSON-toString-valueOf-toPrimitive-and-proxy') {
     const nested = packetSupport.packet({ seed: `run093-${variant}` });
     nested.body.sections[0].text = observedProxy(hostileHookValue(counters), counters);
@@ -341,10 +476,18 @@ function executePacketProxyCase(variant) {
     const bufferResult = packetRuntime.validateAuthorityPacket(Buffer.from(canonical, 'utf8'));
     assert.deepEqual(objectResult, stringResult);
     assert.deepEqual(objectResult, bufferResult);
+    const objectIdentity = packetRuntime.authorityPacketIdentities(packet);
+    const stringIdentity = packetRuntime.authorityPacketIdentities(canonical);
+    const bufferIdentity = packetRuntime.authorityPacketIdentities(Buffer.from(canonical, 'utf8'));
+    assert.equal(objectIdentity.packet_digest, stringIdentity.packet_digest);
+    assert.equal(objectIdentity.packet_digest, bufferIdentity.packet_digest);
+    assert.equal(objectIdentity.canonical_packet_bytes, stringIdentity.canonical_packet_bytes);
+    assert.equal(objectIdentity.canonical_packet_bytes, bufferIdentity.canonical_packet_bytes);
     result = { outcome: 'ACCEPT', positive_control: true, side_effects: 'none' };
   } else fail(`RUN093_UNSUPPORTED_PACKET_VARIANT:${variant}`);
   assert.ok(hooksAreZero(counters), `all named proxy and conversion hooks remain zero for ${variant}`);
-  return { ...result, hooks: 'ZERO', side_effects: 'none' };
+  const representationMatrix = executeIngressRepresentationMatrix();
+  return { ...result, hooks: 'ZERO', side_effects: 'none', representation_matrix: representationMatrix };
 }
 
 function executeDeliveryProxyCase() {
@@ -356,22 +499,58 @@ function executeDeliveryProxyCase() {
   const expectedProxy = observedProxy(expected, counters);
   const rejectedExpected = packetFailure(() => packetRuntime.validateAuthorityPacketDelivery(delivery, expectedProxy), 'GPR_PACKET_READBACK_FAILED');
   assert.ok(hooksAreZero(counters));
+  const deepProxy = observedProxy({}, counters);
+  const hostileDelivery = Object.create(Object.create(deepProxy));
+  packetFailure(() => packetRuntime.validateAuthorityPacketDelivery(hostileDelivery, expected), 'GPR_PACKET_READBACK_FAILED');
+  const hostileExpected = Object.create(Object.create(observedProxy({}, counters)));
+  packetFailure(() => packetRuntime.validateAuthorityPacketDelivery(delivery, hostileExpected), 'GPR_PACKET_READBACK_FAILED');
+  assert.ok(hooksAreZero(counters));
   return { ...rejectedDelivery, reason_code: rejectedExpected.reason_code, hooks: 'ZERO', side_effects: 'none' };
 }
 
 function executePersistenceProxyCase() {
   const packet = packetSupport.packet({ seed: 'run093-persist-hook' });
   const options = packetSupport.options(packetSupport.stateRoot('run093-persist-'));
-  const readers = packetSupport.readers(packet);
+  const counters = hookCounters();
+  const returnedProxy = observedProxy({}, counters);
+  const thrownCounters = hookCounters();
+  let screeningCalls = 0;
+  let backfillCalls = 0;
+  const readers = packetSupport.readers(packet, {
+    screenPacket: () => { screeningCalls += 1; return returnedProxy; },
+    readBackfillSource: () => {
+      backfillCalls += 1;
+      if (backfillCalls === 1) return returnedProxy;
+      throw observedProxy({}, thrownCounters);
+    },
+  });
   const store = packetRuntime.initialiseAuthorityPacketStore(options, readers);
   const admission = packetSupport.producerAdmission(packet);
   const before = packetSupport.receiptEffectSnapshot(store);
-  const counters = hookCounters();
   const rejected = packetFailure(() => store.persistAuthorityPacket(observedProxy(packet, counters), admission), 'GPR_PACKET_VALUE_INVALID');
+  assert.equal(screeningCalls, 0, 'invalid packet ingress fails before unrelated callbacks');
+  const oversizedBuffer = Buffer.alloc(packetRuntime.AUTHORITY_PACKET_LIMITS.artifactBytes + 1, 0x20);
+  const oversizedBufferRejected = packetFailure(() => store.persistAuthorityPacket(oversizedBuffer, admission), 'GPR_PACKET_LIMIT');
+  assert.equal(screeningCalls, 0, 'over-limit Buffer ingress fails before packet screening callbacks');
+  assert.deepEqual(packetSupport.receiptEffectSnapshot(store), before, 'over-limit Buffer rejection creates no packet or event');
+  packetFailure(() => store.persistAuthorityPacket(packet, admission), 'GPR_PACKET_PRIVACY_REJECTED');
+  assert.equal(screeningCalls, 1, 'valid producer packet reaches the actual screening callback once');
+  packetFailure(() => store.backfillAuthorityPacket(packet, readers), 'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED');
+  packetFailure(() => store.backfillAuthorityPacket(packet, readers), 'GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED');
+  assert.equal(backfillCalls, 2, 'valid backfill packets reach the actual backfill-source callback once per invocation');
   const after = packetSupport.receiptEffectSnapshot(store);
   assert.deepEqual(after, before, 'hostile persistence input creates no packet or event');
   assert.ok(hooksAreZero(counters));
-  return { ...rejected, hooks: 'ZERO', database_delta: 0 };
+  assert.ok(hooksAreZero(thrownCounters), 'foreign thrown values remain opaque during error translation');
+  return {
+    ...rejected,
+    hooks: 'ZERO',
+    database_delta: 0,
+    buffer_limit_reason_code: oversizedBufferRejected.reason_code,
+    buffer_limit_database_delta: 0,
+    callback_return_hooks: 'ZERO',
+    callback_calls: 2,
+  };
 }
 
 function executeCurrentOrAdmissionProxyCase(surface) {
@@ -391,6 +570,17 @@ function executeCurrentOrAdmissionProxyCase(surface) {
   if (error) assert.equal(error.packetBoundary, true);
   assert.ok(hooksAreZero(counters));
   assert.deepEqual(packetSupport.receiptEffectSnapshot(gate.store), before, `${surface} has no database effect`);
+  const deepCounters = hookCounters();
+  const hostileDeepIntent = Object.create(Object.create(observedProxy({}, deepCounters)));
+  let deepError;
+  try {
+    if (surface === 'buildCurrentPacketProjection') gate.store.buildCurrentPacketProjection(hostileDeepIntent, gate.trusted_readers);
+    else gate.store.admitSemanticGate(hostileDeepIntent, gate.trusted_readers);
+  } catch (caught) { deepError = caught; }
+  assert.ok(deepError, `${surface} rejects the deeper hostile prototype at its production boundary`);
+  assert.equal(deepError.packetBoundary, true);
+  assert.ok(hooksAreZero(deepCounters));
+  assert.deepEqual(packetSupport.receiptEffectSnapshot(gate.store), before, `${surface} deep-prototype rejection has no database effect`);
   return {
     outcome: 'REJECT',
     reason_code: reasonCode,
@@ -856,22 +1046,169 @@ function deniedResourceResult(result, root) {
   return { outcome: 'REFUSE', effects: 'zero' };
 }
 
-function executeF5(plan) {
+function createSupervisorFixture(root, workerDelayMs = 0) {
+  const cache = path.join(root, 'cache');
+  for (const rel of [
+    '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs',
+  ]) {
+    const target = path.join(cache, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.resolve(__dirname, '..', '..', ...rel.split('/')), target);
+  }
+  const entry = {
+    id: claudePluginSetup.pluginId(), version: control.CONTROL_VERSION, enabled: true,
+    trusted: true, hooksActive: true, installPath: cache,
+  };
+  const witness = path.join(root, 'worker-witness.log');
+  const cli = path.join(root, 'fake-claude.cjs');
+  fs.writeFileSync(cli, [
+    "'use strict';",
+    "const fs=require('node:fs');",
+    `const entry=${JSON.stringify(entry)};`,
+    `const witness=${JSON.stringify(witness)};`,
+    'const args=process.argv.slice(2);',
+    "if(args[0]==='--version'){process.stdout.write('claude fake\\n');process.exit(0);}",
+    "if(args[0]==='plugin'&&args[1]==='list'){process.stdout.write(JSON.stringify({installed:[entry]})+'\\n');process.exit(0);}",
+    "fs.appendFileSync(witness,'worker-started\\n');",
+    ...(workerDelayMs > 0 ? [`Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,${workerDelayMs});`] : []),
+    "fs.appendFileSync(witness,'worker-completed\\n');",
+    '',
+  ].join('\n'), 'utf8');
+  const activationProof = claudePluginSetup.installedActivationProof(entry, control.CONTROL_VERSION);
+  const profile = {
+    schema: control.SCHEMA,
+    host: control.HOSTS.CLAUDE,
+    topology: control.TOPOLOGIES.CLAUDE_DIRECT,
+    capacity_mode: control.CAPACITY_MODES.AUTO,
+    manual_maximum: 0,
+    worker_estimate_bytes: control.DEFAULT_WORKER_COST,
+    queue_limit: control.MAX_QUEUE,
+    reservation_limit: control.EMERGENCY_WORKER_CEILING,
+    controller_version: control.CONTROL_VERSION,
+    enforcement_verified: true,
+    activation_proof: activationProof,
+    claude_cli: cli,
+    status: 'configured',
+    supported: true,
+  };
+  return { cache, cli, profile, witness };
+}
+
+function writeSupervisorSpec(root, reservationId, spec, workerExecutable) {
+  const checked = control.validateLaunchSpec(spec);
+  const promptBytes = Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
+  const stored = {
+    ...checked,
+    child_prompt: undefined,
+    child_prompt_base64: promptBytes.toString('base64'),
+    worker_executable: workerExecutable,
+  };
+  const target = path.join(root, 'jobs', `${reservationId}.json`);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `${JSON.stringify(stored, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  return target;
+}
+
+function runSupervisorCli(root, reservationId, specPath, cli) {
+  return spawnSync(process.execPath, [
+    path.resolve(__dirname, '../scripts/toolkit-agent-control.cjs'), 'supervise',
+    '--root', root, '--reservation', reservationId, '--spec', specPath, '--claude-cli', cli,
+  ], { cwd: packetSupport.repositoryRoot, env: { ...process.env, NODE_OPTIONS: '' }, encoding: 'utf8', windowsHide: true, timeout: 30000 });
+}
+
+function startSupervisorCli(root, reservationId, specPath, cli) {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../scripts/toolkit-agent-control.cjs'), 'supervise',
+    '--root', root, '--reservation', reservationId, '--spec', specPath, '--claude-cli', cli,
+  ], { cwd: packetSupport.repositoryRoot, env: { ...process.env, NODE_OPTIONS: '' }, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    if (stderr.length < 4096) stderr += chunk.toString('utf8').slice(0, 4096 - stderr.length);
+  });
+  const completion = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (status) => resolve({ status, stderr }));
+  });
+  return { child, completion };
+}
+
+async function executeNativeSupervisorPositive(root) {
+  const worker = createSupervisorFixture(root, 1000);
+  const spec = resourceSpec({ estimated_memory_bytes: control.GIB });
+  const admitted = control.admissionDecision(spec, {
+    root, profile: worker.profile, claudeCli: worker.cli, env: { ...process.env },
+  });
+  if (admitted.result !== control.RESULTS.START) {
+    if (admitted.result === control.RESULTS.QUEUE || /resource state|resource capacity|memory pressure/i.test(admitted.reason || '')) {
+      return {
+        outcome: 'HOLD',
+        owner: 'ENVIRONMENT',
+        product_semantics_proven_bad: false,
+        native_admission: admitted.result,
+        native_admission_reason: admitted.reason || '',
+        supervisor_worker_exercised: false,
+      };
+    }
+    assert.equal(admitted.result, control.RESULTS.START, JSON.stringify(admitted));
+  }
+  const persisted = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+  assert.equal(persisted.reservations.length, 1);
+  assert.equal(persisted.reservations[0].producer_provenance.origin, 'native');
+  const reservationId = admitted.reservation_id;
+  const specPath = writeSupervisorSpec(root, reservationId, spec, worker.cli);
+  const reservedStateBytes = fs.readFileSync(control.statePath({ root }));
+  const reservedSpecBytes = fs.readFileSync(specPath);
+  const supervisor = startSupervisorCli(root, reservationId, specPath, worker.cli);
+  let witness = '';
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (fs.existsSync(worker.witness)) witness = fs.readFileSync(worker.witness, 'utf8');
+    if (witness.includes('worker-started')) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.match(witness, /worker-started/);
+  const stateDuringWorker = fs.readFileSync(control.statePath({ root }));
+  const active = JSON.parse(stateDuringWorker.toString('utf8'));
+  assert.equal(active.reservations[0].status, 'running');
+  const mismatchedExecutable = runSupervisorCli(root, reservationId, specPath, `${worker.cli}.different`);
+  assert.notEqual(mismatchedExecutable.status, 0);
+  assert.deepEqual(fs.readFileSync(control.statePath({ root })), stateDuringWorker, 'an executable substitution cannot change or release the live claim');
+  const duplicate = runSupervisorCli(root, reservationId, specPath, worker.cli);
+  assert.notEqual(duplicate.status, 0);
+  assert.deepEqual(fs.readFileSync(control.statePath({ root })), stateDuringWorker, 'the rejected duplicate claimant preserves the live claim byte-for-byte');
+  assert.equal(fs.readFileSync(worker.witness, 'utf8').split('worker-started').length - 1, 1);
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (fs.existsSync(worker.witness)) witness = fs.readFileSync(worker.witness, 'utf8');
+    const state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+    if (witness.includes('worker-completed') && state.reservations.length === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const supervisorResult = await supervisor.completion;
+  const safeSupervisorError = supervisorResult.stderr.replace(/[A-Za-z]:[\\/](?:Users|home)[\\/][^\\/\s]+/g, '[USER_PATH]').slice(0, 300);
+  assert.equal(supervisorResult.status, 0, `actual supervisor exited ${supervisorResult.status}; stderr=${safeSupervisorError}`);
+  assert.match(witness, /worker-completed/);
+  assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8')).reservations.length, 0);
+  assert.equal(witness.split('worker-started').length - 1, 1);
+  fs.writeFileSync(control.statePath({ root }), reservedStateBytes);
+  fs.mkdirSync(path.dirname(specPath), { recursive: true });
+  fs.writeFileSync(specPath, reservedSpecBytes, { encoding: 'utf8', mode: 0o600 });
+  const replay = runSupervisorCli(root, reservationId, specPath, worker.cli);
+  assert.notEqual(replay.status, 0);
+  assert.deepEqual(fs.readFileSync(control.statePath({ root })), reservedStateBytes, 'a persisted claim marker blocks replay of a pre-claim reservation snapshot');
+  assert.equal(fs.readFileSync(worker.witness, 'utf8').split('worker-started').length - 1, 1);
+  return {
+    outcome: 'ACCEPT', positive_control: true, platform_gate: 'linux-or-windows',
+    supervisor_worker_exercised: true, duplicate_claim: 'REJECTED_WITHOUT_RELEASE',
+  };
+}
+
+async function executeF5(plan) {
   const variant = plan.input.variant;
   const fixture = resourceTest.FIXTURE;
   const invocation = resourceTest.INVOCATION;
   if (variant === 'platform-native-production-collector-no-fixture-context') {
-    const state = control.inspectResources();
-    if (!['linux', 'win32'].includes(process.platform)) return { outcome: 'HOLD', platform_gate: 'linux-or-windows' };
-    assert.ok(state);
-    const expectedSource = process.platform === 'linux' ? 'proc-meminfo' : 'win32-operating-system';
-    assert.equal(state.source, expectedSource);
-    assert.equal(state.host_responsive, true);
-    assert.equal(Object.hasOwn(state, 'fixture_id'), false);
-    for (const key of ['physical_total', 'physical_available', 'commit_total', 'commit_available']) assert.ok(Number.isSafeInteger(state[key]) && state[key] > 0);
-    assert.ok(state.physical_available <= state.physical_total);
-    assert.ok(state.commit_available <= state.commit_total);
-    return { outcome: 'ACCEPT', positive_control: true, platform_gate: 'linux-or-windows' };
+    return executeNativeSupervisorPositive(boundedTempRoot());
   }
 
   const root = boundedTempRoot();
@@ -1001,6 +1338,14 @@ function executeF5(plan) {
     if (variant === 'queued-retry-reestablishes-resource-provenance') assert.equal(first.result, control.RESULTS.QUEUE);
     if (variant === 'child-context-does-not-survive-serialization') assert.ok([control.RESULTS.START, control.RESULTS.QUEUE].includes(first.result));
     const before = fs.readFileSync(control.statePath({ root }));
+    if (variant === 'queued-retry-reestablishes-resource-provenance') {
+      const changedJob = resourceSpec({ child_responsibility: 'Implement a different isolated parser shard with focused tests.' });
+      const changedRetry = resourceContext(root, () => control.resourceAdmissionDecision(
+        { ...changedJob, queue_id: first.queue_id }, selectedProfile, fixture, inputOptions,
+      ));
+      assert.equal(changedRetry.result, control.RESULTS.REFUSE, 'a queue ticket cannot be rebound to a different job identity');
+      assert.deepEqual(fs.readFileSync(control.statePath({ root })), before, 'a failed changed-job claimant cannot alter the durable queue');
+    }
     const second = control.resourceAdmissionDecision(selectedSpec, selectedProfile, fixture, inputOptions);
     assert.equal(second.result, control.RESULTS.REFUSE);
     assert.deepEqual(fs.readFileSync(control.statePath({ root })), before);
@@ -1070,8 +1415,75 @@ function executeF5(plan) {
     return { ...deniedResourceResult(result, root), jobs_created: false };
   }
   if (variant === 'fixture-reservation-cannot-replay-production-supervisor') {
-    const result = resourceContext(root, () => control.launch(resourceSpec(), { root, profile: resourceProfile(), resourceState: fixture }));
-    return deniedResourceResult(result, root);
+    const spec = resourceSpec();
+    const worker = createSupervisorFixture(root);
+    const admitted = resourceContext(root, () => control.resourceAdmissionDecision(spec, resourceProfile(), fixture, {
+      root, repository_test_invocation: invocation, resourceState: fixture, claudeCli: worker.cli,
+    }));
+    assert.equal(admitted.result, control.RESULTS.START);
+    const persisted = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+    assert.equal(persisted.reservations.length, 1);
+    assert.equal(persisted.reservations[0].producer_provenance.origin, 'repository-test');
+    const stateBeforeForeignRelease = fs.readFileSync(control.statePath({ root }));
+    const controlModule = path.resolve(__dirname, '../scripts/toolkit-agent-control.cjs');
+    const foreignRelease = spawnSync(process.execPath, ['-e',
+      `const c=require(${JSON.stringify(controlModule)});process.stdout.write(String(c.releaseReservation(${JSON.stringify(admitted.reservation_id)},{root:${JSON.stringify(root)}})));`,
+    ], { encoding: 'utf8', windowsHide: true });
+    assert.equal(foreignRelease.status, 0, foreignRelease.stderr);
+    assert.equal(foreignRelease.stdout.trim(), 'false');
+    assert.deepEqual(fs.readFileSync(control.statePath({ root })), stateBeforeForeignRelease, 'a foreign process cannot release the reservation owner\'s entry');
+    const specPath = writeSupervisorSpec(root, admitted.reservation_id, spec, worker.cli);
+    const mismatchedExecutable = runSupervisorCli(root, admitted.reservation_id, specPath, `${worker.cli}.different`);
+    assert.notEqual(mismatchedExecutable.status, 0);
+    assert.equal(fs.existsSync(worker.witness), false, 'the actual supervisor rejects executable substitution before worker invocation');
+    assert.deepEqual(fs.readFileSync(control.statePath({ root })), stateBeforeForeignRelease);
+    const supervisor = runSupervisorCli(root, admitted.reservation_id, specPath, worker.cli);
+    assert.notEqual(supervisor.status, 0, supervisor.stdout);
+    assert.equal(fs.existsSync(worker.witness), false, 'fixture-origin provenance rejects at supervise before any worker invocation');
+    const retained = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+    assert.equal(retained.reservations.length, 1, 'a rejected supervisor claimant does not release the reservation');
+    assert.equal(retained.reservations[0].status, 'reserved');
+    assert.equal(retained.reservations[0].producer_provenance.origin, 'repository-test');
+
+    const forgedRoot = boundedTempRoot();
+    const forgedWorker = createSupervisorFixture(forgedRoot);
+    const forgedId = crypto.randomUUID();
+    const forgedSpec = resourceSpec();
+    const forgedSpecPath = writeSupervisorSpec(forgedRoot, forgedId, forgedSpec, forgedWorker.cli);
+    const now = Date.now();
+    fs.mkdirSync(path.dirname(control.statePath({ root: forgedRoot })), { recursive: true });
+    fs.writeFileSync(control.statePath({ root: forgedRoot }), `${JSON.stringify({
+      schema: control.SCHEMA,
+      reservations: [{
+        id: forgedId,
+        host: control.HOSTS.CLAUDE,
+        topology: 'toolkit-controlled-direct',
+        depth: 1,
+        role: control.ROLES.WORKER,
+        owner_pid: process.pid,
+        created_at_ms: now,
+        expires_at_ms: now + 60_000,
+        estimated_memory_bytes: control.DEFAULT_WORKER_COST,
+        effort: 'medium',
+        job_identity_digest: '0'.repeat(64),
+        worker_executable: forgedWorker.cli,
+        status: 'reserved',
+        producer_provenance: {
+          schema: 'toolkit.agent-control.resource-provenance.v1',
+          origin: 'native',
+          resource_source: 'win32-operating-system',
+          admission_id: crypto.randomUUID(),
+          job_identity_digest: '0'.repeat(64),
+          mac: 'a'.repeat(64),
+        },
+      }],
+      queue: [],
+      checker_reviews: [],
+    }, null, 2)}\n`, 'utf8');
+    const forgedSupervisor = runSupervisorCli(forgedRoot, forgedId, forgedSpecPath, forgedWorker.cli);
+    assert.notEqual(forgedSupervisor.status, 0);
+    assert.equal(fs.existsSync(forgedWorker.witness), false, 'caller-authored native provenance is rejected before worker execution');
+    return { outcome: 'REFUSE', effects: 'zero', actual_supervisor: true, worker_execution: false, persisted_test_origin: true };
   }
   fail(`RUN093_F5_VARIANT_UNMAPPED:${variant}`);
 }
@@ -1190,19 +1602,45 @@ function topologyCandidateHead(env = process.env) {
 function executeIntegration(plan, fixture) {
   const variant = plan.input.variant;
   const root = path.resolve(__dirname, '..', '..');
-  if (variant === 'current-M2-controller-architecture-registry-policy') {
+  if (variant === 'integrated-current-main-plus-accepted-C1') {
     const controller = fs.readFileSync(path.join(root, 'repo/CONTROLLER.md'), 'utf8');
     const architecture = fs.readFileSync(path.join(root, 'repo/ARCHITECTURE.md'), 'utf8');
     for (const phrase of [
-      'Mandatory requirement coverage closure', 'Mechanism completeness / observability',
-      'Commit-required validation sequencing', 'Conditional G3 adversarial pre-publication validation',
-      'G1_RECONVERGENCE',
-    ]) assert.ok(controller.includes(phrase), `M2 Controller clause retained: ${phrase}`);
+      'Mandatory requirement coverage closure', 'Mechanism completeness / observability', 'Mechanism-completeness proof model',
+      'G2 in-gate convergence', 'challenge -> refine -> challenge', 'G2 adversarial contract falsification',
+      'Async/deferred temporal-semantics closure', 'Failure attribution', 'Hosted non-product reclosure inside G3',
+      'G1_RECONVERGENCE', 'G2 always resolves through the selected named stack\'s single `G2` route',
+      'CURRENT-first bounded worker context', 'Toolkit-controller active-child improvement quarantine',
+      'Interim Controller-law canonicalisation', 'Complex/STRICT G3 paired convergence + adversarial pre-publication validation',
+      'Strong G3 challenge packet / implementation handoff', 'G3 anti-bounce / Web-return boundary',
+    ]) assert.ok(controller.includes(phrase), `integrated Controller clause retained: ${phrase}`);
+    assert.equal(controller.includes('G2_ESCALATED'), false);
+    assert.equal(/(^|[\s,`])LOOP([\s,`]|$)/m.test(controller), false);
     for (const phrase of [
-      'For transactional/state-machine work', 'Mechanism completeness is distinct from semantic correctness',
-      'G3 performs a pre-publication adversarial validation episode inside the same G3',
-    ]) assert.ok(architecture.includes(phrase), `M2 Architecture clause retained: ${phrase}`);
-    for (const file of MAIN_ONLY_PATHS) assert.deepEqual(fs.readFileSync(path.join(root, file)), gitBytes(M2, file), `${file} is exact M2 carry`);
+      'WEB_ROUTE_RECOMMENDATION', 'For transactional/state-machine work', 'Mechanism completeness is distinct from semantic correctness',
+      'MECHANISM_COMPLETENESS_PROOF_MODEL', 'G3 uses a paired convergence cycle inside the same G3 episode',
+      'COMMIT_REQUIRED_VALIDATION=YES', 'Candidate immutability is per exact candidate identity',
+      'paired convergence cycle inside the same G3 episode', 'implementation-ready diagnostic handoff rather than a bare verdict',
+    ]) assert.ok(architecture.includes(phrase), `integrated Architecture clause retained: ${phrase}`);
+    const registry = JSON.parse(fs.readFileSync(path.join(root, CURRENT_MAIN_EXACT_PATHS[0]), 'utf8'));
+    const stack = registry.stacks['owner-openai-default'];
+    assert.deepEqual(Object.keys(stack.routes), ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER']);
+    assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1);
+    assert.deepEqual(stack.routes.G2, { provider: 'openai', model: 'gpt-6-astra', reasoning: 'high' });
+    assert.deepEqual(stack.routes.G3.adversarial_subagent, { provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' });
+    assert.equal(Object.hasOwn(stack, 'subagents'), false);
+    const policyTests = fs.readFileSync(path.join(root, 'repo/tests/controller-policy-separation.test.cjs'), 'utf8');
+    for (const phrase of [
+      'CURRENT-first bounded worker context', 'Toolkit-controller active-child improvement quarantine',
+      'generic interim Controller law is canonicalised only by the Toolkit source-owning controller',
+      'complex G3 uses paired implementation and strong-review convergence attempts',
+      'task-specific terminal vocabularies cannot suppress controller typed non-product holds',
+    ]) assert.ok(policyTests.includes(phrase), `integrated controller policy regression retained: ${phrase}`);
+    assert.equal(gitText(['rev-parse', `${CANONICAL_MAIN}:repo/CONTROLLER.md`]), CONTROLLER_BLOB);
+    assert.equal(gitText(['rev-parse', `${CANONICAL_MAIN}:repo/ARCHITECTURE.md`]), ARCHITECTURE_BLOB);
+    assert.equal(gitText(['rev-parse', `${CANONICAL_MAIN}:repo/contracts/controller-kernel/stack-registry-v2.json`]), STACK_REGISTRY_BLOB);
+    assert.equal(gitText(['rev-parse', `${CANONICAL_MAIN}:repo/contracts/controller-kernel/stack-registry-v2.schema.json`]), STACK_REGISTRY_SCHEMA_BLOB);
+    for (const file of CURRENT_MAIN_EXACT_PATHS) assert.deepEqual(fs.readFileSync(path.join(root, file)), gitBytes(CANONICAL_MAIN, file), `${file} is exact current-main canonical content`);
     return { outcome: 'PRESERVED' };
   }
   if (variant === 'K-compatible-candidate-contract-preserved') {
@@ -1217,31 +1655,41 @@ function executeIntegration(plan, fixture) {
     for (const [file, marker] of requiredMarkers) assert.ok(fs.readFileSync(path.join(root, file), 'utf8').includes(marker), `${file}:${marker}`);
     return { outcome: 'PRESERVED' };
   }
-  if (variant === 'compare-exact-run095-path-manifest') {
-    const allowed = new Set(fixture.mutation.allow_paths);
-    const mergeBaseTree = gitMergeBaseTree();
-    const tracked = gitText(['diff', '--name-only', mergeBaseTree]).split(/\r?\n/).filter(Boolean);
+  if (variant === 'compare-exact-run099-path-manifest') {
+    const allowed = new Set(RUN099_ALLOWED_PATHS);
+    const canonicalMergeBase = gitText(['merge-base', P, CANONICAL_MAIN]);
+    const canonicalMainDelta = gitText(['diff', '--name-only', canonicalMergeBase, CANONICAL_MAIN]).split(/\r?\n/).filter(Boolean);
+    assert.deepEqual(canonicalMainDelta.filter((file) => !allowed.has(file)), [], 'canonical-main changes since the P/main merge-base stay inside the Run-099 path ceiling');
+    const candidateHead = topologyCandidateHead();
+    const tracked = (candidateHead === P
+      ? gitText(['diff', '--name-only', P])
+      : gitText(['diff', '--name-only', P, candidateHead])).split(/\r?\n/).filter(Boolean);
     const untracked = gitText(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean);
     const changed = [...new Set([...tracked, ...untracked])];
     const extra = changed.filter((file) => !allowed.has(file));
     assert.deepEqual(extra, []);
-    assert.ok(changed.length <= RUN095_MAXIMUM_CHANGED_PATHS);
-    assert.deepEqual(RUN095_ADDITIONAL_PATHS.every((file) => changed.includes(file)), true);
-    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: RUN095_MAXIMUM_CHANGED_PATHS };
+    assert.deepEqual(changed.sort(), [...RUN099_ALLOWED_PATHS].sort());
+    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: RUN099_ALLOWED_PATHS.length };
   }
-  if (variant === 'N-ordered-parents-K-M2-first-parent-K') {
-    assert.equal(gitText(['cat-file', '-t', K]), 'commit');
-    assert.equal(gitText(['cat-file', '-t', M2]), 'commit');
+  if (variant === 'N-ordered-parents-P-current-main') {
+    assert.equal(gitText(['cat-file', '-t', P]), 'commit');
+    assert.equal(gitText(['cat-file', '-t', CANONICAL_MAIN]), 'commit');
+    assert.equal(gitText(['rev-parse', `${P}^{tree}`]), P_TREE);
+    assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', P]).split(' ').slice(1), [K, M2]);
+    assert.equal(gitText(['merge-base', P, CANONICAL_MAIN]), M2);
     const head = topologyCandidateHead();
-    if (head === K) fail('RUN093_EXACT_N_NOT_CREATED');
+    if (head === P && process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer') {
+      return { outcome: 'DEFERRED', candidate_sha: P, identity_deferred: true };
+    }
+    if (head === P) fail('RUN099_EXACT_Q_NOT_CREATED');
     assert.equal(gitText(['cat-file', '-t', head]), 'commit');
     const parents = gitText(['rev-list', '--parents', '-n', '1', head]).split(' ').slice(1);
-    assert.deepEqual(parents, [K, M2]);
+    assert.deepEqual(parents, [P, CANONICAL_MAIN]);
     const tree = gitText(['rev-parse', `${head}^{tree}`]);
     const identitySource = process.env.GITHUB_EVENT_NAME === 'pull_request'
       ? 'github-event-pull-request-head'
       : 'local-current-HEAD';
-    process.stdout.write(`RUN093_TOPOLOGY_HEAD=${head}; TREE=${tree}; PARENTS=${parents.join(',')}; SOURCE=${identitySource}\n`);
+    process.stdout.write(`RUN099_TOPOLOGY_Q=${head}; TREE=${tree}; PARENTS=${parents.join(',')}; SOURCE=${identitySource}\n`);
     return { outcome: 'EXACT', candidate_sha: head, candidate_tree: tree, ordered_parents: parents, identity_source: identitySource };
   }
   if (variant === 'authoritative-and-checked-native-manifests' || variant === 'Codex-Claude-bridge-and-setup-expectations') {
@@ -1250,7 +1698,7 @@ function executeIntegration(plan, fixture) {
     const claudeInput = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json'), 'utf8'));
     const codexChecked = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
     const claudeChecked = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/plugin.json'), 'utf8'));
-    assert.equal(version, '2.10.10');
+    assert.equal(version, '2.10.11');
     assert.equal(codexInput.version, version);
     assert.equal(claudeInput.version, version);
     assert.deepEqual(codexChecked, codexInput);
@@ -1318,9 +1766,25 @@ test('Run-094 reclosure fixture registers, executes, and verifies every Run-093 
   assert.equal(registered.size, REQUIRED_CASE_IDS.length);
   const receipts = [];
   let positiveControls = 0;
+  let identityDeferred = 0;
+  let evidenceHolds = 0;
+  const evidenceHoldDetails = [];
   for (const plan of registered.values()) {
     const observation = await executeRun093Case(plan, ir);
-    assertExpected(plan, observation);
+    if (observation.outcome === 'DEFERRED') {
+      assert.equal(process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY, 'defer');
+      assert.equal(plan.id, 'R093-I-PARENT-TOPOLOGY');
+      assert.equal(observation.identity_deferred, true);
+      identityDeferred += 1;
+    } else if (plan.id === 'R093-F5-NATIVE-COLLECTOR-POS' && observation.outcome === 'HOLD') {
+      assert.equal(observation.owner, 'ENVIRONMENT');
+      assert.equal(observation.product_semantics_proven_bad, false);
+      assert.equal(observation.supervisor_worker_exercised, false);
+      evidenceHolds += 1;
+      evidenceHoldDetails.push({ case_id: plan.id, owner: observation.owner, native_admission: observation.native_admission, native_admission_reason: observation.native_admission_reason });
+    } else {
+      assertExpected(plan, observation);
+    }
     if (plan.expected.positive_control === true) positiveControls += 1;
     receipts.push(receiptFor(plan, observation));
   }
@@ -1331,7 +1795,9 @@ test('Run-094 reclosure fixture registers, executes, and verifies every Run-093 
   assert.equal(result.executed_count, 81);
   assert.equal(new Set(result.case_ids).size, 81);
   assert.equal(positiveControls, 10);
+  assert.equal(identityDeferred, process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer' ? 1 : 0);
+  assert.equal(evidenceHolds, 0, `RUN099_ENVIRONMENT_EVIDENCE_HOLD: ${JSON.stringify(evidenceHoldDetails)}`);
   assert.equal(verifyCompletion({ executed_count: 80 }), null);
   assert.equal(verifyCompletion(null), null);
-  process.stdout.write(`RUN093_REClosure=${result.executed_count}/${result.declared_count}; positives=${positiveControls}; skipped=0\n`);
+  process.stdout.write(`RUN093_REClosure=${result.executed_count}/${result.declared_count}; positives=${positiveControls}; identity_deferred=${identityDeferred}; evidence_holds=${evidenceHolds}\n`);
 });

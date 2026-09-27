@@ -11,7 +11,7 @@ const controller = fs.readFileSync(path.join(repoRoot, 'repo', 'CONTROLLER.md'),
 test('controller full-read policy is bootstrap/change-bound rather than packet-bound', () => {
   assert.match(controller, /## Controller bootstrap and refresh/);
   assert.match(controller, /new Web Controller bootstrap, takeover, explicit handover, restart after lost controller state, or new chat/);
-  assert.match(controller, /Do not re-read the full Controller merely because a worker\/Loop packet returns/);
+  assert.match(controller, /Do not re-read the full Controller merely because a worker packet returns/);
   assert.match(controller, /perform a lightweight canonical Controller revision check/);
   assert.match(controller, /If the canonical Controller identity is unchanged, continue from the bound revision without a full re-read/);
   assert.match(controller, /in-flight run remains governed by the exact Controller\/Lock revision it was admitted under/);

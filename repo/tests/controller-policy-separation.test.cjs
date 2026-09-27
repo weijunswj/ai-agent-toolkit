@@ -13,7 +13,7 @@ const registry = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
-const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G2', 'G2_ESCALATED', 'G3', 'G4', 'LOOP', 'G1_RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER'];
+const requiredRoutes = ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER'];
 
 test('controller bootstrap does not manufacture Toolkit or merge authority', () => {
   assert.match(controller, /Reading this file.*does not itself make the target repository Toolkit-managed.*grants no merge, close, or repository-finality authority/s);
@@ -32,11 +32,13 @@ test('controller stage policy is provider/model agnostic', () => {
     for (const route of Object.values(stack.routes)) {
       assert.equal(controller.includes(route.model), false, `model leaked into Controller law: ${route.model}`);
       assert.equal(architecture.includes(route.model), false, `model leaked into Architecture law: ${route.model}`);
-    }
-    for (const route of Object.values(stack.subagents)) {
-      if (route) {
-        assert.equal(controller.includes(route.model), false, `subagent model leaked into Controller law: ${route.model}`);
-        assert.equal(architecture.includes(route.model), false, `subagent model leaked into Architecture law: ${route.model}`);
+      if (route.subagent) {
+        assert.equal(controller.includes(route.subagent.model), false, `subagent model leaked into Controller law: ${route.subagent.model}`);
+        assert.equal(architecture.includes(route.subagent.model), false, `subagent model leaked into Architecture law: ${route.subagent.model}`);
+      }
+      if (route.adversarial_subagent) {
+        assert.equal(controller.includes(route.adversarial_subagent.model), false, `adversarial subagent model leaked into Controller law: ${route.adversarial_subagent.model}`);
+        assert.equal(architecture.includes(route.adversarial_subagent.model), false, `adversarial subagent model leaked into Architecture law: ${route.adversarial_subagent.model}`);
       }
     }
   }
@@ -46,21 +48,47 @@ test('stack registry has explicit complete symbolic routes and only G0/G3 subage
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
   assert.equal(registry.version, 2);
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
-    assert.deepEqual(Object.keys(stack.routes).sort(), [...requiredRoutes].sort(), stackId);
-    assert.deepEqual(Object.keys(stack.subagents).sort(), ['G0', 'G3'], stackId);
-    for (const route of Object.values(stack.routes)) {
+    assert.deepEqual(Object.keys(stack.routes), requiredRoutes, `${stackId} route presentation order`);
+    assert.equal(Object.hasOwn(stack, 'subagents'), false, `${stackId} must use stage-local subagent routes`);
+    for (const [role, route] of Object.entries(stack.routes)) {
       assert.equal(typeof route.provider, 'string');
       assert.ok(route.provider.length > 0);
       assert.equal(typeof route.model, 'string');
       assert.ok(route.model.length > 0);
       assert.equal(typeof route.reasoning, 'string');
       assert.ok(route.reasoning.length > 0);
+      if (role === 'G0') {
+        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.G0 must expose its child route locally`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), false, `${stackId}.G0 cannot expose the G3 adversarial route`);
+      } else if (role === 'G3') {
+        assert.equal(Object.hasOwn(route, 'subagent'), true, `${stackId}.G3 must expose its ordinary child route locally`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), true, `${stackId}.G3 must expose its adversarial child route locally`);
+      } else {
+        assert.equal(Object.hasOwn(route, 'subagent'), false, `${stackId}.${role} cannot expose a semantic child route`);
+        assert.equal(Object.hasOwn(route, 'adversarial_subagent'), false, `${stackId}.${role} cannot expose a G3 adversarial child route`);
+      }
+    }
+  }
+});
+
+test('stack registry keeps reconvergence next to G1 and nests child routes under G0/G3', () => {
+  assert.deepEqual(requiredRoutes, ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER']);
+  for (const [stackId, stack] of Object.entries(registry.stacks)) {
+    assert.deepEqual(Object.keys(stack.routes), requiredRoutes, stackId);
+    assert.equal(Object.hasOwn(stack, 'subagents'), false, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G0, 'subagent'), true, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G0, 'adversarial_subagent'), false, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G3, 'subagent'), true, stackId);
+    assert.equal(Object.hasOwn(stack.routes.G3, 'adversarial_subagent'), true, stackId);
+    for (const role of requiredRoutes.filter((role) => !['G0', 'G3'].includes(role))) {
+      assert.equal(Object.hasOwn(stack.routes[role], 'subagent'), false, `${stackId}.${role}`);
+      assert.equal(Object.hasOwn(stack.routes[role], 'adversarial_subagent'), false, `${stackId}.${role}`);
     }
   }
 });
 
 test('named stacks support explicit cross-harness selection without harness authority', () => {
-  for (const stackId of ['owner-openai-default', 'owner-claude']) {
+  for (const stackId of ['owner-openai-default', 'owner-claude', 'owner-mixed-claude-gpt']) {
     assert.ok(registry.stacks[stackId], `missing named stack: ${stackId}`);
   }
   assert.equal(Object.hasOwn(registry.stacks, 'owner-deepseek'), false);
@@ -72,6 +100,24 @@ test('named stacks support explicit cross-harness selection without harness auth
   assert.match(architecture, /logical lane may hand off between qualified harnesses/);
 });
 
+test('Web route recommendations are advisory and exact Owner-approved overrides do not change semantic authority', () => {
+  assert.match(controller, /Web route recommendation/);
+  assert.match(controller, /concrete current-run evidence that the selected provider\/model\/reasoning route may be materially too light/);
+  assert.match(controller, /AUTHORITY_EFFECT=NONE/);
+  assert.match(controller, /OWNER_APPROVAL_REQUIRED=YES/);
+  assert.match(controller, /Recommendation alone never changes routing/);
+  assert.match(controller, /After explicit Owner approval/);
+  assert.match(controller, /one-run\/stage-episode route override/);
+  assert.match(controller, /safe worker launch\/adoption\/replacement boundary/);
+  assert.match(controller, /not a new named stack or silent fallback/);
+  assert.match(controller, /must not hot-swap a running semantic worker/);
+  assert.match(controller, /resets no attempt\/budget/);
+  assert.match(controller, /cannot substitute for missing G1\/G2\/evidence authority or create an automatic escalation stage/);
+  assert.match(architecture, /recommendation has no authority effect/);
+  assert.match(architecture, /explicit Owner approval/);
+  assert.match(architecture, /bounded orchestration overlay, not a new stack, fallback chain or semantic escalation stage/);
+});
+
 test('root workers never self-verify model identity while G0/G3 parents configure child routes before launch', () => {
   assert.match(controller, /Root execution threads are bound.*out of band by User\/Web\/controller\/harness before launch or adoption/s);
   assert.match(controller, /root semantic worker must never resolve, inspect, verify, attest, compare, reject, or HOLD on its own provider\/model\/reasoning identity/i);
@@ -79,7 +125,9 @@ test('root workers never self-verify model identity while G0/G3 parents configur
   assert.match(controller, /inability to introspect its own model can never create either HOLD/i);
   assert.doesNotMatch(controller, /current harness cannot launch and verify it/i);
   assert.match(controller, /Only `G0` and `G3` may resolve semantic subagent routes/);
-  assert.match(controller, /parent\/launcher resolves the concrete child provider\/model\/reasoning route.*before child creation/s);
+  assert.match(controller, /ordinary subagent.*stage-local `subagent` provider\/model\/reasoning route/s);
+  assert.match(controller, /mandatory complex\/STRICT G3 adversarial pre-publication challenge.*`adversarial_subagent` route/s);
+  assert.match(controller, /parent\/launcher resolves.*before child creation/s);
   assert.match(controller, /spawned child never self-attests after launch/i);
   assert.match(controller, /Silent provider\/model\/reasoning substitution remains prohibited.*controller\/launcher boundary/s);
   assert.match(controller, /root semantic prompts.*do not carry concrete provider\/model\/reasoning verification obligations/i);
@@ -87,6 +135,52 @@ test('root workers never self-verify model identity while G0/G3 parents configur
   assert.match(architecture, /root semantic worker never verifies or attests its own model identity/i);
   assert.match(architecture, /parent\/launcher resolves the concrete child route.*before child creation/s);
   assert.match(architecture, /spawned children never self-attest after launch/i);
+});
+
+test('web owns CURRENT reconciliation while semantic workers receive compiled bounded context', () => {
+  assert.match(controller, /Web\/controller CURRENT ownership/);
+  assert.match(controller, /Update and read back CURRENT after every material transition that changes a projected current fact/);
+  assert.match(controller, /Do not write merely because another chat turn occurred when no current fact changed/);
+  assert.match(controller, /CURRENT-first bounded worker context/);
+  assert.match(controller, /Before worker launch\/adoption, Web\/controller must reconcile stale, missing or contradictory CURRENT facts/);
+  assert.match(controller, /must not be emitted wholesale into an ordinary worker packet/);
+  assert.match(controller, /Current-facing body sections that still claim an obsolete RUN\/Lock\/gate\/NEXT\/route or prior CURRENT state are presentation drift/);
+  assert.match(controller, /repair them from canonical CURRENT at the next safe reconciliation boundary/);
+
+  assert.match(controller, /bounded stage\/task\/authority packet compiled from CURRENT/);
+  assert.match(controller, /full programme-parent body, Delivery Child body, issue\/PR chronology, historical authority list/);
+  assert.match(controller, /are not default worker context/);
+  assert.match(controller, /If CURRENT is insufficient, reconcile CURRENT; never compensate by dumping chronology into the worker prompt/);
+  assert.match(controller, /issue body is not itself the semantic worker packet/);
+});
+
+test('Toolkit controller future-owns reusable improvements instead of expanding the CURRENT delivery child', () => {
+  assert.match(controller, /Toolkit-controller active-child improvement quarantine/);
+  assert.match(controller, /applies only when the Web Controller repository fence is exactly `weijunswj\/ai-agent-toolkit`/);
+  assert.match(controller, /defaults to `FUTURE_OWNED_NONBLOCKING`/);
+  assert.match(controller, /smallest compatible existing durable future child\/shared carrier\/seed/);
+  assert.match(controller, /does not by itself widen that child's scope, mutation ceiling, prerequisite graph, RUN\/Lock lineage or repair budget/);
+  assert.match(controller, /CURRENT_CHILD_INVARIANT_AFFECTED/);
+  assert.match(controller, /CURRENT_CHILD_ASSURANCE_INVALIDATED/);
+  assert.match(controller, /SAFE_DEFERRAL_IMPOSSIBLE/);
+  assert.match(controller, /SMALLEST_CURRENT_CORRECTION/);
+  assert.match(controller, /Missing any field means future-own the improvement and continue the current child/);
+  assert.match(controller, /never launders a real current-child defect into follow-up work/);
+  assert.match(controller, /Controllers bound to SQAG, Platform, Design, Automation or any other repository do not inherit this Toolkit programme-topology rule/);
+  assert.match(controller, /may surface reusable `TOOLKIT_FEEDBACK`/);
+});
+
+test('generic interim Controller law is canonicalised only by the Toolkit source-owning controller', () => {
+  assert.match(controller, /Interim Controller-law canonicalisation/);
+  assert.match(controller, /generic Owner\/Web interim rule that changes Controller behaviour across chats, workers or Toolkit-managed repositories/);
+  assert.match(controller, /Canonicalisation into `weijunswj\/ai-agent-toolkit:repo\/CONTROLLER\.md` is owned only by the Web Controller currently bound to the Toolkit repository/);
+  assert.match(controller, /explicitly authorised Toolkit executor operating under that controller/);
+  assert.match(controller, /Web Controller bound to another repository must not cross its repository fence/);
+  assert.match(controller, /must not.*stage Toolkit source.*open\/update a Toolkit source PR.*treat this clause as mutation authority/s);
+  assert.match(controller, /surface the reusable gap\/feedback or exact handoff to the Toolkit source-owning controller\/durable owner/);
+  assert.match(controller, /next safe Toolkit source boundary/);
+  assert.match(controller, /does not remain indefinitely comment-only/);
+  assert.match(controller, /Repository\/task-specific facts, receipts and implementation contracts remain on their owning programme\/child surfaces/);
 });
 
 test('ordinary semantic executors receive bounded authority instead of being told to read the full Controller', () => {
@@ -105,30 +199,71 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G1.reasoning, 'high');
   const openai = registry.stacks['owner-openai-default'];
   for (const [role, route] of Object.entries(openai.routes)) {
-    if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'xhigh', `OpenAI Sol route must be xhigh: ${role}`);
+    if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'max', `OpenAI Sol route must be max: ${role}`);
   }
-  assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'xhigh');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'medium');
-  assert.equal(registry.stacks['owner-openai-default'].routes.G2_ESCALATED.reasoning, 'high');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'max');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G2.reasoning, 'high');
-  assert.equal(claude.routes.G2_ESCALATED.reasoning, 'xhigh');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
-  assert.equal(claude.routes.LOOP.reasoning, 'medium');
   assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
   assert.equal(claude.routes.BROWSER.reasoning, 'high');
-  assert.equal(claude.subagents['G0'].reasoning, 'medium');
-  assert.equal(claude.subagents.G3.reasoning, 'medium');
+  assert.equal(claude.routes.G0.subagent.reasoning, 'medium');
+  assert.equal(claude.routes.G3.subagent.reasoning, 'medium');
 });
 
-test('G2 escalation is a stronger route category, not a new gate', () => {
-  assert.match(controller, /`G2_ESCALATED` is a stronger route category for the same semantic `G2` gate/);
-  assert.match(controller, /fresh G4 has classified a material blocker as `G2_CONTRACT_COVERAGE_MISS`/);
-  assert.match(controller, /normal G2 route returned HOLD.*remaining blocker is adversarial executable-contract closure/s);
-  assert.match(controller, /once for the same G2 root\/contract/);
-  assert.match(controller, /does not authorise mutation or bypass missing evidence/);
-  assert.match(controller, /Do not auto-escalate merely because.*G3 implementation failed/s);
+test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max worker slot', () => {
+  const openai = registry.stacks['owner-openai-default'];
+  const mixed = registry.stacks['owner-mixed-claude-gpt'];
+  assert.ok(mixed);
+
+  assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G1_RECONVERGENCE, mixed.routes.G1);
+
+  for (const role of requiredRoutes) {
+    if (['G_FRAME', 'G1', 'G1_RECONVERGENCE'].includes(role)) continue;
+    const openaiRoute = openai.routes[role];
+    const mixedRoute = mixed.routes[role];
+    const openaiRoot = { provider: openaiRoute.provider, model: openaiRoute.model, reasoning: openaiRoute.reasoning };
+    const mixedRoot = { provider: mixedRoute.provider, model: mixedRoute.model, reasoning: mixedRoute.reasoning };
+
+    if (openaiRoot.provider === 'openai' && openaiRoot.model === 'gpt-6-luna' && openaiRoot.reasoning === 'max') {
+      assert.deepEqual(mixedRoot, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
+    } else {
+      assert.deepEqual(mixedRoot, openaiRoot, `mixed route must mirror OpenAI for ${role}`);
+    }
+
+    if (['G0', 'G3'].includes(role)) {
+      const openaiSubagent = openaiRoute.subagent;
+      const mixedSubagent = mixedRoute.subagent;
+      if (openaiSubagent && openaiSubagent.provider === 'openai' && openaiSubagent.model === 'gpt-6-luna' && openaiSubagent.reasoning === 'max') {
+        assert.deepEqual(mixedSubagent, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna subagent replacement mismatch: ${role}`);
+      } else {
+        assert.deepEqual(mixedSubagent, openaiSubagent, `mixed subagent route must mirror OpenAI for ${role}`);
+      }
+    }
+  }
+});
+test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
+  for (const [stackId, stack] of Object.entries(registry.stacks)) {
+    assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1, stackId);
+  }
+  assert.match(controller, /G1_RECONVERGENCE.*uses exactly the selected stack's `G1` provider\/model\/reasoning route/);
+  assert.match(controller, /not an independent model-strength tier/);
+  assert.match(architecture, /uses exactly the selected stack's G1 provider\/model\/reasoning route/);
+});
+
+test('OpenAI G2 is Astra High and current G2 has no automatic higher-reasoning retry', () => {
+  const openai = registry.stacks['owner-openai-default'];
+  assert.equal(openai.routes.G2.provider, 'openai');
+  assert.equal(openai.routes.G2.model, 'gpt-6-astra');
+  assert.equal(openai.routes.G2.reasoning, 'high');
+  assert.match(controller, /G2 always resolves through the selected named stack's single `G2` route/);
+  assert.match(controller, /There is no automatic higher-reasoning G2 retry category/);
+  assert.match(controller, /return to Web for causal adjudication rather than automatically spending another model tier/);
+  assert.match(controller, /Web may explicitly select another registered stack for a later run when justified/);
 });
 
 test('delegation capability is stage law, not model law', () => {
@@ -165,8 +300,9 @@ test('github presentation mechanics stay in renderer automation, not Controller 
 test('stack registry has no default stack or authoritative service tier', () => {
   assert.equal(Object.hasOwn(registry, 'default_stack'), false);
   for (const stack of Object.values(registry.stacks)) {
-    for (const route of [...Object.values(stack.routes), ...Object.values(stack.subagents)]) {
-      if (route) assert.equal(Object.hasOwn(route, 'tier'), false);
+    for (const route of Object.values(stack.routes)) {
+      assert.equal(Object.hasOwn(route, 'tier'), false);
+      if (route.subagent) assert.equal(Object.hasOwn(route.subagent, 'tier'), false);
     }
   }
 });
@@ -178,7 +314,7 @@ test('convergence-first roles are represented without widening delegation', () =
   assert.match(architecture, /Reconverged correction exception/);
   assert.match(architecture, /Web-directed continuation after autonomous exhaustion/);
   assert.match(controller, /WEB_DIRECTED_CONTINUATION/);
-  assert.match(controller, /does not automatically spend a higher-model `G1_RECONVERGENCE` call/);
+  assert.match(controller, /Web may optionally invoke one read-only `G1_RECONVERGENCE` synthesis/);
 });
 
 test('shipping-first policy is singular, ordered, and retains canonical Shipping Law', () => {
@@ -223,8 +359,7 @@ test('post-Web-directed G4 amend defaults to targeted G2 reclosure before anothe
   assert.match(controller, /deterministic regressions plus positive controls/);
   assert.match(controller, /production-boundary evidence/);
   assert.match(controller, /changed root\/trust\/architecture model requires G1 re-entry/);
-  assert.match(controller, /`G2_CONTRACT_COVERAGE_MISS` requires targeted G2 re-entry and may use `G2_ESCALATED`/);
-  assert.match(controller, /standard G2 route normally applies/);
+  assert.match(controller, /`G2_CONTRACT_COVERAGE_MISS` requires targeted G2 re-entry under the selected stack's normal `G2` route/);
   assert.match(controller, /Narrow G2-reuse exception/);
   assert.match(controller, /every exact material G4 counterexample.*executable G2 invariant.*regression plus positive-control obligation.*production-boundary evidence requirement.*validation criterion/s);
   assert.match(controller, /`MECHANISM_COMPLETENESS_ALREADY_BOUND=YES`/);
@@ -298,9 +433,9 @@ test('async waiters and deferred work require adversarial progress and truthful 
   assert.match(controller, /Already-complete-before-waiter is insufficient alone/);
   assert.match(controller, /non-zero outstanding work without a progress signal fails loudly/);
   assert.match(controller, /Deferred-work accounting/);
-  assert.match(controller, /remains outstanding until real consequential completion/);
-  assert.match(controller, /Cancelling its scheduler does not erase it/);
-  assert.match(controller, /Flush either permits the normal dispatch or takes ownership of that same work/);
+  assert.match(controller, /accepted temporal model classifies as a still-required obligation.*remains outstanding until real consequential completion/s);
+  assert.match(controller, /Cancelling or replacing a scheduler cannot erase an independently required obligation/);
+  assert.match(controller, /latest-state debounce\/coalescing\/supersession semantics.*not automatically lost work/s);
 });
 
 test('logical identities that alias one consequential resource are closed before G3', () => {
@@ -323,6 +458,48 @@ test('universal invariants require mechanism-complete enforcement and observable
   assert.match(architecture, /Post-hoc detector coverage is not a substitute for observability the platform does not provide/);
 });
 
+test('blocking findings attribute the causal layer instead of collapsing everything into G3 implementation', () => {
+  assert.match(controller, /Failure attribution/);
+  assert.match(controller, /OWNER=PRODUCT\|CONTRACT\|TOOLKIT\|HARNESS\|ENVIRONMENT\|UNKNOWN/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD=YES\|NO/);
+  assert.match(controller, /G3_IMPLEMENTATION_MISS.*OWNER=PRODUCT.*candidate semantics themselves violate an accepted invariant/s);
+  assert.match(controller, /Contract\/completeness\/proof-model defects are CONTRACT\/G2/);
+  assert.match(controller, /Toolkit, harness and environment defects do not consume product\/G3 correction budget/);
+  assert.match(controller, /UNKNOWN.*bounded diagnosis rather than blind candidate mutation/);
+
+  assert.match(architecture, /OWNER=PRODUCT/);
+  assert.match(architecture, /OWNER=CONTRACT/);
+  assert.match(architecture, /OWNER=TOOLKIT/);
+  assert.match(architecture, /OWNER=HARNESS/);
+  assert.match(architecture, /OWNER=ENVIRONMENT/);
+  assert.match(architecture, /OWNER=UNKNOWN/);
+  assert.match(architecture, /product convergence and delivery-machinery convergence remain distinguishable/);
+});
+
+test('task-specific terminal vocabularies cannot suppress controller typed non-product holds', () => {
+  assert.match(controller, /Task\/stage prompts may enumerate semantic terminal outcomes/);
+  assert.match(controller, /`return exactly one`/);
+  assert.match(controller, /do not implicitly suppress Controller-defined typed non-product HOLDs/);
+  assert.match(controller, /executor\/runtime\/harness permission or safety interruption/);
+  assert.match(controller, /pure non-product interruption does not consume product\/G3 correction budget unless it independently establishes a candidate defect/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD/);
+});
+
+test('broken verifier substitution preserves the invariant and separate defect ownership', () => {
+  assert.match(controller, /Equivalent evidence for a broken verifier/);
+  assert.match(controller, /not itself an unresolved required product\/security\/finality deliverable/);
+  assert.match(controller, /same unchanged invariant.*same consequential boundary or a proven faithful equivalent/s);
+  assert.match(controller, /same positive\/negative\/effect obligations/);
+  assert.match(controller, /normal independent review/);
+  assert.match(controller, /verifier defect remains separately owned/);
+  assert.match(controller, /PRODUCT_SEMANTICS_PROVEN_BAD=NO/);
+
+  assert.match(architecture, /known-broken canonical verifier may be replaced by bounded equivalent evidence/);
+  assert.match(architecture, /required positive\/negative\/adversarial and effect\/zero-effect semantics/);
+  assert.match(architecture, /allow product delivery to continue.*defect remains separately owned and unresolved/s);
+  assert.match(architecture, /validation\/evidence block with product semantics not proven bad/);
+});
+
 test('fresh G4 attacks the enforcement mechanism itself and routes observer incompleteness back to G2', () => {
   assert.match(controller, /MECHANISM_COMPLETENESS_UNPROVEN/);
   assert.match(controller, /detector\/interceptor\/hook\/brand\/parser\/ledger mechanisms/);
@@ -333,6 +510,45 @@ test('fresh G4 attacks the enforcement mechanism itself and routes observer inco
   assert.match(architecture, /ordinary construction instead of an intercepted API/);
   assert.match(architecture, /state change that leaves watched shape\/prototype evidence unchanged/);
   assert.match(architecture, /return to targeted G2 before another G3/);
+});
+
+test('same-root G2 contract defects converge inside one G2 episode instead of chaining fresh G2 runs', () => {
+  assert.match(controller, /G2 in-gate convergence/);
+  assert.match(controller, /challenge -> refine -> challenge/);
+  assert.match(controller, /defect found in G2's own draft contract is ordinary in-gate refinement/);
+  assert.match(controller, /not by itself `G2_AMEND` or authority for a fresh same-root G2 RUN\/Lock/);
+  assert.match(controller, /G2_PASS/);
+  assert.match(controller, /G2_HOLD/);
+  assert.match(controller, /G2_REENTRY_REQUIRED/);
+  assert.match(controller, /G2_NONCONVERGED/);
+  assert.match(controller, /do not manufacture another materially equivalent G2 merely by issuing a new RUN\/Lock/);
+  assert.match(architecture, /Discovering a defect in that proposed contract is not itself a terminal AMEND/);
+  assert.match(architecture, /Renaming RUN\/Lock without materially changed input does not create another admissible G2 episode/);
+});
+
+test('G2 adversarially tries to falsify its own contract before PASS', () => {
+  assert.match(controller, /G2 adversarial contract falsification/);
+  assert.match(controller, /implementation that follows the written mechanism yet violates the invariant/);
+  assert.match(controller, /competing semantic models/);
+  assert.match(controller, /validation\/evidence false positives or false greens/);
+  assert.match(controller, /Surviving assumptions must be explicitly bound/);
+  assert.match(controller, /mapped to deterministic G3 negative regressions plus positive controls/);
+  assert.match(controller, /G2 proves the contract\/design is adversarially coherent enough to implement; it does not prove the implementation itself/);
+  assert.match(architecture, /adversarial reviewer of its own proposed contract/);
+  assert.match(architecture, /design\/contract analogue of G4 attacking the realised candidate/);
+});
+
+test('async/deferred contracts freeze temporal semantics instead of inferring them from timers', () => {
+  assert.match(controller, /Async\/deferred temporal-semantics closure/);
+  assert.match(controller, /individually consequential or latest\/coalesced only/);
+  assert.match(controller, /debounce\/coalescing/);
+  assert.match(controller, /replacement\/supersession\/cancellation/);
+  assert.match(controller, /queue-time snapshot versus execution-time\/current-state lookup/);
+  assert.match(controller, /G3 and G4 must not infer product semantics merely from timers, queues, promises, callbacks/);
+  assert.match(controller, /Replacing a timer is not lost required work unless the accepted temporal model says that individual obligation remained consequential/);
+  assert.match(architecture, /timer\/queue\/promise\/callback mechanics are evidence about implementation shape, not authority for product semantics/);
+  assert.match(architecture, /latest-state debounce\/coalescing.*obligation transfers\/merges into the latest consequential state/s);
+  assert.match(architecture, /under each-state-required semantics, replacement\/cancellation must preserve or truthfully fail the individual obligation/);
 });
 
 test('G2 cannot drop mandatory requirements when freezing the candidate contract', () => {
@@ -368,6 +584,43 @@ test('canonical equivalence and rejection noninterference are consequential evid
   assert.match(architecture, /final error code alone cannot prove zero execution/);
 });
 
+test('universal and no-bypass claims require an explicit mechanism-completeness proof model beyond finite regressions', () => {
+  assert.match(controller, /Mechanism-completeness proof model/);
+  assert.match(controller, /MECHANISM_COMPLETENESS_PROOF_MODEL/);
+  assert.match(controller, /regression breadth cannot establish exhaustiveness by itself/);
+  assert.match(controller, /complete trusted-boundary inventory, material state machine, protocol schema, enforcement mapping and falsifiable assumptions/);
+  assert.match(controller, /ingress\/egress\/export\/receipt\/binding\/actor\/state transition/);
+  assert.match(controller, /multiplicity\/replay\/reordering, malformed evidence, actor\/identity substitution and bypass transitions/);
+  assert.match(controller, /MECHANISM_COMPLETENESS_UNPROVEN/);
+  assert.match(controller, /conditional on exhaustive claims, not ordinary bounded finite behaviour/);
+
+  assert.match(architecture, /complete trusted-boundary inventory across executable ingress\/egress/);
+  assert.match(architecture, /material state-machine artefact/);
+  assert.match(architecture, /protocol-schema artefact/);
+  assert.match(architecture, /Existing canonical schemas may be referenced rather than duplicated when complete/);
+  assert.match(architecture, /dense finite regression matrix remains necessary falsification\/implementation evidence but is not a completeness proof/);
+  assert.match(architecture, /coordinator versus actual executor/);
+  assert.match(architecture, /G4 directly challenges the proof model/);
+});
+
+test('validation cases cannot manufacture later false RED by consuming a shared bounded resource', () => {
+  assert.match(controller, /Validation resource non-interference/);
+  assert.match(controller, /shared resource\/equivalence identity/);
+  assert.match(controller, /which cases consume or mutate it/);
+  assert.match(controller, /later oracle's prerequisite state/);
+  assert.match(controller, /isolation first, then deterministic reset, then explicit shared-state ordering\/ownership/);
+  assert.match(controller, /bounded pacing\/window separation only when the real resource is inherently time-windowed/);
+  assert.match(controller, /Do not spoof identities, disable limits, bypass production controls or scatter sleeps/);
+  assert.match(controller, /must not make an otherwise-valid later oracle fail merely by consuming its prerequisite shared resource/);
+
+  assert.match(architecture, /validation cases share a materially bounded\/mutable resource/);
+  assert.match(architecture, /per-case consumption\/mutation/);
+  assert.match(architecture, /rate-limit\/quota windows/);
+  assert.match(architecture, /one explicit bounded group\/window boundary/);
+  assert.match(architecture, /If the shared interference is itself the behavior under test, declare that intentionally/);
+  assert.match(architecture, /validation self-interference is harness\/evidence failure rather than product failure/);
+});
+
 test('stateful and async contracts close on named transition regressions, not prose or suite green alone', () => {
   assert.match(controller, /State-transition adversarial closure/);
   assert.match(controller, /each material transition is bound to a named deterministic negative transition regression plus a positive control/);
@@ -382,30 +635,87 @@ test('stateful and async contracts close on named transition regressions, not pr
   assert.match(architecture, /not a mandatory combinatorial matrix/);
 });
 
-test('complex G3 work gets conditional adversarial pre-publication validation without adding a gate', () => {
-  assert.match(controller, /Conditional G3 adversarial pre-publication validation/);
-  assert.match(controller, /sufficiently complex\/STRICT G3 involving concurrency, async\/deferred work, causal controls, lifecycle coordination or identity\/resource mapping/);
-  assert.match(controller, /optional depth-1 read-only validation leaf/);
-  assert.match(controller, /leaf never mutates or declares completion/);
-  assert.match(controller, /parent remains sole integrator\/revalidator/);
+test('complex G3 uses paired implementation and strong-review convergence attempts without adding a gate', () => {
+  assert.match(controller, /Complex\/STRICT G3 paired convergence \+ adversarial pre-publication validation/);
+  assert.match(controller, /each substantive G3 convergence attempt as one paired cycle/);
+  assert.match(controller, /parent implementation\/correction -> complete affected integrated validation green -> fresh depth-1 read-only adversarial challenge leaf/);
+  assert.match(controller, /separately registered G3 `adversarial_subagent` route/);
+  assert.match(controller, /deliberately stronger reasoning route/);
+  assert.match(controller, /privilege\/context boundaries/);
+  assert.match(controller, /production-boundary reachability/);
+  assert.match(controller, /validation false-greens/);
+  assert.match(controller, /leaf never mutates, publishes, grants authority or declares G3 completion/);
+  assert.match(controller, /clean challenge closes that paired attempt successfully/);
+  assert.match(controller, /material settled in-contract implementation finding.*paired attempt is unsuccessful/s);
+  assert.match(controller, /next materially distinct correction attempt inside the same RUN\/Lock/);
+  assert.match(controller, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(controller, /Strong G3 challenge packet \/ implementation handoff/);
+  assert.match(controller, /self-sufficient diagnostic packet, not only `PASS`\/`RED`/);
+  assert.match(controller, /exact accepted G2 invariant\/contract obligation violated/);
+  assert.match(controller, /smallest suggested in-contract correction mechanism\/direction/);
+  assert.match(controller, /deterministic negative regression plus same-boundary positive control and effect\/zero-effect oracle/);
+  assert.match(controller, /scope guard\/what must remain unchanged/);
+  assert.match(controller, /Suggested fixes are diagnostic guidance, not mutation\/contract authority/);
+  assert.match(controller, /primary handoff for the next parent correction attempt/);
+  assert.match(controller, /cheaper G3 route can verify\/adapt the proposed direction instead of repeating open-ended root-cause discovery/);
+  assert.match(controller, /no separate reviewer retry budget beyond the G3 attempt budget/);
+  assert.match(controller, /no one-leaf-per-G3 ceiling/);
+  assert.match(controller, /unchanged-byte rechecks, evidence gathering and typed non-product HOLD recovery do not manufacture or consume a substantive attempt/);
+  assert.match(controller, /simple\/low-risk G3.*leaf remains optional/s);
+  assert.match(controller, /must not silently fall back to the ordinary G3 implementer or ordinary G3 `subagent` route/);
+  assert.match(controller, /pre-publication route\/harness HOLD/);
+  assert.match(controller, /G3 anti-bounce \/ Web-return boundary/);
+  assert.match(controller, /ordinary settled in-contract RED, strong-review RED, diagnosis, correction and revalidation are internal to the already-admitted G3 RUN\/Lock/);
+  assert.match(controller, /must not emit `NEXT=RETURN_TO_WEB`/);
+  assert.match(controller, /request a fresh continuation receipt/);
+  assert.match(controller, /manufacture a new G3 RUN\/Lock/);
+  assert.match(controller, /Historical issue text, old continuation receipts, obsolete NEXT instructions or prior Web-directed examples never grant current return authority/);
   assert.match(controller, /Settled-behaviour RED stays in G3/);
   assert.match(controller, /missing product\/compatibility semantics return to G2/);
   assert.match(controller, /changed root\/trust\/architecture returns to G1/);
+
+  assert.match(architecture, /paired convergence cycle inside the same G3 episode/);
+  assert.match(architecture, /One substantive attempt consists of parent implementation\/correction/);
+  assert.match(architecture, /complete affected integrated validation floor reaching green/);
+  assert.match(architecture, /fresh depth-1 read-only adversarial challenge leaf against those exact current bytes/);
+  assert.match(architecture, /clean challenge closes that paired attempt successfully/);
+  assert.match(architecture, /3 normal materially distinct attempts and an absolute ceiling of 5/);
+  assert.match(architecture, /implementation-ready diagnostic handoff rather than a bare verdict/);
+  assert.match(architecture, /smallest suggested in-contract correction direction/);
+  assert.match(architecture, /negative regression plus same-boundary positive control and effect\/zero-effect oracle/);
+  assert.match(architecture, /cheaper G3 parent to consume findings and implement\/verify the next in-contract correction without reconstructing the reviewer's root-cause analysis from scratch/);
+  assert.match(architecture, /no independent reviewer retry budget/);
+  assert.match(architecture, /no one-leaf-per-G3 ceiling/);
+  assert.match(architecture, /no new G3 RUN\/Lock/);
   assert.match(architecture, /It is not another gate/);
+
+  const openai = registry.stacks['owner-openai-default'].routes.G3.adversarial_subagent;
+  assert.deepEqual(openai, { provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' });
+  const claude = registry.stacks['owner-claude'].routes.G3.adversarial_subagent;
+  assert.deepEqual(claude, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  const mixed = registry.stacks['owner-mixed-claude-gpt'].routes.G3.adversarial_subagent;
+  assert.deepEqual(mixed, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
 });
 
-test('commit-required validation sequencing freezes one local candidate before clean-head validators without publishing it', () => {
+test('commit-required validation sequencing freezes each candidate identity before clean-head validators without publishing it', () => {
   assert.match(controller, /Commit-required validation sequencing/);
   assert.match(controller, /accepted validator materially requires immutable commit identity or a clean committed working tree/);
   assert.match(controller, /all meaningful non-commit-dependent checks are green and candidate contents\/mutation scope are frozen/);
   assert.match(controller, /Bind the exact commit\/tree\/parent/);
-  assert.match(controller, /prohibit source amendment, amend\/rebase\/reconstruction or replacement candidate inside that episode/);
+  assert.match(controller, /prohibit amendment\/rebase\/reconstruction of that candidate identity/);
   assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
   assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
-  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit rather than rebuilding it/);
+  assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit/);
+  assert.match(controller, /pre-publication identity-bound validation or the required adversarial challenge proves a settled in-contract product RED.*new immutable local candidate in the same RUN\/Lock.*existing G3 attempt budget/s);
+  assert.match(controller, /Preserve the failed candidate as evidence; never amend, rebase, reconstruct or overwrite it/);
+  assert.match(controller, /Repeat applicable non-commit-dependent checks, freeze the corrected contents\/scope, and bind the replacement's exact commit\/tree\/parent before its identity-dependent checks/);
+  assert.match(controller, /pre-publication product correction is separate from the published\/hosted non-product reclosure rule below/);
   assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
-  assert.match(architecture, /create exactly one immutable local candidate commit under the existing allowance/);
+  assert.match(architecture, /create the ordinary immutable local candidate commit under the existing allowance/);
   assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
+  assert.match(architecture, /pre-publication identity-bound validation or the required adversarial challenge proves a settled in-contract product RED.*new immutable local candidate in the same RUN\/Lock.*existing G3 attempt budget/s);
+  assert.match(architecture, /failed candidate as durable evidence; never amend, rebase, reconstruct or overwrite it/);
+  assert.match(architecture, /does not authorize publication before one exact candidate completes the full floor/);
 });
 
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {
@@ -421,6 +731,22 @@ test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-roo
   assert.match(controller, /Before Web admits fresh G4/);
   assert.match(controller, /zero unresolved required in-contract roots/);
   assert.match(controller, /worker's `G3_PASS` label alone never authorises G4/);
+});
+
+test('hosted non-product validation reclosure stays inside G3 while every candidate remains immutable', () => {
+  assert.match(controller, /Hosted non-product reclosure inside G3/);
+  assert.match(controller, /candidate immutability is per exact candidate identity, not a singleton constraint on the G3 episode/i);
+  assert.match(controller, /same RUN\/Lock\/G3 episode/);
+  assert.match(controller, /primary owner is `HARNESS`, `TOOLKIT` or `ENVIRONMENT`/);
+  assert.match(controller, /`PRODUCT_SEMANTICS_PROVEN_BAD=NO`/);
+  assert.match(controller, /failed candidate remains immutable and preserved as evidence/);
+  assert.match(controller, /does not consume a product\/G3 correction attempt or reset any historical budget/);
+  assert.match(controller, /Product RED remains ordinary G3 convergence/);
+  assert.match(controller, /Repeated materially equivalent non-product hosted RED.*returns to Web diagnosis/s);
+  assert.match(controller, /hosted non-product reclosure rule.*same G3 RUN\/Lock.*without manufacturing another semantic continuation grant/s);
+  assert.match(architecture, /Candidate immutability is per exact candidate identity, not a requirement that the entire G3 episode contain only one candidate/);
+  assert.match(architecture, /This is validation reclosure, not product correction/);
+  assert.match(architecture, /Every failed candidate remains immutable durable evidence/);
 });
 
 test('candidate acceptance, child completion, and per-repository wait removal stay distinct', () => {

@@ -550,9 +550,29 @@ test('backfill requires a complete trusted source and records the original produ
   assertCode(() => failedStore.backfillAuthorityPacket(packetValue), 'GPR_PACKET_LEGACY_RERUN_REQUIRED');
 });
 
-test('packet boundary failures use the exact typed terminal envelope', () => {
-  const envelope = runtime.packetFailureEnvelope({ reason_code: 'GPR_PACKET_NOT_FOUND' });
-  assert.deepEqual(envelope, {
+test('packet boundary envelopes reject foreign reasons and preserve trusted internal reasons', () => {
+  const foreignEnvelope = runtime.packetFailureEnvelope({ reason_code: 'GPR_PACKET_NOT_FOUND' });
+  assert.deepEqual(foreignEnvelope, {
+    ok: false,
+    code: 'TERMINAL_PACKET_DURABILITY_UNVERIFIED',
+    reason_code: 'GPR_PACKET_VALUE_INVALID',
+    accepted: false,
+    consumable: false,
+    next_gate_admitted: false
+  });
+
+  const packetValue = packetFixture('trusted-packet-error-envelope');
+  const { store } = initialise(packetValue);
+  let trustedError;
+  try {
+    store.readAuthorityPacket(`ap1-${'0'.repeat(64)}`, packetValue.bindings);
+  } catch (error) {
+    trustedError = error;
+  }
+  assert.ok(trustedError, 'the production store boundary supplies a trusted missing-packet error');
+  assert.equal(trustedError.packetBoundary, true);
+  assert.equal(trustedError.code, 'GPR_PACKET_NOT_FOUND');
+  assert.deepEqual(runtime.packetFailureEnvelope(trustedError), {
     ok: false,
     code: 'TERMINAL_PACKET_DURABILITY_UNVERIFIED',
     reason_code: 'GPR_PACKET_NOT_FOUND',
