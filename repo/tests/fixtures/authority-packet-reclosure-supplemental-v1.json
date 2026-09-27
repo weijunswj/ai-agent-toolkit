@@ -1,0 +1,61 @@
+{
+  "schema": "toolkit.gate-contract-ir.v1",
+  "run": "toolkit-c1-run090-combined-f1-f2-f3-correction-g3-20260925-091",
+  "lock": "DL-C1-RUN090-COMBINED-F1-F2-F3-CORRECTION-G3-091",
+  "source_stage": "G2",
+  "target_stage": "G3",
+  "mutation": {
+    "allow_paths": [
+      "repo/tests/toolkit-authority-packet-test-support.cjs",
+      "repo/tests/toolkit-authority-packet-admission.test.cjs",
+      "repo/tests/fixtures/authority-packet-reclosure-supplemental-v1.json",
+      "repo/tests/toolkit-authority-packet-supplemental-support.cjs",
+      "repo/tests/toolkit-authority-packet-supplemental.test.cjs",
+      "repo/tests/toolkit-gate-contract-compiler.test.cjs",
+      "repo/tests/toolkit-evidence-plan-compiler.test.cjs",
+      "repo/scripts/toolkit-github-program-state-v5.cjs",
+      "repo/scripts/toolkit-programme-surface-v1.cjs",
+      "repo/contracts/controller-kernel/programme-surface-v1.schema.json",
+      "repo/tests/fixtures/controller-kernel/programme-421-proof-v1.json",
+      "repo/tests/toolkit-programme-surface-v1.test.cjs",
+      "repo/tests/toolkit-github-programme-human-surface-v2.test.cjs",
+      "repo/contracts/github-program-reconciler/human-surface-v2.schema.json"
+    ],
+    "forbid_extra_paths": true
+  },
+  "requirements": [
+    {
+      "id": "R090-F1",
+      "invariant": "The immutable supplemental plan owns required-call role and attempt order; a caller setup flag cannot hide a required production call.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"R090-F1-SETUP-FLAG-NEG","surface":"validateAuthorityPacket","input":{"variant":"missing-decision","setup":true},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"R090-F1-SETUP-FLAG-POS","surface":"validateAuthorityPacket","input":{"variant":"clean-packet","setup":true},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": [
+        "R081-F1: bind the complete durable execution tuple through recovery and authentic handles; reject foreign-context lease deletion before mutation.",
+        "R081-F2: require outgoing custody for every required consumer or retain-through-finality obligation, including zero-predecessor starts and terminals.",
+        "R081-F3: require fresh CURRENT and completion custody before consumable terminal paths; stale CURRENT produces GPR_PACKET_CURRENT_UNVERIFIED without effects."
+      ]
+    },
+    {
+      "id": "R090-F2",
+      "invariant": "Trusted recipe binding is reference-based and non-executing; the prescribed recipe is the positive control.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"R090-F2-PROXY-RECIPE-NEG","surface":"validateAuthorityPacket","input":{"variant":"hostile-proxy-recipe"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"R090-F2-CLEAN-RECIPE-POS","surface":"validateAuthorityPacket","input":{"variant":"clean-packet"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": [
+        "R081-F4: validation evidence must come from executed production boundaries, including the D01 positive control.",
+        "R081-F5: bind the exact durable acceptance event; reject a suppressed insert even when readback or an identifier appears successful.",
+        "R081-F6: preserve packet, semantic, receipt, and loop identifier bounds and historical v5 compatibility.",
+        "R081-F7: retire the CURRENT projection before lifecycle changes while preserving substantive packet custody."
+      ]
+    }
+  ],
+  "required_validation": ["node --test repo/tests/toolkit-authority-packet-supplemental.test.cjs"],
+  "required_evidence": ["declared-compiled", "registered", "awaited-production-boundary", "private-completion-receipt"]
+}

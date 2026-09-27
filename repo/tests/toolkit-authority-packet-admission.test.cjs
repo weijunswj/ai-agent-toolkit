@@ -1,0 +1,1138 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { DatabaseSync } = require('node:sqlite');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+let Ajv2020 = null;
+try { Ajv2020 = require('ajv/dist/2020'); } catch (_) { /* Optional in dependency-light checkouts. */ }
+
+const compiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
+const runtime = require('../scripts/toolkit-github-program-receipt.cjs');
+const reconciler = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const executionLoop = require('../scripts/toolkit-execution-loop.cjs');
+const programme = require('../scripts/toolkit-github-program-state-v5.cjs');
+const assurance = require('../scripts/toolkit-assurance-web-finality.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+
+const ORACLE_FIXTURE = path.join(__dirname, 'fixtures', 'authority-packet-durability-g2-v1.json');
+
+test.afterEach(() => support.cleanup());
+
+function assertCode(callback, code) {
+  assert.throws(callback, (error) => error && error.code === code);
+}
+
+function setup(seed = 'admission', setupOptions = {}) {
+  const packetValue = support.packet({ seed });
+  const storeOptions = support.options(support.stateRoot(`authority-admission-${seed}-`));
+  const required = packetValue.bindings.applicability.required_consumers;
+  const authority = packetValue.bindings.authority;
+  let current = null;
+  let currentBodyDigest = runtime.digestValue({ seed, body: 'current' });
+  let recoveryOutcome = 'confirmed';
+  const readers = support.readers(packetValue, {
+    readAuthority: () => ({
+      authority: structuredClone(authority),
+      required_consumers: structuredClone(required),
+      ...(setupOptions.completion_applicability === undefined
+        ? {} : { completion_applicability: structuredClone(setupOptions.completion_applicability) }),
+      later_controlling_comments: [],
+    }),
+    readCandidate: () => setupOptions.readCandidate ? setupOptions.readCandidate() : null,
+    readWebDecision: () => {
+      const identities = runtime.authorityPacketIdentities(packetValue);
+      return {
+        packet_id: identities.packet_id,
+        packet_digest: identities.packet_digest,
+        binding_digest: identities.binding_digest,
+        web_source: structuredClone(authority),
+        disposition: 'ACCEPTED_FOR_CONSUMPTION',
+        permitted_consumers: structuredClone(setupOptions.permitted_consumers === undefined ? required : setupOptions.permitted_consumers),
+        applicability: structuredClone(packetValue.bindings.applicability),
+        successor_applicability: structuredClone(setupOptions.successor_applicability || []),
+      };
+    },
+    readCurrent: () => ({
+      current,
+      projection_digest: runtime.digestValue(current),
+      body_digest: currentBodyDigest,
+      revision: 1,
+    }),
+    readDispatchOutcome: setupOptions.readDispatchOutcome || ((input) => {
+      const outcome = input.recovery ? recoveryOutcome : input.transport_result && input.transport_result.status
+        || (input.transport_error ? 'not-started' : 'confirmed');
+      return {
+        admission_id: input.admission_id,
+        consumer_key: input.consumer_key,
+        intent_event_id: input.intent_event_id,
+        attempt: input.attempt,
+        transport_id: input.transport_id,
+        transport_digest: input.transport_digest || runtime.digestValue({ transport_id: input.transport_id, outcome }),
+        outcome,
+        delayed_completion_excluded: outcome === 'not-started',
+      };
+    }),
+    screenPacket: (value) => ({
+      packet_digest: value && value.bindings
+        ? runtime.authorityPacketIdentities(value).packet_digest
+        : runtime.authorityPacketIdentities(packetValue).packet_digest,
+      decision: 'ALLOW',
+      policy_digest: runtime.digestValue('authority-admission-policy'),
+      retention_policy_digest: runtime.digestValue('authority-admission-retention'),
+    }),
+  });
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readers);
+  const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+  store.bindWebPacketAcceptance(persisted.packet_id, readers);
+  const intent = {
+    repository: packetValue.bindings.repository,
+    parent_issue: packetValue.bindings.parent_issue,
+    child_issue: packetValue.bindings.child_issue,
+    lane_id: packetValue.bindings.lane_id,
+    human_owner: packetValue.bindings.human_owner,
+    consumer: {
+      run: `run-${seed}`,
+      lock: `lock-${seed}`,
+      stage: 'G3',
+      role: 'G3',
+      scope_digest: required[0].scope_digest,
+    },
+    candidate: setupOptions.candidate || null,
+    execution_binding: {
+      semantic_run: null,
+      receipt_run_id: null,
+      loop_run_id: `loop-${seed}`,
+      repository_id: 'a'.repeat(64),
+      authorized_ref_digest: 'b'.repeat(64),
+      current_authority_digest: 'c'.repeat(64),
+    },
+    predecessors: [{ packet_id: persisted.packet_id, dependency_id: required[0].dependency_id }],
+    operation: 'loop',
+  };
+  current = store.buildCurrentPacketProjection(intent, readers);
+  store.confirmCurrentPacketProjection(current, readers);
+  return {
+    packetValue,
+    storeOptions,
+    store,
+    readers,
+    intent,
+    setRecoveryOutcome(value) { recoveryOutcome = value; },
+    setCurrentBodyDigest(value) { currentBodyDigest = value; },
+  };
+}
+
+test('Run-094 rejects proxied semantic intents before calling trusted readers', () => {
+  const gate = setup('run094-proxy-intent');
+  const before = support.receiptEffectSnapshot(gate.store);
+  let trapCount = 0;
+  const trap = () => {
+    trapCount += 1;
+    throw new Error('untrusted semantic intent trap executed');
+  };
+  const hostileIntent = new Proxy(gate.intent, {
+    defineProperty: trap,
+    deleteProperty: trap,
+    get: trap,
+    getOwnPropertyDescriptor: trap,
+    getPrototypeOf: trap,
+    has: trap,
+    isExtensible: trap,
+    ownKeys: trap,
+    preventExtensions: trap,
+    set: trap,
+    setPrototypeOf: trap,
+  });
+
+  assertCode(() => gate.store.buildCurrentPacketProjection(hostileIntent, gate.readers), 'GPR_PACKET_CURRENT_UNVERIFIED');
+  assertCode(() => gate.store.admitSemanticGate(hostileIntent, gate.readers), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(trapCount, 0, 'proxy traps remain untouched');
+  assert.deepEqual(support.receiptEffectSnapshot(gate.store), before, 'rejected intent has no packet database effects');
+});
+
+function receiptAuthority(seed) {
+  return {
+    child_comment_id: 1,
+    parent_comment_id: 2,
+    node_id: `IC_run077_${seed.replace(/[^A-Za-z0-9]/g, '_')}`,
+    author_login: 'weijunswj',
+    author_association: 'OWNER',
+    body_digest: runtime.digestValue({ seed, body: 'receipt-authority' }),
+    updated_at: '2026-09-22T10:00:00.000Z',
+    update_identity_digest: runtime.digestValue({ seed, update: 'receipt-authority' }),
+    scope_digest: runtime.digestValue({ seed, scope: 'receipt' }),
+  };
+}
+
+function receiptStart(seed) {
+  return {
+    base_sha: '1'.repeat(40),
+    head_sha: '2'.repeat(40),
+    tree_sha: '3'.repeat(40),
+    status_digest: runtime.digestValue({ seed, status: 'clean' }),
+    clean_worktree: true,
+    ref: { detached: false, name: `run077/${seed.replace(/[^A-Za-z0-9-]/g, '-')}` },
+  };
+}
+
+function completionApplicability(seed, required = true) {
+  const scope = support.bindings(seed).applicability.required_consumers[0].scope_digest;
+  return {
+    schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+    scope_digest: scope,
+    candidate: null,
+    required_consumers: required ? [{ class: 'G4', dependency_id: 'child-finality', scope_digest: scope }] : [],
+    retain_through_child_finality: required,
+    retain_through_candidate_finality: false,
+  };
+}
+
+function boundReceiptContext(seed, options = {}) {
+  const completionApplicability = options.completion_applicability;
+  const fixture = options.fixture || setup(seed, {
+    ...(completionApplicability === undefined ? {} : { completion_applicability: completionApplicability }),
+  });
+  const consumer = fixture.intent.consumer;
+  const semanticRun = consumer.run;
+  const receiptRun = options.receipt_run || `receipt-${seed}`;
+  fixture.intent.execution_binding.semantic_run = semanticRun;
+  fixture.intent.execution_binding.receipt_run_id = receiptRun;
+  const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+  const required = fixture.intent.predecessors.map((item) => ({
+    class: consumer.stage,
+    dependency_id: item.dependency_id,
+    scope_digest: consumer.scope_digest,
+  }));
+  const authority = receiptAuthority(seed);
+  const binding = { semantic_run: semanticRun, receipt_run_id: receiptRun, loop_run_id: fixture.intent.execution_binding.loop_run_id };
+  let observedBinding = structuredClone(binding);
+  let authorityReads = 0;
+  let startReads = 0;
+  const readers = {
+    readAuthority: async () => {
+      authorityReads += 1;
+      return {
+        authority: structuredClone(authority),
+        required_consumers: structuredClone(required),
+        semantic_binding: structuredClone(observedBinding),
+        ...(completionApplicability === undefined ? {} : { completion_applicability: structuredClone(completionApplicability) }),
+        later_controlling_comments: [],
+      };
+    },
+    readStart: async () => { startReads += 1; return receiptStart(seed); },
+  };
+  const root = options.stateRoot || support.stateRoot(`run077-receipt-${seed}-`);
+  const storeOptions = { ...support.options(root), ...(options.namespace || {}) };
+  const store = runtime.createProgrammeReceiptStore(storeOptions);
+  const input = {
+    lock: options.lock === undefined ? consumer.lock : options.lock,
+    authority,
+    start: receiptStart(seed),
+    candidate: null,
+    lease_ms: 60000,
+    semantic_gate: { store: fixture.store, admission: admitted.admission },
+  };
+  return {
+    fixture, admitted, consumer, semanticRun, receiptRun, required, authority, binding,
+    readers, store, storeOptions, input,
+    get authorityReads() { return authorityReads; },
+    get startReads() { return startReads; },
+    setObservedBinding(value) { observedBinding = structuredClone(value); },
+    async startRun() { return store.startRun(input, readers); },
+    allocateRun() { return store.allocateRun(input); },
+  };
+}
+
+function confirmedOutgoingCustody(context, seed, options = {}) {
+  const applicability = context.fixture.readers.readAuthority({}).completion_applicability;
+  const bindings = support.bindings(`outgoing-${seed}`);
+  bindings.repository = context.fixture.intent.repository;
+  bindings.parent_issue = context.fixture.intent.parent_issue;
+  bindings.child_issue = context.fixture.intent.child_issue;
+  bindings.lane_id = context.fixture.intent.lane_id;
+  bindings.human_owner = context.fixture.intent.human_owner;
+  bindings.authority = structuredClone(context.fixture.readers.readAuthority({}).authority);
+  bindings.producer = {
+    run: context.fixture.intent.execution_binding.loop_run_id,
+    lock: context.consumer.lock,
+    stage: context.consumer.stage,
+    role: context.consumer.role,
+  };
+  bindings.candidate = context.fixture.intent.candidate;
+  bindings.applicability = {
+    scope_digest: applicability.scope_digest,
+    required_consumers: structuredClone(applicability.required_consumers),
+    retain_through_child_finality: applicability.retain_through_child_finality,
+    retain_through_candidate_finality: applicability.retain_through_candidate_finality,
+  };
+  if (options.changeBindings) options.changeBindings(bindings);
+  const packetValue = support.packet({ bindings });
+  let screenAllowed = true;
+  const readers = support.readers(packetValue, {
+    screenPacket: (value) => screenAllowed
+      ? support.screening(value.packet)
+      : { packet_digest: value.packet_digest, decision: 'DENY', policy_digest: runtime.digestValue('deny'), retention_policy_digest: runtime.digestValue('deny-retention') },
+  });
+  const outputStore = runtime.initialiseAuthorityPacketStore(
+    support.options(support.stateRoot(`run077-outgoing-${seed}-`)), readers
+  );
+  const producer = support.producerAdmission(packetValue);
+  const identities = runtime.authorityPacketIdentities(packetValue);
+  const completion = options.confirm === false ? null : context.fixture.store.confirmSemanticCompletion(
+    context.admitted.admission, outputStore, packetValue, producer
+  );
+  return {
+    outputStore,
+    packetValue,
+    completion,
+    outcome_ref: completion ? completion.outcome_ref : identities.packet_digest,
+    allowScreening(value) { screenAllowed = value; },
+  };
+}
+
+function multiPredecessorSetup(seed, count) {
+  const scope = runtime.digestValue({ seed, scope: 'shared-consumer' });
+  const required = Array.from({ length: count }, (_, index) => ({
+    class: 'G3', dependency_id: `dep-${String(index).padStart(2, '0')}`, scope_digest: scope,
+  }));
+  const authority = support.sourceReference(`${seed}-authority`);
+  const packetValues = required.map((consumer, index) => {
+    const packetBindings = support.bindings(`${seed}-${index}`);
+    packetBindings.authority = structuredClone(authority);
+    packetBindings.producer.run = `producer-${seed}-${index}`;
+    packetBindings.applicability.scope_digest = scope;
+    packetBindings.applicability.required_consumers = [consumer];
+    return support.packet({ bindings: packetBindings });
+  });
+  const packetById = new Map(packetValues.map((value) => [runtime.authorityPacketIdentities(value).packet_id, value]));
+  let current = null;
+  const readerSet = support.readers(packetValues[0], {
+    readAuthority: ({ packet_id }) => {
+      const source = packet_id ? packetById.get(packet_id) : packetValues[0];
+      return {
+        authority: structuredClone(authority),
+        required_consumers: structuredClone(required),
+        later_controlling_comments: [],
+        producer_authority: {
+          lane_id: source.bindings.lane_id,
+          human_owner: source.bindings.human_owner,
+          producer: structuredClone(source.bindings.producer),
+        },
+      };
+    },
+    screenPacket: ({ packet: value }) => support.screening(value),
+    readWebDecision: ({ packet_id }) => {
+      const value = packetById.get(packet_id);
+      return support.webDecision(value, value.bindings.applicability.required_consumers);
+    },
+    readCandidate: () => null,
+    readCurrent: () => ({ current, projection_digest: runtime.digestValue(current), body_digest: runtime.digestValue({ seed, body: 'current' }), revision: 1 }),
+    readDispatchOutcome: support.oracleDispatchOutcomeReader('confirmed'),
+  });
+  const storeOptions = support.options(support.stateRoot(`authority-multi-${seed}-`));
+  const store = runtime.initialiseAuthorityPacketStore(storeOptions, readerSet);
+  const persisted = packetValues.map((value) => store.persistAuthorityPacket(value, support.producerAdmission(value)));
+  const accepted = persisted.map((value) => store.bindWebPacketAcceptance(value.packet_id, readerSet));
+  const intent = {
+    repository: packetValues[0].bindings.repository,
+    parent_issue: packetValues[0].bindings.parent_issue,
+    child_issue: packetValues[0].bindings.child_issue,
+    lane_id: packetValues[0].bindings.lane_id,
+    human_owner: packetValues[0].bindings.human_owner,
+    consumer: { run: `consumer-${seed}`, lock: `lock-${seed}`, stage: 'G3', role: 'G3', scope_digest: scope },
+    candidate: null,
+    execution_binding: { semantic_run: null, receipt_run_id: null, loop_run_id: `loop-${seed}`, repository_id: 'a'.repeat(64), authorized_ref_digest: 'b'.repeat(64), current_authority_digest: 'c'.repeat(64) },
+    predecessors: persisted.map((value, index) => ({ packet_id: value.packet_id, dependency_id: required[index].dependency_id })),
+    operation: 'loop',
+  };
+  current = store.buildCurrentPacketProjection(intent, readerSet);
+  return {
+    store, storeOptions, readerSet, intent, current, required, accepted,
+    setCurrent(value) { current = value; },
+  };
+}
+
+test('G2 A01-I06 and X01-X10 oracle fixture compiles with complete coverage', () => {
+  const ir = JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'));
+  const expectedIds = [
+    ...Array.from({ length: 5 }, (_, index) => `A0${index + 1}`),
+    ...Array.from({ length: 6 }, (_, index) => `B0${index + 1}`),
+    ...Array.from({ length: 9 }, (_, index) => `C0${index + 1}`),
+    ...Array.from({ length: 5 }, (_, index) => `D0${index + 1}`),
+    ...Array.from({ length: 8 }, (_, index) => `E0${index + 1}`),
+    ...Array.from({ length: 4 }, (_, index) => `F0${index + 1}`),
+    ...Array.from({ length: 6 }, (_, index) => `G0${index + 1}`),
+    ...Array.from({ length: 7 }, (_, index) => `H0${index + 1}`),
+    ...Array.from({ length: 6 }, (_, index) => `I0${index + 1}`),
+    ...Array.from({ length: 10 }, (_, index) => `X${String(index + 1).padStart(2, '0')}`),
+  ];
+  assert.equal(ir.mutation.allow_paths.length, 29);
+  assert.equal(new Set(ir.mutation.allow_paths).size, 29);
+  assert.deepEqual(ir.requirements.map((item) => item.id), expectedIds);
+  assert.ok(ir.requirements.every((item) => item.macros.length === 0));
+  assert.equal(ir.requirements.find((item) => item.id === 'D01').cases.length, 31);
+  assert.ok(ir.requirements.filter((item) => item.id !== 'D01').every((item) => item.cases.length === 2));
+  assert.ok(ir.requirements.every((item) => item.cases.some((entry) => entry.id.endsWith('-NEG') || entry.id.startsWith('D01-NEG-'))
+    && item.cases.some((entry) => entry.id.endsWith('-POS'))));
+  const packet = compiler.compileGateContract(ir);
+  assert.equal(packet.requirements.length, 66);
+  assert.equal(packet.generated_cases.length, 337);
+  assert.equal(packet.coverage_map.length, 66);
+  assert.ok(packet.generated_cases.every((item) => item.assertion_count > 0));
+});
+
+test('F14 executes every compiled oracle case through production-backed boundaries', async () => {
+  const ir = JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'));
+  const packet = compiler.compileGateContract(ir);
+  const result = await support.runAuthorityPacketOracleMatrix(packet.generated_cases);
+  assert.equal(result.requirement_count, 66);
+  assert.equal(result.case_count, 337);
+  assert.equal(result.skipped_count, 0);
+  assert.equal(result.unexecuted_count, 0);
+  assert.equal(result.failed_count, 0);
+  assert.ok(result.evidence.every((item) => item.passed === true));
+  assert.ok(result.evidence.every((item) => item.assertions_executed > 0));
+  assert.ok(result.evidence.every((item) => item.production_surface));
+});
+
+test('F14 corrupted-store rejection cases exercise the verified v4 initializer', async () => {
+  const cases = support.ORACLE_MANDATORY_CASES.filter((item) => [
+    'missing-or-wrong-store', 'network-store-fallback', 'altered-schema-guard',
+  ].includes(item.input.variant));
+  assert.equal(cases.length, 3);
+  for (const item of cases) {
+    const result = await support.executeAuthorityPacketOracleCase(item);
+    assert.equal(result.passed, true, item.id);
+  }
+});
+
+test('R090 immutable call plan keeps required calls visible despite caller role flags', async () => {
+  const item = support.ORACLE_MANDATORY_CASES.find((candidate) => candidate.requirement_id === 'A03'
+    && candidate.expected.positive_control === true);
+  const key = support.oracleCaseIdentity(item);
+  const handlers = {
+    [key]: async (caseValue) => {
+      const value = support.packet({ seed: 'run090-role-flag-positive' });
+      const call = await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { setup: true, supporting: true });
+      return { production_surface_receipts: [call.receipt], positive_control_case_id: caseValue.id };
+    },
+  };
+  const result = await support.executeAuthorityPacketOracleCase(item, handlers);
+  assert.equal(result.passed, true);
+
+  const repeatedHandlers = {
+    [key]: async (caseValue) => {
+      const value = support.packet({ seed: 'run090-role-flag-repeat' });
+      const first = await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { setup: true });
+      await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'validateAuthorityPacket', [value], { supporting: true });
+      return { production_surface_receipts: [first.receipt], positive_control_case_id: caseValue.id };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(item, repeatedHandlers),
+    /ORACLE_CALL_SEQUENCE_MISMATCH/
+  );
+
+  const wrongMethodHandlers = {
+    [key]: async (caseValue) => {
+      await support.invokeOracleSurface(caseValue, 'runtime', runtime,
+        'authorityPacketIdentities', [support.packet({ seed: 'run090-role-method-swap' })], { setup: true });
+      return { production_surface_receipts: [], positive_control_case_id: caseValue.id };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(item, wrongMethodHandlers),
+    /ORACLE_CALL_SEQUENCE_MISMATCH/
+  );
+});
+
+test('semantic admission binds exact CURRENT, acceptance and fresh packet evidence', () => {
+  const fixture = setup('positive');
+  const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+  assert.ok(Object.isFrozen(admitted.admission));
+  assert.equal(admitted.proof.dependency_state, 'PREDECESSORS_VERIFIED');
+  assert.equal(admitted.proof.current.revision, 1);
+  assert.equal(fixture.store.revalidateSemanticGate(admitted.admission, { operation: 'loop' }).fresh, true);
+  assertCode(() => fixture.store.revalidateSemanticGate({}), 'GPR_PACKET_ADMISSION_REQUIRED');
+
+  const intent = fixture.store.beginSemanticGateDispatch(admitted.admission);
+  fixture.store.recordSemanticGateDispatch(admitted.admission, { transport_id: intent.transport_id, transport_result: { status: 'confirmed' }, transport_error: null });
+  const db = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+  try {
+    const events = db.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all();
+    assert.deepEqual(events.map((row) => row.event_type), ['DISPATCH_INTENT', 'DISPATCH_CONFIRMED']);
+  } finally { db.close(); }
+});
+
+test('ambiguous dispatch remains unresolved until definitive not-started evidence, then recovery is bounded', () => {
+  const fixture = setup('recovery');
+  const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+  const intent = fixture.store.beginSemanticGateDispatch(admitted.admission);
+  assertCode(
+    () => fixture.store.recordSemanticGateDispatch(admitted.admission, { transport_id: intent.transport_id, transport_result: { status: 'ambiguous' }, transport_error: null }),
+    'GPR_PACKET_DISPATCH_UNRESOLVED'
+  );
+  const db = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+  let consumerKey;
+  try {
+    consumerKey = db.prepare('SELECT consumer_key FROM semantic_gate_admissions').get().consumer_key;
+  } finally { db.close(); }
+  assertCode(
+    () => fixture.store.recoverSemanticGateAdmission({ consumer_key: consumerKey }, fixture.readers),
+    'GPR_PACKET_DISPATCH_UNRESOLVED'
+  );
+  fixture.setRecoveryOutcome('not-started');
+  const recovered = fixture.store.recoverSemanticGateAdmission({ consumer_key: consumerKey }, fixture.readers);
+  assert.equal(recovered.recovered, true);
+  const retryIntent = fixture.store.beginSemanticGateDispatch(recovered.admission);
+  fixture.store.recordSemanticGateDispatch(recovered.admission, { transport_id: retryIntent.transport_id, transport_result: { status: 'confirmed' }, transport_error: null });
+});
+
+test('unbound not-started transport evidence cannot append a retry permission', () => {
+  const validReader = support.oracleDispatchOutcomeReader('not-started');
+  const fixture = setup('unbound-transport', {
+    readDispatchOutcome: (input) => ({ ...validReader(input), transport_id: '0'.repeat(64) }),
+  });
+  const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+  const intent = fixture.store.beginSemanticGateDispatch(admitted.admission);
+  assertCode(() => fixture.store.recordSemanticGateDispatch(admitted.admission, {
+    transport_id: intent.transport_id,
+    transport_result: { status: 'not-started' },
+    transport_error: null,
+  }), 'GPR_PACKET_DISPATCH_UNRESOLVED');
+  const db = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+  try {
+    const events = db.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all();
+    assert.deepEqual(events.map((row) => row.event_type), ['DISPATCH_INTENT']);
+  } finally { db.close(); }
+});
+
+test('changed CURRENT readback fails revalidation before dispatch', () => {
+  const fixture = setup('stale-current');
+  const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+  fixture.setCurrentBodyDigest(runtime.digestValue({ changed: true }));
+  assertCode(
+    () => fixture.store.revalidateSemanticGate(admitted.admission, { operation: 'loop' }),
+    'GPR_PACKET_CURRENT_UNVERIFIED'
+  );
+});
+
+test('semantic admission enforces permitted consumer subsets and exact successor candidate applicability', () => {
+  const denied = setup('empty-consumers', { permitted_consumers: [] });
+  assertCode(() => denied.store.admitSemanticGate(denied.intent, denied.readers), 'GPR_PACKET_CONSUMER_NOT_PERMITTED');
+  let db = new DatabaseSync(denied.store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM semantic_gate_admissions').get().n, 0); }
+  finally { db.close(); }
+
+  const candidate = {
+    pr_number: 354,
+    branch: 'c1-successor-candidate',
+    base_ref: 'main',
+    base_sha: '1'.repeat(40),
+    head_sha: '2'.repeat(40),
+    tree_sha: '3'.repeat(40),
+  };
+  const candidateReader = () => ({ candidate, candidate_reuse: true });
+  const implicit = setup('implicit-successor', { candidate, readCandidate: candidateReader });
+  assertCode(() => implicit.store.admitSemanticGate(implicit.intent, implicit.readers), 'GPR_PACKET_BINDING_MISMATCH');
+  db = new DatabaseSync(implicit.store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM semantic_gate_admissions').get().n, 0); }
+  finally { db.close(); }
+
+  const exact = setup('exact-successor', {
+    candidate,
+    readCandidate: candidateReader,
+    successor_applicability: [{
+      scope_digest: support.bindings('exact-successor').applicability.required_consumers[0].scope_digest,
+      candidate,
+    }],
+  });
+  const admitted = exact.store.admitSemanticGate(exact.intent, exact.readers);
+  assert.equal(admitted.proof.dependency_state, 'PREDECESSORS_VERIFIED');
+  assert.equal(exact.store.revalidateSemanticGate(admitted.admission).fresh, true);
+});
+
+test('receipt-produced CURRENT passes AJV and real N5, v5, and assurance consumers without rewriting', { skip: !Ajv2020 }, () => {
+  const gate = support.semanticGate('current-cross-runtime');
+  const current = gate.store.buildCurrentPacketProjection(gate.consumer_intent, gate.trusted_readers);
+  const publishedSchema = JSON.parse(fs.readFileSync(path.join(__dirname, '../contracts/github-program-reconciler/programme-state-v5.schema.json'), 'utf8'));
+  const validate = new Ajv2020({ strict: false, allErrors: true }).compile({
+    ...publishedSchema.$defs.authorityPacketCurrent,
+    $defs: publishedSchema.$defs,
+  });
+  assert.equal(validate(current), true, JSON.stringify(validate.errors));
+  assert.equal(reconciler.validateAuthorityPacketCurrent(current, {
+    repository: current.repository,
+    parent_issue: current.parent_issue,
+    child_issue: current.child_issue,
+  }), true);
+  assert.equal(programme.validateAuthorityPacketCurrent(current, {
+    repository: current.repository,
+    parent_issue: current.parent_issue,
+    child_issue: current.child_issue,
+  }), true);
+  const admitted = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
+  const assuranceContext = assurance.bindReceiptAdmission(gate.store, admitted.admission);
+  assert.equal(assurance.evaluateInvalidation({ event: 'SUCCESSOR_CANDIDATE_HEAD' }, assuranceContext).g4_invalidated, true);
+
+  const maxContractId = structuredClone(current);
+  maxContractId.consumer.run = 'r'.repeat(160);
+  assert.equal(runtime.validateAuthorityPacketCurrent(maxContractId).consumer.run, 'r'.repeat(160));
+  assert.equal(reconciler.validateAuthorityPacketCurrent(maxContractId), true);
+  assert.equal(programme.validateAuthorityPacketCurrent(maxContractId), true);
+  const tooLongContractId = structuredClone(current);
+  tooLongContractId.consumer.run = 'r'.repeat(161);
+  assert.throws(() => runtime.validateAuthorityPacketCurrent(tooLongContractId),
+    (error) => error && error.code === 'GPR_PACKET_CURRENT_UNVERIFIED');
+  assert.equal(reconciler.validateAuthorityPacketCurrent(tooLongContractId), false);
+  assert.equal(programme.validateAuthorityPacketCurrent(tooLongContractId), false);
+  const tooLongProducerRun = structuredClone(current);
+  tooLongProducerRun.predecessors[0].producer.run = 'p'.repeat(129);
+  assert.throws(() => runtime.validateAuthorityPacketCurrent(tooLongProducerRun),
+    (error) => error && error.code === 'GPR_PACKET_VALUE_INVALID');
+  assert.equal(reconciler.validateAuthorityPacketCurrent(tooLongProducerRun), false);
+  assert.equal(programme.validateAuthorityPacketCurrent(tooLongProducerRun), false);
+});
+
+test('v2 start and mutation bind semantic, receipt, and Loop RUN identities while ordinary v2 remains compatible', async () => {
+  const gate = support.semanticGate('receipt-semantic-binding');
+  const semanticRun = gate.consumer_intent.consumer.run;
+  const receiptRun = 'receipt/run-072-bound';
+  const loopRun = gate.consumer_intent.execution_binding.loop_run_id;
+  gate.consumer_intent.execution_binding.semantic_run = semanticRun;
+  gate.consumer_intent.execution_binding.receipt_run_id = receiptRun;
+  const admitted = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
+  const v2Authority = {
+    child_comment_id: 1, parent_comment_id: 2, node_id: 'IC_run072_semantic_binding',
+    author_login: 'weijunswj', author_association: 'OWNER', body_digest: 'a'.repeat(64),
+    updated_at: '2026-09-22T10:00:00.000Z', update_identity_digest: 'b'.repeat(64), scope_digest: 'c'.repeat(64),
+  };
+  const start = { base_sha: '1'.repeat(40), head_sha: '2'.repeat(40), tree_sha: '3'.repeat(40), status_digest: 'd'.repeat(64), clean_worktree: true, ref: { detached: false, name: 'oracle/run072-semantic' } };
+  const required = [{ class: 'G3', dependency_id: gate.consumer_intent.predecessors[0].dependency_id, scope_digest: gate.consumer_intent.consumer.scope_digest }];
+  let observedBinding = { semantic_run: semanticRun, receipt_run_id: receiptRun, loop_run_id: loopRun };
+  const readAuthority = async () => ({ authority: v2Authority, required_consumers: required, semantic_binding: structuredClone(observedBinding), later_controlling_comments: [] });
+  const store = runtime.createProgrammeReceiptStore(support.options(support.stateRoot('run072-v2-semantic-binding-')));
+  const session = await store.startRun({
+    lock: gate.consumer_intent.consumer.lock, authority: v2Authority, start, candidate: null, lease_ms: 60000,
+    semantic_gate: { store: gate.store, admission: admitted.admission },
+  }, { readAuthority, readStart: async () => start });
+  assert.equal(session.started, true);
+  assert.equal(session.run_id, receiptRun);
+
+  const target = { resource_type: 'provider_resource', resource_id: 'run072-semantic-resource' };
+  const descriptor = {
+    operation_kind: 'IDEMPOTENT_SET', safety_class: 'IDEMPOTENT', target_identity: target,
+    target_digest: runtime.digestValue(target), expected_source_digest: 'e'.repeat(64), cas_digest: 'f'.repeat(64),
+    expected_post_state_digest: '1'.repeat(64), adapter_identity_digest: '2'.repeat(64), retry_of_operation_id: null,
+  };
+  let providerCalls = 0;
+  const mutationReaders = {
+    readAuthority,
+    readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
+    verifyOutcomeEvidence: async (value) => value,
+  };
+  observedBinding = { ...observedBinding, loop_run_id: 'wrong-loop-run' };
+  await assert.rejects(store.admitMutationOperation(session, descriptor, mutationReaders),
+    (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH');
+  let db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mutation_operations').get().n, 0); }
+  finally { db.close(); }
+  observedBinding = { semantic_run: semanticRun, receipt_run_id: receiptRun, loop_run_id: loopRun };
+  const mutation = await store.admitMutationOperation(session, descriptor, mutationReaders);
+  observedBinding = { ...observedBinding, receipt_run_id: 'wrong-receipt-run' };
+  await assert.rejects(store.authorizeMutationDispatch(session, mutation),
+    (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH');
+  assert.equal(providerCalls, 0);
+
+  const ordinaryRoot = support.stateRoot('run072-v2-ordinary-');
+  const ordinary = runtime.createProgrammeReceiptStore(support.options(ordinaryRoot));
+  const ordinaryAuthority = { ...v2Authority, node_id: 'IC_run072_ordinary' };
+  const ordinaryStarted = await ordinary.startRun({ lock: 'ordinary-lock', authority: ordinaryAuthority, start, candidate: null, lease_ms: 60000 }, {
+    readAuthority: async () => ({ authority: ordinaryAuthority,
+      completion_applicability: {
+        schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+        scope_digest: ordinaryAuthority.scope_digest,
+        candidate: null,
+        required_consumers: [],
+        retain_through_child_finality: false,
+        retain_through_candidate_finality: false
+      },
+      later_controlling_comments: [] }),
+    readStart: async () => start,
+  });
+  assert.equal(ordinaryStarted.started, true);
+
+  for (const mode of ['startRun', 'allocateRun-startAllocatedRun']) {
+    const missingStore = runtime.createProgrammeReceiptStore(support.options(support.stateRoot(`run072-v2-missing-${mode}-`)));
+    const missingAuthority = { ...v2Authority, node_id: `IC_missing_${mode.replace(/[^A-Za-z0-9]/g, '_')}` };
+    const missingReaders = {
+      readAuthority: async () => ({ authority: missingAuthority, required_consumers: required, semantic_binding: observedBinding,
+        completion_applicability: {
+          schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+          scope_digest: missingAuthority.scope_digest,
+          candidate: null,
+          required_consumers: [],
+          retain_through_child_finality: false,
+          retain_through_candidate_finality: false
+        },
+        later_controlling_comments: [] }),
+      readStart: async () => start,
+    };
+    if (mode === 'startRun') {
+      await assert.rejects(
+        missingStore.startRun({ lock: 'missing-lock', authority: missingAuthority, start, candidate: null, lease_ms: 60000 }, missingReaders),
+        (error) => error.code === 'GPR_PACKET_ADMISSION_REQUIRED'
+      );
+    } else {
+      const allocated = missingStore.allocateRun({ lock: 'missing-lock', authority: missingAuthority, start, candidate: null, lease_ms: 60000 });
+      await assert.rejects(missingStore.startAllocatedRun(allocated, missingReaders),
+        (error) => error.code === 'GPR_PACKET_ADMISSION_REQUIRED');
+    }
+    db = new DatabaseSync(missingStore.databasePath, { readOnly: true });
+    try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM receipts').get().n, 0); }
+    finally { db.close(); }
+  }
+});
+
+test('Run-077 C1 rejects authentic admissions at allocation on independent LOCK and namespace mismatches', async () => {
+  const mismatches = [
+    { key: 'lock', namespace: {}, lock: 'changed-lock' },
+    { key: 'repository', namespace: { repository: 'weijunswj/other-repo' } },
+    { key: 'parent', namespace: { parent_issue: 436 } },
+    { key: 'child', namespace: { child_issue: 436 } },
+  ];
+  for (const item of mismatches) {
+    const seed = `c1-${item.key}`;
+    const root = support.stateRoot(`run077-c1-${item.key}-`);
+    const context = boundReceiptContext(seed, {
+      stateRoot: root,
+      namespace: item.namespace,
+      ...(item.lock ? { lock: item.lock } : {}),
+    });
+    const before = support.receiptEffectSnapshot(context.store);
+    assert.throws(() => context.allocateRun(), (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH', item.key);
+    assert.deepEqual(support.receiptEffectSnapshot(context.store), before, `${item.key} allocation effects`);
+    await assert.rejects(context.startRun(), (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH', `${item.key} startRun`);
+    assert.equal(context.authorityReads, 0, `${item.key} authority reader ran before rejected allocation`);
+    assert.equal(context.startReads, 0, `${item.key} start reader ran before rejected allocation`);
+    assert.deepEqual(support.receiptEffectSnapshot(context.store), before, `${item.key} composed start effects`);
+
+    context.input.lock = context.consumer.lock;
+    const correctedOptions = {
+      ...support.options(root),
+      repository: context.fixture.intent.repository,
+      parent_issue: context.fixture.intent.parent_issue,
+      child_issue: context.fixture.intent.child_issue,
+    };
+    const correctedStore = item.key === 'lock'
+      ? context.store
+      : runtime.createProgrammeReceiptStore(correctedOptions);
+    const allocated = correctedStore.allocateRun(context.input);
+    assert.equal(allocated.run_id, context.receiptRun);
+    const started = await correctedStore.startAllocatedRun(allocated, context.readers);
+    assert.equal(started.started, true);
+    assert.equal(started.run_id, context.receiptRun);
+    const positive = support.receiptEffectSnapshot(correctedStore).tables;
+    assert.equal(positive.allocations.count, 1);
+    assert.equal(positive.runs.count, 1);
+    assert.equal(positive.coordination_state.count, 1);
+    assert.equal(positive.lease_events.count, 1);
+    assert.equal(positive.receipts.count, 1);
+    assert.equal(positive.mutation_operations.count, 0);
+    assert.equal(positive.mutation_operation_events.count, 0);
+    const db = new DatabaseSync(correctedStore.databasePath, { readOnly: true });
+    try {
+      assert.equal(db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water, 1);
+      assert.equal(db.prepare('SELECT event_type FROM lease_events').get().event_type, 'ALLOCATED');
+      assert.equal(db.prepare('SELECT receipt_type FROM receipts').get().receipt_type, 'RUN_STARTED');
+    } finally { db.close(); }
+  }
+});
+
+test('Run-077 C2 enforces fresh outgoing custody at every shared terminal entry and on replay', async () => {
+  const terminalTypes = ['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED'];
+  for (const type of terminalTypes) {
+    const seed = `c2-required-${type.toLowerCase()}`;
+    const applicability = completionApplicability(seed);
+    const context = boundReceiptContext(seed, { completion_applicability: applicability });
+    const session = await context.startRun();
+    const before = support.receiptEffectSnapshot(context.store);
+    const missing = () => type === 'RUN_INTERRUPTED'
+      ? context.store.appendReceipt(session, { receipt_type: type, payload: { classification: 'RUN_INTERRUPTED' } })
+      : context.store.appendReceipt(session, { receipt_type: type, payload: { classification: 'IMPLEMENTED' } });
+    assert.throws(missing, (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED', `${type} missing custody`);
+    assert.deepEqual(support.receiptEffectSnapshot(context.store), before, `${type} rejected effects`);
+    assert.equal(context.store.classifyRecovery(session.run_id).status, 'LIVE_RUN_NOT_ADOPTABLE');
+
+    if (type === 'RUN_INTERRUPTED') {
+      assert.throws(() => context.store.interruptRun(session, { payload: { classification: 'RUN_INTERRUPTED' } }),
+        (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED', 'interruptRun missing custody');
+      assert.deepEqual(support.receiptEffectSnapshot(context.store), before, 'interruptRun rejected effects');
+    }
+
+    const outgoing = confirmedOutgoingCustody(context, `valid-${type}`);
+    const input = {
+      receipt_type: type,
+      payload: { classification: type === 'RUN_INTERRUPTED' ? 'RUN_INTERRUPTED' : 'IMPLEMENTED', evidence_digest: outgoing.outcome_ref },
+      semantic_completion: { store: outgoing.outputStore, outcome_ref: outgoing.outcome_ref },
+    };
+    const result = type === 'RUN_INTERRUPTED'
+      ? context.store.interruptRun(session, input)
+      : context.store.appendReceipt(session, input);
+    assert.equal(result.duplicate, false, `${type} substantive custody append`);
+    const after = support.receiptEffectSnapshot(context.store);
+    assert.equal(after.tables.allocations.count, 1);
+    assert.equal(after.tables.runs.count, 1);
+    assert.equal(after.tables.coordination_state.count, 1);
+    assert.equal(after.tables.lease_events.count, 2);
+    assert.equal(after.tables.receipts.count, 2);
+    assert.equal(after.tables.authority_packets.count, 0);
+    assert.equal(after.tables.authority_packet_events.count, 0);
+    assert.equal(after.tables.semantic_gate_admissions.count, 0);
+    assert.equal(after.tables.mutation_operations.count, 0);
+    assert.equal(after.tables.mutation_operation_events.count, 0);
+    assert.equal(context.store.classifyRecovery(session.run_id).status, 'TERMINAL');
+
+    const duplicate = type === 'RUN_INTERRUPTED'
+      ? context.store.interruptRun(session, { ...input, created_at: result.receipt.created_at })
+      : context.store.appendReceipt(session, { ...input, created_at: result.receipt.created_at });
+    assert.equal(duplicate.duplicate, true, `${type} valid replay`);
+    assert.deepEqual(support.receiptEffectSnapshot(context.store), after, `${type} replay effects`);
+    outgoing.allowScreening(false);
+    const rejectedReplay = () => type === 'RUN_INTERRUPTED'
+      ? context.store.interruptRun(session, { ...input, created_at: result.receipt.created_at })
+      : context.store.appendReceipt(session, { ...input, created_at: result.receipt.created_at });
+    assert.throws(rejectedReplay, (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH', `${type} stale replay custody`);
+    assert.deepEqual(support.receiptEffectSnapshot(context.store), after, `${type} unverifiable replay effects`);
+  }
+});
+
+test('Run-077 C2 preserves no-custody-required terminals and rejects mismatched or absent completion evidence', async () => {
+  for (const type of ['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED']) {
+    const seed = `c2-no-required-${type.toLowerCase()}`;
+    const applicability = completionApplicability(seed, false);
+    const context = boundReceiptContext(seed, { completion_applicability: applicability });
+    const session = await context.startRun();
+    const input = { receipt_type: type, payload: { classification: 'IMPLEMENTED' } };
+    const result = type === 'RUN_INTERRUPTED'
+      ? context.store.interruptRun(session, { payload: input.payload })
+      : context.store.appendReceipt(session, input);
+    assert.equal(result.duplicate, false);
+    const facts = support.receiptEffectSnapshot(context.store).tables;
+    assert.equal(facts.receipts.count, 2);
+    assert.equal(facts.lease_events.count, 2);
+    assert.equal(facts.allocations.count, 1);
+    assert.equal(facts.mutation_operations.count, 0);
+  }
+
+  const seed = 'c2-bad-ref';
+  const context = boundReceiptContext(seed, { completion_applicability: completionApplicability(seed) });
+  const session = await context.startRun();
+  const outgoing = confirmedOutgoingCustody(context, 'wrong-payload-ref');
+  const before = support.receiptEffectSnapshot(context.store);
+  assert.throws(() => context.store.appendReceipt(session, {
+    receipt_type: 'EXECUTOR_TERMINAL',
+    payload: { classification: 'IMPLEMENTED', evidence_digest: runtime.digestValue('different-outcome') },
+    semantic_completion: { store: outgoing.outputStore, outcome_ref: outgoing.outcome_ref },
+  }), (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  assert.deepEqual(support.receiptEffectSnapshot(context.store), before);
+
+  const unconfirmed = confirmedOutgoingCustody(context, 'unconfirmed-output', { confirm: false });
+  unconfirmed.outputStore.persistAuthorityPacket(unconfirmed.packetValue, support.producerAdmission(unconfirmed.packetValue));
+  const outputBefore = support.receiptEffectSnapshot(unconfirmed.outputStore);
+  assert.throws(() => context.store.appendReceipt(session, {
+    receipt_type: 'G4_TERMINAL',
+    payload: { classification: 'IMPLEMENTED', evidence_digest: unconfirmed.outcome_ref },
+    semantic_completion: { store: unconfirmed.outputStore, outcome_ref: unconfirmed.outcome_ref },
+  }), (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  assert.deepEqual(support.receiptEffectSnapshot(context.store), before);
+  assert.deepEqual(support.receiptEffectSnapshot(unconfirmed.outputStore), outputBefore);
+
+  const malformed = confirmedOutgoingCustody(context, 'wrong-lock', {
+    confirm: false,
+    changeBindings(value) { value.producer.lock = 'wrong-lock'; },
+  });
+  malformed.outputStore.persistAuthorityPacket(malformed.packetValue, support.producerAdmission(malformed.packetValue));
+  const malformedBefore = support.receiptEffectSnapshot(malformed.outputStore);
+  assert.throws(() => context.fixture.store.confirmSemanticCompletion(
+    context.admitted.admission, malformed.outputStore, malformed.packetValue, support.producerAdmission(malformed.packetValue)
+  ), (error) => error.code === 'GPR_PACKET_BINDING_MISMATCH');
+  assert.throws(() => context.store.appendReceipt(session, {
+    receipt_type: 'EXECUTOR_TERMINAL',
+    payload: { classification: 'IMPLEMENTED', evidence_digest: malformed.outcome_ref },
+    semantic_completion: { store: malformed.outputStore, outcome_ref: malformed.outcome_ref },
+  }), (error) => error.code === 'GPR_PACKET_OUTGOING_CUSTODY_MISMATCH');
+  assert.deepEqual(support.receiptEffectSnapshot(context.store), before);
+  assert.deepEqual(support.receiptEffectSnapshot(malformed.outputStore), malformedBefore);
+});
+
+test('Run-077 C3 validates reopened durable context before recovery permission or handle creation', () => {
+  const cases = [
+    { name: 'missing-predecessors', expected: 'GPR_PACKET_CONTENT_MISMATCH', update(record) { delete record.predecessors; } },
+    { name: 'malformed-predecessor', expected: 'GPR_PACKET_CONTENT_MISMATCH', update(record) { record.predecessors[0] = null; } },
+    { name: 'changed-predecessor-identity', expected: 'GPR_PACKET_STALE_REPLAY', recoveryOnly: true, update(record) {
+      record.predecessors[0].packet_digest = 'e'.repeat(64);
+      record.predecessors[0].packet_id = `ap1-${record.predecessors[0].packet_digest}`;
+    } },
+    { name: 'missing-execution-context', expected: 'GPR_PACKET_CONTENT_MISMATCH', update(record) { delete record.execution_binding.loop_run_id; } },
+  ];
+  for (const item of cases) {
+    const fixture = setup(`c3-${item.name}`);
+    const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readers);
+    fixture.store.beginSemanticGateDispatch(admitted.admission);
+    const db = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+    let consumerKey;
+    try { consumerKey = db.prepare('SELECT consumer_key FROM semantic_gate_admissions').get().consumer_key; }
+    finally { db.close(); }
+    support.mutateSemanticAdmissionRecord(fixture.store, consumerKey, item.update);
+    fixture.setRecoveryOutcome('not-started');
+    if (item.recoveryOnly) {
+      const reopened = runtime.initialiseAuthorityPacketStore(fixture.storeOptions, fixture.readers);
+      const before = support.receiptEffectSnapshot(reopened);
+      assert.throws(() => reopened.recoverSemanticGateAdmission({ consumer_key: consumerKey }, fixture.readers),
+        (error) => error.code === item.expected, item.name);
+      assert.deepEqual(support.receiptEffectSnapshot(reopened), before, `${item.name} recovery effects`);
+    } else {
+      const before = support.receiptEffectSnapshot(fixture.store);
+      assert.throws(() => runtime.initialiseAuthorityPacketStore(fixture.storeOptions, fixture.readers),
+        (error) => error.code === item.expected, item.name);
+      assert.deepEqual(support.receiptEffectSnapshot(fixture.store), before, `${item.name} recovery effects`);
+    }
+    const events = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+    try {
+      assert.deepEqual(events.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all().map((row) => row.event_type), ['DISPATCH_INTENT']);
+    } finally { events.close(); }
+  }
+});
+
+test('Run-077 C3 recovered admission passes receipt, split start, mutation, Loop, and assurance consumers', async () => {
+  const context = boundReceiptContext('c3-recovered-consumption');
+  const initialIntent = context.fixture.store.beginSemanticGateDispatch(context.admitted.admission);
+  assert.ok(initialIntent.transport_id);
+  context.fixture.setRecoveryOutcome('not-started');
+  const reopened = runtime.initialiseAuthorityPacketStore(context.fixture.storeOptions, context.fixture.readers);
+  const beforeRecovery = support.receiptEffectSnapshot(reopened);
+  const keyDb = new DatabaseSync(reopened.databasePath, { readOnly: true });
+  let consumerKey;
+  try { consumerKey = keyDb.prepare('SELECT consumer_key FROM semantic_gate_admissions').get().consumer_key; }
+  finally { keyDb.close(); }
+  const recovered = reopened.recoverSemanticGateAdmission({ consumer_key: consumerKey }, context.fixture.readers);
+  assert.equal(recovered.recovered, true);
+  assert.equal(reopened.revalidateSemanticGate(recovered.admission).fresh, true);
+  const afterRecovery = support.receiptEffectSnapshot(reopened);
+  for (const table of Object.keys(beforeRecovery.tables)) {
+    if (table === 'semantic_gate_admission_events') {
+      assert.equal(afterRecovery.tables[table].count, beforeRecovery.tables[table].count + 1);
+      assert.equal(afterRecovery.tables[table].identity_values.length, beforeRecovery.tables[table].identity_values.length + 1);
+    } else assert.deepEqual(afterRecovery.tables[table], beforeRecovery.tables[table], `${table} recovery zero effects`);
+  }
+  let dispatchDb = new DatabaseSync(reopened.databasePath, { readOnly: true });
+  try {
+    assert.deepEqual(dispatchDb.prepare('SELECT event_type FROM semantic_gate_admission_events ORDER BY sequence').all().map((row) => row.event_type), [
+      'DISPATCH_INTENT', 'DISPATCH_NOT_STARTED',
+    ]);
+  } finally { dispatchDb.close(); }
+  const repeatedBefore = support.receiptEffectSnapshot(reopened);
+  assert.equal(reopened.recoverSemanticGateAdmission({ consumer_key: consumerKey }, context.fixture.readers).recovered, true);
+  assert.deepEqual(support.receiptEffectSnapshot(reopened), repeatedBefore, 'resolved recovery tail appended a duplicate event');
+
+  context.input.semantic_gate = { store: reopened, admission: recovered.admission };
+  const session = await context.startRun();
+  assert.equal(session.started, true);
+  assert.equal(session.run_id, context.receiptRun);
+
+  const secondReceiptStore = runtime.createProgrammeReceiptStore({
+    ...support.options(support.stateRoot('run077-c3-recovered-split-')),
+    repository: context.fixture.intent.repository,
+    parent_issue: context.fixture.intent.parent_issue,
+    child_issue: context.fixture.intent.child_issue,
+  });
+  const splitAllocated = secondReceiptStore.allocateRun({ ...context.input, semantic_gate: { store: reopened, admission: recovered.admission } });
+  const splitStarted = await secondReceiptStore.startAllocatedRun(splitAllocated, context.readers);
+  assert.equal(splitStarted.started, true);
+  assert.equal(splitStarted.run_id, context.receiptRun);
+  const splitFacts = support.receiptEffectSnapshot(secondReceiptStore).tables;
+  assert.equal(splitFacts.allocations.count, 1);
+  assert.equal(splitFacts.receipts.count, 1);
+
+  const target = { resource_type: 'provider_resource', resource_id: 'run077-c3-recovered-resource' };
+  const descriptor = {
+    operation_kind: 'IDEMPOTENT_SET', safety_class: 'IDEMPOTENT', target_identity: target,
+    target_digest: runtime.digestValue(target), expected_source_digest: 'e'.repeat(64), cas_digest: 'f'.repeat(64),
+    expected_post_state_digest: '1'.repeat(64), adapter_identity_digest: '2'.repeat(64), retry_of_operation_id: null,
+  };
+  let providerCalls = 0;
+  const mutationReaders = {
+    readAuthority: context.readers.readAuthority,
+    readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
+    verifyOutcomeEvidence: async (value) => value,
+  };
+  const mutation = await context.store.admitMutationOperation(session, descriptor, mutationReaders);
+  const dispatch = await context.store.authorizeMutationDispatch(session, mutation);
+  assert.equal(dispatch.operation_id, mutation.operation_id);
+  assert.equal(dispatch.run_id, context.receiptRun);
+  assert.equal(providerCalls, 0, 'dispatch permission invoked a provider');
+  await assert.rejects(context.store.authorizeMutationDispatch(session, mutation),
+    (error) => error.code === 'GPR_ADMISSION_CONSUMED');
+
+  const loopRequest = executionLoop.normalizeRequest({
+    task: { id: 'run077-recovered-loop', digest: runtime.digestValue('run077-recovered-loop-task') },
+    repository_id: context.fixture.intent.execution_binding.repository_id,
+    authorized_ref_digest: context.fixture.intent.execution_binding.authorized_ref_digest,
+    current_authority_digest: context.fixture.intent.execution_binding.current_authority_digest,
+    authority: { delegated: false, lanes: [] },
+  });
+  const route = executionLoop.admitRoute({
+    request: loopRequest,
+    expected_live: { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) },
+    liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) }) },
+    consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+  });
+  assert.equal(route.status, 'admitted');
+  const loopRun = executionLoop.createRunReceipt({
+    request: route.request,
+    route_plan: route.route_plan,
+    run_id: context.fixture.intent.execution_binding.loop_run_id,
+  });
+  const loopAdmitted = executionLoop.transitionRun(loopRun, 'admitted', {
+    semantic_gate: {
+      store: reopened,
+      consumer_identity: { consumer_key: consumerKey },
+      trusted_readers: context.fixture.readers,
+    },
+  });
+  assert.equal(loopAdmitted.execution_state, 'admitted');
+  const assuranceContext = assurance.bindReceiptAdmission(reopened, recovered.admission);
+  assert.equal(assurance.evaluateInvalidation({ event: 'SUCCESSOR_CANDIDATE_HEAD' }, assuranceContext).g4_invalidated, true);
+});
+
+test('CURRENT confirmation validates 2, 3, and 16 predecessors before one transaction', () => {
+  for (const count of [2, 3, 16]) {
+    const fixture = multiPredecessorSetup(`positive-${count}`, count);
+    const confirmed = fixture.store.confirmCurrentPacketProjection(fixture.current, fixture.readerSet);
+    const admitted = fixture.store.admitSemanticGate(fixture.intent, fixture.readerSet);
+    assert.equal(admitted.proof.predecessors.length, count);
+    assert.equal(confirmed.readback_event_ids.length, count);
+    const db = new DatabaseSync(fixture.store.databasePath, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM authority_packet_events WHERE event_type='CURRENT_READBACK'").get().n, count);
+    } finally { db.close(); }
+  }
+
+  const mixed = multiPredecessorSetup('mixed-acceptance', 2);
+  const bad = structuredClone(mixed.current);
+  bad.predecessors[1].acceptance_event_id = bad.predecessors[0].acceptance_event_id;
+  mixed.setCurrent(bad);
+  assertCode(() => mixed.store.confirmCurrentPacketProjection(bad, mixed.readerSet), 'GPR_PACKET_CONTENT_MISMATCH');
+  let db = new DatabaseSync(mixed.store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM authority_packet_events WHERE event_type='CURRENT_READBACK'").get().n, 0); }
+  finally { db.close(); }
+
+  const local = multiPredecessorSetup('foreign-local', 1);
+  const foreign = multiPredecessorSetup('foreign-store', 1);
+  local.setCurrent(foreign.current);
+  assertCode(() => local.store.confirmCurrentPacketProjection(foreign.current, local.readerSet), 'GPR_PACKET_NOT_FOUND');
+  db = new DatabaseSync(local.store.databasePath, { readOnly: true });
+  try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM authority_packet_events WHERE event_type='CURRENT_READBACK'").get().n, 0); }
+  finally { db.close(); }
+});
+
+test('oracle requires the full case identity set and rejects false assertions and mismatched measured effects', async () => {
+  const generated = compiler.compileGateContract(JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'))).generated_cases;
+  const onePerRequirement = generated.filter((item, index, all) =>
+    all.findIndex((candidate) => candidate.requirement_id === item.requirement_id) === index);
+  assert.throws(() => support.assertOracleHandlerCompleteness(onePerRequirement), /ORACLE_CASE_UNEXECUTED/);
+
+  const acceptanceCase = generated.find((item) => item.requirement_id === 'A05'
+    && item.expected.positive_control === true && item.surface === 'bindWebPacketAcceptance');
+  const key = support.oracleCaseIdentity(acceptanceCase);
+  const falseAssertionHandlers = {
+    [key]: async (item, { record }) => {
+      const context = support.oracleContext(item.id);
+      const call = await support.invokeOracleSurface(item, 'authorityPacketStore', context.store, item.surface, [context.persisted.packet_id, context.readerSet]);
+      record('false-production-effect-assertion', false, 'deliberately-false');
+      return { production_surface_receipts: [call.receipt] };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(acceptanceCase, falseAssertionHandlers),
+    /ORACLE_CALLER_ASSERTION_FORBIDDEN/
+  );
+
+  const mismatchedEffectHandlers = {
+    [key]: async (item) => {
+      const context = support.oracleContext(item.id);
+      context.store.bindWebPacketAcceptance(context.persisted.packet_id, context.readerSet);
+      const call = await support.invokeOracleSurface(item, 'authorityPacketStore', context.store, item.surface, [context.persisted.packet_id, context.readerSet]);
+      return { production_surface_receipts: [call.receipt] };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(acceptanceCase, mismatchedEffectHandlers),
+    /ORACLE_EFFECT_MISMATCH/
+  );
+});
+
+test('Run-082 F5 proves the exact durable acceptance event and rejects a suppressed insert', async () => {
+  const acceptanceCase = support.ORACLE_MANDATORY_CASES.find((item) => item.requirement_id === 'A05'
+    && item.expected.positive_control === true);
+  const evidence = await support.executeAuthorityPacketOracleCase(acceptanceCase);
+  assert.equal(evidence.actual_effects.readback_verified, true);
+  assert.equal(evidence.actual_effects.acceptance_event_verified, true);
+  assert.equal(evidence.actual_effects.web_acceptance_events_delta, 1);
+  assert.equal(evidence.actual_effects.readback_events_delta, 1);
+
+  const suppressedCase = support.ORACLE_MANDATORY_CASES.find((item) => item.requirement_id === 'C09'
+    && item.expected.positive_control === true);
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  DatabaseSync.prototype.prepare = function (sql, ...args) {
+    const statement = Reflect.apply(originalPrepare, this, [sql, ...args]);
+    if (sql.trim() !== 'INSERT INTO authority_packet_events VALUES (?, ?, ?, ?, ?, ?, ?)') return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property === 'run') return (...values) => values[5] === 'WEB_ACCEPTANCE_BOUND'
+          ? { changes: 0, lastInsertRowid: 0 }
+          : target.run(...values);
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
+  try {
+    await assert.rejects(
+      support.executeAuthorityPacketOracleCase(suppressedCase),
+      /ORACLE_EFFECT_MISMATCH/
+    );
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+  }
+});
+
+test('Run-082 F4 keeps an earlier failed required call sticky when a later call succeeds', async () => {
+  const generated = compiler.compileGateContract(JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'))).generated_cases;
+  const positive = generated.find((item) => item.requirement_id === 'D01' && item.expected.positive_control === true);
+  const key = support.oracleCaseIdentity(positive);
+  const handlers = {
+    [key]: async (item) => {
+      const invalid = support.packet({ seed: 'run082-d01-invalid' });
+      delete invalid.body.decision;
+      const failed = await support.invokeOracleSurface(item, 'runtime', runtime, 'validateAuthorityPacket', [invalid]);
+      const valid = support.packet({ seed: 'run082-d01-valid' });
+      const succeeded = await support.invokeOracleSurface(item, 'runtime', runtime, 'validateAuthorityPacket', [valid]);
+      return {
+        production_surface_receipts: [succeeded.receipt],
+        positive_control_case_id: item.id,
+        assertion_trace: [{ label: 'caller-hidden-failure', passed: true, actual: failed.error ? failed.error.code : 'ACCEPT' }],
+      };
+    },
+  };
+  await assert.rejects(
+    support.executeAuthorityPacketOracleCase(positive, handlers),
+    /ORACLE_REQUIRED_CALL_FAILED|ORACLE_CALL_SEQUENCE_MISMATCH/
+  );
+});

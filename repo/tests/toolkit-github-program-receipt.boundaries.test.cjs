@@ -98,7 +98,16 @@ function options(root = stateRoot()) {
 function readers(expectedAuthority, expectedStart, now) {
   return {
     now,
-    readAuthority: async () => ({ authority: structuredClone(expectedAuthority), later_controlling_comments: [] }),
+    readAuthority: async () => ({ authority: structuredClone(expectedAuthority),
+      completion_applicability: {
+        schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+        scope_digest: expectedAuthority.scope_digest,
+        candidate: null,
+        required_consumers: [],
+        retain_through_child_finality: false,
+        retain_through_candidate_finality: false
+      },
+      later_controlling_comments: [] }),
     readStart: async () => structuredClone(expectedStart)
   };
 }
@@ -260,8 +269,21 @@ function descriptor(overrides = {}) {
 }
 
 function trustedReaders(expectedAuthority, operationDescriptor, overrides = {}) {
+  const defaultApplicability = {
+    schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+    scope_digest: expectedAuthority.scope_digest,
+    candidate: null,
+    required_consumers: [],
+    retain_through_child_finality: false,
+    retain_through_candidate_finality: false
+  };
+  const readAuthority = overrides.readAuthority
+    ? async (...args) => ({ completion_applicability: structuredClone(defaultApplicability),
+      ...await overrides.readAuthority(...args) })
+    : async () => ({ authority: structuredClone(expectedAuthority),
+      completion_applicability: structuredClone(defaultApplicability), later_controlling_comments: [] });
   return {
-    readAuthority: overrides.readAuthority || (async () => ({ authority: structuredClone(expectedAuthority), later_controlling_comments: [] })),
+    readAuthority,
     readSource: overrides.readSource || (async () => ({
       source_digest: operationDescriptor.expected_source_digest,
       cas_digest: operationDescriptor.cas_digest
@@ -431,10 +453,10 @@ test('a newer fence created before operation admission rejects the stale started
   const current = await fixture({ lease_ms: 5000 });
   await new Promise((resolve) => setTimeout(resolve,
     Math.max(0, Date.parse(current.session.lease.expires_at) - Date.now() + 30)));
-  const newer = current.store.allocateRun({
+  const newer = await current.store.startRun({
     lock: 'LOCK-NEWER-FENCE', authority: current.expectedAuthority, start: current.expectedStart,
     candidate: null, lease_ms: 60000
-  });
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso()));
   assert.equal(newer.lease.fence_sequence, current.session.lease.fence_sequence + 1);
   const operationDescriptor = descriptor();
   await assertCodeAsync(() => current.store.admitMutationOperation(current.session, operationDescriptor,
@@ -450,6 +472,8 @@ test('same-process allocation alone cannot grant operation admission before veri
     lock: 'LOCK-ZERO-MUTATION', authority: expectedAuthority, start: expectedStart,
     candidate: null, lease_ms: 60000
   });
+  assert.equal(allocated.status, 'PENDING_AUTHORITY_PREFLIGHT');
+  assert.equal(allocated.lease, undefined);
   const operationDescriptor = descriptor();
   await assertCodeAsync(() => store.admitMutationOperation(allocated, operationDescriptor,
     trustedReaders(expectedAuthority, operationDescriptor)), 'GPR_RUN_NOT_FRESHLY_VERIFIED');
@@ -465,24 +489,24 @@ test('IN_FLIGHT and UNKNOWN are durable Child-wide holds across release, Lock ch
   const secondDescriptor = descriptor({ target_identity: secondTarget, target_digest: digestValue(secondTarget) });
   await assertCodeAsync(() => store.admitMutationOperation(session, secondDescriptor,
     trustedReaders(expectedAuthority, secondDescriptor)), 'GPR_UNRESOLVED_OPERATION');
-  assertCode(() => store.allocateRun({
+  await assertCodeAsync(() => store.startRun({
     lock: 'LOCK-NEW', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(expectedAuthority, expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
   assertCode(() => store.appendReceipt(session, {
     receipt_type: 'EXECUTOR_TERMINAL', payload: { classification: 'SUCCESS' }, created_at: nowIso()
   }), 'GPR_UNRESOLVED_OPERATION');
   store.interruptRun(session, { payload: { classification: 'PROCESS_DIED' }, created_at: nowIso() });
-  assertCode(() => store.allocateRun({
+  await assertCodeAsync(() => store.startRun({
     lock: 'LOCK-NEW', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(expectedAuthority, expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
   const operation = store.readMutationOperation(admission.operation_id).operation;
   const reconciled = await store.reconcileMutationOperation(operation.operation_id,
     async () => ({ authority: authority('reconcile'), later_controlling_comments: [] }),
     async () => outcomeEvidence(operation, 'UNKNOWN'));
   assert.equal(reconciled.state, 'UNKNOWN');
-  assertCode(() => store.allocateRun({
+  await assertCodeAsync(() => store.startRun({
     lock: 'LOCK-NEWER', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(expectedAuthority, expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('closed adapter-bound outcome evidence records exact APPLIED, NOT_APPLIED, and UNKNOWN states', async () => {
@@ -526,10 +550,10 @@ test('failure to append UNKNOWN leaves the already committed IN_FLIGHT hold auth
     locker.close();
   }
   assert.equal(current.store.readMutationOperation(current.admission.operation_id).state, 'IN_FLIGHT');
-  assertCode(() => current.store.allocateRun({
+  await assertCodeAsync(() => current.store.startRun({
     lock: 'LOCK-AFTER-UNKNOWN-WRITE-FAILURE', authority: current.expectedAuthority,
     start: current.expectedStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('fresh authority and exact provider readback reconcile unresolved operations without adopting the old run', async () => {
@@ -555,10 +579,10 @@ test('lease expiry before dispatch performs zero writes and cannot permit takeov
   await assertCodeAsync(() => current.store.authorizeMutationDispatch(current.session, current.admission), 'GPR_EXPIRED_FENCE');
   assert.equal(writes, 0);
   assert.equal(current.store.readMutationOperation(current.admission.operation_id).state, 'IN_FLIGHT');
-  assertCode(() => current.store.allocateRun({
+  await assertCodeAsync(() => current.store.startRun({
     lock: 'LOCK-AFTER-EXPIRY', authority: current.expectedAuthority, start: current.expectedStart,
     candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('APPLIED is non-retryable while unchanged freshly revalidated NOT_APPLIED retry is accepted', async () => {
@@ -710,10 +734,10 @@ test('UNKNOWN remains an unresolved barrier to explicit retry', async () => {
   };
   await assertCodeAsync(() => current.store.admitMutationOperation(current.session, retryDescriptor,
     trustedReaders(current.expectedAuthority, retryDescriptor)), 'GPR_UNRESOLVED_OPERATION');
-  assertCode(() => current.store.allocateRun({
+  await assertCodeAsync(() => current.store.startRun({
     lock: 'LOCK-AFTER-UNKNOWN-RETRY', authority: current.expectedAuthority,
     start: current.expectedStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('terminal append and lease release are atomic and next allocation is N+1', async () => {
@@ -724,10 +748,10 @@ test('terminal append and lease release are atomic and next allocation is N+1', 
     receipt_type: 'G4_TERMINAL', payload: { classification: 'PASS' },
     created_at: nowIso()
   });
-  const next = store.allocateRun({
+  const next = await store.startRun({
     lock: 'LOCK-NEXT', authority: expectedAuthority, start: expectedStart,
     candidate: null, lease_ms: 60000
-  });
+  }, readers(expectedAuthority, expectedStart, nowIso()));
   assert.equal(next.lease.fence_sequence, session.lease.fence_sequence + 1);
 });
 
@@ -856,11 +880,19 @@ test('PREPARED and IN_FLIGHT commit atomically and process death leaves the unre
     (async () => {
       const store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
       const session = await store.startRun({ lock: 'LOCK-DEAD-OWNER', authority: auth, start, candidate: null, lease_ms: 60000 }, {
-        readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+        readAuthority: async () => ({ authority: auth, completion_applicability: {
+          schema: 'toolkit.github-program.semantic-completion-applicability.v1', scope_digest: auth.scope_digest,
+          candidate: null, required_consumers: [], retain_through_child_finality: false,
+          retain_through_candidate_finality: false
+        }, later_controlling_comments: [] }),
         readStart: async () => start
       });
       const admission = await store.admitMutationOperation(session, descriptor, {
-        readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+        readAuthority: async () => ({ authority: auth, completion_applicability: {
+          schema: 'toolkit.github-program.semantic-completion-applicability.v1', scope_digest: auth.scope_digest,
+          candidate: null, required_consumers: [], retain_through_child_finality: false,
+          retain_through_candidate_finality: false
+        }, later_controlling_comments: [] }),
         readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
         verifyOutcomeEvidence: async (evidence) => evidence
       });
@@ -874,9 +906,9 @@ test('PREPARED and IN_FLIGHT commit atomically and process death leaves the unre
   const reopened = createProgrammeReceiptStore(storeOptions);
   const operation = reopened.readMutationOperation(child.stdout);
   assert.deepEqual(operation.events.map((event) => event.state), ['PREPARED', 'IN_FLIGHT']);
-  assertCode(() => reopened.allocateRun({
+  await assertCodeAsync(() => reopened.startRun({
     lock: 'LOCK-REPLACEMENT', authority: auth, start: initialStart, candidate: null, lease_ms: 60000
-  }), 'GPR_UNRESOLVED_OPERATION');
+  }, readers(auth, initialStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('process death during or after a trusted write leaves IN_FLIGHT until read-only reconciliation', async () => {
@@ -896,10 +928,18 @@ test('process death during or after a trusted write leaves IN_FLIGHT until read-
       (async () => {
         const store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
         const session = await store.startRun({ lock: 'LOCK-${stage}', authority: auth, start, candidate: null, lease_ms: 60000 }, {
-          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }), readStart: async () => start
+          readAuthority: async () => ({ authority: auth, completion_applicability: {
+            schema: 'toolkit.github-program.semantic-completion-applicability.v1', scope_digest: auth.scope_digest,
+            candidate: null, required_consumers: [], retain_through_child_finality: false,
+            retain_through_candidate_finality: false
+          }, later_controlling_comments: [] }), readStart: async () => start
         });
         const trusted = {
-          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+          readAuthority: async () => ({ authority: auth, completion_applicability: {
+            schema: 'toolkit.github-program.semantic-completion-applicability.v1', scope_digest: auth.scope_digest,
+            candidate: null, required_consumers: [], retain_through_child_finality: false,
+            retain_through_candidate_finality: false
+          }, later_controlling_comments: [] }),
           readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
           verifyOutcomeEvidence: async (evidence) => evidence
         };
@@ -917,9 +957,9 @@ test('process death during or after a trusted write leaves IN_FLIGHT until read-
     assert.equal(fs.existsSync(marker), true);
     const reopened = createProgrammeReceiptStore(storeOptions);
     assert.equal(reopened.readMutationOperation(child.stdout).state, 'IN_FLIGHT');
-    assertCode(() => reopened.allocateRun({
+    await assertCodeAsync(() => reopened.startRun({
       lock: `LOCK-${stage}-REPLACEMENT`, authority: auth, start: initialStart, candidate: null, lease_ms: 60000
-    }), 'GPR_UNRESOLVED_OPERATION');
+    }, readers(auth, initialStart, nowIso())), 'GPR_UNRESOLVED_OPERATION');
   }
 });
 
@@ -972,7 +1012,7 @@ test('payload, receipt-count, and database-size limits fail closed', async () =>
   assertCode(() => createProgrammeReceiptStore(second.storeOptions), 'GPR_DATABASE_LIMIT');
 });
 
-test('unsafe roots, sensitive fields, caller fences, and unsupported runtimes are rejected', () => {
+test('unsafe roots, sensitive fields, caller fences, and unsupported runtimes are rejected', async () => {
   assertCode(() => createProgrammeReceiptStore({
     repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359,
     stateRoot: repositoryRoot, repositoryRoot
@@ -1013,11 +1053,14 @@ test('unsafe roots, sensitive fields, caller fences, and unsupported runtimes ar
   assertCode(() => assertRuntimeSupport({ nodeVersion: '22.12.0', sqlite: { DatabaseSync() {} } }), 'GPR_UNSUPPORTED_RUNTIME');
   assertCode(() => assertRuntimeSupport({ nodeVersion: '22.13.0', sqlite: {} }), 'GPR_SQLITE_UNAVAILABLE');
   const validRefStore = createProgrammeReceiptStore(options());
-  assert.equal(validRefStore.allocateRun({
-    lock: 'LOCK-VALID-REF', authority: authority(),
-    start: { ...start(), ref: { detached: false, name: 'feat/x]' } },
+  const validRefAuthority = authority();
+  const validRefStart = { ...start(), ref: { detached: false, name: 'feat/x]' } };
+  const validRefRun = await validRefStore.startRun({
+    lock: 'LOCK-VALID-REF', authority: validRefAuthority,
+    start: validRefStart,
     candidate: null, lease_ms: 5000
-  }).lease.fence_sequence, 1);
+  }, readers(validRefAuthority, validRefStart, nowIso()));
+  assert.equal(validRefRun.lease.fence_sequence, 1);
 
   const shadowRoot = stateRoot();
   const originalPath = process.env.PATH;

@@ -7,12 +7,18 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+
+function semanticGate(seed = 'run162') {
+  return support.semanticGate(seed);
+}
 
 const common = {
   task: { id: 'task-run162-red', digest: 'a'.repeat(64) },
   repository_id: 'b'.repeat(64),
   authorized_ref_digest: 'c'.repeat(64),
   current_authority_digest: 'd'.repeat(64),
+  semantic_gate: semanticGate('common'),
 };
 const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
 
@@ -177,6 +183,7 @@ function releaseOptions(stateRoot, fixture, lease, overrides = {}) {
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: fixture.terminal,
     ...overrides,
   };
 }

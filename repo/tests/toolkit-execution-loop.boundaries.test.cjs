@@ -5,8 +5,49 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const receiptRuntime = require('../scripts/toolkit-github-program-receipt.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+
+test.afterEach(() => support.cleanup());
+
+test('execution request and semantic consumer ingress reject Proxies before observation', () => {
+  const counts = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const handler = {
+    get(target, key, receiver) { counts.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { counts.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { counts.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { counts.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  };
+  const validOptions = {
+    ...common,
+    authority: { delegated: false, lanes: [] },
+    run_id: 'run-proxy-boundary',
+  };
+  const requestProxy = new Proxy({ task: validOptions.task }, handler);
+  expectCode(() => runtime.normalizeRequest(requestProxy), 'REQUEST_CONTRACT_INVALID');
+  assert.deepEqual(counts, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+
+  const gate = semanticGate('run-proxy-consumer');
+  gate.consumer_intent = new Proxy(gate.consumer_intent, handler);
+  const result = runtime.admitRun({ ...validOptions, run_id: 'run-proxy-consumer', semantic_gate: gate });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.deepEqual(counts, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+});
+
+function semanticGate(seed = 'boundary') {
+  return support.semanticGate(seed);
+}
+
+function customizedGate(overrides = {}) {
+  const gate = semanticGate();
+  if (overrides.trusted_readers) gate.trusted_readers = { ...gate.trusted_readers, ...overrides.trusted_readers };
+  if (overrides.consumer_identity) gate.consumer_identity = overrides.consumer_identity;
+  return gate;
+}
 
 const common = {
   task: { id: 'task-boundary', digest: 'a'.repeat(64) },
@@ -21,12 +62,13 @@ function expectCode(fn, code) {
 }
 
 function createRun(runId = 'run-boundary') {
-  const admitted = runtime.admitRun({ ...common, run_id: runId, authority: { delegated: false, lanes: [] } });
+  const admitted = runtime.admitRun({ ...common, semantic_gate: semanticGate(runId), run_id: runId, authority: { delegated: false, lanes: [] } });
   return admitted.run;
 }
 
 function commitEvidence(runId = 'run-commit', bindings = {}, stateRoot) {
-  const admitted = runtime.admitRun({ ...common, ...bindings, run_id: runId, authority: { delegated: false, lanes: [] } });
+  const semantic_gate = semanticGate(runId);
+  const admitted = runtime.admitRun({ ...common, ...bindings, semantic_gate, run_id: runId, authority: { delegated: false, lanes: [] } });
   const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
   const workspace = runtime.admitWorkspace({
     state_root: stateRoot,
@@ -36,7 +78,7 @@ function commitEvidence(runId = 'run-commit', bindings = {}, stateRoot) {
     workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + runId, workspace_handle: 'handle-' + runId, commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
-  return { ...common, ...bindings, run_id: runId, repository_id: running.repository_id, authorized_ref_digest: running.authorized_ref_digest, current_authority_digest: running.current_authority_digest, route_plan: admitted.route_plan, run: running, workspace_receipt: workspace.workspace_receipt, liveRefProvider: { read: () => live } };
+  return { ...common, ...bindings, semantic_gate, run_id: runId, repository_id: running.repository_id, authorized_ref_digest: running.authorized_ref_digest, current_authority_digest: running.current_authority_digest, route_plan: admitted.route_plan, run: running, workspace_receipt: workspace.workspace_receipt, liveRefProvider: { read: () => live } };
 }
 
 function completeSafeEvidence(running, stateRoot) {
@@ -48,6 +90,92 @@ function completeSafeEvidence(running, stateRoot) {
 
 function completeSafeRun(running) {
   return completeSafeEvidence(running).terminal;
+}
+
+function completionEvidence(runId, outgoingRequired, classificationAvailable = true) {
+  const stateRoot = support.stateRoot(`run072-loop-completion-${runId}-`);
+  const scopeDigest = runtime.digestValue({ runId, scope: 'g4-output' });
+  const applicability = {
+    schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+    scope_digest: scopeDigest,
+    candidate: null,
+    required_consumers: outgoingRequired
+      ? [{ class: 'G4', dependency_id: `g4-${runId}`, scope_digest: scopeDigest }]
+      : [],
+    retain_through_child_finality: false,
+    retain_through_candidate_finality: false,
+  };
+  const gate = support.semanticGate(runId, {
+    completion_applicability: classificationAvailable ? applicability : false,
+  });
+  const commonRun = {
+    task: { id: `task-${runId}`, digest: 'a'.repeat(64) },
+    repository_id: 'b'.repeat(64),
+    authorized_ref_digest: 'c'.repeat(64),
+    current_authority_digest: 'd'.repeat(64),
+    authority: { delegated: false, lanes: [] },
+    consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+    semantic_gate: gate,
+    run_id: runId,
+  };
+  const admitted = runtime.admitRun(commonRun);
+  const live = { ref: 'refs/heads/main', sha: '1'.repeat(40), tree: '2'.repeat(40) };
+  const workspace = runtime.admitWorkspace({
+    state_root: stateRoot,
+    run: admitted.run,
+    expected_live: live,
+    liveRefProvider: { read: () => live },
+    workspaceAdapter: {
+      prepare: () => ({ workspace_id: `workspace-${runId}`, workspace_handle: `handle-${runId}`, commit_sha: live.sha, tree_sha: live.tree }),
+      verifySnapshot: () => true,
+    },
+  });
+  const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
+  const validating = runtime.transitionRun(running, 'validating', { state_root: stateRoot });
+  const lease = runtime.acquireMutationLease({
+    state_root: stateRoot, repository_id: running.repository_id,
+    authorized_ref_digest: running.authorized_ref_digest, run_id: running.run_id,
+  });
+  let substantiveResult = null;
+  let terminalPacket;
+  if (outgoingRequired) {
+    const bindings = support.bindings(`outgoing-${runId}`);
+    bindings.authority = support.sourceReference(`loop-${runId}`);
+    bindings.lane_id = gate.consumer_intent.lane_id;
+    bindings.human_owner = gate.consumer_intent.human_owner;
+    bindings.producer = {
+      run: running.run_id,
+      lock: gate.consumer_intent.consumer.lock,
+      stage: 'G3',
+      role: 'G3',
+    };
+    bindings.applicability = {
+      scope_digest: scopeDigest,
+      required_consumers: structuredClone(applicability.required_consumers),
+      retain_through_child_finality: applicability.retain_through_child_finality,
+      retain_through_candidate_finality: applicability.retain_through_candidate_finality,
+    };
+    bindings.candidate = applicability.candidate;
+    const packetValue = support.packet({ bindings });
+    packetValue.body.sections = ['implementation', 'candidate_identity', 'validation_results', 'remaining_obligations']
+      .map((name) => ({ name, text: `Observed ${name.replace(/_/g, ' ')} for ${runId}.` }));
+    const outputStore = receiptRuntime.initialiseAuthorityPacketStore(
+      support.options(support.stateRoot(`run072-outgoing-${runId}-`)),
+      support.readers(packetValue)
+    );
+    substantiveResult = { store: outputStore, packet: packetValue, producer_admission: support.producerAdmission(packetValue) };
+    const packetDigest = receiptRuntime.authorityPacketIdentities(packetValue).packet_digest;
+    terminalPacket = runtime.createTerminalPacket({
+      run_id: validating.run_id, outcome: 'success', reason_code: 'COMMITTED',
+      evidence_digest: packetDigest, publication_state: 'verified', workspace_disposition: 'cleaned',
+    });
+  } else {
+    terminalPacket = runtime.createTerminalPacket({
+      run_id: validating.run_id, outcome: 'success', reason_code: 'COMMITTED',
+      evidence_digest: 'f'.repeat(64), publication_state: 'verified', workspace_disposition: 'cleaned',
+    });
+  }
+  return { stateRoot, gate, running, validating, lease, terminalPacket, substantiveResult };
 }
 
 function commitOptions(overrides = {}) {
@@ -112,6 +240,93 @@ test('A3 exposes exactly five contract identities and no second authority surfac
   assert.equal(runtime.POLICY.mutation_lease.required_before_stage, true);
 });
 
+test('semantic admission is receipt-owned, opaque, and required at direct consequential boundaries', () => {
+  const blocked = runtime.admitRun({
+    ...common,
+    semantic_gate: undefined,
+    verified: true,
+    legacy_ok: true,
+    environment: { execution_loop: 'enabled' },
+    authority: { delegated: false, lanes: [] },
+  });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+
+  const route = runtime.admitRoute({ ...common, authority: { delegated: false, lanes: [] } });
+  const planned = runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission' });
+  expectCode(() => runtime.transitionRun(planned, 'admitted'), 'GPR_PACKET_ADMISSION_REQUIRED');
+  const directGate = customizedGate();
+  const directAdmitted = runtime.transitionRun(
+    runtime.createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: 'run-direct-admission-success' }),
+    'admitted',
+    { semantic_gate: directGate },
+  );
+  assert.equal(directAdmitted.execution_state, 'admitted');
+  const directDb = new DatabaseSync(directGate.store.databasePath, { readOnly: true });
+  try { assert.equal(directDb.prepare('SELECT COUNT(*) AS count FROM semantic_gate_admissions').get().count, 1); } finally { directDb.close(); }
+
+  const admitted = runtime.admitRun({ ...common, semantic_gate: semanticGate('run-serialized-admission'), run_id: 'run-serialized-admission', authority: { delegated: false, lanes: [] } });
+  const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+  const workspace = runtime.admitWorkspace({
+    run: admitted.run,
+    expected_live: live,
+    liveRefProvider: { read: () => live },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-serialized', workspace_handle: 'handle-serialized', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
+  });
+  const serialized = JSON.parse(JSON.stringify(workspace.run));
+  expectCode(() => runtime.transitionRun(serialized, 'running'), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted.run, 'semantic_admission'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted.run, 'verified'), false);
+});
+
+test('semantic gate admission and readers reject promises in synchronous Loop guards', () => {
+  const asyncAdmission = { ...semanticGate('async-admission'), store: { admitSemanticGate: () => Promise.resolve({}) } };
+  const blocked = runtime.admitRun({ ...common, semantic_gate: asyncAdmission, authority: { delegated: false, lanes: [] } });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.reason_code, 'GPR_PACKET_ADMISSION_REQUIRED');
+
+  const asyncRevalidation = { ...semanticGate('async-revalidation'), store: { revalidateSemanticGate: () => Promise.resolve(true) } };
+  const admitted = runtime.admitRun({ ...common, semantic_gate: asyncRevalidation, run_id: 'run-async-revalidation', authority: { delegated: false, lanes: [] } });
+  assert.equal(admitted.status, 'blocked');
+
+  const voidRevalidation = { ...semanticGate('void-revalidation'), store: { revalidateSemanticGate() {} } };
+  const voidResult = runtime.admitRun({ ...common, semantic_gate: voidRevalidation, run_id: 'run-void-revalidation', authority: { delegated: false, lanes: [] } });
+  assert.equal(voidResult.status, 'blocked');
+});
+
+test('restart release can recover only through the receipt-owned semantic admission API', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-loop-recovery-'));
+  const evidence = commitEvidence('run-loop-recovery', {}, stateRoot);
+  const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: evidence.repository_id, authorized_ref_digest: evidence.authorized_ref_digest, run_id: evidence.run_id });
+  const gate = semanticGate('restart');
+  gate.consumer_intent = {
+    ...gate.consumer_intent,
+    execution_binding: {
+      ...gate.consumer_intent.execution_binding,
+      loop_run_id: evidence.run_id,
+      repository_id: evidence.repository_id,
+      authorized_ref_digest: evidence.authorized_ref_digest,
+      current_authority_digest: evidence.current_authority_digest,
+    },
+  };
+  gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers);
+  const restartDb = new DatabaseSync(gate.store.databasePath, { readOnly: true });
+  let consumerKey;
+  try { consumerKey = restartDb.prepare('SELECT consumer_key FROM semantic_gate_admissions').get().consumer_key; } finally { restartDb.close(); }
+  gate.consumer_identity = { consumer_key: consumerKey };
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: evidence.repository_id,
+    authorized_ref_digest: evidence.authorized_ref_digest,
+    lease_id: lease.lease_id,
+    terminal_state: terminalEvidence.terminal.execution_state,
+    workspace_disposition: terminalEvidence.terminal.workspace_disposition,
+    publication_state: terminalEvidence.terminal.publication_state,
+    semantic_gate: gate,
+  }), { released: true });
+});
+
 test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-success-'));
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
@@ -137,7 +352,27 @@ test('typed A1 commit seam stages exactly the authorized paths and verifies the 
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
+});
+
+test('typed commit and commitExact reject serialized admission context before staging', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-loop-opaque-commit-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-opaque-commit' });
+  const evidence = commitEvidence('run-opaque-commit', {}, stateRoot);
+  const fixture = gitFixture();
+  let stageCalls = 0;
+  const originalStage = fixture.stageExact;
+  fixture.stageExact = (input) => { stageCalls += 1; return originalStage.call(fixture, input); };
+  const serializedEvidence = { ...evidence, run: JSON.parse(JSON.stringify(evidence.run)) };
+  const options = {
+    ...commitOptions({ run_id: 'run-opaque-commit', state_root: stateRoot, mutation_lease: lease, evidence: serializedEvidence }),
+    git: fixture,
+    broker: { authorize: () => ({ decision: 'allow' }) },
+  };
+  expectCode(() => runtime.executeTypedGitCommit(options), 'GPR_PACKET_ADMISSION_REQUIRED');
+  expectCode(() => runtime.commitExact(options), 'GPR_PACKET_ADMISSION_REQUIRED');
+  assert.equal(stageCalls, 0);
 });
 
 test('typed A1 commit without an owned lease performs zero stage or commit mutation', () => {
@@ -276,6 +511,7 @@ test('uncertain or interrupted publication preserves lease evidence until safe t
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
   const later = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-later' });
   assert.equal(later.run_id, 'run-later');
@@ -317,7 +553,7 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
   expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
   expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: 'lease-forged', terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_TOKEN_MISMATCH');
   const running = runtime.transitionRun(firstWorkspace.run, 'running', { state_root: stateRoot });
-  completeSafeEvidence(running, stateRoot);
+  const terminalEvidence = completeSafeEvidence(running, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: run.repository_id,
@@ -327,6 +563,7 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
     terminal_state: 'terminal-success',
     workspace_disposition: 'cleaned',
     publication_state: 'verified',
+    run: terminalEvidence.terminal,
   }), { released: true });
 });
 
@@ -336,6 +573,80 @@ test('uncertain and dirty workspace evidence is preserved or quarantined and can
   assert.equal(runtime.finalizeWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: true, proven_disposable: true, uncertain: true } }).disposition, 'quarantined');
   assert.equal(runtime.cleanupWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: false, proven_disposable: true } }).removable, false);
   expectCode(() => runtime.createTerminalPacket({ run_id: 'run-finality', outcome: 'success', reason_code: 'accepted', evidence_digest: 'a'.repeat(64) }), 'TERMINAL_FINALITY_FORBIDDEN');
+});
+
+test('applicable Loop completion and release require durable fresh-read substantive output custody', () => {
+  const unclassified = completionEvidence('run072-outgoing-unclassified', true, false);
+  expectCode(() => runtime.completeRun({
+    state_root: unclassified.stateRoot,
+    run: unclassified.validating,
+    terminal_packet: unclassified.terminalPacket,
+  }), 'GPR_PACKET_AUTHORITY_UNVERIFIED');
+
+  const missing = completionEvidence('run072-outgoing-missing', true);
+  expectCode(() => runtime.completeRun({
+    state_root: missing.stateRoot,
+    run: missing.validating,
+    terminal_packet: missing.terminalPacket,
+  }), 'GPR_PACKET_OUTGOING_CUSTODY_REQUIRED');
+  const missingRun = runtime.readDurableRun({
+    state_root: missing.stateRoot,
+    repository_id: missing.running.repository_id,
+    authorized_ref_digest: missing.running.authorized_ref_digest,
+    run_id: missing.running.run_id,
+  });
+  assert.equal(missingRun.execution_state, 'validating');
+  const missingDb = new DatabaseSync(missing.substantiveResult.store.databasePath, { readOnly: true });
+  try {
+    assert.equal(missingDb.prepare('SELECT COUNT(*) AS n FROM authority_packets').get().n, 0);
+    assert.equal(missingDb.prepare("SELECT COUNT(*) AS n FROM authority_packet_events WHERE event_type='CONSUMER_COMPLETED'").get().n, 0);
+  } finally { missingDb.close(); }
+
+  const complete = completionEvidence('run072-outgoing-positive', true);
+  const terminal = runtime.completeRun({
+    state_root: complete.stateRoot,
+    run: complete.validating,
+    terminal_packet: complete.terminalPacket,
+    substantive_result: complete.substantiveResult,
+  });
+  assert.equal(terminal.execution_state, 'terminal-success');
+  assert.equal(terminal.terminal_packet_digest, runtime.digestValue(complete.terminalPacket));
+  const outputDb = new DatabaseSync(complete.substantiveResult.store.databasePath, { readOnly: true });
+  try {
+    assert.equal(outputDb.prepare('SELECT COUNT(*) AS n FROM authority_packets').get().n, 1);
+    assert.equal(outputDb.prepare("SELECT COUNT(*) AS n FROM authority_packet_events WHERE event_type='CONSUMER_COMPLETED'").get().n, 1);
+  } finally { outputDb.close(); }
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: complete.stateRoot,
+    repository_id: complete.running.repository_id,
+    authorized_ref_digest: complete.running.authorized_ref_digest,
+    run_id: complete.running.run_id,
+    lease_id: complete.lease.lease_id,
+    terminal_state: terminal.execution_state,
+    workspace_disposition: terminal.workspace_disposition,
+    publication_state: terminal.publication_state,
+    run: terminal,
+    substantive_result: { store: complete.substantiveResult.store },
+  }), { released: true });
+
+  const noLaterConsumer = completionEvidence('run072-no-later-consumer', false);
+  const noLaterTerminal = runtime.completeRun({
+    state_root: noLaterConsumer.stateRoot,
+    run: noLaterConsumer.validating,
+    terminal_packet: noLaterConsumer.terminalPacket,
+  });
+  assert.equal(noLaterTerminal.execution_state, 'terminal-success');
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: noLaterConsumer.stateRoot,
+    repository_id: noLaterConsumer.running.repository_id,
+    authorized_ref_digest: noLaterConsumer.running.authorized_ref_digest,
+    run_id: noLaterConsumer.running.run_id,
+    lease_id: noLaterConsumer.lease.lease_id,
+    terminal_state: noLaterTerminal.execution_state,
+    workspace_disposition: noLaterTerminal.workspace_disposition,
+    publication_state: noLaterTerminal.publication_state,
+    run: noLaterTerminal,
+  }), { released: true });
 });
 
 test('retry requires fresh authority and live workspace admission', () => {
@@ -352,6 +663,7 @@ test('retry requires fresh authority and live workspace admission', () => {
     run_id: 'run-new',
     current_authority_digest: 'e'.repeat(64),
     authority: { delegated: false, lanes: [] },
+    semantic_gate: semanticGate('retry-ready'),
     expected_live: { ref: 'refs/heads/main', sha, tree },
     liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha, tree }) },
     workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-retry', workspace_handle: 'handle-retry', commit_sha: sha, tree_sha: tree }), verifySnapshot: () => true },

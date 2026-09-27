@@ -1,0 +1,908 @@
+{
+  "schema": "toolkit.gate-contract-ir.v1",
+  "run": "toolkit-c1-authority-packet-durability-g2-reclosure-20260922-061",
+  "lock": "DL-C1-AUTHORITY-PACKET-DURABILITY-G2-RECLOSURE-061",
+  "source_stage": "G2",
+  "target_stage": "G3",
+  "mutation": {
+    "allow_paths": [
+      "repo/CONTROLLER.md",
+      "repo/scripts/toolkit-github-program-receipt.cjs",
+      "repo/scripts/toolkit-execution-loop.cjs",
+      "repo/scripts/toolkit-assurance-web-finality.cjs",
+      "repo/scripts/toolkit-github-governance-review-reconciler.cjs",
+      "repo/scripts/toolkit-github-program-state-v5.cjs",
+      "repo/contracts/github-program-receipt/github-program-receipt-policy.json",
+      "repo/contracts/github-program-receipt/authority-packet-v1.schema.json",
+      "repo/contracts/bounded-local-execution-loop/execution-loop-policy.json",
+      "repo/contracts/github-governance-review-reconciler/tracker-v3-grammar.json",
+      "repo/contracts/github-program-reconciler/programme-state-v5.schema.json",
+      "repo/tests/fixtures/authority-packet-durability-g2-v1.json",
+      "repo/tests/toolkit-authority-packet.test.cjs",
+      "repo/tests/toolkit-authority-packet-admission.test.cjs",
+      "repo/tests/toolkit-authority-packet-test-support.cjs",
+      "repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs",
+      "repo/tests/toolkit-github-programme-human-surface-v2.test.cjs",
+      "repo/tests/toolkit-execution-loop.test.cjs",
+      "repo/tests/toolkit-execution-loop.boundaries.test.cjs",
+      "repo/tests/toolkit-execution-loop.run160-red.test.cjs",
+      "repo/tests/toolkit-execution-loop.run162-red.test.cjs",
+      "repo/tests/toolkit-execution-loop.run163-red.test.cjs",
+      "repo/tests/toolkit-execution-loop.run164-red.test.cjs",
+      "repo/tests/toolkit-assurance-web-finality.contract.test.cjs",
+      "repo/tests/toolkit-assurance-web-finality.privacy.test.cjs",
+      "repo/tests/toolkit-assurance-web-finality.run169-red.test.cjs",
+      "repo/tests/toolkit-assurance-web-finality.run172-red.test.cjs",
+      "repo/tests/controller-policy-separation.test.cjs",
+      "repo/tests/toolkit-github-programme-projection-bootstrap-recovery-v5.test.cjs"
+    ],
+    "forbid_extra_paths": true
+  },
+  "requirements": [
+    {
+      "id": "A01",
+      "invariant": "Summary-only input cannot satisfy semantic packet custody.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"A01-NEG","surface":"persistAuthorityPacket","input":{"variant":"summary-only"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"A01-POS","surface":"persistAuthorityPacket","input":{"variant":"complete"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-immutable-artifact"}}
+      ],
+      "forbidden_behaviour": ["summary-substitution"]
+    },
+    {
+      "id": "A02",
+      "invariant": "Lifecycle terminal envelopes cannot become semantic authority packets.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"A02-NEG","surface":"persistAuthorityPacket","input":{"variant":"terminal-envelope"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"A02-POS","surface":"persistAuthorityPacket","input":{"variant":"lifecycle-plus-semantic-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-immutable-artifact"}}
+      ],
+      "forbidden_behaviour": ["lifecycle-authority-substitution"]
+    },
+    {
+      "id": "A03",
+      "invariant": "Pointers, digests, receipts, manifests and compiler output cannot replace the complete artifact.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"A03-NEG","surface":"validateAuthorityPacket","input":{"variant":"pointer-or-digest"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"A03-POS","surface":"validateAuthorityPacket","input":{"variant":"complete-retrieved-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["digest-only-custody"]
+    },
+    {
+      "id": "A04",
+      "invariant": "Only fresh runtime-owned evidence can produce a mechanical admission handle.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"A04-NEG","surface":"admitSemanticGate","input":{"variant":"forged-or-serialized-handle"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"none"}},
+        {"id":"A04-POS","surface":"admitSemanticGate","input":{"variant":"fresh-runtime-proof"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-admission-record"}}
+      ],
+      "forbidden_behaviour": ["serialized-admission-bypass"]
+    },
+    {
+      "id": "A05",
+      "invariant": "Web PASS cannot bind consumable acceptance before fresh packet readback.",
+      "surfaces": ["bindWebPacketAcceptance"],
+      "macros": [],
+      "cases": [
+        {"id":"A05-NEG","surface":"bindWebPacketAcceptance","input":{"variant":"web-pass-before-readback"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_READBACK_FAILED","side_effects":"no-acceptance-event"}},
+        {"id":"A05-POS","surface":"bindWebPacketAcceptance","input":{"variant":"readback-then-web-binding"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-acceptance-event"}}
+      ],
+      "forbidden_behaviour": ["web-pass-without-readback"]
+    },
+    {
+      "id": "B01",
+      "invariant": "Missing, inaccessible or incorrectly versioned custody stores fail closed.",
+      "surfaces": ["initialiseAuthorityPacketStore"],
+      "macros": [],
+      "cases": [
+        {"id":"B01-NEG","surface":"initialiseAuthorityPacketStore","input":{"variant":"missing-or-wrong-store"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_STORE_UNAVAILABLE","side_effects":"none"}},
+        {"id":"B01-POS","surface":"initialiseAuthorityPacketStore","input":{"variant":"verified-private-v4-store"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"store-ready"}}
+      ],
+      "forbidden_behaviour": ["implicit-migration"]
+    },
+    {
+      "id": "B02",
+      "invariant": "An interrupted insertion transaction leaves no partial artifact.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"B02-NEG","surface":"persistAuthorityPacket","input":{"variant":"writer-killed-before-commit"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_WRITE_FAILED","side_effects":"zero-artifacts"}},
+        {"id":"B02-POS","surface":"persistAuthorityPacket","input":{"variant":"committed-complete-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-complete-row"}}
+      ],
+      "forbidden_behaviour": ["partial-insert"]
+    },
+    {
+      "id": "B03",
+      "invariant": "A producer crash before readback cannot create acceptance.",
+      "surfaces": ["bindWebPacketAcceptance"],
+      "macros": [],
+      "cases": [
+        {"id":"B03-NEG","surface":"bindWebPacketAcceptance","input":{"variant":"producer-crash-before-readback"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_READBACK_FAILED","side_effects":"no-acceptance-event"}},
+        {"id":"B03-POS","surface":"bindWebPacketAcceptance","input":{"variant":"new-fresh-readback"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-readback-one-acceptance"}}
+      ],
+      "forbidden_behaviour": ["unreadbacked-acceptance"]
+    },
+    {
+      "id": "B04",
+      "invariant": "Fresh-process retrieval survives loss of producer process and session fixtures.",
+      "surfaces": ["verifyAuthorityPacketFresh"],
+      "macros": [],
+      "cases": [
+        {"id":"B04-NEG","surface":"verifyAuthorityPacketFresh","input":{"variant":"producer-session-only"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_NOT_FOUND","side_effects":"none"}},
+        {"id":"B04-POS","surface":"verifyAuthorityPacketFresh","input":{"variant":"durable-complete-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"byte-equal-delivery"}}
+      ],
+      "forbidden_behaviour": ["session-only-custody"]
+    },
+    {
+      "id": "B05",
+      "invariant": "Acceptance recovery is idempotent after a projection interruption.",
+      "surfaces": ["bindWebPacketAcceptance"],
+      "macros": [],
+      "cases": [
+        {"id":"B05-NEG","surface":"bindWebPacketAcceptance","input":{"variant":"acceptance-write-interrupted"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_WRITE_FAILED","side_effects":"no-duplicate-artifact"}},
+        {"id":"B05-POS","surface":"bindWebPacketAcceptance","input":{"variant":"same-identity-recovery"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-acceptance-identity"}}
+      ],
+      "forbidden_behaviour": ["duplicate-acceptance"]
+    },
+    {
+      "id": "B06",
+      "invariant": "Projection write uncertainty is reconciled by fresh state, not blind repetition.",
+      "surfaces": ["confirmCurrentPacketProjection"],
+      "macros": [],
+      "cases": [
+        {"id":"B06-NEG","surface":"confirmCurrentPacketProjection","input":{"variant":"lost-projection-response"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"no-blind-repeat"}},
+        {"id":"B06-POS","surface":"confirmCurrentPacketProjection","input":{"variant":"fresh-current-revision"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-current-readback"}}
+      ],
+      "forbidden_behaviour": ["blind-projection-retry"]
+    },
+    {
+      "id": "C01",
+      "invariant": "Any semantic content mutation invalidates the complete artifact identity.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"C01-NEG","surface":"validateAuthorityPacket","input":{"variant":"section-or-evidence-tamper"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_IDENTITY_MISMATCH","side_effects":"none"}},
+        {"id":"C01-POS","surface":"validateAuthorityPacket","input":{"variant":"unchanged-complete-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["partial-digest-recompute"]
+    },
+    {
+      "id": "C02",
+      "invariant": "Packet identifiers are recomputed from the whole canonical artifact.",
+      "surfaces": ["authorityPacketIdentities"],
+      "macros": [],
+      "cases": [
+        {"id":"C02-NEG","surface":"authorityPacketIdentities","input":{"variant":"content-only-recompute"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_IDENTITY_MISMATCH","side_effects":"none"}},
+        {"id":"C02-POS","surface":"authorityPacketIdentities","input":{"variant":"whole-artifact-recompute"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"deterministic-identities"}}
+      ],
+      "forbidden_behaviour": ["content-only-identity"]
+    },
+    {
+      "id": "C03",
+      "invariant": "Custody is bound to the exact namespace database identity.",
+      "surfaces": ["authorityPacketStoreIdentity"],
+      "macros": [],
+      "cases": [
+        {"id":"C03-NEG","surface":"authorityPacketStoreIdentity","input":{"variant":"wrong-namespace-or-relocation"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_STORE_IDENTITY_MISMATCH","side_effects":"none"}},
+        {"id":"C03-POS","surface":"authorityPacketStoreIdentity","input":{"variant":"pinned-private-store"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"stable-store-identity"}}
+      ],
+      "forbidden_behaviour": ["relocated-store-substitution"]
+    },
+    {
+      "id": "C04",
+      "invariant": "Repository, parent, child, lane and owner bindings are independently exact.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"C04-NEG","surface":"validateAuthorityPacket","input":{"variant":"changed-ownership-binding"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_BINDING_MISMATCH","side_effects":"none"}},
+        {"id":"C04-POS","surface":"validateAuthorityPacket","input":{"variant":"exact-namespace-binding"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["same-pr-binding-shortcut"]
+    },
+    {
+      "id": "C05",
+      "invariant": "Producer run, lock, stage, role and schema remain immutable.",
+      "surfaces": ["readAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"C05-NEG","surface":"readAuthorityPacket","input":{"variant":"producer-relabel"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_BINDING_MISMATCH","side_effects":"none"}},
+        {"id":"C05-POS","surface":"readAuthorityPacket","input":{"variant":"original-producer"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"original-retained"}}
+      ],
+      "forbidden_behaviour": ["producer-relabel"]
+    },
+    {
+      "id": "C06",
+      "invariant": "Authority revision must be current or explicitly reusable.",
+      "surfaces": ["readAuthority"],
+      "macros": [],
+      "cases": [
+        {"id":"C06-NEG","surface":"readAuthority","input":{"variant":"missing-or-superseded-authority"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_AUTHORITY_UNVERIFIED","side_effects":"none"}},
+        {"id":"C06-POS","surface":"readAuthority","input":{"variant":"exact-current-authority"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"fresh-authority-bound"}}
+      ],
+      "forbidden_behaviour": ["stale-authority-reuse"]
+    },
+    {
+      "id": "C07",
+      "invariant": "Candidate PR, head, tree and base are exact and successor applicability is explicit.",
+      "surfaces": ["readCandidate"],
+      "macros": [],
+      "cases": [
+        {"id":"C07-NEG","surface":"readCandidate","input":{"variant":"changed-candidate"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_BINDING_MISMATCH","side_effects":"none"}},
+        {"id":"C07-POS","surface":"readCandidate","input":{"variant":"exact-or-explicit-successor"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"candidate-bound"}}
+      ],
+      "forbidden_behaviour": ["same-pr-candidate-shortcut"]
+    },
+    {
+      "id": "C08",
+      "invariant": "Producer and consumer identities remain distinct while sharing an explicit dependency.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"C08-NEG","surface":"admitSemanticGate","input":{"variant":"consumer-relabelled-producer"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_BINDING_MISMATCH","side_effects":"none"}},
+        {"id":"C08-POS","surface":"admitSemanticGate","input":{"variant":"distinct-consumer-reference"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"distinct-bound-consumer"}}
+      ],
+      "forbidden_behaviour": ["producer-consumer-collapse"]
+    },
+    {
+      "id": "C09",
+      "invariant": "Web acceptance references the exact packet, readback and decision.",
+      "surfaces": ["bindWebPacketAcceptance"],
+      "macros": [],
+      "cases": [
+        {"id":"C09-NEG","surface":"bindWebPacketAcceptance","input":{"variant":"wrong-packet-or-revision"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ACCEPTANCE_UNVERIFIED","side_effects":"no-acceptance-event"}},
+        {"id":"C09-POS","surface":"bindWebPacketAcceptance","input":{"variant":"exact-web-reference"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"bound-acceptance"}}
+      ],
+      "forbidden_behaviour": ["caller-authored-acceptance"]
+    },
+    {
+      "id": "D01",
+      "invariant": "Closed canonical packet validation rejects malformed values and alternate encodings.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"D01-NEG-accessor","surface":"validateAuthorityPacket","input":{"variant":"accessor"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-self-modifying-accessor","surface":"validateAuthorityPacket","input":{"variant":"self-modifying-accessor"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-proxy","surface":"validateAuthorityPacket","input":{"variant":"proxy"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-revoked-proxy","surface":"validateAuthorityPacket","input":{"variant":"revoked-proxy"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-function","surface":"validateAuthorityPacket","input":{"variant":"function"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-symbol-value","surface":"validateAuthorityPacket","input":{"variant":"symbol-value"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-symbol-key","surface":"validateAuthorityPacket","input":{"variant":"symbol-key"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-inherited-data","surface":"validateAuthorityPacket","input":{"variant":"inherited-data"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-custom-prototype","surface":"validateAuthorityPacket","input":{"variant":"custom-prototype"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-toJSON","surface":"validateAuthorityPacket","input":{"variant":"toJSON"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-non-enumerable","surface":"validateAuthorityPacket","input":{"variant":"non-enumerable"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-sparse-array","surface":"validateAuthorityPacket","input":{"variant":"sparse-array"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-array-extra-property","surface":"validateAuthorityPacket","input":{"variant":"array-extra-property"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-cycle","surface":"validateAuthorityPacket","input":{"variant":"cycle"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-undefined","surface":"validateAuthorityPacket","input":{"variant":"undefined"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-bigint","surface":"validateAuthorityPacket","input":{"variant":"bigint"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-fraction","surface":"validateAuthorityPacket","input":{"variant":"fraction"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-unsafe-number","surface":"validateAuthorityPacket","input":{"variant":"unsafe-number"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-non-finite-number","surface":"validateAuthorityPacket","input":{"variant":"non-finite-number"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-negative-zero","surface":"validateAuthorityPacket","input":{"variant":"negative-zero"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-unpaired-surrogate","surface":"validateAuthorityPacket","input":{"variant":"unpaired-surrogate"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-unknown-key","surface":"validateAuthorityPacket","input":{"variant":"unknown-key"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-unknown-discriminant","surface":"validateAuthorityPacket","input":{"variant":"unknown-discriminant"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-duplicate-json-key","surface":"validateAuthorityPacket","input":{"variant":"duplicate-json-key"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-alternate-whitespace","surface":"validateAuthorityPacket","input":{"variant":"alternate-whitespace"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-key-order","surface":"validateAuthorityPacket","input":{"variant":"key-order"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-escaping","surface":"validateAuthorityPacket","input":{"variant":"escaping"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-trailing-newline","surface":"validateAuthorityPacket","input":{"variant":"trailing-newline"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-bom","surface":"validateAuthorityPacket","input":{"variant":"bom"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-NEG-malformed-utf8","surface":"validateAuthorityPacket","input":{"variant":"malformed-utf8"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D01-POS","surface":"validateAuthorityPacket","input":{"variant":"canonical-multiline-packet"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["alternate-serialization"]
+    },
+    {
+      "id": "D02",
+      "invariant": "Unknown versions and downgrade attempts are rejected.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"D02-NEG","surface":"validateAuthorityPacket","input":{"variant":"unknown-or-downgraded-schema"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_SCHEMA_UNSUPPORTED","side_effects":"none"}},
+        {"id":"D02-POS","surface":"validateAuthorityPacket","input":{"variant":"authority-packet-v1"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["schema-downgrade"]
+    },
+    {
+      "id": "D03",
+      "invariant": "Sensitive values in every content-bearing field reject persistence.",
+      "surfaces": ["screenPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"D03-NEG","surface":"screenPacket","input":{"variant":"credential-private-canary"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_PRIVACY_REJECTED","side_effects":"zero-artifacts"}},
+        {"id":"D03-POS","surface":"screenPacket","input":{"variant":"safe-policy-discussion"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"screened"}}
+      ],
+      "forbidden_behaviour": ["silent-redaction"]
+    },
+    {
+      "id": "D04",
+      "invariant": "Oversize and unsafe values fail before content-changing insertion.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"D04-NEG","surface":"persistAuthorityPacket","input":{"variant":"oversize-or-unsafe"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LIMIT","side_effects":"zero-artifacts"}},
+        {"id":"D04-POS","surface":"persistAuthorityPacket","input":{"variant":"boundary-sized-safe"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"exact-preserved"}}
+      ],
+      "forbidden_behaviour": ["cleanup-on-capacity-pressure"]
+    },
+    {
+      "id": "D05",
+      "invariant": "Supporting evidence references survive exact roundtrip but references alone do not.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"D05-NEG","surface":"validateAuthorityPacket","input":{"variant":"reference-only-body"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_VALUE_INVALID","side_effects":"none"}},
+        {"id":"D05-POS","surface":"validateAuthorityPacket","input":{"variant":"complete-sections-and-refs"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"exact-roundtrip"}}
+      ],
+      "forbidden_behaviour": ["reference-only-custody"]
+    },
+    {
+      "id": "E01",
+      "invariant": "Same-process objects and envelopes cannot substitute for fresh-process proof.",
+      "surfaces": ["verifyAuthorityPacketFresh"],
+      "macros": [],
+      "cases": [
+        {"id":"E01-NEG","surface":"verifyAuthorityPacketFresh","input":{"variant":"same-process-reread"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_READBACK_FAILED","side_effects":"none"}},
+        {"id":"E01-POS","surface":"verifyAuthorityPacketFresh","input":{"variant":"fresh-os-process"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"read-only-proof"}}
+      ],
+      "forbidden_behaviour": ["same-process-proof"]
+    },
+    {
+      "id": "E02",
+      "invariant": "Delivery requires the envelope and exact full packet.",
+      "surfaces": ["validateAuthorityPacketDelivery"],
+      "macros": [],
+      "cases": [
+        {"id":"E02-NEG","surface":"validateAuthorityPacketDelivery","input":{"variant":"envelope-only-or-truncated"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_READBACK_FAILED","side_effects":"none"}},
+        {"id":"E02-POS","surface":"validateAuthorityPacketDelivery","input":{"variant":"envelope-plus-full-packet"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"byte-equal-delivery"}}
+      ],
+      "forbidden_behaviour": ["envelope-only-authority"]
+    },
+    {
+      "id": "E03",
+      "invariant": "Delivery mutations are detected by consumer recomputation.",
+      "surfaces": ["validateAuthorityPacketDelivery"],
+      "macros": [],
+      "cases": [
+        {"id":"E03-NEG","surface":"validateAuthorityPacketDelivery","input":{"variant":"modified-delivery"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_IDENTITY_MISMATCH","side_effects":"none"}},
+        {"id":"E03-POS","surface":"validateAuthorityPacketDelivery","input":{"variant":"unchanged-delivery"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"none"}}
+      ],
+      "forbidden_behaviour": ["trusted-envelope-without-recompute"]
+    },
+    {
+      "id": "E04",
+      "invariant": "G3 can admit from bounded CURRENT and exact accepted predecessor without chat history.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"E04-NEG","surface":"admitSemanticGate","input":{"variant":"chronology-only-input"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-launch"}},
+        {"id":"E04-POS","surface":"admitSemanticGate","input":{"variant":"current-and-predecessor"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"admission-issued"}}
+      ],
+      "forbidden_behaviour": ["chat-history-authority"]
+    },
+    {
+      "id": "E05",
+      "invariant": "Every direct consequential entry point requires the common receipt-owned prerequisite.",
+      "surfaces": [
+        "receipt.startRun",
+        "receipt.allocateRun->startAllocatedRun",
+        "receipt.admitMutationOperation",
+        "receipt.authorizeMutationDispatch",
+        "loop.admitRun",
+        "loop.prepareRetry",
+        "loop.transitionRun.admitted",
+        "loop.transitionRun.running",
+        "loop.startDelegatedRun",
+        "loop.atomicBatchCommit",
+        "loop.executeTypedGitCommit",
+        "loop.commitExact",
+        "loop.completeRun",
+        "loop.transitionRun.terminal",
+        "loop.governedCompletion",
+        "loop.releaseMutationLease",
+        "receipt.appendReceipt",
+        "assurance.admitG4",
+        "assurance.evaluateAssurance",
+        "assurance.evaluateG4A",
+        "assurance.evaluateNoByteReviewDisposition",
+        "assurance.evaluateInvalidation",
+        "assurance.evaluateFinality"
+      ],
+      "macros": [],
+      "cases": [
+        {"id":"E05-NEG","input":{"variant":"missing-handle"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"zero-side-effects"}},
+        {"id":"E05-POS","input":{"variant":"valid-handle"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"fresh-proof"}}
+      ],
+      "forbidden_behaviour": ["direct-entry-bypass"]
+    },
+    {
+      "id": "E06",
+      "invariant": "Wrappers, aliases and atomic paths cannot substitute for the common prerequisite.",
+      "surfaces": [
+        "receipt.startRun",
+        "receipt.allocateRun->startAllocatedRun",
+        "receipt.admitMutationOperation",
+        "receipt.authorizeMutationDispatch",
+        "loop.admitRun",
+        "loop.prepareRetry",
+        "loop.transitionRun.admitted",
+        "loop.transitionRun.running",
+        "loop.startDelegatedRun",
+        "loop.atomicBatchCommit",
+        "loop.executeTypedGitCommit",
+        "loop.commitExact",
+        "loop.completeRun",
+        "loop.transitionRun.terminal",
+        "loop.governedCompletion",
+        "loop.releaseMutationLease",
+        "receipt.appendReceipt",
+        "assurance.admitG4",
+        "assurance.evaluateAssurance",
+        "assurance.evaluateG4A",
+        "assurance.evaluateNoByteReviewDisposition",
+        "assurance.evaluateInvalidation",
+        "assurance.evaluateFinality"
+      ],
+      "macros": [],
+      "cases": [
+        {"id":"E06-NEG","input":{"variant":"wrapper-or-alias-bypass"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"zero-dispatch"}},
+        {"id":"E06-POS","input":{"variant":"valid-common-prerequisite"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-intent"}}
+      ],
+      "forbidden_behaviour": ["wrapper-bypass"]
+    },
+    {
+      "id": "E07",
+      "invariant": "Durable lifecycle summaries cannot reconstruct a semantic admission.",
+      "surfaces": ["recoverSemanticGateAdmission"],
+      "macros": [],
+      "cases": [
+        {"id":"E07-NEG","surface":"recoverSemanticGateAdmission","input":{"variant":"lifecycle-only-reconstruction"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-recovery"}},
+        {"id":"E07-POS","surface":"recoverSemanticGateAdmission","input":{"variant":"fresh-packet-acceptance-recovery"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"recovered-handle"}}
+      ],
+      "forbidden_behaviour": ["lifecycle-summary-substitution"]
+    },
+    {
+      "id": "E08",
+      "invariant": "CURRENT readback is mandatory for admission.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"E08-NEG","surface":"admitSemanticGate","input":{"variant":"missing-or-mismatched-current-readback"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"no-launch"}},
+        {"id":"E08-POS","surface":"admitSemanticGate","input":{"variant":"exact-current-readback"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"admission-issued"}}
+      ],
+      "forbidden_behaviour": ["current-readback-waiver"]
+    },
+    {
+      "id": "F01",
+      "invariant": "CURRENT contains only bounded dependency references and no packet body.",
+      "surfaces": ["buildCurrentPacketProjection"],
+      "macros": [],
+      "cases": [
+        {"id":"F01-NEG","surface":"buildCurrentPacketProjection","input":{"variant":"body-or-manifest-in-current"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"no-projection"}},
+        {"id":"F01-POS","surface":"buildCurrentPacketProjection","input":{"variant":"bounded-references-only"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"bounded-projection"}}
+      ],
+      "forbidden_behaviour": ["body-in-current"]
+    },
+    {
+      "id": "F02",
+      "invariant": "Repeated persistence, acceptance and projection preserve one immutable artifact.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"F02-NEG","surface":"persistAuthorityPacket","input":{"variant":"repeated-content-changing-write"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONFLICT","side_effects":"one-artifact"}},
+        {"id":"F02-POS","surface":"persistAuthorityPacket","input":{"variant":"repeated-identical-write"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-artifact"}}
+      ],
+      "forbidden_behaviour": ["duplicate-artifact"]
+    },
+    {
+      "id": "F03",
+      "invariant": "CURRENT may shrink only after obsolete dependencies cease to be required; custody remains.",
+      "surfaces": ["confirmCurrentPacketProjection"],
+      "macros": [],
+      "cases": [
+        {"id":"F03-NEG","surface":"confirmCurrentPacketProjection","input":{"variant":"remove-required-predecessor"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"custody-unchanged"}},
+        {"id":"F03-POS","surface":"confirmCurrentPacketProjection","input":{"variant":"advance-and-remove-obsolete"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"custody-retained"}}
+      ],
+      "forbidden_behaviour": ["custody-shrink-with-current"]
+    },
+    {
+      "id": "F04",
+      "invariant": "Chronology enumeration cannot substitute for bounded CURRENT recovery.",
+      "surfaces": ["recoverSemanticGateAdmission"],
+      "macros": [],
+      "cases": [
+        {"id":"F04-NEG","surface":"recoverSemanticGateAdmission","input":{"variant":"chronology-reader"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-recovery"}},
+        {"id":"F04-POS","surface":"recoverSemanticGateAdmission","input":{"variant":"bounded-current-recovery"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"recovered-handle"}}
+      ],
+      "forbidden_behaviour": ["chronology-substitution"]
+    },
+    {
+      "id": "G01",
+      "invariant": "Identical persistence is idempotent by complete identity.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"G01-NEG","surface":"persistAuthorityPacket","input":{"variant":"identity-mismatch"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONFLICT","side_effects":"one-row"}},
+        {"id":"G01-POS","surface":"persistAuthorityPacket","input":{"variant":"identical-repersistence"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"same-id-one-row"}}
+      ],
+      "forbidden_behaviour": ["replacement-write"]
+    },
+    {
+      "id": "G02",
+      "invariant": "Conflicting content under one producer key cannot replace the original.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"G02-NEG","surface":"persistAuthorityPacket","input":{"variant":"same-producer-conflict"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONFLICT","side_effects":"original-unchanged"}},
+        {"id":"G02-POS","surface":"persistAuthorityPacket","input":{"variant":"original-immutable"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"original-retained"}}
+      ],
+      "forbidden_behaviour": ["overwrite-original"]
+    },
+    {
+      "id": "G03",
+      "invariant": "Concurrent identical writers resolve to one artifact.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"G03-NEG","surface":"persistAuthorityPacket","input":{"variant":"concurrent-conflicting-writers"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONFLICT","side_effects":"at-most-one-artifact"}},
+        {"id":"G03-POS","surface":"persistAuthorityPacket","input":{"variant":"concurrent-identical-writers"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-artifact"}}
+      ],
+      "forbidden_behaviour": ["dual-artifact-race"]
+    },
+    {
+      "id": "G04",
+      "invariant": "Conflicting concurrent writes have one winner and no dual acceptance.",
+      "surfaces": ["persistAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"G04-NEG","surface":"persistAuthorityPacket","input":{"variant":"conflicting-race"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONFLICT","side_effects":"one-winner"}},
+        {"id":"G04-POS","surface":"persistAuthorityPacket","input":{"variant":"serialized-conflict-resolution"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-acceptance"}}
+      ],
+      "forbidden_behaviour": ["dual-acceptance"]
+    },
+    {
+      "id": "G05",
+      "invariant": "Superseded packets and acceptances cannot be replayed as current.",
+      "surfaces": ["revalidateSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"G05-NEG","surface":"revalidateSemanticGate","input":{"variant":"superseded-predecessor"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_STALE_REPLAY","side_effects":"no-dispatch"}},
+        {"id":"G05-POS","surface":"revalidateSemanticGate","input":{"variant":"current-predecessor"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"fresh-proof"}}
+      ],
+      "forbidden_behaviour": ["stale-replay"]
+    },
+    {
+      "id": "G06",
+      "invariant": "Ambiguous insertion, readback, projection and dispatch outcomes reconcile without duplicate side effects.",
+      "surfaces": ["recordSemanticGateDispatch"],
+      "macros": [],
+      "cases": [
+        {"id":"G06-NEG","surface":"recordSemanticGateDispatch","input":{"variant":"ambiguous-outcome"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_DISPATCH_UNRESOLVED","side_effects":"no-relaunch"}},
+        {"id":"G06-POS","surface":"recordSemanticGateDispatch","input":{"variant":"definitive-outcome"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-recorded-outcome"}}
+      ],
+      "forbidden_behaviour": ["automatic-relaunch"]
+    },
+    {
+      "id": "H01",
+      "invariant": "No-predecessor admission requires explicit trusted classification.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"H01-NEG","surface":"admitSemanticGate","input":{"variant":"missing-no-predecessor-classification"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-admission"}},
+        {"id":"H01-POS","surface":"admitSemanticGate","input":{"variant":"trusted-no-predecessor"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"admission-issued"}}
+      ],
+      "forbidden_behaviour": ["missing-defaults-to-no-predecessor"]
+    },
+    {
+      "id": "H02",
+      "invariant": "Declared consumers and finality applicability remain bound to authority.",
+      "surfaces": ["buildCurrentPacketProjection"],
+      "macros": [],
+      "cases": [
+        {"id":"H02-NEG","surface":"buildCurrentPacketProjection","input":{"variant":"changed-consumer-set"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"no-projection"}},
+        {"id":"H02-POS","surface":"buildCurrentPacketProjection","input":{"variant":"declared-applicability"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"bound-current"}}
+      ],
+      "forbidden_behaviour": ["consumer-set-inference"]
+    },
+    {
+      "id": "H03",
+      "invariant": "Required packets remain retrievable through process restart and pending finality.",
+      "surfaces": ["readAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"H03-NEG","surface":"readAuthorityPacket","input":{"variant":"required-packet-unreadable"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_NOT_FOUND","side_effects":"finality-blocked"}},
+        {"id":"H03-POS","surface":"readAuthorityPacket","input":{"variant":"sequential-consumer-retention"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"exactly-retrievable"}}
+      ],
+      "forbidden_behaviour": ["premature-deletion"]
+    },
+    {
+      "id": "H04",
+      "invariant": "Append-only custody survives update, delete, replace and capacity-pressure cleanup attempts.",
+      "surfaces": ["readAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"H04-NEG","surface":"readAuthorityPacket","input":{"variant":"update-delete-replace-cleanup"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONTENT_MISMATCH","side_effects":"required-row-retained"}},
+        {"id":"H04-POS","surface":"readAuthorityPacket","input":{"variant":"capacity-blocks-new-writes"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"existing-readable"}}
+      ],
+      "forbidden_behaviour": ["retained-packet-cleanup"]
+    },
+    {
+      "id": "H05",
+      "invariant": "Explicitly authorised complete historical packets may be backfilled without relabelling the producer.",
+      "surfaces": ["backfillAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"H05-NEG","surface":"backfillAuthorityPacket","input":{"variant":"inferred-or-incomplete-source"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LEGACY_BACKFILL_UNVERIFIED","side_effects":"no-artifact"}},
+        {"id":"H05-POS","surface":"backfillAuthorityPacket","input":{"variant":"complete-explicit-source"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"original-producer-retained"}}
+      ],
+      "forbidden_behaviour": ["producer-relabel-on-backfill"]
+    },
+    {
+      "id": "H06",
+      "invariant": "Summaries, fragments, memory and inferred historical values cannot be backfill sources.",
+      "surfaces": ["backfillAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"H06-NEG","surface":"backfillAuthorityPacket","input":{"variant":"summary-fragment-memory"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LEGACY_RERUN_REQUIRED","side_effects":"no-artifact"}},
+        {"id":"H06-POS","surface":"backfillAuthorityPacket","input":{"variant":"named-complete-source"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"ordinary-validation"}}
+      ],
+      "forbidden_behaviour": ["inferred-history"]
+    },
+    {
+      "id": "H07",
+      "invariant": "Unprovable required historical dependencies return typed rerun-required HOLD.",
+      "surfaces": ["backfillAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"H07-NEG","surface":"backfillAuthorityPacket","input":{"variant":"required-source-unprovable"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LEGACY_RERUN_REQUIRED","side_effects":"no-grandfathering"}},
+        {"id":"H07-POS","surface":"backfillAuthorityPacket","input":{"variant":"provable-required-source"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"fresh-custody"}}
+      ],
+      "forbidden_behaviour": ["historical-grandfathering"]
+    },
+    {
+      "id": "I01",
+      "invariant": "Runtime and workers cannot create Web acceptance or finality authority.",
+      "surfaces": ["bindWebPacketAcceptance"],
+      "macros": [],
+      "cases": [
+        {"id":"I01-NEG","surface":"bindWebPacketAcceptance","input":{"variant":"runtime-self-approval"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ACCEPTANCE_UNVERIFIED","side_effects":"no-acceptance-event"}},
+        {"id":"I01-POS","surface":"bindWebPacketAcceptance","input":{"variant":"independent-web-decision"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"recordable-decision"}}
+      ],
+      "forbidden_behaviour": ["runtime-self-authority"]
+    },
+    {
+      "id": "I02",
+      "invariant": "Transport readback proves delivery only and cannot mint semantic authority.",
+      "surfaces": ["verifyAuthorityPacketFresh"],
+      "macros": [],
+      "cases": [
+        {"id":"I02-NEG","surface":"verifyAuthorityPacketFresh","input":{"variant":"transport-as-authority"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-admission"}},
+        {"id":"I02-POS","surface":"verifyAuthorityPacketFresh","input":{"variant":"delivery-only-proof"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"no-authority-mint"}}
+      ],
+      "forbidden_behaviour": ["transport-authority"]
+    },
+    {
+      "id": "I03",
+      "invariant": "Existing receipt and privacy negative contracts remain rejecting.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"I03-NEG","surface":"validateAuthorityPacket","input":{"variant":"existing-negative-fixture"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_PRIVACY_REJECTED","side_effects":"none"}},
+        {"id":"I03-POS","surface":"validateAuthorityPacket","input":{"variant":"existing-safe-fixture"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"legacy-pass-retained"}}
+      ],
+      "forbidden_behaviour": ["weakened-legacy-negative"]
+    },
+    {
+      "id": "I04",
+      "invariant": "Cross-repository packets fail at every consequential admission surface.",
+      "surfaces": [
+        "receipt.startRun",
+        "receipt.allocateRun->startAllocatedRun",
+        "receipt.admitMutationOperation",
+        "receipt.authorizeMutationDispatch",
+        "loop.admitRun",
+        "loop.prepareRetry",
+        "loop.transitionRun.admitted",
+        "loop.transitionRun.running",
+        "loop.startDelegatedRun",
+        "loop.atomicBatchCommit",
+        "loop.executeTypedGitCommit",
+        "loop.commitExact",
+        "loop.completeRun",
+        "loop.transitionRun.terminal",
+        "loop.governedCompletion",
+        "loop.releaseMutationLease",
+        "receipt.appendReceipt",
+        "assurance.admitG4",
+        "assurance.evaluateAssurance",
+        "assurance.evaluateG4A",
+        "assurance.evaluateNoByteReviewDisposition",
+        "assurance.evaluateInvalidation",
+        "assurance.evaluateFinality"
+      ],
+      "macros": [],
+      "cases": [
+        {"id":"I04-NEG","input":{"variant":"cross-repository"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_BINDING_MISMATCH","side_effects":"no-launch"}},
+        {"id":"I04-POS","input":{"variant":"same-repository-exact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"admission-issued"}}
+      ],
+      "forbidden_behaviour": ["cross-repository-reuse"]
+    },
+    {
+      "id": "I05",
+      "invariant": "Packet custody remains offline and does not fall back to a network store.",
+      "surfaces": ["initialiseAuthorityPacketStore"],
+      "macros": [],
+      "cases": [
+        {"id":"I05-NEG","surface":"initialiseAuthorityPacketStore","input":{"variant":"network-store-fallback"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_STORE_UNAVAILABLE","side_effects":"no-network-fallback"}},
+        {"id":"I05-POS","surface":"initialiseAuthorityPacketStore","input":{"variant":"offline-private-sqlite"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"local-custody"}}
+      ],
+      "forbidden_behaviour": ["network-custody-fallback"]
+    },
+    {
+      "id": "I06",
+      "invariant": "Lifecycle receipts, compiler artifacts and chronology are not canonical custody.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"I06-NEG","surface":"admitSemanticGate","input":{"variant":"lifecycle-or-compiler-custody"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-admission"}},
+        {"id":"I06-POS","surface":"admitSemanticGate","input":{"variant":"private-receipt-artifact"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"admission-issued"}}
+      ],
+      "forbidden_behaviour": ["compiler-custody"]
+    },
+    {
+      "id": "X01",
+      "invariant": "V2 to V4 migration is explicit, quiescent and preserves historical bytes while V3 remains dormant.",
+      "surfaces": ["migrateAuthorityPacketStore"],
+      "macros": [],
+      "cases": [
+        {"id":"X01-NEG","surface":"migrateAuthorityPacketStore","input":{"variant":"v3-or-nonquiescent-source"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_MIGRATION_SOURCE_INVALID","side_effects":"v2-unchanged"}},
+        {"id":"X01-POS","surface":"migrateAuthorityPacketStore","input":{"variant":"exact-quiescent-v2"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"v4-historical-preserved"}}
+      ],
+      "forbidden_behaviour": ["v3-activation"]
+    },
+    {
+      "id": "X02",
+      "invariant": "Schema fingerprints, append-only guards and relational bindings are independently verified on reopen.",
+      "surfaces": ["initialiseAuthorityPacketStore"],
+      "macros": [],
+      "cases": [
+        {"id":"X02-NEG","surface":"initialiseAuthorityPacketStore","input":{"variant":"altered-schema-guard"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONTENT_MISMATCH","side_effects":"store-blocked"}},
+        {"id":"X02-POS","surface":"initialiseAuthorityPacketStore","input":{"variant":"exact-schema-and-guards"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"reopen-verified"}}
+      ],
+      "forbidden_behaviour": ["guard-removal"]
+    },
+    {
+      "id": "X03",
+      "invariant": "Fresh-reader runtime, stream, challenge and environment boundaries fail closed.",
+      "surfaces": ["verifyAuthorityPacketFresh"],
+      "macros": [],
+      "cases": [
+        {"id":"X03-NEG","surface":"verifyAuthorityPacketFresh","input":{"variant":"runtime-injection-timeout-stream"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_READBACK_FAILED","side_effects":"none"}},
+        {"id":"X03-POS","surface":"verifyAuthorityPacketFresh","input":{"variant":"canonical-scrubbed-reader"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"one-json-line"}}
+      ],
+      "forbidden_behaviour": ["injected-reader-environment"]
+    },
+    {
+      "id": "X04",
+      "invariant": "Packet delivery has its own bounded capacity and does not alter the RUN_STARTED ceiling.",
+      "surfaces": ["validateAuthorityPacketDelivery"],
+      "macros": [],
+      "cases": [
+        {"id":"X04-NEG","surface":"validateAuthorityPacketDelivery","input":{"variant":"delivery-over-capacity"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LIMIT","side_effects":"none"}},
+        {"id":"X04-POS","surface":"validateAuthorityPacketDelivery","input":{"variant":"valid-over-16k-packet"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"run-started-limit-unchanged"}}
+      ],
+      "forbidden_behaviour": ["legacy-limit-change"]
+    },
+    {
+      "id": "X05",
+      "invariant": "Receipt and Loop imports expose complete APIs without circularity bypass.",
+      "surfaces": ["admitSemanticGate"],
+      "macros": [],
+      "cases": [
+        {"id":"X05-NEG","surface":"admitSemanticGate","input":{"variant":"partial-circular-export"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"no-bypass"}},
+        {"id":"X05-POS","surface":"admitSemanticGate","input":{"variant":"both-import-orders"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"complete-api"}}
+      ],
+      "forbidden_behaviour": ["partial-export-bypass"]
+    },
+    {
+      "id": "X06",
+      "invariant": "A crash after dispatch intent produces an ambiguous hold and no automatic relaunch.",
+      "surfaces": ["recoverSemanticGateAdmission"],
+      "macros": [],
+      "cases": [
+        {"id":"X06-NEG","surface":"recoverSemanticGateAdmission","input":{"variant":"intent-without-outcome"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_DISPATCH_UNRESOLVED","side_effects":"no-relaunch"}},
+        {"id":"X06-POS","surface":"recoverSemanticGateAdmission","input":{"variant":"definitive-not-started"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"new-attempt-permitted"}}
+      ],
+      "forbidden_behaviour": ["automatic-relaunch"]
+    },
+    {
+      "id": "X07",
+      "invariant": "Historical absent packet fields preserve exact projection bytes while explicit fields roundtrip.",
+      "surfaces": ["buildCurrentPacketProjection"],
+      "macros": [],
+      "cases": [
+        {"id":"X07-NEG","surface":"buildCurrentPacketProjection","input":{"variant":"historical-byte-drift"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CURRENT_UNVERIFIED","side_effects":"legacy-bytes-preserved"}},
+        {"id":"X07-POS","surface":"buildCurrentPacketProjection","input":{"variant":"explicit-field-roundtrip"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"projection-preserved"}}
+      ],
+      "forbidden_behaviour": ["historical-byte-rewrite"]
+    },
+    {
+      "id": "X08",
+      "invariant": "Combined source integration preserves Run-059 compiler oracles and all nine #448 shipping tests.",
+      "surfaces": ["validateAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"X08-NEG","surface":"validateAuthorityPacket","input":{"variant":"integration-regression"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_CONTENT_MISMATCH","side_effects":"candidate-blocked"}},
+        {"id":"X08-POS","surface":"validateAuthorityPacket","input":{"variant":"retained-integration"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"compiler-and-shipping-green"}}
+      ],
+      "forbidden_behaviour": ["retained-test-regression"]
+    },
+    {
+      "id": "X09",
+      "invariant": "Plain objects shaped like routes, reports or assurance cannot substitute for an opaque admission.",
+      "surfaces": [
+        "receipt.startRun",
+        "receipt.allocateRun->startAllocatedRun",
+        "receipt.admitMutationOperation",
+        "receipt.authorizeMutationDispatch",
+        "loop.admitRun",
+        "loop.prepareRetry",
+        "loop.transitionRun.admitted",
+        "loop.transitionRun.running",
+        "loop.startDelegatedRun",
+        "loop.atomicBatchCommit",
+        "loop.executeTypedGitCommit",
+        "loop.commitExact",
+        "loop.completeRun",
+        "loop.transitionRun.terminal",
+        "loop.governedCompletion",
+        "loop.releaseMutationLease",
+        "receipt.appendReceipt",
+        "assurance.admitG4",
+        "assurance.evaluateAssurance",
+        "assurance.evaluateG4A",
+        "assurance.evaluateNoByteReviewDisposition",
+        "assurance.evaluateInvalidation",
+        "assurance.evaluateFinality"
+      ],
+      "macros": [],
+      "cases": [
+        {"id":"X09-NEG","input":{"variant":"plain-shaped-object"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_ADMISSION_REQUIRED","side_effects":"zero-side-effects"}},
+        {"id":"X09-POS","input":{"variant":"opaque-runtime-handle"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"fresh-proof"}}
+      ],
+      "forbidden_behaviour": ["shape-based-admission"]
+    },
+    {
+      "id": "X10",
+      "invariant": "Capacity blocks new writes but required existing packets remain readable.",
+      "surfaces": ["readAuthorityPacket"],
+      "macros": [],
+      "cases": [
+        {"id":"X10-NEG","surface":"readAuthorityPacket","input":{"variant":"capacity-read-delete-fallback"},"expected":{"outcome":"REJECT","reason_code":"GPR_PACKET_LIMIT","side_effects":"no-delete"}},
+        {"id":"X10-POS","surface":"readAuthorityPacket","input":{"variant":"existing-required-read"},"expected":{"outcome":"ACCEPT","positive_control":true,"side_effects":"existing-readable"}}
+      ],
+      "forbidden_behaviour": ["capacity-cleanup"]
+    }
+  ],
+  "required_validation": [
+    "node --check",
+    "node --test",
+    "node repo/scripts/validate-toolkit.cjs",
+    "git diff --check"
+  ],
+  "required_evidence": [
+    "oracle-inventory-and-counts",
+    "exact-assertion-results",
+    "zero-side-effect-counters",
+    "migration-and-byte-preservation",
+    "compiler-coverage",
+    "secret-privacy-audit"
+  ]
+}

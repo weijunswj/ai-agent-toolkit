@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.controller.resource-evidence.v1",
+  "title": "Native or explicitly isolated repository-test resource evidence",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "physical_total", "physical_available", "commit_total", "commit_available", "host_responsive"],
+      "properties": {
+        "source": { "const": "proc-meminfo" },
+        "physical_total": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "physical_available": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "commit_total": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "commit_available": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "host_responsive": { "const": true }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "physical_total", "physical_available", "commit_total", "commit_available", "host_responsive"],
+      "properties": {
+        "source": { "const": "win32-operating-system" },
+        "physical_total": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "physical_available": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "commit_total": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "commit_available": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "host_responsive": { "const": true }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "fixture_id", "physical_total", "physical_available", "commit_total", "commit_available", "host_responsive"],
+      "properties": {
+        "source": { "const": "repository-test-fixture" },
+        "fixture_id": { "const": "healthy-resource-v1" },
+        "physical_total": { "const": 17179869184 },
+        "physical_available": { "const": 8589934592 },
+        "commit_total": { "const": 34359738368 },
+        "commit_available": { "const": 17179869184 },
+        "host_responsive": { "const": true }
+      }
+    }
+  ],
+  "$defs": {
+    "repositoryTestInvocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invocation", "fixture_id"],
+      "properties": {
+        "invocation": { "const": "toolkit.repository-test.resource.v1" },
+        "fixture_id": { "const": "healthy-resource-v1" }
+      }
+    }
+  }
+}

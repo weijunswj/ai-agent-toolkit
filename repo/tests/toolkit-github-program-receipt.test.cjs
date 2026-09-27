@@ -107,7 +107,16 @@ function options(root = stateRoot(), child = 359) {
 function readers(expectedAuthority, expectedStart, now = '2026-08-30T11:00:00.000Z') {
   return {
     now,
-    readAuthority: async () => ({ authority: structuredClone(expectedAuthority), later_controlling_comments: [] }),
+    readAuthority: async () => ({ authority: structuredClone(expectedAuthority),
+      completion_applicability: {
+        schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+        scope_digest: expectedAuthority.scope_digest,
+        candidate: null,
+        required_consumers: [],
+        retain_through_child_finality: false,
+        retain_through_candidate_finality: false
+      },
+      later_controlling_comments: [] }),
     readStart: async () => structuredClone(expectedStart)
   };
 }
@@ -188,9 +197,9 @@ test('truthful pre-PR start rejects fake candidate and start movement', async ()
     lock: 'LOCK-START-MOVED', authority: expectedAuthority, start: expectedStart,
     candidate: null, lease_ms: 5000
   });
+  assert.deepEqual(allocated, { status: 'PENDING_AUTHORITY_PREFLIGHT' });
   const moved = { ...expectedStart, head_sha: '9'.repeat(40) };
   await assertCodeAsync(() => store.startAllocatedRun(allocated, readers(expectedAuthority, moved, '2026-08-30T11:00:01.000Z')), 'GPR_START_CHANGED');
-  assert.equal(store.classifyRecovery(allocated.run_id, allocated.lease.issued_at).status, 'UNSTARTED_ALLOCATION_ACTIVE');
 });
 
 test('candidate introduction is preview-only and immutable', async () => {
@@ -246,50 +255,54 @@ test('active lease blocks a different Lock and expiry increments Child-wide fenc
     lock: 'LOCK-OLD', authority: auth, start: initialStart, candidate: null,
     lease_ms: 5000
   }, readers(auth, initialStart, '2026-08-30T11:00:00.000Z'));
-  assertCode(() => store.allocateRun({
+  await assertCodeAsync(() => store.startRun({
     lock: 'LOCK-NEW', authority: auth, start: initialStart, candidate: null,
     lease_ms: 5000
-  }), 'GPR_ACTIVE_LEASE');
+  }, readers(auth, initialStart, '2026-08-30T11:00:00.000Z')), 'GPR_ACTIVE_LEASE');
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(old.lease.expires_at) - Date.now() + 50)));
-  const newer = store.allocateRun({
+  const newer = await store.startRun({
     lock: 'LOCK-NEW', authority: auth, start: initialStart, candidate: null,
     lease_ms: 5000
-  });
+  }, readers(auth, initialStart, '2026-08-30T11:00:06.000Z'));
   assert.equal(newer.lease.fence_sequence, 2);
   assertCode(() => store.appendReceipt(old, {
     receipt_type: 'RUN_INTERRUPTED', payload: { classification: 'OLD_HOLDER' }, created_at: nowIso()
   }), 'GPR_NEWER_FENCE_EXISTS');
 });
 
-test('different Children use independent fence high-water databases', () => {
+test('different Children use independent fence high-water databases', async () => {
   const root = stateRoot();
   const auth = authority();
   const initialStart = start();
-  const first = createProgrammeReceiptStore(options(root, 359)).allocateRun({
+  const firstStore = createProgrammeReceiptStore(options(root, 359));
+  const secondStore = createProgrammeReceiptStore(options(root, 360));
+  const first = await firstStore.startRun({
     lock: 'LOCK-A', authority: auth, start: initialStart, candidate: null,
     lease_ms: 5000
-  });
-  const second = createProgrammeReceiptStore(options(root, 360)).allocateRun({
+  }, readers(auth, initialStart));
+  const second = await secondStore.startRun({
     lock: 'LOCK-B', authority: auth, start: initialStart, candidate: null,
     lease_ms: 5000
-  });
+  }, readers(auth, initialStart));
   assert.equal(first.lease.fence_sequence, 1);
   assert.equal(second.lease.fence_sequence, 1);
 });
 
-test('repository casing aliases share one Child-wide coordination namespace', () => {
+test('repository casing aliases share one Child-wide coordination namespace', async () => {
   const root = stateRoot();
   const upperOptions = { ...options(root), repository: 'WeiJunSWJ/AI-Agent-Toolkit' };
   const lowerOptions = options(root);
   const upper = createProgrammeReceiptStore(upperOptions);
   const lower = createProgrammeReceiptStore(lowerOptions);
   assert.equal(upper.databasePath, lower.databasePath);
-  upper.allocateRun({
-    lock: 'LOCK-CASE-A', authority: authority(), start: start(), candidate: null, lease_ms: 5000
-  });
-  assertCode(() => lower.allocateRun({
-    lock: 'LOCK-CASE-B', authority: authority(), start: start(), candidate: null, lease_ms: 5000
-  }), 'GPR_ACTIVE_LEASE');
+  const auth = authority();
+  const initialStart = start();
+  await upper.startRun({
+    lock: 'LOCK-CASE-A', authority: auth, start: initialStart, candidate: null, lease_ms: 5000
+  }, readers(auth, initialStart));
+  await assertCodeAsync(() => lower.startRun({
+    lock: 'LOCK-CASE-B', authority: auth, start: initialStart, candidate: null, lease_ms: 5000
+  }, readers(auth, initialStart)), 'GPR_ACTIVE_LEASE');
 });
 
 test('real child processes serialize concurrent allocation', async () => {
@@ -302,12 +315,19 @@ test('real child processes serialize concurrent allocation', async () => {
   };
   const code = `
     const { createProgrammeReceiptStore } = require(${JSON.stringify(receiptRuntimePath)});
-    try {
-      const session = createProgrammeReceiptStore(${JSON.stringify(storeOptions)}).allocateRun(${JSON.stringify(input)});
+    const input = ${JSON.stringify(input)};
+    const completion_applicability = {
+      schema: 'toolkit.github-program.semantic-completion-applicability.v1',
+      scope_digest: input.authority.scope_digest, candidate: null, required_consumers: [],
+      retain_through_child_finality: false, retain_through_candidate_finality: false
+    };
+    (async () => {
+      const session = await createProgrammeReceiptStore(${JSON.stringify(storeOptions)}).startRun(input, {
+        readAuthority: async () => ({ authority: input.authority, completion_applicability, later_controlling_comments: [] }),
+        readStart: async () => input.start
+      });
       process.stdout.write(JSON.stringify({ ok: true, fence: session.lease.fence_sequence }));
-    } catch (error) {
-      process.stdout.write(JSON.stringify({ ok: false, code: error.code }));
-    }
+    })().catch((error) => process.stdout.write(JSON.stringify({ ok: false, code: error.code })));
   `;
   const results = await Promise.all([runChild(code), runChild(code)]);
   const payloads = results.map((result) => JSON.parse(result.stdout));
@@ -341,10 +361,10 @@ test('allocator high-water and operation-independent fencing survive restart', a
   const current = await startedStore();
   current.store.interruptRun(current.session, { payload: { classification: 'RESTART' }, created_at: nowIso() });
   const restarted = createProgrammeReceiptStore(current.storeOptions);
-  const next = restarted.allocateRun({
+  const next = await restarted.startRun({
     lock: 'LOCK-AFTER-RESTART', authority: current.expectedAuthority, start: current.expectedStart,
     candidate: null, lease_ms: 60000
-  });
+  }, readers(current.expectedAuthority, current.expectedStart));
   assert.equal(next.lease.fence_sequence, current.session.lease.fence_sequence + 1);
 });
 
@@ -360,14 +380,19 @@ test('serialized ownership and a different store object cannot mutate a live run
   }), 'GPR_OWNERSHIP_LOST');
 });
 
-test('unstarted allocation recovery is typed and does not adopt the run', () => {
+test('no-gate split allocation stays pending until trusted start preflight succeeds', async () => {
   const store = createProgrammeReceiptStore(options());
+  const auth = authority();
+  const expectedStart = start();
   const allocated = store.allocateRun({
-    lock: 'LOCK-UNSTARTED', authority: authority(), start: start(), candidate: null,
+    lock: 'LOCK-UNSTARTED', authority: auth, start: expectedStart, candidate: null,
     lease_ms: 1000
   });
-  assert.equal(store.classifyRecovery(allocated.run_id, allocated.lease.issued_at).status, 'UNSTARTED_ALLOCATION_ACTIVE');
-  assert.equal(store.classifyRecovery(allocated.run_id, allocated.lease.expires_at).status, 'UNSTARTED_ALLOCATION_EXPIRED');
+  assert.deepEqual(allocated, { status: 'PENDING_AUTHORITY_PREFLIGHT' });
+  const moved = { ...expectedStart, head_sha: '9'.repeat(40) };
+  await assertCodeAsync(() => store.startAllocatedRun(allocated, readers(auth, moved)), 'GPR_START_CHANGED');
+  const started = await store.startAllocatedRun(allocated, readers(auth, expectedStart));
+  assert.equal(started.started, true);
 });
 
 test('receipt validation rejects IDs, sequence regressions, chain breaks, and binding mismatches', async () => {

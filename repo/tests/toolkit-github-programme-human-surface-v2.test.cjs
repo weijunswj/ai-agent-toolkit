@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 
 const runtime = require('../scripts/toolkit-github-program-state-v5.cjs');
 const Ajv2020 = require('ajv/dist/2020');
@@ -16,6 +17,7 @@ const HISTORICAL_PROOF_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SCHEMA-CONSISTENCY-006
 const REPOSITORY = 'weijunswj/ai-agent-toolkit';
 const MAIN_SHA = '6ed24e4fae973a4c722ff5a604b37ef4921a741e';
 const PROOF_FIXTURE_PATH = path.join(__dirname, 'fixtures/github-program-human-surface/root-005-executable-proof-matrix-v1.json');
+const HISTORICAL_H2_FIXTURE_PATH = path.join(__dirname, 'fixtures/github-program-human-surface/historical-human-v2-j-k-v1.json');
 const HUMAN_SURFACE_SCHEMA_PATH = path.join(__dirname, '..', 'contracts', 'github-program-reconciler', 'human-surface-v2.schema.json');
 
 const proofFixture = JSON.parse(fs.readFileSync(PROOF_FIXTURE_PATH, 'utf8'));
@@ -105,6 +107,42 @@ function boundAuthority(inputDescriptor, prNumber = 400, overrides = {}) {
   return authority;
 }
 
+function authorityPacketCurrent() {
+  const source = {
+    repository: REPOSITORY,
+    issue_number: 435,
+    comment_id: 5772542748,
+    node_id: 'IC_kwDOSTHjGM8AAAABWBIDHA',
+    author_login: 'weijunswj',
+    updated_at: '2026-09-22T07:09:31Z',
+    body_digest: 'a'.repeat(64),
+  };
+  return {
+    schema: runtime.AUTHORITY_PACKET_CURRENT_SCHEMA,
+    repository: REPOSITORY,
+    parent_issue: 240,
+    child_issue: 359,
+    lane_id: 'lane-g3-leaf-d',
+    human_owner: 'weijunswj',
+    consumer: { run: 'run-061', lock: 'lock-061', stage: 'G3', role: 'leaf-d', scope_digest: 'b'.repeat(64) },
+    authority: source,
+    candidate: { pr_number: 447, branch: 'codex/c1-authority-packet', base_ref: 'main', base_sha: 'c'.repeat(40), head_sha: 'd'.repeat(40), tree_sha: 'e'.repeat(40) },
+    predecessors: [{
+      packet_id: 'packet-060',
+      packet_digest: 'f'.repeat(64),
+      content_digest: '1'.repeat(64),
+      binding_digest: '2'.repeat(64),
+      producer: { run: 'run-060', lock: 'lock-060', stage: 'G2', role: 'G2' },
+      candidate: { pr_number: 447, branch: 'codex/c1-foundation', base_ref: 'main', base_sha: '3'.repeat(40), head_sha: '4'.repeat(40), tree_sha: '5'.repeat(40) },
+      dependency_id: 'g2-contract',
+      acceptance_event_id: 'acceptance-060',
+      web_source: source,
+      readback_event_id: 'readback-060',
+      store_identity_digest: '6'.repeat(64),
+    }],
+  };
+}
+
 function historyDecision(parentResult, inputDescriptor, authority, additions) {
   const decision = {
     schema: 'toolkit.github.program.human-history-decision.v2',
@@ -172,6 +210,31 @@ function publicRead(body, expect) {
   return surface.readComplete({ read: completeRead(body), expect });
 }
 
+function historicalH2Bodies() {
+  const record = JSON.parse(fs.readFileSync(HISTORICAL_H2_FIXTURE_PATH, 'utf8'));
+  assert.equal(record.schema, 'toolkit.github.program.historical-human-v2-compatibility.v1');
+  assert.deepEqual(record.producer, {
+    commit: 'da984fbac48c5a825e8d172cb528becd50749cd2',
+    path: 'repo/scripts/toolkit-github-program-state-v5.cjs',
+    blob: 'c3b7a609b8945f9aaaf6b7faed4be4737f3fba31',
+  });
+  const decode = (item) => {
+    assert.equal(item.encoding, 'gzip+base64');
+    assert.ok(Array.isArray(item.body_gzip_base64_chunks));
+    const body = zlib.gunzipSync(Buffer.from(item.body_gzip_base64_chunks.join(''), 'base64'));
+    assert.equal(body.length, item.body_bytes);
+    assert.equal(runtime.sha256Text(body.toString('utf8')), item.body_sha256);
+    return body.toString('utf8');
+  };
+  return {
+    record,
+    j: decode(record.j_graphless),
+    k: decode(record.k_graphful),
+    child: decode(record.j_historical_child),
+    pr: decode(record.j_pr_pre_number),
+  };
+}
+
 function bodySection(body, heading, endHeading) {
   const lines = body.split('\n');
   const start = lines.indexOf(heading);
@@ -203,9 +266,12 @@ function expectFailure(result, code) {
 }
 
 function rewriteParentCarrier(parentResult, mutate) {
-  const lines = parentResult.body.split('\n');
-  const carrierIndex = lines.length - 2;
-  const marker = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ';
+  const sourceBody = typeof parentResult === 'string' ? parentResult : parentResult.body;
+  const lines = sourceBody.split('\n');
+  const carrierIndex = lines.findIndex((line) => line.includes('PARENT-CARRIER human-v2 '));
+  assert.notEqual(carrierIndex, -1);
+  const markerEnd = lines[carrierIndex].indexOf('human-v2 ') + 'human-v2 '.length;
+  const marker = lines[carrierIndex].slice(0, markerEnd);
   assert.equal(lines[carrierIndex].startsWith(marker), true);
   const encoded = lines[carrierIndex].slice(marker.length, -4);
   const carrier = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
@@ -535,7 +601,7 @@ function aggregateProofFamily(family, receipts) {
     if (!receipt.assertion || JSON.stringify(Object.keys(receipt.assertion).sort()) !== JSON.stringify(['expected', 'name', 'passed'])) return null;
     if (receipt.assertion.name !== expected.assertion || !receipt.assertion.passed || JSON.stringify(receipt.assertion.expected) !== JSON.stringify(expected.expected)) return null;
     if (receipt.result.ok !== expected.expected.ok || receipt.result.code !== expected.expected.code || receipt.result.stage !== expected.expected.stage) return null;
-    const unsigned = { ...receipt };
+    const unsigned = Object.fromEntries(Object.entries(receipt));
     delete unsigned.receipt_sha256;
     if (runtime.digestValue(unsigned) !== receipt.receipt_sha256) return null;
   }
@@ -559,7 +625,7 @@ function humanSurfaceContractInstance() {
     root: ROOT,
     lock: LOCK,
     version: 'human-v2',
-    package_version: '2.10.9',
+    package_version: '2.10.10',
     facade_export: 'humanSurfaceV2',
     operations: ['readComplete', 'render', 'extendHistory', 'planMigration'],
     stages: [
@@ -572,6 +638,27 @@ function humanSurfaceContractInstance() {
       expectations: { kind: 'parent', repository: REPOSITORY, issue: 240 },
       render: {
         parent_child_source: { type: 'PARENT_READ', parent_read: read },
+        canonical_state_source: {
+          type: 'CANONICAL_STATE',
+          state: {
+            schema: 'toolkit.github-program.state.generic.v1',
+            repository: REPOSITORY,
+            parent: { issue: 240, title: 'Synthetic programme', goal: 'Exercise the explicit canonical-state render source.' },
+            children: [{
+              boundaries: [], done_when: ['The synthetic outcome is complete.'], eli5: 'Synthetic test.', epochs: [],
+              finality: { state: 'HELD' }, issue: 435, lifecycle: 'CURRENT', objective: 'Exercise the render contract.',
+              order: 1, out_of_scope: [], pr_registry: [], scope: [], summary: 'Synthetic current child.', title: 'Synthetic child',
+            }],
+            active_lanes: [],
+            evidence_refs: [],
+            historical_transitions: [],
+            prs: [],
+            extensions: [{
+              schema: 'toolkit.github-program.programme-graph-metadata.v1',
+              outcomes: [{ child_issue: 435, outcome_id: 'C1' }],
+            }],
+          },
+        },
         pr_source: { type: 'PR_DESCRIPTOR', descriptor: inputDescriptor, bound_authority: null },
         targets: [{ kind: 'parent' }, { kind: 'pr' }],
       },
@@ -620,6 +707,13 @@ function humanSurfaceContractInstance() {
       typed_nodes: true,
       text_encoding: 'audit-first-code-point-single-pass',
       url_rebuild: 'https-only-whatwg-no-credentials-preserve-query-order',
+      renderer_revision: 'human-v2-r093',
+      historical_dispatch: {
+        recognized_revision: 'current-human-v2',
+        absent_revision: 'frozen-J-K-serializer-only',
+        unknown_revision: 'reject',
+        historical_graphless_authority: 'read-only-no-current-proof',
+      },
     },
     lifecycle: {
       child_actions: ['CHILD_COMPLETE', 'BLOCKING_HOLD', 'WAIT_DEPENDENCIES', 'AWAIT_CHILD_AUTHORITY', 'CONTINUE_ACTIVE_GATE', 'AMEND_REQUIRED', 'REPLACEMENT_REQUIRED', 'AWAIT_EPOCH_AUTHORITY', 'BEGIN_OR_CONTINUE_EPOCH', 'AWAIT_CHILD_FINALITY'],
@@ -636,6 +730,7 @@ function humanSurfaceContractInstance() {
       human_drift: 'MIGRATION_CHILD_DRIFT',
       legacy_human: 'MIGRATION_ORDER_INVALID',
       human_parent_history_null: true,
+      graphless_generic_parent: 'WRITE_PARENT_IF_COMPLETE_METADATA',
     },
     safety: {
       provider_writes_external: true,
@@ -663,6 +758,14 @@ function humanSurfaceContractInstance() {
       selective_aggregate: 'selected family only',
       false_positive_probes: ['missing', 'duplicate', 'unknown', 'failed-case', 'entrypoint-mismatch', 'metadata-tampering'],
     },
+    programme_graph: {
+      graph_schema: 'toolkit.controller.programme-graph.v1',
+      metadata_schema: 'toolkit.github-program.programme-graph-metadata.v1',
+      identity_fields: ['schema', 'digest'],
+      digest_scope: 'canonical-serialization-with-digest-excluded',
+      historical_absence: 'readable-without-current-proof',
+      renderer_revision: 'human-v2-r093',
+    },
   };
 }
 
@@ -688,6 +791,109 @@ test('human-surface-v2 schema declares every root requirement and passes strict 
   const unknownPhaseProjectionProperty = clone(valid);
   unknownPhaseProjectionProperty.phase_projection.unexpected = true;
   assert.equal(validate(unknownPhaseProjectionProperty), false);
+
+  const missingCanonicalStateSource = clone(valid);
+  delete missingCanonicalStateSource.inputs.render.canonical_state_source;
+  assert.equal(validate(missingCanonicalStateSource), false);
+
+  const wrongGraphIdentity = clone(valid);
+  wrongGraphIdentity.programme_graph.identity_fields = ['schema', 'full_graph'];
+  assert.equal(validate(wrongGraphIdentity), false);
+});
+
+test('F3 reads immutable J/K predecessor bytes and keeps graphless history read-only', () => {
+  const { record, j, k, child: historicalChild, pr: historicalPr } = historicalH2Bodies();
+  assert.equal(record.canonical_sha256, '4122eead6382d95be5e0593d2e2f35b54a6c07bf8592cf4c5a5d9a67ee8b95c2');
+  assert.equal(record.j_graphless.revision, 'J');
+  assert.equal(record.k_graphful.revision, 'K');
+  assert.equal(record.k_graphful.canonical_sha256, 'e0e2d56c874767108f8e0e7bd56a526c2421def93ad70a1f66affd8b925c14f8');
+  assert.equal(record.k_graphful.graph_sha256, 'fce04a50b5818862f2eb4dcad12195e77bc04ef1fd85c0af54304bd8ecc38ed9');
+
+  const jRead = publicRead(j, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(jRead.ok, true, JSON.stringify(jRead));
+  assert.equal(jRead.format, 'human-v2');
+  assert.equal(jRead.historical_read_only, true);
+  assert.equal(jRead.renderer_revision, null);
+  assert.equal(jRead.canonical_sha256, record.canonical_sha256);
+  assert.equal(Object.hasOwn(jRead, 'programme_graph'), false);
+
+  const kRead = publicRead(k, { kind: 'parent', repository: 'example/toolkit', issue: 999 });
+  assert.equal(kRead.ok, true, JSON.stringify(kRead));
+  assert.equal(kRead.format, 'human-v2');
+  assert.equal(kRead.historical_read_only, true);
+  assert.equal(kRead.renderer_revision, null);
+  assert.equal(kRead.canonical_sha256, record.k_graphful.canonical_sha256);
+  assert.deepEqual(kRead.programme_graph, { schema: 'toolkit.controller.programme-graph.v1', digest: record.k_graphful.graph_sha256 });
+
+  assert.equal(record.j_historical_child.parent_body_sha256, record.j_graphless.body_sha256);
+  const childRead = surface.readComplete({
+    read: completeRead(historicalChild),
+    expect: { kind: 'child', repository: REPOSITORY, issue: 359, parent_issue: 240, parent_read: completeRead(j) },
+  });
+  assert.equal(childRead.ok, true, JSON.stringify(childRead));
+  assert.equal(childRead.renderer_revision, null);
+  assert.equal(childRead.historical_read_only, true);
+  assert.equal(childRead.canonical_sha256, record.canonical_sha256);
+
+  assert.equal(runtime.digestValue(descriptor()), record.j_pr_pre_number.descriptor_sha256);
+  const prRead = surface.readComplete({
+    read: completeRead(historicalPr),
+    expect: { kind: 'pr', repository: REPOSITORY, descriptor: descriptor(), bound_authority: null },
+  });
+  assert.equal(prRead.ok, true, JSON.stringify(prRead));
+  assert.equal(prRead.renderer_revision, null);
+  assert.equal(prRead.historical_read_only, true);
+  assert.equal(prRead.number_state, 'PRE_NUMBER');
+
+  const changedBody = j.replace('## ELI5\n', '## ELI5\nTampered historical content.\n');
+  assert.notEqual(changedBody, j);
+  const changedBodyRead = publicRead(changedBody, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(changedBodyRead.ok, false);
+  assert.ok(['PUBLIC_PROSE_DIGEST_MISMATCH', 'READBACK_MISMATCH'].includes(changedBodyRead.code));
+  const changedCarrier = rewriteParentCarrier(j, (carrier) => { carrier.canonical.digest = 'a'.repeat(64); });
+  const changedCarrierRead = publicRead(changedCarrier, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(changedCarrierRead.ok, false);
+  assert.ok(['CARRIER_INVALID', 'CANONICAL_DIGEST_MISMATCH', 'READBACK_MISMATCH'].includes(changedCarrierRead.code));
+  const changedChild = historicalChild.replace('## ELI5\n', '## ELI5\nTampered historical child.\n');
+  assert.equal(surface.readComplete({
+    read: completeRead(changedChild),
+    expect: { kind: 'child', repository: REPOSITORY, issue: 359, parent_issue: 240, parent_read: completeRead(j) },
+  }).ok, false);
+  const changedPr = historicalPr.replace('## What happens next\n', '## What happens next\nTampered.\n');
+  assert.equal(surface.readComplete({
+    read: completeRead(changedPr),
+    expect: { kind: 'pr', repository: REPOSITORY, descriptor: descriptor(), bound_authority: null },
+  }).ok, false);
+
+  const blockedRender = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(j) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(blockedRender.code, 'PROGRAMME_GRAPH_METADATA_REQUIRED');
+  const blockedChildRender = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(j) },
+    target: { kind: 'child', issue: 359 },
+  });
+  assert.equal(blockedChildRender.code, 'PROGRAMME_GRAPH_METADATA_REQUIRED');
+  const blockedHistory = surface.extendHistory({ parent_read: completeRead(j), decision: {}, provider_observations: null });
+  assert.equal(blockedHistory.code, 'PROGRAMME_GRAPH_METADATA_REQUIRED');
+  const blockedMigration = surface.planMigration({
+    parent_read: completeRead(j), child_read: completeRead(LEGACY_STAGE_B.child),
+    history_decision: null, provider_observations: null,
+  });
+  assert.equal(blockedMigration.code, 'PROGRAMME_GRAPH_METADATA_REQUIRED');
+
+  const current = surface.render({
+    source: { type: 'CANONICAL_STATE', state: humanSurfaceContractInstance().inputs.render.canonical_state_source.state },
+    target: { kind: 'parent' },
+  });
+  assert.equal(current.ok, true, JSON.stringify(current));
+  assert.equal(publicRead(rewriteParentCarrier(current.body, (carrier) => { carrier.renderer_revision = 'human-v2-r999'; }), {
+    kind: 'parent', repository: REPOSITORY, issue: 240,
+  }).code, 'CARRIER_INVALID');
+  assert.equal(publicRead(rewriteParentCarrier(current.body, (carrier) => { delete carrier.renderer_revision; }), {
+    kind: 'parent', repository: REPOSITORY, issue: 240,
+  }).code, 'READBACK_MISMATCH');
 });
 
 test('readComplete preserves legacy v5 compatibility and reads a human-v2 parent', () => {
@@ -705,6 +911,147 @@ test('readComplete preserves legacy v5 compatibility and reads a human-v2 parent
   assert.equal(human.ok, true);
   assert.equal(human.format, 'human-v2');
   assert.equal(human.canonical_sha256, rendered.canonical_sha256);
+});
+
+test('human-v2 preserves the bounded CURRENT packet in parent and child projections', () => {
+  const base = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(base.ok, true, JSON.stringify(base));
+  const packet = authorityPacketCurrent();
+  let rewritten = rewriteParentCarrier(base, (carrier) => {
+    const state = carrier.canonical.state;
+    state.design_lock = 'DL-C1-AUTHORITY-PACKET-TEST-001';
+    delete state.recovery;
+    const child = state.children.find((item) => item.issue === 359);
+    child.holds = [];
+    child.finality = { authority_ref: null, state: 'UNMERGED' };
+    const laneCandidate = clone(child.pr_registry.find((item) => item.pr === 379).candidate);
+    state.active_lanes = [{
+      candidate: { ...laneCandidate, epoch_id: 'E3', pr: 379 },
+      child_issue: 359,
+      epoch_id: 'E3',
+      gate: 'G3',
+      gate_result: null,
+      gate_state: 'ACTIVE',
+      lane_id: 'lane-g3-leaf-d',
+      work_claims: [{ mode: 'READ_ONLY', operation: 'INSPECT', resource: 'current-child' }],
+    }];
+    state.concurrency_authority.permitted_child_issues = [359];
+    child.authority_packet_current = packet;
+    carrier.canonical.digest = runtime.digestValue(state);
+    const projection = clone(base.projection);
+    projection.current_child.action = 'CONTINUE_ACTIVE_GATE';
+    projection.current_child.authority_packet_current = packet;
+    projection.next_action = {
+      action: 'CONTINUE_CURRENT_CHILD',
+      ref: 'lane-g3-leaf-d',
+      text: 'Continue the already admitted active gate; no new lane is created.',
+    };
+    carrier.projection.digest = runtime.digestValue(projection);
+  });
+  const rewrittenLines = rewritten.split('\n');
+  const oldText = 'The next epoch is pending separate authority\\; no activation is inferred\\.';
+  const newText = 'Continue the already admitted active gate\\; no new lane is created\\.';
+  for (let index = 0; index < rewrittenLines.length; index += 1) {
+    rewrittenLines[index] = rewrittenLines[index]
+      .replace('- CONTINUE\\_CURRENT\\_CHILD\\: ' + oldText, '- CONTINUE\\_CURRENT\\_CHILD\\: ' + newText)
+      .replace('- ' + oldText, '- ' + newText);
+  }
+  const carrierIndex = rewrittenLines.length - 2;
+  const carrierMarker = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ';
+  const carrier = JSON.parse(Buffer.from(rewrittenLines[carrierIndex].slice(carrierMarker.length, -4), 'base64url').toString('utf8'));
+  carrier.public_prose_sha256 = runtime.sha256Text(rewrittenLines.slice(1, -2).join('\n'));
+  rewrittenLines[carrierIndex] = carrierMarker + Buffer.from(runtime.canonicalSerialize(carrier), 'utf8').toString('base64url') + ' -->';
+  rewritten = rewrittenLines.join('\n');
+  const parent = publicRead(rewritten, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(parent.ok, true, JSON.stringify(parent));
+  assert.deepEqual(parent.projection.current_child.authority_packet_current, packet);
+  const child = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(rewritten) },
+    target: { kind: 'child', issue: 359 },
+  });
+  assert.equal(child.ok, true, JSON.stringify(child));
+  assert.deepEqual(child.projection.authority_packet_current, packet);
+  const childRead = publicRead(child.body, { kind: 'child', repository: REPOSITORY, issue: 359, parent_issue: 240, parent_read: completeRead(rewritten) });
+  assert.equal(childRead.ok, true, JSON.stringify(childRead));
+  assert.deepEqual(childRead.projection.authority_packet_current, packet);
+});
+
+test('human-v2 preserves historical wide CURRENT packet bytes while omitting them from strict projections', () => {
+  const base = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(LEGACY_STAGE_B.parent) },
+    target: { kind: 'parent' },
+  });
+  assert.equal(base.ok, true, JSON.stringify(base));
+  const packet = authorityPacketCurrent();
+  packet.consumer.run = 'c'.repeat(161);
+  packet.predecessors[0].packet_id = 'p'.repeat(161);
+  packet.predecessors[0].dependency_id = 'd'.repeat(161);
+  packet.predecessors[0].acceptance_event_id = 'a'.repeat(161);
+  packet.predecessors[0].readback_event_id = 'b'.repeat(161);
+  packet.predecessors[0].producer.run = 'r'.repeat(129);
+  const rewritten = rewriteParentCarrier(base, (carrier) => {
+    const state = carrier.canonical.state;
+    state.design_lock = 'DL-C1-AUTHORITY-PACKET-TEST-001';
+    delete state.recovery;
+    const child = state.children.find((item) => item.issue === 359);
+    child.holds = [];
+    child.finality = { authority_ref: null, state: 'UNMERGED' };
+    child.authority_packet_current = packet;
+    const laneCandidate = clone(child.pr_registry.find((item) => item.pr === 379).candidate);
+    state.active_lanes = [{
+      candidate: { ...laneCandidate, epoch_id: 'E3', pr: 379 },
+      child_issue: 359,
+      epoch_id: 'E3',
+      gate: 'G3',
+      gate_result: null,
+      gate_state: 'ACTIVE',
+      lane_id: 'lane-g3-leaf-d',
+      work_claims: [{ mode: 'READ_ONLY', operation: 'INSPECT', resource: 'current-child' }],
+    }];
+    state.concurrency_authority.permitted_child_issues = [359];
+    carrier.canonical.digest = runtime.digestValue(state);
+    const projection = clone(base.projection);
+    projection.current_child.action = 'CONTINUE_ACTIVE_GATE';
+    projection.next_action = {
+      action: 'CONTINUE_CURRENT_CHILD',
+      ref: 'lane-g3-leaf-d',
+      text: 'Continue the already admitted active gate; no new lane is created.',
+    };
+    carrier.projection.digest = runtime.digestValue(projection);
+  });
+  const rewrittenLines = rewritten.split('\n');
+  const oldText = 'The next epoch is pending separate authority\\; no activation is inferred\\.';
+  const newText = 'Continue the already admitted active gate\\; no new lane is created\\.';
+  for (let index = 0; index < rewrittenLines.length; index += 1) {
+    rewrittenLines[index] = rewrittenLines[index]
+      .replace('- CONTINUE\\_CURRENT\\_CHILD\\: ' + oldText, '- CONTINUE\\_CURRENT\\_CHILD\\: ' + newText)
+      .replace('- ' + oldText, '- ' + newText);
+  }
+  const carrierIndex = rewrittenLines.length - 2;
+  const carrierMarker = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ';
+  const carrier = JSON.parse(Buffer.from(rewrittenLines[carrierIndex].slice(carrierMarker.length, -4), 'base64url').toString('utf8'));
+  carrier.public_prose_sha256 = runtime.sha256Text(rewrittenLines.slice(1, -2).join('\n'));
+  rewrittenLines[carrierIndex] = carrierMarker + Buffer.from(runtime.canonicalSerialize(carrier), 'utf8').toString('base64url') + ' -->';
+  const historicalBody = rewrittenLines.join('\n');
+  const parent = publicRead(historicalBody, { kind: 'parent', repository: REPOSITORY, issue: 240 });
+  assert.equal(parent.ok, true, JSON.stringify(parent));
+  const retained = parent.canonical_state.children.find((item) => item.issue === 359).authority_packet_current;
+  assert.deepEqual(retained, packet);
+  assert.equal(runtime.canonicalSerialize(retained), runtime.canonicalSerialize(packet));
+  assert.equal(Object.hasOwn(parent.projection.current_child, 'authority_packet_current'), false);
+
+  const child = surface.render({
+    source: { type: 'PARENT_READ', parent_read: completeRead(historicalBody) },
+    target: { kind: 'child', issue: 359 },
+  });
+  assert.equal(child.ok, true, JSON.stringify(child));
+  assert.equal(Object.hasOwn(child.projection, 'authority_packet_current'), false);
+  const childRead = publicRead(child.body, { kind: 'child', repository: REPOSITORY, issue: 359, parent_issue: 240, parent_read: completeRead(historicalBody) });
+  assert.equal(childRead.ok, true, JSON.stringify(childRead));
+  assert.equal(Object.hasOwn(childRead.projection, 'authority_packet_current'), false);
 });
 
 test('complete-read false records fail at COMPLETE_READ while malformed types fail at INPUT', () => {
@@ -805,6 +1152,26 @@ test('render and readComplete enforce child source binding and PR number states'
   assert.equal(replay.ok, false);
   assert.equal(replay.safe_for_provider_write, false);
   assert.equal(replay.provider_mutation_authorised, false);
+});
+
+test('current PR rendering omits empty collection-backed detail while retaining required presentation', () => {
+  const inputDescriptor = descriptor({
+    changed_surfaces: [], scope: [], out_of_scope: [], design_constraints: [], validation_requirements: [],
+    evidence_refs: [], repair_history: [], before_after: [], repair_budget: [], hosted_qualification: [], recovery_evidence: [],
+  });
+  const result = surface.render({
+    source: { type: 'PR_DESCRIPTOR', descriptor: inputDescriptor, bound_authority: null },
+    target: { kind: 'pr' },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  for (const heading of [
+    '### Changed surfaces', '### Scope', '### Out of scope', '### Design constraints',
+    '### Validation requirements', '### Evidence references', '### Repair history',
+    '### Before and after', '### Repair budget', '### Hosted qualification', '### Recovery evidence',
+  ]) assert.equal(result.body.includes(heading), false, heading);
+  for (const heading of ['## Current phase', '## Programme position', '## Candidate / lineage', '### Summary', '### Purpose', '## What happens next']) {
+    assert.equal(result.body.includes(heading), true, heading);
+  }
 });
 
 test('Root-005 preserves the accepted Root-004 descriptor projection architecture', () => {
@@ -1109,8 +1476,9 @@ test('Root-005 proof aggregation fails closed for false-positive receipt paths',
   const copyReceipt = (receipt, changes = {}, preserveDigest = false) => {
     const copy = { ...receipt, ...changes };
     if (!preserveDigest) {
-      delete copy.receipt_sha256;
-      copy.receipt_sha256 = runtime.digestValue(copy);
+      const unsigned = Object.fromEntries(Object.entries(copy));
+      delete unsigned.receipt_sha256;
+      copy.receipt_sha256 = runtime.digestValue(unsigned);
     }
     return Object.freeze({ ...copy, [RECEIPT_TOKEN]: RECEIPT_TOKEN });
   };

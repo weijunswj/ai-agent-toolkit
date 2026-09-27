@@ -8,8 +8,15 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const contractRoot = path.join(repoRoot, 'repo', 'contracts', 'independent-assurance-web-finality');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-assurance-web-finality.cjs'));
+const support = require('./toolkit-authority-packet-test-support.cjs');
 
 const sha = (letter) => letter.repeat(40);
+const digest = (letter) => letter.repeat(64);
+
+function receiptContext() {
+  const fixture = support.assuranceReceiptAdmission();
+  return runtime.bindReceiptAdmission(fixture.store, fixture.admission);
+}
 
 test('A4 contract is direct and has no generated or published surface', () => {
   assert.equal(fs.existsSync(contractRoot), true);
@@ -46,6 +53,18 @@ test('A4 source shape does not absorb the A3 five-contract set or live execution
   assert.equal(policy.authority_boundaries.a3_contract_count_added, 0);
   assert.equal(runtime.G4_AUTHORITY, 'read-only-assurance');
   assert.equal(runtime.G4A_MODEL, 'GPT-5.6 Sol Max');
+});
+
+test('receipt dependency proof ingress rejects proxies without observing their traps', () => {
+  const traps = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const proof = new Proxy({}, {
+    get(target, key, receiver) { traps.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { traps.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { traps.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { traps.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  });
+  assert.deepEqual(runtime.validateReceiptDependencyProof(proof), ['receipt-dependency-proof-shape-invalid']);
+  assert.deepEqual(traps, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
 });
 
 test('privacy-safe report contains the required human companion and one action', () => {
@@ -122,7 +141,7 @@ test('successful finality proof accepts expected squash result without rerunning
       server_authoritative: true,
       verifiable: true,
     },
-  });
+  }, receiptContext());
   assert.equal(result.code, 'FINALITY_VERIFIED');
   assert.equal(result.g4_rerun, false);
   assert.equal(result.branch_cleanup_verified, true);

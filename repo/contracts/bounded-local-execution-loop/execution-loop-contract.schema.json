@@ -10,6 +10,7 @@
   ],
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+    "physicalRunId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(?!-)(?!.*\\.\\.)[A-Za-z0-9._:-]+$" },
     "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "sha1": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "request": {
@@ -76,7 +77,7 @@
       "required": ["contract_version", "run_id", "request_digest", "repository_id", "authorized_ref_digest", "route_digest", "authority_binding_digest", "current_authority_digest", "execution_state", "current_lanes", "workspace_receipt_digest", "terminal_packet_digest", "publication_state", "workspace_disposition", "created_at", "updated_at"],
       "properties": {
         "contract_version": { "const": "toolkit.execution-loop.run-receipt.v1" },
-        "run_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/physicalRunId" },
         "request_digest": { "$ref": "#/$defs/digest" },
         "repository_id": { "$ref": "#/$defs/digest" },
         "authorized_ref_digest": { "$ref": "#/$defs/digest" },
@@ -99,7 +100,7 @@
       "required": ["contract_version", "run_id", "repository_id", "authorized_ref_digest", "live_ref_digest", "snapshot_commit_digest", "snapshot_tree_digest", "workspace_id", "workspace_handle", "setup_digest", "verified"],
       "properties": {
         "contract_version": { "const": "toolkit.execution-loop.workspace-receipt.v1" },
-        "run_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/physicalRunId" },
         "repository_id": { "$ref": "#/$defs/digest" },
         "authorized_ref_digest": { "$ref": "#/$defs/digest" },
         "live_ref_digest": { "$ref": "#/$defs/digest" },
@@ -117,7 +118,7 @@
       "required": ["contract_version", "run_id", "outcome", "reason_code", "evidence_digest", "workspace_disposition", "publication_state", "web_handoff"],
       "properties": {
         "contract_version": { "const": "toolkit.execution-loop.terminal-packet.v1" },
-        "run_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/physicalRunId" },
         "outcome": { "enum": ["success", "failure", "blocked", "interrupted"] },
         "reason_code": { "$ref": "#/$defs/id" },
         "evidence_digest": { "$ref": "#/$defs/digest" },

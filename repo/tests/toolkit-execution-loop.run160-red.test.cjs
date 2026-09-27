@@ -7,6 +7,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const runtime = require('../scripts/toolkit-execution-loop.cjs');
+const support = require('./toolkit-authority-packet-test-support.cjs');
+
+function semanticGate(seed = 'run160') {
+  return support.semanticGate(seed);
+}
 
 const common = {
   task: { id: 'task-run160-red', digest: 'a'.repeat(64) },
@@ -15,6 +20,7 @@ const common = {
   current_authority_digest: 'd'.repeat(64),
   consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
 };
+Object.defineProperty(common, 'semantic_gate', { enumerable: true, get: () => semanticGate('common') });
 
 function expectCode(fn, code) {
   assert.throws(fn, (error) => error && error.code === code);

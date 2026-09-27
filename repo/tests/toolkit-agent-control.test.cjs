@@ -6,15 +6,43 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const Ajv2020 = require('ajv/dist/2020');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
 const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
+const resourceTest = require('./toolkit-resource-test-support.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
+  return { ...resourceTest.FIXTURE, ...overrides };
 }
+
+const rawAdmissionDecision = control.admissionDecision;
+control.admissionDecision = (specInput, options = {}) => {
+  const supplied = options.resourceState ?? options.resource_state;
+  if (!resourceTest.isFixture(supplied)) return rawAdmissionDecision(specInput, options);
+  const testRoot = options.root || root();
+  return resourceTest.withFixture(testRoot, () => rawAdmissionDecision(specInput, resourceTest.options(testRoot, options)));
+};
+const rawResourceAdmissionDecision = control.resourceAdmissionDecision;
+control.resourceAdmissionDecision = (specInput, selectedProfile, resourcesInput, options = {}) => {
+  const supplied = options.resourceState ?? options.resource_state;
+  if (!resourceTest.isFixture(resourcesInput) && !resourceTest.isFixture(supplied)) {
+    return rawResourceAdmissionDecision(specInput, selectedProfile, resourcesInput, options);
+  }
+  const testRoot = options.root || root();
+  return resourceTest.withFixture(testRoot, () => rawResourceAdmissionDecision(
+    specInput, selectedProfile, resourcesInput, resourceTest.options(testRoot, options),
+  ));
+};
+const rawInspectResourceCapability = control.inspectResourceCapability;
+control.inspectResourceCapability = (options = {}) => {
+  const supplied = options.resourceState ?? options.resource_state;
+  if (!resourceTest.isFixture(supplied)) return rawInspectResourceCapability(options);
+  const testRoot = options.root || root();
+  return resourceTest.withFixture(testRoot, () => rawInspectResourceCapability(resourceTest.options(testRoot, options)));
+};
 function spec(overrides = {}) {
   return {
     child_responsibility: 'Implement the isolated parser shard and its focused tests.',
@@ -38,9 +66,11 @@ function activationProof(overrides = {}) {
 }
 let defaultVerifier;
 function configured(topology, capacity_mode, overrides = {}) {
+  const nativeResources = control.inspectResources();
+  const resourceSource = nativeResources?.source || 'unsupported-or-malformed';
   return { topology, capacity_mode, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), claude_cli: defaultVerifier?.cli || 'claude',
-    resource_counter_supported: topology === control.TOPOLOGIES.CLAUDE_DIRECT,
-    resource_counter_source: topology === control.TOPOLOGIES.CLAUDE_DIRECT ? 'win32-operating-system' : 'not-applicable', ...overrides };
+    resource_counter_supported: topology === control.TOPOLOGIES.CLAUDE_DIRECT && ['proc-meminfo', 'win32-operating-system'].includes(resourceSource),
+    resource_counter_source: topology === control.TOPOLOGIES.CLAUDE_DIRECT ? resourceSource : 'not-applicable', ...overrides };
 }
 function profile(overrides = {}) {
   return { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
@@ -119,20 +149,20 @@ test('delegating every substantive shard and duplicate parent work are rejected'
 
 test('pressure queues boundedly and unknown state refuses root-only', () => {
   const work = root();
-  const pressured = resources({ physical_available: 8 * control.GIB, commit_available: 10 * control.GIB });
-  const queued = control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: pressured }));
+  const expensive = spec({ estimated_memory_bytes: 16 * control.GIB });
+  const queued = control.admissionDecision(expensive, verifiedOptions({ root: work, resourceState: resources() }));
   assert.equal(queued.result, control.RESULTS.QUEUE);
   assert.ok(queued.expires_at_ms > Date.now());
-  const critical = resources({ physical_available: control.GIB, commit_available: control.GIB });
-  assert.equal(control.admissionDecision(spec({ queue_id: queued.queue_id }), verifiedOptions({ root: work, resourceState: critical })).result, control.RESULTS.REFUSE);
+  assert.equal(control.admissionDecision(spec({ ...expensive, queue_id: queued.queue_id }), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.QUEUE);
   assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: root(), resourceState: null })).result, control.RESULTS.REFUSE);
+  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: root(), resourceState: resources({ physical_available: control.GIB }) })).result, control.RESULTS.REFUSE);
   fs.writeFileSync(control.statePath({ root: work }), '{ malformed');
   assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.REFUSE);
 });
 
 test('bounded queue retry keeps identity and starts only the oldest request after pressure clears', () => {
   const work = root();
-  const queued = control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources({ physical_available: 8 * control.GIB, commit_available: 10 * control.GIB }) }));
+  const queued = control.admissionDecision(spec({ estimated_memory_bytes: 16 * control.GIB }), verifiedOptions({ root: work, resourceState: resources() }));
   assert.equal(queued.result, control.RESULTS.QUEUE);
   const later = control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() }));
   assert.equal(later.result, control.RESULTS.QUEUE);
@@ -177,15 +207,7 @@ test('shared resource admission refuses Toolkit child recursion before creating 
 test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
   const work = root();
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });
-  const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const s=${JSON.stringify(spec())};const r=${JSON.stringify(resources())};console.log(c.admissionDecision(s,{root:${JSON.stringify(work)},resourceState:r,claudeCli:${JSON.stringify(defaultVerifier.cli)}}).result)`;
-  const run = () => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = ''; let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr)));
-  });
+  const run = () => resourceTest.runAdmissionChild(spec(), work, defaultVerifier.cli).then((result) => result.result);
   const results = await Promise.all([run(), run()]);
   assert.deepEqual(results.sort(), ['queue', 'start']);
 });
@@ -270,22 +292,14 @@ test('Codex and Claude profile state is isolated', () => {
 
 test('aggregate reserved memory is subtracted under the admission lock', async () => {
   const work = root();
-  const expensive = spec({ estimated_memory_bytes: 7 * control.GIB });
+  const expensive = spec({ estimated_memory_bytes: 3 * control.GIB });
   const options = verifiedOptions({ root: work, resourceState: resources() });
   assert.equal(control.admissionDecision(expensive, options).result, control.RESULTS.START);
   assert.equal(control.admissionDecision(expensive, options).result, control.RESULTS.QUEUE);
 
   const raceRoot = root();
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO), { root: raceRoot });
-  const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const s=${JSON.stringify(expensive)};const r=${JSON.stringify(resources())};console.log(c.admissionDecision(s,{root:${JSON.stringify(raceRoot)},resourceState:r,claudeCli:${JSON.stringify(defaultVerifier.cli)}}).result)`;
-  const run = () => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = ''; let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr)));
-  });
+  const run = () => resourceTest.runAdmissionChild(expensive, raceRoot, defaultVerifier.cli).then((result) => result.result);
   assert.deepEqual((await Promise.all([run(), run()])).sort(), ['queue', 'start']);
 });
 
@@ -340,10 +354,12 @@ test('strict profiles require exact native activation proof and direct profiles 
   assert.throws(() => control.configureProfile('claude-code', {
     topology: control.TOPOLOGIES.ROOT_ONLY, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, enforcement_verified: true,
   }, { root: work }), /trust and activation/i);
-  assert.throws(() => control.configureProfile('claude-code', {
+  const configuredDirect = control.configureProfile('claude-code', {
     topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO,
     enforcement_verified: true, activation_proof: activationProof(),
-  }, { root: work }), /resource counters/i);
+  }, { root: work });
+  assert.equal(configuredDirect.resource_counter_verified, true);
+  assert.ok(['proc-meminfo', 'win32-operating-system'].includes(configuredDirect.resource_counter_source));
   for (const bad of [
     null,
     activationProof({ schema: 2 }),
@@ -378,6 +394,153 @@ test('schema-2 strict profiles fail closed while a correct schema-3 proof persis
   assert.equal(control.verifyCurrentClaudeEnforcement(persisted, { claudeCli: fixture.cli }), true);
 });
 
+test('Run-094 Linux native resource positive uses production proc-meminfo collection without fixture context', {
+  skip: process.platform !== 'linux',
+}, () => {
+  assert.equal(process.platform, 'linux');
+  const state = control.inspectResources();
+  assert.ok(state);
+  assert.equal(state.source, 'proc-meminfo');
+  assert.equal(state.host_responsive, true);
+  assert.equal(Object.hasOwn(state, 'fixture_id'), false);
+  for (const field of ['physical_total', 'physical_available', 'commit_total', 'commit_available']) {
+    assert.equal(Number.isSafeInteger(state[field]), true, field);
+    assert.ok(state[field] > 0, field);
+  }
+  assert.ok(state.physical_available <= state.physical_total);
+  assert.ok(state.commit_available <= state.commit_total);
+});
+
+test('Run-094 Windows native resource positive uses production operating-system counters', {
+  skip: process.platform !== 'win32',
+}, () => {
+  assert.equal(process.platform, 'win32');
+  const state = control.inspectResources();
+  assert.ok(state);
+  assert.equal(state.source, 'win32-operating-system');
+  assert.equal(state.host_responsive, true);
+  assert.equal(Object.hasOwn(state, 'fixture_id'), false);
+  for (const field of ['physical_total', 'physical_available', 'commit_total', 'commit_available']) {
+    assert.equal(Number.isSafeInteger(state[field]), true, field);
+    assert.ok(state[field] > 0, field);
+  }
+  assert.ok(state.physical_available <= state.physical_total);
+  assert.ok(state.commit_available <= state.commit_total);
+});
+
+test('resource evidence schema preserves native and repository-test provenance without coercion', () => {
+  const schemaPath = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'resource-evidence-v1.schema.json');
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+  const ajv = new Ajv2020({ strict: true, allErrors: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+  const validateEvidence = ajv.compile(schema);
+  const validateInvocation = ajv.compile({ ...schema.$defs.repositoryTestInvocation, $schema: schema.$schema });
+  assert.equal(validateEvidence(resourceTest.FIXTURE), true, JSON.stringify(validateEvidence.errors));
+  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, source: 'proc-meminfo' }), false);
+  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, fixture_id: 'other' }), false);
+  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, extra: true }), false);
+  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, physical_available: '8589934592' }), false);
+  assert.equal(validateInvocation(resourceTest.INVOCATION), true, JSON.stringify(validateInvocation.errors));
+  assert.equal(validateInvocation({ ...resourceTest.INVOCATION, extra: true }), false);
+});
+
+test('repository-test fixture admission is privately scoped and cannot launch or become production profile proof', () => {
+  const work = root();
+  const denied = rawResourceAdmissionDecision(spec(), profile(), resourceTest.FIXTURE, { root: work });
+  assert.equal(denied.result, control.RESULTS.REFUSE);
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  assert.equal(control.inspectResources({ resourceState: resourceTest.FIXTURE }), null);
+
+  const admitted = resourceTest.withFixture(work, () => rawResourceAdmissionDecision(
+    spec(), profile(), resourceTest.FIXTURE, resourceTest.options(work),
+  ));
+  assert.equal(admitted.result, control.RESULTS.START);
+  assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 1);
+
+  const launch = resourceTest.withFixture(work, () => control.launch(spec(), resourceTest.options(work, {
+    profile: profile(), claudeCli: process.execPath,
+  })));
+  assert.equal(launch.result, control.RESULTS.REFUSE);
+  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+  assert.throws(() => resourceTest.withFixture(work, () => control.configureProfile('claude-code', configured(
+    control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO,
+  ), { root: work })), /cannot configure a production profile/i);
+
+  const descendantRoot = root();
+  resourceTest.registerOwnedRoot(descendantRoot);
+  const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const x=${JSON.stringify(resourceTest.FIXTURE)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};console.log(c.resourceAdmissionDecision(s,p,x,{root:${JSON.stringify(descendantRoot)}}).result)`;
+  const child = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', windowsHide: true, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' } });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), control.RESULTS.REFUSE);
+  assert.equal(fs.existsSync(control.statePath({ root: descendantRoot })), false);
+});
+
+test('resource evidence aliases, inherited fields, accessors, Proxies, environment and globals do not grant test context', () => {
+  const fixture = resourceTest.FIXTURE;
+  assert.equal(control.inspectResources({ resourceState: null }), null);
+  assert.equal(control.inspectResources({ resource_state: undefined }), null);
+  assert.equal(control.inspectResources({ resourceState: fixture, resource_state: fixture }), null);
+  assert.equal(control.inspectResources({ resource: fixture }), null);
+  assert.equal(control.inspectResources({ resources: fixture }), null);
+  assert.equal(control.inspectResources({ resourceState: { ...fixture, source: 'proc-meminfo' } }), null);
+
+  let accessorCalls = 0;
+  const accessor = {};
+  Object.defineProperty(accessor, 'resourceState', { enumerable: true, get() { accessorCalls += 1; return fixture; } });
+  assert.equal(control.inspectResources(accessor), null);
+  const proxyCounters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
+  const proxyOptions = new Proxy({ resourceState: fixture }, {
+    get(target, key, receiver) { proxyCounters.get += 1; return Reflect.get(target, key, receiver); },
+    ownKeys(target) { proxyCounters.ownKeys += 1; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) { proxyCounters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+    getPrototypeOf(target) { proxyCounters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
+  });
+  assert.equal(control.inspectResources(proxyOptions), null);
+  assert.deepEqual(proxyCounters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
+  assert.equal(accessorCalls, 0);
+
+  const invocationRoot = root();
+  resourceTest.withFixture(invocationRoot, () => {
+    assert.equal(control.inspectResources({
+      ...resourceTest.options(invocationRoot),
+      repositoryTestInvocation: resourceTest.INVOCATION,
+    }), null);
+    assert.equal(control.inspectResources({
+      ...resourceTest.options(invocationRoot),
+      resource_state: fixture,
+    }), null);
+    globalThis.__toolkitRepositoryTestResource = true;
+    process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE = JSON.stringify(resourceTest.INVOCATION);
+    try {
+      const childRoot = root();
+      resourceTest.registerOwnedRoot(childRoot);
+      const source = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const f=${JSON.stringify(fixture)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};globalThis.__toolkitRepositoryTestResource=true;process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE=JSON.stringify(f);console.log(c.resourceAdmissionDecision(s,p,f,{root:${JSON.stringify(childRoot)}}).result)`;
+      const child = spawnSync(process.execPath, ['-e', source], {
+        cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', windowsHide: true,
+        env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' },
+      });
+      assert.equal(child.status, 0, child.stderr);
+      assert.equal(child.stdout.trim(), control.RESULTS.REFUSE);
+      assert.equal(fs.existsSync(control.statePath({ root: childRoot })), false);
+
+      const preloadRoot = root();
+      resourceTest.registerOwnedRoot(preloadRoot);
+      const preload = path.join(invocationRoot, 'resource-test-preload.cjs');
+      fs.writeFileSync(preload, `globalThis.__toolkitRepositoryTestResource=true;process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE=${JSON.stringify(JSON.stringify(resourceTest.INVOCATION))};`);
+      const preloadScript = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const f=${JSON.stringify(fixture)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};console.log(c.resourceAdmissionDecision(s,p,f,{root:${JSON.stringify(preloadRoot)}}).result)`;
+      const preloaded = spawnSync(process.execPath, ['-e', preloadScript], {
+        cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', windowsHide: true,
+        env: { ...process.env, NODE_OPTIONS: `--require=${preload}`, NODE_PATH: '' },
+      });
+      assert.equal(preloaded.status, 0, preloaded.stderr);
+      assert.equal(preloaded.stdout.trim(), control.RESULTS.REFUSE);
+      assert.equal(fs.existsSync(control.statePath({ root: preloadRoot })), false);
+    } finally {
+      delete globalThis.__toolkitRepositoryTestResource;
+      delete process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE;
+    }
+  });
+});
+
 test('resource capability rejects unsupported malformed and overflowed states', () => {
   assert.equal(control.inspectResourceCapability({ resourceState: null }).supported, false);
   assert.equal(control.inspectResourceCapability({ resourceState: resources({ physical_available: Infinity }) }).supported, false);
@@ -388,7 +551,7 @@ test('resource capability rejects unsupported malformed and overflowed states', 
 test('oversized Unicode prompts refuse before admission or artifact creation', () => {
   const work = root();
   const result = control.launch(spec({ child_prompt: `${'a'.repeat(control.MAX_PROMPT_BYTES - 2)}€` }), {
-    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(), resourceState: resources(),
+    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(),
   });
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.notEqual(result.status, 'launched');
@@ -435,7 +598,7 @@ test('direct admission revalidates current Claude trust, hooks and installed ide
     const fixture = enforcementFixture();
     mutate(fixture);
     fs.writeFileSync(fixture.statePath, `${JSON.stringify(fixture.entry, null, 2)}\n`);
-    const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli, resourceState: resources() });
+    const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli });
     assert.match(result.reason, /current Claude plugin trust, hook activation, and installed enforcement identity/i, name);
     assertNoAdmissionResidue(fixture, result, name);
   }
@@ -460,7 +623,7 @@ test('symlinked installed process-launch dependency refuses before admission res
     if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
     throw error;
   }
-  const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli, resourceState: resources() });
+  const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli });
   assertNoAdmissionResidue(fixture, result, 'symlinked process-launch dependency');
 });
 
@@ -522,7 +685,7 @@ test('unavailable persisted Claude command refuses launch without residue', () =
   fs.writeFileSync(control.profilePath('claude-code', { root: fixture.work }), `${JSON.stringify({ ...stored, status: undefined, supported: undefined, claude_cli: path.join(fixture.work, 'missing.cjs') }, null, 2)}\n`);
   const env = { ...process.env };
   delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
-  const result = control.launch(spec(), { root: fixture.work, env, resourceState: resources() });
+  const result = control.launch(spec(), { root: fixture.work, env });
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.notEqual(result.status, 'launched');
   assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false);
@@ -531,7 +694,7 @@ test('unavailable persisted Claude command refuses launch without residue', () =
 
 test('missing strict profile refuses launch without throwing or creating residue', () => {
   const work = root();
-  const result = control.launch(spec(), { root: work, env: { ...process.env }, resourceState: resources() });
+  const result = control.launch(spec(), { root: work, env: { ...process.env } });
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.notEqual(result.status, 'launched');
   assert.equal(fs.existsSync(control.statePath({ root: work })), false);
@@ -724,7 +887,7 @@ test('reservation update and release mutate only a valid target and missing targ
 test('missing Claude executable forms refuse before admission or artifacts', () => {
   for (const executable of ['missing-claude-command-for-toolkit-test', ...['cjs', 'exe', 'cmd', 'bat'].map((ext) => path.join(root(), `missing-claude.${ext}`))]) {
     const work = root();
-    const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: executable, resourceState: resources() }));
+    const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: executable }));
     assert.equal(result.result, control.RESULTS.REFUSE, executable);
     assert.notEqual(result.status, 'launched', executable);
     assert.equal(fs.existsSync(control.statePath({ root: work })), false, executable);
@@ -741,7 +904,7 @@ test('broken Claude executable symlink refuses before admission or artifacts', {
     if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
     throw error;
   }
-  const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: broken, resourceState: resources() }));
+  const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: broken }));
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.notEqual(result.status, 'launched');
   assert.equal(fs.existsSync(control.statePath({ root: work })), false);

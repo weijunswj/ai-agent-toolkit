@@ -1,0 +1,71 @@
+{
+  "schema": "toolkit.controller.programme-graph-source-proof.v1",
+  "parent": {
+    "issue": 421,
+    "revision": "2026-09-25T11:07:51Z",
+    "body_bytes": 28222,
+    "body_sha256": "c4bf059278a53582d6585cb01c2065bab2f90b645c47b6bed34b8b6b1c9469b4",
+    "programme_graph_section_bytes": 9139,
+    "programme_graph_section_sha256": "f828d04a50ed713e4ada4c6aff6d61d2b218fdea1bccb422397596e51be9a4ef"
+  },
+  "w2_a": {
+    "issue": 455,
+    "revision": "2026-09-25T11:06:41Z",
+    "body_bytes": 13180,
+    "body_sha256": "ea74692a8a197bc911e3f99e1be4eda2afdccb36fd2cde335cf1ddbf37d7b27f"
+  },
+  "source_snapshot_fixture": "repo/tests/fixtures/controller-kernel/programme-421-source-snapshot-v1.json",
+  "current_outcome_ids": [
+    "C1", "W2-A", "S1-A", "C2", "C3", "S1", "S2", "H1", "H2", "H3", "H4", "W1", "W2", "D1", "A1",
+    "N1", "N2", "N3", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "V1", "V2", "A4", "A5", "Q"
+  ],
+  "row_fields": [
+    "outcome_id", "child_issue", "order", "source_status", "lifecycle", "dependencies",
+    "source_current_gate", "current_gate", "current_work", "complete_when_text"
+  ],
+  "expected_rows": [
+    ["C1",435,1,"CURRENT","CURRENT",[],"G2 RUN-090 ACTIVE","G2 RUN-090 ACTIVE","#435 · J=`da984fba...` frozen · W2-A lifecycle clarified `#455:5831357417` · launch `5831369109`","Finalise one executable F1/F2/F3 mutation ceiling; then one bounded G3, exact-head hosted green, fresh G4 and Web finality."],
+    ["W2-A",455,2,"QUEUED / URGENT · READ-ONLY G1 AUTHORISED","QUEUED",[],"owner-impacting host-availability defect; read-only G1 may proceed beside C1; implementation/mutation waits for safe C1 boundary","owner-impacting host-availability defect; read-only G1 may proceed beside C1; implementation/mutation waits for safe C1 boundary","#455 · accelerated W2 slice · authority `5792813028` · incident `5792871601`; deterministic worktree + post-merge hygiene `5824856185`; primary-checkout-first `5825457152`; dirty-primary owner choice `5825492447`","Toolkit-owned temp roots are cleanup-registered at creation, capacity-admitted before heavy use, bounded, cleaned on terminal paths, stale-owned residue is recoverable without sweeping user temp, large validation fixtures leave no residue, the existing primary checkout is preferred when safe/unowned, dirty state is inspected and shown to the owner before dirt alone causes another worktree, necessary secondary worktrees use one deterministic configured root, terminal merges/closes trigger safe local fetch/prune/worktree+temp cleanup, and owner has a dry-run/approved legacy cleanup path."],
+    ["S1-A",459,3,"QUEUED / NEXT AFTER C1","QUEUED",["C1"],"—",null,"#459 · materialised planning child · gated by C1 finality only","Simplify instruction surfaces, preserve compatibility, compact hot Controller law and fix the bounded SessionStart/question-bank behaviour. Detailed current planning state lives in #459."],
+    ["C2",423,4,"QUEUED","QUEUED",["C1","S1-A"],"—",null,"#423 · blocked by C1 + S1-A · executor terminal-packet publication/self-repair `5806889578`","Child-owned state, live GitHub reconciliation, lifecycle cleanup, deterministic next-work frontier, and durable screened worker-packet delivery/readback are accepted with obligation continuity."],
+    ["C3",424,5,"QUEUED","QUEUED",["C2"],"—",null,"#424 · blocked by C2","Published capabilities conform to the accepted controller and programme contracts."],
+    ["S1",460,6,"QUEUED / PLANNING ONLY","QUEUED",["C3"],"—",null,"#460 · materialised planning child · after C3","Managed setup/refresh/native execution remains bounded, intent-correct and privacy-safe. Detailed current planning state lives in #460."],
+    ["S2",468,7,"PLANNED / SEED","QUEUED",[],"—",null,"#468 · stable planning child","Managed configuration recovery is source-bound, reversible and verified without manufacturing authority."],
+    ["H1",469,8,"PLANNED / SEED","QUEUED",[],"—",null,"#469 · shared cross-host contract #467","Codex native delivery is qualified under the registered host and shared completion/handoff contract."],
+    ["H2",470,9,"PLANNED / SEED","QUEUED",[],"—",null,"#470 · shared cross-host contract #467","Claude Code native delivery is qualified under the registered host and shared completion/handoff contract."],
+    ["H3",471,10,"PLANNED / SEED","QUEUED",[],"—",null,"#471 · shared cross-host contract #467","OpenCode native delivery is qualified under the registered host and shared completion/handoff contract."],
+    ["H4",472,11,"PLANNED / SEED","QUEUED",[],"—",null,"#472 · stable planning child","AG2 skills-only qualification is verified without introducing an unsupported execution path."],
+    ["W1",473,12,"PLANNED / SEED","QUEUED",[],"—",null,"#473 · stable planning child","Source-watch behavior remains notification-only, pinned and approval-bound."],
+    ["W2",474,13,"PLANNED / SEED","QUEUED",[],"—",null,"#474 · stable planning child · accelerated slice #455","Workspace lifecycle and isolation controls are verified before consequential concurrency."],
+    ["D1",461,14,"QUEUED / PLANNING ONLY","QUEUED",[],"—",null,"#461 · materialised planning child","Mechanise the accepted evidence, validation, convergence and adversarial-debugging rules without another gate/scheduler. Detailed current planning state lives in #461."],
+    ["A1",462,15,"QUEUED / PLANNING ONLY","QUEUED",[],"—",null,"#462 · materialised planning child","Resolve authoritative provider/model/reasoning provenance and remove/demote stale active routing residue. Detailed current planning state lives in #462."],
+    ["N1",475,16,"PLANNED / SEED","QUEUED",[],"—",null,"#475 · stable planning child","Official n8n dependencies are admitted only with verified source and safety provenance."],
+    ["N2",476,17,"PLANNED / SEED","QUEUED",["N1"],"—",null,"#476 · depends on #475","Offline workflow handling validates and transports workflow artifacts without live mutation."],
+    ["N3",477,18,"PLANNED / SEED","QUEUED",["N2"],"—",null,"#477 · depends on #476","n8n API transport remains explicitly authorized, bounded and auditable."],
+    ["X1",478,19,"PLANNED / SEED","QUEUED",[],"—",null,"#478 · stable planning child","Secret references and private custody remain outside public projections and repository artifacts."],
+    ["X2",479,20,"PLANNED / SEED","QUEUED",["X1"],"—",null,"#479 · depends on #478","Sensitive-file access is guarded by explicit scope, provenance and fail-closed checks."],
+    ["X3",463,21,"QUEUED / PLANNING ONLY","QUEUED",["X2"],"—",null,"#463 · materialised planning child · depends on X2","External operations require exact authority, sufficient interface selection and stable live identity. Detailed current planning state lives in #463."],
+    ["X4",480,22,"PLANNED / SEED","QUEUED",["X3"],"—",null,"#480 · depends on #463","Operational evidence remains privacy-minimized, support-safe and source-traceable."],
+    ["X5",481,23,"PLANNED / SEED","QUEUED",[],"—",null,"#481 · stable planning child","Hosted monitoring and reporting expose only truthful, authorized state transitions."],
+    ["X6",482,24,"PLANNED / SEED","QUEUED",["X5"],"—",null,"#482 · depends on #481","Hosted recovery and disaster recovery are tested, bounded and reversible."],
+    ["X7",464,25,"QUEUED / PLANNING ONLY","QUEUED",["X6"],"—",null,"#464 · materialised planning child · depends on X6","Deployment/health/rollback stay exact-revision-bound with composable provider capabilities. Detailed current planning state lives in #464."],
+    ["V1",483,26,"PLANNED / SEED","QUEUED",["A1","C3","N3","X7"],"—",null,"#483 · depends on #462 + #424 + #477 + #464","Integrated conformance and UAT accept every required pre-V2 outcome and unresolved hold."],
+    ["V2",484,27,"PLANNED / SEED","QUEUED",["V1"],"—",null,"#484 · depends on #483","The whole programme passes final audit and exact Web finality is accepted after readback."],
+    ["A4",465,28,"QUEUED / POST_V2","QUEUED",["V2","D1","C3"],"—",null,"#465 · materialised planning child · gated by accepted V2 + D1 + C3","Truthful stable CI shards, unique contexts and deterministic aggregate coverage. Detailed current planning state lives in #465."],
+    ["A5",466,29,"QUEUED / POST_V2","QUEUED",["A4"],"—",null,"#466 · materialised planning child · depends on post-V2 A4","Required checks/protection must match Controller finality without colliding or masked contexts. Detailed current planning state lives in #466."],
+    ["Q",425,30,"QUEUED / NON-EXECUTING","QUEUED",[],"—",null,"#425","Deferred ownership remains non-executing and retains genuinely optional continuing-improvement obligations."]
+  ],
+  "delivery_pr_by_outcome": { "C1": 447 },
+  "planning_metadata": {
+    "W2-A": {
+      "priority": "URGENT",
+      "planning_class": "INVESTIGATION",
+      "planning_admission": "G1_READ_ONLY_AUTHORIZED",
+      "implementation_admission": "DEFERRED"
+    }
+  },
+  "reference_only_issues": [467],
+  "shared_reference_outcomes": ["H1", "H2", "H3"],
+  "forbidden_current_outcome_ids": ["A2", "A3"],
+  "live_fetch_during_tests": false
+}

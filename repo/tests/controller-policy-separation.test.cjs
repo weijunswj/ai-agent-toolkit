@@ -678,7 +678,7 @@ test('complex G3 uses paired implementation and strong-review convergence attemp
   assert.match(architecture, /One substantive attempt consists of parent implementation\/correction/);
   assert.match(architecture, /complete affected integrated validation floor reaching green/);
   assert.match(architecture, /fresh depth-1 read-only adversarial challenge leaf against those exact current bytes/);
-  assert.match(architecture, /clean challenge closes that attempt successfully/);
+  assert.match(architecture, /clean challenge closes that paired attempt successfully/);
   assert.match(architecture, /3 normal materially distinct attempts and an absolute ceiling of 5/);
   assert.match(architecture, /implementation-ready diagnostic handoff rather than a bare verdict/);
   assert.match(architecture, /smallest suggested in-contract correction direction/);
@@ -706,9 +706,16 @@ test('commit-required validation sequencing freezes each candidate identity befo
   assert.match(controller, /Publication remains prohibited until the complete required floor is green/);
   assert.match(controller, /local candidate commit is construction\/custody, not publication, `G3_PASS`, G4 admission, Ready, merge or finality/);
   assert.match(controller, /environment\/transport\/evidence HOLD preserves the exact commit/);
+  assert.match(controller, /pre-publication identity-bound validation or the required adversarial challenge proves a settled in-contract product RED.*new immutable local candidate in the same RUN\/Lock.*existing G3 attempt budget/s);
+  assert.match(controller, /Preserve the failed candidate as evidence; never amend, rebase, reconstruct or overwrite it/);
+  assert.match(controller, /Repeat applicable non-commit-dependent checks, freeze the corrected contents\/scope, and bind the replacement's exact commit\/tree\/parent before its identity-dependent checks/);
+  assert.match(controller, /pre-publication product correction is separate from the published\/hosted non-product reclosure rule below/);
   assert.match(architecture, /COMMIT_REQUIRED_VALIDATION=YES/);
   assert.match(architecture, /create the ordinary immutable local candidate commit under the existing allowance/);
   assert.match(architecture, /Run the identity\/clean-tree-dependent and remaining floor against that exact commit/);
+  assert.match(architecture, /pre-publication identity-bound validation or the required adversarial challenge proves a settled in-contract product RED.*new immutable local candidate in the same RUN\/Lock.*existing G3 attempt budget/s);
+  assert.match(architecture, /failed candidate as durable evidence; never amend, rebase, reconstruct or overwrite it/);
+  assert.match(architecture, /does not authorize publication before one exact candidate completes the full floor/);
 });
 
 test('G3 in-gate convergence keeps ordinary repair inside G3 and bounds same-root thrashing', () => {

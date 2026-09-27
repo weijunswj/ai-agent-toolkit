@@ -67,7 +67,6 @@ function reviewInput(overrides = {}) {
     finding_evidence: findings || [],
     current_candidate: candidate,
     expected_candidate: candidate,
-    ...evidenceOverrides,
   };
   const counts = {
     pull_requests: Array.isArray(evidence.pull_requests) ? evidence.pull_requests.length : 0,
@@ -81,7 +80,13 @@ function reviewInput(overrides = {}) {
       { complete: evidence.pagination[key], pages: 1, cursor: null, count: counts[key] },
     ]));
   }
-  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'evidence_digest')) evidence.evidence_digest = n5.reviewEvidenceDigest(evidence);
+  const validEvidenceDigest = n5.reviewEvidenceDigest(evidence);
+  Object.assign(evidence, evidenceOverrides);
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'evidence_digest')) {
+    evidence.evidence_digest = Object.values(evidenceOverrides).some((value) => value === undefined)
+      ? validEvidenceDigest
+      : n5.reviewEvidenceDigest(evidence);
+  }
   return {
     ...evidence,
     ...(findings === undefined ? {} : { findings }),

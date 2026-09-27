@@ -4,12 +4,20 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { types: utilTypes } = require('node:util');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.9';
+const CONTROL_VERSION = '2.10.12';
+const RESOURCE_PROVENANCE_SCHEMA = 'toolkit.agent-control.resource-provenance.v1';
+const RESOURCE_PROVENANCE_KEY_FILE = 'resource-provenance.key';
+const SUPERVISOR_CLAIM_SCHEMA = 'toolkit.agent-control.supervisor-claim.v1';
+const SUPERVISOR_CLAIM_DIRECTORY = 'supervisor-claims';
+const MAX_ACTIVE_SUPERVISOR_CLAIMS = 1024;
+const RESOURCE_PRODUCTION_ADMISSION = Symbol('native-resource-admission');
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -37,8 +45,23 @@ const MAX_PROMPT_BYTES = 1024 * 1024;
 const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
 const MAX_CHECKER_INPUT_BYTES = 1024 * 1024;
 const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
+const REPOSITORY_TEST_RESOURCE_INVOCATION = 'toolkit.repository-test.resource.v1';
+const RESOURCE_TEST_CONTEXT = new AsyncLocalStorage();
+const NATIVE_RESOURCE_STATES = new WeakSet();
+const TEST_RESOURCE_STATES = new WeakSet();
+const REPOSITORY_TEST_RESOURCE_FIXTURE = Object.freeze({
+  source: 'repository-test-fixture',
+  fixture_id: 'healthy-resource-v1',
+  physical_total: 17179869184,
+  physical_available: 8589934592,
+  commit_total: 34359738368,
+  commit_available: 17179869184,
+  host_responsive: true,
+});
 
 function controlRoot(options = {}) {
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext) return testContext.root;
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
 }
 
@@ -74,6 +97,279 @@ function createPrivateFile(filePath, content = '') {
     fs.fchmodSync(fd, 0o600);
   } finally { fs.closeSync(fd); }
   verifyPrivateRegularFile(filePath);
+}
+
+function resourceProvenanceKey(options = {}, create = false) {
+  const filePath = path.join(controlRoot(options), RESOURCE_PROVENANCE_KEY_FILE);
+  try {
+    verifyPrivateRegularFile(filePath);
+    const encoded = fs.readFileSync(filePath, 'utf8').trim();
+    const key = Buffer.from(encoded, 'base64');
+    if (key.length !== 32 || key.toString('base64') !== encoded) return null;
+    return key;
+  } catch (error) {
+    if (error.code !== 'ENOENT' || !create) return null;
+  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const key = crypto.randomBytes(32);
+  const fd = fs.openSync(filePath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+  try {
+    fs.writeFileSync(fd, `${key.toString('base64')}\n`, { encoding: 'utf8' });
+    fs.fchmodSync(fd, 0o600);
+  } finally { fs.closeSync(fd); }
+  verifyPrivateRegularFile(filePath);
+  return key;
+}
+
+function sortResourceValue(value) {
+  if (Array.isArray(value)) return value.map(sortResourceValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortResourceValue(value[key])]));
+}
+
+function resourceProvenanceMac(kind, entry, key) {
+  const provenance = entry.producer_provenance;
+  if (!provenance || typeof provenance !== 'object') return '';
+  const { mac: _mac, ...producerProvenance } = provenance;
+  const { producer_provenance: _producerProvenance, ...entryBody } = entry;
+  const payload = JSON.stringify(sortResourceValue({ kind, entry: entryBody, producer_provenance: producerProvenance }));
+  return crypto.createHmac('sha256', key).update(payload, 'utf8').digest('hex');
+}
+
+function sealResourceProvenance(kind, entry, origin, resourceSource, jobIdentityDigest, options = {}, suppliedKey = undefined) {
+  const key = suppliedKey || resourceProvenanceKey(options, true);
+  if (!key) throw new Error('Resource provenance could not be persisted safely.');
+  const existingAdmissionId = entry.producer_provenance?.schema === RESOURCE_PROVENANCE_SCHEMA
+    ? entry.producer_provenance.admission_id : null;
+  entry.producer_provenance = {
+    schema: RESOURCE_PROVENANCE_SCHEMA,
+    origin,
+    resource_source: resourceSource,
+    admission_id: existingAdmissionId || crypto.randomUUID(),
+    job_identity_digest: jobIdentityDigest,
+    mac: '',
+  };
+  entry.producer_provenance.mac = resourceProvenanceMac(kind, entry, key);
+  return entry;
+}
+
+function validResourceProvenance(kind, entry, key) {
+  const provenance = entry && entry.producer_provenance;
+  if (!provenance || typeof provenance !== 'object'
+    || Object.keys(provenance).sort().join('\u0000') !== ['admission_id', 'job_identity_digest', 'mac', 'origin', 'resource_source', 'schema'].sort().join('\u0000')
+    || provenance.schema !== RESOURCE_PROVENANCE_SCHEMA
+    || !['native', 'repository-test'].includes(provenance.origin)
+    || (provenance.origin === 'native' && !['proc-meminfo', 'win32-operating-system'].includes(provenance.resource_source))
+    || (provenance.origin === 'repository-test' && provenance.resource_source !== REPOSITORY_TEST_RESOURCE_FIXTURE.source)
+    || typeof entry.worker_executable !== 'string'
+    || !/^[a-f0-9-]{36}$/.test(provenance.admission_id || '')
+    || !/^[a-f0-9]{64}$/.test(provenance.job_identity_digest || '')
+    || !/^[a-f0-9]{64}$/.test(provenance.mac || '')
+    || !key) return false;
+  const expected = Buffer.from(resourceProvenanceMac(kind, entry, key), 'hex');
+  const actual = Buffer.from(provenance.mac, 'hex');
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function validStateResourceProvenance(state, options = {}, suppliedKey = undefined) {
+  const entries = [
+    ...state.reservations.map((entry) => ['reservation', entry]),
+    ...state.queue.map((entry) => ['queue', entry]),
+  ];
+  if (entries.length === 0) return true;
+  const key = suppliedKey || resourceProvenanceKey(options, false);
+  return Boolean(key && entries.every(([kind, entry]) => validResourceProvenance(kind, entry, key)));
+}
+
+function supervisorClaimMac(record, key) {
+  const { mac: _mac, ...payload } = record;
+  return crypto.createHmac('sha256', key)
+    .update(JSON.stringify(sortResourceValue(payload)), 'utf8')
+    .digest('hex');
+}
+
+function validSupervisorClaimMarker(record, key) {
+  if (!record || typeof record !== 'object'
+    || Object.keys(record).sort().join('\u0000') !== ['admission_id', 'claimed_at_ms', 'expires_at_ms', 'job_identity_digest', 'mac', 'owner_pid', 'reservation_id', 'schema'].sort().join('\u0000')
+    || record.schema !== SUPERVISOR_CLAIM_SCHEMA
+    || !/^[a-f0-9-]{36}$/.test(record.reservation_id || '')
+    || !/^[a-f0-9-]{36}$/.test(record.admission_id || '')
+    || !/^[a-f0-9]{64}$/.test(record.job_identity_digest || '')
+    || !Number.isSafeInteger(record.claimed_at_ms) || record.claimed_at_ms <= 0
+    || !Number.isSafeInteger(record.expires_at_ms) || record.expires_at_ms < record.claimed_at_ms
+    || !Number.isSafeInteger(record.owner_pid) || record.owner_pid <= 0
+    || !/^[a-f0-9]{64}$/.test(record.mac || '') || !key) return false;
+  const expected = Buffer.from(supervisorClaimMac(record, key), 'hex');
+  const actual = Buffer.from(record.mac, 'hex');
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function inspectSupervisorClaimMarkers(options, reservationId, admissionId, key, now) {
+  const directory = path.join(controlRoot(options), SUPERVISOR_CLAIM_DIRECTORY);
+  let stat;
+  try { stat = fs.lstatSync(directory); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { ok: true, count: 0, claimed: false };
+    return { ok: false, count: 0, claimed: false };
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return { ok: false, count: 0, claimed: false };
+  let names;
+  try { names = fs.readdirSync(directory); } catch (_) { return { ok: false, count: 0, claimed: false }; }
+  let count = 0;
+  for (const name of names) {
+    if (!/^[a-f0-9-]{36}\.json$/.test(name)) return { ok: false, count: 0, claimed: false };
+    const filePath = path.join(directory, name);
+    let record;
+    try {
+      verifyPrivateRegularFile(filePath);
+      record = readJson(filePath);
+    } catch (_) { return { ok: false, count: 0, claimed: false }; }
+    if (!validSupervisorClaimMarker(record, key) || name !== `${record.reservation_id}.json`) {
+      return { ok: false, count: 0, claimed: false };
+    }
+    if (record.expires_at_ms <= now) {
+      try { fs.unlinkSync(filePath); } catch (_) { return { ok: false, count: 0, claimed: false }; }
+      continue;
+    }
+    count += 1;
+    if (record.reservation_id === reservationId || record.admission_id === admissionId) {
+      return { ok: true, count, claimed: true };
+    }
+  }
+  return { ok: true, count, claimed: false };
+}
+
+function persistSupervisorClaimMarker(entry, options, key, now) {
+  const directory = path.join(controlRoot(options), SUPERVISOR_CLAIM_DIRECTORY);
+  try {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    fs.chmodSync(directory, 0o700);
+    const record = {
+      schema: SUPERVISOR_CLAIM_SCHEMA,
+      reservation_id: entry.id,
+      admission_id: entry.producer_provenance.admission_id,
+      job_identity_digest: entry.job_identity_digest,
+      claimed_at_ms: now,
+      expires_at_ms: entry.expires_at_ms,
+      owner_pid: process.pid,
+      mac: '',
+    };
+    record.mac = supervisorClaimMac(record, key);
+    const filePath = path.join(directory, `${entry.id}.json`);
+    createPrivateFile(filePath, `${JSON.stringify(record, null, 2)}\n`);
+    return true;
+  } catch (_) { return false; }
+}
+
+function resourceJobIdentityDigest(spec, workerExecutable = '') {
+  const identity = { ...spec };
+  delete identity.queue_id;
+  delete identity.child_prompt_base64;
+  delete identity.estimated_memory_bytes;
+  delete identity.tasks_separable;
+  delete identity.concurrent_execution_possible;
+  delete identity.expected_wall_clock_speedup;
+  delete identity.root_retains_longest_or_critical_path;
+  delete identity.child_task_is_shorter_or_easier;
+  delete identity.root_productive_work_declared;
+  identity.child_prompt = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8').toString('utf8');
+  identity.worker_executable = String(workerExecutable || '');
+  return crypto.createHash('sha256').update(JSON.stringify(sortResourceValue(identity)), 'utf8').digest('hex');
+}
+
+function resourceOrigin(resources, context) {
+  if (NATIVE_RESOURCE_STATES.has(resources)) return 'native';
+  if (TEST_RESOURCE_STATES.has(resources) && context) return 'repository-test';
+  return null;
+}
+
+function resourceDataCopy(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error('Resource evidence is malformed.');
+    return value;
+  }
+  if (typeof value === 'object' || typeof value === 'function') {
+    try { if (utilTypes.isProxy(value)) throw new Error('Resource evidence is malformed.'); }
+    catch (_) { throw new Error('Resource evidence is malformed.'); }
+  }
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('Resource evidence is malformed.');
+  seen.add(value);
+  try {
+    const array = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    const names = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0) throw new Error('Resource evidence is malformed.');
+    if (array) {
+      if (prototype !== Array.prototype && prototype !== null) throw new Error('Resource evidence is malformed.');
+      const length = Object.getOwnPropertyDescriptor(value, 'length');
+      if (!length || !Object.hasOwn(length, 'value') || length.enumerable || !Number.isSafeInteger(length.value) || length.value < 0) throw new Error('Resource evidence is malformed.');
+      const result = new Array(length.value);
+      for (const name of names) {
+        if (name === 'length') continue;
+        if (!/^(0|[1-9]\d*)$/.test(name) || Number(name) >= length.value) throw new Error('Resource evidence is malformed.');
+        const descriptor = Object.getOwnPropertyDescriptor(value, name);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+      }
+      for (let index = 0; index < length.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+        Object.defineProperty(result, String(index), { value: resourceDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('Resource evidence is malformed.');
+    const result = {};
+    for (const name of names) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource evidence is malformed.');
+      Object.defineProperty(result, name, { value: resourceDataCopy(descriptor.value, seen), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  } finally { seen.delete(value); }
+}
+
+function resourceOptionShell(options = {}) {
+  if (options === null || typeof options !== 'object') throw new Error('Resource options are malformed.');
+  try { if (utilTypes.isProxy(options)) throw new Error('Resource options are malformed.'); }
+  catch (_) { throw new Error('Resource options are malformed.'); }
+  if (Array.isArray(options)) throw new Error('Resource options are malformed.');
+  const prototype = Object.getPrototypeOf(options);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error('Resource options are malformed.');
+  const names = Object.getOwnPropertyNames(options);
+  if (Object.getOwnPropertySymbols(options).length > 0) throw new Error('Resource options are malformed.');
+  const result = {};
+  for (const name of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(options, name);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw new Error('Resource options are malformed.');
+    Object.defineProperty(result, name, { value: descriptor.value, enumerable: true, writable: true, configurable: true });
+  }
+  return result;
+}
+
+function withRepositoryTestResourceInvocation(invocation, root, callback) {
+  let trustedInvocation;
+  try { trustedInvocation = resourceDataCopy(invocation); }
+  catch (_) { throw new Error('Repository-test resource invocation is invalid.'); }
+  if (!trustedInvocation || typeof trustedInvocation !== 'object'
+    || Object.keys(trustedInvocation).sort().join('\u0000') !== ['fixture_id', 'invocation'].join('\u0000')
+    || trustedInvocation.invocation !== REPOSITORY_TEST_RESOURCE_INVOCATION
+    || trustedInvocation.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE.fixture_id
+    || typeof callback !== 'function') throw new Error('Repository-test resource invocation is invalid.');
+  if (typeof root !== 'string' || typeof callback !== 'function') throw new Error('Repository-test resource invocation is invalid.');
+  const target = path.resolve(root);
+  const tempRoot = path.resolve(os.tmpdir());
+  if (path.dirname(target) !== tempRoot) throw new Error('Repository-test resource root must be a direct owned temporary directory.');
+  const stat = fs.lstatSync(target);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Repository-test resource root must be a real temporary directory.');
+  const context = Object.freeze({
+    invocation: Object.freeze(trustedInvocation),
+    root: target,
+    fixture: REPOSITORY_TEST_RESOURCE_FIXTURE,
+  });
+  return RESOURCE_TEST_CONTEXT.run(context, callback);
 }
 
 function readJson(filePath, fallback = null) {
@@ -352,16 +648,26 @@ function readProfile(host = 'claude-code', options = {}) {
   const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
     && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof)
     && typeof raw.claude_cli === 'string' && raw.claude_cli.length > 0 && (() => { try { processLaunch.validateExecutable(raw.claude_cli); return true; } catch { return false; } })());
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  const currentResources = raw.topology === TOPOLOGIES.CLAUDE_DIRECT && !testContext
+    ? inspectResources() : null;
   const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
-    || (raw.resource_counter_verified === true && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source));
+    || (raw.resource_counter_verified === true
+      && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source)
+      && (testContext || NATIVE_RESOURCE_STATES.has(currentResources) && validResourceState(currentResources)
+        && currentResources.source === raw.resource_counter_source));
   if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
     return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
   }
-  return { ...raw, status: 'configured', supported: true };
+  return { ...raw, status: 'configured', supported: true,
+    ...(testContext ? { resource_evidence_context: 'repository-test-fixture', production_supported: false } : { production_supported: true }) };
 }
 
 function configureProfile(host, selected, options = {}) {
   if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
+  if (RESOURCE_TEST_CONTEXT.getStore()) throw new Error('Repository-test resource context cannot configure a production profile.');
+  try { selected = resourceDataCopy(selected); options = resourceOptionShell(options); }
+  catch (_) { throw new Error('The selected Toolkit profile is malformed.'); }
   const topology = selected.topology;
   const capacityMode = selected.capacity_mode;
   if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
@@ -382,9 +688,12 @@ function configureProfile(host, selected, options = {}) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
   const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
-  const resourceSource = selected.resource_counter_source || resourceCapability.source;
-  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
+  if (Object.hasOwn(selected, 'resource_state') || Object.hasOwn(selected, 'resourceState')) {
+    throw new Error('Caller-provided resource evidence cannot configure a production profile.');
+  }
+  const resourceCapability = topology === TOPOLOGIES.CLAUDE_DIRECT ? inspectResourceCapability() : { supported: false, source: 'not-applicable' };
+  const resourceSource = resourceCapability.source;
+  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (!resourceCapability.supported
     || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
     throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
   }
@@ -414,28 +723,101 @@ function invalidateProfile(host, reason, options = {}) {
   atomicWriteJson(profilePath(host, options), profile);
   return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
 }
+function nativeResourceState(value, source) {
+  const state = Object.freeze({
+    physical_total: value.physical_total,
+    physical_available: value.physical_available,
+    commit_total: value.commit_total,
+    commit_available: value.commit_available,
+    source,
+    host_responsive: value.host_responsive === true,
+  });
+  if (!validResourceState(state) || !['proc-meminfo', 'win32-operating-system'].includes(state.source)) return null;
+  NATIVE_RESOURCE_STATES.add(state);
+  return state;
+}
+
 function linuxResources() {
   const text = fs.readFileSync('/proc/meminfo', 'utf8');
   const values = Object.fromEntries([...text.matchAll(/^(\w+):\s+(\d+)\s+kB$/gm)].map((m) => [m[1], Number(m[2]) * 1024]));
-  return {
+  return nativeResourceState({
     physical_total: values.MemTotal,
     physical_available: values.MemAvailable,
     commit_total: values.CommitLimit,
     commit_available: values.CommitLimit - values.Committed_AS,
-    source: 'proc-meminfo',
     host_responsive: true,
-  };
+  }, 'proc-meminfo');
 }
 
 function windowsResources() {
   const command = '$o=Get-CimInstance Win32_OperatingSystem; [pscustomobject]@{physical_total=[double]$o.TotalVisibleMemorySize*1024;physical_available=[double]$o.FreePhysicalMemory*1024;commit_total=[double]$o.TotalVirtualMemorySize*1024;commit_available=[double]$o.FreeVirtualMemory*1024}|ConvertTo-Json -Compress';
   const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   if (result.status !== 0) throw new Error('Windows memory counters are unavailable.');
-  return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
+  return nativeResourceState({ ...JSON.parse(result.stdout), host_responsive: true }, 'win32-operating-system');
+}
+
+function testResourceFixture(value) {
+  if (!value || typeof value !== 'object'
+    || Object.keys(value).sort().join('\u0000') !== ['commit_available', 'commit_total', 'fixture_id', 'host_responsive', 'physical_available', 'physical_total', 'source'].join('\u0000')
+    || value.source !== REPOSITORY_TEST_RESOURCE_FIXTURE.source
+    || value.fixture_id !== REPOSITORY_TEST_RESOURCE_FIXTURE.fixture_id
+    || value.physical_total !== REPOSITORY_TEST_RESOURCE_FIXTURE.physical_total
+    || value.physical_available !== REPOSITORY_TEST_RESOURCE_FIXTURE.physical_available
+    || value.commit_total !== REPOSITORY_TEST_RESOURCE_FIXTURE.commit_total
+    || value.commit_available !== REPOSITORY_TEST_RESOURCE_FIXTURE.commit_available
+    || value.host_responsive !== true) return false;
+  return true;
+}
+
+function selectResourceEvidence(options = {}, positionalProvided = false, positionalResources = undefined) {
+  let selected;
+  try { selected = resourceOptionShell(options); } catch (_) { return { ok: false, resources: null, options: {} }; }
+  if (['resource_origin', 'resourceOrigin', 'resource_provenance', 'resourceProvenance', 'producer_provenance']
+    .some((key) => Object.hasOwn(selected, key))) return { ok: false, resources: null, options: selected };
+  const context = RESOURCE_TEST_CONTEXT.getStore();
+  const invocationKeys = ['repository_test_invocation', 'repositoryTestInvocation'];
+  const invocationPresent = invocationKeys.filter((key) => Object.hasOwn(selected, key));
+  if (invocationPresent.length > 1) return { ok: false, resources: null, options: selected };
+  if (invocationPresent.length === 1) {
+    let invocation;
+    try { invocation = resourceDataCopy(selected[invocationPresent[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!context || !invocation || invocation.invocation !== context.invocation.invocation
+      || invocation.fixture_id !== context.invocation.fixture_id
+      || Object.keys(invocation).sort().join('\u0000') !== 'fixture_id\u0000invocation') {
+      return { ok: false, resources: null, options: selected };
+    }
+  }
+  if (Object.hasOwn(selected, 'resource') || Object.hasOwn(selected, 'resources')) return { ok: false, resources: null, options: selected };
+  const evidenceKeys = ['resourceState', 'resource_state'];
+  const suppliedEvidenceKeys = evidenceKeys.filter((key) => Object.hasOwn(selected, key));
+  if (suppliedEvidenceKeys.length > 1) return { ok: false, resources: null, options: selected };
+  const hasOptionEvidence = suppliedEvidenceKeys.length === 1;
+  if (positionalProvided && hasOptionEvidence) {
+    let left;
+    let right;
+    try { left = resourceDataCopy(positionalResources); right = resourceDataCopy(selected[suppliedEvidenceKeys[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!testResourceFixture(left) || !testResourceFixture(right)) return { ok: false, resources: null, options: selected };
+  }
+  const evidenceProvided = positionalProvided || hasOptionEvidence;
+  if (evidenceProvided) {
+    if (!context) return { ok: false, resources: null, options: selected };
+    let evidence;
+    try { evidence = resourceDataCopy(positionalProvided ? positionalResources : selected[suppliedEvidenceKeys[0]]); }
+    catch (_) { return { ok: false, resources: null, options: selected }; }
+    if (!testResourceFixture(evidence)) return { ok: false, resources: null, options: selected };
+    const fixture = Object.freeze({ ...REPOSITORY_TEST_RESOURCE_FIXTURE });
+    TEST_RESOURCE_STATES.add(fixture);
+    return { ok: true, resources: fixture, options: selected, context };
+  }
+  return { ok: true, resources: null, options: selected, context };
 }
 
 function inspectResources(options = {}) {
-  if (Object.prototype.hasOwnProperty.call(options, 'resourceState')) return options.resourceState ? { ...options.resourceState } : null;
+  const selected = selectResourceEvidence(options);
+  if (!selected.ok) return null;
+  if (selected.resources) return selected.resources;
   try {
     if (process.platform === 'win32') return windowsResources();
     if (process.platform === 'linux') return linuxResources();
@@ -444,6 +826,7 @@ function inspectResources(options = {}) {
 }
 
 function validResourceState(resources) {
+  try { resources = resourceDataCopy(resources); } catch (_) { return false; }
   return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
     .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
     && resources.physical_available <= resources.physical_total
@@ -453,7 +836,9 @@ function validResourceState(resources) {
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
-  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  const supported = Boolean(validResourceState(resources)
+    && (NATIVE_RESOURCE_STATES.has(resources) || TEST_RESOURCE_STATES.has(resources)
+      && RESOURCE_TEST_CONTEXT.getStore()));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
@@ -685,6 +1070,12 @@ function validAdmissionProfile(profile) {
 }
 
 function admissionDecision(specInput, options = {}) {
+  try {
+    specInput = resourceDataCopy(specInput);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext && options.root && path.resolve(options.root) !== testContext.root) return refusal('Repository-test state must remain inside its owned temporary root.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -693,7 +1084,10 @@ function admissionDecision(specInput, options = {}) {
   const host = String(options.host || spec.host || HOSTS.CLAUDE);
   if (!Object.values(HOSTS).includes(host)) return refusal('The requested host adapter is unsupported.');
   if (host !== spec.host) return refusal('The native host adapter does not match the validated child host contract.');
-  const profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  let profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  if (options.profile) {
+    try { profile = resourceDataCopy(profile); } catch (_) { return refusal('The selected host admission profile could not be verified safely.'); }
+  }
   if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
   if (host === HOSTS.CLAUDE) {
@@ -704,12 +1098,23 @@ function admissionDecision(specInput, options = {}) {
   } else {
     return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
-  const resources = inspectResources(options);
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
-  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+  const selectedResources = selectResourceEvidence(options);
+  if (!selectedResources.ok) return refusal('Resource state could not be verified safely.');
+  const resources = selectedResources.resources || inspectResources({});
+  if (!validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+    && !(TEST_RESOURCE_STATES.has(resources) && selectedResources.context)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options, RESOURCE_PRODUCTION_ADMISSION, selectedResources.context);
 }
 
 function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  const positionalProvided = arguments.length >= 3;
+  try {
+    specInput = resourceDataCopy(specInput);
+    profile = resourceDataCopy(profile);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  const testContext = RESOURCE_TEST_CONTEXT.getStore();
+  if (testContext && options.root && path.resolve(options.root) !== testContext.root) return refusal('Repository-test state must remain inside its owned temporary root.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -717,18 +1122,45 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
-  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
-  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+  const selectedResources = selectResourceEvidence(options, positionalProvided, resources);
+  if (!selectedResources.ok) return refusal('Resource state could not be verified safely.');
+  resources = selectedResources.resources || inspectResources({});
+  if (!validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+    && !(TEST_RESOURCE_STATES.has(resources) && selectedResources.context)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options, null, selectedResources.context);
 }
 
-function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
+function resourceAdmissionDecisionValidated(spec, profile, resources, options, producerAuthority = null, testContext = null) {
   const host = spec.host;
+  const origin = resourceOrigin(resources, testContext);
+  if (!origin || origin === 'native' && producerAuthority !== RESOURCE_PRODUCTION_ADMISSION
+    || origin === 'repository-test' && !testContext) return refusal('Resource provenance could not be established safely.');
+  const workerExecutable = host === HOSTS.CLAUDE ? effectiveClaudeCommand(profile, options) : '';
+  const jobIdentityDigest = resourceJobIdentityDigest(spec, workerExecutable);
   return withLock(options, () => {
     const now = options.now || Date.now();
     const stateFile = statePath(options);
     const rawState = readJson(stateFile);
     if (fs.existsSync(stateFile) && !validControlState(rawState)) return refusal('Toolkit admission state could not be verified safely.');
     const state = recoverState(sanitizeState(rawState || emptyState()), now);
+    const legacyQueueIds = new Set((rawState?.queue || [])
+      .filter((entry) => entry && entry.role === undefined && Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now)
+      .map((entry) => entry.id));
+    let provenanceKey = resourceProvenanceKey(options, false);
+    if (legacyQueueIds.size > 0) {
+      if (origin !== 'repository-test' || !testContext || !spec.queue_id || !legacyQueueIds.has(spec.queue_id)) {
+        return refusal('Legacy queue provenance cannot be promoted to native authority.');
+      }
+      provenanceKey = provenanceKey || resourceProvenanceKey(options, true);
+      if (!provenanceKey) return refusal('Resource provenance could not be verified safely.');
+      const legacyQueue = state.queue.find((entry) => entry.id === spec.queue_id);
+      if (!legacyQueue) return refusal('The legacy queue entry is missing or expired.');
+      try { sealResourceProvenance('queue', legacyQueue, 'repository-test', resources.source, jobIdentityDigest, options, provenanceKey); }
+      catch (_) { return refusal('Repository-test queue provenance could not be preserved safely.'); }
+    }
+    if (!validStateResourceProvenance(state, options, provenanceKey)) {
+      return refusal('Toolkit reservation or queue provenance could not be verified safely.');
+    }
     let reservedBytes = 0;
     for (const entry of state.reservations) {
       if (!validReservation(entry) || reservedBytes > Number.MAX_SAFE_INTEGER - entry.estimated_memory_bytes) return refusal('Toolkit reservation memory state could not be verified safely.');
@@ -751,13 +1183,23 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
     const queuedReservation = spec.queue_id ? state.queue.find((entry) => entry.id === spec.queue_id) : null;
     if (spec.queue_id && !queuedReservation) return refusal('The queue entry is missing or expired.');
     if (queuedReservation && (queuedReservation.host !== host || queuedReservation.role !== spec.role)) return refusal('The queue entry belongs to a different host or child role.');
+    if (queuedReservation && (queuedReservation.producer_provenance.origin !== origin
+      || queuedReservation.producer_provenance.job_identity_digest !== jobIdentityDigest)) {
+      return refusal('The queued request cannot change or promote its resource provenance.');
+    }
     if (state.queue.length && state.queue[0].id !== spec.queue_id) {
       if (spec.role === ROLES.CHECKER) return refusal('The required checker could not be admitted immediately.');
       if (queuedReservation) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'An earlier bounded queue entry is still waiting.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = {
+        id: crypto.randomUUID(), host, topology: 'toolkit-controlled-direct', depth: spec.depth, role: spec.role,
+        created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, estimated_memory_bytes: requested,
+        effort: spec.effort, worker_executable: workerExecutable, job_identity_digest: jobIdentityDigest, status: RESULTS.QUEUE,
+      };
+      try { sealResourceProvenance('queue', queued, origin, resources.source, jobIdentityDigest, options, provenanceKey); }
+      catch (_) { return refusal('Toolkit queue provenance could not be persisted safely.'); }
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Earlier Toolkit-controlled work is queued.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -769,7 +1211,13 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = {
+        id: crypto.randomUUID(), host, topology: 'toolkit-controlled-direct', depth: spec.depth, role: spec.role,
+        created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, estimated_memory_bytes: requested,
+        effort: spec.effort, worker_executable: workerExecutable, job_identity_digest: jobIdentityDigest, status: RESULTS.QUEUE,
+      };
+      try { sealResourceProvenance('queue', queued, origin, resources.source, jobIdentityDigest, options, provenanceKey); }
+      catch (_) { return refusal('Toolkit queue provenance could not be persisted safely.'); }
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -778,9 +1226,12 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
     if (spec.effort !== 'medium' && state.reservations.some((entry) => entry.effort !== 'medium')) return refusal('A higher-effort child is already active; sibling effort escalation is not allowed.');
     const reservation = {
       id: crypto.randomUUID(), host, topology: 'toolkit-controlled-direct', depth: 1, role: spec.role,
-      owner_pid: options.ownerPid || process.pid, created_at_ms: now, expires_at_ms: now + RESERVATION_TTL_MS,
-      estimated_memory_bytes: requested, effort: spec.effort, status: 'reserved',
+      owner_pid: process.pid, created_at_ms: now, expires_at_ms: now + RESERVATION_TTL_MS,
+      estimated_memory_bytes: requested, effort: spec.effort, worker_executable: workerExecutable,
+      job_identity_digest: jobIdentityDigest, status: 'reserved',
     };
+    try { sealResourceProvenance('reservation', reservation, origin, resources.source, jobIdentityDigest, options, provenanceKey); }
+    catch (_) { return refusal('Toolkit reservation provenance could not be persisted safely.'); }
     state.reservations.push(reservation);
     if (spec.role === ROLES.CHECKER) {
       state.checker_reviews.push({ review_id: spec.review_id, reservation_id: reservation.id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS, status: 'pending' });
@@ -791,13 +1242,19 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
 }
 
 function updateReservation(id, updates, options = {}) {
+  try { updates = resourceDataCopy(updates); } catch (_) { return false; }
+  if (!updates || typeof updates !== 'object' || Array.isArray(updates)
+    || Object.keys(updates).some((key) => !['status', 'owner_pid'].includes(key))
+    || updates.status !== 'running'
+    || Object.hasOwn(updates, 'owner_pid') && (!Number.isSafeInteger(updates.owner_pid) || updates.owner_pid <= 0)) return false;
   return withLock(options, () => {
     const current = readMutableControlState(options);
     if (!current.exists || !current.state) return false;
     if (!current.state.reservations.some((item) => item.id === id)) return false;
     const state = recoverState(current.state);
     const entry = state.reservations.find((item) => item.id === id);
-    if (!entry) return false;
+    if (!entry || entry.status !== 'reserved') return false;
+    if (entry.producer_provenance) return false;
     Object.assign(entry, updates);
     if (!validControlState(state)) return false;
     atomicWriteJson(statePath(options), state);
@@ -809,7 +1266,8 @@ function releaseReservation(id, options = {}) {
   return withLock(options, () => {
     const current = readMutableControlState(options);
     if (!current.exists || !current.state) return false;
-    if (!current.state.reservations.some((entry) => entry.id === id)) return false;
+    const target = current.state.reservations.find((entry) => entry.id === id);
+    if (!target || target.owner_pid !== process.pid) return false;
     const state = recoverState(current.state);
     const before = state.reservations.length;
     state.reservations = state.reservations.filter((entry) => entry.id !== id);
@@ -994,7 +1452,70 @@ function readCheckerWorkflowInput(inputPath, options = {}) {
   catch { throw new Error('Checker workflow input is not valid JSON.'); }
 }
 
+function claimSupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options = {}) {
+  if (RESOURCE_TEST_CONTEXT.getStore() || spec.host !== HOSTS.CLAUDE) return false;
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    const now = Date.now();
+    const state = recoverState(current.state, now);
+    const key = resourceProvenanceKey(options, false);
+    if (!validControlState(state) || !key || !validStateResourceProvenance(state, options, key)) return false;
+    const entry = state.reservations.find((item) => item.id === reservationId);
+    if (!entry || entry.status !== 'reserved' || entry.expires_at_ms <= now
+      || !validResourceProvenance('reservation', entry, key)
+      || entry.producer_provenance.origin !== 'native'
+      || entry.producer_provenance.job_identity_digest !== jobIdentityDigest
+      || entry.job_identity_digest !== jobIdentityDigest
+      || entry.worker_executable !== workerExecutable
+      || entry.host !== spec.host || entry.role !== spec.role || entry.depth !== spec.depth
+      || entry.effort !== spec.effort || entry.topology !== 'toolkit-controlled-direct') return false;
+    const priorClaims = inspectSupervisorClaimMarkers(options, entry.id, entry.producer_provenance.admission_id, key, now);
+    if (!priorClaims.ok || priorClaims.claimed || priorClaims.count >= MAX_ACTIVE_SUPERVISOR_CLAIMS) return false;
+    if (spec.role === ROLES.CHECKER) {
+      const checkerReview = state.checker_reviews.find((review) => review.review_id === spec.review_id
+        && review.reservation_id === entry.id && review.status === 'pending' && review.expires_at_ms > now);
+      if (!checkerReview) return false;
+    }
+
+    const resources = inspectResources();
+    if (!validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+      || !['proc-meminfo', 'win32-operating-system'].includes(resources.source)) return false;
+    let otherReservedBytes = 0;
+    for (const reservation of state.reservations) {
+      if (!validReservation(reservation)) return false;
+      if (reservation.id === entry.id) continue;
+      if (otherReservedBytes > Number.MAX_SAFE_INTEGER - reservation.estimated_memory_bytes) return false;
+      otherReservedBytes += reservation.estimated_memory_bytes;
+    }
+    const physicalReserve = Math.max(4 * GIB, resources.physical_total * 0.25);
+    const commitReserve = Math.max(6 * GIB, resources.commit_total * 0.20);
+    const physicalAfter = resources.physical_available - otherReservedBytes - entry.estimated_memory_bytes;
+    const commitAfter = resources.commit_available - otherReservedBytes - entry.estimated_memory_bytes;
+    const critical = resources.physical_available / resources.physical_total < 0.08
+      || resources.commit_available / resources.commit_total < 0.08;
+    if (critical || physicalAfter < physicalReserve || commitAfter < commitReserve
+      || state.reservations.length > EMERGENCY_WORKER_CEILING) return false;
+
+    if (!persistSupervisorClaimMarker(entry, options, key, now)) return false;
+    entry.owner_pid = process.pid;
+    entry.status = 'running';
+    try {
+      sealResourceProvenance('reservation', entry, entry.producer_provenance.origin,
+        entry.producer_provenance.resource_source, entry.producer_provenance.job_identity_digest, options, key);
+    } catch (_) { return false; }
+    if (!validControlState(state)) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
+
 function launch(specInput, options = {}) {
+  try {
+    specInput = resourceDataCopy(specInput);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  if (RESOURCE_TEST_CONTEXT.getStore()) return refusal('Repository-test resource context cannot launch production workers.');
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
   let spec;
@@ -1019,7 +1540,12 @@ function launch(specInput, options = {}) {
   let out;
   let err;
   try {
-    const serialized = { ...spec, child_prompt: undefined, child_prompt_base64: promptBytes.toString('base64') };
+    const serialized = {
+      ...spec,
+      child_prompt: undefined,
+      child_prompt_base64: promptBytes.toString('base64'),
+      worker_executable: claudeCli,
+    };
     createPrivateFile(specPath, `${JSON.stringify(serialized, null, 2)}\n`);
     createPrivateFile(outputPath);
     createPrivateFile(errorPath);
@@ -1044,18 +1570,35 @@ function launch(specInput, options = {}) {
 }
 
 async function supervise(args) {
-  const spec = readJson(args.spec);
   const options = { root: args.root };
   let code = 1;
   let checkerOutcome = null;
+  let claimed = false;
+  let spec;
+  let specPath;
   try {
-    const encoded = String(spec?.child_prompt_base64 || '');
+    if (!/^[a-f0-9-]{36}$/.test(String(args.reservation || ''))) throw new Error('Toolkit reservation identity is invalid.');
+    specPath = path.resolve(String(args.spec || ''));
+    const expectedSpecPath = path.join(controlRoot(options), 'jobs', `${args.reservation}.json`);
+    if (specPath !== expectedSpecPath) throw new Error('Stored worker specification identity is invalid.');
+    verifyPrivateRegularFile(specPath);
+    const stored = readJson(specPath);
+    const encoded = String(stored?.child_prompt_base64 || '');
+    const workerExecutable = String(stored?.worker_executable || '');
+    if (!workerExecutable || workerExecutable !== args.claudeCli) throw new Error('Stored worker executable identity is invalid.');
     const promptBytes = Buffer.from(encoded, 'base64');
     if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
-    const invocation = claudeInvocation({ ...spec, child_prompt: promptBytes.toString('utf8') }, { claudeCli: args.claudeCli, promptBytes });
-    if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
+    const jobSpec = { ...stored };
+    delete jobSpec.child_prompt_base64;
+    delete jobSpec.worker_executable;
+    jobSpec.child_prompt = promptBytes.toString('utf8');
+    spec = validateLaunchSpec(jobSpec);
+    const jobIdentityDigest = resourceJobIdentityDigest(spec, workerExecutable);
+    if (!claimSupervisorReservation(args.reservation, spec, jobIdentityDigest, workerExecutable, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
+    claimed = true;
+    const invocation = claudeInvocation(spec, { claudeCli: workerExecutable, promptBytes });
     const childResult = runValidatedClaude(invocation, spec.role === ROLES.CHECKER);
     if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
     if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
@@ -1067,12 +1610,14 @@ async function supervise(args) {
       console.error('Checker output exceeds the bounded result limit.');
     }
   } finally {
-    if (spec?.role === ROLES.CHECKER) {
+    if (claimed && spec?.role === ROLES.CHECKER) {
       if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', { ...options, checker_result: checkerOutcome })) code = 1;
       if (code !== 0) clearPendingCheckerReview(spec.review_id, options);
     }
-    releaseReservation(args.reservation, options);
-    try { if (verifyPrivateRegularFile(args.spec)) fs.unlinkSync(args.spec); } catch {}
+    if (claimed) {
+      releaseReservation(args.reservation, options);
+      try { if (verifyPrivateRegularFile(specPath)) fs.unlinkSync(specPath); } catch {}
+    }
   }
   return code;
 }
@@ -1120,6 +1665,6 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
-  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
+  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker, withRepositoryTestResourceInvocation,
   checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

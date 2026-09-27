@@ -4,7 +4,85 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
+const packetSupport = require('./toolkit-authority-packet-test-support.cjs');
 const root = path.resolve(__dirname, '..', '..');
+
+function authorityPacket(overrides = {}) {
+  const source = {
+    repository: 'weijunswj/ai-agent-toolkit',
+    issue_number: 435,
+    comment_id: 5772542748,
+    node_id: 'IC_kwDOSTHjGM8AAAABWBIDHA',
+    author_login: 'weijunswj',
+    updated_at: '2026-09-22T07:09:31Z',
+    body_digest: 'a'.repeat(64),
+  };
+  return {
+    schema: n5.AUTHORITY_PACKET_CURRENT_SCHEMA,
+    repository: 'weijunswj/ai-agent-toolkit',
+    parent_issue: 421,
+    child_issue: 435,
+    lane_id: 'lane-g3-leaf-d',
+    human_owner: 'weijunswj',
+    consumer: { run: 'run-061', lock: 'lock-061', stage: 'G3', role: 'leaf-d', scope_digest: 'b'.repeat(64) },
+    authority: source,
+    candidate: { pr_number: 447, branch: 'codex/c1-authority-packet', base_ref: 'main', base_sha: 'c'.repeat(40), head_sha: 'd'.repeat(40), tree_sha: 'e'.repeat(40) },
+    predecessors: [{
+      packet_id: 'packet-060',
+      packet_digest: 'f'.repeat(64),
+      content_digest: '1'.repeat(64),
+      binding_digest: '2'.repeat(64),
+      producer: { run: 'run-060', lock: 'lock-060', stage: 'G2', role: 'G2' },
+      candidate: { pr_number: 447, branch: 'codex/c1-foundation', base_ref: 'main', base_sha: '3'.repeat(40), head_sha: '4'.repeat(40), tree_sha: '5'.repeat(40) },
+      dependency_id: 'g2-contract',
+      acceptance_event_id: 'acceptance-060',
+      web_source: source,
+      readback_event_id: 'readback-060',
+      store_identity_digest: '6'.repeat(64),
+    }],
+    ...overrides,
+  };
+}
+
+function trackerState(packet = authorityPacket()) {
+  const current = { child_id: 'child-435', issue_number: 435, lifecycle: 'current' };
+  if (packet) current.authority_packet_current = packet;
+  return {
+    kind: 'parent',
+    tracker_version: 'v3',
+    repository: 'weijunswj/ai-agent-toolkit',
+    parent_issue: 421,
+    current_work: [current],
+    pending_work: [],
+    other_open_prs: [],
+    terminal: [],
+    deferred_findings: [],
+    owner_detail: 'safe',
+  };
+}
+
+function governedRuntime(initialBody) {
+  let current = initialBody;
+  let revision = 0;
+  const github = {
+    getParent: () => ({ body: current, complete: true, revision: `r${revision}` }),
+    updateParent: ({ body: next }) => { current = next; revision += 1; return { accepted: true }; },
+    reconcileRelated: () => ({ ok: true }),
+  };
+  const identity = {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id: '1'.repeat(64), canonical_remote: 'https://github.com/weijunswj/ai-agent-toolkit.git' }),
+    getRepositoryStatus: () => ({ repository_id: '1'.repeat(64), canonical_remote: 'https://github.com/weijunswj/ai-agent-toolkit.git', capabilities: { 'repository.governance': { state: 'enabled' } } }),
+  };
+  const authority_broker = { authorize: ({ operation }) => ({
+    decision: 'allow', operation_type: operation.type,
+    operation_digest: a1.operationDigest(operation), target_digest: a1.targetDigest(operation),
+  }) };
+  return {
+    runtime: n5.createRuntime({ repository: 'weijunswj/ai-agent-toolkit', a2: identity, authority_broker, github }),
+    github,
+  };
+}
 
 test('A1 is sole mutation and ticket authority', () => { const b = n5.authorityBoundary(); assert.equal(b.a1.sole_mutation_authority, true); assert.equal(b.a1.sole_opaque_ticket_authority, true); assert.equal(b.a1.public_ticket_mint, false); assert.equal(b.n5.authority_or_finality_token, false); });
 test('A2 is consent/state only', () => { const b = n5.authorityBoundary(); assert.equal(b.a2.consent_only, true); assert.equal(b.a2.widens_task_or_delegation, false); assert.equal(b.a2.grants_review_mutation, false); assert.equal(b.a2.grants_finality, false); });
@@ -22,3 +100,81 @@ test('transaction contract is serialized and not arbitrary-editor CAS', () => { 
 test('Auto-code readiness performs no install schedule claim or launch', () => { const r = n5.autoCodeReadiness({ governance: 'enabled', tracker_valid: true, review_inventory_complete: true }); assert.equal(r.install_attempted, false); assert.equal(r.schedule_attempted, false); assert.equal(r.worker_claimed, false); });
 test('historical caller-cache symbols are absent from N5 runtime', () => { const source = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-github-governance-review-reconciler.cjs'), 'utf8'); assert.doesNotMatch(source, /getPairedRecords|evaluateWrapper|callerTokenCache/); });
 test('one next action has no generic authority class', () => { assert.deepEqual(n5.nextAction('N5_RECONCILED'), { next_action: 'READY_FOR_WEB_EXACT_HEAD_VALIDATION' }); assert.doesNotMatch(JSON.stringify(n5.authorityBoundary()), /web_controller/); });
+
+test('bounded CURRENT authority packet validates, round-trips, updates and exposes without history', () => {
+  const packet = authorityPacket();
+  const state = trackerState(packet);
+  assert.equal(n5.validateAuthorityPacketCurrent(packet, { repository: state.repository, parent_issue: state.parent_issue, child_issue: 435 }), true);
+  assert.equal(n5.validateTracker(state).ok, true);
+  const body = n5.renderManagedBlock('parent', state);
+  const parsed = n5.parseManagedBlock(body, 'parent');
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.state, state);
+  assert.deepEqual(n5.boundedProjection(state, parsed).current_work[0].authority_packet_current, packet);
+  assert.deepEqual(Object.keys(packet).sort(), ['authority', 'candidate', 'child_issue', 'consumer', 'human_owner', 'lane_id', 'parent_issue', 'predecessors', 'repository', 'schema'].sort());
+  assert.equal(Object.prototype.hasOwnProperty.call(packet, 'body'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(packet, 'findings'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(packet, 'history'), false);
+
+  const directInstall = n5.applyBoundedUpdate(trackerState(null), { child_id: 'child-435' }, { type: 'set_field', field: 'authority_packet_current', value: packet });
+  assert.equal(directInstall.code, 'N5_SCOPE_REJECTED');
+  const directRetire = n5.applyBoundedUpdate(state, { child_id: 'child-435' }, { type: 'set_lifecycle', lifecycle: 'pending' });
+  assert.equal(directRetire.code, 'N5_AUTHORITY_PACKET_CURRENT_REQUIRED');
+  assert.deepEqual(state.current_work[0].authority_packet_current, packet);
+  const absent = n5.parseManagedBlock(n5.renderManagedBlock('parent', trackerState(null)), 'parent');
+  assert.equal(absent.ok, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(absent.state.current_work[0], 'authority_packet_current'), false);
+});
+
+test('CURRENT packet rejects unknown, recursive and non-current shapes', () => {
+  const packet = authorityPacket();
+  const unknown = authorityPacket({ body: 'not allowed' });
+  assert.equal(n5.validateAuthorityPacketCurrent(unknown), false);
+  const recursive = authorityPacket();
+  recursive.predecessors[0].predecessors = [];
+  assert.equal(n5.validateAuthorityPacketCurrent(recursive), false);
+  const pending = trackerState(null);
+  pending.current_work = [];
+  pending.pending_work = [{ child_id: 'child-435', issue_number: 435, lifecycle: 'pending', queue_order: 1, authority_packet_current: packet }];
+  assert.equal(n5.validateTracker(pending).ok, false);
+});
+
+test('N5 retires and installs CURRENT packets only through fresh semantic gate transitions', () => {
+  const gate = packetSupport.semanticGate('n5-lifecycle');
+  const projection = gate.store.buildCurrentPacketProjection(gate.consumer_intent, gate.trusted_readers);
+  const admission = gate.store.admitSemanticGate(gate.consumer_intent, gate.trusted_readers).admission;
+
+  const current = trackerState(projection);
+  current.parent_issue = 435;
+  const currentBody = n5.renderManagedBlock('parent', current);
+  const retireRuntime = governedRuntime(currentBody);
+  const retired = retireRuntime.runtime.reconcile({
+    repository: current.repository,
+    parent_issue: current.parent_issue,
+    target: { child_id: 'child-435' },
+    update: { type: 'set_lifecycle', lifecycle: 'pending' },
+    accepted_preview: true,
+    current_packet_transition: { store: gate.store, trusted_readers: gate.trusted_readers, admission },
+  });
+  assert.equal(retired.code, 'N5_RECONCILED', JSON.stringify(retired));
+  assert.equal(retireRuntime.github.getParent().body.includes('"authority_packet_current"'), false);
+  assert.equal(retired.readback.target_state.pending_work[0].lifecycle, 'pending');
+
+  const pending = trackerState(null);
+  const installGate = packetSupport.semanticGate('n5-lifecycle-install');
+  const installProjection = installGate.store.buildCurrentPacketProjection(installGate.consumer_intent, installGate.trusted_readers);
+  pending.parent_issue = 435;
+  pending.current_work = [];
+  pending.pending_work = [{ child_id: 'child-435', issue_number: 435, lifecycle: 'pending', queue_order: 1, objective: 'N5 governed child' }];
+  const installRuntime = governedRuntime(n5.renderManagedBlock('parent', pending));
+  const installed = installRuntime.runtime.reconcile({
+    repository: pending.repository,
+    parent_issue: pending.parent_issue,
+    target: { child_id: 'child-435' },
+    update: { type: 'set_lifecycle', lifecycle: 'current' },
+    accepted_preview: true,
+    current_packet_transition: { store: installGate.store, trusted_readers: installGate.trusted_readers, consumer_intent: installGate.consumer_intent },
+  });
+  assert.equal(installed.code, 'N5_RECONCILED', JSON.stringify(installed));
+  assert.deepEqual(installed.readback.target_state.current_work[0].authority_packet_current, installProjection);
+});
