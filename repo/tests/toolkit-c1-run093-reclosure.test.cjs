@@ -66,6 +66,7 @@ const RUN102_Q_TREE = '8b791fddbb04b29d5fbb70009c33bdb674ad359c';
 const RUN102_CANONICAL_MAIN = 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a';
 const RUN102_CONTROLLER_BLOB = 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8';
 const RUN102_PACKAGE_VERSION = '2.10.12';
+const RUN103_SUCCESSOR_PARENT = '760c99749a227312852a3957d706b5a44510c092';
 const RUN102_ALLOWED_PATHS = Object.freeze([
   'repo/scripts/toolkit-github-program-receipt.cjs',
   'repo/scripts/toolkit-execution-loop.cjs',
@@ -175,9 +176,9 @@ function validateFixture(ir = loadFixture()) {
     .find((requirement) => requirement.id === 'R093-INTEGRATION')
     .cases.find((item) => item.id === 'R093-I-UNDECLARED-PATH');
   assert.equal(pathManifestCase.expected.maximum_paths, 49);
-  run095Ir.mutation.allow_paths = [...RUN099_ALLOWED_PATHS];
+  run095Ir.mutation.allow_paths = [...RUN102_ALLOWED_PATHS];
   pathManifestCase.input.variant = 'compare-exact-run099-path-manifest';
-  pathManifestCase.expected.maximum_paths = RUN099_ALLOWED_PATHS.length;
+  pathManifestCase.expected.maximum_paths = RUN102_ALLOWED_PATHS.length;
   const integrationCase = run095Ir.requirements
     .find((requirement) => requirement.id === 'R093-INTEGRATION')
     .cases.find((item) => item.id === 'R093-I-MAIN-SEMANTIC-LOSS');
@@ -187,7 +188,7 @@ function validateFixture(ir = loadFixture()) {
     .cases.find((item) => item.id === 'R093-I-PARENT-TOPOLOGY');
   topologyCase.input.variant = 'N-ordered-parents-P-current-main';
   for (const item of run095Ir.requirements.find((requirement) => requirement.id === 'R093-INTEGRATION').cases) {
-    if (item.id === 'R093-I-VERSION-SPLIT' || item.id === 'R093-I-PACKAGE-ALIGNMENT-POS') item.expected.version = '2.10.11';
+    if (item.id === 'R093-I-VERSION-SPLIT' || item.id === 'R093-I-PACKAGE-ALIGNMENT-POS') item.expected.version = '2.10.12';
   }
   const declared = ir.requirements.flatMap((requirement) => requirement.cases.map(caseId));
   assert.equal(declared.length, 81);
@@ -1625,6 +1626,64 @@ function topologyCandidateHead(env = process.env) {
   return pullRequestHeadFromEvent(event, env);
 }
 
+function sortedUniquePaths(paths) {
+  return [...new Set(paths)].sort();
+}
+
+function changedPaths(base, candidate = null) {
+  const tracked = (candidate === 'working-tree'
+    ? gitText(['diff', '--name-only', base, '--'])
+    : gitText(['diff', '--name-only', base, candidate])).split(/\r?\n/).filter(Boolean);
+  const untracked = candidate === 'working-tree'
+    ? gitText(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean)
+    : [];
+  return sortedUniquePaths([...tracked, ...untracked]);
+}
+
+function immutableChangedPaths(base, candidate) {
+  return sortedUniquePaths(gitText(['diff', '--name-only', base, candidate]).split(/\r?\n/).filter(Boolean));
+}
+
+function requireExactPathSet(actual, expected, code) {
+  if (actual.length !== expected.length || actual.some((file, index) => file !== expected[index])) fail(code);
+  return actual;
+}
+
+function requireExactParents(actual, expected) {
+  if (actual.length !== expected.length || actual.some((parent, index) => parent !== expected[index])) {
+    fail('RUN103_SUCCESSOR_PARENT_SCOPE');
+  }
+  return actual;
+}
+
+function successorCandidateSnapshot(env = process.env, { allowIdentityDeferral = false } = {}) {
+  const eventHead = topologyCandidateHead(env);
+  if (allowIdentityDeferral && eventHead === P && env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer') {
+    return { outcome: 'DEFERRED', candidate_sha: P, identity_deferred: true };
+  }
+  if (env.TOOLKIT_C1_SUCCESSOR_SIMULATION === 'working-tree') {
+    assert.equal(eventHead, RUN102_BASE_Q, 'Run-103 successor simulation must be anchored to the current PR head Q');
+    assert.equal(gitText(['rev-parse', 'HEAD']), RUN103_SUCCESSOR_PARENT, 'Run-103 successor simulation must run from immutable parent R');
+    return {
+      kind: 'working-tree',
+      candidate_sha: 'working-tree-successor',
+      ordered_parents: [RUN103_SUCCESSOR_PARENT],
+      identity_source: 'explicit-successor-working-tree-simulation',
+    };
+  }
+  if (eventHead === RUN102_BASE_Q) fail('RUN103_SUCCESSOR_NOT_CREATED');
+  assert.equal(gitText(['cat-file', '-t', eventHead]), 'commit');
+  const parents = gitText(['rev-list', '--parents', '-n', '1', eventHead]).split(' ').slice(1);
+  requireExactParents(parents, [RUN103_SUCCESSOR_PARENT]);
+  return {
+    kind: 'commit',
+    candidate_sha: eventHead,
+    ordered_parents: parents,
+    candidate_tree: gitText(['rev-parse', `${eventHead}^{tree}`]),
+    identity_source: env.GITHUB_EVENT_NAME === 'pull_request' ? 'github-event-pull-request-head' : 'local-current-HEAD',
+  };
+}
+
 function executeIntegration(plan, fixture) {
   const variant = plan.input.variant;
   const root = path.resolve(__dirname, '..', '..');
@@ -1682,20 +1741,23 @@ function executeIntegration(plan, fixture) {
     return { outcome: 'PRESERVED' };
   }
   if (variant === 'compare-exact-run099-path-manifest') {
-    const allowed = new Set(RUN099_ALLOWED_PATHS);
+    const historical = immutableChangedPaths(P, RUN102_BASE_Q);
+    requireExactPathSet(historical, sortedUniquePaths(RUN099_ALLOWED_PATHS), 'RUN103_HISTORICAL_P_TO_Q_SCOPE');
+    const successor = immutableChangedPaths(RUN102_BASE_Q, RUN103_SUCCESSOR_PARENT);
+    requireExactPathSet(successor, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
+    const cumulative = sortedUniquePaths([...historical, ...successor]);
+    const allowed = new Set(successor);
     const canonicalMergeBase = gitText(['merge-base', P, CANONICAL_MAIN]);
     const canonicalMainDelta = gitText(['diff', '--name-only', canonicalMergeBase, CANONICAL_MAIN]).split(/\r?\n/).filter(Boolean);
-    assert.deepEqual(canonicalMainDelta.filter((file) => !allowed.has(file)), [], 'canonical-main changes since the P/main merge-base stay inside the Run-099 path ceiling');
-    const candidateHead = topologyCandidateHead();
-    const tracked = (candidateHead === P
-      ? gitText(['diff', '--name-only', P])
-      : gitText(['diff', '--name-only', P, candidateHead])).split(/\r?\n/).filter(Boolean);
-    const untracked = gitText(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean);
-    const changed = [...new Set([...tracked, ...untracked])];
-    const extra = changed.filter((file) => !allowed.has(file));
-    assert.deepEqual(extra, []);
-    assert.deepEqual(changed.sort(), [...RUN099_ALLOWED_PATHS].sort());
-    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: RUN099_ALLOWED_PATHS.length };
+    assert.deepEqual(canonicalMainDelta.filter((file) => !new Set(cumulative).has(file)), [], 'canonical-main changes since the P/main merge-base stay inside the cumulative Run-103 path scope');
+    const candidate = successorCandidateSnapshot();
+    if (candidate.outcome === 'DEFERRED') return candidate;
+    const candidateSuccessor = changedPaths(RUN102_BASE_Q, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
+    requireExactPathSet(candidateSuccessor, successor, 'RUN103_SUCCESSOR_PATH_SCOPE');
+    const candidateCumulative = changedPaths(P, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
+    requireExactPathSet(candidateCumulative, cumulative, 'RUN103_CUMULATIVE_PATH_SCOPE');
+    assert.deepEqual(candidateSuccessor.filter((file) => !allowed.has(file)), []);
+    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: successor.length };
   }
   if (variant === 'N-ordered-parents-P-current-main') {
     assert.equal(gitText(['cat-file', '-t', P]), 'commit');
@@ -1703,20 +1765,15 @@ function executeIntegration(plan, fixture) {
     assert.equal(gitText(['rev-parse', `${P}^{tree}`]), P_TREE);
     assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', P]).split(' ').slice(1), [K, M2]);
     assert.equal(gitText(['merge-base', P, CANONICAL_MAIN]), M2);
-    const head = topologyCandidateHead();
-    if (head === P && process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer') {
-      return { outcome: 'DEFERRED', candidate_sha: P, identity_deferred: true };
-    }
-    if (head === P) fail('RUN099_EXACT_Q_NOT_CREATED');
-    assert.equal(gitText(['cat-file', '-t', head]), 'commit');
-    const parents = gitText(['rev-list', '--parents', '-n', '1', head]).split(' ').slice(1);
-    assert.deepEqual(parents, [P, CANONICAL_MAIN]);
-    const tree = gitText(['rev-parse', `${head}^{tree}`]);
-    const identitySource = process.env.GITHUB_EVENT_NAME === 'pull_request'
-      ? 'github-event-pull-request-head'
-      : 'local-current-HEAD';
-    process.stdout.write(`RUN099_TOPOLOGY_Q=${head}; TREE=${tree}; PARENTS=${parents.join(',')}; SOURCE=${identitySource}\n`);
-    return { outcome: 'EXACT', candidate_sha: head, candidate_tree: tree, ordered_parents: parents, identity_source: identitySource };
+    assert.equal(gitText(['cat-file', '-t', RUN102_BASE_Q]), 'commit');
+    assert.equal(gitText(['rev-parse', `${RUN102_BASE_Q}^{tree}`]), RUN102_Q_TREE);
+    const historicalQParents = gitText(['rev-list', '--parents', '-n', '1', RUN102_BASE_Q]).split(' ').slice(1);
+    requireExactParents(historicalQParents, [P, CANONICAL_MAIN]);
+    const candidate = successorCandidateSnapshot(process.env, { allowIdentityDeferral: true });
+    if (candidate.outcome === 'DEFERRED') return candidate;
+    requireExactParents(candidate.ordered_parents, [RUN103_SUCCESSOR_PARENT]);
+    process.stdout.write(`RUN103_TOPOLOGY_SUCCESSOR=${candidate.candidate_sha}; PARENT=${candidate.ordered_parents.join(',')}; SOURCE=${candidate.identity_source}\n`);
+    return { outcome: 'EXACT', candidate_sha: candidate.candidate_sha, candidate_tree: candidate.candidate_tree || null, ordered_parents: candidate.ordered_parents, identity_source: candidate.identity_source };
   }
   if (variant === 'authoritative-and-checked-native-manifests' || variant === 'Codex-Claude-bridge-and-setup-expectations') {
     const version = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
@@ -1724,7 +1781,7 @@ function executeIntegration(plan, fixture) {
     const claudeInput = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json'), 'utf8'));
     const codexChecked = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
     const claudeChecked = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/plugin.json'), 'utf8'));
-    assert.equal(version, '2.10.11');
+    assert.equal(version, '2.10.12');
     assert.equal(codexInput.version, version);
     assert.equal(claudeInput.version, version);
     assert.deepEqual(codexChecked, codexInput);
@@ -1840,14 +1897,35 @@ test('Run-102 successor preserves immutable Run-093 evidence and binds the exact
   assert.equal(RUN102_CANONICAL_MAIN, 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a');
   assert.equal(RUN102_CONTROLLER_BLOB, 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8');
   assert.equal(RUN102_PACKAGE_VERSION, '2.10.12');
+  assert.equal(RUN103_SUCCESSOR_PARENT, '760c99749a227312852a3957d706b5a44510c092');
   assert.equal(new Set(RUN102_ALLOWED_PATHS).size, 19);
 
   const root = path.resolve(__dirname, '..', '..');
-  const changed = spawnSync('git', ['diff', '--name-only', RUN102_BASE_Q, '--'], {
-    cwd: root, encoding: 'utf8', windowsHide: true,
-  });
-  assert.equal(changed.status, 0, changed.stderr);
-  assert.deepEqual(changed.stdout.split(/\r?\n/).filter(Boolean).sort(), [...RUN102_ALLOWED_PATHS].sort());
+  assert.equal(gitText(['cat-file', '-t', RUN103_SUCCESSOR_PARENT]), 'commit');
+  assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', RUN103_SUCCESSOR_PARENT]).split(' ').slice(1), [RUN102_BASE_Q]);
+  const historicalPaths = immutableChangedPaths(P, RUN102_BASE_Q);
+  const successorPaths = immutableChangedPaths(RUN102_BASE_Q, RUN103_SUCCESSOR_PARENT);
+  const cumulativePaths = sortedUniquePaths([...historicalPaths, ...successorPaths]);
+  requireExactPathSet(historicalPaths, sortedUniquePaths(RUN099_ALLOWED_PATHS), 'RUN103_HISTORICAL_P_TO_Q_SCOPE');
+  requireExactPathSet(successorPaths, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
+  assert.equal(cumulativePaths.length, 26);
+  const candidate = successorCandidateSnapshot();
+  if (candidate.outcome === 'DEFERRED') {
+    assert.equal(process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY, 'defer');
+    assert.equal(candidate.candidate_sha, P);
+  } else {
+    requireExactParents(candidate.ordered_parents, [RUN103_SUCCESSOR_PARENT]);
+    const candidateDelta = candidate.kind === 'working-tree'
+      ? changedPaths(RUN103_SUCCESSOR_PARENT, 'working-tree')
+      : immutableChangedPaths(RUN103_SUCCESSOR_PARENT, candidate.candidate_sha);
+    requireExactPathSet(candidateDelta, ['repo/tests/toolkit-c1-run093-reclosure.test.cjs'], 'RUN103_R_TO_SUCCESSOR_SCOPE');
+    const candidateSuccessorPaths = changedPaths(RUN102_BASE_Q, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
+    const candidateCumulativePaths = changedPaths(P, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
+    requireExactPathSet(candidateSuccessorPaths, successorPaths, 'RUN103_SUCCESSOR_PATH_SCOPE');
+    requireExactPathSet(candidateCumulativePaths, cumulativePaths, 'RUN103_CUMULATIVE_PATH_SCOPE');
+  }
+  assert.throws(() => requireExactParents([RUN102_BASE_Q], [RUN103_SUCCESSOR_PARENT]), /RUN103_SUCCESSOR_PARENT_SCOPE/);
+  assert.throws(() => requireExactPathSet([...successorPaths, 'repo/tests/unauthorised-extra.cjs'], successorPaths, 'RUN103_SUCCESSOR_PATH_SCOPE'), /RUN103_SUCCESSOR_PATH_SCOPE/);
 
   const manifests = [
     'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
