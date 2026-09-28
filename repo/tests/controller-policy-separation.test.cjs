@@ -1027,6 +1027,7 @@ test('S1A increment 1 existing lifecycle and continuation boundaries remain inta
   assert.match(architecture, /G2.*G3.*G4/s);
   assert.match(controller, /Web retains judgement\/finality/);
 });
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'e808a4bcb267b97ea6dcd0a983f0e49ffeb44582c23dd5622a7e978d79160326';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
@@ -1339,6 +1340,29 @@ function s1aParseJsonRejectDuplicates(source) {
   return result;
 }
 
+function s1aGovernedHumanPolicyDigest(source) {
+  const policyLawStart = source.indexOf('## Shipping disposition and current blocker admission');
+  const policyLaw = source.slice(policyLawStart);
+  const policyLawEnd = /\r?\n## Child sizing and splitting/.exec(policyLaw);
+  s1aRequire(policyLawStart >= 0 && policyLawEnd,
+    'Architecture current shipping law section is missing or ambiguous');
+  const governedSection = policyLaw.slice(0, policyLawEnd.index);
+  const canonicalStart = governedSection.indexOf('### Canonical disposition vocabulary');
+  const g1Start = governedSection.indexOf('### G1 re-convergence', canonicalStart);
+  s1aRequire(canonicalStart >= 0 && g1Start > canonicalStart,
+    'Architecture governed human policy range is missing or ambiguous');
+  const canonicalFailClosed =
+    'If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
+  const acceptedEquivalentFailClosed =
+    'If any field is missing or contradictory, this disposition must fail closed; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
+  // G1 re-convergence is separate policy. Normalize line endings; the machine contract is independently interpreted below.
+  const governedHumanPolicy = governedSection.slice(0, g1Start)
+    .replace(/~~~s1a-policy-contract-v1\r?\n[\s\S]*?\r?\n~~~/,
+      '~~~s1a-policy-contract-v1\n[fixed-machine-contract]\n~~~')
+    .replace(/\r\n?/g, '\n')
+    .replace(acceptedEquivalentFailClosed, canonicalFailClosed);
+  return crypto.createHash('sha256').update(governedHumanPolicy, 'utf8').digest('hex');
+}
 function s1aReadPolicy(source) {
   const matches = [...source.matchAll(/~~~s1a-policy-contract-v1\r?\n([\s\S]*?)\r?\n~~~/g)];
   s1aRequire(matches.length === 1, 'Architecture must contain exactly one S1-A policy contract');
@@ -1758,23 +1782,8 @@ function s1aReadPolicy(source) {
     carrierProse.includes('A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest.') &&
     !/faithful (?:on|by) (?:shape )?equivalence without (?:an? )?(?:independently bound )?terminal execution receipt|one combined grant is sufficient/i.test(carrierProse),
     'carrier prose must require independently bound boundary evidence and separate current exposure authority');
-  const humanPolicyStart = policyLawProse.indexOf('### Canonical disposition vocabulary');
-  const humanPolicyEnd = policyLawProse.indexOf('### G1 re-convergence', humanPolicyStart);
-  s1aRequire(humanPolicyStart >= 0 && humanPolicyEnd > humanPolicyStart,
-    'Architecture human policy prose range is missing or ambiguous');
-  const canonicalFailClosed =
-    'If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
-  const acceptedEquivalentFailClosed =
-    'If any field is missing or contradictory, this disposition must fail closed; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
-  const governedHumanPolicy = policyLawProse
-    .replace(/~~~s1a-policy-contract-v1\r?\n[\s\S]*?\r?\n~~~/, '~~~s1a-policy-contract-v1\n[fixed-machine-contract]\n~~~')
-    .replace(/\r\n/g, '\n')
-    .replace(acceptedEquivalentFailClosed, canonicalFailClosed);
-  const governedHumanPolicyDigest = crypto.createHash('sha256')
-    .update(governedHumanPolicy, 'utf8')
-    .digest('hex');
-  s1aRequire(governedHumanPolicyDigest ===
-    '9681caed254725832c380697464080e80514b3bd0d4e34633f00bf907efa78c0',
+  const governedHumanPolicyDigest = s1aGovernedHumanPolicyDigest(source);
+  s1aRequire(governedHumanPolicyDigest === S1A_ORACLE_GOVERNED_PROSE_SHA256,
     'S1-A governed human policy prose differs from fixed semantic oracle');
   return { policy, block: matches[0][0] };
 }
@@ -2634,6 +2643,10 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
   }
   return { ok: failures.length === 0, failures };
 }
+test('S1-A canonical Architecture prose baseline matches the fixed oracle before mutations', () => {
+  assert.equal(s1aGovernedHumanPolicyDigest(architecture), S1A_ORACLE_GOVERNED_PROSE_SHA256);
+  assert.doesNotThrow(() => parseS1aPolicyContract(architecture));
+});
 test('S1-A Architecture contract is read directly and agrees with the human tables', () => {
   const policy = parseS1aPolicyContract(architecture);
   assert.deepEqual(policy.dispositions,
@@ -4187,6 +4200,7 @@ test('S1-A source prose rejects polarity, appended contradiction, and coherent m
   const equivalentFailClosed = 'If any field is missing or contradictory, this disposition must fail closed; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
   const equivalentConstruction = architecture.replace(failClosed, equivalentFailClosed);
   assert.notEqual(equivalentConstruction, architecture);
+  assert.equal(s1aGovernedHumanPolicyDigest(equivalentConstruction), S1A_ORACLE_GOVERNED_PROSE_SHA256);
   assert.doesNotThrow(() => parseS1aPolicyContract(equivalentConstruction));
 
   const blockerPolarity = architecture.replace(failClosed,
