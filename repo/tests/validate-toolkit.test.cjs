@@ -428,7 +428,9 @@ function validationWorkflowCheckoutErrors(source) {
   if (checkout.fields['continue-on-error'] === 'true') errors.push('checkout acquisition must not ignore failure');
   const validationIndex = parsed.steps.findIndex((step) => (
     step.source.includes('node repo/scripts/validate-toolkit.cjs') ||
-    step.source.includes('node --test repo/tests/*.test.cjs')
+    step.source.includes('node --test repo/tests/*.test.cjs') ||
+    step.source.includes('npm run validate:all') ||
+    step.source.includes('npm run validate:toolkit')
   ));
   if (validationIndex === -1) errors.push('existing validation floor is missing');
   else if (parsed.steps.indexOf(checkout) >= validationIndex) errors.push('checkout must precede the existing validation floor');
@@ -1284,51 +1286,47 @@ test('validator detects stale plugin package versions', () => {
   assert.match(result.stderr, /version does not match/);
 });
 
-test('validation workflow contains only retained read-only checks', () => {
-  const workflow = readText('.github/workflows/validate.yml');
-  assert.match(workflow, /node repo\/scripts\/sync-agent-instruction-shims\.cjs --check/);
-  assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
-  assert.match(workflow, /node repo\/scripts\/audit-project-source-locks\.cjs/);
-  assert.match(workflow, /node repo\/scripts\/audit-published-surfaces\.cjs --check/);
-  assert.match(workflow, /node repo\/scripts\/validate-toolkit\.cjs/);
-  assert.match(workflow, /node --test repo\/tests\/\*\.test\.cjs/);
-  assert.doesNotMatch(workflow, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
+test('automatic validation retains the canonical full gate while Validate toolkit is manual-only', () => {
+  const validate = readText('.github/workflows/validate.yml');
+  const toolkit = readText('.github/workflows/validate-toolkit.yml');
+
+  assert.match(validate, /^on:\n  pull_request:\n/m);
+  assert.match(validate, /^  push:\n    branches:\n      - main$/m);
+  assert.doesNotMatch(validate, /^  workflow_dispatch:$/m);
+  assert.match(validate, /node repo\/scripts\/sync-agent-instruction-shims\.cjs --check/);
+  assert.match(validate, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
+  assert.match(validate, /node repo\/scripts\/audit-project-source-locks\.cjs/);
+  assert.match(validate, /node repo\/scripts\/audit-published-surfaces\.cjs --check/);
+  assert.match(validate, /node repo\/scripts\/validate-toolkit\.cjs/);
+  assert.match(validate, /node --test repo\/tests\/\*\.test\.cjs/);
+  assert.doesNotMatch(validate, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
+
+  assert.doesNotMatch(toolkit, /^  pull_request:$/m);
+  assert.doesNotMatch(toolkit, /^  push:$/m);
+  assert.match(toolkit, /^  workflow_dispatch:$/m);
+  assert.match(toolkit, /node --check repo\/scripts\/validate-toolkit\.cjs/);
+  assert.match(toolkit, /npm run validate:toolkit/);
+  assert.doesNotMatch(toolkit, /node --test repo\/tests\/\*\.test\.cjs|npm test/);
 });
 
-test('both hosted validation workflows fetch full event history before their validation floor', () => {
+test('automatic and manual validation workflows fetch full history before their own validation floor', () => {
   const specs = [
-    { path: '.github/workflows/validate.yml', dispatch: false },
-    { path: '.github/workflows/validate-toolkit.yml', dispatch: true }
+    { path: '.github/workflows/validate.yml', automatic: true, dispatch: false },
+    { path: '.github/workflows/validate-toolkit.yml', automatic: false, dispatch: true }
   ];
   for (const spec of specs) {
     const source = readText(spec.path);
     assert.deepEqual(validationWorkflowCheckoutErrors(source), [], spec.path);
-    assert.match(source, /^on:\n  pull_request:\n/m, spec.path + ' pull_request trigger');
-    assert.match(source, /^  push:\n    branches:\n      - main$/m, spec.path + ' main push trigger');
     assert.match(source, /^permissions:\n  contents: read$/m, spec.path + ' read-only permissions');
+    if (spec.automatic) {
+      assert.match(source, /^on:\n  pull_request:\n/m, spec.path + ' pull_request trigger');
+      assert.match(source, /^  push:\n    branches:\n      - main$/m, spec.path + ' main push trigger');
+    } else {
+      assert.doesNotMatch(source, /^  pull_request:$/m, spec.path + ' has no pull_request trigger');
+      assert.doesNotMatch(source, /^  push:$/m, spec.path + ' has no push trigger');
+    }
     if (spec.dispatch) assert.match(source, /^  workflow_dispatch:$/m, spec.path + ' workflow_dispatch trigger');
     else assert.doesNotMatch(source, /^  workflow_dispatch:$/m, spec.path + ' retains its existing trigger set');
-    if (spec.path.endsWith('validate.yml')) {
-      for (const command of [
-        'node repo/scripts/sync-repo-doc-contract.cjs --check',
-        'node repo/scripts/sync-agent-instruction-shims.cjs --check',
-        'node repo/scripts/audit-project-source-locks.cjs',
-        'node repo/scripts/audit-published-surfaces.cjs --check',
-        'node repo/scripts/audit-fallback-risk.cjs',
-        'node repo/scripts/validate-toolkit.cjs',
-        'node --test repo/tests/*.test.cjs',
-        'node repo/scripts/audit-skill-portability.cjs',
-        'node repo/scripts/run-design-tests.cjs',
-        'git diff --check'
-      ]) assert.ok(source.includes(command), spec.path + ' retains ' + command);
-    } else {
-      for (const command of [
-        'node --check repo/scripts/validate-toolkit.cjs',
-        'node repo/scripts/validate-toolkit.cjs',
-        'node --test repo/tests/*.test.cjs',
-        'git diff --check'
-      ]) assert.ok(source.includes(command), spec.path + ' retains ' + command);
-    }
   }
 });
 

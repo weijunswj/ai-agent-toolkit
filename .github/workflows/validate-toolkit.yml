@@ -1,10 +1,6 @@
 name: Validate toolkit
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -32,10 +28,4 @@ jobs:
         run: node --check repo/scripts/validate-toolkit.cjs
 
       - name: Validate toolkit
-        run: node repo/scripts/validate-toolkit.cjs
-
-      - name: Run tests
-        run: node --test repo/tests/*.test.cjs
-
-      - name: Check whitespace
-        run: git diff --check
+        run: npm run validate:toolkit
