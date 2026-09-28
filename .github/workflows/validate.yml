@@ -32,15 +32,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run validation
-        run: |
-          node repo/scripts/sync-repo-doc-contract.cjs --check
-          node repo/scripts/sync-agent-instruction-shims.cjs --check
-          node repo/scripts/audit-project-source-locks.cjs
-          node repo/scripts/audit-published-surfaces.cjs --check
-          node repo/scripts/audit-fallback-risk.cjs
-          node repo/scripts/validate-toolkit.cjs
-          node --test repo/tests/*.test.cjs
-          node repo/scripts/audit-skill-portability.cjs
-          node repo/scripts/run-design-tests.cjs
-          git diff --check
+      - name: Run repository tests
+        run: npm test
+
+      - name: Run design tests
+        run: npm run test:design
