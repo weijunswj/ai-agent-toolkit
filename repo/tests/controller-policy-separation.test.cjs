@@ -767,3 +767,250 @@ test('shipping policy remains symbolic and preserves existing policy boundaries'
   assert.match(controller, /Concrete parent\/child provider\/model\/reasoning bindings come from the explicitly selected stack registry/);
   assert.match(architecture, /Only G0 and G3 may use semantic depth-1 subagents/);
 });
+
+function s1aSection(source, heading) {
+  const start = source.indexOf(heading);
+  assert.notEqual(start, -1, 'missing canonical section: ' + heading);
+  const remainder = source.slice(start + heading.length);
+  const nextHeading = remainder.search(/^#{1,6} /m);
+  return nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
+}
+
+function s1aTable(source, heading) {
+  const lines = s1aSection(source, heading)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('|'));
+  assert.ok(lines.length >= 2, 'missing canonical table: ' + heading);
+  const cells = (line) => line.split('|').slice(1, -1).map((cell) => cell.trim());
+  const headers = cells(lines[0]);
+  const tick = String.fromCharCode(96);
+  const rows = [];
+  for (const line of lines.slice(2)) {
+    const values = cells(line);
+    if (!values.length || values.every((value) => /^:?-+:?$/.test(value))) continue;
+    assert.equal(values.length, headers.length, 'malformed canonical table row in ' + heading);
+    rows.push(Object.fromEntries(headers.map((header, index) => [
+      header,
+      values[index].replace(new RegExp('^' + tick + '|' + tick + '$', 'g'), ''),
+    ])));
+  }
+  return rows;
+}
+
+function assertS1aBlockerContract(source) {
+  const section = s1aSection(source, '### Current blocker field contract');
+  const rows = s1aTable(source, '### Current blocker field contract');
+  const ids = rows.map((row) => row['Required field']);
+  assert.deepEqual(ids, [
+    'WEB_ADMITTED_REVISION',
+    'ADMITTED_CURRENT_OUTCOME',
+    'LOCKED_CRITERION_OR_FLOOR',
+    'SHIP_NOW_CONSEQUENCE',
+    'REQUIRED_OUTCOME_EFFECT',
+    'SAFE_DEFERRAL_IMPOSSIBLE',
+    'SMALLEST_CORRECTION',
+    'VERIFIABLE_CLOSURE',
+    'EXACT_EVIDENCE',
+    'CANDIDATE_IDENTITY',
+  ]);
+  assert.match(rows.find((row) => row['Required field'] === 'REQUIRED_OUTCOME_EFFECT')['Bound value or proof'],
+    /FALSE.*MATERIALLY_UNSAFE.*UNASSURABLE/);
+  assert.match(section, /DISPOSITION=CURRENT_SHIP_BLOCKER/);
+  assert.match(section, /LIFECYCLE=UNRESOLVED/);
+  assert.match(section, /ALL_FIELDS_REQUIRED=YES/);
+}
+
+test('S1A increment 1 canonical shipping semantics I1-01..I1-25', async (t) => {
+  const dispositions = s1aTable(architecture, '### Canonical disposition vocabulary');
+  const projections = s1aTable(architecture, '### Lossless legacy projections');
+  const fields = s1aTable(architecture, '### Current blocker field contract');
+  const examples = s1aTable(architecture, '### Current-frontier effect and examples');
+  const dispositionByName = new Map(dispositions.map((row) => [row.Disposition, row['Meaning and timing']]));
+  const projectionKey = (row) => row['Canonical disposition'] + '/' + row.Lifecycle;
+  const projectionByKey = new Map(projections.map((row) => [projectionKey(row), row]));
+  const fieldByName = new Map(fields.map((row) => [row['Required field'], row['Bound value or proof']]));
+  const cases = [
+    ['I1-01', 'the canonical vocabulary has exactly five dispositions', () => {
+      assert.deepEqual(dispositions.map((row) => row.Disposition), [
+        'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY',
+      ]);
+    }],
+    ['I1-02', 'only CURRENT_SHIP_BLOCKER names a present shipment failure', () => {
+      assert.match(dispositionByName.get('CURRENT_SHIP_BLOCKER'), /admitted finding.*satisfied every current-blocker predicate.*while UNRESOLVED.*false, materially unsafe, or unassurable now/);
+    }],
+    ['I1-03', 'IMMEDIATE_POST_SHIP keeps current outcome and floor intact', () => {
+      assert.match(dispositionByName.get('IMMEDIATE_POST_SHIP'), /next post-ship opportunity.*does not make.*fail now/);
+    }],
+    ['I1-04', 'FUTURE_OWNED preserves a verified continuing owner', () => {
+      assert.match(dispositionByName.get('FUTURE_OWNED'), /verified continuing owner and future home.*remains unresolved/);
+    }],
+    ['I1-05', 'OBSERVE retains a trigger without admitting correction', () => {
+      assert.match(dispositionByName.get('OBSERVE'), /signal, trigger, or threshold.*no current correction/);
+    }],
+    ['I1-06', 'EVIDENCE_ONLY does not assert a product defect', () => {
+      assert.match(dispositionByName.get('EVIDENCE_ONLY'), /without asserting a product defect.*required evidence gates remain independently binding/);
+    }],
+    ['I1-07', 'lifecycle is independent of disposition', () => {
+      assert.match(s1aSection(architecture, '### Canonical disposition vocabulary'), /separate lifecycle/);
+      assert.match(s1aSection(architecture, '### Canonical disposition vocabulary'), /UNRESOLVED.*RESOLVED/s);
+    }],
+    ['I1-08', 'an unresolved current blocker projects to the legacy blocking labels', () => {
+      const row = projectionByKey.get('CURRENT_SHIP_BLOCKER/UNRESOLVED');
+      assert.equal(row['Two-way projection'], 'SHIP_BLOCKER');
+      assert.equal(row['v1 projection'], 'BLOCKING');
+    }],
+    ['I1-09', 'a resolved blocker retains its class while v1 records resolution', () => {
+      const row = projectionByKey.get('CURRENT_SHIP_BLOCKER/RESOLVED');
+      assert.equal(row['Two-way projection'], 'SHIP_BLOCKER');
+      assert.equal(row['v1 projection'], 'RESOLVED');
+    }],
+    ['I1-10', 'every unresolved non-blocker projects as POST_SHIP and NON_BLOCKING', () => {
+      for (const disposition of ['IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY']) {
+        const row = projectionByKey.get(disposition + '/UNRESOLVED');
+        assert.equal(row['Two-way projection'], 'POST_SHIP');
+        assert.equal(row['v1 projection'], 'NON_BLOCKING');
+      }
+    }],
+    ['I1-11', 'all resolved v1 findings project as RESOLVED', () => {
+      for (const disposition of dispositions.map((row) => row.Disposition)) {
+        assert.equal(projectionByKey.get(disposition + '/RESOLVED')['v1 projection'], 'RESOLVED');
+      }
+    }],
+    ['I1-12', 'the projection table covers each disposition-lifecycle pair once', () => {
+      assert.equal(projections.length, 10);
+      assert.equal(new Set(projections.map(projectionKey)).size, 10);
+      assert.equal(projections.filter((row) => row.Lifecycle === 'UNRESOLVED').length, 5);
+      assert.equal(projections.filter((row) => row.Lifecycle === 'RESOLVED').length, 5);
+    }],
+    ['I1-13', 'the sidecar retains timing owner evidence and revision', () => {
+      assert.match(s1aSection(architecture, '### Lossless legacy projections'),
+        /canonical disposition, lifecycle, timing, verified owner.*exact evidence references, candidate identity and Web-admitted revision/);
+    }],
+    ['I1-14', 'the current outcome is bound to milestone audience and environment', () => {
+      assert.match(fieldByName.get('ADMITTED_CURRENT_OUTCOME'), /outcome\/milestone, intended audience and supported environment/);
+      assert.match(fieldByName.get('WEB_ADMITTED_REVISION'), /Exact durable Web-admitted revision/);
+    }],
+    ['I1-15', 'the blocker names a locked criterion or applicable floor', () => {
+      assert.match(fieldByName.get('LOCKED_CRITERION_OR_FLOOR'), /Exact locked acceptance-criterion identifier or applicable minimum-safety-floor obligation/);
+    }],
+    ['I1-16', 'the blocker records the ship-now consequence and allowed effect set', () => {
+      assert.match(fieldByName.get('SHIP_NOW_CONSEQUENCE'), /Concrete, evidence-backed consequence/);
+      assert.match(fieldByName.get('REQUIRED_OUTCOME_EFFECT'), /FALSE.*MATERIALLY_UNSAFE.*UNASSURABLE/);
+    }],
+    ['I1-17', 'safe deferral must be demonstrated impossible', () => {
+      assert.match(fieldByName.get('SAFE_DEFERRAL_IMPOSSIBLE'), /why an existing or newly verified future owner cannot safely close/);
+      assert.match(fieldByName.get('SAFE_DEFERRAL_IMPOSSIBLE'), /correct and assurable/);
+    }],
+    ['I1-18', 'the smallest correction has a verifiable closure oracle', () => {
+      assert.match(fieldByName.get('SMALLEST_CORRECTION'), /smallest correction/);
+      assert.match(fieldByName.get('VERIFIABLE_CLOSURE'), /falsifiable closure oracle at the relevant consequential boundary/);
+    }],
+    ['I1-19', 'evidence and immutable candidate identity are exact', () => {
+      assert.match(fieldByName.get('EXACT_EVIDENCE'), /Durable exact evidence references/);
+      assert.match(fieldByName.get('CANDIDATE_IDENTITY'), /Exact candidate commit\/tree or other accepted immutable candidate identity/);
+    }],
+    ['I1-20', 'all blocker fields are conjunctive and Web-admitted', () => {
+      assertS1aBlockerContract(architecture);
+      assert.match(s1aSection(architecture, '### Current blocker field contract'), /Web durably reconciles the full predicate/);
+    }],
+    ['I1-21', 'severity novelty G4 labels and evidence gaps cannot replace the predicate', () => {
+      assert.match(s1aSection(architecture, '### Current blocker field contract'),
+        /Severity, novelty, a G4 label, a critical evidence gap by itself.*cannot substitute for any field/);
+    }],
+    ['I1-22', 'only a properly admitted unresolved blocker blocks its dependent frontier', () => {
+      assert.match(s1aSection(architecture, '### Current-frontier effect and examples'),
+        /Only a properly admitted, unresolved .+CURRENT_SHIP_BLOCKER.+may block the finding-derived dependent current frontier/);
+    }],
+    ['I1-23', 'independent CI assurance authority evidence and checkpoint gates remain binding', () => {
+      assert.match(s1aSection(architecture, '### Current-frontier effect and examples'),
+        /cannot suppress or replace independent CI, assurance, authority, evidence, checkpoint/);
+    }],
+    ['I1-24', 'a safely deferrable alpha edge is not a current blocker', () => {
+      const row = examples.find((example) => /alpha edge/.test(example.Example));
+      assert.ok(row);
+      assert.equal(row.Disposition, 'FUTURE_OWNED');
+      assert.match(row['Evidence result'], /Safe deferral is demonstrated.*remains correct and assurable/);
+    }],
+    ['I1-25', 'an admitted alpha journey data-integrity or safety-floor defect can qualify', () => {
+      const row = examples.find((example) => /admitted alpha journey/.test(example.Example));
+      assert.ok(row);
+      assert.equal(row.Disposition, 'CURRENT_SHIP_BLOCKER');
+      assert.match(row.Example + ' ' + row['Evidence result'], /every required predicate.*exact candidate and Web-admitted revision/);
+    }],
+  ];
+  for (const [id, name, check] of cases) {
+    await t.test('S1A increment 1 ' + id + ' ' + name, check);
+  }
+});
+
+test('S1A increment 1 blocker predicate rejects clause removal and negation', () => {
+  assertS1aBlockerContract(architecture);
+  const section = s1aSection(architecture, '### Current blocker field contract');
+  const tableRows = section.split(/\r?\n/).filter((line) => /^\| (WEB_ADMITTED_REVISION|ADMITTED_CURRENT_OUTCOME|LOCKED_CRITERION_OR_FLOOR|SHIP_NOW_CONSEQUENCE|REQUIRED_OUTCOME_EFFECT|SAFE_DEFERRAL_IMPOSSIBLE|SMALLEST_CORRECTION|VERIFIABLE_CLOSURE|EXACT_EVIDENCE|CANDIDATE_IDENTITY) \|/.test(line));
+  assert.equal(tableRows.length, 10);
+  for (const row of tableRows) {
+    const withoutClause = architecture.replace(row + '\n', '');
+    assert.notEqual(withoutClause, architecture);
+    assert.throws(() => assertS1aBlockerContract(withoutClause));
+  }
+  assert.throws(() => assertS1aBlockerContract(
+    architecture.replace('ALL_FIELDS_REQUIRED=YES', 'ALL_FIELDS_REQUIRED=ANY')
+  ));
+  assert.throws(() => assertS1aBlockerContract(
+    architecture.replace('One demonstrated effect in {FALSE, MATERIALLY_UNSAFE, UNASSURABLE}', 'One demonstrated effect in {TRUE}')
+  ));
+});
+
+test('S1A increment 1 post-child review binds the integrated Toolkit checkpoint', () => {
+  const section = s1aSection(architecture, '### Post-child integrated dual review');
+  assert.match(section, /only to explicitly Toolkit-managed repositories/);
+  assert.match(section, /after each Delivery Child's final PR is merged/);
+  assert.match(section, /canonical commit\/tree is read back/);
+  assert.match(section, /supporting or incremental PRs do not trigger/);
+  assert.match(section, /exact pair currently authorized.*Astra Max and Opus 5\.5 Max/);
+  assert.match(section, /not an authoritative default or permanent Architecture route law/);
+  assert.match(section, /later route change requires explicit current Owner\/Web authority/);
+  assert.match(section, /integration CI to that same exact integrated identity/);
+  assert.match(section, /Each reviewer receives.*neither sees the other's report/);
+  assert.match(section, /only a dependent next-child frontier/);
+  assert.match(section, /final integrated programme review/);
+  assert.match(section, /does not add a V2-style super-audit/);
+  assert.match(controller, /post-child dual review.*does not replace pre-merge G4/);
+});
+
+test('S1A increment 1 non-product continuation stays bounded to accepted work', () => {
+  const section = s1aSection(architecture, '### Bounded non-product continuation');
+  assert.match(section, /HARNESS.*TOOLKIT.*ENVIRONMENT.*TRANSPORT/);
+  assert.match(section, /PRODUCT_SEMANTICS_PROVEN_BAD=NO/);
+  assert.match(section, /exact accepted G3 RUN\/Lock or parent LIGHT operation/);
+  assert.match(section, /Identity-preserving recovery keeps the exact current candidate and its evidence binding.*every candidate remains immutable/);
+  assert.match(section, /Neither path grants product correction.*does not widen the existing authority, mutation boundary, accepted scope\/floor or prerequisite graph/);
+  assert.match(section, /product RED follows ordinary G3 correction/);
+  assert.match(section, /existing explicitly Web-authorised hosted non-product reclosure.*distinct immutable replacement candidate/);
+  assert.match(section, /primary owner HARNESS, TOOLKIT, or ENVIRONMENT/);
+  assert.match(section, /consume no product\/G3 correction attempt, and reset no budget/);
+  assert.match(section, /TRANSPORT-only recovery does not use this replacement-candidate exception/);
+  assert.match(controller, /bounded non-product continuation.*product RED follows ordinary G3 correction/);
+});
+
+test('S1A increment 1 private validation carrier remains the default', () => {
+  const section = s1aSection(architecture, '### Faithful validation carrier');
+  assert.match(section, /PRIVATE\/NONPUBLIC/);
+  assert.match(section, /without domain registration, DNS or public ingress/);
+  assert.match(section, /specific accepted validation criterion requires it and current Owner\/Web authority/);
+  assert.match(section, /If no such carrier is available.*incomplete evidence or a typed HOLD/);
+  assert.match(controller, /PRIVATE\/NONPUBLIC.*no domain registration, DNS or public ingress/);
+});
+
+test('S1A increment 1 existing lifecycle and continuation boundaries remain intact', () => {
+  assert.match(controller, /G4 = fresh isolated read-only exact-head independent assurance/);
+  assert.match(controller, /existing authorised G3 correction path/);
+  assert.match(controller, /distinguish candidate acceptance from programme completion/i);
+  assert.match(controller, /Toolkit-controller active-child improvement quarantine/);
+  assert.match(architecture, /RECONVERGED_CORRECTION/);
+  assert.match(architecture, /WEB_DIRECTED_CONTINUATION/);
+  assert.match(architecture, /G1 re-convergence/);
+  assert.match(architecture, /G2.*G3.*G4/s);
+  assert.match(controller, /Web retains judgement\/finality/);
+});

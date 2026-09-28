@@ -246,6 +246,91 @@ G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.
 
+## Shipping disposition and current blocker admission
+
+### Canonical disposition vocabulary
+
+A finding has exactly one current disposition and a separate lifecycle. Disposition answers what kind of work the evidence supports; lifecycle records whether that obligation remains unresolved. A disposition never grants mutation, ownership, scope, budget, dependency, merge or finality authority.
+
+| Disposition | Meaning and timing |
+| --- | --- |
+| CURRENT_SHIP_BLOCKER | An admitted finding that satisfied every current-blocker predicate when classified; while UNRESOLVED, shipping the admitted current outcome is false, materially unsafe, or unassurable now. |
+| IMMEDIATE_POST_SHIP | A concrete correction for the next post-ship opportunity that does not make the admitted current outcome or minimum floor fail now. |
+| FUTURE_OWNED | A verified continuing owner and future home exist; the finding is deliberately outside the current outcome and remains unresolved until that owner closes or validly transfers it. |
+| OBSERVE | Preserve a signal, trigger, or threshold for reassessment; no current correction is admitted without new evidence and Web adjudication. |
+| EVIDENCE_ONLY | Acquire or verify evidence without asserting a product defect or authorising product correction; required evidence gates remain independently binding. |
+
+`UNRESOLVED` and `RESOLVED` are lifecycle values, not dispositions. Resolving a finding never erases its original disposition, evidence, timing, owner, or closure proof.
+
+### Lossless legacy projections
+
+For consumers that still accept only the two-way or v1 vocabularies, project the canonical state as follows. The canonical disposition and lifecycle sidecar is mandatory: the projected label alone is not a lossless record.
+
+| Canonical disposition | Lifecycle | Two-way projection | v1 projection |
+| --- | --- | --- | --- |
+| CURRENT_SHIP_BLOCKER | UNRESOLVED | SHIP_BLOCKER | BLOCKING |
+| CURRENT_SHIP_BLOCKER | RESOLVED | SHIP_BLOCKER | RESOLVED |
+| IMMEDIATE_POST_SHIP | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| IMMEDIATE_POST_SHIP | RESOLVED | POST_SHIP | RESOLVED |
+| FUTURE_OWNED | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| FUTURE_OWNED | RESOLVED | POST_SHIP | RESOLVED |
+| OBSERVE | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| OBSERVE | RESOLVED | POST_SHIP | RESOLVED |
+| EVIDENCE_ONLY | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| EVIDENCE_ONLY | RESOLVED | POST_SHIP | RESOLVED |
+
+Persist the canonical disposition, lifecycle, timing, verified owner, trigger/reason, closure criterion, exact evidence references, candidate identity and Web-admitted revision alongside either projection. A resolved blocker still projects as `SHIP_BLOCKER` in the two-way field and as `RESOLVED` in v1; the sidecar preserves both its original class and lifecycle.
+
+### Current blocker field contract
+
+Current-blocker admission is conjunctive. Every row below must be present, exact, evidence-backed, and admitted by Web for the revision being decided. The effect set is exactly {FALSE, MATERIALLY_UNSAFE, UNASSURABLE}.
+
+| Required field | Bound value or proof |
+| --- | --- |
+| WEB_ADMITTED_REVISION | Exact durable Web-admitted revision for the current decision; it binds the accepted outcome, milestone, audience, supported environment, timing and current authority. |
+| ADMITTED_CURRENT_OUTCOME | The smallest usable current outcome/milestone, intended audience and supported environment, admitted for this shipment. |
+| LOCKED_CRITERION_OR_FLOOR | Exact locked acceptance-criterion identifier or applicable minimum-safety-floor obligation; no criterion is invented from a suggestion or severity label. |
+| SHIP_NOW_CONSEQUENCE | Concrete, evidence-backed consequence of shipping the current candidate against that criterion or floor. |
+| REQUIRED_OUTCOME_EFFECT | One demonstrated effect in {FALSE, MATERIALLY_UNSAFE, UNASSURABLE} on the admitted current outcome or minimum floor. |
+| SAFE_DEFERRAL_IMPOSSIBLE | Evidence showing why an existing or newly verified future owner cannot safely close the finding later while the current outcome remains correct and assurable. |
+| SMALLEST_CORRECTION | The smallest correction that closes the demonstrated current failure; any correction outside accepted authority or scope returns to Web for decision. |
+| VERIFIABLE_CLOSURE | A falsifiable closure oracle at the relevant consequential boundary, including the required positive control where applicable. |
+| EXACT_EVIDENCE | Durable exact evidence references for the observed failure, current consequence, deferral analysis and closure oracle. |
+| CANDIDATE_IDENTITY | Exact candidate commit/tree or other accepted immutable candidate identity to which the evidence applies. |
+
+Initial admission rule: `DISPOSITION=CURRENT_SHIP_BLOCKER`, `LIFECYCLE=UNRESOLVED`, and `ALL_FIELDS_REQUIRED=YES`. Web durably reconciles the full predicate against the exact candidate and admitted revision. Resolution changes only lifecycle to RESOLVED; it retains the admitted disposition and evidence. Severity, novelty, a G4 label, a critical evidence gap by itself, or a prior blocker label cannot substitute for any field. If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.
+
+### Current-frontier effect and examples
+
+Only a properly admitted, unresolved `CURRENT_SHIP_BLOCKER` may block the finding-derived dependent current frontier. Its dependency must be explicit and limited to the work that cannot safely proceed without closure. It cannot suppress or replace independent CI, assurance, authority, evidence, checkpoint, or other accepted gates. Every non-blocking disposition retains its evidence and required continuing owner/trigger; it cannot widen current mutation scope, budget, prerequisite graph, or authority.
+
+| Example | Evidence result | Disposition |
+| --- | --- | --- |
+| An alpha edge is safely deferrable to its verified future owner and does not violate an admitted current criterion or minimum floor. | Safe deferral is demonstrated; current outcome remains correct and assurable. | FUTURE_OWNED |
+| An admitted alpha journey has a demonstrated data-integrity or safety-floor defect and every required predicate above is satisfied for the exact candidate and Web-admitted revision. | Shipping now is false, materially unsafe, or unassurable; safe deferral is impossible and closure is verifiable. | CURRENT_SHIP_BLOCKER |
+
+### Post-child integrated dual review
+
+This law applies only to explicitly Toolkit-managed repositories. Trigger it after each Delivery Child's final PR is merged and the resulting canonical commit/tree is read back; supporting or incremental PRs do not trigger a child checkpoint. Bind both independent reviewers and applicable integration CI to that same exact integrated identity, and run them in parallel.
+
+Use the exact pair currently authorized for this checkpoint: Astra Max and Opus 5.5 Max. These are current Owner-selected bindings, not an authoritative default or permanent Architecture route law. Record the exact provider/model/reasoning bindings supplied by current Owner/Web authority. A later route change requires explicit current Owner/Web authority. Each reviewer receives the same accepted scope and evidence but neither sees the other's report before both reports are returned to Web. A missing route or unavailable reviewer is a typed hold/Web decision; there is no silent route substitution.
+
+Web adjudicates both reports against the exact integrated identity. The checkpoint may block only a dependent next-child frontier; unrelated authorised lanes continue. The final child's checkpoint is the final integrated programme review on this path. It is not per-commit G4, does not replace pre-merge G4 or any separately required Final Audit, and does not add a V2-style super-audit. Web retains all merge, programme and finality authority.
+
+### Bounded non-product continuation
+
+A bounded non-product continuation may recover an accepted G3 evidence path or a parent-owned already-authorised LIGHT operation for a typed primary owner HARNESS, TOOLKIT, ENVIRONMENT, or TRANSPORT only when PRODUCT_SEMANTICS_PROVEN_BAD=NO. It stays within the exact accepted G3 RUN/Lock or parent LIGHT operation. Identity-preserving recovery keeps the exact current candidate and its evidence binding; every candidate remains immutable.
+
+For a published/hosted candidate, only the existing explicitly Web-authorised hosted non-product reclosure may create a distinct immutable replacement candidate in the same RUN/Lock/G3 episode. That exception requires primary owner HARNESS, TOOLKIT, or ENVIRONMENT; PRODUCT_SEMANTICS_PROVEN_BAD=NO; unchanged product semantics, root/trust, accepted G2 contract and assurance floor; and correction bounded to the exact validation/harness/tooling/environment mechanism. Preserve the failed candidate as durable evidence, bind the replacement's new commit/tree and exact revalidation boundary, consume no product/G3 correction attempt, and reset no budget. This is hosted validation reclosure, not local pre-publication product correction. TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.
+
+Neither path grants product correction or aliases a replacement under an old identity. It does not widen the existing authority, mutation boundary, accepted scope/floor or prerequisite graph, grant a new continuation, or decide PASS/merge/finality. A product RED follows ordinary G3 correction with immutable candidate handling. Material semantic, authority, scope, floor or evidence-contract ambiguity, or repeated materially equivalent non-product RED, returns to Web through the existing typed decision path.
+
+### Faithful validation carrier
+
+The default owner-provisioned carrier for faithful validation is PRIVATE/NONPUBLIC, without domain registration, DNS or public ingress. Public ingress is admissible only when a specific accepted validation criterion requires it and current Owner/Web authority names the exact exposure, audience and boundary. Network availability alone does not create that requirement.
+
+A carrier is faithful only when it exercises the actual accepted production path and preserves its enforcement boundary. If no such carrier is available within authority, report incomplete evidence or a typed HOLD; do not claim equivalency from mocks, fixtures, or indirect evidence.
+
 ### G1 re-convergence
 
 G1_RECONVERGENCE is a read-only, leaf-only, non-gating G1-class root-model reconsideration/synthesis role that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. It is not invoked automatically merely to avoid Web adjudication.
