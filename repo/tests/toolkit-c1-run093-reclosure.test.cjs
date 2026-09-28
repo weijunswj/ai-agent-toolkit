@@ -65,8 +65,11 @@ const RUN102_BASE_Q = 'e28bb8bbeaca49e424c9f0a80dc276d75c23b6a2';
 const RUN102_Q_TREE = '8b791fddbb04b29d5fbb70009c33bdb674ad359c';
 const RUN102_CANONICAL_MAIN = 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a';
 const RUN102_CONTROLLER_BLOB = 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8';
-const RUN102_PACKAGE_VERSION = '2.10.12';
-const RUN103_SUCCESSOR_PARENT = '760c99749a227312852a3957d706b5a44510c092';
+const RUN103_HISTORICAL_PACKAGE_VERSION = '2.10.12';
+const RUN103_HISTORICAL_R = '760c99749a227312852a3957d706b5a44510c092';
+const RUN103_CANDIDATE_S = '2b6a740e62735fce31d1cf385b1140d586fa13b0';
+const RUN103_CANDIDATE_S_TREE = 'fe6e40c9e9e9674483b4c9e7bec1804e29b0806d';
+const RUN103_CANDIDATE_S_TEST_BLOB = 'a990deb6ea9e5fb20ff9df259c718ba0d84baab5';
 const RUN102_ALLOWED_PATHS = Object.freeze([
   'repo/scripts/toolkit-github-program-receipt.cjs',
   'repo/scripts/toolkit-execution-loop.cjs',
@@ -188,7 +191,8 @@ function validateFixture(ir = loadFixture()) {
     .cases.find((item) => item.id === 'R093-I-PARENT-TOPOLOGY');
   topologyCase.input.variant = 'N-ordered-parents-P-current-main';
   for (const item of run095Ir.requirements.find((requirement) => requirement.id === 'R093-INTEGRATION').cases) {
-    if (item.id === 'R093-I-VERSION-SPLIT' || item.id === 'R093-I-PACKAGE-ALIGNMENT-POS') item.expected.version = '2.10.12';
+    if (item.id === 'R093-I-VERSION-SPLIT') item.expected.version = RUN103_HISTORICAL_PACKAGE_VERSION;
+    if (item.id === 'R093-I-PACKAGE-ALIGNMENT-POS') delete item.expected.version;
   }
   const declared = ir.requirements.flatMap((requirement) => requirement.cases.map(caseId));
   assert.equal(declared.length, 81);
@@ -1630,18 +1634,16 @@ function sortedUniquePaths(paths) {
   return [...new Set(paths)].sort();
 }
 
-function changedPaths(base, candidate = null) {
-  const tracked = (candidate === 'working-tree'
-    ? gitText(['diff', '--name-only', base, '--'])
-    : gitText(['diff', '--name-only', base, candidate])).split(/\r?\n/).filter(Boolean);
-  const untracked = candidate === 'working-tree'
-    ? gitText(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean)
-    : [];
-  return sortedUniquePaths([...tracked, ...untracked]);
-}
-
 function immutableChangedPaths(base, candidate) {
   return sortedUniquePaths(gitText(['diff', '--name-only', base, candidate]).split(/\r?\n/).filter(Boolean));
+}
+
+function gitFileText(ref, file) {
+  return gitBytes(ref, file).toString('utf8');
+}
+
+function gitFileJson(ref, file) {
+  return JSON.parse(gitFileText(ref, file));
 }
 
 function requireExactPathSet(actual, expected, code) {
@@ -1651,37 +1653,61 @@ function requireExactPathSet(actual, expected, code) {
 
 function requireExactParents(actual, expected) {
   if (actual.length !== expected.length || actual.some((parent, index) => parent !== expected[index])) {
-    fail('RUN103_SUCCESSOR_PARENT_SCOPE');
+    fail('RUN103_HISTORICAL_S_PARENT_SCOPE');
   }
   return actual;
 }
 
-function successorCandidateSnapshot(env = process.env, { allowIdentityDeferral = false } = {}) {
-  const eventHead = topologyCandidateHead(env);
-  if (allowIdentityDeferral && eventHead === P && env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer') {
-    return { outcome: 'DEFERRED', candidate_sha: P, identity_deferred: true };
-  }
-  if (env.TOOLKIT_C1_SUCCESSOR_SIMULATION === 'working-tree') {
-    assert.equal(eventHead, RUN102_BASE_Q, 'Run-103 successor simulation must be anchored to the current PR head Q');
-    assert.equal(gitText(['rev-parse', 'HEAD']), RUN103_SUCCESSOR_PARENT, 'Run-103 successor simulation must run from immutable parent R');
-    return {
-      kind: 'working-tree',
-      candidate_sha: 'working-tree-successor',
-      ordered_parents: [RUN103_SUCCESSOR_PARENT],
-      identity_source: 'explicit-successor-working-tree-simulation',
-    };
-  }
-  if (eventHead === RUN102_BASE_Q) fail('RUN103_SUCCESSOR_NOT_CREATED');
-  assert.equal(gitText(['cat-file', '-t', eventHead]), 'commit');
-  const parents = gitText(['rev-list', '--parents', '-n', '1', eventHead]).split(' ').slice(1);
-  requireExactParents(parents, [RUN103_SUCCESSOR_PARENT]);
+function requireHistoricalCandidateIdentity(candidateSha) {
+  if (candidateSha !== RUN103_CANDIDATE_S) fail('RUN103_HISTORICAL_CANDIDATE_IDENTITY');
+  return candidateSha;
+}
+
+function requireHistoricalPackageVersion(version) {
+  if (version !== RUN103_HISTORICAL_PACKAGE_VERSION) fail('RUN103_HISTORICAL_PACKAGE_VERSION_SCOPE');
+  return version;
+}
+
+function historicalRun103CandidateSnapshot(candidateSha = RUN103_CANDIDATE_S) {
+  requireHistoricalCandidateIdentity(candidateSha);
+  assert.equal(gitText(['cat-file', '-t', candidateSha]), 'commit');
+  const parents = gitText(['rev-list', '--parents', '-n', '1', candidateSha]).split(' ').slice(1);
+  requireExactParents(parents, [RUN103_HISTORICAL_R]);
   return {
     kind: 'commit',
-    candidate_sha: eventHead,
+    candidate_sha: candidateSha,
     ordered_parents: parents,
-    candidate_tree: gitText(['rev-parse', `${eventHead}^{tree}`]),
-    identity_source: env.GITHUB_EVENT_NAME === 'pull_request' ? 'github-event-pull-request-head' : 'local-current-HEAD',
+    candidate_tree: gitText(['rev-parse', candidateSha + '^{tree}']),
+    identity_source: 'historical-pinned-git-object',
   };
+}
+
+function currentHeadObservation() {
+  const candidateSha = gitText(['rev-parse', 'HEAD']);
+  assert.equal(gitText(['cat-file', '-t', candidateSha]), 'commit');
+  const parents = gitText(['rev-list', '--parents', '-n', '1', candidateSha]).split(' ').slice(1);
+  return { candidate_sha: candidateSha, ordered_parents: parents };
+}
+
+function assertPackageSurfaceAlignment(readJson, readText) {
+  const version = readJson('repo/contracts/toolkit-local-bridge/version.json').version;
+  const manifests = [
+    'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
+    'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json',
+    '.codex-plugin/plugin.json',
+    '.claude-plugin/plugin.json',
+  ];
+  for (const manifest of manifests) assert.equal(readJson(manifest).version, version, manifest);
+  assert.ok(readText('repo/scripts/toolkit-local-bridge.cjs').includes("const BRIDGE_VERSION = '" + version + "';"));
+  assert.ok(readText('repo/scripts/setup-codex-toolkit-plugin.cjs').includes("const EXPECTED_TOOLKIT_VERSION = '" + version + "';"));
+  assert.ok(readText('repo/scripts/toolkit-agent-control.cjs').includes("const CONTROL_VERSION = '" + version + "';"));
+  assert.ok(readText('repo/scripts/codex-delegation-config.cjs').includes("const TOOLKIT_CLIENT_VERSION = '" + version + "';"));
+  assert.ok(readText('repo/tests/toolkit-local-bridge.test.cjs').includes("const expectedBridgeVersion = '" + version + "';"));
+  assert.ok(readText('repo/tests/toolkit-setup-test-support.cjs').includes(version));
+  const baseline = readJson('repo/docs/published-surface-audit-baseline.json');
+  assert.equal(baseline.native_plugins.codex.version, version);
+  assert.equal(baseline.native_plugins.claude.version, version);
+  return version;
 }
 
 function executeIntegration(plan, fixture) {
@@ -1743,21 +1769,22 @@ function executeIntegration(plan, fixture) {
   if (variant === 'compare-exact-run099-path-manifest') {
     const historical = immutableChangedPaths(P, RUN102_BASE_Q);
     requireExactPathSet(historical, sortedUniquePaths(RUN099_ALLOWED_PATHS), 'RUN103_HISTORICAL_P_TO_Q_SCOPE');
-    const successor = immutableChangedPaths(RUN102_BASE_Q, RUN103_SUCCESSOR_PARENT);
-    requireExactPathSet(successor, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
-    const cumulative = sortedUniquePaths([...historical, ...successor]);
-    const allowed = new Set(successor);
+    const qToR = immutableChangedPaths(RUN102_BASE_Q, RUN103_HISTORICAL_R);
+    requireExactPathSet(qToR, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
+    const cumulative = sortedUniquePaths([...historical, ...qToR]);
+    const allowed = new Set(qToR);
     const canonicalMergeBase = gitText(['merge-base', P, CANONICAL_MAIN]);
     const canonicalMainDelta = gitText(['diff', '--name-only', canonicalMergeBase, CANONICAL_MAIN]).split(/\r?\n/).filter(Boolean);
     assert.deepEqual(canonicalMainDelta.filter((file) => !new Set(cumulative).has(file)), [], 'canonical-main changes since the P/main merge-base stay inside the cumulative Run-103 path scope');
-    const candidate = successorCandidateSnapshot();
-    if (candidate.outcome === 'DEFERRED') return candidate;
-    const candidateSuccessor = changedPaths(RUN102_BASE_Q, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
-    requireExactPathSet(candidateSuccessor, successor, 'RUN103_SUCCESSOR_PATH_SCOPE');
-    const candidateCumulative = changedPaths(P, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
-    requireExactPathSet(candidateCumulative, cumulative, 'RUN103_CUMULATIVE_PATH_SCOPE');
-    assert.deepEqual(candidateSuccessor.filter((file) => !allowed.has(file)), []);
-    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: successor.length };
+    const candidate = historicalRun103CandidateSnapshot();
+    const rToS = immutableChangedPaths(RUN103_HISTORICAL_R, candidate.candidate_sha);
+    requireExactPathSet(rToS, ['repo/tests/toolkit-c1-run093-reclosure.test.cjs'], 'RUN103_R_TO_S_SCOPE');
+    const qToS = immutableChangedPaths(RUN102_BASE_Q, candidate.candidate_sha);
+    requireExactPathSet(qToS, qToR, 'RUN103_Q_TO_S_SCOPE');
+    const pToS = immutableChangedPaths(P, candidate.candidate_sha);
+    requireExactPathSet(pToS, cumulative, 'RUN103_P_TO_S_SCOPE');
+    assert.deepEqual(qToS.filter((file) => !allowed.has(file)), []);
+    return { outcome: 'WITHIN_ALLOWLIST', maximum_paths: qToS.length };
   }
   if (variant === 'N-ordered-parents-P-current-main') {
     assert.equal(gitText(['cat-file', '-t', P]), 'commit');
@@ -1768,34 +1795,43 @@ function executeIntegration(plan, fixture) {
     assert.equal(gitText(['cat-file', '-t', RUN102_BASE_Q]), 'commit');
     assert.equal(gitText(['rev-parse', `${RUN102_BASE_Q}^{tree}`]), RUN102_Q_TREE);
     const historicalQParents = gitText(['rev-list', '--parents', '-n', '1', RUN102_BASE_Q]).split(' ').slice(1);
-    requireExactParents(historicalQParents, [P, CANONICAL_MAIN]);
-    const candidate = successorCandidateSnapshot(process.env, { allowIdentityDeferral: true });
-    if (candidate.outcome === 'DEFERRED') return candidate;
-    requireExactParents(candidate.ordered_parents, [RUN103_SUCCESSOR_PARENT]);
-    process.stdout.write(`RUN103_TOPOLOGY_SUCCESSOR=${candidate.candidate_sha}; PARENT=${candidate.ordered_parents.join(',')}; SOURCE=${candidate.identity_source}\n`);
-    return { outcome: 'EXACT', candidate_sha: candidate.candidate_sha, candidate_tree: candidate.candidate_tree || null, ordered_parents: candidate.ordered_parents, identity_source: candidate.identity_source };
-  }
-  if (variant === 'authoritative-and-checked-native-manifests' || variant === 'Codex-Claude-bridge-and-setup-expectations') {
-    const version = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
-    const codexInput = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json'), 'utf8'));
-    const claudeInput = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json'), 'utf8'));
-    const codexChecked = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
-    const claudeChecked = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/plugin.json'), 'utf8'));
-    assert.equal(version, '2.10.12');
-    assert.equal(codexInput.version, version);
-    assert.equal(claudeInput.version, version);
-    assert.deepEqual(codexChecked, codexInput);
-    assert.deepEqual(claudeChecked, claudeInput);
-    assert.equal(require('../scripts/toolkit-local-bridge.cjs').BRIDGE_VERSION, version);
-    assert.equal(require('../scripts/setup-codex-toolkit-plugin.cjs').EXPECTED_TOOLKIT_VERSION, version);
-    const codexDelegationConfig = fs.readFileSync(path.join(root, 'repo/scripts/codex-delegation-config.cjs'), 'utf8');
-    assert.ok(codexDelegationConfig.includes(`const TOOLKIT_CLIENT_VERSION = '${version}';`));
-    assert.equal(control.CONTROL_VERSION, version);
+    requireExactParents(historicalQParents, [P, RUN102_CANONICAL_MAIN]);
+    const candidate = historicalRun103CandidateSnapshot();
+    const currentHead = currentHeadObservation();
+    assert.notEqual(currentHead.candidate_sha, candidate.candidate_sha, 'integrated current HEAD remains separate from historical S');
+    const root = path.resolve(__dirname, '..', '..');
+    const currentPackageVersion = JSON.parse(fs.readFileSync(path.join(root, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
+    const currentSourceSha256 = sha256Text(fs.readFileSync(path.join(root, 'repo/tests/toolkit-c1-run093-reclosure.test.cjs'), 'utf8'));
+    const historicalSourceSha256 = sha256Text(gitFileText(RUN103_CANDIDATE_S, 'repo/tests/toolkit-c1-run093-reclosure.test.cjs'));
+    assert.notEqual(currentSourceSha256, historicalSourceSha256, 'current source bytes may evolve while historical S stays pinned');
     return {
-      outcome: 'ALIGNED',
-      ...(variant === 'Codex-Claude-bridge-and-setup-expectations' ? { positive_control: true } : {}),
-      version,
+      outcome: 'EXACT',
+      candidate_sha: candidate.candidate_sha,
+      candidate_tree: candidate.candidate_tree,
+      ordered_parents: candidate.ordered_parents,
+      identity_source: candidate.identity_source,
+      future_successor_control: {
+        current_head: currentHead.candidate_sha,
+        current_head_parents: currentHead.ordered_parents,
+        current_package_version: currentPackageVersion,
+        current_source_sha256: currentSourceSha256,
+      },
     };
+  }
+  if (variant === 'authoritative-and-checked-native-manifests') {
+    const version = requireHistoricalPackageVersion(assertPackageSurfaceAlignment(
+      (file) => gitFileJson(RUN103_CANDIDATE_S, file),
+      (file) => gitFileText(RUN103_CANDIDATE_S, file),
+    ));
+    return { outcome: 'ALIGNED', version };
+  }
+  if (variant === 'Codex-Claude-bridge-and-setup-expectations') {
+    const version = assertPackageSurfaceAlignment(
+      (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')),
+      (file) => fs.readFileSync(path.join(root, file), 'utf8'),
+    );
+    assert.equal(control.CONTROL_VERSION, version);
+    return { outcome: 'ALIGNED', positive_control: true, version };
   }
   fail(`RUN093_INTEGRATION_VARIANT_UNMAPPED:${variant}`);
 }
@@ -1878,7 +1914,7 @@ test('Run-094 reclosure fixture registers, executes, and verifies every Run-093 
   assert.equal(result.executed_count, 81);
   assert.equal(new Set(result.case_ids).size, 81);
   assert.equal(positiveControls, 10);
-  assert.equal(identityDeferred, process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY === 'defer' ? 1 : 0);
+  assert.equal(identityDeferred, 0, 'Run-103 historical checks always run from pinned S');
   assert.equal(evidenceHolds, 0, `RUN099_ENVIRONMENT_EVIDENCE_HOLD: ${JSON.stringify(evidenceHoldDetails)}`);
   assert.equal(verifyCompletion({ executed_count: 80 }), null);
   assert.equal(verifyCompletion(null), null);
@@ -1886,7 +1922,7 @@ test('Run-094 reclosure fixture registers, executes, and verifies every Run-093 
 });
 
 
-test('Run-102 successor preserves immutable Run-093 evidence and binds the exact Q-to-successor scope', () => {
+test('Run-103 historical Q/R/S proof stays pinned without binding integrated successors', () => {
   assert.equal(RUN, 'toolkit-c1-run093-six-finding-integration-g3-20260926-094');
   assert.equal(LOCK, 'DL-C1-RUN093-SIX-FINDING-INTEGRATION-G3-094');
   assert.equal(P_TREE, '14b95d34fcd8183f4b8317a71d02c4f73996f798');
@@ -1896,53 +1932,49 @@ test('Run-102 successor preserves immutable Run-093 evidence and binds the exact
   assert.equal(RUN102_Q_TREE, '8b791fddbb04b29d5fbb70009c33bdb674ad359c');
   assert.equal(RUN102_CANONICAL_MAIN, 'cb7ec2880bd5f4934ce9196a74e07e6ee4b4912a');
   assert.equal(RUN102_CONTROLLER_BLOB, 'fdaf489e2e7b5920cdb2efa1a503fc252697adc8');
-  assert.equal(RUN102_PACKAGE_VERSION, '2.10.12');
-  assert.equal(RUN103_SUCCESSOR_PARENT, '760c99749a227312852a3957d706b5a44510c092');
+  assert.equal(RUN103_HISTORICAL_PACKAGE_VERSION, '2.10.12');
+  assert.equal(RUN103_HISTORICAL_R, '760c99749a227312852a3957d706b5a44510c092');
+  assert.equal(RUN103_CANDIDATE_S, '2b6a740e62735fce31d1cf385b1140d586fa13b0');
+  assert.equal(RUN103_CANDIDATE_S_TREE, 'fe6e40c9e9e9674483b4c9e7bec1804e29b0806d');
+  assert.equal(RUN103_CANDIDATE_S_TEST_BLOB, 'a990deb6ea9e5fb20ff9df259c718ba0d84baab5');
   assert.equal(new Set(RUN102_ALLOWED_PATHS).size, 19);
 
-  const root = path.resolve(__dirname, '..', '..');
-  assert.equal(gitText(['cat-file', '-t', RUN103_SUCCESSOR_PARENT]), 'commit');
-  assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', RUN103_SUCCESSOR_PARENT]).split(' ').slice(1), [RUN102_BASE_Q]);
-  const historicalPaths = immutableChangedPaths(P, RUN102_BASE_Q);
-  const successorPaths = immutableChangedPaths(RUN102_BASE_Q, RUN103_SUCCESSOR_PARENT);
-  const cumulativePaths = sortedUniquePaths([...historicalPaths, ...successorPaths]);
-  requireExactPathSet(historicalPaths, sortedUniquePaths(RUN099_ALLOWED_PATHS), 'RUN103_HISTORICAL_P_TO_Q_SCOPE');
-  requireExactPathSet(successorPaths, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
-  assert.equal(cumulativePaths.length, 26);
-  const candidate = successorCandidateSnapshot();
-  if (candidate.outcome === 'DEFERRED') {
-    assert.equal(process.env.TOOLKIT_C1_PRECOMMIT_IDENTITY, 'defer');
-    assert.equal(candidate.candidate_sha, P);
-  } else {
-    requireExactParents(candidate.ordered_parents, [RUN103_SUCCESSOR_PARENT]);
-    const candidateDelta = candidate.kind === 'working-tree'
-      ? changedPaths(RUN103_SUCCESSOR_PARENT, 'working-tree')
-      : immutableChangedPaths(RUN103_SUCCESSOR_PARENT, candidate.candidate_sha);
-    requireExactPathSet(candidateDelta, ['repo/tests/toolkit-c1-run093-reclosure.test.cjs'], 'RUN103_R_TO_SUCCESSOR_SCOPE');
-    const candidateSuccessorPaths = changedPaths(RUN102_BASE_Q, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
-    const candidateCumulativePaths = changedPaths(P, candidate.kind === 'working-tree' ? 'working-tree' : candidate.candidate_sha);
-    requireExactPathSet(candidateSuccessorPaths, successorPaths, 'RUN103_SUCCESSOR_PATH_SCOPE');
-    requireExactPathSet(candidateCumulativePaths, cumulativePaths, 'RUN103_CUMULATIVE_PATH_SCOPE');
-  }
-  assert.throws(() => requireExactParents([RUN102_BASE_Q], [RUN103_SUCCESSOR_PARENT]), /RUN103_SUCCESSOR_PARENT_SCOPE/);
-  assert.throws(() => requireExactPathSet([...successorPaths, 'repo/tests/unauthorised-extra.cjs'], successorPaths, 'RUN103_SUCCESSOR_PATH_SCOPE'), /RUN103_SUCCESSOR_PATH_SCOPE/);
+  assert.equal(gitText(['cat-file', '-t', RUN102_BASE_Q]), 'commit');
+  assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', RUN102_BASE_Q]).split(' ').slice(1), [P, RUN102_CANONICAL_MAIN]);
+  assert.equal(gitText(['cat-file', '-t', RUN103_HISTORICAL_R]), 'commit');
+  assert.deepEqual(gitText(['rev-list', '--parents', '-n', '1', RUN103_HISTORICAL_R]).split(' ').slice(1), [RUN102_BASE_Q]);
+  assert.equal(gitText(['cat-file', '-t', RUN103_CANDIDATE_S]), 'commit');
+  assert.equal(gitText(['rev-parse', RUN103_CANDIDATE_S + '^{tree}']), RUN103_CANDIDATE_S_TREE);
+  assert.equal(gitText(['rev-parse', RUN103_CANDIDATE_S + ':repo/tests/toolkit-c1-run093-reclosure.test.cjs']), RUN103_CANDIDATE_S_TEST_BLOB);
 
-  const manifests = [
-    'repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json',
-    'repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json',
-    '.codex-plugin/plugin.json',
-    '.claude-plugin/plugin.json',
-  ];
-  for (const manifest of manifests) {
-    assert.equal(JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8')).version, RUN102_PACKAGE_VERSION, manifest);
-  }
-  assert.equal(require('../scripts/toolkit-local-bridge.cjs').BRIDGE_VERSION, RUN102_PACKAGE_VERSION);
-  assert.equal(require('../scripts/setup-codex-toolkit-plugin.cjs').EXPECTED_TOOLKIT_VERSION, RUN102_PACKAGE_VERSION);
-  assert.equal(require('../scripts/toolkit-agent-control.cjs').CONTROL_VERSION, RUN102_PACKAGE_VERSION);
-  assert.match(fs.readFileSync(path.join(root, 'repo/scripts/codex-delegation-config.cjs'), 'utf8'), /const TOOLKIT_CLIENT_VERSION = '2\.10\.12'/);
-  assert.match(fs.readFileSync(path.join(root, 'repo/tests/toolkit-local-bridge.test.cjs'), 'utf8'), /const expectedBridgeVersion = '2\.10\.12'/);
-  assert.match(fs.readFileSync(path.join(root, 'repo/tests/toolkit-setup-test-support.cjs'), 'utf8'), /2\.10\.12/);
-  const baseline = JSON.parse(fs.readFileSync(path.join(root, 'repo/docs/published-surface-audit-baseline.json'), 'utf8'));
-  assert.equal(baseline.native_plugins.codex.version, RUN102_PACKAGE_VERSION);
-  assert.equal(baseline.native_plugins.claude.version, RUN102_PACKAGE_VERSION);
+  const pToQ = immutableChangedPaths(P, RUN102_BASE_Q);
+  const qToR = immutableChangedPaths(RUN102_BASE_Q, RUN103_HISTORICAL_R);
+  const rToS = immutableChangedPaths(RUN103_HISTORICAL_R, RUN103_CANDIDATE_S);
+  const qToS = immutableChangedPaths(RUN102_BASE_Q, RUN103_CANDIDATE_S);
+  const pToS = immutableChangedPaths(P, RUN103_CANDIDATE_S);
+  const cumulativePaths = sortedUniquePaths([...pToQ, ...qToR]);
+  requireExactPathSet(pToQ, sortedUniquePaths(RUN099_ALLOWED_PATHS), 'RUN103_HISTORICAL_P_TO_Q_SCOPE');
+  requireExactPathSet(qToR, sortedUniquePaths(RUN102_ALLOWED_PATHS), 'RUN103_IMMUTABLE_Q_TO_R_SCOPE');
+  requireExactPathSet(rToS, ['repo/tests/toolkit-c1-run093-reclosure.test.cjs'], 'RUN103_R_TO_S_SCOPE');
+  requireExactPathSet(qToS, qToR, 'RUN103_Q_TO_S_SCOPE');
+  requireExactPathSet(pToS, cumulativePaths, 'RUN103_P_TO_S_SCOPE');
+  assert.equal(cumulativePaths.length, 26);
+
+  const candidate = historicalRun103CandidateSnapshot();
+  assert.equal(candidate.candidate_sha, RUN103_CANDIDATE_S);
+  assert.equal(candidate.candidate_tree, RUN103_CANDIDATE_S_TREE);
+  assert.deepEqual(candidate.ordered_parents, [RUN103_HISTORICAL_R]);
+  assert.throws(() => historicalRun103CandidateSnapshot(RUN103_HISTORICAL_R), /RUN103_HISTORICAL_CANDIDATE_IDENTITY/);
+  assert.throws(() => requireExactParents([RUN102_BASE_Q], [RUN103_HISTORICAL_R]), /RUN103_HISTORICAL_S_PARENT_SCOPE/);
+  assert.throws(
+    () => requireExactPathSet(sortedUniquePaths([...rToS, 'repo/tests/unauthorised-extra.cjs']), rToS, 'RUN103_R_TO_S_SCOPE'),
+    /RUN103_R_TO_S_SCOPE/,
+  );
+
+  const historicalVersion = requireHistoricalPackageVersion(assertPackageSurfaceAlignment(
+    (file) => gitFileJson(RUN103_CANDIDATE_S, file),
+    (file) => gitFileText(RUN103_CANDIDATE_S, file),
+  ));
+  assert.equal(historicalVersion, '2.10.12');
+  assert.throws(() => requireHistoricalPackageVersion('2.10.11'), /RUN103_HISTORICAL_PACKAGE_VERSION_SCOPE/);
 });
