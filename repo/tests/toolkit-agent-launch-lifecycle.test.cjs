@@ -6,10 +6,36 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
+const LIFECYCLE_POLL_INTERVAL_MS = 25;
+const SUPERVISOR_COMPLETION_TIMEOUT_MS = 10_000;
+const CHECKER_COMPLETION_TIMEOUT_MS = 60_000;
+
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function waitForLifecycleCompletion({ label, timeoutMs, observe, isComplete, describe }) {
+  const deadline = performance.now() + timeoutMs;
+  let previousObservation;
+  while (true) {
+    let observation;
+    if (deadline - performance.now() <= 0) {
+      observation = observe(previousObservation);
+      throw new Error(`${label} did not complete within ${timeoutMs} ms; final observable lifecycle state: ${JSON.stringify(describe(observation))}`);
+    }
+    observation = observe(previousObservation);
+    const complete = isComplete(observation);
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) {
+      throw new Error(`${label} did not complete within ${timeoutMs} ms; final observable lifecycle state: ${JSON.stringify(describe(observation))}`);
+    }
+    if (complete) return observation;
+    previousObservation = observation;
+    await wait(Math.min(LIFECYCLE_POLL_INTERVAL_MS, remainingMs));
+  }
+}
 
 test('detached Claude supervisor forces medium non-fast invocation and releases its reservation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-'));
@@ -76,15 +102,24 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
     assert.equal(fs.statSync(result.spec_path).mode & 0o777, 0o600);
     assert.equal(fs.statSync(control.statePath({ root })).mode & 0o777, 0o600);
   }
-  let output = '';
-  let reservations = [{}];
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (fs.existsSync(result.output_path)) output = fs.readFileSync(result.output_path, 'utf8');
-    const state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
-    reservations = state.reservations;
-    if (output && reservations.length === 0) break;
-    await wait(25);
-  }
+  const completed = await waitForLifecycleCompletion({
+    label: 'detached Claude supervisor',
+    timeoutMs: SUPERVISOR_COMPLETION_TIMEOUT_MS,
+    observe: () => {
+      const outputExists = fs.existsSync(result.output_path);
+      const output = outputExists ? fs.readFileSync(result.output_path, 'utf8') : '';
+      const state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+      return { output, outputExists, state };
+    },
+    isComplete: (observation) => observation.output.length > 0 && observation.state.reservations.length === 0,
+    describe: (observation) => ({
+      reservationCount: observation.state.reservations.length,
+      outputExists: observation.outputExists,
+      outputBytes: Buffer.byteLength(observation.output),
+    }),
+  });
+  const output = completed.output;
+  const reservations = completed.state.reservations;
   assert.equal(reservations.length, 0);
   const child = JSON.parse(output);
   assert.equal(child.fast_disabled, '1');
@@ -151,21 +186,38 @@ test('checker execution clears failures and completes only validated structured 
     assert.equal(launched.status, 'PENDING');
     const outputPath = path.join(controlRoot, 'jobs', `${launched.reservation_id}.stdout.json`);
     const errorPath = path.join(controlRoot, 'jobs', `${launched.reservation_id}.stderr.log`);
-    let state;
-    for (let attempt = 0; attempt < 400; attempt += 1) {
-      state = JSON.parse(fs.readFileSync(control.statePath({ root: controlRoot }), 'utf8'));
-      if (state.reservations.length === 0) {
-        await wait(150);
+    const completed = await waitForLifecycleCompletion({
+      label: 'detached checker lifecycle',
+      timeoutMs: CHECKER_COMPLETION_TIMEOUT_MS,
+      observe: (previousObservation) => {
+        const state = JSON.parse(fs.readFileSync(control.statePath({ root: controlRoot }), 'utf8'));
+        const error = fs.readFileSync(errorPath, 'utf8');
+        const output = fs.readFileSync(outputPath, 'utf8');
         return {
-          state: JSON.parse(fs.readFileSync(control.statePath({ root: controlRoot }), 'utf8')),
-          launched,
-          error: fs.readFileSync(errorPath, 'utf8'),
-          output: fs.readFileSync(outputPath, 'utf8'),
+          state,
+          error,
+          output,
+          filesStable: Boolean(previousObservation)
+            && previousObservation.state.reservations.length === 0
+            && previousObservation.error === error
+            && previousObservation.output === output,
         };
-      }
-      await wait(25);
-    }
-    return { state, error: '', output: '', launched };
+      },
+      isComplete: (observation) => observation.state.reservations.length === 0
+        && observation.filesStable
+        && (observation.error.length > 0 || observation.output.length > 0),
+      describe: (observation) => {
+        const review = observation.state.checker_reviews.find((entry) => entry.review_id === launched.review_id);
+        return {
+          reservationCount: observation.state.reservations.length,
+          checkerReviewStatus: review?.status || 'absent',
+          outputBytes: Buffer.byteLength(observation.output),
+          errorBytes: Buffer.byteLength(observation.error),
+          filesStable: observation.filesStable,
+        };
+      },
+    });
+    return { state: completed.state, error: completed.error, output: completed.output, launched };
   };
 
   const failed = await settle(launchChecker('failed-checker-lifecycle', Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'REQUIRED_CHILD_CONFIG'))));
