@@ -804,18 +804,7 @@ function assertS1aBlockerContract(source) {
   const section = s1aSection(source, '### Current blocker field contract');
   const rows = s1aTable(source, '### Current blocker field contract');
   const ids = rows.map((row) => row['Required field']);
-  assert.deepEqual(ids, [
-    'WEB_ADMITTED_REVISION',
-    'ADMITTED_CURRENT_OUTCOME',
-    'LOCKED_CRITERION_OR_FLOOR',
-    'SHIP_NOW_CONSEQUENCE',
-    'REQUIRED_OUTCOME_EFFECT',
-    'SAFE_DEFERRAL_IMPOSSIBLE',
-    'SMALLEST_CORRECTION',
-    'VERIFIABLE_CLOSURE',
-    'EXACT_EVIDENCE',
-    'CANDIDATE_IDENTITY',
-  ]);
+  assert.deepEqual(ids, S1A_ORACLE_BLOCKER_FIELDS);
   assert.deepEqual(parseS1aPolicyContract(source).blocker.requiredFields, ids);
   assert.match(rows.find((row) => row['Required field'] === 'REQUIRED_OUTCOME_EFFECT')['Bound value or proof'],
     /FALSE.*MATERIALLY_UNSAFE.*UNASSURABLE/);
@@ -971,7 +960,7 @@ test('S1A increment 1 post-child review binds the integrated Toolkit checkpoint'
   assert.match(section, /only to explicitly Toolkit-managed repositories/);
   assert.match(section, /after each Delivery Child's final PR is merged/);
   assert.match(section, /canonical commit\/tree is read back/);
-  assert.match(section, /supporting or incremental PRs do not trigger/);
+  assert.match(section, /supporting or incremental PRs do not trigger/i);
   assert.match(section, /route for each review is supplied by current Owner\/Web authority/);
   assert.match(section, /not an authoritative default or permanent Architecture route law/);
   assert.match(section, /exact provider\/model\/reasoning bindings from that current readback/);
@@ -988,7 +977,9 @@ test('S1A increment 1 post-child review binds the integrated Toolkit checkpoint'
   assert.match(section, /mutually blind until both reports have returned/);
   assert.match(section, /only a dependent next-child frontier/);
   assert.match(section, /final integrated programme review occurs at the final Delivery Child checkpoint for this lifecycle/);
-  assert.match(controller, /terminal receipts and applicable integrated checks to two independent read-only whole-programme reviews/);
+  assert.match(controller, /Launch two independent read-only whole-programme reviews alongside merge-triggered CI/);
+  assert.match(controller, /Read back the complete terminal receipt\/check inventories after completion and before Web adjudication/);
+  assert.doesNotMatch(controller, /Verify both complete inventories before the reviews start/);
   assert.match(controller, /post-child dual review.*does not replace pre-merge G4/);
 });
 
@@ -996,8 +987,8 @@ test('S1A increment 1 non-product continuation stays bounded to accepted work', 
   const section = s1aSection(architecture, '### Bounded non-product continuation');
   assert.match(section, /HARNESS.*TOOLKIT.*ENVIRONMENT.*TRANSPORT/);
   assert.match(section, /PRODUCT_SEMANTICS_PROVEN_BAD=NO/);
-  assert.match(section, /exact accepted G3 RUN\/Lock or parent LIGHT operation/);
-  assert.match(section, /Identity-preserving recovery keeps the exact current candidate and its evidence binding.*every candidate remains immutable/);
+  assert.match(section, /exact current G3 RUN\/Lock, a parent-owned already-authorised LIGHT operation, or any other currently accepted Web-bounded evidence episode recorded by its authoritative readback/);
+  assert.match(section, /Identity-preserving recovery keeps the exact candidate and evidence identities, and every candidate remains immutable/);
   assert.match(section, /Neither path grants product correction.*does not widen the existing authority, mutation boundary, accepted scope\/floor or prerequisite graph/);
   assert.match(section, /product RED follows ordinary G3 correction/);
   assert.match(section, /existing explicitly Web-authorised hosted non-product reclosure.*distinct immutable replacement candidate/);
@@ -1013,7 +1004,7 @@ test('S1A increment 1 private validation carrier remains the default', () => {
   assert.match(section, /without domain registration, DNS or public ingress/);
   assert.match(section, /specific accepted validation criterion requires it and a current authoritative Owner\/Web readback/);
   assert.match(section, /If no such evidence is available.*incomplete evidence or a typed HOLD/);
-  assert.match(controller, /PRIVATE\/NONPUBLIC.*no domain registration, DNS or public ingress/);
+  assert.match(controller, /PRIVATE\/NONPUBLIC by default; persistence does not imply exposure/);
 });
 
 test('S1A increment 1 existing lifecycle and continuation boundaries remain intact', () => {
@@ -1027,7 +1018,101 @@ test('S1A increment 1 existing lifecycle and continuation boundaries remain inta
   assert.match(architecture, /G2.*G3.*G4/s);
   assert.match(controller, /Web retains judgement\/finality/);
 });
-const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'e808a4bcb267b97ea6dcd0a983f0e49ffeb44582c23dd5622a7e978d79160326';
+const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
+  eligiblePrimaryOwners: Object.freeze(['HARNESS', 'TOOLKIT', 'ENVIRONMENT', 'VALIDATION_CARRIER', 'TRANSPORT']),
+  excludedAutonomousOwners: Object.freeze(['PRODUCT', 'UNKNOWN']),
+  productSemanticsRequired: 'NO',
+  episodeAuthority: Object.freeze({
+    mode: 'CURRENT_EXPLICIT_WEB_BOUNDED_EPISODE',
+    requiredFields: Object.freeze([
+      'episodeId', 'episodeKind', 'authorityReference', 'primaryOwner', 'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'digest',
+      'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId',
+      'evidenceBoundaryId'
+    ]),
+    kindBinding: 'EXACT_CURRENT_INDEPENDENT_WEB_READBACK',
+    anyExplicitWebBoundKindAllowedWhenIndependentlyAccepted: true
+  }),
+  acceptedAuthorityBinding: Object.freeze({
+    source: 'CURRENT_ACCEPTED_G2_EPISODE_AUTHORITY_READBACK',
+    stateField: 'acceptedEpisodeAuthority',
+    requiredFields: Object.freeze(['episodeId', 'episodeKind', 'authorityReference', 'primaryOwner',
+      'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId',
+      'evidenceBoundaryId']),
+    mustMatchIndependentAcceptedReadback: true
+  }),
+  acceptedBoundaryBinding: Object.freeze({
+    inputField: 'acceptedBoundary',
+    source: 'CURRENT_ACCEPTED_G2_BOUNDARY_READBACK',
+    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'readBack', 'rootFamilyId',
+      'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId', 'digest']),
+    episodeFields: Object.freeze(['rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId',
+      'assuranceFloorId', 'evidenceBoundaryId']),
+    mustRemainExact: true
+  }),
+  currentStateReadback: Object.freeze({
+    inputField: 'currentStateReadback',
+    source: 'CURRENT_ACCEPTED_G2_CONTINUATION_STATE_READBACK',
+    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'complete', 'readBack', 'episodeId',
+      'acceptedEpisodeAuthority', 'candidateIdentity', 'evidenceIdentity', 'attemptState',
+      'currentFailureSignature', 'history', 'effectReconciliation', 'faithfulPathInventoryDigest', 'digest']),
+    attemptFields: Object.freeze(['attemptCount', 'attemptLimit', 'productCorrectionAttempts',
+      'productCorrectionLimit', 'budgetConsumed', 'budgetLimit']),
+    historyMustMatchExactly: true,
+    mustMatchIndependentAcceptedReadback: true
+  }),
+  requiredConditions: Object.freeze([
+    'CONCLUSIVE_PRIMARY_OWNER', 'PRODUCT_SEMANTICS_PROVEN_BAD_NO', 'RECONCILED_EFFECTS',
+    'FAITHFUL_PATH_REMAINS', 'NO_EQUIVALENT_NO_PROGRESS_REPEAT', 'SAME_ROOT_TRUST_AUTHORITY_SCOPE',
+    'SAME_ASSURANCE_FLOOR_AND_EVIDENCE_BOUNDARY', 'EXACT_CANDIDATE_AND_EVIDENCE_IDENTITY',
+    'NO_ATTEMPT_OR_BUDGET_RESET', 'AUTHORITATIVE_CURRENT_STATE_READBACK',
+    'ACCEPTED_EPISODE_AUTHORITY_READBACK', 'CONSUMPTION_WITHIN_ACCEPTED_LIMITS',
+    'FAITHFUL_PATH_HAS_BOUND_EVIDENCE'
+  ]),
+  effectReconciliation: Object.freeze({
+    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'complete', 'readBack', 'effects', 'digest']),
+    acceptedEffectState: 'RECONCILED',
+    independentReadbackField: 'effectReconciliation',
+    mustMatchCurrentAcceptedStateReadback: true,
+    equivalentEffectOrderAllowed: true
+  }),
+  faithfulPathInventory: Object.freeze({
+    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'complete', 'readBack', 'paths', 'digest']),
+    requiresRemainingFaithfulPath: true,
+    pathFields: Object.freeze(['pathId', 'faithful', 'available', 'actualPath', 'evidenceRef',
+      'evidenceBoundaryId', 'candidateIdentity']),
+    pathInventoryDigestBoundToCurrentState: true
+  }),
+  equivalenceFields: Object.freeze([
+    'rootFamilyId', 'unresolvedBlockerIds', 'primaryOwner', 'failedMechanism', 'effectClass', 'evidenceBoundaryId'
+  ]),
+  equivalenceIgnoresLabels: Object.freeze(['runId', 'workerId', 'branch', 'candidateIdentity', 'episodeId']),
+  candidateTransition: 'PRESERVE_EXACT_IDENTITY',
+  evidenceTransition: 'PRESERVE_EXACT_IDENTITY',
+  attemptAndBudget: Object.freeze({
+    attemptCountMayDecrease: false,
+    budgetSpentMayDecrease: false,
+    limitsMayIncrease: false,
+    attemptCountMayExceedLimit: false,
+    productCorrectionsMayExceedLimit: false,
+    budgetConsumedMayExceedLimit: false,
+    overLimitResult: 'RETURN_TO_WEB',
+    resetAllowed: false
+  }),
+  resultFields: Object.freeze([
+    'admission', 'violatedObligationIds', 'candidateTransition', 'evidenceTransition', 'attemptEffects', 'budgetEffects'
+  ]),
+  hostedReplacementCandidate: Object.freeze({
+    requiresExplicitCurrentWebAuthority: true,
+    allowedPrimaryOwners: Object.freeze(['HARNESS', 'TOOLKIT', 'ENVIRONMENT']),
+    episodeKind: 'G3_RUN_LOCK',
+    preserveFailedCandidateAndEvidence: true,
+    replacementMustBeDistinctAndImmutable: true,
+    transportMayAuthorize: false,
+    productAttemptDelta: 0,
+    budgetResetAllowed: false
+  })
+});
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = '4c0b80e8205689afcb685161fa314e395ab400679c272310588ce020ec960480';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
@@ -1040,14 +1125,48 @@ const S1A_ORACLE_PROJECTION_ROWS = Object.freeze([
     Object.freeze({ disposition, lifecycle: 'RESOLVED', twoWay: 'POST_SHIP', v1: 'RESOLVED' })
   ])
 ]);
+const S1A_ORACLE_OWNERSHIP_READBACK_RULE = Object.freeze({
+  source: 'CURRENT_AUTHORITATIVE_OWNERSHIP_READBACK',
+  requiredFields: Object.freeze([
+    'source', 'authoritative', 'current', 'readBack', 'repository', 'packetIdentity', 'findingId',
+    'webAdmittedRevision', 'findingRevision', 'candidateIdentity', 'acceptedDecisionId', 'programmeId',
+    'childId', 'frontierId', 'controllerId', 'acceptedContractId', 'subjectId', 'observedBehavior',
+    'requiredBehavior', 'primaryOwner', 'adjudication', 'ownerRole', 'owner', 'resolution', 'revision', 'digest'
+  ]),
+  recordBindings: Object.freeze([
+    Object.freeze({ readback: 'repository', record: 'REPOSITORY' }),
+    Object.freeze({ readback: 'packetIdentity', record: 'PACKET_IDENTITY' }),
+    Object.freeze({ readback: 'findingId', record: 'FINDING_ID' }),
+    Object.freeze({ readback: 'webAdmittedRevision', record: 'WEB_ADMITTED_REVISION' }),
+    Object.freeze({ readback: 'findingRevision', record: 'FINDING_REVISION' }),
+    Object.freeze({ readback: 'candidateIdentity', record: 'CANDIDATE_IDENTITY' }),
+    Object.freeze({ readback: 'acceptedDecisionId', record: 'ACCEPTED_DECISION_ID' }),
+    Object.freeze({ readback: 'programmeId', record: 'PROGRAMME_ID' }),
+    Object.freeze({ readback: 'childId', record: 'CHILD_ID' }),
+    Object.freeze({ readback: 'frontierId', record: 'FRONTIER_ID' }),
+    Object.freeze({ readback: 'controllerId', record: 'CONTROLLER_ID' }),
+    Object.freeze({ readback: 'acceptedContractId', record: 'ACCEPTED_CONTRACT_ID' }),
+    Object.freeze({ readback: 'subjectId', record: 'SUBJECT_ID' }),
+    Object.freeze({ readback: 'observedBehavior', record: 'OBSERVED_BEHAVIOR' }),
+    Object.freeze({ readback: 'requiredBehavior', record: 'REQUIRED_BEHAVIOR' }),
+    Object.freeze({ readback: 'primaryOwner', record: 'PRIMARY_OWNER' }),
+    Object.freeze({ readback: 'adjudication', record: 'ADJUDICATION' }),
+    Object.freeze({ readback: 'ownerRole', record: 'OWNER_ROLE' }),
+    Object.freeze({ readback: 'owner', record: 'VERIFIED_OWNER' }),
+    Object.freeze({ readback: 'resolution', record: 'RESOLUTION' })
+  ]),
+  digestMode: 'CANONICAL_READBACK_CORE_SHA256',
+  resolutionMustRemain: 'NOT_RESOLVED'
+});
 const S1A_ORACLE_LIFECYCLE_TRANSITIONS = Object.freeze([
   Object.freeze({ event: 'DEFER', from: 'UNRESOLVED', to: 'UNRESOLVED',
     requires: Object.freeze(['VERIFIED_OWNER', 'TIMING', 'TRIGGER_OR_REASON']),
     requiredValueTypes: Object.freeze({ VERIFIED_OWNER: 'NONEMPTY_STRING', TIMING: 'NONEMPTY_STRING',
       TRIGGER_OR_REASON: 'NONEMPTY_STRING' }) }),
   Object.freeze({ event: 'TRANSFER', from: 'UNRESOLVED', to: 'UNRESOLVED',
-    requires: Object.freeze(['VERIFIED_OWNER']),
-    requiredValueTypes: Object.freeze({ VERIFIED_OWNER: 'NONEMPTY_STRING' }) }),
+    requires: Object.freeze(['VERIFIED_OWNER', 'OWNER_READBACK']),
+    requiredValueTypes: Object.freeze({ VERIFIED_OWNER: 'NONEMPTY_STRING', OWNER_READBACK: 'NONEMPTY_OBJECT' }),
+    ownerReadback: S1A_ORACLE_OWNERSHIP_READBACK_RULE }),
   Object.freeze({ event: 'EVIDENCE_ACQUIRED', from: 'UNRESOLVED', to: 'UNRESOLVED',
     requires: Object.freeze(['EXACT_EVIDENCE']),
     requiredValueTypes: Object.freeze({ EXACT_EVIDENCE: 'NONEMPTY_EVIDENCE_REFERENCES' }) }),
@@ -1063,17 +1182,28 @@ const S1A_ORACLE_EVIDENCE_ONLY = Object.freeze({
   independentEvidenceGatesRemainBinding: true
 });
 const S1A_ORACLE_EVIDENCE_ONLY_MEANING = 'Acquire, preserve or verify evidence as a custody-only action; it neither asserts a product defect nor authorises product correction. Evidence acquisition does not resolve or discard the obligation; required evidence gates remain independently binding.';
+const S1A_ORACLE_COMMON_FIELD_NAMES = Object.freeze([
+  'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION', 'ACCEPTED_DECISION_ID',
+  'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID', 'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID',
+  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ADJUDICATION',
+  'OWNER_ROLE', 'OWNER_READBACK', 'RESOLUTION'
+]);
 const S1A_ORACLE_BLOCKER_FIELDS = Object.freeze([
   'WEB_ADMITTED_REVISION', 'ADMITTED_CURRENT_OUTCOME', 'LOCKED_CRITERION_OR_FLOOR',
   'SHIP_NOW_CONSEQUENCE', 'REQUIRED_OUTCOME_EFFECT', 'SAFE_DEFERRAL_IMPOSSIBLE',
-  'SMALLEST_CORRECTION', 'VERIFIABLE_CLOSURE', 'EXACT_EVIDENCE', 'CANDIDATE_IDENTITY'
+  'SMALLEST_CORRECTION', 'VERIFIABLE_CLOSURE', 'EXACT_EVIDENCE', 'CANDIDATE_IDENTITY',
+  ...S1A_ORACLE_COMMON_FIELD_NAMES
 ]);
 const S1A_ORACLE_BLOCKER_RECORD_FIELDS = Object.freeze([
   'FINDING_ID', 'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'TIMING',
   'VERIFIED_OWNER', 'TRIGGER_OR_REASON', 'CLOSURE_CRITERION', 'EXACT_EVIDENCE',
   'CANDIDATE_IDENTITY', 'DETAIL_REF', 'ADMITTED_CURRENT_OUTCOME',
   'LOCKED_CRITERION_OR_FLOOR', 'SHIP_NOW_CONSEQUENCE', 'REQUIRED_OUTCOME_EFFECT',
-  'SAFE_DEFERRAL_IMPOSSIBLE', 'SMALLEST_CORRECTION', 'VERIFIABLE_CLOSURE'
+  'SAFE_DEFERRAL_IMPOSSIBLE', 'SMALLEST_CORRECTION', 'VERIFIABLE_CLOSURE',
+  'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION', 'ACCEPTED_DECISION_ID',
+  'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID', 'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID',
+  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ADJUDICATION',
+  'OWNER_ROLE', 'OWNER_READBACK', 'RESOLUTION'
 ]);
 const S1A_ORACLE_BLOCKER_TYPED_PATHS = Object.freeze({
   FINDING_ID: 'NONEMPTY_STRING', WEB_ADMITTED_REVISION: 'NONEMPTY_STRING',
@@ -1081,6 +1211,13 @@ const S1A_ORACLE_BLOCKER_TYPED_PATHS = Object.freeze({
   VERIFIED_OWNER: 'NONEMPTY_STRING', TRIGGER_OR_REASON: 'NONEMPTY_STRING',
   CLOSURE_CRITERION: 'NONEMPTY_STRING', EXACT_EVIDENCE: 'NONEMPTY_EVIDENCE_REFERENCES',
   CANDIDATE_IDENTITY: 'NONEMPTY_OBJECT', DETAIL_REF: 'SHA256_REFERENCE',
+  REPOSITORY: 'NONEMPTY_STRING', PACKET_IDENTITY: 'NONEMPTY_OBJECT',
+  FINDING_REVISION: 'NONEMPTY_STRING', ACCEPTED_DECISION_ID: 'NONEMPTY_STRING',
+  PROGRAMME_ID: 'NONEMPTY_STRING', CHILD_ID: 'NONEMPTY_STRING', FRONTIER_ID: 'NONEMPTY_STRING',
+  CONTROLLER_ID: 'NONEMPTY_STRING', ACCEPTED_CONTRACT_ID: 'NONEMPTY_STRING', SUBJECT_ID: 'NONEMPTY_STRING',
+  OBSERVED_BEHAVIOR: 'NONEMPTY_STRING', REQUIRED_BEHAVIOR: 'NONEMPTY_STRING',
+  PRIMARY_OWNER: 'NONEMPTY_STRING', ADJUDICATION: 'NONEMPTY_STRING', OWNER_ROLE: 'NONEMPTY_STRING',
+  OWNER_READBACK: 'NONEMPTY_OBJECT', RESOLUTION: 'NONEMPTY_STRING',
   'ADMITTED_CURRENT_OUTCOME.id': 'NONEMPTY_STRING',
   'ADMITTED_CURRENT_OUTCOME.milestone': 'NONEMPTY_STRING',
   'ADMITTED_CURRENT_OUTCOME.audience': 'NONEMPTY_STRING',
@@ -1113,6 +1250,11 @@ const S1A_ORACLE_BLOCKER_NESTED_FIELDS = Object.freeze([
 ]);
 const S1A_ORACLE_BLOCKER_BINDINGS = Object.freeze([
   Object.freeze({ record: 'FINDING_ID', decision: 'findingId' }),
+  Object.freeze({ record: 'REPOSITORY', decision: 'repository' }),
+  Object.freeze({ record: 'PACKET_IDENTITY', decision: 'packetIdentity' }),
+  Object.freeze({ record: 'FINDING_REVISION', decision: 'findingRevision' }),
+  Object.freeze({ record: 'ACCEPTED_DECISION_ID', decision: 'acceptedDecisionId' }),
+  Object.freeze({ record: 'ADJUDICATION', decision: 'adjudication' }),
   Object.freeze({ record: 'WEB_ADMITTED_REVISION', decision: 'webRevision' }),
   Object.freeze({ record: 'ADMITTED_CURRENT_OUTCOME', decision: 'currentOutcome' }),
   Object.freeze({ record: 'REQUIRED_OUTCOME_EFFECT', decision: 'requiredOutcomeEffect' }),
@@ -1142,7 +1284,82 @@ const S1A_ORACLE_COMPANION_HISTORY_ANCHOR = Object.freeze({
   parentReadbackFields: ['source', 'authoritative', 'current', 'readBack', 'repository', 'revision', 'body', 'bodyDigest'],
   parentBodyBindsLedgerDigest: true
 });
-const S1A_ORACLE_COMPANION_TYPED_FIELDS = Object.freeze({
+const S1A_ORACLE_COMMON_FIELD_TYPES = Object.freeze({
+  REPOSITORY: 'NONEMPTY_STRING',
+  PACKET_IDENTITY: 'NONEMPTY_OBJECT',
+  FINDING_REVISION: 'NONEMPTY_STRING',
+  ACCEPTED_DECISION_ID: 'NONEMPTY_STRING',
+  PROGRAMME_ID: 'NONEMPTY_STRING',
+  CHILD_ID: 'NONEMPTY_STRING',
+  FRONTIER_ID: 'NONEMPTY_STRING',
+  CONTROLLER_ID: 'NONEMPTY_STRING',
+  ACCEPTED_CONTRACT_ID: 'NONEMPTY_STRING',
+  SUBJECT_ID: 'NONEMPTY_STRING',
+  OBSERVED_BEHAVIOR: 'NONEMPTY_STRING',
+  REQUIRED_BEHAVIOR: 'NONEMPTY_STRING',
+  PRIMARY_OWNER: 'NONEMPTY_STRING',
+  ADJUDICATION: 'NONEMPTY_STRING',
+  OWNER_ROLE: 'NONEMPTY_STRING',
+  OWNER_READBACK: 'NONEMPTY_OBJECT',
+  RESOLUTION: 'NONEMPTY_STRING'
+});
+const S1A_ORACLE_PACKET_IDENTITY = Object.freeze({
+  repository: 'weijunswj/ai-agent-toolkit',
+  packetId: 'packet:s1a-increment-1',
+  packetRevision: 'packet:revision-7'
+});
+function makeS1aCommonFindingFields(identity) {
+  const fields = {
+    REPOSITORY: 'weijunswj/ai-agent-toolkit',
+    PACKET_IDENTITY: s1aClone(S1A_ORACLE_PACKET_IDENTITY),
+    FINDING_REVISION: 'finding-revision:7',
+    ACCEPTED_DECISION_ID: 'decision:web:7',
+    PROGRAMME_ID: 'programme:s1a',
+    CHILD_ID: 'child:s1a-increment-1',
+    FRONTIER_ID: 'frontier:increment-1',
+    CONTROLLER_ID: 'controller:web-459',
+    ACCEPTED_CONTRACT_ID: 'contract:s1a-i1-25',
+    SUBJECT_ID: 'subject:current-candidate',
+    OBSERVED_BEHAVIOR: 'Observed behavior violates the accepted criterion.',
+    REQUIRED_BEHAVIOR: 'Required behavior satisfies the accepted criterion.',
+    PRIMARY_OWNER: 'TOOLKIT',
+    ADJUDICATION: 'EVIDENCE_ONLY',
+    OWNER_ROLE: 'TOOLKIT_OWNER',
+    RESOLUTION: 'NOT_RESOLVED',
+    ...s1aClone(identity)
+  };
+  const readbackCore = {
+    source: 'CURRENT_AUTHORITATIVE_OWNERSHIP_READBACK',
+    authoritative: true,
+    current: true,
+    readBack: true,
+    repository: fields.REPOSITORY,
+    packetIdentity: s1aClone(fields.PACKET_IDENTITY),
+    findingId: fields.FINDING_ID,
+    findingRevision: fields.FINDING_REVISION,
+    candidateIdentity: s1aClone(fields.CANDIDATE_IDENTITY),
+    acceptedDecisionId: fields.ACCEPTED_DECISION_ID,
+    primaryOwner: fields.PRIMARY_OWNER,
+    ownerRole: fields.OWNER_ROLE,
+    owner: fields.VERIFIED_OWNER,
+    webAdmittedRevision: fields.WEB_ADMITTED_REVISION,
+    programmeId: fields.PROGRAMME_ID,
+    childId: fields.CHILD_ID,
+    frontierId: fields.FRONTIER_ID,
+    controllerId: fields.CONTROLLER_ID,
+    acceptedContractId: fields.ACCEPTED_CONTRACT_ID,
+    subjectId: fields.SUBJECT_ID,
+    observedBehavior: fields.OBSERVED_BEHAVIOR,
+    requiredBehavior: fields.REQUIRED_BEHAVIOR,
+    adjudication: fields.ADJUDICATION,
+    resolution: fields.RESOLUTION,
+    revision: 'ownership:readback-revision-7'
+  };
+  fields.OWNER_READBACK = { ...readbackCore, digest: s1aHashRecord(readbackCore) };
+  return fields;
+}
+const S1A_ORACLE_COMPANION_TYPED_FIELDS = Object.freeze({...S1A_ORACLE_COMMON_FIELD_TYPES,
+
   FINDING_ID: 'NONEMPTY_STRING',
   WEB_ADMITTED_REVISION: 'NONEMPTY_STRING',
   DISPOSITION: 'NONEMPTY_STRING',
@@ -1158,7 +1375,7 @@ const S1A_ORACLE_COMPANION_CURRENT_INVENTORY_RULE = Object.freeze({
   mode: 'CURRENT_AUTHORITATIVE_COMPLETE_READBACK',
   source: 'CURRENT_WEB_ADMISSION_COMPANION_INVENTORY',
   readbackFields: Object.freeze([
-    'source', 'authoritative', 'current', 'readBack', 'repository', 'revision', 'records', 'digest'
+    'source', 'authoritative', 'current', 'complete', 'readBack', 'repository', 'packetIdentity', 'acceptedDecisionIds', 'candidateIdentities', 'revision', 'records', 'digest'
   ]),
   recordFields: Object.freeze(['ref', 'record']),
   digestMode: 'CANONICAL_COMPLETE_RECORD_INVENTORY_SHA256',
@@ -1210,35 +1427,45 @@ const S1A_ORACLE_CLOSURE_READBACK = Object.freeze({
   body: S1A_ORACLE_CLOSURE_BODY_TEXT,
   bodyDigest: s1aHashText(S1A_ORACLE_CLOSURE_BODY_TEXT)
 });
+const S1A_ORACLE_HISTORY_IDENTITY_FIELDS = Object.freeze(['FINDING_ID', 'WEB_ADMITTED_REVISION', 'CANDIDATE_IDENTITY']);
 const S1A_ORACLE_COMPANION_IDENTITY_FIELDS = Object.freeze([
-  'FINDING_ID', 'WEB_ADMITTED_REVISION', 'CANDIDATE_IDENTITY'
+  'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_ID', 'WEB_ADMITTED_REVISION', 'CANDIDATE_IDENTITY'
 ]);
-const S1A_ORACLE_POST_CHILD_RECEIPT_IDS = Object.freeze(['receipt:merge', 'receipt:child-terminal']);
+const S1A_ORACLE_COMPANION_PROJECTION_FIELDS = Object.freeze([
+  'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_ID', 'FINDING_REVISION',
+  'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'CANDIDATE_IDENTITY', 'ACCEPTED_DECISION_ID'
+]);const S1A_ORACLE_POST_CHILD_RECEIPT_IDS = Object.freeze(['receipt:merge', 'receipt:child-terminal']);
 const S1A_ORACLE_POST_CHILD_CHECK_IDS = Object.freeze(['check:integration', 'check:policy']);
 const S1A_ORACLE_BOUNDARY_RUN_EVENTS = Object.freeze([
   'CANDIDATE_BOUND', 'ACCEPTED_BOUNDARY_INVOKED', 'BOUNDARY_OUTCOME_OBSERVED', 'RUN_TERMINAL'
 ]);
 const S1A_ORACLE_IDENTITY_FIELDS = Object.freeze([
-  'FINDING_ID', 'DISPOSITION', 'LIFECYCLE', 'DETAIL_REF'
+  'FINDING_ID', 'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION',
+  'WEB_ADMITTED_REVISION', 'CANDIDATE_IDENTITY', 'ACCEPTED_DECISION_ID',
+  'DISPOSITION', 'LIFECYCLE', 'DETAIL_REF'
 ]);
 const S1A_ORACLE_DETAIL_FIELDS = Object.freeze([
   'FINDING_ID', 'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'TIMING',
   'VERIFIED_OWNER', 'TRIGGER_OR_REASON', 'CLOSURE_CRITERION', 'EXACT_EVIDENCE',
-  'CANDIDATE_IDENTITY'
+  'CANDIDATE_IDENTITY', ...Object.keys(S1A_ORACLE_COMMON_FIELD_TYPES)
 ]);
+const S1A_ORACLE_BLOCKER_PROOF_FIELDS = Object.freeze(
+  S1A_ORACLE_BLOCKER_RECORD_FIELDS.filter((field) => field !== 'DETAIL_REF'));
 const S1A_ORACLE_REVIEW_SNAPSHOT_FIELDS = Object.freeze([
   'repository', 'deliveryChildId', 'commit', 'tree',
   'reviewRouteAuthorityRevision', 'reviewRouteAuthorityDigest',
   'parentContractRevision', 'parentContractDigest',
-  'childStateRevision', 'childStateDigest', 'terminalReceiptIds', 'terminalReceiptInventoryDigest',
-  'applicableIntegratedCheckIds', 'applicableIntegratedCheckInventoryDigest'
+  'childStateRevision', 'childStateDigest', 'terminalReceiptIds',
+  'applicableIntegratedCheckIds'
 ]);
 const S1A_REVIEW_EVENTS = Object.freeze([
   'FINAL_DELIVERY_CHILD_MERGED', 'INTEGRATED_IDENTITY_READ_BACK',
   'CURRENT_PARENT_CONTRACT_READ_BACK', 'CURRENT_CHILD_STATE_READ_BACK',
-  'TERMINAL_RECEIPTS_READ_BACK', 'APPLICABLE_CHECKS_TERMINAL',
-  'REVIEW_A_STARTED', 'REVIEW_B_STARTED', 'REPORT_A_TERMINAL', 'REPORT_B_TERMINAL',
-  'WEB_ADJUDICATION'
+  'REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK', 'APPLICABLE_CHECK_MEMBERSHIP_READ_BACK',
+  'MERGE_TRIGGERED_CI_STARTED', 'REVIEW_A_STARTED', 'REVIEW_B_STARTED',
+  'REPORT_A_TERMINAL', 'REPORT_B_TERMINAL', 'TERMINAL_RECEIPTS_READ_BACK',
+  'TERMINAL_RECEIPTS_TERMINAL', 'APPLICABLE_CHECKS_READ_BACK',
+  'APPLICABLE_CHECKS_TERMINAL', 'WEB_ADJUDICATION'
 ]);
 const S1A_PEER_VISIBILITY_EVENTS = Object.freeze([
   'REPORT_A_VISIBLE_TO_B', 'REPORT_B_VISIBLE_TO_A'
@@ -1363,6 +1590,112 @@ function s1aGovernedHumanPolicyDigest(source) {
     .replace(acceptedEquivalentFailClosed, canonicalFailClosed);
   return crypto.createHash('sha256').update(governedHumanPolicy, 'utf8').digest('hex');
 }
+function s1aProseRange(source, startHeading, endHeading) {
+  const start = source.indexOf(startHeading);
+  const end = source.indexOf(endHeading, start);
+  return start >= 0 && end > start ? source.slice(start, end) : '';
+}
+
+function s1aContinuationProseViolations(source) {
+  const prose = s1aProseRange(source, '### Bounded non-product continuation', '### Faithful validation carrier');
+  const required = [
+    ['CONTINUATION_OWNER_PRODUCT_BOUNDARY', [
+      'conclusive primary attribution to HARNESS, TOOLKIT, ENVIRONMENT, VALIDATION_CARRIER, or TRANSPORT',
+      'PRODUCT or UNKNOWN never grants autonomous continuation',
+      'PRODUCT_SEMANTICS_PROVEN_BAD=YES is not product-correction authority'
+    ]],
+    ['CONTINUATION_EPISODE_SCOPE_AUTHORITY', [
+      'any other currently accepted Web-bounded evidence episode recorded by its authoritative readback',
+      'G3 and LIGHT are examples, not an exclusive episode set.',
+      'The current episode authority, primary owner, semantics, root, trust model, scope, assurance floor and accepted evidence boundary remain exact.'
+    ]],
+    ['CONTINUATION_ACCEPTED_AUTHORITY_READBACK', [
+      'The episode kind and primary owner must match the independently accepted current Web authority readback.'
+    ]],
+    ['CONTINUATION_CURRENT_STATE_READBACK', [
+      'A complete current accepted-G2 state readback binds the exact episode authority and owner, candidate and evidence identities, attempt and budget counters and limits, current failure signature, faithful-path inventory digest, and full continuation history.',
+      'Omitted, stale, partial or caller-rebound authority, history, identities, counters or limits return to Web.'
+    ]],
+    ['CONTINUATION_ATTEMPT_LIMITS', [
+      'Attempt, product-correction and consumed-budget counts may not exceed their accepted limits; any over-limit count returns to Web.'
+    ]],
+    ['CONTINUATION_EFFECT_RECONCILIATION', [
+      'Independently reconcile effects and faithful-path inventory; an unreconciled effect or exhausted faithful path returns to Web.'
+    ]],
+    ['CONTINUATION_FAITHFUL_PATH_USABILITY', [
+      'A remaining faithful path must have an exact non-empty path identity, actual path and evidence reference bound to the accepted candidate, evidence boundary and independent accepted-state inventory digest; missing or caller-rebound path evidence returns to Web.'
+    ]],
+    ['CONTINUATION_FAITHFUL_PATH_PROGRESS', [
+      'Repeated materially equivalent no-progress history returns to Web even when run, worker, branch or candidate labels change.'
+    ]],
+    ['CONTINUATION_IDENTITY_BUDGET_PRESERVATION', [
+      'Identity-preserving recovery keeps the exact candidate and evidence identities, and every candidate remains immutable.',
+      'It does not widen the existing authority, mutation boundary, accepted scope/floor or prerequisite graph, grant a new continuation, reset a budget'
+    ]],
+    ['CONTINUATION_REPLACEMENT_AUTHORITY', [
+      'only the existing explicitly Web-authorised hosted non-product reclosure may create a distinct immutable replacement candidate',
+      'TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.'
+    ]]
+  ];
+  const failures = required.filter(([, clauses]) => clauses.some((clause) => !prose.includes(clause)))
+    .map(([id]) => id);
+  const contradictions = [
+    [/Contradiction:\s*PRODUCT or UNKNOWN may continue autonomously/i, 'CONTINUATION_OWNER_PRODUCT_BOUNDARY'],
+    [/Contradiction:\s*PRODUCT_SEMANTICS_PROVEN_BAD=YES authorizes product correction/i, 'CONTINUATION_OWNER_PRODUCT_BOUNDARY'],
+    [/Contradiction:\s*G3 and LIGHT are the only accepted evidence episodes/i, 'CONTINUATION_EPISODE_SCOPE_AUTHORITY'],
+    [/Contradiction:\s*the episode may widen root, trust, scope, floor, or evidence boundary/i, 'CONTINUATION_EPISODE_SCOPE_AUTHORITY'],
+    [/Contradiction:\s*caller-rebound episode authority or owner may replace the accepted Web readback/i, 'CONTINUATION_ACCEPTED_AUTHORITY_READBACK'],
+    [/Contradiction:\s*partial caller history may replace the authoritative readback/i, 'CONTINUATION_CURRENT_STATE_READBACK'],
+    [/Contradiction:\s*attempt, product-correction or consumed-budget counts may exceed their accepted limits/i, 'CONTINUATION_ATTEMPT_LIMITS'],
+    [/Contradiction:\s*unreconciled effects may be ignored/i, 'CONTINUATION_EFFECT_RECONCILIATION'],
+    [/Contradiction:\s*an exhausted faithful path may continue/i, 'CONTINUATION_FAITHFUL_PATH_PROGRESS'],
+    [/Contradiction:\s*renamed no-progress history is new progress/i, 'CONTINUATION_FAITHFUL_PATH_PROGRESS'],
+    [/Contradiction:\s*a path without an actual path or evidence reference may continue/i, 'CONTINUATION_FAITHFUL_PATH_USABILITY'],
+    [/Contradiction:\s*candidate, evidence, attempts, or consumed budgets may be reset/i, 'CONTINUATION_IDENTITY_BUDGET_PRESERVATION'],
+    [/Contradiction:\s*TRANSPORT may create a replacement candidate/i, 'CONTINUATION_REPLACEMENT_AUTHORITY']
+  ];
+  for (const [pattern, id] of contradictions) if (pattern.test(prose) && !failures.includes(id)) failures.push(id);
+  return failures;
+}
+function s1aCarrierProseViolations(source) {
+  const prose = s1aProseRange(source, '### Faithful validation carrier', '### G1 re-convergence');
+  const required = [
+    ['CARRIER_AUTHORITATIVE_INVENTORY_ORDER', [
+      'Treat the carrier inventory as an authoritative current readback, not caller-supplied availability.',
+      'A carrier is an execution substrate, not one dedicated test application per repository;',
+      'Select faithful local/dev first, then reconcile suitable existing Owner-authorised execution infrastructure, and provision or expand only after that reconciliation proves necessity.'
+    ]],
+    ['CARRIER_EXECUTION_EVIDENCE_BINDING', [
+      'Bind the selected carrier identity and actual path to the candidate, accepted criterion, accepted execution path, enforcement boundary and required terminal execution/readback evidence.',
+      'A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest.'
+    ]],
+    ['CARRIER_PUBLIC_AUTHORITY_MATCH', [
+      'Public ingress is admissible only when a specific accepted validation criterion requires it and a current authoritative Owner/Web readback binds the exact exposure and public request, including consumer, protocol, path, hostname requirement and hostname, accepted criterion, necessity, audience, boundary, lifetime and cleanup.'
+    ]],
+    ['CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY', [
+      'If domain registration or DNS is required, each operation needs its own current authoritative Owner/Web readback bound to that exposure with a distinct authority reference; one combined grant is insufficient.'
+    ]],
+    ['CARRIER_PRIVATE_PERSISTENCE', [
+      'The default carrier remains PRIVATE/NONPUBLIC without domain registration, DNS or public ingress.',
+      'Persistence does not imply exposure.'
+    ]]
+  ];
+  const failures = required.filter(([, clauses]) => clauses.some((clause) => !prose.includes(clause)))
+    .map(([id]) => id);
+  const contradictions = [
+    [/Contradiction:\s*caller-supplied availability is authoritative/i, 'CARRIER_AUTHORITATIVE_INVENTORY_ORDER'],
+    [/Contradiction:\s*one dedicated test application is required per repository/i, 'CARRIER_AUTHORITATIVE_INVENTORY_ORDER'],
+    [/Contradiction:\s*provision before reconciling existing Owner infrastructure/i, 'CARRIER_AUTHORITATIVE_INVENTORY_ORDER'],
+    [/Contradiction:\s*equivalent shape alone proves boundary exercise/i, 'CARRIER_EXECUTION_EVIDENCE_BINDING'],
+    [/Contradiction:\s*faithful by shape equivalence without a terminal execution receipt/i, 'CARRIER_EXECUTION_EVIDENCE_BINDING'],
+    [/Contradiction:\s*public request details need not match Owner authority/i, 'CARRIER_PUBLIC_AUTHORITY_MATCH'],
+    [/Contradiction:\s*one combined domain and DNS grant is sufficient/i, 'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY'],
+    [/Contradiction:\s*persistence implies public exposure/i, 'CARRIER_PRIVATE_PERSISTENCE']
+  ];
+  for (const [pattern, id] of contradictions) if (pattern.test(prose) && !failures.includes(id)) failures.push(id);
+  return failures;
+}
+
 function s1aReadPolicy(source) {
   const matches = [...source.matchAll(/~~~s1a-policy-contract-v1\r?\n([\s\S]*?)\r?\n~~~/g)];
   s1aRequire(matches.length === 1, 'Architecture must contain exactly one S1-A policy contract');
@@ -1374,9 +1707,11 @@ function s1aReadPolicy(source) {
   const policyLawProse = source.slice(policyLawStart, policyLawEnd);
   s1aExactKeys(policy, [
     'schema', 'dispositions', 'lifecycles', 'evidenceOnly', 'projectionRows', 'blocker', 'companion',
-    'lifecycleTransitions', 'closureVerification', 'postChildReview', 'faithfulCarrier'
+    'lifecycleTransitions', 'closureVerification', 'postChildReview', 'faithfulCarrier', 'boundedContinuation'
   ], 'root');
   s1aRequire(policy.schema === 'toolkit.s1a.policy-contract.v1', 'unknown S1-A policy schema');
+  s1aRequire(s1aSame(policy.boundedContinuation, S1A_ORACLE_BOUNDED_CONTINUATION_POLICY),
+    'bounded continuation contract differs from fixed behavioral observer');
   s1aUniqueStrings(policy.dispositions, 'dispositions', S1A_ORACLE_DISPOSITIONS);
   s1aRequire(s1aSame(policy.dispositions, S1A_ORACLE_DISPOSITIONS), 'canonical disposition set or order changed');
   s1aUniqueStrings(policy.lifecycles, 'lifecycles', S1A_ORACLE_LIFECYCLES);
@@ -1439,7 +1774,8 @@ function s1aReadPolicy(source) {
   for (const row of policy.blocker.bindings) {
     s1aExactKeys(row, ['record', 'decision'], 'blocker binding');
     s1aRequire(blockerPaths.includes(row.record), 'unresolved blocker record binding');
-    s1aRequire(['findingId', 'webRevision', 'currentOutcome', 'closureCriterion',
+    s1aRequire(['findingId', 'repository', 'packetIdentity', 'findingRevision', 'acceptedDecisionId',
+      'adjudication', 'webRevision', 'currentOutcome', 'closureCriterion',
       'candidateIdentity', 'detailRef', 'requiredOutcomeEffect'].includes(row.decision), 'unresolved blocker decision binding');
   }
   s1aRequire(s1aSame(policy.blocker.bindings, S1A_ORACLE_BLOCKER_BINDINGS),
@@ -1483,7 +1819,7 @@ function s1aReadPolicy(source) {
     'unresolved effect binding');
   s1aExactKeys(policy.blocker.proofBinding, ['mode', 'fields'], 'blocker proofBinding');
   s1aRequire(policy.blocker.proofBinding.mode === 'SAME_CONTENT_ADDRESSED_COMPANION_RECORD' &&
-    s1aSame(policy.blocker.proofBinding.fields, S1A_ORACLE_BLOCKER_FIELDS),
+    s1aSame(policy.blocker.proofBinding.fields, S1A_ORACLE_BLOCKER_PROOF_FIELDS),
     'blocker proof must be bound to the full content-addressed companion');
   s1aRequire(s1aSame(policy.blocker.bindings, S1A_ORACLE_BLOCKER_BINDINGS),
     'blocker decision bindings are incomplete');
@@ -1502,12 +1838,9 @@ function s1aReadPolicy(source) {
   s1aUniqueStrings(policy.companion.requiredFields, 'companion.requiredFields', S1A_ORACLE_DETAIL_FIELDS);
   s1aRequire(s1aSame(policy.companion.requiredFields, S1A_ORACLE_DETAIL_FIELDS),
     'companion detail fields are incomplete');
-  s1aUniqueStrings(policy.companion.projectionBindingFields, 'projectionBindingFields', [
-    'FINDING_ID', 'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'CANDIDATE_IDENTITY'
-  ]);
-  s1aRequire(s1aSame(policy.companion.projectionBindingFields, [
-    'FINDING_ID', 'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'CANDIDATE_IDENTITY'
-  ]), 'companion projection identity bindings are incomplete');
+  s1aUniqueStrings(policy.companion.projectionBindingFields, 'projectionBindingFields', S1A_ORACLE_COMPANION_PROJECTION_FIELDS);
+  s1aRequire(s1aSame(policy.companion.projectionBindingFields, S1A_ORACLE_COMPANION_PROJECTION_FIELDS),
+    'companion projection identity bindings are incomplete');
   s1aUniqueStrings(policy.companion.legacyProjectionFields, 'legacyProjectionFields',
     ['TWO_WAY', 'V1']);
   s1aRequire(s1aSame(policy.companion.legacyProjectionFields, ['TWO_WAY', 'V1']),
@@ -1527,7 +1860,13 @@ function s1aReadPolicy(source) {
   s1aRequire(Array.isArray(policy.lifecycleTransitions), 'lifecycleTransitions must be an array');
   const transitionIds = new Set();
   for (const row of policy.lifecycleTransitions) {
-    s1aExactKeys(row, ['event', 'from', 'to', 'requires', 'requiredValueTypes'], 'lifecycle transition');
+    s1aExactKeys(row, row.event === 'TRANSFER'
+      ? ['event', 'from', 'to', 'requires', 'requiredValueTypes', 'ownerReadback']
+      : ['event', 'from', 'to', 'requires', 'requiredValueTypes'], 'lifecycle transition');
+    if (row.event === 'TRANSFER') {
+      s1aRequire(s1aSame(row.ownerReadback, S1A_ORACLE_OWNERSHIP_READBACK_RULE),
+        'transfer ownership readback fields and bindings are incomplete');
+    }
     s1aRequire(['DEFER', 'TRANSFER', 'EVIDENCE_ACQUIRED', 'VERIFIED_CLOSURE'].includes(row.event),
       'unknown lifecycle event');
     s1aRequire(!transitionIds.has(row.event), 'duplicate lifecycle event: ' + row.event);
@@ -1561,8 +1900,8 @@ function s1aReadPolicy(source) {
     review.parentContractDigestField === 'bodyDigest' &&
     review.parentContractDigestMode === 'SHA256_EXACT_READBACK_BODY' &&
     review.frontierEffect === 'DEPENDENT_NEXT_CHILD' &&
-    review.receiptInventoryMode === 'CANONICAL_AUTHORITATIVE_COMPLETE_READBACK' &&
-    review.checkInventoryMode === 'CANONICAL_AUTHORITATIVE_COMPLETE_READBACK' &&
+    review.receiptInventoryMode === 'CANONICAL_AUTHORITATIVE_COMPLETE_TERMINAL_READBACK' &&
+    review.checkInventoryMode === 'CANONICAL_AUTHORITATIVE_COMPLETE_TERMINAL_READBACK' &&
     review.childStateDigestMode === 'CANONICAL_STATE_SHA256' &&
     s1aSame(review.inventorySources, {
       receipts: 'CANONICAL_TERMINAL_OBJECT_RECEIPT_READBACK',
@@ -1610,14 +1949,16 @@ function s1aReadPolicy(source) {
   s1aRequire(review.receiptInventoryField === 'terminalReceiptIds' &&
     review.checkInventoryField === 'applicableIntegratedCheckIds',
     'post-child receipt/check inventories must come from canonical child state');
-  s1aRequire(review.sameSnapshotFields.includes('terminalReceiptInventoryDigest') &&
-    review.sameSnapshotFields.includes('applicableIntegratedCheckInventoryDigest'),
-    'post-child review must bind both inventory digests');
+  s1aRequire(review.sameSnapshotFields.includes('terminalReceiptIds') &&
+    review.sameSnapshotFields.includes('applicableIntegratedCheckIds') &&
+    !review.sameSnapshotFields.includes('terminalReceiptInventoryDigest') &&
+    !review.sameSnapshotFields.includes('applicableIntegratedCheckInventoryDigest'),
+    'post-child launch snapshot binds stable inventory membership, not terminal status digests');
   s1aRequire(review.blindUntil === 'BOTH_REPORTS_TERMINAL',
     'reviewers remain blind until both reports are terminal');
   s1aExactKeys(review.trace, [
     'requiredEvents', 'reviewStartsAfter', 'peerVisibilityEvents',
-    'bothReviewsStartBeforeAnyReport', 'adjudicationAfter'
+    'bothReviewsStartBeforeAnyReport', 'adjudicationAfter', 'terminalReadbackPrecedes'
   ], 'review trace');
   s1aUniqueStrings(review.trace.requiredEvents, 'review events', S1A_REVIEW_EVENTS);
   s1aRequire(s1aSame(review.trace.requiredEvents, S1A_REVIEW_EVENTS),
@@ -1626,8 +1967,8 @@ function s1aReadPolicy(source) {
   s1aRequire(s1aSame(review.trace.reviewStartsAfter, [
     'FINAL_DELIVERY_CHILD_MERGED', 'INTEGRATED_IDENTITY_READ_BACK',
     'CURRENT_PARENT_CONTRACT_READ_BACK', 'CURRENT_CHILD_STATE_READ_BACK',
-    'TERMINAL_RECEIPTS_READ_BACK', 'APPLICABLE_CHECKS_TERMINAL'
-  ]), 'post-child reviews must start after their canonical inputs are terminal');
+    'REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK', 'APPLICABLE_CHECK_MEMBERSHIP_READ_BACK'
+  ]), 'post-child reviews require exact input membership before launch; CI may still be running');
   s1aUniqueStrings(review.trace.peerVisibilityEvents, 'peer visibility events', S1A_PEER_VISIBILITY_EVENTS);
   s1aRequire(s1aSame(review.trace.peerVisibilityEvents, S1A_PEER_VISIBILITY_EVENTS),
     'both peer-visibility attacks must remain observable');
@@ -1636,15 +1977,22 @@ function s1aReadPolicy(source) {
   s1aUniqueStrings(review.trace.adjudicationAfter, 'adjudicationAfter', S1A_REVIEW_EVENTS);
   s1aRequire(s1aSame(review.trace.adjudicationAfter, [
     'REPORT_A_TERMINAL', 'REPORT_B_TERMINAL',
-    'TERMINAL_RECEIPTS_READ_BACK', 'APPLICABLE_CHECKS_TERMINAL'
-  ]), 'Web adjudication must follow both reports and all terminal inputs');
+    'TERMINAL_RECEIPTS_READ_BACK', 'TERMINAL_RECEIPTS_TERMINAL',
+    'APPLICABLE_CHECKS_READ_BACK', 'APPLICABLE_CHECKS_TERMINAL'
+  ]), 'Web adjudication must follow both reports and all terminal readbacks');
+  s1aRequire(s1aSame(review.trace.terminalReadbackPrecedes, [
+    ['TERMINAL_RECEIPTS_READ_BACK', 'TERMINAL_RECEIPTS_TERMINAL'],
+    ['APPLICABLE_CHECKS_READ_BACK', 'APPLICABLE_CHECKS_TERMINAL']
+  ]), 'terminal receipt/check readback must precede terminal attestation');
 
   const carrier = policy.faithfulCarrier;
   s1aExactKeys(carrier, [
-    'selectionOrder', 'defaultExposure', 'acceptedBoundaryId', 'faithfulnessRule',
+    'inventory', 'selectionOrder', 'defaultExposure', 'acceptedBoundaryId', 'faithfulnessRule',
     'boundaryExercise', 'publicExposureRequires', 'domainDnsRequiresSeparateAuthority',
     'persistenceImpliesExposure', 'publicExposureAuthority', 'domainDnsAuthority'
   ], 'faithfulCarrier');
+  s1aRequire(s1aSame(carrier.inventory, S1A_ORACLE_CARRIER_INVENTORY_POLICY),
+    'carrier inventory must be an authoritative complete readback');
   s1aUniqueStrings(carrier.selectionOrder, 'carrier selectionOrder',
     ['LOCAL_DEV', 'AUTHORIZED_EXISTING_OWNER', 'NEW_OWNER_PROVISIONED']);
   s1aRequire(s1aSame(carrier.selectionOrder,
@@ -1663,48 +2011,54 @@ function s1aReadPolicy(source) {
   ], 'carrier boundaryExercise');
   s1aRequire(carrier.boundaryExercise.mode === 'INDEPENDENTLY_BOUND_TERMINAL_EXECUTION_EVIDENCE' &&
     carrier.boundaryExercise.evidenceInputField === 'acceptedBoundaryEvidence' &&
-    carrier.boundaryExercise.carrierIdentityField === 'carrierId' &&
+    carrier.boundaryExercise.carrierIdentityField === 'identity' &&
     s1aSame(carrier.boundaryExercise.acceptedCarrierIds, carrier.selectionOrder) &&
     s1aSame(carrier.boundaryExercise.readbackFields, [
-      'source', 'authoritative', 'complete', 'readBack', 'acceptedCriterion',
-      'carrierId', 'candidateIdentity', 'run', 'receipt', 'digest'
+      'source', 'authoritative', 'current', 'complete', 'readBack', 'repository',
+      'acceptedCriterion', 'carrierId', 'carrierIdentity', 'actualPath', 'candidateIdentity',
+      'enforcementBoundary', 'run', 'receipt', 'digest'
     ]) &&
     carrier.boundaryExercise.acceptedExecutionPath === 'ACCEPTED_PRODUCTION_PATH' &&
     carrier.boundaryExercise.acceptedOutcome === 'BOUNDARY_EXERCISED' &&
     s1aSame(carrier.boundaryExercise.requiredRunEvents, S1A_ORACLE_BOUNDARY_RUN_EVENTS),
     'carrier exercise must be independently bound terminal execution evidence');
   s1aUniqueStrings(carrier.boundaryExercise.requiredFields, 'boundary receipt fields', [
-    'receiptId', 'acceptedCriterion', 'carrierId', 'candidateIdentity', 'boundaryId', 'executionPath',
-    'outcome', 'terminal', 'evidenceRef', 'runId', 'runEvents',
+    'receiptId', 'acceptedCriterion', 'carrierId', 'carrierIdentity', 'candidateIdentity', 'boundaryId',
+    'enforcementBoundary',
+    'actualPath', 'executionPath', 'outcome', 'terminal', 'evidenceRef', 'runId', 'runEvents',
     'executionEvidenceDigest', 'receiptDigest'
   ]);
   s1aRequire(s1aSame(carrier.boundaryExercise.requiredFields, [
-    'receiptId', 'acceptedCriterion', 'carrierId', 'candidateIdentity', 'boundaryId', 'executionPath',
-    'outcome', 'terminal', 'evidenceRef', 'runId', 'runEvents',
+    'receiptId', 'acceptedCriterion', 'carrierId', 'carrierIdentity', 'candidateIdentity', 'boundaryId',
+    'enforcementBoundary',
+    'actualPath', 'executionPath', 'outcome', 'terminal', 'evidenceRef', 'runId', 'runEvents',
     'executionEvidenceDigest', 'receiptDigest'
   ]), 'carrier boundary receipt is incomplete');
   s1aRequire(s1aSame(carrier.boundaryExercise.requiredRunEvents, S1A_ORACLE_BOUNDARY_RUN_EVENTS),
     'carrier run event set is incomplete');
   s1aUniqueStrings(carrier.publicExposureRequires, 'publicExposureRequires', [
-    'ACCEPTED_CRITERION', 'EXPLICIT_EXPOSURE_AUTHORITY', 'AUDIENCE',
-    'BOUNDARY', 'LIFETIME', 'CLEANUP'
+    'ACCEPTED_CRITERION', 'EXPLICIT_EXPOSURE_AUTHORITY', 'CONSUMER', 'PROTOCOL',
+    'PATH', 'HOSTNAME', 'NECESSITY', 'AUDIENCE', 'BOUNDARY', 'LIFETIME', 'CLEANUP'
   ]);
   s1aRequire(s1aSame(carrier.publicExposureRequires, [
-    'ACCEPTED_CRITERION', 'EXPLICIT_EXPOSURE_AUTHORITY', 'AUDIENCE',
-    'BOUNDARY', 'LIFETIME', 'CLEANUP'
+    'ACCEPTED_CRITERION', 'EXPLICIT_EXPOSURE_AUTHORITY', 'CONSUMER', 'PROTOCOL',
+    'PATH', 'HOSTNAME', 'NECESSITY', 'AUDIENCE', 'BOUNDARY', 'LIFETIME', 'CLEANUP'
   ]), 'public exposure authority requirements are incomplete');
   s1aRequire(carrier.domainDnsRequiresSeparateAuthority === true &&
     carrier.persistenceImpliesExposure === false,
     'domain/DNS authority and private-persistence semantics are incomplete');
   s1aExactKeys(carrier.publicExposureAuthority, [
-    'mode', 'inputField', 'source', 'requiredFields', 'digestMode', 'exposureValue'
+    'mode', 'inputField', 'requestField', 'requestMatchFields', 'source', 'requiredFields', 'digestMode', 'exposureValue'
   ], 'publicExposureAuthority');
   s1aRequire(carrier.publicExposureAuthority.mode === 'CURRENT_OWNER_WEB_AUTHORITY_READBACK' &&
     carrier.publicExposureAuthority.inputField === 'exposureAuthority' &&
+    carrier.publicExposureAuthority.requestField === 'publicExposureRequest' &&
+    s1aSame(carrier.publicExposureAuthority.requestMatchFields, ['consumer', 'protocol', 'path', 'hostnameRequired', 'hostname', 'lifetime', 'cleanup', 'necessity']) &&
     carrier.publicExposureAuthority.source === 'CURRENT_OWNER_WEB_AUTHORITY' &&
     s1aSame(carrier.publicExposureAuthority.requiredFields, [
       'source', 'authoritative', 'current', 'readBack', 'authorityReference',
-      'criterion', 'exposure', 'audience', 'boundary', 'lifetime', 'cleanup', 'requiredOperations', 'digest'
+      'criterion', 'exposure', 'consumer', 'protocol', 'path', 'hostnameRequired', 'hostname',
+      'audience', 'boundary', 'lifetime', 'cleanup', 'necessity', 'requiredOperations', 'digest'
     ]) && carrier.publicExposureAuthority.digestMode === 'SHA256_CANONICAL_AUTHORITY_READBACK' &&
     carrier.publicExposureAuthority.exposureValue === 'PUBLIC',
     'public exposure must bind current exact Owner/Web authority');
@@ -1777,11 +2131,12 @@ function s1aReadPolicy(source) {
   const carrierEnd = source.indexOf('### G1 re-convergence', carrierStart);
   const carrierProse = carrierStart >= 0 && carrierEnd > carrierStart
     ? source.slice(carrierStart, carrierEnd) : '';
-  s1aRequire(carrierProse.includes('Public ingress is admissible only when a specific accepted validation criterion requires it and a current authoritative Owner/Web readback binds the exact exposure, accepted criterion, audience, boundary, lifetime and cleanup.') &&
-    carrierProse.includes('If domain registration or DNS is required, each operation needs its own current authoritative Owner/Web readback bound to that exposure with a distinct authority reference; one combined grant is insufficient.') &&
-    carrierProse.includes('A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest.') &&
-    !/faithful (?:on|by) (?:shape )?equivalence without (?:an? )?(?:independently bound )?terminal execution receipt|one combined grant is sufficient/i.test(carrierProse),
-    'carrier prose must require independently bound boundary evidence and separate current exposure authority');
+  const carrierProseFailures = s1aCarrierProseViolations(source);
+  s1aRequire(carrierProseFailures.length === 0,
+    'carrier prose must preserve inventory, execution, exposure, DNS/domain and privacy semantics: ' + carrierProseFailures.join(','));
+  const continuationProseFailures = s1aContinuationProseViolations(source);
+  s1aRequire(continuationProseFailures.length === 0,
+    'bounded continuation prose must preserve fixed behavioral obligations: ' + continuationProseFailures.join(','));
   const governedHumanPolicyDigest = s1aGovernedHumanPolicyDigest(source);
   s1aRequire(governedHumanPolicyDigest === S1A_ORACLE_GOVERNED_PROSE_SHA256,
     'S1-A governed human policy prose differs from fixed semantic oracle');
@@ -1790,6 +2145,11 @@ function s1aReadPolicy(source) {
 
 function parseS1aPolicyContract(source) {
   return s1aReadPolicy(source).policy;
+}
+function s1aInterpretPolicyContract(source) {
+  const matches = [...source.matchAll(/~~~s1a-policy-contract-v1\r?\n([\s\S]*?)\r?\n~~~/g)];
+  s1aRequire(matches.length === 1, 'Architecture must contain exactly one S1-A policy contract');
+  return s1aParseJsonRejectDuplicates(matches[0][1]);
 }
 function rewriteS1aPolicy(source, mutate) {
   const parsed = s1aReadPolicy(source);
@@ -1855,6 +2215,33 @@ function s1aSame(left, right) {
   return s1aCanonical(left) === s1aCanonical(right);
 }
 
+function s1aOwnershipReadbackMatches(record) {
+  const readback = record && record.OWNER_READBACK;
+  const rule = S1A_ORACLE_OWNERSHIP_READBACK_RULE;
+  if (!s1aHasExactKeys(readback, rule.requiredFields) ||
+      readback.source !== rule.source || readback.authoritative !== true ||
+      readback.current !== true || readback.readBack !== true ||
+      record.RESOLUTION !== rule.resolutionMustRemain ||
+      readback.resolution !== rule.resolutionMustRemain) return false;
+  for (const [field, type] of Object.entries(S1A_ORACLE_COMMON_FIELD_TYPES)) {
+    if (!s1aTypeMatches(record && record[field], type)) return false;
+  }
+  for (const [field, type] of Object.entries({
+    FINDING_ID: 'NONEMPTY_STRING', WEB_ADMITTED_REVISION: 'NONEMPTY_STRING',
+    CANDIDATE_IDENTITY: 'NONEMPTY_OBJECT', VERIFIED_OWNER: 'NONEMPTY_STRING'
+  })) {
+    if (!s1aTypeMatches(record && record[field], type)) return false;
+  }
+  for (const binding of rule.recordBindings) {
+    if (!s1aPresent(record[binding.record]) || !s1aPresent(readback[binding.readback]) ||
+        !s1aSame(readback[binding.readback], record[binding.record])) return false;
+  }
+  if (!s1aPresent(readback.revision)) return false;
+  const core = Object.fromEntries(rule.requiredFields.filter((field) => field !== 'digest')
+    .map((field) => [field, readback[field]]));
+  return readback.digest === s1aHashRecord(core);
+}
+
 function evaluateS1aBlocker(policy, record, decision, companionProjection, companionEntries, currentInventory) {
   const failures = [];
   const blocker = policy.blocker;
@@ -1864,6 +2251,7 @@ function evaluateS1aBlocker(policy, record, decision, companionProjection, compa
       failures.push('BLOCKER_TYPE_MISMATCH:' + path);
     }
   }
+  if (!s1aOwnershipReadbackMatches(record)) failures.push('BLOCKER_OWNER_READBACK');
   for (const requirement of blocker.nestedRequiredFields) {
     const nested = record && record[requirement.record];
     if (!s1aHasExactKeys(nested, requirement.fields)) {
@@ -1961,16 +2349,9 @@ function evaluateS1aBlocker(policy, record, decision, companionProjection, compa
 function makeS1aBlockerFixture() {
   const proofRecord = s1aClone(S1A_ORACLE_BLOCKER_PROOF_RECORD);
   const detailRef = S1A_ORACLE_BLOCKER_DETAIL_REF;
-  const companionProjection = {
-    FINDING_ID: proofRecord.FINDING_ID,
-    WEB_ADMITTED_REVISION: proofRecord.WEB_ADMITTED_REVISION,
-    DISPOSITION: proofRecord.DISPOSITION,
-    LIFECYCLE: proofRecord.LIFECYCLE,
-    CANDIDATE_IDENTITY: s1aClone(proofRecord.CANDIDATE_IDENTITY),
-    DETAIL_REF: detailRef,
-    TWO_WAY: 'SHIP_BLOCKER',
-    V1: 'BLOCKING'
-  };
+  const companionProjection = makeS1aCompanionProjection(proofRecord, detailRef, {
+    TWO_WAY: 'SHIP_BLOCKER', V1: 'BLOCKING'
+  });
   return {
     record: { ...proofRecord, DETAIL_REF: detailRef },
     decision: s1aClone(S1A_ORACLE_WEB_ADMISSION_DECISION),
@@ -2189,11 +2570,25 @@ const S1A_ORACLE_BLOCKER_PROOF_RECORD = Object.freeze({
   VERIFIABLE_CLOSURE: Object.freeze({
     oracleId: 'closure:alpha', positiveControlId: 'control:alpha',
     evidenceRefs: Object.freeze(['evidence:closure'])
+  }),
+  ...makeS1aCommonFindingFields({
+    FINDING_ID: 'finding:alpha', WEB_ADMITTED_REVISION: 'web:459:revision-7',
+    FINDING_REVISION: 'finding-revision:alpha-7', ACCEPTED_DECISION_ID: 'decision:web:alpha-7',
+    CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+    VERIFIED_OWNER: 'owner:current-outcome', PRIMARY_OWNER: 'PRODUCT',
+    ADJUDICATION: 'CURRENT_SHIP_BLOCKER', OWNER_ROLE: 'PRODUCT_OWNER',
+    OBSERVED_BEHAVIOR: 'Current candidate violates criterion:alpha.',
+    REQUIRED_BEHAVIOR: 'Current candidate satisfies criterion:alpha.'
   })
 });
 const S1A_ORACLE_BLOCKER_DETAIL_REF = s1aHashRecord(S1A_ORACLE_BLOCKER_PROOF_RECORD);
 const S1A_ORACLE_WEB_ADMISSION_DECISION_CORE = Object.freeze({
+  repository: S1A_ORACLE_BLOCKER_PROOF_RECORD.REPOSITORY,
+  packetIdentity: S1A_ORACLE_BLOCKER_PROOF_RECORD.PACKET_IDENTITY,
   findingId: 'finding:alpha',
+  findingRevision: S1A_ORACLE_BLOCKER_PROOF_RECORD.FINDING_REVISION,
+  acceptedDecisionId: S1A_ORACLE_BLOCKER_PROOF_RECORD.ACCEPTED_DECISION_ID,
+  adjudication: S1A_ORACLE_BLOCKER_PROOF_RECORD.ADJUDICATION,
   webRevision: 'web:459:revision-7',
   currentOutcome: S1A_ORACLE_BLOCKER_PROOF_RECORD.ADMITTED_CURRENT_OUTCOME,
   closureCriterion: 'closure:alpha',
@@ -2206,8 +2601,12 @@ const S1A_ORACLE_WEB_ADMISSION_DECISION_CORE = Object.freeze({
 function s1aWebAdmissionBody(decision) {
   return s1aCanonical({
     schema: 'toolkit.s1a.web-admission.v1',
-    repository: 'weijunswj/ai-agent-toolkit',
+    repository: decision.repository,
+    packetIdentity: decision.packetIdentity,
     findingId: decision.findingId,
+    findingRevision: decision.findingRevision,
+    acceptedDecisionId: decision.acceptedDecisionId,
+    adjudication: decision.adjudication,
     webRevision: decision.webRevision,
     currentOutcome: decision.currentOutcome,
     closureCriterion: decision.closureCriterion,
@@ -2316,14 +2715,30 @@ const S1A_ORACLE_CURRENT_COMPANION_RECORDS = Object.freeze([
     DISPOSITION: 'FUTURE_OWNED', LIFECYCLE: 'UNRESOLVED', TIMING: 'future-release',
     VERIFIED_OWNER: 'team:one', TRIGGER_OR_REASON: 'new acceptance evidence',
     CLOSURE_CRITERION: 'closure:one', EXACT_EVIDENCE: Object.freeze(['evidence:one']),
-    CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:7', tree: 'tree:7' })
+    CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:7', tree: 'tree:7' }),
+    ...makeS1aCommonFindingFields({
+      FINDING_ID: 'finding:one', WEB_ADMITTED_REVISION: 'web:revision-7',
+      FINDING_REVISION: 'finding-revision:one-7', ACCEPTED_DECISION_ID: 'decision:web:one',
+      VERIFIED_OWNER: 'team:one', CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+      PRIMARY_OWNER: 'TOOLKIT', ADJUDICATION: 'FUTURE_OWNED', OWNER_ROLE: 'TOOLKIT_OWNER',
+      OBSERVED_BEHAVIOR: 'The accepted future criterion remains unresolved.',
+      REQUIRED_BEHAVIOR: 'The verified future owner closes the criterion before its trigger.'
+    })
   }),
   Object.freeze({
     FINDING_ID: 'finding:two', WEB_ADMITTED_REVISION: 'web:revision-7',
     DISPOSITION: 'EVIDENCE_ONLY', LIFECYCLE: 'UNRESOLVED', TIMING: 'before-next-review',
     VERIFIED_OWNER: 'team:two', TRIGGER_OR_REASON: 'required evidence acquisition',
     CLOSURE_CRITERION: 'closure:two', EXACT_EVIDENCE: Object.freeze(['evidence:two']),
-    CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:7', tree: 'tree:7' })
+    CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:7', tree: 'tree:7' }),
+    ...makeS1aCommonFindingFields({
+      FINDING_ID: 'finding:two', WEB_ADMITTED_REVISION: 'web:revision-7',
+      FINDING_REVISION: 'finding-revision:two-7', ACCEPTED_DECISION_ID: 'decision:web:two',
+      VERIFIED_OWNER: 'team:two', CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+      PRIMARY_OWNER: 'HARNESS', ADJUDICATION: 'EVIDENCE_ONLY', OWNER_ROLE: 'TOOLKIT_OWNER',
+      OBSERVED_BEHAVIOR: 'The current evidence does not establish a product defect.',
+      REQUIRED_BEHAVIOR: 'Acquire and preserve the exact evidence before the next review.'
+    })
   })
 ]);
 function makeS1aCurrentCompanionInventory(records, revision) {
@@ -2331,20 +2746,46 @@ function makeS1aCurrentCompanionInventory(records, revision) {
     source: 'CURRENT_WEB_ADMISSION_COMPANION_INVENTORY',
     authoritative: true,
     current: true,
+    complete: true,
     readBack: true,
     repository: 'weijunswj/ai-agent-toolkit',
+    packetIdentity: s1aClone(records[0].PACKET_IDENTITY),
+    acceptedDecisionIds: [...new Set(records.map((record) => record.ACCEPTED_DECISION_ID))].sort(),
+    candidateIdentities: records.map((record) => s1aClone(record.CANDIDATE_IDENTITY)),
     revision,
     records: records.map((record) => ({ ref: s1aHashRecord(record), record: s1aClone(record) }))
   };
   return { ...core, digest: s1aHashRecord(core) };
 }
+function makeS1aCompanionProjection(record, ref, legacy = {}) {
+  return {
+    ...Object.fromEntries(S1A_ORACLE_COMPANION_PROJECTION_FIELDS.map((field) =>
+      [field, record[field] === undefined ? undefined : s1aClone(record[field])])),
+    DISPOSITION: record.DISPOSITION,
+    LIFECYCLE: record.LIFECYCLE,
+    DETAIL_REF: ref,
+    TWO_WAY: legacy.TWO_WAY,
+    V1: legacy.V1
+  };
+}
 const S1A_ORACLE_CURRENT_COMPANION_INVENTORY = Object.freeze(
   makeS1aCurrentCompanionInventory(S1A_ORACLE_CURRENT_COMPANION_RECORDS, 'web:inventory-revision-7'));
 const S1A_ORACLE_BLOCKER_COMPANION_INVENTORY = Object.freeze(
   makeS1aCurrentCompanionInventory([S1A_ORACLE_BLOCKER_PROOF_RECORD], 'web:inventory-revision-blocker-7'));
+const S1A_ORACLE_DUPLICATE_CURRENT_COMPANION_INVENTORY = (() => {
+  const records = s1aClone(S1A_ORACLE_CURRENT_COMPANION_RECORDS);
+  const duplicate = s1aClone(records[0]);
+  duplicate.FINDING_REVISION = 'finding-revision:one-8';
+  duplicate.ACCEPTED_DECISION_ID = 'decision:web:one-8';
+  duplicate.DISPOSITION = 'OBSERVE';
+  duplicate.ADJUDICATION = 'OBSERVE';
+  records.push(duplicate);
+  return makeS1aCurrentCompanionInventory(records, 'web:inventory-revision-duplicate-current-slot');
+})();
 const S1A_ORACLE_ALLOWED_COMPANION_INVENTORIES = Object.freeze([
   S1A_ORACLE_CURRENT_COMPANION_INVENTORY,
-  S1A_ORACLE_BLOCKER_COMPANION_INVENTORY
+  S1A_ORACLE_BLOCKER_COMPANION_INVENTORY,
+  S1A_ORACLE_DUPLICATE_CURRENT_COMPANION_INVENTORY
 ]);
 function makeS1aCompanionFixture() {
   const currentInventory = s1aClone(S1A_ORACLE_CURRENT_COMPANION_INVENTORY);
@@ -2353,23 +2794,16 @@ function makeS1aCompanionFixture() {
     const record = entry.record;
     const mapping = S1A_ORACLE_PROJECTION_ROWS.find((row) =>
       row.disposition === record.DISPOSITION && row.lifecycle === record.LIFECYCLE);
-    return {
-      FINDING_ID: record.FINDING_ID,
-      WEB_ADMITTED_REVISION: record.WEB_ADMITTED_REVISION,
-      DISPOSITION: record.DISPOSITION,
-      LIFECYCLE: record.LIFECYCLE,
-      CANDIDATE_IDENTITY: s1aClone(record.CANDIDATE_IDENTITY),
-      DETAIL_REF: entry.ref,
+    return makeS1aCompanionProjection(record, entry.ref, {
       TWO_WAY: mapping.twoWay,
       V1: mapping.v1
-    };
+    });
   });
   return {
     projections, entries, currentInventory,
     historyLedger: makeS1aCompanionHistoryLedger()
   };
 }
-
 function s1aCompanionIdentity(record, fields) {
   if (!record || fields.some((field) => !s1aPresent(record[field]))) return null;
   return s1aCanonical(fields.map((field) => record[field]));
@@ -2436,20 +2870,13 @@ function observeS1aCompanionOracle(policy) {
     obligation: 'COMPANION_CURRENT_DISPOSITION_UNIQUENESS',
     build: () => {
       const fixture = makeS1aCompanionFixture();
-      const duplicate = s1aClone(fixture.entries[0].record);
-      duplicate.DISPOSITION = 'OBSERVE';
-      duplicate.TIMING = 'reclassified-without-new-revision';
-      const ref = s1aHashRecord(duplicate);
-      fixture.entries.push({ ref, record: duplicate });
-      fixture.projections.push({
-        FINDING_ID: duplicate.FINDING_ID,
-        WEB_ADMITTED_REVISION: duplicate.WEB_ADMITTED_REVISION,
-        DISPOSITION: duplicate.DISPOSITION,
-        LIFECYCLE: duplicate.LIFECYCLE,
-        CANDIDATE_IDENTITY: duplicate.CANDIDATE_IDENTITY,
-        DETAIL_REF: ref,
-        TWO_WAY: 'POST_SHIP',
-        V1: 'NON_BLOCKING'
+      fixture.currentInventory = s1aClone(S1A_ORACLE_DUPLICATE_CURRENT_COMPANION_INVENTORY);
+      fixture.entries = s1aClone(fixture.currentInventory.records);
+      fixture.projections = fixture.entries.map((entry) => {
+        const record = entry.record;
+        const mapping = S1A_ORACLE_PROJECTION_ROWS.find((row) =>
+          row.disposition === record.DISPOSITION && row.lifecycle === record.LIFECYCLE);
+        return makeS1aCompanionProjection(record, entry.ref, { TWO_WAY: mapping.twoWay, V1: mapping.v1 });
       });
       return fixture;
     }
@@ -2463,16 +2890,9 @@ function observeS1aCompanionOracle(policy) {
       rewritten.TIMING = 'rewritten-historical-detail';
       const ref = s1aHashRecord(rewritten);
       fixture.entries[0] = { ref, record: rewritten };
-      fixture.projections[0] = {
-        FINDING_ID: rewritten.FINDING_ID,
-        WEB_ADMITTED_REVISION: rewritten.WEB_ADMITTED_REVISION,
-        DISPOSITION: rewritten.DISPOSITION,
-        LIFECYCLE: rewritten.LIFECYCLE,
-        CANDIDATE_IDENTITY: rewritten.CANDIDATE_IDENTITY,
-        DETAIL_REF: ref,
-        TWO_WAY: 'POST_SHIP',
-        V1: 'NON_BLOCKING'
-      };
+      fixture.projections[0] = makeS1aCompanionProjection(rewritten, ref, {
+        TWO_WAY: 'POST_SHIP', V1: 'NON_BLOCKING'
+      });
       return fixture;
     }
   }];
@@ -2561,8 +2981,14 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
   if (!s1aHasExactKeys(currentInventory, policy.companion.currentInventory.readbackFields) ||
       !S1A_ORACLE_ALLOWED_COMPANION_INVENTORIES.some((oracle) => s1aSame(currentInventory, oracle)) ||
       currentInventory.source !== policy.companion.currentInventory.source ||
+      currentInventory.repository !== 'weijunswj/ai-agent-toolkit' ||
+      !s1aSame(currentInventory.packetIdentity, S1A_ORACLE_PACKET_IDENTITY) ||
+      !s1aSame(currentInventory.acceptedDecisionIds,
+        [...new Set(entries.map((entry) => entry.record.ACCEPTED_DECISION_ID))].sort()) ||
+      !s1aSame(currentInventory.candidateIdentities,
+        entries.map((entry) => entry.record.CANDIDATE_IDENTITY)) ||
       currentInventory.authoritative !== true || currentInventory.current !== true ||
-      currentInventory.readBack !== true ||
+      currentInventory.complete !== true || currentInventory.readBack !== true ||
       currentInventory.digest !== s1aHashWithoutField(currentInventory, 'digest') ||
       !s1aSame(entries, currentInventory.records)) {
     failures.push('COMPANION_CURRENT_INVENTORY_READBACK');
@@ -2589,7 +3015,7 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
   }
   const historicalByIdentity = new Map();
   for (const item of history) {
-    const key = item && s1aCompanionIdentity(item.record, policy.companion.currentUniquenessFields);
+    const key = item && s1aCompanionIdentity(item.record, S1A_ORACLE_HISTORY_IDENTITY_FIELDS);
     if (!item || !s1aPresent(item.ref) || !key ||
         item.ref !== s1aHashRecord(item.record) || historicalByIdentity.has(key)) {
       failures.push('COMPANION_HISTORICAL_RECORD_IMMUTABILITY');
@@ -2598,7 +3024,8 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
     historicalByIdentity.set(key, item);
   }
   for (let index = 0; index < entries.length; index++) {
-    const prior = historicalByIdentity.get(currentKeys[index]);
+    const historyKey = s1aCompanionIdentity(entries[index].record, S1A_ORACLE_HISTORY_IDENTITY_FIELDS);
+    const prior = historicalByIdentity.get(historyKey);
     if (prior && (prior.ref !== entries[index][recordRefField] ||
         !s1aSame(prior.record, entries[index].record))) {
       failures.push('COMPANION_HISTORICAL_RECORD_IMMUTABILITY');
@@ -2777,6 +3204,101 @@ test('S1-A lifecycle proof values remain typed and transfer or deferral cannot r
   assert.equal(reboundClosure.ok, false);
   assert.equal(reboundClosure.lifecycle, 'UNRESOLVED');
 });
+test('S1-A ownership transfer requires a current authoritative readback bound to every shared identity', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const makeTransfer = () => makeS1aCommonFindingFields({
+    FINDING_ID: 'finding:transfer',
+    WEB_ADMITTED_REVISION: 'web:transfer-7',
+    FINDING_REVISION: 'finding-revision:transfer-7',
+    ACCEPTED_DECISION_ID: 'decision:web:transfer-7',
+    CANDIDATE_IDENTITY: { commit: 'commit:transfer', tree: 'tree:transfer' },
+    VERIFIED_OWNER: 'owner:current'
+  });
+  const transfer = makeTransfer();
+  const accepted = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+    'TRANSFER', transfer);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.lifecycle, 'UNRESOLVED');
+
+  const rebindReadback = (detail) => {
+    const { digest, ...core } = detail.OWNER_READBACK;
+    detail.OWNER_READBACK.digest = s1aHashRecord(core);
+  };
+  const attacks = [
+    ['missing readback', (detail) => { delete detail.OWNER_READBACK; }],
+    ['non-authoritative readback', (detail) => {
+      detail.OWNER_READBACK.authoritative = false;
+      rebindReadback(detail);
+    }],
+    ['stale readback', (detail) => {
+      detail.OWNER_READBACK.current = false;
+      rebindReadback(detail);
+    }],
+    ['unread readback', (detail) => {
+      detail.OWNER_READBACK.readBack = false;
+      rebindReadback(detail);
+    }],
+    ['repository mismatch', (detail) => {
+      detail.OWNER_READBACK.repository = 'other/repository';
+      rebindReadback(detail);
+    }],
+    ['packet mismatch', (detail) => {
+      detail.OWNER_READBACK.packetIdentity.packetId = 'packet:other';
+      rebindReadback(detail);
+    }],
+    ['finding revision mismatch', (detail) => {
+      detail.OWNER_READBACK.findingRevision = 'finding-revision:stale';
+      rebindReadback(detail);
+    }],
+    ['candidate mismatch', (detail) => {
+      detail.OWNER_READBACK.candidateIdentity.tree = 'tree:other';
+      rebindReadback(detail);
+    }],
+    ['Web revision mismatch', (detail) => { detail.OWNER_READBACK.webAdmittedRevision = 'web:other'; rebindReadback(detail); }],
+    ['programme mismatch', (detail) => { detail.OWNER_READBACK.programmeId = 'programme:other'; rebindReadback(detail); }],
+    ['child mismatch', (detail) => { detail.OWNER_READBACK.childId = 'child:other'; rebindReadback(detail); }],
+    ['frontier mismatch', (detail) => { detail.OWNER_READBACK.frontierId = 'frontier:other'; rebindReadback(detail); }],
+    ['controller mismatch', (detail) => { detail.OWNER_READBACK.controllerId = 'controller:other'; rebindReadback(detail); }],
+    ['contract mismatch', (detail) => { detail.OWNER_READBACK.acceptedContractId = 'contract:other'; rebindReadback(detail); }],
+    ['subject mismatch', (detail) => { detail.OWNER_READBACK.subjectId = 'subject:other'; rebindReadback(detail); }],
+    ['observed behavior mismatch', (detail) => { detail.OWNER_READBACK.observedBehavior = 'other observed behavior'; rebindReadback(detail); }],
+    ['required behavior mismatch', (detail) => { detail.OWNER_READBACK.requiredBehavior = 'other required behavior'; rebindReadback(detail); }],
+    ['primary owner mismatch', (detail) => { detail.OWNER_READBACK.primaryOwner = 'OTHER_OWNER'; rebindReadback(detail); }],
+    ['adjudication mismatch', (detail) => { detail.OWNER_READBACK.adjudication = 'OTHER_DISPOSITION'; rebindReadback(detail); }],
+    ['resolution mismatch', (detail) => { detail.OWNER_READBACK.resolution = 'RESOLVED'; rebindReadback(detail); }],
+    ['co-rebound resolved record', (detail) => {
+      detail.RESOLUTION = 'RESOLVED';
+      detail.OWNER_READBACK.resolution = 'RESOLVED';
+      rebindReadback(detail);
+    }],
+    ['missing shared finding field', (detail) => { delete detail.CHILD_ID; }],
+    ['accepted decision mismatch', (detail) => {
+      detail.OWNER_READBACK.acceptedDecisionId = 'decision:web:other';
+      rebindReadback(detail);
+    }],
+    ['owner mismatch', (detail) => {
+      detail.OWNER_READBACK.owner = 'owner:other';
+      rebindReadback(detail);
+    }],
+    ['role mismatch', (detail) => {
+      detail.OWNER_READBACK.ownerRole = 'OTHER_ROLE';
+      rebindReadback(detail);
+    }],
+    ['invalid digest', (detail) => {
+      detail.OWNER_READBACK.digest = 'sha256:caller-value';
+    }]
+  ];
+  for (const [name, attack] of attacks) {
+    const detail = makeTransfer();
+    attack(detail);
+    const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+      'TRANSFER', detail);
+    assert.equal(result.ok, false, name + ' must not transfer ownership');
+    assert.equal(result.lifecycle, 'UNRESOLVED', name + ' must not resolve the finding');
+    assert.ok(result.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'),
+      name + ' must fail the ownership readback obligation');
+  }
+});
 test('S1-A clause-removal and polarity controls are rejected by the closed contract', () => {
   const removed = rewriteS1aPolicy(architecture, (policy) => {
     policy.blocker.requiredFields = policy.blocker.requiredFields.filter((field) =>
@@ -2805,6 +3327,10 @@ test('S1-A companion observer rejects discarded, altered, and swapped detailed r
   const valid = makeS1aCompanionFixture();
   assert.equal(evaluateS1aCompanions(policy, valid.projections, valid.entries,
     valid.historyLedger, valid.currentInventory).ok, true);
+  const duplicateSlot = fixed.find((item) => item.id === 'companion-duplicate-current-disposition');
+  assert.ok(duplicateSlot.failures.includes('COMPANION_CURRENT_DISPOSITION_UNIQUENESS'));
+  assert.equal(duplicateSlot.failures.some((id) =>
+    ['COMPANION_CURRENT_INVENTORY_READBACK', 'COMPANION_HISTORICAL_RECORD_IMMUTABILITY'].includes(id)), false);
   assert.equal(evaluateS1aCompanions(policy, valid.projections, valid.entries).ok, false);
   assert.equal(evaluateS1aCompanions(policy, valid.projections, [], valid.historyLedger,
     valid.currentInventory).ok, false);
@@ -2969,6 +3495,9 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail) {
       failures.push('LIFECYCLE_VALUE_TYPE:' + field);
     }
   }
+  if (event === 'TRANSFER' && !s1aOwnershipReadbackMatches(safeDetail)) {
+    failures.push('LIFECYCLE_OWNER_TRANSFER_READBACK');
+  }
   if (event === 'VERIFIED_CLOSURE') {
     const closure = safeDetail.closureReadback;
     const body = closure && Object.fromEntries(policy.closureVerification.bodyFields
@@ -3012,15 +3541,26 @@ function observeS1aLifecycleOracle(policy) {
     CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity),
     closureReadback: s1aClone(S1A_ORACLE_CLOSURE_READBACK)
   };
+  const transferDetail = {
+    ...detail,
+    ...makeS1aCommonFindingFields({
+      FINDING_ID: S1A_ORACLE_CLOSURE_BODY.findingId,
+      WEB_ADMITTED_REVISION: S1A_ORACLE_CLOSURE_BODY.webAdmittedRevision,
+      FINDING_REVISION: 'finding-revision:transfer-7',
+      ACCEPTED_DECISION_ID: 'decision:web:transfer-7',
+      CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity),
+      VERIFIED_OWNER: 'owner:verified'
+    })
+  };
   const cases = [
     { id: 'lifecycle-defer', event: 'DEFER', expectedLifecycle: 'UNRESOLVED' },
-    { id: 'lifecycle-transfer', event: 'TRANSFER', expectedLifecycle: 'UNRESOLVED' },
+    { id: 'lifecycle-transfer', event: 'TRANSFER', detail: transferDetail, expectedLifecycle: 'UNRESOLVED' },
     { id: 'lifecycle-evidence-acquired', event: 'EVIDENCE_ACQUIRED', expectedLifecycle: 'UNRESOLVED' },
     { id: 'lifecycle-verified-closure', event: 'VERIFIED_CLOSURE', expectedLifecycle: 'RESOLVED' }
   ];
   return cases.map((scenario) => {
     const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
-      scenario.event, detail);
+      scenario.event, scenario.detail || detail);
     const mismatch = !result.ok || result.lifecycle !== scenario.expectedLifecycle;
     return {
       id: scenario.id,
@@ -3189,7 +3729,6 @@ function evaluateS1aPostChildReview(policy, input) {
       !s1aSame(actualReceiptIds, inventoryReceiptIds) ||
       !s1aSame(input.receipts, receiptInventory.items) ||
       receiptInventory.digest !== s1aHashWithoutField(receiptInventory, 'digest') ||
-      child.terminalReceiptInventoryDigest !== receiptInventory.digest ||
       input.receipts.some((receipt) => receipt.terminal !== true || receipt.readBack !== true ||
         !s1aSame(receipt.identity, identity))) {
     failures.push('POST_CHILD_TERMINAL_RECEIPT_INVENTORY');
@@ -3209,7 +3748,6 @@ function evaluateS1aPostChildReview(policy, input) {
       !s1aSame(actualCheckIds, inventoryCheckIds) ||
       !s1aSame(input.checks, checkInventory.items) ||
       checkInventory.digest !== s1aHashWithoutField(checkInventory, 'digest') ||
-      child.applicableIntegratedCheckInventoryDigest !== checkInventory.digest ||
       input.checks.some((check) => check.applicable !== true || check.terminal !== true ||
         check.readBack !== true || !s1aSame(check.identity, identity))) {
     failures.push('POST_CHILD_APPLICABLE_CHECK_INVENTORY');
@@ -3230,9 +3768,7 @@ function evaluateS1aPostChildReview(policy, input) {
     childStateRevision: child.revision,
     childStateDigest: child.stateDigest,
     terminalReceiptIds: requiredReceiptIds,
-    terminalReceiptInventoryDigest: receiptInventory.digest,
-    applicableIntegratedCheckIds: requiredCheckIds,
-    applicableIntegratedCheckInventoryDigest: checkInventory.digest
+    applicableIntegratedCheckIds: requiredCheckIds
   };
   const reviewers = new Set();
   const contexts = new Set();
@@ -3314,6 +3850,11 @@ function evaluateS1aPostChildReview(policy, input) {
       failures.push('POST_CHILD_MUTUAL_BLINDNESS');
     }
   }
+  for (const [readbackEvent, terminalEvent] of rule.trace.terminalReadbackPrecedes) {
+    if (!(eventIndex.get(readbackEvent) < eventIndex.get(terminalEvent))) {
+      failures.push('POST_CHILD_TERMINAL_READBACK_ORDER:' + readbackEvent + ':' + terminalEvent);
+    }
+  }
   const adjudicationAt = eventIndex.get('WEB_ADJUDICATION') ?? -1;
   for (const event of rule.trace.adjudicationAfter) {
     if (!(eventIndex.get(event) < adjudicationAt)) {
@@ -3364,9 +3905,7 @@ const S1A_ORACLE_POST_CHILD_STATE_CORE = Object.freeze({
   lifecycle: 'CURRENT',
   revision: 'child:revision-12',
   terminalReceiptIds: Object.freeze(S1A_ORACLE_POST_CHILD_RECEIPTS.map((receipt) => receipt.id)),
-  terminalReceiptInventoryDigest: S1A_ORACLE_POST_CHILD_RECEIPT_INVENTORY.digest,
-  applicableIntegratedCheckIds: Object.freeze(S1A_ORACLE_POST_CHILD_CHECKS.map((check) => check.id)),
-  applicableIntegratedCheckInventoryDigest: S1A_ORACLE_POST_CHILD_CHECK_INVENTORY.digest
+  applicableIntegratedCheckIds: Object.freeze(S1A_ORACLE_POST_CHILD_CHECKS.map((check) => check.id))
 });
 const S1A_ORACLE_POST_CHILD_STATE = Object.freeze({
   ...S1A_ORACLE_POST_CHILD_STATE_CORE,
@@ -3421,9 +3960,7 @@ function makeS1aReviewFixture() {
     childStateRevision: childState.revision,
     childStateDigest: childState.stateDigest,
     terminalReceiptIds: [...childState.terminalReceiptIds],
-    terminalReceiptInventoryDigest: receiptInventory.digest,
-    applicableIntegratedCheckIds: [...childState.applicableIntegratedCheckIds],
-    applicableIntegratedCheckInventoryDigest: checkInventory.digest
+    applicableIntegratedCheckIds: [...childState.applicableIntegratedCheckIds]
   };
   const reviews = ['A', 'B'].map((slot) => {
     const route = reviewRouteAuthority.routes.find((item) => item.slot === slot);
@@ -3445,12 +3982,17 @@ function makeS1aReviewFixture() {
     'INTEGRATED_IDENTITY_READ_BACK',
     'CURRENT_PARENT_CONTRACT_READ_BACK',
     'CURRENT_CHILD_STATE_READ_BACK',
-    'TERMINAL_RECEIPTS_READ_BACK',
-    'APPLICABLE_CHECKS_TERMINAL',
+    'REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK',
+    'APPLICABLE_CHECK_MEMBERSHIP_READ_BACK',
+    'MERGE_TRIGGERED_CI_STARTED',
     'REVIEW_A_STARTED',
     'REVIEW_B_STARTED',
     'REPORT_A_TERMINAL',
     'REPORT_B_TERMINAL',
+    'TERMINAL_RECEIPTS_READ_BACK',
+    'TERMINAL_RECEIPTS_TERMINAL',
+    'APPLICABLE_CHECKS_READ_BACK',
+    'APPLICABLE_CHECKS_TERMINAL',
     'WEB_ADJUDICATION'
   ];
   return {
@@ -3467,7 +4009,8 @@ function makeS1aReviewFixture() {
     checks,
     trace
   };
-}function observeS1aPostChildOracle(policy) {
+}
+function observeS1aPostChildOracle(policy) {
   const cases = [
     { id: 'post-child-complete-positive', expected: true, build: () => makeS1aReviewFixture() },
     { id: 'post-child-missing-terminal-receipt', expected: false, build: () => {
@@ -3485,12 +4028,6 @@ function makeS1aReviewFixture() {
       input.checks[0].readBack = false;
       input.checkInventory.items[0].readBack = false;
       input.checkInventory.digest = s1aHashWithoutField(input.checkInventory, 'digest');
-      input.childState.applicableIntegratedCheckInventoryDigest = input.checkInventory.digest;
-      input.childState.stateDigest = s1aHashWithoutField(input.childState, 'stateDigest');
-      input.reviews.forEach((review) => {
-        review.applicableIntegratedCheckInventoryDigest = input.checkInventory.digest;
-        review.childStateDigest = input.childState.stateDigest;
-      });
       return input;
     } },
     { id: 'post-child-co-omission-from-authoritative-inventory', expected: false, build: () => {
@@ -3512,11 +4049,28 @@ function makeS1aReviewFixture() {
       input.childState.lifecycle = 'COMPLETED';
       return input;
     } },
-    { id: 'post-child-receipt-inventory-after-review-start', expected: false, build: () => {
+    { id: 'post-child-receipt-membership-after-review-start', expected: false, build: () => {
       const input = makeS1aReviewFixture();
-      const at = input.trace.indexOf('TERMINAL_RECEIPTS_READ_BACK');
+      const at = input.trace.indexOf('REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK');
       input.trace.splice(at, 1);
-      input.trace.splice(input.trace.indexOf('REVIEW_A_STARTED') + 1, 0, 'TERMINAL_RECEIPTS_READ_BACK');
+      input.trace.splice(input.trace.indexOf('REVIEW_A_STARTED') + 1, 0, 'REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK');
+      return input;
+    } },
+    { id: 'post-child-terminal-receipts-after-web', expected: false, build: () => {
+      const input = makeS1aReviewFixture();
+      const readAt = input.trace.indexOf('TERMINAL_RECEIPTS_READ_BACK');
+      const terminalAt = input.trace.indexOf('TERMINAL_RECEIPTS_TERMINAL');
+      input.trace.splice(terminalAt, 1);
+      input.trace.splice(readAt, 1);
+      input.trace.push('TERMINAL_RECEIPTS_READ_BACK', 'TERMINAL_RECEIPTS_TERMINAL');
+      return input;
+    } },
+    { id: 'post-child-terminal-check-readback-order', expected: false, build: () => {
+      const input = makeS1aReviewFixture();
+      const readAt = input.trace.indexOf('APPLICABLE_CHECKS_READ_BACK');
+      input.trace.splice(readAt, 1);
+      const terminalAt = input.trace.indexOf('APPLICABLE_CHECKS_TERMINAL');
+      input.trace.splice(terminalAt + 1, 0, 'APPLICABLE_CHECKS_READ_BACK');
       return input;
     } },
     { id: 'post-child-one-report', expected: false, build: () => {
@@ -3592,89 +4146,74 @@ function makeS1aReviewFixture() {
   });
 }
 
-// Fixed positive vectors model independently bound external execution-evidence readbacks.
-// This source-policy suite does not invoke production carrier code or qualify runtime execution.
+// Fixed carrier inventories and evidence model authoritative external readbacks.
+// These source-policy vectors do not execute production code or qualify a runtime carrier.
+const S1A_ORACLE_CARRIER_INVENTORY_SOURCE = 'CURRENT_OWNER_WEB_CARRIER_INVENTORY';
+const S1A_ORACLE_CARRIER_RECONCILIATION_SOURCE = 'CURRENT_OWNER_WEB_CARRIER_RECONCILIATION';
+const S1A_ORACLE_CARRIER_PROVISIONING_SOURCE = 'CURRENT_OWNER_WEB_PROVISIONING_AUTHORITY';
 const S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE = 'INDEPENDENTLY_BOUND_ACCEPTED_BOUNDARY_EVIDENCE';
-
-function makeS1aOracleBoundaryEvidence(criterion, carrierId, candidateIdentity, runId, receiptId) {
-  const runEvents = [...S1A_ORACLE_BOUNDARY_RUN_EVENTS];
-  const executionEvidence = {
-    runId,
-    acceptedCriterion: criterion,
-    carrierId,
-    candidateIdentity: s1aClone(candidateIdentity),
-    boundaryId: 'ACCEPTED_PRODUCTION_BOUNDARY',
-    executionPath: 'ACCEPTED_PRODUCTION_PATH',
-    outcome: 'BOUNDARY_EXERCISED',
-    runEvents,
-    terminal: true
-  };
-  const executionEvidenceDigest = s1aHashRecord(executionEvidence);
-  const run = { ...executionEvidence, executionEvidenceDigest };
-  const receipt = {
-    receiptId,
-    acceptedCriterion: criterion,
-    carrierId,
-    candidateIdentity: s1aClone(candidateIdentity),
-    boundaryId: executionEvidence.boundaryId,
-    executionPath: executionEvidence.executionPath,
-    outcome: executionEvidence.outcome,
-    terminal: true,
-    evidenceRef: 'execution-evidence:' + executionEvidenceDigest,
-    runId,
-    runEvents,
-    executionEvidenceDigest
-  };
-  receipt.receiptDigest = s1aHashRecord(receipt);
-  const readback = {
-    source: S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE,
-    authoritative: true,
-    complete: true,
-    readBack: true,
-    acceptedCriterion: criterion,
-    carrierId,
-    candidateIdentity: s1aClone(candidateIdentity),
-    run,
-    receipt
-  };
-  readback.digest = s1aHashRecord(readback);
-  return readback;
-}
-
-const S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS = Object.freeze([
-  ...['LOCAL_DEV', 'AUTHORIZED_EXISTING_OWNER', 'NEW_OWNER_PROVISIONED'].flatMap((carrierId) => [
-    makeS1aOracleBoundaryEvidence(
-      'criterion:accepted-boundary', carrierId,
-      { commit: 'carrier:commit-8', tree: 'carrier:tree-8' },
-      'run:oracle:accepted:' + carrierId, 'receipt:oracle:accepted:' + carrierId),
-    makeS1aOracleBoundaryEvidence(
-      'criterion:public-validation', carrierId,
-      { commit: 'carrier:commit-8', tree: 'carrier:tree-8' },
-      'run:oracle:public:' + carrierId, 'receipt:oracle:public:' + carrierId)
-  ])
+const S1A_ORACLE_CARRIER_REPOSITORY = 'weijunswj/ai-agent-toolkit';
+const S1A_ORACLE_CARRIER_CANDIDATE = Object.freeze({ commit: 'carrier:commit-8', tree: 'carrier:tree-8' });
+const S1A_ORACLE_CARRIER_CRITERIA = Object.freeze(['criterion:accepted-boundary', 'criterion:public-validation']);
+const S1A_ORACLE_CARRIER_SELECTION_ORDER = Object.freeze(['LOCAL_DEV', 'AUTHORIZED_EXISTING_OWNER', 'NEW_OWNER_PROVISIONED']);
+const S1A_ORACLE_CARRIER_INVENTORY_FIELDS = Object.freeze([
+  'source', 'authoritative', 'current', 'complete', 'readBack', 'repository', 'revision',
+  'criterion', 'candidateIdentity', 'records', 'digest'
 ]);
-
-function setS1aCarrierEvidence(input, carrierId) {
-  const evidence = S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS.find((candidate) =>
-    candidate.carrierId === carrierId && candidate.acceptedCriterion === input.criterion &&
-    s1aSame(candidate.candidateIdentity, input.candidateIdentity));
-  if (!evidence) throw new Error('missing fixed accepted boundary vector for ' + carrierId);
-  input.acceptedBoundaryEvidence = s1aClone(evidence);
-  for (const option of Object.values(input.options)) delete option.boundaryExecutionReceipt;
-  input.options[carrierId].boundaryExecutionReceipt = s1aClone(evidence.receipt);
-}
+const S1A_ORACLE_CARRIER_RECORD_FIELDS = Object.freeze([
+  'carrierId', 'identity', 'executionSubstrate', 'available', 'authorized', 'ownerProvisioned',
+  'faithful', 'actualPath', 'acceptedExecutionPath', 'enforcementBoundary', 'reconciliation', 'provisioning'
+]);
+const S1A_ORACLE_CARRIER_RECONCILIATION_FIELDS = Object.freeze([
+  'source', 'authoritative', 'current', 'complete', 'readBack', 'inventoryRevision',
+  'carrierId', 'identity', 'actualPath', 'suitability', 'necessity', 'digest'
+]);
+const S1A_ORACLE_CARRIER_INVENTORY_POLICY = Object.freeze({
+  mode: 'CURRENT_AUTHORITATIVE_COMPLETE_READBACK',
+  inputField: 'authoritativeInventory',
+  source: S1A_ORACLE_CARRIER_INVENTORY_SOURCE,
+  requiredFields: Object.freeze([...S1A_ORACLE_CARRIER_INVENTORY_FIELDS]),
+  recordFields: Object.freeze([...S1A_ORACLE_CARRIER_RECORD_FIELDS]),
+  reconciliationFields: Object.freeze([...S1A_ORACLE_CARRIER_RECONCILIATION_FIELDS]),
+  localFirstWhenFaithful: true,
+  reconcileExistingBeforeProvisioning: true,
+  provisionOnlyAfterNecessityProven: true,
+  requestCannotChangeInventory: true
+});
+const S1A_ORACLE_CARRIER_BOUNDARY_POLICY = Object.freeze({
+  mode: 'INDEPENDENTLY_BOUND_TERMINAL_EXECUTION_EVIDENCE',
+  evidenceInputField: 'acceptedBoundaryEvidence',
+  carrierIdentityField: 'identity',
+  acceptedCarrierIds: S1A_ORACLE_CARRIER_SELECTION_ORDER,
+  readbackFields: Object.freeze([
+    'source', 'authoritative', 'current', 'complete', 'readBack', 'repository',
+    'acceptedCriterion', 'carrierId', 'carrierIdentity', 'actualPath', 'candidateIdentity',
+    'enforcementBoundary', 'run', 'receipt', 'digest'
+  ]),
+  requiredFields: Object.freeze([
+    'receiptId', 'acceptedCriterion', 'carrierId', 'carrierIdentity', 'candidateIdentity',
+    'boundaryId', 'enforcementBoundary', 'actualPath', 'executionPath', 'outcome', 'terminal', 'evidenceRef',
+    'runId', 'runEvents', 'executionEvidenceDigest', 'receiptDigest'
+  ]),
+  acceptedExecutionPath: 'ACCEPTED_PRODUCTION_PATH',
+  acceptedOutcome: 'BOUNDARY_EXERCISED',
+  requiredRunEvents: S1A_ORACLE_BOUNDARY_RUN_EVENTS
+});
+const S1A_ORACLE_PUBLIC_REQUEST_MATCH_FIELDS = Object.freeze([
+  'consumer', 'protocol', 'path', 'hostnameRequired', 'hostname', 'lifetime', 'cleanup', 'necessity'
+]);
+const S1A_ORACLE_PUBLIC_REQUEST = Object.freeze({
+  criterion: 'criterion:public-validation', exposure: 'PUBLIC',
+  consumer: 'external-validation-client', protocol: 'https', path: '/accepted-boundary',
+  hostnameRequired: true, hostname: 'validation.example.test',
+  necessity: 'REQUIRED_BY_ACCEPTED_CRITERION', audience: 'named-test-audience',
+  boundary: 'named-public-ingress', lifetime: 'until-validation-completes',
+  cleanup: 'cleanup:remove-public-ingress'
+});
 const S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY_CORE = Object.freeze({
-  source: 'CURRENT_OWNER_WEB_AUTHORITY',
-  authoritative: true,
-  current: true,
-  readBack: true,
+  source: 'CURRENT_OWNER_WEB_AUTHORITY', authoritative: true, current: true, readBack: true,
   authorityReference: 'authority:public-ingress:5',
-  criterion: 'criterion:public-validation',
-  exposure: 'PUBLIC',
-  audience: 'named-test-audience',
-  boundary: 'named-public-ingress',
-  lifetime: 'until-validation-completes',
-  cleanup: 'cleanup:remove-public-ingress',
+  ...S1A_ORACLE_PUBLIC_REQUEST,
   requiredOperations: Object.freeze(['DOMAIN_REGISTRATION', 'DNS_CONFIGURATION'])
 });
 const S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY = Object.freeze({
@@ -3682,192 +4221,978 @@ const S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY = Object.freeze({
   digest: s1aHashRecord(S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY_CORE)
 });
 const S1A_ORACLE_DOMAIN_AUTHORITY_CORE = Object.freeze({
-  source: 'CURRENT_OWNER_WEB_AUTHORITY',
-  authoritative: true,
-  current: true,
-  readBack: true,
+  source: 'CURRENT_OWNER_WEB_AUTHORITY', authoritative: true, current: true, readBack: true,
   authorityReference: 'authority:domain-registration:8',
-  exposureReference: 'authority:public-ingress:5',
-  operation: 'DOMAIN_REGISTRATION',
-  target: 'validation-domain:alpha'
+  exposureReference: S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY.authorityReference,
+  operation: 'DOMAIN_REGISTRATION', target: S1A_ORACLE_PUBLIC_REQUEST.hostname
 });
 const S1A_ORACLE_DOMAIN_AUTHORITY = Object.freeze({
-  ...S1A_ORACLE_DOMAIN_AUTHORITY_CORE,
-  digest: s1aHashRecord(S1A_ORACLE_DOMAIN_AUTHORITY_CORE)
+  ...S1A_ORACLE_DOMAIN_AUTHORITY_CORE, digest: s1aHashRecord(S1A_ORACLE_DOMAIN_AUTHORITY_CORE)
 });
 const S1A_ORACLE_DNS_AUTHORITY_CORE = Object.freeze({
-  source: 'CURRENT_OWNER_WEB_AUTHORITY',
-  authoritative: true,
-  current: true,
-  readBack: true,
+  source: 'CURRENT_OWNER_WEB_AUTHORITY', authoritative: true, current: true, readBack: true,
   authorityReference: 'authority:dns-configuration:9',
-  exposureReference: 'authority:public-ingress:5',
-  operation: 'DNS_CONFIGURATION',
-  target: 'validation-domain:alpha'
+  exposureReference: S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY.authorityReference,
+  operation: 'DNS_CONFIGURATION', target: S1A_ORACLE_PUBLIC_REQUEST.hostname
 });
 const S1A_ORACLE_DNS_AUTHORITY = Object.freeze({
-  ...S1A_ORACLE_DNS_AUTHORITY_CORE,
-  digest: s1aHashRecord(S1A_ORACLE_DNS_AUTHORITY_CORE)
+  ...S1A_ORACLE_DNS_AUTHORITY_CORE, digest: s1aHashRecord(S1A_ORACLE_DNS_AUTHORITY_CORE)
+});
+const S1A_ORACLE_PUBLIC_AUTHORITY_POLICY = Object.freeze({
+  mode: 'CURRENT_OWNER_WEB_AUTHORITY_READBACK', inputField: 'exposureAuthority',
+  requestField: 'publicExposureRequest',
+  requestMatchFields: S1A_ORACLE_PUBLIC_REQUEST_MATCH_FIELDS,
+  source: 'CURRENT_OWNER_WEB_AUTHORITY',
+  requiredFields: Object.freeze([
+    'source', 'authoritative', 'current', 'readBack', 'authorityReference', 'criterion',
+    'exposure', 'consumer', 'protocol', 'path', 'hostnameRequired', 'hostname', 'audience',
+    'boundary', 'lifetime', 'cleanup', 'necessity', 'requiredOperations', 'digest'
+  ]),
+  digestMode: 'SHA256_CANONICAL_AUTHORITY_READBACK', exposureValue: 'PUBLIC'
+});
+const S1A_ORACLE_DOMAIN_DNS_POLICY = Object.freeze({
+  requiredOperationsField: 'requiredOperations', domainInputField: 'domainAuthority',
+  dnsInputField: 'dnsAuthority',
+  requiredFields: Object.freeze(['source', 'authoritative', 'current', 'readBack', 'authorityReference',
+    'exposureReference', 'operation', 'target', 'digest']),
+  domainOperation: 'DOMAIN_REGISTRATION', dnsOperation: 'DNS_CONFIGURATION',
+  referencesMustDiffer: true, eachReferenceMustDifferFromExposure: true
+});
+const S1A_ORACLE_PUBLIC_EXPOSURE_REQUIRES = Object.freeze([
+  'ACCEPTED_CRITERION', 'EXPLICIT_EXPOSURE_AUTHORITY', 'CONSUMER', 'PROTOCOL', 'PATH',
+  'HOSTNAME', 'NECESSITY', 'AUDIENCE', 'BOUNDARY', 'LIFETIME', 'CLEANUP'
+]);
+const S1A_ORACLE_CARRIER_POLICY = Object.freeze({
+  inventory: S1A_ORACLE_CARRIER_INVENTORY_POLICY,
+  selectionOrder: S1A_ORACLE_CARRIER_SELECTION_ORDER,
+  defaultExposure: 'PRIVATE_NONPUBLIC',
+  acceptedBoundaryId: 'ACCEPTED_PRODUCTION_BOUNDARY',
+  faithfulnessRule: 'EXERCISED_ACCEPTED_BOUNDARY',
+  boundaryExercise: S1A_ORACLE_CARRIER_BOUNDARY_POLICY,
+  publicExposureRequires: S1A_ORACLE_PUBLIC_EXPOSURE_REQUIRES,
+  domainDnsRequiresSeparateAuthority: true,
+  persistenceImpliesExposure: false,
+  publicExposureAuthority: S1A_ORACLE_PUBLIC_AUTHORITY_POLICY,
+  domainDnsAuthority: S1A_ORACLE_DOMAIN_DNS_POLICY
 });
 
-function s1aCarrierReceiptIsBound(rule, input, source, option) {
-  const readback = input[rule.boundaryExercise.evidenceInputField];
-  const receipt = option.boundaryExecutionReceipt;
-  if (!readback || typeof readback !== 'object' || Array.isArray(readback) ||
-      !receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return false;
-  const readbackFields = rule.boundaryExercise.readbackFields;
-  if (!s1aSame([...Object.keys(readback)].sort(), [...readbackFields].sort()) ||
-      readbackFields.some((field) => !s1aPresent(readback[field]))) return false;
-  const expected = S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS.filter((candidate) =>
-    candidate.acceptedCriterion === input.criterion &&
-    candidate.carrierId === source &&
-    s1aSame(candidate.candidateIdentity, input.candidateIdentity));
-  if (expected.length !== 1 || !s1aSame(readback, expected[0]) ||
-      readback.source !== S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE ||
-      readback.authoritative !== true || readback.complete !== true || readback.readBack !== true ||
-      readback.digest !== s1aHashWithoutField(readback, 'digest') ||
-      !Array.isArray(input.acceptedCriteria) || !input.acceptedCriteria.includes(input.criterion) ||
-      readback.acceptedCriterion !== input.criterion || readback.carrierId !== source ||
-      !s1aSame(readback.candidateIdentity, input.candidateIdentity) ||
-      !s1aSame(receipt, readback.receipt)) return false;
-
-  const requiredFields = rule.boundaryExercise.requiredFields;
-  if (!s1aSame([...Object.keys(receipt)].sort(), [...requiredFields].sort()) ||
-      requiredFields.some((field) => !s1aPresent(receipt[field]))) return false;
-  const run = readback.run;
-  const executionEvidence = {
-    runId: run.runId,
-    acceptedCriterion: run.acceptedCriterion,
-    carrierId: run.carrierId,
-    candidateIdentity: run.candidateIdentity,
-    boundaryId: run.boundaryId,
-    executionPath: run.executionPath,
-    outcome: run.outcome,
-    runEvents: run.runEvents,
-    terminal: run.terminal
+function makeS1aOracleCarrierReconciliation(inventoryRevision, carrierId, identity, actualPath, suitability, necessity) {
+  const core = {
+    source: S1A_ORACLE_CARRIER_RECONCILIATION_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    inventoryRevision, carrierId, identity, actualPath, suitability, necessity
   };
-  return run.acceptedCriterion === input.criterion && run.carrierId === source &&
-    s1aSame(run.candidateIdentity, input.candidateIdentity) &&
-    run.boundaryId === rule.acceptedBoundaryId &&
-    run.executionPath === rule.boundaryExercise.acceptedExecutionPath &&
-    run.outcome === rule.boundaryExercise.acceptedOutcome && run.terminal === true &&
-    s1aSame(run.runEvents, rule.boundaryExercise.requiredRunEvents) &&
-    run.executionEvidenceDigest === s1aHashRecord(executionEvidence) &&
-    receipt.acceptedCriterion === input.criterion && receipt.carrierId === source &&
-    s1aSame(receipt.candidateIdentity, input.candidateIdentity) &&
-    receipt.boundaryId === rule.acceptedBoundaryId &&
-    receipt.executionPath === rule.boundaryExercise.acceptedExecutionPath &&
-    receipt.outcome === rule.boundaryExercise.acceptedOutcome && receipt.terminal === true &&
-    receipt.runId === run.runId && s1aSame(receipt.runEvents, run.runEvents) &&
-    receipt.executionEvidenceDigest === run.executionEvidenceDigest &&
-    receipt.evidenceRef === 'execution-evidence:' + run.executionEvidenceDigest &&
-    receipt.receiptDigest === s1aHashWithoutField(receipt, 'receiptDigest');
+  return { ...core, digest: s1aHashRecord(core) };
 }
+
+function makeS1aOracleCarrierRecord(carrierId, inventoryRevision, profile) {
+  const defaults = {
+    LOCAL_DEV: {
+      identity: 'carrier-identity:local-dev-8', executionSubstrate: 'LOCAL_PROCESS',
+      actualPath: 'workspace-local-dev-path', ownerProvisioned: false,
+      acceptedExecutionPath: 'ACCEPTED_PRODUCTION_PATH', enforcementBoundary: 'ACCEPTED_PRODUCTION_BOUNDARY'
+    },
+    AUTHORIZED_EXISTING_OWNER: {
+      identity: 'carrier-identity:owner-existing-8', executionSubstrate: 'OWNER_AUTHORISED_EXECUTION_SUBSTRATE',
+      actualPath: 'owner-existing-validation-path', ownerProvisioned: false,
+      acceptedExecutionPath: 'ACCEPTED_PRODUCTION_PATH', enforcementBoundary: 'ACCEPTED_PRODUCTION_BOUNDARY'
+    },
+    NEW_OWNER_PROVISIONED: {
+      identity: 'carrier-identity:owner-provisioned-8', executionSubstrate: 'OWNER_PROVISIONED_EXECUTION_SUBSTRATE',
+      actualPath: 'owner-provisioned-validation-path', ownerProvisioned: true,
+      acceptedExecutionPath: 'ACCEPTED_PRODUCTION_PATH', enforcementBoundary: 'ACCEPTED_PRODUCTION_BOUNDARY'
+    }
+  }[carrierId];
+  const state = profile[carrierId];
+  let reconciliation = null;
+  let provisioning = null;
+  if (carrierId === 'AUTHORIZED_EXISTING_OWNER') {
+    reconciliation = makeS1aOracleCarrierReconciliation(inventoryRevision, carrierId,
+      defaults.identity, defaults.actualPath,
+      state.available && state.authorized && state.faithful ? 'FAITHFUL' : 'UNSUITABLE',
+      'RECONCILED_EXISTING_OWNER_INFRASTRUCTURE');
+  } else if (carrierId === 'NEW_OWNER_PROVISIONED') {
+    reconciliation = makeS1aOracleCarrierReconciliation(inventoryRevision, carrierId,
+      defaults.identity, defaults.actualPath, 'NO_SUITABLE_EXISTING_CARRIER',
+      'PROVEN_NO_SUITABLE_EXISTING_CARRIER');
+    const provisionCore = {
+      source: S1A_ORACLE_CARRIER_PROVISIONING_SOURCE,
+      authoritative: true, current: true, complete: true, readBack: true,
+      authorityReference: 'authority:carrier-provisioning:8', inventoryRevision,
+      carrierId, identity: defaults.identity, actualPath: defaults.actualPath,
+      necessity: 'PROVEN_NO_SUITABLE_EXISTING_CARRIER'
+    };
+    provisioning = { ...provisionCore, digest: s1aHashRecord(provisionCore) };
+  }
+  return {
+    carrierId, identity: defaults.identity, executionSubstrate: defaults.executionSubstrate,
+    available: state.available, authorized: state.authorized, ownerProvisioned: defaults.ownerProvisioned,
+    faithful: state.faithful, actualPath: defaults.actualPath,
+    acceptedExecutionPath: defaults.acceptedExecutionPath,
+    enforcementBoundary: defaults.enforcementBoundary, reconciliation, provisioning
+  };
+}
+
+function makeS1aOracleCarrierInventory(profileName, criterion, candidateIdentity = S1A_ORACLE_CARRIER_CANDIDATE) {
+  const profiles = {
+    local: {
+      LOCAL_DEV: { available: true, authorized: true, faithful: true },
+      AUTHORIZED_EXISTING_OWNER: { available: true, authorized: true, faithful: true },
+      NEW_OWNER_PROVISIONED: { available: false, authorized: false, faithful: false }
+    },
+    existing: {
+      LOCAL_DEV: { available: false, authorized: false, faithful: false },
+      AUTHORIZED_EXISTING_OWNER: { available: true, authorized: true, faithful: true },
+      NEW_OWNER_PROVISIONED: { available: false, authorized: false, faithful: false }
+    },
+    provisioned: {
+      LOCAL_DEV: { available: false, authorized: false, faithful: false },
+      AUTHORIZED_EXISTING_OWNER: { available: false, authorized: false, faithful: false },
+      NEW_OWNER_PROVISIONED: { available: true, authorized: true, faithful: true }
+    }
+  };
+  const profile = profiles[profileName];
+  if (!profile) throw new Error('unknown fixed carrier inventory profile ' + profileName);
+  const revision = 'carrier-inventory:' + profileName + ':' + criterion + ':8';
+  const core = {
+    source: S1A_ORACLE_CARRIER_INVENTORY_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    repository: S1A_ORACLE_CARRIER_REPOSITORY, revision, criterion,
+    candidateIdentity: s1aClone(candidateIdentity),
+    records: S1A_ORACLE_CARRIER_SELECTION_ORDER.map((carrierId) =>
+      makeS1aOracleCarrierRecord(carrierId, revision, profile))
+  };
+  return { ...core, digest: s1aHashRecord(core) };
+}
+const S1A_ORACLE_CARRIER_INVENTORIES = Object.freeze(
+  ['local', 'existing', 'provisioned'].flatMap((profile) => S1A_ORACLE_CARRIER_CRITERIA.map((criterion) =>
+    Object.freeze(makeS1aOracleCarrierInventory(profile, criterion)))));
+
+function makeS1aOracleBoundaryEvidence(inventory, carrier) {
+  const runId = 'run:oracle:' + inventory.revision + ':' + carrier.carrierId;
+  const receiptId = 'receipt:oracle:' + inventory.revision + ':' + carrier.carrierId;
+  const runEvents = [...S1A_ORACLE_BOUNDARY_RUN_EVENTS];
+  const evidenceCore = {
+    runId, acceptedCriterion: inventory.criterion, carrierId: carrier.carrierId,
+    carrierIdentity: carrier.identity, actualPath: carrier.actualPath,
+    candidateIdentity: s1aClone(inventory.candidateIdentity),
+    enforcementBoundary: carrier.enforcementBoundary,
+    boundaryId: carrier.enforcementBoundary, executionPath: carrier.acceptedExecutionPath,
+    outcome: 'BOUNDARY_EXERCISED', runEvents, terminal: true
+  };
+  const executionEvidenceDigest = s1aHashRecord(evidenceCore);
+  const run = { ...evidenceCore, executionEvidenceDigest };
+  const receiptCore = {
+    receiptId, acceptedCriterion: inventory.criterion, carrierId: carrier.carrierId,
+    carrierIdentity: carrier.identity, candidateIdentity: s1aClone(inventory.candidateIdentity),
+    boundaryId: carrier.enforcementBoundary, enforcementBoundary: carrier.enforcementBoundary,
+    actualPath: carrier.actualPath, executionPath: carrier.acceptedExecutionPath, outcome: 'BOUNDARY_EXERCISED',
+    terminal: true, evidenceRef: 'execution-evidence:' + executionEvidenceDigest,
+    runId, runEvents, executionEvidenceDigest
+  };
+  const receipt = { ...receiptCore, receiptDigest: s1aHashRecord(receiptCore) };
+  const readbackCore = {
+    source: S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    repository: inventory.repository, acceptedCriterion: inventory.criterion,
+    carrierId: carrier.carrierId, carrierIdentity: carrier.identity,
+    actualPath: carrier.actualPath, candidateIdentity: s1aClone(inventory.candidateIdentity),
+    enforcementBoundary: carrier.enforcementBoundary, run, receipt
+  };
+  return { ...readbackCore, digest: s1aHashRecord(readbackCore) };
+}
+const S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS = Object.freeze(S1A_ORACLE_CARRIER_INVENTORIES.flatMap((inventory) =>
+  inventory.records.filter((carrier) => carrier.available && carrier.authorized && carrier.faithful)
+    .map((carrier) => Object.freeze(makeS1aOracleBoundaryEvidence(inventory, carrier)))));
+
+function setS1aCarrierEvidence(input, carrierId) {
+  const inventory = input.authoritativeInventory;
+  const carrier = inventory.records.find((record) => record.carrierId === carrierId);
+  const evidence = S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS.find((candidate) =>
+    candidate.acceptedCriterion === input.criterion && candidate.carrierId === carrierId &&
+    candidate.actualPath === (carrier && carrier.actualPath) &&
+    s1aSame(candidate.candidateIdentity, input.candidateIdentity) &&
+    candidate.run.runId.includes(inventory.revision));
+  if (!evidence) throw new Error('missing fixed accepted boundary vector for ' + carrierId);
+  input.acceptedBoundaryEvidence = s1aClone(evidence);
+}
+
+function s1aCarrierReconciliationIsCurrent(record, inventory) {
+  const readback = record.reconciliation;
+  if (!s1aHasExactKeys(readback, S1A_ORACLE_CARRIER_RECONCILIATION_FIELDS) ||
+      readback.source !== S1A_ORACLE_CARRIER_RECONCILIATION_SOURCE ||
+      readback.authoritative !== true || readback.current !== true ||
+      readback.complete !== true || readback.readBack !== true ||
+      readback.inventoryRevision !== inventory.revision || readback.carrierId !== record.carrierId ||
+      readback.identity !== record.identity || readback.actualPath !== record.actualPath ||
+      readback.digest !== s1aHashWithoutField(readback, 'digest')) return false;
+  if (record.carrierId === 'AUTHORIZED_EXISTING_OWNER') {
+    return readback.suitability === 'FAITHFUL' &&
+      readback.necessity === 'RECONCILED_EXISTING_OWNER_INFRASTRUCTURE';
+  }
+  if (record.carrierId === 'NEW_OWNER_PROVISIONED') {
+    return readback.suitability === 'NO_SUITABLE_EXISTING_CARRIER' &&
+      readback.necessity === 'PROVEN_NO_SUITABLE_EXISTING_CARRIER';
+  }
+  return false;
+}
+
+function s1aCarrierProvisioningIsAuthorised(record, inventory) {
+  const proof = record.provisioning;
+  const expectedFields = [
+    'source', 'authoritative', 'current', 'complete', 'readBack', 'authorityReference',
+    'inventoryRevision', 'carrierId', 'identity', 'actualPath', 'necessity', 'digest'
+  ];
+  return s1aHasExactKeys(proof, expectedFields) &&
+    proof.source === S1A_ORACLE_CARRIER_PROVISIONING_SOURCE &&
+    proof.authoritative === true && proof.current === true && proof.complete === true &&
+    proof.readBack === true && proof.authorityReference === 'authority:carrier-provisioning:8' &&
+    proof.inventoryRevision === inventory.revision && proof.carrierId === record.carrierId &&
+    proof.identity === record.identity && proof.actualPath === record.actualPath &&
+    proof.necessity === 'PROVEN_NO_SUITABLE_EXISTING_CARRIER' &&
+    proof.digest === s1aHashWithoutField(proof, 'digest');
+}
+
+function s1aCarrierExecutionEvidenceIsBound(input, inventory, carrier, rule) {
+  const readback = input[rule.boundaryExercise.evidenceInputField];
+  const expected = S1A_ORACLE_BOUNDARY_EVIDENCE_READBACKS.filter((candidate) =>
+    candidate.acceptedCriterion === inventory.criterion && candidate.carrierId === carrier.carrierId &&
+    candidate.actualPath === carrier.actualPath && s1aSame(candidate.candidateIdentity, inventory.candidateIdentity) &&
+    candidate.run.runId.includes(inventory.revision));
+  if (expected.length !== 1 || !s1aHasExactKeys(readback, rule.boundaryExercise.readbackFields) ||
+      !s1aSame(readback, expected[0]) || readback.source !== S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE ||
+      readback.authoritative !== true || readback.current !== true || readback.complete !== true ||
+      readback.readBack !== true || readback.repository !== inventory.repository ||
+      readback.acceptedCriterion !== inventory.criterion || readback.carrierId !== carrier.carrierId ||
+      readback.carrierIdentity !== carrier.identity || readback.actualPath !== carrier.actualPath ||
+      !s1aSame(readback.candidateIdentity, inventory.candidateIdentity) ||
+      readback.enforcementBoundary !== carrier.enforcementBoundary ||
+      readback.digest !== s1aHashWithoutField(readback, 'digest')) return false;
+  const receipt = readback.receipt;
+  const run = readback.run;
+  if (!s1aHasExactKeys(receipt, rule.boundaryExercise.requiredFields) ||
+      !s1aHasExactKeys(run, [
+        'runId', 'acceptedCriterion', 'carrierId', 'carrierIdentity', 'actualPath',
+        'candidateIdentity', 'enforcementBoundary', 'boundaryId', 'executionPath',
+        'outcome', 'runEvents', 'terminal', 'executionEvidenceDigest'
+      ]) ||
+      receipt.carrierId !== carrier.carrierId || receipt.carrierIdentity !== carrier.identity ||
+      receipt.actualPath !== carrier.actualPath || receipt.acceptedCriterion !== inventory.criterion ||
+      !s1aSame(receipt.candidateIdentity, inventory.candidateIdentity) ||
+      receipt.boundaryId !== rule.acceptedBoundaryId || receipt.executionPath !== carrier.acceptedExecutionPath ||
+      receipt.enforcementBoundary !== carrier.enforcementBoundary || receipt.outcome !== rule.boundaryExercise.acceptedOutcome ||
+      receipt.terminal !== true || receipt.runId !== run.runId ||
+      !s1aSame(receipt.runEvents, rule.boundaryExercise.requiredRunEvents) ||
+      receipt.executionEvidenceDigest !== run.executionEvidenceDigest ||
+      receipt.evidenceRef !== 'execution-evidence:' + run.executionEvidenceDigest ||
+      receipt.receiptDigest !== s1aHashWithoutField(receipt, 'receiptDigest')) return false;
+  const runCore = Object.fromEntries(Object.entries(run).filter(([key]) => key !== 'executionEvidenceDigest'));
+  return run.acceptedCriterion === inventory.criterion && run.carrierId === carrier.carrierId &&
+    run.carrierIdentity === carrier.identity && run.actualPath === carrier.actualPath &&
+    run.enforcementBoundary === carrier.enforcementBoundary && run.boundaryId === rule.acceptedBoundaryId &&
+    run.executionPath === carrier.acceptedExecutionPath &&
+    run.outcome === rule.boundaryExercise.acceptedOutcome && run.terminal === true &&
+    s1aSame(run.candidateIdentity, inventory.candidateIdentity) &&
+    s1aSame(run.runEvents, rule.boundaryExercise.requiredRunEvents) &&
+    run.executionEvidenceDigest === s1aHashRecord(runCore);
+}
+
+function s1aPublicExposureRequestAuthorityMatches(rule, input, criterion) {
+  const request = input && input[rule.publicExposureAuthority.requestField];
+  const authority = input && input[rule.publicExposureAuthority.inputField];
+  const requestFields = [
+    'criterion', 'exposure', 'consumer', 'protocol', 'path', 'hostnameRequired', 'hostname',
+    'necessity', 'audience', 'boundary', 'lifetime', 'cleanup'
+  ];
+  return s1aHasExactKeys(request, requestFields) && s1aSame(request, S1A_ORACLE_PUBLIC_REQUEST) &&
+    s1aHasExactKeys(authority, rule.publicExposureAuthority.requiredFields) &&
+    s1aSame(authority, S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY) &&
+    authority.source === rule.publicExposureAuthority.source && authority.authoritative === true &&
+    authority.current === true && authority.readBack === true && authority.criterion === criterion &&
+    authority.exposure === rule.publicExposureAuthority.exposureValue &&
+    Array.isArray(input.acceptedCriteria) && input.acceptedCriteria.includes(criterion) &&
+    request.criterion === criterion && request.exposure === authority.exposure &&
+    rule.publicExposureAuthority.requestMatchFields.every((field) => request[field] === authority[field]) &&
+    request.audience === authority.audience && request.boundary === authority.boundary &&
+    request.necessity === authority.necessity && authority.necessity === 'REQUIRED_BY_ACCEPTED_CRITERION' &&
+    authority.digest === s1aHashWithoutField(authority, 'digest');
+}
+
+function s1aPublicExposureIsAuthorised(rule, input, criterion) {
+  if (!s1aPublicExposureRequestAuthorityMatches(rule, input, criterion)) return false;
+  const authority = input[rule.publicExposureAuthority.inputField];
+  if (!Array.isArray(authority.requiredOperations)) return false;
+  const operations = new Set(authority.requiredOperations);
+  if (operations.size !== authority.requiredOperations.length ||
+      [...operations].some((operation) => !['DOMAIN_REGISTRATION', 'DNS_CONFIGURATION'].includes(operation))) return false;
+  if (!operations.size) return true;
+  const dnsRule = rule.domainDnsAuthority;
+  const domain = input[dnsRule.domainInputField];
+  const dns = input[dnsRule.dnsInputField];
+  const validOperation = (value, expected, operation) =>
+    s1aHasExactKeys(value, dnsRule.requiredFields) && s1aSame(value, expected) &&
+    value.source === authority.source && value.authoritative === true && value.current === true &&
+    value.readBack === true && value.exposureReference === authority.authorityReference &&
+    value.operation === operation && value.target === authority.hostname &&
+    value.digest === s1aHashWithoutField(value, 'digest');
+  const needsDomain = operations.has(dnsRule.domainOperation);
+  const needsDns = operations.has(dnsRule.dnsOperation);
+  return (!needsDomain || validOperation(domain, S1A_ORACLE_DOMAIN_AUTHORITY, dnsRule.domainOperation)) &&
+    (!needsDns || validOperation(dns, S1A_ORACLE_DNS_AUTHORITY, dnsRule.dnsOperation)) &&
+    (!needsDomain || !needsDns || domain.authorityReference !== dns.authorityReference) &&
+    (!needsDomain || domain.authorityReference !== authority.authorityReference) &&
+    (!needsDns || dns.authorityReference !== authority.authorityReference);
+}
+
 function evaluateS1aCarrier(policy, input) {
-  const rule = policy.faithfulCarrier;
-  const requestedExposure = input.requestedExposure ||
-    (input.persistent === true && rule.persistenceImpliesExposure ? 'PUBLIC' : rule.defaultExposure);
-  const failures = [];
-  let exposureAllowed = requestedExposure === 'PRIVATE_NONPUBLIC';
+  const rule = policy && policy.faithfulCarrier ? policy.faithfulCarrier : {};
+  const violations = [];
+  const fail = (id) => { if (!violations.includes(id)) violations.push(id); };
+  if (!s1aSame(rule.inventory, S1A_ORACLE_CARRIER_INVENTORY_POLICY) ||
+      !s1aSame(rule.selectionOrder, S1A_ORACLE_CARRIER_SELECTION_ORDER)) {
+    fail('CARRIER_AUTHORITATIVE_INVENTORY_ORDER');
+  }
+  if (!s1aSame(rule.boundaryExercise, S1A_ORACLE_CARRIER_BOUNDARY_POLICY) ||
+      rule.acceptedBoundaryId !== S1A_ORACLE_CARRIER_POLICY.acceptedBoundaryId ||
+      rule.faithfulnessRule !== S1A_ORACLE_CARRIER_POLICY.faithfulnessRule) {
+    fail('CARRIER_EXECUTION_EVIDENCE_BINDING');
+  }
+  if (!s1aSame(rule.publicExposureRequires, S1A_ORACLE_PUBLIC_EXPOSURE_REQUIRES) ||
+      !s1aSame(rule.publicExposureAuthority, S1A_ORACLE_PUBLIC_AUTHORITY_POLICY)) {
+    fail('CARRIER_PUBLIC_AUTHORITY_MATCH');
+  }
+  if (rule.domainDnsRequiresSeparateAuthority !== true ||
+      !s1aSame(rule.domainDnsAuthority, S1A_ORACLE_DOMAIN_DNS_POLICY)) {
+    fail('CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY');
+  }
+  if (rule.defaultExposure !== 'PRIVATE_NONPUBLIC' || rule.persistenceImpliesExposure !== false) {
+    fail('CARRIER_PRIVATE_PERSISTENCE');
+  }
+  const inventory = input && input.authoritativeInventory;
+  const fixedInventory = S1A_ORACLE_CARRIER_INVENTORIES.find((candidate) => s1aSame(candidate, inventory));
+  if (!fixedInventory || !s1aHasExactKeys(inventory, S1A_ORACLE_CARRIER_INVENTORY_FIELDS) ||
+      inventory.source !== S1A_ORACLE_CARRIER_INVENTORY_SOURCE || inventory.authoritative !== true ||
+      inventory.current !== true || inventory.complete !== true || inventory.readBack !== true ||
+      inventory.repository !== S1A_ORACLE_CARRIER_REPOSITORY ||
+      inventory.digest !== s1aHashWithoutField(inventory, 'digest')) {
+    fail('CARRIER_AUTHORITATIVE_INVENTORY_READBACK');
+  }
+  const criterion = input && input.criterion;
+  if (!fixedInventory || !S1A_ORACLE_CARRIER_CRITERIA.includes(criterion) ||
+      inventory.criterion !== criterion || !s1aSame(inventory.candidateIdentity, S1A_ORACLE_CARRIER_CANDIDATE) ||
+      !s1aSame(input.candidateIdentity, inventory.candidateIdentity) ||
+      !Array.isArray(input.acceptedCriteria) || !input.acceptedCriteria.includes(criterion)) {
+    fail('CARRIER_INVENTORY_CANDIDATE_CRITERION_BINDING');
+  }
+  let exposure = 'PRIVATE_NONPUBLIC';
+  const request = input && input.publicExposureRequest;
+  const requestedExposure = input && input.requestedExposure ||
+    (request && request.exposure) || S1A_ORACLE_CARRIER_POLICY.defaultExposure;
   if (requestedExposure === 'PUBLIC') {
-    const authorityRule = rule.publicExposureAuthority;
-    const authority = input[authorityRule.inputField] || {};
-    exposureAllowed = s1aHasExactKeys(authority, authorityRule.requiredFields) &&
-      s1aSame(authority, S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY) &&
-      authority.source === authorityRule.source && authority.authoritative === true &&
-      authority.current === true && authority.readBack === true &&
-      authority.authorityReference === S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY.authorityReference &&
-      authority.criterion === input.criterion &&
-      authority.exposure === authorityRule.exposureValue &&
-      authority.audience === input.audience && authority.boundary === input.boundary &&
-      authority.lifetime === input.lifetime && s1aPresent(authority.cleanup) &&
-      Array.isArray(authority.requiredOperations) &&
-      authority.requiredOperations.every((operation) =>
-        ['DOMAIN_REGISTRATION', 'DNS_CONFIGURATION'].includes(operation)) &&
-      new Set(authority.requiredOperations).size === authority.requiredOperations.length &&
-      authority.digest === s1aHashWithoutField(authority, 'digest') &&
-      Array.isArray(input.acceptedCriteria) && input.acceptedCriteria.includes(input.criterion);
-    const requiredOperations = new Set(authority.requiredOperations || []);
-    if (requiredOperations.size > 0 && rule.domainDnsRequiresSeparateAuthority) {
-      const dnsRule = rule.domainDnsAuthority;
-      const domain = input[dnsRule.domainInputField] || {};
-      const dns = input[dnsRule.dnsInputField] || {};
-      const validAuthority = (value, expected, operation) =>
-        s1aHasExactKeys(value, dnsRule.requiredFields) && s1aSame(value, expected) &&
-        value.source === authorityRule.source && value.authoritative === true &&
-        value.current === true && value.readBack === true &&
-        value.exposureReference === authority.authorityReference &&
-        value.operation === operation && value.digest === s1aHashWithoutField(value, 'digest');
-      const needsDomain = requiredOperations.has(dnsRule.domainOperation);
-      const needsDns = requiredOperations.has(dnsRule.dnsOperation);
-      exposureAllowed = exposureAllowed &&
-        (!needsDomain || validAuthority(domain, S1A_ORACLE_DOMAIN_AUTHORITY, dnsRule.domainOperation)) &&
-        (!needsDns || validAuthority(dns, S1A_ORACLE_DNS_AUTHORITY, dnsRule.dnsOperation)) &&
-        (!needsDomain || !needsDns || domain.authorityReference !== dns.authorityReference) &&
-        (!needsDomain || domain.authorityReference !== authority.authorityReference) &&
-        (!needsDns || dns.authorityReference !== authority.authorityReference);
+    exposure = 'PUBLIC';
+    if (!s1aPublicExposureIsAuthorised(rule, input, criterion)) {
+      fail(s1aPublicExposureRequestAuthorityMatches(rule, input, criterion)
+        ? 'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY' : 'CARRIER_PUBLIC_AUTHORITY_MATCH');
     }
   } else if (requestedExposure !== 'PRIVATE_NONPUBLIC') {
-    exposureAllowed = false;
+    fail('CARRIER_PRIVATE_PERSISTENCE');
+  } else if (request && request.exposure === 'PUBLIC') {
+    fail('CARRIER_PUBLIC_AUTHORITY_MATCH');
   }
-  if (!exposureAllowed) failures.push('CARRIER_EXPOSURE_AUTHORITY');
   let selected = null;
-  for (const source of rule.selectionOrder) {
-    const option = (input.options || {})[source];
-    if (!option || option.available !== true || option.authorized !== true) continue;
-    if (source === 'AUTHORIZED_EXISTING_OWNER' && option.ownerAuthorized !== true) continue;
-    if (source === 'NEW_OWNER_PROVISIONED' &&
-        (option.ownerProvisioned !== true || option.ownerAuthorized !== true)) continue;
-    const faithful = s1aCarrierReceiptIsBound(rule, input, source, option);
-    if (faithful) {
-      selected = source;
+  if (fixedInventory && Array.isArray(inventory.records)) {
+    for (const carrierId of S1A_ORACLE_CARRIER_SELECTION_ORDER) {
+      const record = inventory.records.find((entry) => entry.carrierId === carrierId);
+      if (!record || !record.available || !record.authorized || !record.faithful ||
+          !s1aHasExactKeys(record, S1A_ORACLE_CARRIER_RECORD_FIELDS) ||
+          record.executionSubstrate === 'LOCAL_PROCESS' && record.ownerProvisioned !== false) continue;
+      if (carrierId === 'AUTHORIZED_EXISTING_OWNER' &&
+          (!s1aCarrierReconciliationIsCurrent(record, inventory) || record.ownerProvisioned !== false)) continue;
+      if (carrierId === 'NEW_OWNER_PROVISIONED') {
+        const suitableExisting = inventory.records.some((candidate) =>
+          candidate.carrierId !== 'NEW_OWNER_PROVISIONED' && candidate.available === true &&
+          candidate.authorized === true && candidate.faithful === true);
+        if (suitableExisting || !s1aCarrierReconciliationIsCurrent(record, inventory) ||
+            !s1aCarrierProvisioningIsAuthorised(record, inventory) || record.ownerProvisioned !== true) continue;
+      }
+      if (record.acceptedExecutionPath !== S1A_ORACLE_CARRIER_BOUNDARY_POLICY.acceptedExecutionPath ||
+          record.enforcementBoundary !== S1A_ORACLE_CARRIER_POLICY.acceptedBoundaryId) continue;
+      selected = record;
       break;
     }
   }
-  if (!selected) failures.push('CARRIER_ACCEPTED_BOUNDARY_NOT_EXERCISED');
+  if (!selected) fail('CARRIER_INVENTORY_ORDER_OR_PROVISIONING');
+  else if (!s1aCarrierExecutionEvidenceIsBound(input, inventory, selected, S1A_ORACLE_CARRIER_POLICY)) {
+    fail('CARRIER_EXECUTION_EVIDENCE_BINDING');
+    selected = null;
+  }
   return {
-    ok: failures.length === 0,
-    selected: selected || 'HOLD',
-    exposure: requestedExposure,
-    failures
+    ok: violations.length === 0, selected: selected ? selected.carrierId : 'HOLD',
+    exposure, failures: violations
   };
 }
 
-function makeS1aCarrierFixture() {
+function observeS1aCarrierSource(source, input, claimedDigest = s1aGovernedHumanPolicyDigest(source)) {
+  const policy = s1aInterpretPolicyContract(source);
+  const result = evaluateS1aCarrier(policy, input);
+  result.governedProseDigest = claimedDigest;
+  result.violatedObligationIds = result.failures;
+  for (const id of s1aCarrierProseViolations(source)) {
+    if (!result.violatedObligationIds.includes(id)) result.violatedObligationIds.push(id);
+  }
+  result.failures = result.violatedObligationIds;
+  result.ok = result.violatedObligationIds.length === 0;
+  if (!result.ok && result.selected !== 'HOLD') result.selected = 'HOLD';
+  return result;
+}
+
+function makeS1aCarrierFixture(profileName = 'local', criterion = 'criterion:accepted-boundary') {
+  const authoritativeInventory = s1aClone(makeS1aOracleCarrierInventory(profileName, criterion));
   const input = {
-    persistent: true,
-    criterion: 'criterion:accepted-boundary',
-    acceptedCriteria: ['criterion:accepted-boundary'],
-    candidateIdentity: { commit: 'carrier:commit-8', tree: 'carrier:tree-8' },
-    options: {
-      LOCAL_DEV: { available: true, authorized: true, claimedEquivalent: true },
-      AUTHORIZED_EXISTING_OWNER: {
-        available: false, authorized: false, ownerAuthorized: false, claimedEquivalent: true
-      },
-      NEW_OWNER_PROVISIONED: {
-        available: false, authorized: false, ownerAuthorized: false,
-        ownerProvisioned: false, claimedEquivalent: true
-      }
-    }
+    persistent: true, criterion, acceptedCriteria: [criterion],
+    candidateIdentity: s1aClone(S1A_ORACLE_CARRIER_CANDIDATE),
+    authoritativeInventory,
+    options: { LOCAL_DEV: { available: true, authorized: true, claimedEquivalent: true } }
   };
-  setS1aCarrierEvidence(input, 'LOCAL_DEV');
+  const selected = authoritativeInventory.records.find((record) =>
+    record.available && record.authorized && record.faithful);
+  if (selected) setS1aCarrierEvidence(input, selected.carrierId);
   return input;
 }
 
 function makeS1aAuthorizedPublicCarrierFixture() {
-  const input = makeS1aCarrierFixture();
+  const input = makeS1aCarrierFixture('local', 'criterion:public-validation');
   input.requestedExposure = 'PUBLIC';
-  input.acceptedCriteria = ['criterion:public-validation'];
-  input.criterion = 'criterion:public-validation';
-  setS1aCarrierEvidence(input, 'LOCAL_DEV');
-  input.audience = 'named-test-audience';
-  input.boundary = 'named-public-ingress';
-  input.lifetime = 'until-validation-completes';
-  input.domainDnsRequired = true;
+  input.publicExposureRequest = s1aClone(S1A_ORACLE_PUBLIC_REQUEST);
   input.exposureAuthority = s1aClone(S1A_ORACLE_PUBLIC_EXPOSURE_AUTHORITY);
   input.domainAuthority = s1aClone(S1A_ORACLE_DOMAIN_AUTHORITY);
   input.dnsAuthority = s1aClone(S1A_ORACLE_DNS_AUTHORITY);
   return input;
+}
+
+
+const S1A_ORACLE_CONTINUATION_AUTHORITY_SOURCE = 'CURRENT_OWNER_WEB_BOUNDED_EPISODE_AUTHORITY';
+const S1A_ORACLE_CONTINUATION_EFFECT_SOURCE = 'CURRENT_OWNER_EFFECT_RECONCILIATION_READBACK';
+function s1aCanonicalContinuationEffects(value) {
+  if (!value || !Array.isArray(value.effects)) return value;
+  const core = { ...value, effects: [...value.effects].sort((a, b) => String(a.effectId).localeCompare(String(b.effectId))) };
+  delete core.digest;
+  return { ...core, digest: s1aHashRecord(core) };
+}
+const S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED = Object.freeze(
+  s1aCanonicalContinuationEffects({
+    source: S1A_ORACLE_CONTINUATION_EFFECT_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    effects: Object.freeze([
+      Object.freeze({ effectId: 'effect:accepted-run-4', state: 'RECONCILED', evidenceRef: 'effect-evidence:4' }),
+      Object.freeze({ effectId: 'effect:accepted-worker-4', state: 'RECONCILED', evidenceRef: 'effect-evidence:worker-4' })
+    ])
+  }));
+const S1A_ORACLE_CONTINUATION_PATH_SOURCE = 'CURRENT_OWNER_FAITHFUL_PATH_INVENTORY';
+const S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS = Object.freeze([
+  'authorityReference', 'rootFamilyId', 'acceptedContractId', 'trustModelId',
+  'scopeId', 'assuranceFloorId', 'evidenceBoundaryId'
+]);
+const S1A_ORACLE_CONTINUATION_EPISODE_FIELDS = Object.freeze([
+  'episodeId', 'episodeKind', 'authorityReference', 'primaryOwner', 'source', 'authoritative', 'current',
+  'readBack', 'explicitWebBound', 'digest', 'rootFamilyId', 'acceptedContractId',
+  'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId'
+]);
+const S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY_CORE = Object.freeze({
+  source: 'CURRENT_ACCEPTED_G2_BOUNDARY_READBACK', authoritative: true, current: true, readBack: true,
+  rootFamilyId: 'root-family:accepted-7', acceptedContractId: 'contract:g2-accepted-7',
+  trustModelId: 'trust:model-7', scopeId: 'scope:accepted-7',
+  assuranceFloorId: 'floor:accepted-7', evidenceBoundaryId: 'boundary:evidence-7'
+});
+const S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY = Object.freeze(s1aSignedReadback(
+  S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY_CORE));
+const S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY = Object.freeze({
+  commit: 'continuation:commit-4', tree: 'continuation:tree-4'
+});
+const S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY = Object.freeze({
+  evidenceId: 'evidence:continuation-4', digest: 'evidence-digest:continuation-4',
+  candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY
+});
+const S1A_ORACLE_CONTINUATION_ATTEMPT_STATE = Object.freeze({
+  attemptCount: 4, attemptLimit: 5, productCorrectionAttempts: 2,
+  productCorrectionLimit: 3, budgetConsumed: 7, budgetLimit: 10
+});
+function s1aMakeAcceptedContinuationEpisodeAuthority(episodeKind, primaryOwner) {
+  const episodeToken = episodeKind.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const ownerToken = primaryOwner.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return Object.freeze(s1aSignedReadback({
+    episodeId: 'episode:' + episodeToken + ':' + ownerToken,
+    episodeKind,
+    authorityReference: 'authority:web-episode:' + episodeToken + ':' + ownerToken,
+    primaryOwner,
+    source: S1A_ORACLE_CONTINUATION_AUTHORITY_SOURCE,
+    authoritative: true, current: true, readBack: true, explicitWebBound: true,
+    rootFamilyId: 'root-family:accepted-7', acceptedContractId: 'contract:g2-accepted-7',
+    trustModelId: 'trust:model-7', scopeId: 'scope:accepted-7',
+    assuranceFloorId: 'floor:accepted-7', evidenceBoundaryId: 'boundary:evidence-7'
+  }));
+}
+const S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
+  s1aMakeAcceptedContinuationEpisodeAuthority('G3_RUN_LOCK', 'TOOLKIT'));
+const S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
+  s1aMakeAcceptedContinuationEpisodeAuthority('OTHER_WEB_BOUNDED_EVIDENCE_EPISODE', 'TOOLKIT'));
+const S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
+  s1aMakeAcceptedContinuationEpisodeAuthority('OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY', 'VALIDATION_CARRIER'));
+const S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE = Object.freeze({
+  rootFamilyId: 'root-family:accepted-7',
+  unresolvedBlockerIds: Object.freeze(['blocker:validation-carrier']), primaryOwner: 'TOOLKIT',
+  failedMechanism: 'accepted-runner-readback', effectClass: 'NO_PRODUCT_EFFECT',
+  evidenceBoundaryId: 'boundary:evidence-7',
+  runId: 'run:current-4', workerId: 'worker:current-4', branch: 'branch:current-4',
+  candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY,
+  episodeId: 'episode:g3-run-lock:toolkit'
+});
+const S1A_ORACLE_CONTINUATION_HISTORY = Object.freeze([{
+  outcome: 'PROGRESSED', signature: Object.freeze({
+    ...S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE, failedMechanism: 'different-mechanism',
+    runId: 'run:older-2', workerId: 'worker:older-2', branch: 'branch:older-2',
+    candidateIdentity: Object.freeze({ commit: 'continuation:old-commit', tree: 'continuation:old-tree' }),
+    episodeId: 'episode:older-2'
+  })
+}]);
+const S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY = Object.freeze(s1aSignedReadback({
+  source: S1A_ORACLE_CONTINUATION_PATH_SOURCE,
+  authoritative: true, current: true, complete: true, readBack: true,
+  paths: [Object.freeze({
+    pathId: 'path:faithful-accepted-4', faithful: true, available: true,
+    actualPath: 'accepted-validation-path', evidenceRef: 'path-evidence:accepted-4',
+    evidenceBoundaryId: 'boundary:evidence-7',
+    candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY
+  })]
+}));
+function s1aBuildFixedContinuationStateReadback(episodeAuthority) {
+  const currentFailureSignature = s1aClone(S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE);
+  currentFailureSignature.primaryOwner = episodeAuthority.primaryOwner;
+  currentFailureSignature.episodeId = episodeAuthority.episodeId;
+  return s1aSignedReadback({
+    source: 'CURRENT_ACCEPTED_G2_CONTINUATION_STATE_READBACK',
+    authoritative: true, current: true, complete: true, readBack: true,
+    episodeId: episodeAuthority.episodeId,
+    acceptedEpisodeAuthority: episodeAuthority,
+    candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY,
+    evidenceIdentity: S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY,
+    attemptState: S1A_ORACLE_CONTINUATION_ATTEMPT_STATE,
+    currentFailureSignature,
+    history: S1A_ORACLE_CONTINUATION_HISTORY,
+    effectReconciliation: S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED,
+    faithfulPathInventoryDigest: S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY.digest
+  });
+}
+const S1A_ORACLE_CURRENT_CONTINUATION_STATE_READBACK = Object.freeze(
+  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY));
+const S1A_ORACLE_OTHER_WEB_CONTINUATION_STATE_READBACK = Object.freeze(
+  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY));
+const S1A_ORACLE_CARRIER_WEB_CONTINUATION_STATE_READBACK = Object.freeze(
+  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY));
+const S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS = Object.freeze({
+  G3_RUN_LOCK_TOOLKIT: Object.freeze({
+    episodeAuthority: S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY,
+    stateReadback: S1A_ORACLE_CURRENT_CONTINUATION_STATE_READBACK
+  }),
+  OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT: Object.freeze({
+    episodeAuthority: S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY,
+    stateReadback: S1A_ORACLE_OTHER_WEB_CONTINUATION_STATE_READBACK
+  }),
+  OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY: Object.freeze({
+    episodeAuthority: S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY,
+    stateReadback: S1A_ORACLE_CARRIER_WEB_CONTINUATION_STATE_READBACK
+  })
+});
+function s1aExpectedContinuationStateReadback(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
+  const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
+  return scenario ? s1aClone(scenario.stateReadback) : null;
+}
+function s1aExpectedContinuationEpisodeAuthority(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
+  const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
+  return scenario ? s1aClone(scenario.episodeAuthority) : null;
+}
+const S1A_ORACLE_CONTINUATION_RELATIONS = Object.freeze({
+  OWNER_PRODUCT: 'CONTINUATION_OWNER_PRODUCT_BOUNDARY',
+  EPISODE_SCOPE: 'CONTINUATION_EPISODE_SCOPE_AUTHORITY',
+  AUTHORITY_READBACK: 'CONTINUATION_ACCEPTED_AUTHORITY_READBACK',
+  LIMITS: 'CONTINUATION_ATTEMPT_LIMITS',
+  PATH_USABILITY: 'CONTINUATION_FAITHFUL_PATH_USABILITY',
+  EFFECTS: 'CONTINUATION_EFFECT_RECONCILIATION',
+  PATH_PROGRESS: 'CONTINUATION_FAITHFUL_PATH_PROGRESS',
+  CURRENT_STATE: 'CONTINUATION_CURRENT_STATE_READBACK',
+  IDENTITY_BUDGET: 'CONTINUATION_IDENTITY_BUDGET_PRESERVATION',
+  REPLACEMENT: 'CONTINUATION_REPLACEMENT_AUTHORITY'
+});
+
+function s1aSignedReadback(core) {
+  return { ...core, digest: s1aHashRecord(core) };
+}
+
+function makeS1aContinuationFixture(options = {}) {
+  const scenarioKey = options.scenario || 'G3_RUN_LOCK_TOOLKIT';
+  const currentStateReadback = s1aExpectedContinuationStateReadback(scenarioKey);
+  const acceptedAuthority = s1aExpectedContinuationEpisodeAuthority(scenarioKey);
+  if (!currentStateReadback || !acceptedAuthority) throw new Error('unknown fixed continuation oracle scenario');
+  const owner = options.owner || acceptedAuthority.primaryOwner;
+  const episodeAuthority = s1aClone(acceptedAuthority);
+  if (options.episodeKind) {
+    episodeAuthority.episodeKind = options.episodeKind;
+    episodeAuthority.digest = s1aHashWithoutField(episodeAuthority, 'digest');
+  }
+  const currentFailureSignature = s1aClone(currentStateReadback.currentFailureSignature);
+  const attemptState = currentStateReadback.attemptState;
+  const candidateIdentity = s1aClone(S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY);
+  const evidenceIdentity = s1aClone(S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY);
+  const effectCore = {
+    ...S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED,
+    effects: [...S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED.effects]
+  };
+  return {
+    mode: 'IDENTITY_PRESERVING', primaryOwner: owner, PRODUCT_SEMANTICS_PROVEN_BAD: 'NO',
+    episodeAuthority,
+    acceptedBoundary: s1aClone(S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY),
+    requestedBoundary: Object.fromEntries(S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS.map((field) =>
+      [field, episodeAuthority[field]])),
+    currentStateReadback,
+    effectReconciliation: s1aCanonicalContinuationEffects(effectCore),
+    faithfulPathInventory: s1aClone(S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY),
+    currentFailureSignature,
+    history: s1aClone(currentStateReadback.history),
+    candidateBefore: s1aClone(candidateIdentity), candidateAfter: s1aClone(candidateIdentity),
+    evidenceBefore: s1aClone(evidenceIdentity), evidenceAfter: s1aClone(evidenceIdentity),
+    attempts: {
+      attemptCountBefore: attemptState.attemptCount, attemptCountAfter: attemptState.attemptCount,
+      attemptLimitBefore: attemptState.attemptLimit, attemptLimitAfter: attemptState.attemptLimit,
+      productCorrectionAttemptsBefore: attemptState.productCorrectionAttempts,
+      productCorrectionAttemptsAfter: attemptState.productCorrectionAttempts,
+      productCorrectionLimitBefore: attemptState.productCorrectionLimit,
+      productCorrectionLimitAfter: attemptState.productCorrectionLimit,
+      budgetConsumedBefore: attemptState.budgetConsumed, budgetConsumedAfter: attemptState.budgetConsumed,
+      budgetLimitBefore: attemptState.budgetLimit, budgetLimitAfter: attemptState.budgetLimit,
+      reset: false
+    },
+    replacementAuthority: null,
+    durableFailedCandidates: []
+  };
+}
+function s1aContinuationPolicyViolations(policy) {
+  const rule = policy && policy.boundedContinuation ? policy.boundedContinuation : {};
+  const oracle = S1A_ORACLE_BOUNDED_CONTINUATION_POLICY;
+  const failures = [];
+  const push = (id) => { if (!failures.includes(id)) failures.push(id); };
+  const requiredConditions = Array.isArray(rule.requiredConditions) ? rule.requiredConditions : [];
+  if (!s1aSame(rule.eligiblePrimaryOwners, oracle.eligiblePrimaryOwners) ||
+      !s1aSame(rule.excludedAutonomousOwners, oracle.excludedAutonomousOwners) ||
+      rule.productSemanticsRequired !== oracle.productSemanticsRequired) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.OWNER_PRODUCT);
+  }
+  if (!s1aSame(rule.episodeAuthority, oracle.episodeAuthority) ||
+      !s1aSame(rule.acceptedBoundaryBinding, oracle.acceptedBoundaryBinding) ||
+      !requiredConditions.includes('SAME_ROOT_TRUST_AUTHORITY_SCOPE') ||
+      !requiredConditions.includes('SAME_ASSURANCE_FLOOR_AND_EVIDENCE_BOUNDARY')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.EPISODE_SCOPE);
+  }
+  if (!s1aSame(rule.acceptedAuthorityBinding, oracle.acceptedAuthorityBinding) ||
+      !requiredConditions.includes('ACCEPTED_EPISODE_AUTHORITY_READBACK')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.AUTHORITY_READBACK);
+  }
+  if (!s1aSame(rule.currentStateReadback, oracle.currentStateReadback) ||
+      !requiredConditions.includes('AUTHORITATIVE_CURRENT_STATE_READBACK')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.CURRENT_STATE);
+  }
+  if (!s1aSame(rule.effectReconciliation, oracle.effectReconciliation) ||
+      !requiredConditions.includes('RECONCILED_EFFECTS')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.EFFECTS);
+  }
+  const pathProgressPolicy = {
+    requiredFields: rule.faithfulPathInventory && rule.faithfulPathInventory.requiredFields,
+    requiresRemainingFaithfulPath: rule.faithfulPathInventory && rule.faithfulPathInventory.requiresRemainingFaithfulPath
+  };
+  const oraclePathProgressPolicy = {
+    requiredFields: oracle.faithfulPathInventory.requiredFields,
+    requiresRemainingFaithfulPath: oracle.faithfulPathInventory.requiresRemainingFaithfulPath
+  };
+  if (!s1aSame(pathProgressPolicy, oraclePathProgressPolicy) ||
+      !s1aSame(rule.equivalenceFields, oracle.equivalenceFields) ||
+      !s1aSame(rule.equivalenceIgnoresLabels, oracle.equivalenceIgnoresLabels) ||
+      !requiredConditions.includes('FAITHFUL_PATH_REMAINS') ||
+      !requiredConditions.includes('NO_EQUIVALENT_NO_PROGRESS_REPEAT')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.PATH_PROGRESS);
+  }
+  const pathUsabilityPolicy = {
+    pathFields: rule.faithfulPathInventory && rule.faithfulPathInventory.pathFields,
+    pathInventoryDigestBoundToCurrentState: rule.faithfulPathInventory &&
+      rule.faithfulPathInventory.pathInventoryDigestBoundToCurrentState
+  };
+  const oraclePathUsabilityPolicy = {
+    pathFields: oracle.faithfulPathInventory.pathFields,
+    pathInventoryDigestBoundToCurrentState: oracle.faithfulPathInventory.pathInventoryDigestBoundToCurrentState
+  };
+  if (!s1aSame(pathUsabilityPolicy, oraclePathUsabilityPolicy) ||
+      !requiredConditions.includes('FAITHFUL_PATH_HAS_BOUND_EVIDENCE')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.PATH_USABILITY);
+  }
+  const attemptCore = { ...(rule.attemptAndBudget || {}) };
+  const oracleAttemptCore = { ...oracle.attemptAndBudget };
+  const limitKeys = ['attemptCountMayExceedLimit', 'productCorrectionsMayExceedLimit',
+    'budgetConsumedMayExceedLimit', 'overLimitResult'];
+  for (const key of limitKeys) {
+    delete attemptCore[key];
+    delete oracleAttemptCore[key];
+  }
+  if (rule.candidateTransition !== oracle.candidateTransition ||
+      rule.evidenceTransition !== oracle.evidenceTransition ||
+      !s1aSame(attemptCore, oracleAttemptCore) ||
+      !requiredConditions.includes('EXACT_CANDIDATE_AND_EVIDENCE_IDENTITY') ||
+      !requiredConditions.includes('NO_ATTEMPT_OR_BUDGET_RESET')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.IDENTITY_BUDGET);
+  }
+  const attemptLimitPolicy = Object.fromEntries(limitKeys.map((key) => [key,
+    rule.attemptAndBudget && rule.attemptAndBudget[key]]));
+  const oracleAttemptLimitPolicy = Object.fromEntries(limitKeys.map((key) => [key,
+    oracle.attemptAndBudget[key]]));
+  if (!s1aSame(attemptLimitPolicy, oracleAttemptLimitPolicy) ||
+      !requiredConditions.includes('CONSUMPTION_WITHIN_ACCEPTED_LIMITS')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.LIMITS);
+  }
+  if (!s1aSame(rule.hostedReplacementCandidate, oracle.hostedReplacementCandidate)) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT);
+  }
+  return failures;
+}
+function s1aEquivalentContinuationFailure(left, right, equivalenceFields) {
+  return equivalenceFields.every((field) => s1aSame(left && left[field], right && right[field]));
+}
+
+function s1aReplacementAuthorityIsValid(input, episode) {
+  const authority = input.replacementAuthority;
+  const fields = [
+    'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'authorityReference',
+    'episodeId', 'episodeKind', 'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId',
+    'assuranceFloorId', 'evidenceBoundaryId', 'primaryOwner', 'failedCandidateIdentity',
+    'failedEvidenceIdentity', 'replacementCandidateIdentity', 'revalidationBoundaryId',
+    'correctionMechanism', 'productCorrectionAttemptsBefore', 'productCorrectionAttemptsAfter',
+    'budgetReset', 'digest'
+  ];
+  if (!s1aHasExactKeys(authority, fields) ||
+      authority.source !== 'CURRENT_OWNER_WEB_HOSTED_RECLOSURE_AUTHORITY' ||
+      authority.authoritative !== true || authority.current !== true || authority.readBack !== true ||
+      authority.explicitWebBound !== true || authority.authorityReference !== 'authority:hosted-reclosure:7' ||
+      authority.episodeId !== episode.episodeId || authority.episodeKind !== 'G3_RUN_LOCK' ||
+      input.episodeAuthority.episodeKind !== 'G3_RUN_LOCK' ||
+      !S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.hostedReplacementCandidate.allowedPrimaryOwners.includes(input.primaryOwner) ||
+      authority.primaryOwner !== input.primaryOwner ||
+      authority.rootFamilyId !== episode.rootFamilyId ||
+      authority.acceptedContractId !== episode.acceptedContractId ||
+      authority.trustModelId !== episode.trustModelId || authority.scopeId !== episode.scopeId ||
+      authority.assuranceFloorId !== episode.assuranceFloorId ||
+      authority.evidenceBoundaryId !== episode.evidenceBoundaryId ||
+      !s1aSame(authority.failedCandidateIdentity, input.candidateBefore) ||
+      !s1aSame(authority.failedEvidenceIdentity, input.evidenceBefore) ||
+      !s1aSame(authority.replacementCandidateIdentity, input.candidateAfter) ||
+      authority.revalidationBoundaryId !== episode.evidenceBoundaryId ||
+      !['HARNESS_VALIDATION', 'TOOLKIT_VALIDATION', 'ENVIRONMENT_VALIDATION'].includes(authority.correctionMechanism) ||
+      authority.productCorrectionAttemptsBefore !== input.attempts.productCorrectionAttemptsBefore ||
+      authority.productCorrectionAttemptsAfter !== input.attempts.productCorrectionAttemptsAfter ||
+      authority.productCorrectionAttemptsBefore !== authority.productCorrectionAttemptsAfter ||
+      authority.budgetReset !== false || authority.digest !== s1aHashWithoutField(authority, 'digest')) return false;
+  const oldEvidencePreserved = Array.isArray(input.durableFailedCandidates) &&
+    input.durableFailedCandidates.some((row) => row.immutable === true && row.preserved === true &&
+      s1aSame(row.candidateIdentity, input.candidateBefore) && s1aSame(row.evidenceIdentity, input.evidenceBefore));
+  const newIdentity = input.candidateAfter &&
+    typeof input.candidateAfter.commit === 'string' && typeof input.candidateAfter.tree === 'string' &&
+    !s1aSame(input.candidateAfter, input.candidateBefore);
+  return oldEvidencePreserved && newIdentity && input.replacementCandidateImmutable === true &&
+    input.evidenceAfter && s1aSame(input.evidenceAfter.candidateIdentity, input.candidateAfter) &&
+    input.attempts.productCorrectionAttemptsAfter === input.attempts.productCorrectionAttemptsBefore &&
+    input.attempts.budgetConsumedAfter >= input.attempts.budgetConsumedBefore &&
+    input.attempts.budgetLimitAfter <= input.attempts.budgetLimitBefore && input.attempts.reset === false;
+}
+
+function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_TOOLKIT') {
+  const failures = s1aContinuationPolicyViolations(policy);
+  const push = (id) => { if (!failures.includes(id)) failures.push(id); };
+  const rule = S1A_ORACLE_BOUNDED_CONTINUATION_POLICY;
+  const episode = input && input.episodeAuthority;
+  const requestedBoundary = input && input.requestedBoundary;
+  const acceptedBoundary = input && input.acceptedBoundary;
+  const owner = input && input.primaryOwner;
+  if (!rule.eligiblePrimaryOwners.includes(owner) || rule.excludedAutonomousOwners.includes(owner)) {
+    push('CONTINUATION_PRIMARY_OWNER_NOT_ELIGIBLE');
+  }
+  if (!input || input.PRODUCT_SEMANTICS_PROVEN_BAD !== 'NO') {
+    push('CONTINUATION_PRODUCT_CORRECTION_NOT_AUTHORISED');
+  }
+  const independentlyAcceptedAuthority = s1aExpectedContinuationEpisodeAuthority(expectedScenario);
+  const acceptedState = s1aExpectedContinuationStateReadback(expectedScenario);
+  const episodeKindAccepted = episode && typeof episode.episodeKind === 'string' &&
+    episode.episodeKind.trim().length > 0 && episode.explicitWebBound === true &&
+    Boolean(independentlyAcceptedAuthority);
+  const episodeValid = s1aHasExactKeys(episode, S1A_ORACLE_CONTINUATION_EPISODE_FIELDS) &&
+    episode.source === S1A_ORACLE_CONTINUATION_AUTHORITY_SOURCE &&
+    episode.authoritative === true && episode.current === true && episode.readBack === true &&
+    episodeKindAccepted && episode.primaryOwner === owner &&
+    s1aSame(episode, independentlyAcceptedAuthority) &&
+    typeof episode.episodeId === 'string' && episode.episodeId.length > 0 &&
+    typeof episode.authorityReference === 'string' && episode.authorityReference.length > 0 &&
+    episode.digest === s1aHashWithoutField(episode, 'digest');
+  const acceptedBoundaryFields = rule.acceptedBoundaryBinding.requiredFields;
+  const acceptedBoundaryBound = s1aHasExactKeys(acceptedBoundary, acceptedBoundaryFields) &&
+    s1aSame(acceptedBoundary, S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY) &&
+    rule.acceptedBoundaryBinding.episodeFields.every((field) =>
+      s1aSame(acceptedBoundary[field], episode && episode[field]));
+  if (!episodeValid || !acceptedBoundaryBound ||
+      !s1aHasExactKeys(requestedBoundary, S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS) ||
+      !S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS.every((field) =>
+        s1aSame(requestedBoundary && requestedBoundary[field], episode && episode[field]))) {
+    push('CONTINUATION_AUTHORITY_SCOPE_BOUNDARY');
+  }
+  const stateRule = rule.currentStateReadback;
+  const stateReadback = input && input[stateRule.inputField];
+  const acceptedAuthorityReadback = stateReadback && stateReadback.acceptedEpisodeAuthority;
+  if (!independentlyAcceptedAuthority ||
+      !s1aSame(episode, independentlyAcceptedAuthority) ||
+      !s1aSame(acceptedAuthorityReadback, independentlyAcceptedAuthority) ||
+      owner !== independentlyAcceptedAuthority.primaryOwner) {
+    push('CONTINUATION_ACCEPTED_AUTHORITY_READBACK');
+  }
+  const stateReadbackValid = Boolean(acceptedState) &&
+    s1aHasExactKeys(stateReadback, stateRule.requiredFields) &&
+    stateReadback.source === stateRule.source && stateReadback.authoritative === true &&
+    stateReadback.current === true && stateReadback.complete === true && stateReadback.readBack === true &&
+    stateReadback.digest === s1aHashWithoutField(stateReadback, 'digest') &&
+    s1aSame(stateReadback, acceptedState);
+  if (!stateReadbackValid) push('CONTINUATION_CURRENT_STATE_READBACK');
+  const historyComplete = Array.isArray(input && input.history) && input.history.length > 0 &&
+    Array.isArray(stateReadback && stateReadback.history) &&
+    s1aSame(input.history, stateReadback.history) && s1aSame(stateReadback.history, acceptedState.history);
+  if (!historyComplete) push('CONTINUATION_HISTORY_INCOMPLETE');
+  const identityBeforeMatches = s1aSame(input && input.candidateBefore, acceptedState.candidateIdentity) &&
+    s1aSame(input && input.evidenceBefore, acceptedState.evidenceIdentity) &&
+    s1aSame(input && input.evidenceBefore && input.evidenceBefore.candidateIdentity,
+      acceptedState.candidateIdentity) &&
+    s1aSame(input && input.currentFailureSignature, acceptedState.currentFailureSignature) &&
+    s1aSame(episode && episode.episodeId, acceptedState.episodeId);
+  if (!identityBeforeMatches) push('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY');
+  const attempts = input && input.attempts;
+  const attemptStateMatches = stateRule.attemptFields.every((field) =>
+    attempts && Number.isSafeInteger(attempts[field + 'Before']) &&
+    attempts[field + 'Before'] === acceptedState.attemptState[field]);
+  if (!attemptStateMatches) push('CONTINUATION_ATTEMPT_BUDGET_RESET');
+  const effects = input && input.effectReconciliation;
+  const effectFields = rule.effectReconciliation.requiredFields;
+  if (!s1aHasExactKeys(effects, effectFields) ||
+      effects.source !== S1A_ORACLE_CONTINUATION_EFFECT_SOURCE ||
+      effects.authoritative !== true || effects.current !== true || effects.complete !== true ||
+      effects.readBack !== true || !Array.isArray(effects.effects) ||
+      effects.effects.some((effect) => !effect || typeof effect.effectId !== 'string' ||
+        effect.state !== rule.effectReconciliation.acceptedEffectState ||
+        typeof effect.evidenceRef !== 'string' || effect.evidenceRef.length === 0) ||
+      effects.digest !== s1aCanonicalContinuationEffects(effects).digest ||
+      !acceptedState || !s1aSame(s1aCanonicalContinuationEffects(effects),
+        acceptedState[rule.effectReconciliation.independentReadbackField])) {
+    push('CONTINUATION_EFFECTS_UNRECONCILED');
+  }
+  const paths = input && input.faithfulPathInventory;
+  const pathFields = rule.faithfulPathInventory.requiredFields;
+  const pathRecordFields = rule.faithfulPathInventory.pathFields;
+  const pathHasBoundIdentityEvidence = paths && Array.isArray(paths.paths) && paths.paths.some((path) =>
+    s1aHasExactKeys(path, pathRecordFields) &&
+    typeof path.pathId === 'string' && path.pathId.trim().length > 0 &&
+    typeof path.actualPath === 'string' && path.actualPath.trim().length > 0 &&
+    typeof path.evidenceRef === 'string' && path.evidenceRef.trim().length > 0 &&
+    path.evidenceBoundaryId === (episode && episode.evidenceBoundaryId) &&
+    s1aSame(path.candidateIdentity, input.candidateBefore));
+  const pathRemains = pathHasBoundIdentityEvidence && paths.paths.some((path) =>
+    path.faithful === true && path.available === true);
+  const inventoryDigestBound = Boolean(acceptedState) &&
+    paths && paths.digest === acceptedState.faithfulPathInventoryDigest;
+  if (!pathHasBoundIdentityEvidence || !inventoryDigestBound) {
+    push('CONTINUATION_FAITHFUL_PATH_USABILITY');
+  }
+  if (!s1aHasExactKeys(paths, pathFields) ||
+      paths.source !== S1A_ORACLE_CONTINUATION_PATH_SOURCE ||
+      paths.authoritative !== true || paths.current !== true || paths.complete !== true ||
+      paths.readBack !== true || !pathRemains || !inventoryDigestBound ||
+      paths.digest !== s1aHashWithoutField(paths, 'digest')) {
+    push('CONTINUATION_FAITHFUL_PATH_EXHAUSTED');
+  }  const currentSignature = input && input.currentFailureSignature;
+  const equivalentNoProgress = Array.isArray(input && input.history) && input.history.some((entry) =>
+    entry && entry.outcome === 'NO_PROGRESS' &&
+    s1aEquivalentContinuationFailure(currentSignature, entry.signature, rule.equivalenceFields));
+  if (!currentSignature || equivalentNoProgress) push('CONTINUATION_EQUIVALENT_NO_PROGRESS');
+  if (!episode || !currentSignature ||
+      currentSignature.rootFamilyId !== episode.rootFamilyId || currentSignature.primaryOwner !== owner ||
+      currentSignature.evidenceBoundaryId !== episode.evidenceBoundaryId) {
+    push('CONTINUATION_ROOT_TRUST_SCOPE_MISMATCH');
+  }
+  const candidateAndEvidenceSame = input && input.mode === 'IDENTITY_PRESERVING' &&
+    s1aSame(input.candidateBefore, input.candidateAfter) &&
+    s1aSame(input.evidenceBefore, input.evidenceAfter) &&
+    s1aSame(input.evidenceBefore && input.evidenceBefore.candidateIdentity, input.candidateBefore) &&
+    identityBeforeMatches;
+  let replacementValid = false;
+  if (input && input.mode === 'HOSTED_VALIDATION_RECLOSURE') {
+    replacementValid = s1aReplacementAuthorityIsValid(input, episode || {});
+    if (!replacementValid) push('CONTINUATION_REPLACEMENT_AUTHORITY');
+  } else if (!candidateAndEvidenceSame) {
+    push('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY');
+  }
+  const counterFields = [
+    'attemptCountBefore', 'attemptCountAfter', 'attemptLimitBefore', 'attemptLimitAfter',
+    'productCorrectionAttemptsBefore', 'productCorrectionAttemptsAfter',
+    'productCorrectionLimitBefore', 'productCorrectionLimitAfter',
+    'budgetConsumedBefore', 'budgetConsumedAfter', 'budgetLimitBefore', 'budgetLimitAfter'
+  ];
+  const counters = attempts && counterFields.every((key) =>
+    Number.isSafeInteger(attempts[key]) && attempts[key] >= 0);
+  const withinAcceptedLimits = counters &&
+    attempts.attemptCountAfter <= attempts.attemptLimitAfter &&
+    attempts.productCorrectionAttemptsAfter <= attempts.productCorrectionLimitAfter &&
+    attempts.budgetConsumedAfter <= attempts.budgetLimitAfter;
+  if (!withinAcceptedLimits) push('CONTINUATION_ATTEMPT_LIMIT_EXCEEDED');
+  const noReset = counters && withinAcceptedLimits && attempts.reset === false &&
+    attempts.attemptCountAfter >= attempts.attemptCountBefore &&
+    attempts.attemptLimitAfter <= attempts.attemptLimitBefore &&
+    attempts.productCorrectionAttemptsAfter === attempts.productCorrectionAttemptsBefore &&
+    attempts.productCorrectionLimitAfter <= attempts.productCorrectionLimitBefore &&
+    attempts.budgetConsumedAfter >= attempts.budgetConsumedBefore &&
+    attempts.budgetLimitAfter <= attempts.budgetLimitBefore &&
+    (input.mode !== 'HOSTED_VALIDATION_RECLOSURE' ||
+      attempts.productCorrectionAttemptsAfter === attempts.productCorrectionAttemptsBefore);
+  if (!noReset) push('CONTINUATION_ATTEMPT_BUDGET_RESET');
+  const attemptEffects = counters ? {
+    attemptsConsumedBefore: attempts.attemptCountBefore,
+    attemptsConsumedAfter: attempts.attemptCountAfter,
+    productCorrectionsBefore: attempts.productCorrectionAttemptsBefore,
+    productCorrectionsAfter: attempts.productCorrectionAttemptsAfter
+  } : null;
+  const budgetEffects = counters ? {
+    budgetConsumedBefore: attempts.budgetConsumedBefore,
+    budgetConsumedAfter: attempts.budgetConsumedAfter,
+    budgetLimitBefore: attempts.budgetLimitBefore,
+    budgetLimitAfter: attempts.budgetLimitAfter
+  } : null;
+  return {
+    admission: failures.length === 0 ? 'ADMIT_BOUNDED_CONTINUATION' : 'RETURN_TO_WEB',
+    ok: failures.length === 0, violatedObligationIds: failures,
+    candidateTransition: replacementValid ? 'CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT' :
+      (candidateAndEvidenceSame ? 'PRESERVE_EXACT_IDENTITY' : 'REJECT_IDENTITY_CHANGE'),
+    evidenceTransition: replacementValid ? 'PRESERVE_FAILED_EVIDENCE_AND_BIND_NEW_REVALIDATION' :
+      (candidateAndEvidenceSame ? 'PRESERVE_EXACT_IDENTITY' : 'REJECT_IDENTITY_CHANGE'),
+    attemptEffects, budgetEffects
+  };
+}
+function observeS1aContinuationSource(source, input, claimedDigest = s1aGovernedHumanPolicyDigest(source), expectedScenario = 'G3_RUN_LOCK_TOOLKIT') {
+  const policy = s1aInterpretPolicyContract(source);
+  const result = evaluateS1aContinuation(policy, input, expectedScenario);
+  result.governedProseDigest = claimedDigest;
+  for (const id of s1aContinuationProseViolations(source)) {
+    if (!result.violatedObligationIds.includes(id)) result.violatedObligationIds.push(id);
+  }
+  result.ok = result.violatedObligationIds.length === 0;
+  result.admission = result.ok ? 'ADMIT_BOUNDED_CONTINUATION' : 'RETURN_TO_WEB';
+  return result;
 }
 
 test('S1-A post-child checkpoint requires canonical identity, current inputs, and terminal blind reports', () => {
@@ -3876,6 +5201,13 @@ test('S1-A post-child checkpoint requires canonical identity, current inputs, an
   const result = evaluateS1aPostChildReview(policy, valid);
   assert.equal(result.ok, true, result.failures.join(','));
   assert.equal(result.frontierEffect, 'DEPENDENT_NEXT_CHILD');
+  assert.ok(valid.trace.indexOf('MERGE_TRIGGERED_CI_STARTED') < valid.trace.indexOf('REVIEW_A_STARTED'));
+  assert.ok(valid.trace.indexOf('REVIEW_B_STARTED') < valid.trace.indexOf('APPLICABLE_CHECKS_TERMINAL'),
+    'reviews can launch while merge CI checks remain pending');
+  for (const event of ['REPORT_A_TERMINAL', 'REPORT_B_TERMINAL', 'TERMINAL_RECEIPTS_TERMINAL',
+    'APPLICABLE_CHECKS_TERMINAL']) {
+    assert.ok(valid.trace.indexOf(event) < valid.trace.indexOf('WEB_ADJUDICATION'), event);
+  }
 
   const completedChild = s1aClone(valid);
   completedChild.childState.lifecycle = 'COMPLETED';
@@ -4000,193 +5332,6 @@ test('S1-A post-child fixed oracle rejects every declared identity and snapshot 
   }
 });
 
-test('S1-A carrier positive control models independently bound execution evidence without executing production', () => {
-  const policy = parseS1aPolicyContract(architecture);
-  const modeledEvidence = makeS1aCarrierFixture();
-  assert.equal(modeledEvidence.acceptedBoundaryEvidence.source,
-    S1A_ORACLE_BOUNDARY_EVIDENCE_SOURCE);
-  assert.equal(modeledEvidence.acceptedBoundaryEvidence.readBack, true);
-  assert.deepEqual(modeledEvidence.acceptedBoundaryEvidence.run.runEvents,
-    S1A_ORACLE_BOUNDARY_RUN_EVENTS);
-  assert.equal(evaluateS1aCarrier(policy, modeledEvidence).ok, true);
-
-  const equivalentOnly = s1aClone(modeledEvidence);
-  delete equivalentOnly.acceptedBoundaryEvidence;
-  delete equivalentOnly.options.LOCAL_DEV.boundaryExecutionReceipt;
-  equivalentOnly.options.LOCAL_DEV.exercisedBoundaryId = policy.faithfulCarrier.acceptedBoundaryId;
-  equivalentOnly.options.LOCAL_DEV.boundaryEvidence = ['self-asserted:equivalent'];
-  assert.equal(evaluateS1aCarrier(policy, equivalentOnly).ok, false);
-  assert.equal(evaluateS1aCarrier(policy, equivalentOnly).selected, 'HOLD');
-
-  const alteredReadback = s1aClone(modeledEvidence);
-  alteredReadback.acceptedBoundaryEvidence.run.outcome = 'BOUNDARY_NOT_EXERCISED';
-  alteredReadback.acceptedBoundaryEvidence.digest = s1aHashWithoutField(
-    alteredReadback.acceptedBoundaryEvidence, 'digest');
-  assert.equal(evaluateS1aCarrier(policy, alteredReadback).ok, false,
-    'a recomputed but non-oracle evidence construction is not accepted');
-});
-
-test('S1-A faithful carrier prefers local and existing authorised paths and requires bound evidence', () => {
-  const policy = parseS1aPolicyContract(architecture);
-  const localAndExisting = makeS1aCarrierFixture();
-  localAndExisting.options.AUTHORIZED_EXISTING_OWNER = {
-    available: true, authorized: true, ownerAuthorized: true, claimedEquivalent: true,
-    boundaryExecutionReceipt: s1aClone(localAndExisting.acceptedBoundaryEvidence.receipt)
-  };
-  assert.deepEqual(evaluateS1aCarrier(policy, localAndExisting), {
-    ok: true, selected: 'LOCAL_DEV', exposure: 'PRIVATE_NONPUBLIC', failures: []
-  });
-
-  const existingBeforeNew = makeS1aCarrierFixture();
-  existingBeforeNew.options.LOCAL_DEV.available = false;
-  delete existingBeforeNew.options.LOCAL_DEV.boundaryExecutionReceipt;
-  existingBeforeNew.options.AUTHORIZED_EXISTING_OWNER = {
-    available: true, authorized: true, ownerAuthorized: true, claimedEquivalent: true,
-    boundaryExecutionReceipt: s1aClone(existingBeforeNew.acceptedBoundaryEvidence.receipt)
-  };
-  existingBeforeNew.options.NEW_OWNER_PROVISIONED = {
-    available: true, authorized: true, ownerAuthorized: true, ownerProvisioned: true, claimedEquivalent: true
-  };
-  setS1aCarrierEvidence(existingBeforeNew, 'AUTHORIZED_EXISTING_OWNER');
-  assert.equal(evaluateS1aCarrier(policy, existingBeforeNew).selected,
-    'AUTHORIZED_EXISTING_OWNER');
-
-  const replayedReceipt = makeS1aCarrierFixture();
-  replayedReceipt.options.LOCAL_DEV.available = false;
-  replayedReceipt.options.AUTHORIZED_EXISTING_OWNER = {
-    available: true, authorized: true, ownerAuthorized: true, claimedEquivalent: true,
-    boundaryExecutionReceipt: s1aClone(replayedReceipt.acceptedBoundaryEvidence.receipt)
-  };
-  const replay = evaluateS1aCarrier(policy, replayedReceipt);
-  assert.equal(replay.ok, false, 'a LOCAL_DEV receipt cannot qualify another carrier');
-  assert.equal(replay.selected, 'HOLD');
-
-  const newOwner = makeS1aCarrierFixture();
-  newOwner.options.LOCAL_DEV.available = false;
-  newOwner.options.NEW_OWNER_PROVISIONED = {
-    available: true, authorized: true, ownerAuthorized: true, ownerProvisioned: true, claimedEquivalent: true
-  };
-  setS1aCarrierEvidence(newOwner, 'NEW_OWNER_PROVISIONED');
-  assert.equal(evaluateS1aCarrier(policy, newOwner).selected, 'NEW_OWNER_PROVISIONED');
-
-  const equivalentClaimOnly = makeS1aCarrierFixture();
-  delete equivalentClaimOnly.acceptedBoundaryEvidence;
-  delete equivalentClaimOnly.options.LOCAL_DEV.boundaryExecutionReceipt;
-  const claimed = evaluateS1aCarrier(policy, equivalentClaimOnly);
-  assert.equal(claimed.ok, false);
-  assert.equal(claimed.selected, 'HOLD');
-
-  const selfDeclaredBoundary = makeS1aCarrierFixture();
-  delete selfDeclaredBoundary.acceptedBoundaryEvidence;
-  delete selfDeclaredBoundary.options.LOCAL_DEV.boundaryExecutionReceipt;
-  selfDeclaredBoundary.options.LOCAL_DEV.exercisedBoundaryId =
-    policy.faithfulCarrier.acceptedBoundaryId;
-  selfDeclaredBoundary.options.LOCAL_DEV.boundaryEvidence = ['self-asserted:boundary'];
-  const selfDeclared = evaluateS1aCarrier(policy, selfDeclaredBoundary);
-  assert.equal(selfDeclared.ok, false);
-  assert.equal(selfDeclared.selected, 'HOLD');
-
-  for (const field of ['receiptId', 'acceptedCriterion', 'candidateIdentity', 'boundaryId',
-    'executionPath', 'outcome', 'terminal', 'evidenceRef', 'runId', 'runEvents',
-    'executionEvidenceDigest', 'receiptDigest']) {
-    const altered = makeS1aCarrierFixture();
-    const receipt = s1aClone(altered.options.LOCAL_DEV.boundaryExecutionReceipt);
-    if (field === 'receiptDigest') {
-      receipt.receiptDigest = 'sha256:altered';
-    } else {
-      delete receipt.receiptDigest;
-      if (field === 'candidateIdentity') receipt.candidateIdentity.tree = 'carrier:wrong-tree';
-      else if (field === 'terminal') receipt.terminal = false;
-      else receipt[field] = 'altered:' + field;
-      receipt.receiptDigest = s1aHashRecord(receipt);
-    }
-    altered.options.LOCAL_DEV.boundaryExecutionReceipt = receipt;
-    assert.equal(evaluateS1aCarrier(policy, altered).ok, false,
-      'carrier evidence binding rejects ' + field);
-  }
-
-  const persistedPrivate = evaluateS1aCarrier(policy, makeS1aCarrierFixture());
-  assert.equal(persistedPrivate.ok, true);
-  assert.equal(persistedPrivate.exposure, 'PRIVATE_NONPUBLIC');
-
-  const unavailable = makeS1aCarrierFixture();
-  for (const option of Object.values(unavailable.options)) option.available = false;
-  const hold = evaluateS1aCarrier(policy, unavailable);
-  assert.equal(hold.ok, false);
-  assert.equal(hold.selected, 'HOLD');
-
-  const publicCarrier = makeS1aAuthorizedPublicCarrierFixture();
-  assert.equal(evaluateS1aCarrier(policy, publicCarrier).ok, true);
-
-  const missingCleanup = s1aClone(publicCarrier);
-  delete missingCleanup.exposureAuthority.cleanup;
-  assert.equal(evaluateS1aCarrier(policy, missingCleanup).ok, false);
-
-  const sameDnsAuthority = s1aClone(publicCarrier);
-  sameDnsAuthority.dnsAuthority.authorityReference =
-    sameDnsAuthority.exposureAuthority.authorityReference;
-  assert.equal(evaluateS1aCarrier(policy, sameDnsAuthority).ok, false);
-
-  const callerFlagBypass = s1aClone(publicCarrier);
-  callerFlagBypass.domainDnsRequired = false;
-  delete callerFlagBypass.domainAuthority;
-  delete callerFlagBypass.dnsAuthority;
-  assert.equal(evaluateS1aCarrier(policy, callerFlagBypass).ok, false,
-    "caller flags cannot waive operations required by the current authority readback");
-
-  const combinedGrant = s1aClone(publicCarrier);
-  combinedGrant.dnsAuthority = s1aClone(combinedGrant.domainAuthority);
-  assert.equal(evaluateS1aCarrier(policy, combinedGrant).ok, false,
-    'one combined domain/DNS authority cannot substitute for distinct grants');
-
-  const staleExposureAuthority = s1aClone(publicCarrier);
-  staleExposureAuthority.exposureAuthority.current = false;
-  staleExposureAuthority.exposureAuthority.digest =
-    s1aHashWithoutField(staleExposureAuthority.exposureAuthority, 'digest');
-  assert.equal(evaluateS1aCarrier(policy, staleExposureAuthority).ok, false);
-});
-test('S1-A carrier source mutations fail fixed boundary, ordering, privacy, and authority outcomes', () => {
-  const claimOnly = makeS1aCarrierFixture();
-  delete claimOnly.acceptedBoundaryEvidence;
-  delete claimOnly.options.LOCAL_DEV.boundaryExecutionReceipt;
-  claimOnly.options.LOCAL_DEV.exercisedBoundaryId = 'ACCEPTED_PRODUCTION_BOUNDARY';
-  claimOnly.options.LOCAL_DEV.boundaryEvidence = ['self-asserted:boundary'];
-  const weakenedBoundary = rewriteS1aPolicy(architecture, (policy) => {
-    policy.faithfulCarrier.faithfulnessRule = 'CLAIMED_EQUIVALENCE';
-  });
-  const faithfulProse = 'A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest. Source-policy regression fixtures may model such a verified receipt but do not execute or qualify a carrier. Caller-supplied labels, hashes, mocks, fixtures or indirect observations do not establish runtime boundary exercise. If no such evidence is available within authority, report incomplete evidence or a typed HOLD.';
-  const weakenedProse = 'A carrier may be faithful when its shape is equivalent to the accepted path without independently bound terminal execution evidence. If no such evidence is available within authority, report incomplete evidence or a typed HOLD.';
-  s1aRequire(weakenedBoundary.includes(faithfulProse), 'missing exercised-boundary prose for coherent weakening');
-  const bothWeakened = weakenedBoundary.replace(faithfulProse, weakenedProse);
-  assert.throws(() => parseS1aPolicyContract(bothWeakened),
-    /carrier faithfulness must require observed accepted-boundary exercise/);
-  assert.equal(evaluateS1aCarrier(parseS1aPolicyContract(architecture), claimOnly).ok, false,
-    'equivalence without independently bound execution evidence must fail');
-  const reordered = rewriteS1aPolicy(architecture, (policy) => {
-    policy.faithfulCarrier.selectionOrder = [
-      'AUTHORIZED_EXISTING_OWNER', 'LOCAL_DEV', 'NEW_OWNER_PROVISIONED'
-    ];
-  });
-  assert.throws(() => parseS1aPolicyContract(reordered),
-    /carrier selection order is incomplete/);
-  const missingCleanup = rewriteS1aPolicy(architecture, (policy) => {
-    policy.faithfulCarrier.publicExposureRequires =
-      policy.faithfulCarrier.publicExposureRequires.filter((field) => field !== 'CLEANUP');
-  });
-  assert.throws(() => parseS1aPolicyContract(missingCleanup),
-    /public exposure authority requirements are incomplete/);
-
-  const mergedDomainAuthority = rewriteS1aPolicy(architecture, (policy) => {
-    policy.faithfulCarrier.domainDnsRequiresSeparateAuthority = false;
-  });
-  assert.throws(() => parseS1aPolicyContract(mergedDomainAuthority),
-    /domain\/DNS authority and private-persistence semantics are incomplete/);
-  const exposedPersistence = rewriteS1aPolicy(architecture, (policy) => {
-    policy.faithfulCarrier.persistenceImpliesExposure = true;
-  });
-  assert.throws(() => parseS1aPolicyContract(exposedPersistence),
-    /domain\/DNS authority and private-persistence semantics are incomplete/);
-});
 test('S1-A policy source sensitivity rejects weakened blocker effects', () => {
   const weakened = rewriteS1aPolicy(architecture, (policy) => {
     policy.blocker.allowedEffects = policy.blocker.allowedEffects.filter((effect) =>
@@ -4263,14 +5408,14 @@ test('S1-A source prose rejects polarity, appended contradiction, and coherent m
   const carrierPolarity = architecture.replace(faithfulClause,
     'A carrier is faithful when its shape is equivalent without a terminal execution receipt.');
   assert.throws(() => parseS1aPolicyContract(carrierPolarity),
-    /carrier prose must require independently bound boundary evidence/);
+    /carrier prose must preserve inventory, execution, exposure, DNS\/domain and privacy semantics/);
 
   const carrierContradiction = architecture.replace(
     '### G1 re-convergence',
     'Contradiction: faithful by shape equivalence without a terminal execution receipt.\n\n### G1 re-convergence'
   );
   assert.throws(() => parseS1aPolicyContract(carrierContradiction),
-    /carrier prose must require independently bound boundary evidence/);
+    /carrier prose must preserve inventory, execution, exposure, DNS\/domain and privacy semantics/);
 });
 test('S1-A current-law review names current semantics and retains technical schema versions', () => {
   const section = s1aSection(architecture, '### Post-child integrated dual review');
@@ -4279,4 +5424,540 @@ test('S1-A current-law review names current semantics and retains technical sche
   assert.doesNotMatch(section, /\bV2\b|super-audit/i);
   assert.match(controller, /stack-registry-v2\.json/);
   assert.equal(registry.schema, 'toolkit.controller.stack-registry.v2');
+});
+
+function rewriteS1aPolicyForObserver(source, mutate) {
+  const match=/~~~s1a-policy-contract-v1\r?\n([\s\S]*?)\r?\n~~~/.exec(source);
+  if(!match)throw new Error('missing observer policy');
+  const policy=JSON.parse(match[1]);mutate(policy);
+  return source.replace(match[0],'~~~s1a-policy-contract-v1\n'+JSON.stringify(policy,null,2)+'\n~~~');
+}
+function appendS1aContradiction(source,heading,text) {
+  const start=source.indexOf(heading),end=source.indexOf('\n',start);
+  if(start<0||end<0)throw new Error('missing contradiction heading '+heading);
+  return source.slice(0,end+1)+'\n'+text+'\n'+source.slice(end+1);
+}
+function replaceS1aSourceClause(source,from,to) {
+  if(!source.includes(from))throw new Error('missing source clause '+from);
+  return source.replace(from,to);
+}
+function observeS1aContinuation(source,input) {
+  return observeS1aContinuationSource(source,input);
+}
+function observeS1aOtherAcceptedWebContinuation(source,input) {
+  return observeS1aContinuationSource(source,input,s1aGovernedHumanPolicyDigest(source),
+    'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT');
+}
+function observeS1aCarrierAcceptedWebContinuation(source,input) {
+  return observeS1aContinuationSource(source,input,s1aGovernedHumanPolicyDigest(source),
+    'OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY');
+}
+function observeS1aCarrier(source,input) {
+  return observeS1aCarrierSource(source,input,s1aGovernedHumanPolicyDigest(source));
+}
+function s1aObservedViolations(result) { return result.violatedObligationIds||result.failures||[]; }
+function assertS1aSixControlClasses(relation,positive,controls) {
+  const check=(name,result,expected,obligation)=>{
+    assert.equal(result.ok,expected,relation+'/'+name+' outcome');
+    const ids=s1aObservedViolations(result);
+    if(expected)assert.deepEqual(ids,[],relation+'/'+name+' stays green');
+    else {
+      assert.ok(ids.includes(obligation),relation+'/'+name+' missed '+obligation+': '+ids.join(','));
+      assert.doesNotMatch(ids.join('|'),/PARSER|HASH|DIGEST/i,relation+'/'+name+' used unrelated failure');
+      if(name==='coherent') {
+        assert.equal(typeof result.governedProseDigest,'string',relation+'/coherent must report the rebound prose digest');
+        assert.notEqual(result.governedProseDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256,
+          relation+'/coherent must independently rebind changed prose');
+      }
+    }
+  };
+  check('positive',positive(),true);
+  assert.deepEqual(Object.keys(controls).sort(),['coherent','contradiction','equivalent','polarity','removal'].sort());
+  for(const name of ['removal','polarity','contradiction','equivalent','coherent']) {
+    const item=controls[name];check(name,item.run(),item.ok,item.obligation);
+  }
+}
+function makeS1aHostedReplacementContinuationFixture(owner='TOOLKIT') {
+  const input=makeS1aContinuationFixture({owner});input.mode='HOSTED_VALIDATION_RECLOSURE';
+  input.candidateAfter={commit:'continuation:replacement-commit-5',tree:'continuation:replacement-tree-5'};
+  const evidence={evidenceId:'evidence:continuation-revalidation-5',
+    candidateIdentity:s1aClone(input.candidateAfter),revalidationBoundaryId:input.episodeAuthority.evidenceBoundaryId};
+  input.evidenceAfter={...evidence,digest:s1aHashRecord(evidence)};
+  input.replacementCandidateImmutable=true;
+  input.durableFailedCandidates=[{immutable:true,preserved:true,candidateIdentity:s1aClone(input.candidateBefore),
+    evidenceIdentity:s1aClone(input.evidenceBefore)}];
+  input.replacementAuthority=s1aSignedReadback({
+    source:'CURRENT_OWNER_WEB_HOSTED_RECLOSURE_AUTHORITY',authoritative:true,current:true,readBack:true,
+    explicitWebBound:true,authorityReference:'authority:hosted-reclosure:7',
+    episodeId:input.episodeAuthority.episodeId,episodeKind:input.episodeAuthority.episodeKind,
+    rootFamilyId:input.episodeAuthority.rootFamilyId,acceptedContractId:input.episodeAuthority.acceptedContractId,
+    trustModelId:input.episodeAuthority.trustModelId,scopeId:input.episodeAuthority.scopeId,
+    assuranceFloorId:input.episodeAuthority.assuranceFloorId,evidenceBoundaryId:input.episodeAuthority.evidenceBoundaryId,
+    primaryOwner:owner,failedCandidateIdentity:s1aClone(input.candidateBefore),
+    failedEvidenceIdentity:s1aClone(input.evidenceBefore),replacementCandidateIdentity:s1aClone(input.candidateAfter),
+    revalidationBoundaryId:input.episodeAuthority.evidenceBoundaryId,correctionMechanism:'TOOLKIT_VALIDATION',
+    productCorrectionAttemptsBefore:input.attempts.productCorrectionAttemptsBefore,
+    productCorrectionAttemptsAfter:input.attempts.productCorrectionAttemptsAfter,budgetReset:false
+  });
+  return input;
+}
+
+test('S1-A continuation owner/product boundary six-control matrix',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_OWNER_PRODUCT_BOUNDARY',
+    ()=>observeS1aContinuation(architecture,s1aClone(f)),{
+      removal:{ok:false,obligation:'CONTINUATION_OWNER_PRODUCT_BOUNDARY',run:()=>observeS1aContinuation(
+        rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.eligiblePrimaryOwners=
+          p.boundedContinuation.eligiblePrimaryOwners.filter(x=>x!=='TRANSPORT')),s1aClone(f))},
+      polarity:{ok:false,obligation:'CONTINUATION_PRODUCT_CORRECTION_NOT_AUTHORISED',run:()=>{const i=s1aClone(f);
+        i.PRODUCT_SEMANTICS_PROVEN_BAD='YES';return observeS1aContinuation(architecture,i);}},
+      contradiction:{ok:false,obligation:'CONTINUATION_OWNER_PRODUCT_BOUNDARY',run:()=>observeS1aContinuation(
+        appendS1aContradiction(architecture,'### Bounded non-product continuation',
+          'Contradiction: PRODUCT or UNKNOWN may continue autonomously.'),s1aClone(f))},
+      equivalent:{ok:false,obligation:'CONTINUATION_PRIMARY_OWNER_NOT_ELIGIBLE',run:()=>observeS1aContinuation(
+        architecture,makeS1aContinuationFixture({owner:'UNKNOWN'}))},
+      coherent:{ok:false,obligation:'CONTINUATION_OWNER_PRODUCT_BOUNDARY',run:()=>{
+        let s=rewriteS1aPolicyForObserver(architecture,p=>{p.boundedContinuation.eligiblePrimaryOwners.push('PRODUCT');
+          p.boundedContinuation.excludedAutonomousOwners=['UNKNOWN'];});
+        s=replaceS1aSourceClause(s,'PRODUCT or UNKNOWN never grants autonomous continuation',
+          'PRODUCT may continue autonomously and UNKNOWN remains excluded.');
+        return observeS1aContinuation(s,s1aClone(f));}}
+    });
+  for(const owner of ['PRODUCT','UNKNOWN'])assert.ok(observeS1aContinuation(architecture,
+    makeS1aContinuationFixture({owner})).violatedObligationIds.includes('CONTINUATION_PRIMARY_OWNER_NOT_ELIGIBLE'));
+});
+
+test('S1-A continuation episode/scope six-control matrix and general Web-bounded episodes',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_EPISODE_SCOPE_AUTHORITY',
+    ()=>observeS1aContinuation(architecture,s1aClone(f)),{
+      removal:{ok:false,obligation:'CONTINUATION_EPISODE_SCOPE_AUTHORITY',run:()=>observeS1aContinuation(
+        rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.acceptedBoundaryBinding.episodeFields=
+          p.boundedContinuation.acceptedBoundaryBinding.episodeFields.filter(x=>x!=='scopeId')),s1aClone(f))},
+      polarity:{ok:false,obligation:'CONTINUATION_AUTHORITY_SCOPE_BOUNDARY',run:()=>{
+        const i=s1aClone(f);i.acceptedBoundary.scopeId='scope:expanded';
+        i.acceptedBoundary.digest=s1aHashWithoutField(i.acceptedBoundary,'digest');
+        i.episodeAuthority.scopeId='scope:expanded';i.episodeAuthority.digest=s1aHashWithoutField(i.episodeAuthority,'digest');
+        i.requestedBoundary.scopeId='scope:expanded';return observeS1aContinuation(architecture,i);}},
+      contradiction:{ok:false,obligation:'CONTINUATION_EPISODE_SCOPE_AUTHORITY',run:()=>observeS1aContinuation(
+        appendS1aContradiction(architecture,'### Bounded non-product continuation',
+          'Contradiction: the episode may widen root, trust, scope, floor, or evidence boundary.'),s1aClone(f))},
+      equivalent:{ok:true,run:()=>{const generic=makeS1aContinuationFixture({scenario:'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT'});
+        return observeS1aOtherAcceptedWebContinuation(architecture,generic);}},
+      coherent:{ok:false,obligation:'CONTINUATION_EPISODE_SCOPE_AUTHORITY',run:()=>{
+        let s=rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.acceptedBoundaryBinding.mustRemainExact=false);
+        s=replaceS1aSourceClause(s,'The current episode authority, primary owner, semantics, root, trust model, scope, assurance floor and accepted evidence boundary remain exact.',
+          'The current episode may expand its root, trust, scope, floor and evidence boundary.');
+        return observeS1aContinuation(s,s1aClone(f));}}
+    });
+  assert.equal(S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.episodeAuthority.kindBinding,
+    'EXACT_CURRENT_INDEPENDENT_WEB_READBACK');
+  assert.equal(S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.episodeAuthority.anyExplicitWebBoundKindAllowedWhenIndependentlyAccepted,true);
+  const genericEpisode=makeS1aContinuationFixture({scenario:'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT'});
+  assert.equal(observeS1aOtherAcceptedWebContinuation(architecture,genericEpisode).ok,true,'generic accepted Web-bounded episode');
+  const independentlyAcceptedCarrierEpisode=makeS1aContinuationFixture({scenario:'OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY'});
+  assert.equal(observeS1aCarrierAcceptedWebContinuation(architecture,independentlyAcceptedCarrierEpisode).ok,true,
+    'previously unlisted Web-accepted episode and VALIDATION_CARRIER owner');
+  const reboundKnownKind=s1aClone(f);
+  reboundKnownKind.episodeAuthority.episodeKind='OTHER_WEB_BOUNDED_EVIDENCE_EPISODE';
+  reboundKnownKind.episodeAuthority.digest=s1aHashWithoutField(reboundKnownKind.episodeAuthority,'digest');
+  assert.ok(observeS1aContinuation(architecture,reboundKnownKind).violatedObligationIds
+    .includes('CONTINUATION_ACCEPTED_AUTHORITY_READBACK'));
+  for(const field of ['rootFamilyId','acceptedContractId','trustModelId','scopeId','assuranceFloorId','evidenceBoundaryId']){
+    const i=s1aClone(f);i.acceptedBoundary[field]='expanded:'+field;
+    i.acceptedBoundary.digest=s1aHashWithoutField(i.acceptedBoundary,'digest');
+    i.episodeAuthority[field]='expanded:'+field;i.episodeAuthority.digest=s1aHashWithoutField(i.episodeAuthority,'digest');
+    i.requestedBoundary[field]=i.episodeAuthority[field];
+    assert.ok(observeS1aContinuation(architecture,i).violatedObligationIds.includes('CONTINUATION_AUTHORITY_SCOPE_BOUNDARY'),field);
+  }
+});
+
+test('S1-A continuation accepted-authority readback six-control matrix',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_ACCEPTED_AUTHORITY_READBACK',
+    ()=>observeS1aContinuation(architecture,s1aClone(f)),{
+      removal:{ok:false,obligation:'CONTINUATION_ACCEPTED_AUTHORITY_READBACK',run:()=>observeS1aContinuation(
+        rewriteS1aPolicyForObserver(architecture,p=>delete p.boundedContinuation.acceptedAuthorityBinding),
+        s1aClone(f))},
+      polarity:{ok:false,obligation:'CONTINUATION_ACCEPTED_AUTHORITY_READBACK',run:()=>{
+        const i=s1aClone(f);i.primaryOwner='HARNESS';i.episodeAuthority.primaryOwner='HARNESS';
+        i.episodeAuthority.digest=s1aHashWithoutField(i.episodeAuthority,'digest');
+        return observeS1aContinuation(architecture,i);}},
+      contradiction:{ok:false,obligation:'CONTINUATION_ACCEPTED_AUTHORITY_READBACK',run:()=>observeS1aContinuation(
+        appendS1aContradiction(architecture,'### Bounded non-product continuation',
+          'Contradiction: caller-rebound episode authority or owner may replace the accepted Web readback.'),s1aClone(f))},
+      equivalent:{ok:true,run:()=>{const generic=makeS1aContinuationFixture({scenario:'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT'});
+        return observeS1aOtherAcceptedWebContinuation(architecture,generic);}},
+      coherent:{ok:false,obligation:'CONTINUATION_ACCEPTED_AUTHORITY_READBACK',run:()=>{
+        let s=rewriteS1aPolicyForObserver(architecture,p=>
+          p.boundedContinuation.acceptedAuthorityBinding.mustMatchIndependentAcceptedReadback=false);
+        s=replaceS1aSourceClause(s,
+          'The episode kind and primary owner must match the independently accepted current Web authority readback.',
+          'The episode kind and primary owner may be caller-rebound in the current Web authority readback.');
+        const reboundDigest=s1aGovernedHumanPolicyDigest(s);
+        const result=observeS1aContinuationSource(s,s1aClone(f),reboundDigest);
+        assert.equal(result.governedProseDigest,reboundDigest);
+        assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
+        return result;
+      }}
+    });
+  assert.deepEqual(S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.eligiblePrimaryOwners,
+    ['HARNESS','TOOLKIT','ENVIRONMENT','VALIDATION_CARRIER','TRANSPORT']);
+  const reboundOwner=s1aClone(f);reboundOwner.primaryOwner='HARNESS';
+  reboundOwner.episodeAuthority.primaryOwner='HARNESS';
+  reboundOwner.episodeAuthority.digest=s1aHashWithoutField(reboundOwner.episodeAuthority,'digest');
+  assert.ok(observeS1aContinuation(architecture,reboundOwner).violatedObligationIds
+    .includes('CONTINUATION_ACCEPTED_AUTHORITY_READBACK'));
+  const unrecorded=makeS1aContinuationFixture({episodeKind:'UNRECORDED_WEB_EPISODE'});
+  assert.ok(observeS1aContinuation(architecture,unrecorded).violatedObligationIds
+    .includes('CONTINUATION_ACCEPTED_AUTHORITY_READBACK'));
+});
+test('S1-A continuation effects and faithful-path/progress six-control matrices',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_EFFECT_RECONCILIATION',()=>observeS1aContinuation(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CONTINUATION_EFFECTS_UNRECONCILED',run:()=>{const i=s1aClone(f);
+      delete i.effectReconciliation.complete;i.effectReconciliation.digest=s1aHashWithoutField(i.effectReconciliation,'digest');
+      return observeS1aContinuation(architecture,i);}},
+    polarity:{ok:false,obligation:'CONTINUATION_EFFECTS_UNRECONCILED',run:()=>{const i=s1aClone(f);
+      i.effectReconciliation.effects[0].state='UNRECONCILED';
+      i.effectReconciliation.digest=s1aHashWithoutField(i.effectReconciliation,'digest');return observeS1aContinuation(architecture,i);}},
+    contradiction:{ok:false,obligation:'CONTINUATION_EFFECT_RECONCILIATION',run:()=>observeS1aContinuation(
+      appendS1aContradiction(architecture,'### Bounded non-product continuation','Contradiction: unreconciled effects may be ignored.'),s1aClone(f))},
+    equivalent:{ok:true,run:()=>{const i=s1aClone(f);i.effectReconciliation.effects.reverse();
+      i.effectReconciliation.digest=s1aCanonicalContinuationEffects(i.effectReconciliation).digest;
+      return observeS1aContinuation(architecture,i);}},
+    coherent:{ok:false,obligation:'CONTINUATION_EFFECT_RECONCILIATION',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.effectReconciliation.acceptedEffectState='IGNORED');
+      s=replaceS1aSourceClause(s,'Independently reconcile effects and faithful-path inventory; an unreconciled effect or exhausted faithful path returns to Web.',
+        'Effects may be ignored even when their authoritative readback is incomplete.');return observeS1aContinuation(s,s1aClone(f));}}
+  });
+  assertS1aSixControlClasses('CONTINUATION_FAITHFUL_PATH_PROGRESS',()=>observeS1aContinuation(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_PROGRESS',run:()=>observeS1aContinuation(
+      rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.faithfulPathInventory.requiresRemainingFaithfulPath=false),s1aClone(f))},
+    polarity:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_EXHAUSTED',run:()=>{const i=s1aClone(f);
+      i.faithfulPathInventory.paths[0].available=false;
+      i.faithfulPathInventory.digest=s1aHashWithoutField(i.faithfulPathInventory,'digest');return observeS1aContinuation(architecture,i);}},
+    contradiction:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_PROGRESS',run:()=>observeS1aContinuation(
+      appendS1aContradiction(architecture,'### Bounded non-product continuation','Contradiction: renamed no-progress history is new progress.'),s1aClone(f))},
+    equivalent:{ok:false,obligation:'CONTINUATION_EQUIVALENT_NO_PROGRESS',run:()=>{const i=s1aClone(f);
+      i.history.push({outcome:'NO_PROGRESS',signature:{...i.currentFailureSignature,runId:'renamed-run',workerId:'renamed-worker',
+        branch:'renamed-branch',candidateIdentity:{commit:'renamed-commit',tree:'renamed-tree'},episodeId:'renamed-episode'}});
+      return observeS1aContinuation(architecture,i);}},
+    coherent:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_PROGRESS',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.boundedContinuation.equivalenceIgnoresLabels=[];
+        p.boundedContinuation.equivalenceFields=p.boundedContinuation.equivalenceFields.filter(x=>x!=='failedMechanism');});
+      s=replaceS1aSourceClause(s,'Repeated materially equivalent no-progress history returns to Web even when run, worker, branch or candidate labels change.',
+        'A no-progress result repeats only when run, worker, branch and candidate labels also stay equal.');return observeS1aContinuation(s,s1aClone(f));}}
+  });
+  const exhausted=s1aClone(f);exhausted.faithfulPathInventory.paths=[];
+  exhausted.faithfulPathInventory.digest=s1aHashWithoutField(exhausted.faithfulPathInventory,'digest');
+  assert.ok(observeS1aContinuation(architecture,exhausted).violatedObligationIds.includes('CONTINUATION_FAITHFUL_PATH_EXHAUSTED'));
+});
+
+test('S1-A continuation faithful-path usability six-control matrix',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_FAITHFUL_PATH_USABILITY',
+    ()=>observeS1aContinuation(architecture,s1aClone(f)),{
+      removal:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_USABILITY',run:()=>observeS1aContinuation(
+        rewriteS1aPolicyForObserver(architecture,p=>{
+          p.boundedContinuation.faithfulPathInventory.pathFields=
+            p.boundedContinuation.faithfulPathInventory.pathFields.filter(field=>field!=='actualPath');
+          p.boundedContinuation.faithfulPathInventory.pathInventoryDigestBoundToCurrentState=false;
+        }),s1aClone(f))},
+      polarity:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_USABILITY',run:()=>{
+        const i=s1aClone(f);delete i.faithfulPathInventory.paths[0].actualPath;
+        i.faithfulPathInventory.digest=s1aHashWithoutField(i.faithfulPathInventory,'digest');
+        return observeS1aContinuation(architecture,i);}},
+      contradiction:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_USABILITY',run:()=>observeS1aContinuation(
+        appendS1aContradiction(architecture,'### Bounded non-product continuation',
+          'Contradiction: a path without an actual path or evidence reference may continue.'),s1aClone(f))},
+      equivalent:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_USABILITY',run:()=>{
+        const i=s1aClone(f);i.faithfulPathInventory.paths[0].pathId='renamed-but-unproved-path';
+        i.faithfulPathInventory.paths[0].actualPath='renamed-but-unproved-path';delete i.faithfulPathInventory.paths[0].evidenceRef;
+        i.faithfulPathInventory.digest=s1aHashWithoutField(i.faithfulPathInventory,'digest');
+        return observeS1aContinuation(architecture,i);}},
+      coherent:{ok:false,obligation:'CONTINUATION_FAITHFUL_PATH_USABILITY',run:()=>{
+        let s=rewriteS1aPolicyForObserver(architecture,p=>{
+          p.boundedContinuation.faithfulPathInventory.pathFields=
+            p.boundedContinuation.faithfulPathInventory.pathFields.filter(field=>!['actualPath','evidenceRef'].includes(field));
+          p.boundedContinuation.faithfulPathInventory.pathInventoryDigestBoundToCurrentState=false;
+        });
+        s=replaceS1aSourceClause(s,
+          'A remaining faithful path must have an exact non-empty path identity, actual path and evidence reference bound to the accepted candidate, evidence boundary and independent accepted-state inventory digest; missing or caller-rebound path evidence returns to Web.',
+          'A remaining faithful path may use caller-supplied labels without actual-path evidence or accepted-state inventory binding.');
+        const i=s1aClone(f);delete i.faithfulPathInventory.paths[0].actualPath;
+        delete i.faithfulPathInventory.paths[0].evidenceRef;
+        i.faithfulPathInventory.digest=s1aHashWithoutField(i.faithfulPathInventory,'digest');
+        const reboundDigest=s1aGovernedHumanPolicyDigest(s);
+        const result=observeS1aContinuationSource(s,i,reboundDigest);
+        assert.equal(result.governedProseDigest,reboundDigest);
+        assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
+        return result;
+      }}
+    });
+});
+test('S1-A continuation identity/budget and replacement six-control matrices',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_IDENTITY_BUDGET_PRESERVATION',()=>observeS1aContinuation(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CONTINUATION_IDENTITY_BUDGET_PRESERVATION',run:()=>observeS1aContinuation(
+      rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.requiredConditions=
+        p.boundedContinuation.requiredConditions.filter(x=>x!=='NO_ATTEMPT_OR_BUDGET_RESET')),s1aClone(f))},
+    polarity:{ok:false,obligation:'CONTINUATION_ATTEMPT_BUDGET_RESET',run:()=>{const i=s1aClone(f);i.attempts.budgetConsumedAfter=6;
+      return observeS1aContinuation(architecture,i);}},
+    contradiction:{ok:false,obligation:'CONTINUATION_IDENTITY_BUDGET_PRESERVATION',run:()=>observeS1aContinuation(
+      appendS1aContradiction(architecture,'### Bounded non-product continuation',
+        'Contradiction: candidate, evidence, attempts, or consumed budgets may be reset.'),s1aClone(f))},
+    equivalent:{ok:true,run:()=>{const i=s1aClone(f);i.candidateAfter={tree:i.candidateBefore.tree,commit:i.candidateBefore.commit};
+      i.evidenceAfter={evidenceId:i.evidenceBefore.evidenceId,digest:i.evidenceBefore.digest,
+        candidateIdentity:{tree:i.candidateBefore.tree,commit:i.candidateBefore.commit}};return observeS1aContinuation(architecture,i);}},
+    coherent:{ok:false,obligation:'CONTINUATION_IDENTITY_BUDGET_PRESERVATION',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.attemptAndBudget.budgetSpentMayDecrease=true);
+      s=replaceS1aSourceClause(s,'grant a new continuation, reset a budget','grant a new continuation, reset budgets when attempts are reissued');
+      return observeS1aContinuation(s,s1aClone(f));}}
+  });
+  const changed=s1aClone(f);changed.candidateAfter.tree='substituted-tree';
+  assert.ok(observeS1aContinuation(architecture,changed).violatedObligationIds.includes('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY'));
+
+  assertS1aSixControlClasses('CONTINUATION_REPLACEMENT_AUTHORITY',()=>observeS1aContinuation(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(
+      rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners=
+        p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners.filter(x=>x!=='HARNESS')),s1aClone(f))},
+    polarity:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(architecture,
+      makeS1aHostedReplacementContinuationFixture('TRANSPORT'))},
+    contradiction:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(
+      appendS1aContradiction(architecture,'### Bounded non-product continuation',
+        'Contradiction: TRANSPORT may create a replacement candidate.'),s1aClone(f))},
+    equivalent:{ok:true,run:()=>observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TOOLKIT'))},
+    coherent:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.boundedContinuation.hostedReplacementCandidate.transportMayAuthorize=true;
+        p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners.push('TRANSPORT');});
+      s=replaceS1aSourceClause(s,'TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.',
+        'TRANSPORT-only recovery may use this replacement-candidate exception without separate explicit Web authority.');
+      return observeS1aContinuation(s,s1aClone(f));}}
+  });
+  assert.equal(observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TOOLKIT')).ok,true);
+  assert.ok(observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TRANSPORT'))
+    .violatedObligationIds.includes('CONTINUATION_REPLACEMENT_AUTHORITY'));
+});
+
+test('S1-A continuation attempt and budget limits six-control matrix',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_ATTEMPT_LIMITS',
+    ()=>observeS1aContinuation(architecture,s1aClone(f)),{
+      removal:{ok:false,obligation:'CONTINUATION_ATTEMPT_LIMITS',run:()=>observeS1aContinuation(
+        rewriteS1aPolicyForObserver(architecture,p=>
+          p.boundedContinuation.attemptAndBudget.budgetConsumedMayExceedLimit=true),s1aClone(f))},
+      polarity:{ok:false,obligation:'CONTINUATION_ATTEMPT_LIMIT_EXCEEDED',run:()=>{
+        const i=s1aClone(f);i.attempts.attemptCountAfter=6;i.attempts.budgetConsumedAfter=11;
+        return observeS1aContinuation(architecture,i);}},
+      contradiction:{ok:false,obligation:'CONTINUATION_ATTEMPT_LIMITS',run:()=>observeS1aContinuation(
+        appendS1aContradiction(architecture,'### Bounded non-product continuation',
+          'Contradiction: attempt, product-correction or consumed-budget counts may exceed their accepted limits and continue.'),s1aClone(f))},
+      equivalent:{ok:false,obligation:'CONTINUATION_ATTEMPT_LIMIT_EXCEEDED',run:()=>{
+        const i=s1aClone(f);i.attempts.productCorrectionAttemptsAfter=4;
+        return observeS1aContinuation(architecture,i);}},
+      coherent:{ok:false,obligation:'CONTINUATION_ATTEMPT_LIMITS',run:()=>{
+        let s=rewriteS1aPolicyForObserver(architecture,p=>{
+          p.boundedContinuation.attemptAndBudget.attemptCountMayExceedLimit=true;
+          p.boundedContinuation.attemptAndBudget.productCorrectionsMayExceedLimit=true;
+          p.boundedContinuation.attemptAndBudget.budgetConsumedMayExceedLimit=true;
+          p.boundedContinuation.attemptAndBudget.overLimitResult='ADMIT_BOUNDED_CONTINUATION';
+        });
+        s=replaceS1aSourceClause(s,
+          'Attempt, product-correction and consumed-budget counts may not exceed their accepted limits; any over-limit count returns to Web.',
+          'Attempt, product-correction and consumed-budget counts may exceed their accepted limits and continue.');
+        const i=s1aClone(f);i.attempts.attemptCountAfter=6;i.attempts.budgetConsumedAfter=11;
+        const reboundDigest=s1aGovernedHumanPolicyDigest(s);
+        const result=observeS1aContinuationSource(s,i,reboundDigest);
+        assert.equal(result.governedProseDigest,reboundDigest);
+        assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
+        return result;
+      }}
+    });
+  const atLimit=s1aClone(f);atLimit.attempts.attemptCountAfter=5;
+  atLimit.attempts.budgetConsumedAfter=10;
+  assert.equal(observeS1aContinuation(architecture,atLimit).ok,true,
+    'consumption at, but not above, an accepted limit remains within the bound');
+});
+test('S1-A continuation current accepted-state readback six-control matrix',()=>{
+  const f=makeS1aContinuationFixture();
+  assertS1aSixControlClasses('CONTINUATION_CURRENT_STATE_READBACK',()=>observeS1aContinuation(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CONTINUATION_CURRENT_STATE_READBACK',run:()=>{const i=s1aClone(f);
+      delete i.currentStateReadback;return observeS1aContinuation(architecture,i);}},
+    polarity:{ok:false,obligation:'CONTINUATION_HISTORY_INCOMPLETE',run:()=>{const i=s1aClone(f);
+      i.history=[];return observeS1aContinuation(architecture,i);}},
+    contradiction:{ok:false,obligation:'CONTINUATION_CURRENT_STATE_READBACK',run:()=>observeS1aContinuation(
+      appendS1aContradiction(architecture,'### Bounded non-product continuation',
+        'Contradiction: partial caller history may replace the authoritative readback.'),s1aClone(f))},
+    equivalent:{ok:false,obligation:'CONTINUATION_EQUIVALENT_NO_PROGRESS',run:()=>{const i=s1aClone(f);
+      i.history.push({outcome:'NO_PROGRESS',signature:{...i.currentFailureSignature,runId:'rebound-run',
+        workerId:'rebound-worker',branch:'rebound-branch',candidateIdentity:{commit:'rebound-commit',tree:'rebound-tree'},
+        episodeId:'rebound-episode'}});return observeS1aContinuation(architecture,i);}},
+    coherent:{ok:false,obligation:'CONTINUATION_CURRENT_STATE_READBACK',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{
+        p.boundedContinuation.currentStateReadback.requiredFields=
+          p.boundedContinuation.currentStateReadback.requiredFields.filter(field=>field!=='history');
+        p.boundedContinuation.currentStateReadback.historyMustMatchExactly=false;
+      });
+      s=replaceS1aSourceClause(s,
+        'Omitted, stale, partial or caller-rebound authority, history, identities, counters or limits return to Web.',
+        'A caller-provided partial history may replace the accepted state readback.');
+      const reboundDigest=s1aGovernedHumanPolicyDigest(s);
+      const result=observeS1aContinuationSource(s,s1aClone(f),reboundDigest);
+      assert.equal(result.governedProseDigest,reboundDigest);
+      assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
+      return result;
+    }}
+  });
+
+  const omittedHistory=s1aClone(f);delete omittedHistory.history;
+  assert.ok(observeS1aContinuation(architecture,omittedHistory).violatedObligationIds
+    .includes('CONTINUATION_HISTORY_INCOMPLETE'));
+
+  const reboundIdentity=s1aClone(f);
+  reboundIdentity.candidateBefore={commit:'rebound-candidate',tree:'rebound-tree'};
+  reboundIdentity.candidateAfter=s1aClone(reboundIdentity.candidateBefore);
+  reboundIdentity.evidenceBefore={evidenceId:'rebound-evidence',digest:'rebound-evidence-digest',
+    candidateIdentity:s1aClone(reboundIdentity.candidateBefore)};
+  reboundIdentity.evidenceAfter=s1aClone(reboundIdentity.evidenceBefore);
+  reboundIdentity.faithfulPathInventory.paths[0].candidateIdentity=s1aClone(reboundIdentity.candidateBefore);
+  reboundIdentity.faithfulPathInventory.digest=s1aHashWithoutField(reboundIdentity.faithfulPathInventory,'digest');
+  const identityResult=observeS1aContinuation(architecture,reboundIdentity);
+  assert.ok(identityResult.violatedObligationIds.includes('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY'));
+
+  const resetCounters=s1aClone(f);
+  for(const field of ['attemptCount','productCorrectionAttempts','budgetConsumed']){
+    resetCounters.attempts[field+'Before']=0;resetCounters.attempts[field+'After']=0;
+  }
+  const resetResult=observeS1aContinuation(architecture,resetCounters);
+  assert.ok(resetResult.violatedObligationIds.includes('CONTINUATION_ATTEMPT_BUDGET_RESET'));
+
+  const reboundReadback=s1aClone(f);
+  reboundReadback.currentStateReadback.candidateIdentity={commit:'rebound-candidate',tree:'rebound-tree'};
+  reboundReadback.currentStateReadback.evidenceIdentity={evidenceId:'rebound-evidence',
+    digest:'rebound-evidence-digest',candidateIdentity:s1aClone(reboundReadback.currentStateReadback.candidateIdentity)};
+  reboundReadback.currentStateReadback.currentFailureSignature.candidateIdentity=
+    s1aClone(reboundReadback.currentStateReadback.candidateIdentity);
+  reboundReadback.currentStateReadback.digest=s1aHashWithoutField(reboundReadback.currentStateReadback,'digest');
+  const readbackResult=observeS1aContinuation(architecture,reboundReadback);
+  assert.ok(readbackResult.violatedObligationIds.includes('CONTINUATION_CURRENT_STATE_READBACK'));
+});
+test('S1-A carrier inventory/order six-control matrix uses authoritative readback, not app-per-repository',()=>{
+  const f=makeS1aCarrierFixture();
+  assertS1aSixControlClasses('CARRIER_AUTHORITATIVE_INVENTORY_ORDER',()=>observeS1aCarrier(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CARRIER_AUTHORITATIVE_INVENTORY_READBACK',run:()=>{const i=s1aClone(f);
+      i.authoritativeInventory.complete=false;i.authoritativeInventory.digest=s1aHashWithoutField(i.authoritativeInventory,'digest');
+      return observeS1aCarrier(architecture,i);}},
+    polarity:{ok:false,obligation:'CARRIER_AUTHORITATIVE_INVENTORY_ORDER',run:()=>observeS1aCarrier(
+      rewriteS1aPolicyForObserver(architecture,p=>p.faithfulCarrier.selectionOrder=['AUTHORIZED_EXISTING_OWNER','LOCAL_DEV','NEW_OWNER_PROVISIONED']),s1aClone(f))},
+    contradiction:{ok:false,obligation:'CARRIER_AUTHORITATIVE_INVENTORY_ORDER',run:()=>observeS1aCarrier(
+      appendS1aContradiction(architecture,'### Faithful validation carrier','Contradiction: caller-supplied availability is authoritative.'),s1aClone(f))},
+    equivalent:{ok:true,run:()=>{const i=makeS1aCarrierFixture('provisioned');
+      i.options.LOCAL_DEV={available:true,authorized:true,claimedEquivalent:true};
+      i.options.AUTHORIZED_EXISTING_OWNER={available:true,authorized:true,claimedEquivalent:true};
+      return observeS1aCarrier(architecture,i);}},
+    coherent:{ok:false,obligation:'CARRIER_AUTHORITATIVE_INVENTORY_ORDER',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.faithfulCarrier.inventory.localFirstWhenFaithful=false;
+        p.faithfulCarrier.inventory.reconcileExistingBeforeProvisioning=false;});
+      s=replaceS1aSourceClause(s,'Select faithful local/dev first, then reconcile suitable existing Owner-authorised execution infrastructure, and provision or expand only after that reconciliation proves necessity.',
+        'Select existing Owner-authorised infrastructure first, then consider local/dev, and provision when convenient.');
+      return observeS1aCarrier(s,s1aClone(f));}}
+  });
+  assert.equal(observeS1aCarrier(architecture,s1aClone(f)).selected,'LOCAL_DEV');
+  assert.equal(observeS1aCarrier(architecture,makeS1aCarrierFixture('existing')).selected,'AUTHORIZED_EXISTING_OWNER');
+  const provisioned=makeS1aCarrierFixture('provisioned');
+  provisioned.options.LOCAL_DEV={available:true,authorized:true,claimedEquivalent:true};
+  assert.equal(observeS1aCarrier(architecture,provisioned).selected,'NEW_OWNER_PROVISIONED');
+  assert.match(architecture,/A carrier is an execution substrate, not one dedicated test application per repository/);
+});
+
+test('S1-A carrier execution-evidence six-control matrix binds candidate/path/enforcement readback',()=>{
+  const f=makeS1aCarrierFixture();
+  assertS1aSixControlClasses('CARRIER_EXECUTION_EVIDENCE_BINDING',()=>observeS1aCarrier(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CARRIER_EXECUTION_EVIDENCE_BINDING',run:()=>{const i=s1aClone(f);
+      delete i.acceptedBoundaryEvidence;return observeS1aCarrier(architecture,i);}},
+    polarity:{ok:false,obligation:'CARRIER_EXECUTION_EVIDENCE_BINDING',run:()=>{const i=s1aClone(f);
+      i.acceptedBoundaryEvidence.receipt.enforcementBoundary='OTHER_BOUNDARY';
+      i.acceptedBoundaryEvidence.receipt.receiptDigest=s1aHashWithoutField(i.acceptedBoundaryEvidence.receipt,'receiptDigest');
+      i.acceptedBoundaryEvidence.digest=s1aHashWithoutField(i.acceptedBoundaryEvidence,'digest');
+      return observeS1aCarrier(architecture,i);}},
+    contradiction:{ok:false,obligation:'CARRIER_EXECUTION_EVIDENCE_BINDING',run:()=>observeS1aCarrier(
+      appendS1aContradiction(architecture,'### Faithful validation carrier','Contradiction: equivalent shape alone proves boundary exercise.'),s1aClone(f))},
+    equivalent:{ok:false,obligation:'CARRIER_EXECUTION_EVIDENCE_BINDING',run:()=>{const i=s1aClone(f);
+      delete i.acceptedBoundaryEvidence;i.options.LOCAL_DEV.exercisedBoundaryId='ACCEPTED_PRODUCTION_BOUNDARY';
+      i.options.LOCAL_DEV.boundaryEvidence=['self-asserted:equivalent'];return observeS1aCarrier(architecture,i);}},
+    coherent:{ok:false,obligation:'CARRIER_EXECUTION_EVIDENCE_BINDING',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>p.faithfulCarrier.boundaryExercise.requiredFields=
+        p.faithfulCarrier.boundaryExercise.requiredFields.filter(x=>x!=='enforcementBoundary'));
+      s=replaceS1aSourceClause(s,
+        'A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest.',
+        'A carrier may be faithful when a receipt names its identity, criterion, candidate and ordered run events.');
+      return observeS1aCarrier(s,s1aClone(f));}}
+  });
+});
+
+test('S1-A carrier public-authority six-control matrix matches exact request fields',()=>{
+  const f=makeS1aAuthorizedPublicCarrierFixture();
+  assertS1aSixControlClasses('CARRIER_PUBLIC_AUTHORITY_MATCH',()=>observeS1aCarrier(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CARRIER_PUBLIC_AUTHORITY_MATCH',run:()=>{const i=s1aClone(f);
+      delete i.exposureAuthority.cleanup;return observeS1aCarrier(architecture,i);}},
+    polarity:{ok:false,obligation:'CARRIER_PUBLIC_AUTHORITY_MATCH',run:()=>{const i=s1aClone(f);
+      i.publicExposureRequest.path='/unapproved';return observeS1aCarrier(architecture,i);}},
+    contradiction:{ok:false,obligation:'CARRIER_PUBLIC_AUTHORITY_MATCH',run:()=>observeS1aCarrier(
+      appendS1aContradiction(architecture,'### Faithful validation carrier','Contradiction: public request details need not match Owner authority.'),s1aClone(f))},
+    equivalent:{ok:false,obligation:'CARRIER_PUBLIC_AUTHORITY_MATCH',run:()=>{const i=s1aClone(f);
+      i.publicExposureRequest.consumer='renamed-consumer';i.exposureAuthority.consumer='renamed-consumer';
+      i.exposureAuthority.digest=s1aHashWithoutField(i.exposureAuthority,'digest');return observeS1aCarrier(architecture,i);}},
+    coherent:{ok:false,obligation:'CARRIER_PUBLIC_AUTHORITY_MATCH',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.faithfulCarrier.publicExposureRequires=
+        p.faithfulCarrier.publicExposureRequires.filter(x=>x!=='PATH');
+        p.faithfulCarrier.publicExposureAuthority.requiredFields=p.faithfulCarrier.publicExposureAuthority.requiredFields.filter(x=>x!=='path');});
+      s=replaceS1aSourceClause(s,
+        'Public ingress is admissible only when a specific accepted validation criterion requires it and a current authoritative Owner/Web readback binds the exact exposure and public request, including consumer, protocol, path, hostname requirement and hostname, accepted criterion, necessity, audience, boundary, lifetime and cleanup.',
+        'Public ingress is admissible when a criterion requires it and current authority binds exposure, audience, boundary, lifetime and cleanup.');
+      return observeS1aCarrier(s,s1aClone(f));}}
+  });
+});
+
+test('S1-A carrier domain/DNS six-control matrix requires separate operation authority',()=>{
+  const f=makeS1aAuthorizedPublicCarrierFixture();
+  assertS1aSixControlClasses('CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',()=>observeS1aCarrier(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',run:()=>{const i=s1aClone(f);
+      delete i.dnsAuthority;return observeS1aCarrier(architecture,i);}},
+    polarity:{ok:false,obligation:'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',run:()=>{const i=s1aClone(f);
+      i.dnsAuthority.authorityReference=i.domainAuthority.authorityReference;
+      i.dnsAuthority.digest=s1aHashWithoutField(i.dnsAuthority,'digest');return observeS1aCarrier(architecture,i);}},
+    contradiction:{ok:false,obligation:'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',run:()=>observeS1aCarrier(
+      appendS1aContradiction(architecture,'### Faithful validation carrier','Contradiction: one combined domain and DNS grant is sufficient.'),s1aClone(f))},
+    equivalent:{ok:false,obligation:'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',run:()=>{const i=s1aClone(f);
+      i.dnsAuthority=s1aClone(i.domainAuthority);return observeS1aCarrier(architecture,i);}},
+    coherent:{ok:false,obligation:'CARRIER_DOMAIN_DNS_SEPARATE_AUTHORITY',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.faithfulCarrier.domainDnsRequiresSeparateAuthority=false;
+        p.faithfulCarrier.domainDnsAuthority.referencesMustDiffer=false;
+        p.faithfulCarrier.domainDnsAuthority.eachReferenceMustDifferFromExposure=false;});
+      s=replaceS1aSourceClause(s,
+        'If domain registration or DNS is required, each operation needs its own current authoritative Owner/Web readback bound to that exposure with a distinct authority reference; one combined grant is insufficient.',
+        'Domain registration and DNS may share one current authority readback and reference.');
+      return observeS1aCarrier(s,s1aClone(f));}}
+  });
+});
+
+test('S1-A carrier private-persistence six-control matrix keeps stored data private',()=>{
+  const f=makeS1aCarrierFixture();
+  assertS1aSixControlClasses('CARRIER_PRIVATE_PERSISTENCE',()=>observeS1aCarrier(architecture,s1aClone(f)),{
+    removal:{ok:false,obligation:'CARRIER_PRIVATE_PERSISTENCE',run:()=>observeS1aCarrier(
+      rewriteS1aPolicyForObserver(architecture,p=>delete p.faithfulCarrier.defaultExposure),s1aClone(f))},
+    polarity:{ok:false,obligation:'CARRIER_PRIVATE_PERSISTENCE',run:()=>observeS1aCarrier(
+      rewriteS1aPolicyForObserver(architecture,p=>p.faithfulCarrier.persistenceImpliesExposure=true),s1aClone(f))},
+    contradiction:{ok:false,obligation:'CARRIER_PRIVATE_PERSISTENCE',run:()=>observeS1aCarrier(
+      appendS1aContradiction(architecture,'### Faithful validation carrier','Contradiction: persistence implies public exposure.'),s1aClone(f))},
+    equivalent:{ok:true,run:()=>{const i=makeS1aCarrierFixture();i.persistent=true;
+      i.persistedArtifact='private:validation-receipt';return observeS1aCarrier(architecture,i);}},
+    coherent:{ok:false,obligation:'CARRIER_PRIVATE_PERSISTENCE',run:()=>{
+      let s=rewriteS1aPolicyForObserver(architecture,p=>p.faithfulCarrier.persistenceImpliesExposure=true);
+      s=replaceS1aSourceClause(s,'Persistence does not imply exposure.','Persistence implies public exposure.');
+      return observeS1aCarrier(s,s1aClone(f));}}
+  });
+  const persisted=observeS1aCarrier(architecture,makeS1aCarrierFixture());
+  assert.equal(persisted.ok,true);assert.equal(persisted.exposure,'PRIVATE_NONPUBLIC');
 });
