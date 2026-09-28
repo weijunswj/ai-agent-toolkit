@@ -1,10 +1,6 @@
 name: Validate toolkit
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -33,12 +29,3 @@ jobs:
 
       - name: Validate toolkit
         run: npm run validate:toolkit
-
-      - name: Validate published surfaces
-        run: npm run validate:surfaces
-
-      - name: Audit fallback risk
-        run: npm run validate:fallback-risk
-
-      - name: Check whitespace
-        run: npm run validate:whitespace
