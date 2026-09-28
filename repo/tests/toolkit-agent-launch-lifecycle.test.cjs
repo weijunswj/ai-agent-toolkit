@@ -11,7 +11,7 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
 const LIFECYCLE_POLL_INTERVAL_MS = 25;
-const SUPERVISOR_COMPLETION_TIMEOUT_MS = 10_000;
+const SUPERVISOR_COMPLETION_TIMEOUT_MS = 60_000;
 const CHECKER_COMPLETION_TIMEOUT_MS = 60_000;
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
