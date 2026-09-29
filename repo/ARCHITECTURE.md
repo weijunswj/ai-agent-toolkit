@@ -314,8 +314,21 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "RESOLUTION": "NONEMPTY_STRING"
     },
     "nestedRequiredFields": [
+      { "record": "PACKET_IDENTITY", "fields": ["repository", "packetId", "packetRevision"] },
+      { "record": "CANDIDATE_IDENTITY", "fields": ["commit", "tree"] },
       { "record": "ADMITTED_CURRENT_OUTCOME", "fields": ["id", "milestone", "audience", "environment"] }
     ],
+    "nestedBindings": [
+      { "left": "PACKET_IDENTITY.repository", "right": "REPOSITORY" }
+    ],
+    "rejectedRequestState": {
+      "ok": false,
+      "transition": null,
+      "mutationEffects": [],
+      "dispositionField": "DISPOSITION",
+      "lifecycleField": "LIFECYCLE",
+      "requestValuesMaySelectState": false
+    },
     "transitionBindings": [
       { "transition": "disposition", "record": "DISPOSITION" },
       { "transition": "sourceLifecycle", "record": "LIFECYCLE" }
@@ -1280,6 +1293,8 @@ For consumers that still accept only the two-way or v1 vocabularies, project the
 
 Persist the complete canonical common finding record alongside either projection, including the admitted outcome, milestone, audience and environment; repository, packet, finding/revision, accepted decision and candidate; programme, child, frontier, Controller, contract and subject; timing, trigger, closure criterion and exact evidence; attribution, adjudication, disposition and lifecycle; and verified owner role/readback. The canonical record is authoritative: a transition disposition and source lifecycle repeated in transition input must agree with the record, including verified closure. Reject a contradiction under F1_RECORD_TRANSITION_CONSISTENCY before transition or effect. Reject missing applicable common fields under F2_COMMON_RECORD_COMPANION_COMPLETENESS. A resolved blocker still projects as `SHIP_BLOCKER` in the two-way field and as `RESOLVED` in v1; the sidecar preserves both its original class and lifecycle.
 
+Nested identity composition is exact: PACKET_IDENTITY is an object with own nonblank string repository, packetId and packetRevision fields; its repository equals common REPOSITORY. CANDIDATE_IDENTITY is an object with own nonblank string commit and tree fields. Preserve these exact nested identities across the canonical record, owner readback, companion projection, current inventory, closure readback and blocker admission. Transfer also requires a separate independently anchored current ownership readback. Hashes and digests bind bytes but never establish authority. For every rejected transition request, including early validation returns, return ok=false, transition=null, mutationEffects=[], and the canonical record's DISPOSITION and LIFECYCLE; request values never select the resulting state.
+
 Every coarse row carries a content-addressed DETAIL_REF to exactly one complete companion record; consumers recompute its canonical record digest. Every applicable current or historical record carries the complete common semantic context. Each companion projection binds repository, packet, finding/revision, candidate, accepted decision and the complete admitted outcome object (outcome, milestone, audience and environment); hashes and coherent caller rebinding cannot replace current authoritative context. Every current companion row and its complete inventory must be read back from the current authoritative Web admission source, with the inventory digest binding every exact record and reference. The independent contract interpreter checks every declared field type and rejects missing, duplicate, swapped, altered or contradictory records even when caller-supplied hashes are recomputed. For CURRENT_SHIP_BLOCKER, the same hashed record contains every blocker field and nested proof value, and admission binds each proof field to that exact record and Web-admitted DETAIL_REF. At most one current disposition is admitted for each repository, accepted packet, finding, Web-admitted revision and candidate identity; FINDING_REVISION and ACCEPTED_DECISION_ID remain bound in each record and projection but do not create another current uniqueness slot. Historical evidence remains immutable and append-only: the complete ledger digest is read back from the CURRENT canonical parent contract, every retained record is content-addressed, and an existing record and digest are never rewritten; later state receives a new Web-admitted revision and DETAIL_REF.
 
 ### Current blocker field contract
@@ -1297,9 +1312,9 @@ Current-blocker admission is conjunctive. Every row below must be present, exact
 | SMALLEST_CORRECTION | The smallest correction that closes the demonstrated current failure; any correction outside accepted authority or scope returns to Web for decision. |
 | VERIFIABLE_CLOSURE | A falsifiable closure oracle at the relevant consequential boundary, including the required positive control where applicable. |
 | EXACT_EVIDENCE | Durable exact evidence references for the observed failure, current consequence, deferral analysis and closure oracle. |
-| CANDIDATE_IDENTITY | Exact candidate commit/tree or other accepted immutable candidate identity to which the evidence applies. |
+| CANDIDATE_IDENTITY | Exact object with own nonblank string commit and tree fields, identifying the accepted immutable candidate to which the evidence applies. |
 | REPOSITORY | Exact canonical repository identity shared by the accepted packet, finding, candidate and current Web decision. |
-| PACKET_IDENTITY | Complete accepted packet identity; it remains bound to this repository, programme, child, frontier and accepted contract. |
+| PACKET_IDENTITY | Exact object with own nonblank string repository, packetId and packetRevision fields; repository equals REPOSITORY, and the identity remains bound to the programme, child, frontier and accepted contract. |
 | FINDING_REVISION | Exact immutable finding revision evaluated by the accepted decision. |
 | ACCEPTED_DECISION_ID | Exact current Web-admitted decision identifier bound to this finding and candidate. |
 | PROGRAMME_ID | Exact parent programme identity for this accepted finding. |
