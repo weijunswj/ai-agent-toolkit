@@ -272,6 +272,63 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
     "authorizesProductCorrection": false,
     "independentEvidenceGatesRemainBinding": true
   },
+  "commonRecord": {
+    "requiredFields": [
+      "FINDING_ID", "REPOSITORY", "PACKET_IDENTITY", "FINDING_REVISION",
+      "WEB_ADMITTED_REVISION", "ACCEPTED_DECISION_ID", "ADMITTED_CURRENT_OUTCOME",
+      "PROGRAMME_ID", "CHILD_ID", "FRONTIER_ID", "TIMING", "TRIGGER_OR_REASON",
+      "CLOSURE_CRITERION", "EXACT_EVIDENCE", "CONTROLLER_ID", "ACCEPTED_CONTRACT_ID",
+      "SUBJECT_ID", "CANDIDATE_IDENTITY", "ATTRIBUTION", "PRIMARY_OWNER", "ADJUDICATION",
+      "OBSERVED_BEHAVIOR", "REQUIRED_BEHAVIOR", "DISPOSITION", "LIFECYCLE",
+      "VERIFIED_OWNER", "OWNER_ROLE", "OWNER_READBACK", "RESOLUTION"
+    ],
+    "typedFields": {
+      "FINDING_ID": "NONEMPTY_STRING",
+      "REPOSITORY": "NONEMPTY_STRING",
+      "PACKET_IDENTITY": "NONEMPTY_OBJECT",
+      "FINDING_REVISION": "NONEMPTY_STRING",
+      "WEB_ADMITTED_REVISION": "NONEMPTY_STRING",
+      "ACCEPTED_DECISION_ID": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME": "NONEMPTY_OBJECT",
+      "PROGRAMME_ID": "NONEMPTY_STRING",
+      "CHILD_ID": "NONEMPTY_STRING",
+      "FRONTIER_ID": "NONEMPTY_STRING",
+      "TIMING": "NONEMPTY_STRING",
+      "TRIGGER_OR_REASON": "NONEMPTY_STRING",
+      "CLOSURE_CRITERION": "NONEMPTY_STRING",
+      "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES",
+      "CONTROLLER_ID": "NONEMPTY_STRING",
+      "ACCEPTED_CONTRACT_ID": "NONEMPTY_STRING",
+      "SUBJECT_ID": "NONEMPTY_STRING",
+      "CANDIDATE_IDENTITY": "NONEMPTY_OBJECT",
+      "ATTRIBUTION": "NONEMPTY_STRING",
+      "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ADJUDICATION": "NONEMPTY_STRING",
+      "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
+      "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
+      "DISPOSITION": "NONEMPTY_STRING",
+      "LIFECYCLE": "NONEMPTY_STRING",
+      "VERIFIED_OWNER": "NONEMPTY_STRING",
+      "OWNER_ROLE": "NONEMPTY_STRING",
+      "OWNER_READBACK": "NONEMPTY_OBJECT",
+      "RESOLUTION": "NONEMPTY_STRING"
+    },
+    "nestedRequiredFields": [
+      { "record": "ADMITTED_CURRENT_OUTCOME", "fields": ["id", "milestone", "audience", "environment"] }
+    ],
+    "transitionBindings": [
+      { "transition": "disposition", "record": "DISPOSITION" },
+      { "transition": "sourceLifecycle", "record": "LIFECYCLE" }
+    ],
+    "canonicalRecordAuthoritative": true,
+    "adjudicationMustMatchDisposition": true,
+    "resolutionLifecycleBindings": [
+      { "lifecycle": "UNRESOLVED", "resolution": "NOT_RESOLVED" },
+      { "lifecycle": "RESOLVED", "resolution": "RESOLVED" }
+    ],
+    "completenessObligation": "F2_COMMON_RECORD_COMPANION_COMPLETENESS",
+    "transitionConsistencyObligation": "F1_RECORD_TRANSITION_CONSISTENCY"
+  },
   "projectionRows": [
     {
       "disposition": "CURRENT_SHIP_BLOCKER",
@@ -359,6 +416,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "OBSERVED_BEHAVIOR",
       "REQUIRED_BEHAVIOR",
       "PRIMARY_OWNER",
+      "ATTRIBUTION",
       "ADJUDICATION",
       "OWNER_ROLE",
       "OWNER_READBACK",
@@ -408,6 +466,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "OBSERVED_BEHAVIOR",
       "REQUIRED_BEHAVIOR",
       "PRIMARY_OWNER",
+      "ATTRIBUTION",
       "ADJUDICATION",
       "OWNER_ROLE",
       "OWNER_READBACK",
@@ -438,6 +497,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
       "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
       "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ATTRIBUTION": "NONEMPTY_STRING",
       "ADJUDICATION": "NONEMPTY_STRING",
       "OWNER_ROLE": "NONEMPTY_STRING",
       "OWNER_READBACK": "NONEMPTY_OBJECT",
@@ -621,6 +681,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
         "OBSERVED_BEHAVIOR",
         "REQUIRED_BEHAVIOR",
         "PRIMARY_OWNER",
+        "ATTRIBUTION",
         "ADJUDICATION",
         "OWNER_ROLE",
         "OWNER_READBACK",
@@ -640,6 +701,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "CLOSURE_CRITERION",
       "EXACT_EVIDENCE",
       "CANDIDATE_IDENTITY",
+      "ADMITTED_CURRENT_OUTCOME",
       "REPOSITORY",
       "PACKET_IDENTITY",
       "FINDING_REVISION",
@@ -653,6 +715,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "OBSERVED_BEHAVIOR",
       "REQUIRED_BEHAVIOR",
       "PRIMARY_OWNER",
+      "ATTRIBUTION",
       "ADJUDICATION",
       "OWNER_ROLE",
       "OWNER_READBACK",
@@ -667,7 +730,9 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "DISPOSITION",
       "LIFECYCLE",
       "CANDIDATE_IDENTITY",
-      "ACCEPTED_DECISION_ID"
+      "ACCEPTED_DECISION_ID",
+      "ADMITTED_CURRENT_OUTCOME",
+      "ATTRIBUTION"
     ],
     "legacyProjectionFields": [
       "TWO_WAY",
@@ -694,6 +759,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "CLOSURE_CRITERION": "NONEMPTY_STRING",
       "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES",
       "CANDIDATE_IDENTITY": "NONEMPTY_OBJECT",
+      "ADMITTED_CURRENT_OUTCOME": "NONEMPTY_OBJECT",
       "REPOSITORY": "NONEMPTY_STRING",
       "PACKET_IDENTITY": "NONEMPTY_OBJECT",
       "FINDING_REVISION": "NONEMPTY_STRING",
@@ -707,6 +773,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
       "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
       "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ATTRIBUTION": "NONEMPTY_STRING",
       "ADJUDICATION": "NONEMPTY_STRING",
       "OWNER_ROLE": "NONEMPTY_STRING",
       "OWNER_READBACK": "NONEMPTY_OBJECT",
@@ -780,7 +847,7 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
         "mustNotAliasRequestedRecord": true,
         "mustMatchRecordReadbackExactly": true,
         "mustMatchIndependentAuthoritySnapshot": true,
-        "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "packetIdentity", "findingId", "webAdmittedRevision", "findingRevision", "candidateIdentity", "acceptedDecisionId", "programmeId", "childId", "frontierId", "controllerId", "acceptedContractId", "subjectId", "observedBehavior", "requiredBehavior", "primaryOwner", "adjudication", "ownerRole", "owner", "resolution", "revision", "digest"],
+        "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "packetIdentity", "findingId", "webAdmittedRevision", "findingRevision", "candidateIdentity", "acceptedDecisionId", "admittedCurrentOutcome", "programmeId", "childId", "frontierId", "timing", "triggerOrReason", "closureCriterion", "exactEvidence", "controllerId", "acceptedContractId", "subjectId", "attribution", "observedBehavior", "requiredBehavior", "primaryOwner", "adjudication", "disposition", "lifecycle", "ownerRole", "owner", "resolution", "revision", "digest"],
         "recordBindings": [
           { "readback": "repository", "record": "REPOSITORY" },
           { "readback": "packetIdentity", "record": "PACKET_IDENTITY" },
@@ -789,16 +856,24 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
           { "readback": "findingRevision", "record": "FINDING_REVISION" },
           { "readback": "candidateIdentity", "record": "CANDIDATE_IDENTITY" },
           { "readback": "acceptedDecisionId", "record": "ACCEPTED_DECISION_ID" },
+          { "readback": "admittedCurrentOutcome", "record": "ADMITTED_CURRENT_OUTCOME" },
           { "readback": "programmeId", "record": "PROGRAMME_ID" },
           { "readback": "childId", "record": "CHILD_ID" },
           { "readback": "frontierId", "record": "FRONTIER_ID" },
+          { "readback": "timing", "record": "TIMING" },
+          { "readback": "triggerOrReason", "record": "TRIGGER_OR_REASON" },
+          { "readback": "closureCriterion", "record": "CLOSURE_CRITERION" },
+          { "readback": "exactEvidence", "record": "EXACT_EVIDENCE" },
           { "readback": "controllerId", "record": "CONTROLLER_ID" },
           { "readback": "acceptedContractId", "record": "ACCEPTED_CONTRACT_ID" },
           { "readback": "subjectId", "record": "SUBJECT_ID" },
+          { "readback": "attribution", "record": "ATTRIBUTION" },
           { "readback": "observedBehavior", "record": "OBSERVED_BEHAVIOR" },
           { "readback": "requiredBehavior", "record": "REQUIRED_BEHAVIOR" },
           { "readback": "primaryOwner", "record": "PRIMARY_OWNER" },
           { "readback": "adjudication", "record": "ADJUDICATION" },
+          { "readback": "disposition", "record": "DISPOSITION" },
+          { "readback": "lifecycle", "record": "LIFECYCLE" },
           { "readback": "ownerRole", "record": "OWNER_ROLE" },
           { "readback": "owner", "record": "VERIFIED_OWNER" },
           { "readback": "resolution", "record": "RESOLUTION" }
@@ -835,14 +910,17 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
   "closureVerification": {
     "mode": "CURRENT_AUTHORITATIVE_WEB_CLOSURE_READBACK",
     "source": "CURRENT_WEB_CLOSURE_ADMISSION",
+    "commonRecordField": "commonRecord",
+    "commonRecordMode": "EXACT_CANONICAL_TRANSITION_SOURCE_RECORD",
+    "commonRecordFieldsFrom": "commonRecord.requiredFields",
     "requiredFields": [
       "source", "authoritative", "current", "readBack", "repository", "revision",
       "findingId", "webAdmittedRevision", "disposition", "fromLifecycle", "toLifecycle",
-      "closureCriterion", "exactEvidence", "candidateIdentity", "body", "bodyDigest"
+      "closureCriterion", "exactEvidence", "candidateIdentity", "commonRecord", "body", "bodyDigest"
     ],
     "bodyFields": [
       "repository", "findingId", "webAdmittedRevision", "disposition",
-      "fromLifecycle", "toLifecycle", "closureCriterion", "exactEvidence", "candidateIdentity"
+      "fromLifecycle", "toLifecycle", "closureCriterion", "exactEvidence", "candidateIdentity", "commonRecord"
     ],
     "digestMode": "SHA256_EXACT_READBACK_BODY",
     "resolvesOnlyAfterVerifiedReadback": true,
@@ -1200,9 +1278,9 @@ For consumers that still accept only the two-way or v1 vocabularies, project the
 | EVIDENCE_ONLY | UNRESOLVED | POST_SHIP | NON_BLOCKING |
 | EVIDENCE_ONLY | RESOLVED | POST_SHIP | RESOLVED |
 
-Persist the canonical disposition, lifecycle, timing, verified owner, trigger/reason, closure criterion, exact evidence references, candidate identity and Web-admitted revision alongside either projection. A resolved blocker still projects as `SHIP_BLOCKER` in the two-way field and as `RESOLVED` in v1; the sidecar preserves both its original class and lifecycle.
+Persist the complete canonical common finding record alongside either projection, including the admitted outcome, milestone, audience and environment; repository, packet, finding/revision, accepted decision and candidate; programme, child, frontier, Controller, contract and subject; timing, trigger, closure criterion and exact evidence; attribution, adjudication, disposition and lifecycle; and verified owner role/readback. The canonical record is authoritative: a transition disposition and source lifecycle repeated in transition input must agree with the record, including verified closure. Reject a contradiction under F1_RECORD_TRANSITION_CONSISTENCY before transition or effect. Reject missing applicable common fields under F2_COMMON_RECORD_COMPANION_COMPLETENESS. A resolved blocker still projects as `SHIP_BLOCKER` in the two-way field and as `RESOLVED` in v1; the sidecar preserves both its original class and lifecycle.
 
-Every coarse row carries a content-addressed DETAIL_REF to exactly one complete companion record; consumers recompute its canonical record digest. Every current companion row and its complete inventory must be read back from the current authoritative Web admission source, with the inventory digest binding every exact record and reference. The independent contract interpreter checks every declared field type and rejects missing, duplicate, swapped, altered or contradictory records even when caller-supplied hashes are recomputed. For CURRENT_SHIP_BLOCKER, the same hashed record contains every blocker field and nested proof value, and admission binds each proof field to that exact record and Web-admitted DETAIL_REF. At most one current disposition is admitted for each repository, accepted packet, finding, Web-admitted revision and candidate identity; FINDING_REVISION and ACCEPTED_DECISION_ID remain bound in each record and projection but do not create another current uniqueness slot. Historical evidence remains immutable and append-only: the complete ledger digest is read back from the CURRENT canonical parent contract, every retained record is content-addressed, and an existing record and digest are never rewritten; later state receives a new Web-admitted revision and DETAIL_REF.
+Every coarse row carries a content-addressed DETAIL_REF to exactly one complete companion record; consumers recompute its canonical record digest. Every applicable current or historical record carries the complete common semantic context. Each companion projection binds repository, packet, finding/revision, candidate, accepted decision and the complete admitted outcome object (outcome, milestone, audience and environment); hashes and coherent caller rebinding cannot replace current authoritative context. Every current companion row and its complete inventory must be read back from the current authoritative Web admission source, with the inventory digest binding every exact record and reference. The independent contract interpreter checks every declared field type and rejects missing, duplicate, swapped, altered or contradictory records even when caller-supplied hashes are recomputed. For CURRENT_SHIP_BLOCKER, the same hashed record contains every blocker field and nested proof value, and admission binds each proof field to that exact record and Web-admitted DETAIL_REF. At most one current disposition is admitted for each repository, accepted packet, finding, Web-admitted revision and candidate identity; FINDING_REVISION and ACCEPTED_DECISION_ID remain bound in each record and projection but do not create another current uniqueness slot. Historical evidence remains immutable and append-only: the complete ledger digest is read back from the CURRENT canonical parent contract, every retained record is content-addressed, and an existing record and digest are never rewritten; later state receives a new Web-admitted revision and DETAIL_REF.
 
 ### Current blocker field contract
 
@@ -1233,12 +1311,13 @@ Current-blocker admission is conjunctive. Every row below must be present, exact
 | OBSERVED_BEHAVIOR | Evidence-backed observed behavior for this exact subject and candidate. |
 | REQUIRED_BEHAVIOR | Exact accepted behavior required by the locked criterion or floor. |
 | PRIMARY_OWNER | Exact canonical primary-owner identity retained with the finding. |
+| ATTRIBUTION | Exact accepted causal or learning attribution for this finding, preserved separately from its disposition and lifecycle. |
 | ADJUDICATION | Exact Web-admitted disposition assigned to this finding revision. |
 | OWNER_ROLE | Exact role held by the verified continuing owner for this obligation. |
-| OWNER_READBACK | Current authoritative readback bound to repository, packet, finding and Web revisions, candidate, accepted decision, programme/child/frontier/controller/contract/subject context, observed and required behavior, primary owner, adjudication, verified owner and role, and unresolved state. Transfer compares the complete requested record and its embedded readback with a separate, non-aliasing current authoritative ownership-state readback; caller-rebound owner/readback fields and a recomputed digest do not authorize transfer. Transfer leaves the lifecycle UNRESOLVED. |
+| OWNER_READBACK | Current authoritative readback bound to every applicable common-record value: repository, packet, finding/revisions, accepted decision and complete admitted outcome; programme/child/frontier; timing, trigger, closure and exact evidence; Controller/contract/subject/candidate; attribution, primary owner, adjudication, disposition and lifecycle; verified owner, owner role and resolution. Transfer compares the complete requested record and embedded readback with a separate, non-aliasing current authoritative ownership-state readback; caller-rebound values and recomputed digests do not authorize transfer. Transfer leaves lifecycle UNRESOLVED. |
 | RESOLUTION | Exact lifecycle resolution state; transfer or deferral alone remains unresolved. |
 
-Initial admission rule: DISPOSITION=CURRENT_SHIP_BLOCKER, LIFECYCLE=UNRESOLVED, and every declared field is required. Every scalar identity, outcome, owner, timing, criterion, correction and closure value is a non-empty string; evidence references are non-empty arrays of non-empty unique strings; nested outcome, consequence, deferral and closure records have exactly their declared fields and types. The full common finding record and every blocker-specific field must be present, non-empty, mutually consistent and bound to the exact candidate, accepted outcome, criterion/floor, durable evidence and Web-admitted revision. The decision itself must be read back from the current authoritative Web admission, and its exact body digest binds the complete decision including the detailed companion reference. Web durably reconciles the full predicate against that exact identity. Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion or evidence label alone cannot resolve work. Resolution retains the admitted disposition and evidence. Deferral, evidence acquisition or ownership transfer never resolves an unfinished obligation; an ownership transfer binds the complete current finding record and authoritative readback while `RESOLUTION=NOT_RESOLVED` on both sides. Severity, novelty, a G4 label, a critical evidence gap by itself, or a prior blocker label cannot substitute for any field. If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.
+Initial admission rule: DISPOSITION=CURRENT_SHIP_BLOCKER, LIFECYCLE=UNRESOLVED, and every declared field is required. Every scalar identity, outcome, owner, timing, criterion, correction and closure value is a non-empty string; evidence references are non-empty arrays of non-empty unique strings; nested outcome, consequence, deferral and closure records have exactly their declared fields and types. The full common finding record and every blocker-specific field must be present, non-empty, mutually consistent and bound to the exact candidate, accepted outcome, criterion/floor, durable evidence and Web-admitted revision. The decision itself must be read back from the current authoritative Web admission, and its exact body digest binds the complete decision including the detailed companion reference. Web durably reconciles the full predicate against that exact identity. Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback binds the complete canonical common record, including the admitted outcome, milestone, audience and environment, and verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion, evidence label or recomputed digest alone cannot resolve work. Resolution retains the admitted disposition and evidence. Deferral, evidence acquisition or ownership transfer never resolves an unfinished obligation; an ownership transfer binds the complete current finding record and authoritative readback while `RESOLUTION=NOT_RESOLVED` on both sides. Severity, novelty, a G4 label, a critical evidence gap by itself, or a prior blocker label cannot substitute for any field. If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.
 
 ### Current-frontier effect and examples
 

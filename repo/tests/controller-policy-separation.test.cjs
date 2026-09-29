@@ -878,7 +878,7 @@ test('S1A increment 1 canonical shipping semantics I1-01..I1-25', async (t) => {
     }],
     ['I1-13', 'the sidecar retains timing owner evidence and revision', () => {
       assert.match(s1aSection(architecture, '### Lossless legacy projections'),
-        /canonical disposition, lifecycle, timing, verified owner.*exact evidence references, candidate identity and Web-admitted revision/);
+        /complete canonical common finding record.*admitted outcome.*timing, trigger.*closure criterion and exact evidence.*owner role\/readback/);
     }],
     ['I1-14', 'the current outcome is bound to milestone audience and environment', () => {
       assert.match(fieldByName.get('ADMITTED_CURRENT_OUTCOME'), /non-empty outcome id, milestone, intended audience and supported environment/);
@@ -1163,7 +1163,7 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
     mutationEffects: Object.freeze([])
   })
 });
-const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'd05cf916a616e599709207fea870305502670cf47631a57ff1aae9f66e6cf030';
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = '40b1fa1a6354f4f717978df1db974c7d320b14d08617c326ed701c741da8b95b';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
@@ -1185,9 +1185,10 @@ const S1A_ORACLE_OWNERSHIP_READBACK_RULE = Object.freeze({
   mustMatchIndependentAuthoritySnapshot: true,
   requiredFields: Object.freeze([
     'source', 'authoritative', 'current', 'readBack', 'repository', 'packetIdentity', 'findingId',
-    'webAdmittedRevision', 'findingRevision', 'candidateIdentity', 'acceptedDecisionId', 'programmeId',
-    'childId', 'frontierId', 'controllerId', 'acceptedContractId', 'subjectId', 'observedBehavior',
-    'requiredBehavior', 'primaryOwner', 'adjudication', 'ownerRole', 'owner', 'resolution', 'revision', 'digest'
+    'webAdmittedRevision', 'findingRevision', 'candidateIdentity', 'acceptedDecisionId', 'admittedCurrentOutcome', 'programmeId',
+    'childId', 'frontierId', 'timing', 'triggerOrReason', 'closureCriterion', 'exactEvidence', 'controllerId',
+    'acceptedContractId', 'subjectId', 'attribution', 'observedBehavior', 'requiredBehavior',
+    'primaryOwner', 'adjudication', 'disposition', 'lifecycle', 'ownerRole', 'owner', 'resolution', 'revision', 'digest'
   ]),
   recordBindings: Object.freeze([
     Object.freeze({ readback: 'repository', record: 'REPOSITORY' }),
@@ -1197,16 +1198,24 @@ const S1A_ORACLE_OWNERSHIP_READBACK_RULE = Object.freeze({
     Object.freeze({ readback: 'findingRevision', record: 'FINDING_REVISION' }),
     Object.freeze({ readback: 'candidateIdentity', record: 'CANDIDATE_IDENTITY' }),
     Object.freeze({ readback: 'acceptedDecisionId', record: 'ACCEPTED_DECISION_ID' }),
+    Object.freeze({ readback: 'admittedCurrentOutcome', record: 'ADMITTED_CURRENT_OUTCOME' }),
     Object.freeze({ readback: 'programmeId', record: 'PROGRAMME_ID' }),
     Object.freeze({ readback: 'childId', record: 'CHILD_ID' }),
     Object.freeze({ readback: 'frontierId', record: 'FRONTIER_ID' }),
+    Object.freeze({ readback: 'timing', record: 'TIMING' }),
+    Object.freeze({ readback: 'triggerOrReason', record: 'TRIGGER_OR_REASON' }),
+    Object.freeze({ readback: 'closureCriterion', record: 'CLOSURE_CRITERION' }),
+    Object.freeze({ readback: 'exactEvidence', record: 'EXACT_EVIDENCE' }),
     Object.freeze({ readback: 'controllerId', record: 'CONTROLLER_ID' }),
     Object.freeze({ readback: 'acceptedContractId', record: 'ACCEPTED_CONTRACT_ID' }),
     Object.freeze({ readback: 'subjectId', record: 'SUBJECT_ID' }),
+    Object.freeze({ readback: 'attribution', record: 'ATTRIBUTION' }),
     Object.freeze({ readback: 'observedBehavior', record: 'OBSERVED_BEHAVIOR' }),
     Object.freeze({ readback: 'requiredBehavior', record: 'REQUIRED_BEHAVIOR' }),
     Object.freeze({ readback: 'primaryOwner', record: 'PRIMARY_OWNER' }),
     Object.freeze({ readback: 'adjudication', record: 'ADJUDICATION' }),
+    Object.freeze({ readback: 'disposition', record: 'DISPOSITION' }),
+    Object.freeze({ readback: 'lifecycle', record: 'LIFECYCLE' }),
     Object.freeze({ readback: 'ownerRole', record: 'OWNER_ROLE' }),
     Object.freeze({ readback: 'owner', record: 'VERIFIED_OWNER' }),
     Object.freeze({ readback: 'resolution', record: 'RESOLUTION' })
@@ -1241,7 +1250,7 @@ const S1A_ORACLE_EVIDENCE_ONLY_MEANING = 'Acquire, preserve or verify evidence a
 const S1A_ORACLE_COMMON_FIELD_NAMES = Object.freeze([
   'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION', 'ACCEPTED_DECISION_ID',
   'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID', 'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID',
-  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ADJUDICATION',
+  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ATTRIBUTION', 'ADJUDICATION',
   'OWNER_ROLE', 'OWNER_READBACK', 'RESOLUTION'
 ]);
 const S1A_ORACLE_BLOCKER_FIELDS = Object.freeze([
@@ -1258,7 +1267,7 @@ const S1A_ORACLE_BLOCKER_RECORD_FIELDS = Object.freeze([
   'SAFE_DEFERRAL_IMPOSSIBLE', 'SMALLEST_CORRECTION', 'VERIFIABLE_CLOSURE',
   'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION', 'ACCEPTED_DECISION_ID',
   'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID', 'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID',
-  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ADJUDICATION',
+  'SUBJECT_ID', 'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ATTRIBUTION', 'ADJUDICATION',
   'OWNER_ROLE', 'OWNER_READBACK', 'RESOLUTION'
 ]);
 const S1A_ORACLE_BLOCKER_TYPED_PATHS = Object.freeze({
@@ -1272,7 +1281,8 @@ const S1A_ORACLE_BLOCKER_TYPED_PATHS = Object.freeze({
   PROGRAMME_ID: 'NONEMPTY_STRING', CHILD_ID: 'NONEMPTY_STRING', FRONTIER_ID: 'NONEMPTY_STRING',
   CONTROLLER_ID: 'NONEMPTY_STRING', ACCEPTED_CONTRACT_ID: 'NONEMPTY_STRING', SUBJECT_ID: 'NONEMPTY_STRING',
   OBSERVED_BEHAVIOR: 'NONEMPTY_STRING', REQUIRED_BEHAVIOR: 'NONEMPTY_STRING',
-  PRIMARY_OWNER: 'NONEMPTY_STRING', ADJUDICATION: 'NONEMPTY_STRING', OWNER_ROLE: 'NONEMPTY_STRING',
+  PRIMARY_OWNER: 'NONEMPTY_STRING', ATTRIBUTION: 'NONEMPTY_STRING',
+  ADJUDICATION: 'NONEMPTY_STRING', OWNER_ROLE: 'NONEMPTY_STRING',
   OWNER_READBACK: 'NONEMPTY_OBJECT', RESOLUTION: 'NONEMPTY_STRING',
   'ADMITTED_CURRENT_OUTCOME.id': 'NONEMPTY_STRING',
   'ADMITTED_CURRENT_OUTCOME.milestone': 'NONEMPTY_STRING',
@@ -1357,7 +1367,73 @@ const S1A_ORACLE_COMMON_FIELD_TYPES = Object.freeze({
   ADJUDICATION: 'NONEMPTY_STRING',
   OWNER_ROLE: 'NONEMPTY_STRING',
   OWNER_READBACK: 'NONEMPTY_OBJECT',
+  RESOLUTION: 'NONEMPTY_STRING',
+  ATTRIBUTION: 'NONEMPTY_STRING'
+});
+const S1A_ORACLE_COMMON_RECORD_FIELDS = Object.freeze([
+  'FINDING_ID', 'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_REVISION',
+  'WEB_ADMITTED_REVISION', 'ACCEPTED_DECISION_ID', 'ADMITTED_CURRENT_OUTCOME',
+  'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID', 'TIMING', 'TRIGGER_OR_REASON',
+  'CLOSURE_CRITERION', 'EXACT_EVIDENCE', 'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID',
+  'SUBJECT_ID', 'CANDIDATE_IDENTITY', 'ATTRIBUTION', 'PRIMARY_OWNER', 'ADJUDICATION',
+  'OBSERVED_BEHAVIOR', 'REQUIRED_BEHAVIOR', 'DISPOSITION', 'LIFECYCLE',
+  'VERIFIED_OWNER', 'OWNER_ROLE', 'OWNER_READBACK', 'RESOLUTION'
+]);
+const S1A_ORACLE_COMMON_RECORD_TYPED_FIELDS = Object.freeze({
+  FINDING_ID: 'NONEMPTY_STRING',
+  REPOSITORY: 'NONEMPTY_STRING',
+  PACKET_IDENTITY: 'NONEMPTY_OBJECT',
+  FINDING_REVISION: 'NONEMPTY_STRING',
+  WEB_ADMITTED_REVISION: 'NONEMPTY_STRING',
+  ACCEPTED_DECISION_ID: 'NONEMPTY_STRING',
+  ADMITTED_CURRENT_OUTCOME: 'NONEMPTY_OBJECT',
+  PROGRAMME_ID: 'NONEMPTY_STRING',
+  CHILD_ID: 'NONEMPTY_STRING',
+  FRONTIER_ID: 'NONEMPTY_STRING',
+  TIMING: 'NONEMPTY_STRING',
+  TRIGGER_OR_REASON: 'NONEMPTY_STRING',
+  CLOSURE_CRITERION: 'NONEMPTY_STRING',
+  EXACT_EVIDENCE: 'NONEMPTY_EVIDENCE_REFERENCES',
+  CONTROLLER_ID: 'NONEMPTY_STRING',
+  ACCEPTED_CONTRACT_ID: 'NONEMPTY_STRING',
+  SUBJECT_ID: 'NONEMPTY_STRING',
+  CANDIDATE_IDENTITY: 'NONEMPTY_OBJECT',
+  ATTRIBUTION: 'NONEMPTY_STRING',
+  PRIMARY_OWNER: 'NONEMPTY_STRING',
+  ADJUDICATION: 'NONEMPTY_STRING',
+  OBSERVED_BEHAVIOR: 'NONEMPTY_STRING',
+  REQUIRED_BEHAVIOR: 'NONEMPTY_STRING',
+  DISPOSITION: 'NONEMPTY_STRING',
+  LIFECYCLE: 'NONEMPTY_STRING',
+  VERIFIED_OWNER: 'NONEMPTY_STRING',
+  OWNER_ROLE: 'NONEMPTY_STRING',
+  OWNER_READBACK: 'NONEMPTY_OBJECT',
   RESOLUTION: 'NONEMPTY_STRING'
+});
+const S1A_ORACLE_COMMON_RECORD_NESTED_FIELDS = Object.freeze([
+  Object.freeze({ record: 'ADMITTED_CURRENT_OUTCOME',
+    fields: Object.freeze(['id', 'milestone', 'audience', 'environment']) })
+]);
+const S1A_ORACLE_COMMON_RECORD_CONTRACT = Object.freeze({
+  requiredFields: S1A_ORACLE_COMMON_RECORD_FIELDS,
+  typedFields: S1A_ORACLE_COMMON_RECORD_TYPED_FIELDS,
+  nestedRequiredFields: S1A_ORACLE_COMMON_RECORD_NESTED_FIELDS,
+  transitionBindings: Object.freeze([
+    Object.freeze({ transition: 'disposition', record: 'DISPOSITION' }),
+    Object.freeze({ transition: 'sourceLifecycle', record: 'LIFECYCLE' })
+  ]),
+  canonicalRecordAuthoritative: true,
+  adjudicationMustMatchDisposition: true,
+  resolutionLifecycleBindings: Object.freeze([
+    Object.freeze({ lifecycle: 'UNRESOLVED', resolution: 'NOT_RESOLVED' }),
+    Object.freeze({ lifecycle: 'RESOLVED', resolution: 'RESOLVED' })
+  ]),
+  completenessObligation: 'F2_COMMON_RECORD_COMPANION_COMPLETENESS',
+  transitionConsistencyObligation: 'F1_RECORD_TRANSITION_CONSISTENCY'
+});
+const S1A_ORACLE_ADMITTED_CURRENT_OUTCOME = Object.freeze({
+  id: 'outcome:alpha', milestone: 'alpha', audience: 'internal',
+  environment: 'staging'
 });
 const S1A_ORACLE_PACKET_IDENTITY = Object.freeze({
   repository: 'weijunswj/ai-agent-toolkit',
@@ -1366,20 +1442,32 @@ const S1A_ORACLE_PACKET_IDENTITY = Object.freeze({
 });
 function makeS1aCommonFindingFields(identity) {
   const fields = {
+    FINDING_ID: 'finding:common-record',
     REPOSITORY: 'weijunswj/ai-agent-toolkit',
     PACKET_IDENTITY: s1aClone(S1A_ORACLE_PACKET_IDENTITY),
     FINDING_REVISION: 'finding-revision:7',
+    WEB_ADMITTED_REVISION: 'web:revision-7',
     ACCEPTED_DECISION_ID: 'decision:web:7',
+    ADMITTED_CURRENT_OUTCOME: s1aClone(S1A_ORACLE_ADMITTED_CURRENT_OUTCOME),
     PROGRAMME_ID: 'programme:s1a',
     CHILD_ID: 'child:s1a-increment-1',
     FRONTIER_ID: 'frontier:increment-1',
+    TIMING: 'future-release',
+    TRIGGER_OR_REASON: 'reassess on accepted evidence',
+    CLOSURE_CRITERION: 'criterion:future-close',
+    EXACT_EVIDENCE: ['evidence:common-record'],
     CONTROLLER_ID: 'controller:web-459',
     ACCEPTED_CONTRACT_ID: 'contract:s1a-i1-25',
     SUBJECT_ID: 'subject:current-candidate',
-    OBSERVED_BEHAVIOR: 'Observed behavior violates the accepted criterion.',
-    REQUIRED_BEHAVIOR: 'Required behavior satisfies the accepted criterion.',
+    CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+    ATTRIBUTION: 'TOOLKIT',
     PRIMARY_OWNER: 'TOOLKIT',
-    ADJUDICATION: 'EVIDENCE_ONLY',
+    ADJUDICATION: 'FUTURE_OWNED',
+    OBSERVED_BEHAVIOR: 'Observed behavior remains within the accepted future scope.',
+    REQUIRED_BEHAVIOR: 'The verified owner closes the accepted criterion by its trigger.',
+    DISPOSITION: 'FUTURE_OWNED',
+    LIFECYCLE: 'UNRESOLVED',
+    VERIFIED_OWNER: 'owner:verified',
     OWNER_ROLE: 'TOOLKIT_OWNER',
     RESOLUTION: 'NOT_RESOLVED',
     ...s1aClone(identity)
@@ -1395,20 +1483,28 @@ function makeS1aCommonFindingFields(identity) {
     findingRevision: fields.FINDING_REVISION,
     candidateIdentity: s1aClone(fields.CANDIDATE_IDENTITY),
     acceptedDecisionId: fields.ACCEPTED_DECISION_ID,
-    primaryOwner: fields.PRIMARY_OWNER,
-    ownerRole: fields.OWNER_ROLE,
-    owner: fields.VERIFIED_OWNER,
-    webAdmittedRevision: fields.WEB_ADMITTED_REVISION,
+    admittedCurrentOutcome: s1aClone(fields.ADMITTED_CURRENT_OUTCOME),
     programmeId: fields.PROGRAMME_ID,
     childId: fields.CHILD_ID,
     frontierId: fields.FRONTIER_ID,
+    timing: fields.TIMING,
+    triggerOrReason: fields.TRIGGER_OR_REASON,
+    closureCriterion: fields.CLOSURE_CRITERION,
+    exactEvidence: s1aClone(fields.EXACT_EVIDENCE),
     controllerId: fields.CONTROLLER_ID,
     acceptedContractId: fields.ACCEPTED_CONTRACT_ID,
     subjectId: fields.SUBJECT_ID,
+    attribution: fields.ATTRIBUTION,
     observedBehavior: fields.OBSERVED_BEHAVIOR,
     requiredBehavior: fields.REQUIRED_BEHAVIOR,
+    primaryOwner: fields.PRIMARY_OWNER,
     adjudication: fields.ADJUDICATION,
+    disposition: fields.DISPOSITION,
+    lifecycle: fields.LIFECYCLE,
+    ownerRole: fields.OWNER_ROLE,
+    owner: fields.VERIFIED_OWNER,
     resolution: fields.RESOLUTION,
+    webAdmittedRevision: fields.WEB_ADMITTED_REVISION,
     revision: 'ownership:readback-revision-7'
   };
   fields.OWNER_READBACK = { ...readbackCore, digest: s1aHashRecord(readbackCore) };
@@ -1424,19 +1520,7 @@ const S1A_ORACLE_TRANSFER_FINDING_IDENTITY = Object.freeze({
 });
 const S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK = s1aDeepFreeze(s1aClone(
   makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY).OWNER_READBACK));
-const S1A_ORACLE_COMPANION_TYPED_FIELDS = Object.freeze({...S1A_ORACLE_COMMON_FIELD_TYPES,
-
-  FINDING_ID: 'NONEMPTY_STRING',
-  WEB_ADMITTED_REVISION: 'NONEMPTY_STRING',
-  DISPOSITION: 'NONEMPTY_STRING',
-  LIFECYCLE: 'NONEMPTY_STRING',
-  TIMING: 'NONEMPTY_STRING',
-  VERIFIED_OWNER: 'NONEMPTY_STRING',
-  TRIGGER_OR_REASON: 'NONEMPTY_STRING',
-  CLOSURE_CRITERION: 'NONEMPTY_STRING',
-  EXACT_EVIDENCE: 'NONEMPTY_EVIDENCE_REFERENCES',
-  CANDIDATE_IDENTITY: 'NONEMPTY_OBJECT'
-});
+const S1A_ORACLE_COMPANION_TYPED_FIELDS = S1A_ORACLE_COMMON_RECORD_TYPED_FIELDS;
 const S1A_ORACLE_COMPANION_CURRENT_INVENTORY_RULE = Object.freeze({
   mode: 'CURRENT_AUTHORITATIVE_COMPLETE_READBACK',
   source: 'CURRENT_WEB_ADMISSION_COMPANION_INVENTORY',
@@ -1450,19 +1534,36 @@ const S1A_ORACLE_COMPANION_CURRENT_INVENTORY_RULE = Object.freeze({
 const S1A_ORACLE_CLOSURE_VERIFICATION = Object.freeze({
   mode: 'CURRENT_AUTHORITATIVE_WEB_CLOSURE_READBACK',
   source: 'CURRENT_WEB_CLOSURE_ADMISSION',
+  commonRecordField: 'commonRecord',
+  commonRecordMode: 'EXACT_CANONICAL_TRANSITION_SOURCE_RECORD',
+  commonRecordFieldsFrom: 'commonRecord.requiredFields',
   requiredFields: Object.freeze([
     'source', 'authoritative', 'current', 'readBack', 'repository', 'revision',
     'findingId', 'webAdmittedRevision', 'disposition', 'fromLifecycle', 'toLifecycle',
-    'closureCriterion', 'exactEvidence', 'candidateIdentity', 'body', 'bodyDigest'
+    'closureCriterion', 'exactEvidence', 'candidateIdentity', 'commonRecord', 'body', 'bodyDigest'
   ]),
   bodyFields: Object.freeze([
     'repository', 'findingId', 'webAdmittedRevision', 'disposition',
-    'fromLifecycle', 'toLifecycle', 'closureCriterion', 'exactEvidence', 'candidateIdentity'
+    'fromLifecycle', 'toLifecycle', 'closureCriterion', 'exactEvidence', 'candidateIdentity', 'commonRecord'
   ]),
   digestMode: 'SHA256_EXACT_READBACK_BODY',
   resolvesOnlyAfterVerifiedReadback: true,
   retainsAdmittedDisposition: true
 });
+const S1A_ORACLE_CLOSURE_COMMON_RECORD_SOURCE = makeS1aCommonFindingFields({
+  FINDING_ID: 'finding:closure',
+  WEB_ADMITTED_REVISION: 'web:revision-7',
+  DISPOSITION: 'FUTURE_OWNED',
+  ADJUDICATION: 'FUTURE_OWNED',
+  LIFECYCLE: 'UNRESOLVED',
+  CLOSURE_CRITERION: 'criterion:close',
+  EXACT_EVIDENCE: ['evidence:verified'],
+  CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' }
+});
+const S1A_ORACLE_CLOSURE_COMMON_RECORD = Object.freeze(Object.fromEntries(
+  S1A_ORACLE_COMMON_RECORD_FIELDS.map((field) => [field,
+    s1aClone(S1A_ORACLE_CLOSURE_COMMON_RECORD_SOURCE[field])])
+));
 const S1A_ORACLE_CLOSURE_BODY = Object.freeze({
   repository: 'weijunswj/ai-agent-toolkit',
   findingId: 'finding:closure',
@@ -1472,7 +1573,8 @@ const S1A_ORACLE_CLOSURE_BODY = Object.freeze({
   toLifecycle: 'RESOLVED',
   closureCriterion: 'criterion:close',
   exactEvidence: Object.freeze(['evidence:verified']),
-  candidateIdentity: Object.freeze({ commit: 'commit:7', tree: 'tree:7' })
+  candidateIdentity: Object.freeze({ commit: 'commit:7', tree: 'tree:7' }),
+  commonRecord: S1A_ORACLE_CLOSURE_COMMON_RECORD
 });
 const S1A_ORACLE_CLOSURE_BODY_TEXT = s1aCanonical(S1A_ORACLE_CLOSURE_BODY);
 const S1A_ORACLE_CLOSURE_READBACK = Object.freeze({
@@ -1490,6 +1592,7 @@ const S1A_ORACLE_CLOSURE_READBACK = Object.freeze({
   closureCriterion: S1A_ORACLE_CLOSURE_BODY.closureCriterion,
   exactEvidence: S1A_ORACLE_CLOSURE_BODY.exactEvidence,
   candidateIdentity: S1A_ORACLE_CLOSURE_BODY.candidateIdentity,
+  commonRecord: S1A_ORACLE_CLOSURE_BODY.commonRecord,
   body: S1A_ORACLE_CLOSURE_BODY_TEXT,
   bodyDigest: s1aHashText(S1A_ORACLE_CLOSURE_BODY_TEXT)
 });
@@ -1499,7 +1602,8 @@ const S1A_ORACLE_COMPANION_IDENTITY_FIELDS = Object.freeze([
 ]);
 const S1A_ORACLE_COMPANION_PROJECTION_FIELDS = Object.freeze([
   'REPOSITORY', 'PACKET_IDENTITY', 'FINDING_ID', 'FINDING_REVISION',
-  'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'CANDIDATE_IDENTITY', 'ACCEPTED_DECISION_ID'
+  'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'CANDIDATE_IDENTITY', 'ACCEPTED_DECISION_ID',
+  'ADMITTED_CURRENT_OUTCOME', 'ATTRIBUTION'
 ]);const S1A_ORACLE_POST_CHILD_RECEIPT_IDS = Object.freeze(['receipt:merge', 'receipt:child-terminal']);
 const S1A_ORACLE_POST_CHILD_CHECK_IDS = Object.freeze(['check:integration', 'check:policy']);
 const S1A_ORACLE_BOUNDARY_RUN_EVENTS = Object.freeze([
@@ -1513,7 +1617,11 @@ const S1A_ORACLE_IDENTITY_FIELDS = Object.freeze([
 const S1A_ORACLE_DETAIL_FIELDS = Object.freeze([
   'FINDING_ID', 'WEB_ADMITTED_REVISION', 'DISPOSITION', 'LIFECYCLE', 'TIMING',
   'VERIFIED_OWNER', 'TRIGGER_OR_REASON', 'CLOSURE_CRITERION', 'EXACT_EVIDENCE',
-  'CANDIDATE_IDENTITY', ...Object.keys(S1A_ORACLE_COMMON_FIELD_TYPES)
+  'CANDIDATE_IDENTITY', 'ADMITTED_CURRENT_OUTCOME', 'REPOSITORY', 'PACKET_IDENTITY',
+  'FINDING_REVISION', 'ACCEPTED_DECISION_ID', 'PROGRAMME_ID', 'CHILD_ID', 'FRONTIER_ID',
+  'CONTROLLER_ID', 'ACCEPTED_CONTRACT_ID', 'SUBJECT_ID', 'OBSERVED_BEHAVIOR',
+  'REQUIRED_BEHAVIOR', 'PRIMARY_OWNER', 'ATTRIBUTION', 'ADJUDICATION', 'OWNER_ROLE',
+  'OWNER_READBACK', 'RESOLUTION'
 ]);
 const S1A_ORACLE_BLOCKER_PROOF_FIELDS = Object.freeze(
   S1A_ORACLE_BLOCKER_RECORD_FIELDS.filter((field) => field !== 'DETAIL_REF'));
@@ -1785,10 +1893,12 @@ function s1aReadPolicy(source) {
     'Architecture current shipping law section is missing or ambiguous');
   const policyLawProse = source.slice(policyLawStart, policyLawEnd);
   s1aExactKeys(policy, [
-    'schema', 'dispositions', 'lifecycles', 'evidenceOnly', 'projectionRows', 'blocker', 'companion',
+    'schema', 'dispositions', 'lifecycles', 'evidenceOnly', 'commonRecord', 'projectionRows', 'blocker', 'companion',
     'lifecycleTransitions', 'closureVerification', 'postChildReview', 'faithfulCarrier', 'boundedContinuation'
   ], 'root');
   s1aRequire(policy.schema === 'toolkit.s1a.policy-contract.v1', 'unknown S1-A policy schema');
+  s1aRequire(s1aSame(policy.commonRecord, S1A_ORACLE_COMMON_RECORD_CONTRACT),
+    'common record fields, transition bindings, or composition obligations are incomplete');
   s1aRequire(s1aSame(policy.boundedContinuation, S1A_ORACLE_BOUNDED_CONTINUATION_POLICY),
     'bounded continuation contract differs from fixed behavioral observer');
   s1aUniqueStrings(policy.dispositions, 'dispositions', S1A_ORACLE_DISPOSITIONS);
@@ -2190,7 +2300,7 @@ function s1aReadPolicy(source) {
     !/admit(?:ted)?\s+(?:this disposition|a blocker)\s+even (?:when|if)\s+(?:a |any )?(?:required )?field is missing/i.test(blockerProse) &&
     !blockerWaiverContradiction.test(policyLawProse),
     'blocker prose must fail closed on missing or contradictory proof');
-  s1aRequire(blockerProse.includes('Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion or evidence label alone cannot resolve work.') &&
+  s1aRequire(blockerProse.includes('Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback binds the complete canonical common record, including the admitted outcome, milestone, audience and environment, and verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion, evidence label or recomputed digest alone cannot resolve work.') &&
     !/caller[- ]supplied (?:criterion|evidence label) alone can resolve/i.test(blockerProse),
     'closure prose must require current authoritative verification');
   const postChildStart = source.indexOf('### Post-child integrated dual review');
@@ -2311,8 +2421,7 @@ function s1aOwnershipReadbackMatches(record) {
   if (!s1aHasExactKeys(readback, rule.requiredFields) ||
       readback.source !== rule.source || readback.authoritative !== true ||
       readback.current !== true || readback.readBack !== true ||
-      record.RESOLUTION !== rule.resolutionMustRemain ||
-      readback.resolution !== rule.resolutionMustRemain) return false;
+      readback.resolution !== record.RESOLUTION) return false;
   for (const [field, type] of Object.entries(S1A_ORACLE_COMMON_FIELD_TYPES)) {
     if (!s1aTypeMatches(record && record[field], type)) return false;
   }
@@ -2330,6 +2439,37 @@ function s1aOwnershipReadbackMatches(record) {
   const core = Object.fromEntries(rule.requiredFields.filter((field) => field !== 'digest')
     .map((field) => [field, readback[field]]));
   return readback.digest === s1aHashRecord(core);
+}
+
+function s1aValidateCommonFindingRecord(policy, record) {
+  const failures = [];
+  const rule = policy.commonRecord;
+  for (const field of rule.requiredFields) {
+    if (!s1aPresent(record && record[field])) failures.push(rule.completenessObligation);
+    if (!s1aTypeMatches(record && record[field], rule.typedFields[field])) {
+      failures.push(rule.completenessObligation);
+    }
+  }
+  for (const nested of rule.nestedRequiredFields) {
+    const value = record && record[nested.record];
+    if (!s1aHasExactKeys(value, nested.fields) ||
+        nested.fields.some((field) => !s1aTypeMatches(value && value[field], 'NONEMPTY_STRING'))) {
+      failures.push(rule.completenessObligation);
+    }
+  }
+  if (record && S1A_ORACLE_DISPOSITIONS.includes(record.DISPOSITION) &&
+      S1A_ORACLE_LIFECYCLES.includes(record.LIFECYCLE)) {
+    const resolution = rule.resolutionLifecycleBindings.find((row) =>
+      row.lifecycle === record.LIFECYCLE);
+    if (!resolution || record.RESOLUTION !== resolution.resolution ||
+        (rule.adjudicationMustMatchDisposition && record.ADJUDICATION !== record.DISPOSITION)) {
+      failures.push(rule.transitionConsistencyObligation);
+    }
+  } else {
+    failures.push(rule.completenessObligation);
+  }
+  if (!s1aOwnershipReadbackMatches(record)) failures.push(rule.completenessObligation);
+  return { ok: failures.length === 0, failures: [...new Set(failures)] };
 }
 
 function s1aOwnershipTransferReadbackMatches(record, trustedOwnershipReadback) {
@@ -2356,6 +2496,8 @@ function evaluateS1aBlocker(policy, record, decision, companionProjection, compa
       failures.push('BLOCKER_TYPE_MISMATCH:' + path);
     }
   }
+  const commonRecord = s1aValidateCommonFindingRecord(policy, record);
+  if (!commonRecord.ok) failures.push(...commonRecord.failures);
   if (!s1aOwnershipReadbackMatches(record)) failures.push('BLOCKER_OWNER_READBACK');
   for (const requirement of blocker.nestedRequiredFields) {
     const nested = record && record[requirement.record];
@@ -2680,7 +2822,11 @@ const S1A_ORACLE_BLOCKER_PROOF_RECORD = Object.freeze({
     FINDING_ID: 'finding:alpha', WEB_ADMITTED_REVISION: 'web:459:revision-7',
     FINDING_REVISION: 'finding-revision:alpha-7', ACCEPTED_DECISION_ID: 'decision:web:alpha-7',
     CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
-    VERIFIED_OWNER: 'owner:current-outcome', PRIMARY_OWNER: 'PRODUCT',
+    ADMITTED_CURRENT_OUTCOME: { id: 'outcome:alpha', milestone: 'alpha', audience: 'internal', environment: 'staging' },
+    DISPOSITION: 'CURRENT_SHIP_BLOCKER', LIFECYCLE: 'UNRESOLVED',
+    TIMING: 'current-shipment', TRIGGER_OR_REASON: 'current candidate violates an accepted criterion',
+    CLOSURE_CRITERION: 'closure:alpha', EXACT_EVIDENCE: ['evidence:impact', 'evidence:deferral', 'evidence:closure'],
+    ATTRIBUTION: 'PRODUCT', VERIFIED_OWNER: 'owner:current-outcome', PRIMARY_OWNER: 'PRODUCT',
     ADJUDICATION: 'CURRENT_SHIP_BLOCKER', OWNER_ROLE: 'PRODUCT_OWNER',
     OBSERVED_BEHAVIOR: 'Current candidate violates criterion:alpha.',
     REQUIRED_BEHAVIOR: 'Current candidate satisfies criterion:alpha.'
@@ -2744,16 +2890,15 @@ const S1A_ORACLE_WEB_ADMISSION_DECISION = Object.freeze({
 });
 
 const S1A_ORACLE_HISTORY_RECORD = Object.freeze({
-  FINDING_ID: 'finding:one',
-  WEB_ADMITTED_REVISION: 'web:revision-6',
-  DISPOSITION: 'FUTURE_OWNED',
-  LIFECYCLE: 'UNRESOLVED',
-  TIMING: 'future-release',
-  VERIFIED_OWNER: 'team:one',
-  TRIGGER_OR_REASON: 'accepted prior owner and trigger',
-  CLOSURE_CRITERION: 'closure:one',
-  EXACT_EVIDENCE: Object.freeze(['evidence:one-prior']),
-  CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:6', tree: 'tree:6' })
+  ...makeS1aCommonFindingFields({
+    FINDING_ID: 'finding:one', WEB_ADMITTED_REVISION: 'web:revision-6',
+    FINDING_REVISION: 'finding-revision:one-6', ACCEPTED_DECISION_ID: 'decision:web:one-6',
+    DISPOSITION: 'FUTURE_OWNED', LIFECYCLE: 'UNRESOLVED', TIMING: 'future-release',
+    VERIFIED_OWNER: 'team:one', TRIGGER_OR_REASON: 'accepted prior owner and trigger',
+    CLOSURE_CRITERION: 'closure:one', EXACT_EVIDENCE: ['evidence:one-prior'],
+    CANDIDATE_IDENTITY: { commit: 'commit:6', tree: 'tree:6' }, ATTRIBUTION: 'TOOLKIT',
+    ADJUDICATION: 'FUTURE_OWNED', PRIMARY_OWNER: 'TOOLKIT', OWNER_ROLE: 'TOOLKIT_OWNER'
+  })
 });
 const S1A_ORACLE_HISTORY_RECORDS = Object.freeze([Object.freeze({
   ref: s1aHashRecord(S1A_ORACLE_HISTORY_RECORD),
@@ -2825,6 +2970,10 @@ const S1A_ORACLE_CURRENT_COMPANION_RECORDS = Object.freeze([
       FINDING_ID: 'finding:one', WEB_ADMITTED_REVISION: 'web:revision-7',
       FINDING_REVISION: 'finding-revision:one-7', ACCEPTED_DECISION_ID: 'decision:web:one',
       VERIFIED_OWNER: 'team:one', CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+      ADMITTED_CURRENT_OUTCOME: s1aClone(S1A_ORACLE_ADMITTED_CURRENT_OUTCOME),
+      DISPOSITION: 'FUTURE_OWNED', LIFECYCLE: 'UNRESOLVED', TIMING: 'future-release',
+      TRIGGER_OR_REASON: 'new acceptance evidence', CLOSURE_CRITERION: 'closure:one',
+      EXACT_EVIDENCE: ['evidence:one'], ATTRIBUTION: 'TOOLKIT',
       PRIMARY_OWNER: 'TOOLKIT', ADJUDICATION: 'FUTURE_OWNED', OWNER_ROLE: 'TOOLKIT_OWNER',
       OBSERVED_BEHAVIOR: 'The accepted future criterion remains unresolved.',
       REQUIRED_BEHAVIOR: 'The verified future owner closes the criterion before its trigger.'
@@ -2840,6 +2989,10 @@ const S1A_ORACLE_CURRENT_COMPANION_RECORDS = Object.freeze([
       FINDING_ID: 'finding:two', WEB_ADMITTED_REVISION: 'web:revision-7',
       FINDING_REVISION: 'finding-revision:two-7', ACCEPTED_DECISION_ID: 'decision:web:two',
       VERIFIED_OWNER: 'team:two', CANDIDATE_IDENTITY: { commit: 'commit:7', tree: 'tree:7' },
+      ADMITTED_CURRENT_OUTCOME: s1aClone(S1A_ORACLE_ADMITTED_CURRENT_OUTCOME),
+      DISPOSITION: 'EVIDENCE_ONLY', LIFECYCLE: 'UNRESOLVED', TIMING: 'before-next-review',
+      TRIGGER_OR_REASON: 'required evidence acquisition', CLOSURE_CRITERION: 'closure:two',
+      EXACT_EVIDENCE: ['evidence:two'], ATTRIBUTION: 'HARNESS',
       PRIMARY_OWNER: 'HARNESS', ADJUDICATION: 'EVIDENCE_ONLY', OWNER_ROLE: 'TOOLKIT_OWNER',
       OBSERVED_BEHAVIOR: 'The current evidence does not establish a product defect.',
       REQUIRED_BEHAVIOR: 'Acquire and preserve the exact evidence before the next review.'
@@ -3099,6 +3252,8 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
     failures.push('COMPANION_CURRENT_INVENTORY_READBACK');
   }
   for (const entry of entries) {
+    const commonResult = s1aValidateCommonFindingRecord(policy, entry && entry.record);
+    if (!commonResult.ok) failures.push(...commonResult.failures);
     for (const [field, type] of Object.entries(policy.companion.typedFields)) {
       if (!s1aTypeMatches(entry && entry.record && entry.record[field], type)) {
         failures.push('COMPANION_FIELD_TYPE:' + field);
@@ -3120,6 +3275,8 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
   }
   const historicalByIdentity = new Map();
   for (const item of history) {
+    const commonResult = s1aValidateCommonFindingRecord(policy, item && item.record);
+    if (!commonResult.ok) failures.push(...commonResult.failures);
     const key = item && s1aCompanionIdentity(item.record, S1A_ORACLE_HISTORY_IDENTITY_FIELDS);
     if (!item || !s1aPresent(item.ref) || !key ||
         item.ref !== s1aHashRecord(item.record) || historicalByIdentity.has(key)) {
@@ -3144,6 +3301,12 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
       continue;
     }
     const record = matches[0].record;
+    const acceptedRecord = [...S1A_ORACLE_CURRENT_COMPANION_RECORDS, S1A_ORACLE_BLOCKER_PROOF_RECORD]
+      .find((candidate) => candidate.FINDING_ID === record.FINDING_ID);
+    if (!acceptedRecord || !S1A_ORACLE_COMMON_RECORD_FIELDS.every((field) =>
+      s1aSame(record[field], acceptedRecord[field]))) {
+      failures.push('COMPANION_SEMANTIC_CONTEXT_BINDING');
+    }
     if (!s1aPresent(record)) {
       failures.push('COMPANION_RECORD_MISSING');
       continue;
@@ -3167,6 +3330,11 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
     for (const field of policy.companion.projectionBindingFields) {
       if (!s1aSame(projection[field], record[field])) {
         failures.push('COMPANION_IDENTITY_BINDING:' + field);
+        if (['REPOSITORY', 'PACKET_IDENTITY', 'FINDING_ID', 'FINDING_REVISION',
+          'WEB_ADMITTED_REVISION', 'CANDIDATE_IDENTITY', 'ACCEPTED_DECISION_ID',
+          'ADMITTED_CURRENT_OUTCOME', 'ATTRIBUTION'].includes(field)) {
+          failures.push('COMPANION_SEMANTIC_CONTEXT_BINDING');
+        }
       }
     }
   }
@@ -3270,15 +3438,17 @@ test('S1-A lifecycle proof values remain typed and transfer or deferral cannot r
   assert.equal(deferredFalse.ok, false);
   assert.equal(deferredFalse.lifecycle, 'UNRESOLVED');
 
-  const verified = {
+  const verified = makeS1aCommonFindingFields({
     FINDING_ID: S1A_ORACLE_CLOSURE_BODY.findingId,
     WEB_ADMITTED_REVISION: S1A_ORACLE_CLOSURE_BODY.webAdmittedRevision,
     DISPOSITION: S1A_ORACLE_CLOSURE_BODY.disposition,
+    LIFECYCLE: S1A_ORACLE_CLOSURE_BODY.fromLifecycle,
     CLOSURE_CRITERION: S1A_ORACLE_CLOSURE_BODY.closureCriterion,
     EXACT_EVIDENCE: [...S1A_ORACLE_CLOSURE_BODY.exactEvidence],
     CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity),
-    closureReadback: s1aClone(S1A_ORACLE_CLOSURE_READBACK)
-  };
+    ADJUDICATION: S1A_ORACLE_CLOSURE_BODY.disposition
+  });
+  verified.closureReadback = s1aClone(S1A_ORACLE_CLOSURE_READBACK);
   const acceptedClosure = evaluateS1aTransition(policy, 'FUTURE_OWNED',
     'UNRESOLVED', 'VERIFIED_CLOSURE', verified);
   assert.equal(acceptedClosure.ok, true);
@@ -3430,6 +3600,276 @@ test('S1-A ownership transfer requires a current authoritative readback bound to
     'co-rebinding request, embedded readback, digest, and a cloned fake trusted readback is rejected');
   assert.equal(forgedContextResult.lifecycle, 'UNRESOLVED');
   assert.ok(forgedContextResult.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'));
+});
+test('S1-A F1 rejects transition contradictions before effects, including valid objects composed across contexts', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const assertRejected = (result, sourceLifecycle, label, obligation = 'F1_RECORD_TRANSITION_CONSISTENCY') => {
+    assert.equal(result.ok, false, label + ' must reject');
+    assert.ok(result.failures.includes(obligation), label + ' must fail on ' + obligation);
+    assert.equal(result.transition, null, label + ' must create no transition');
+    assert.deepEqual(result.mutationEffects, [], label + ' must create no effect');
+    assert.equal(result.lifecycle, sourceLifecycle, label + ' must preserve source lifecycle');
+  };
+
+  const rebindLifecycleReadback = (record, lifecycle, resolution) => {
+    record.LIFECYCLE = lifecycle;
+    record.RESOLUTION = resolution;
+    record.OWNER_READBACK.lifecycle = lifecycle;
+    record.OWNER_READBACK.resolution = resolution;
+    const { digest, ...core } = record.OWNER_READBACK;
+    record.OWNER_READBACK.digest = s1aHashRecord(core);
+  };
+  const companionFixture = makeS1aCompanionFixture();
+  const companionBaseline = evaluateS1aCompanions(policy, companionFixture.projections,
+    companionFixture.entries, companionFixture.historyLedger, companionFixture.currentInventory);
+  assert.equal(companionBaseline.ok, true, 'complete companion context must pass on its own');
+  const futureRecord = companionFixture.entries[0].record;
+  assert.equal(futureRecord.DISPOSITION, 'FUTURE_OWNED');
+  assert.equal(futureRecord.LIFECYCLE, 'UNRESOLVED');
+  assert.equal(s1aValidateCommonFindingRecord(policy, futureRecord).ok, true,
+    'complete canonical record must pass on its own');
+  const matchingDefer = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+    'DEFER', futureRecord);
+  assert.equal(matchingDefer.ok, true, 'matching FUTURE_OWNED/UNRESOLVED defer must pass');
+  assert.deepEqual(matchingDefer.transition,
+    { event: 'DEFER', disposition: 'FUTURE_OWNED', from: 'UNRESOLVED', to: 'UNRESOLVED' });
+  for (const field of S1A_ORACLE_COMMON_RECORD_FIELDS) {
+    const record = makeS1aCommonFindingFields({ FINDING_ID: 'finding:missing-common:' + field });
+    const baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
+      'DEFER', record);
+    assert.equal(baseline.ok, true, 'missing ' + field + ' control must start from a passing baseline');
+    delete record[field];
+    assert.equal(Object.prototype.hasOwnProperty.call(record, field), false,
+      'common field mutation must be present: ' + field);
+    const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED', 'DEFER', record);
+    assertRejected(result, 'UNRESOLVED', 'missing common field ' + field,
+      'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+  }
+  for (const field of ['id', 'milestone', 'audience', 'environment']) {
+    const record = makeS1aCommonFindingFields({ FINDING_ID: 'finding:missing-outcome:' + field });
+    const baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
+      'DEFER', record);
+    assert.equal(baseline.ok, true, 'missing outcome ' + field + ' must start from a passing baseline');
+    delete record.ADMITTED_CURRENT_OUTCOME[field];
+    assert.equal(Object.prototype.hasOwnProperty.call(record.ADMITTED_CURRENT_OUTCOME, field), false,
+      'nested outcome field mutation must be present: ' + field);
+    const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED', 'DEFER', record);
+    assertRejected(result, 'UNRESOLVED', 'missing outcome field ' + field,
+      'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+  }
+
+  const blockerRecord = makeS1aCommonFindingFields({
+    FINDING_ID: 'finding:composition-blocker',
+    DISPOSITION: 'CURRENT_SHIP_BLOCKER',
+    ADJUDICATION: 'CURRENT_SHIP_BLOCKER'
+  });
+  assert.equal(s1aValidateCommonFindingRecord(policy, blockerRecord).ok, true,
+    'complete blocker record must pass in its matching context');
+  const blockerTransition = evaluateS1aTransition(policy, 'CURRENT_SHIP_BLOCKER',
+    'UNRESOLVED', 'DEFER', blockerRecord);
+  assert.equal(blockerTransition.ok, true,
+    'the blocker transition request must pass with its own matching record');
+  const composedContradiction = evaluateS1aTransition(policy, 'CURRENT_SHIP_BLOCKER',
+    'UNRESOLVED', 'DEFER', futureRecord);
+  assertRejected(composedContradiction, 'UNRESOLVED',
+    'separately valid future record, companion, and blocker transition composed together');
+  assert.equal(evaluateS1aCompanions(policy, companionFixture.projections,
+    companionFixture.entries, companionFixture.historyLedger, companionFixture.currentInventory).ok,
+  true, 'the companion remains valid while the contradictory transition is rejected');
+
+  const sameRecordWrongDisposition = evaluateS1aTransition(policy, 'CURRENT_SHIP_BLOCKER',
+    'UNRESOLVED', 'DEFER', futureRecord);
+  assertRejected(sameRecordWrongDisposition, 'UNRESOLVED',
+    'FUTURE_OWNED/UNRESOLVED record with CURRENT_SHIP_BLOCKER/UNRESOLVED arguments');
+
+  const resolvedRecord = s1aClone(futureRecord);
+  const resolvedRecordBefore = s1aClone(resolvedRecord);
+  rebindLifecycleReadback(resolvedRecord, 'RESOLVED', 'RESOLVED');
+  assert.notDeepEqual(resolvedRecord, resolvedRecordBefore,
+    'canonical lifecycle mutation must be present');
+  assert.equal(s1aValidateCommonFindingRecord(policy, resolvedRecord).ok, true,
+    'RESOLVED record with matching resolution/readback must be valid on its own');
+  const resolvedRecordUnresolvedSource = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'DEFER', resolvedRecord);
+  assertRejected(resolvedRecordUnresolvedSource, 'UNRESOLVED',
+    'canonical RESOLVED record with UNRESOLVED source lifecycle mutated from a passing defer');
+
+  const closureBaselineRecord = makeS1aCommonFindingFields({
+    FINDING_ID: S1A_ORACLE_CLOSURE_BODY.findingId,
+    WEB_ADMITTED_REVISION: S1A_ORACLE_CLOSURE_BODY.webAdmittedRevision,
+    DISPOSITION: S1A_ORACLE_CLOSURE_BODY.disposition,
+    ADJUDICATION: S1A_ORACLE_CLOSURE_BODY.disposition,
+    LIFECYCLE: 'UNRESOLVED',
+    CLOSURE_CRITERION: S1A_ORACLE_CLOSURE_BODY.closureCriterion,
+    EXACT_EVIDENCE: [...S1A_ORACLE_CLOSURE_BODY.exactEvidence],
+    CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity)
+  });
+  closureBaselineRecord.closureReadback = s1aClone(S1A_ORACLE_CLOSURE_READBACK);
+  const verifiedClosureBaseline = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', closureBaselineRecord);
+  assert.equal(verifiedClosureBaseline.ok, true,
+    'verified closure and unresolved canonical record must pass together');
+  const foreignClosureOutcome = s1aClone(closureBaselineRecord);
+  foreignClosureOutcome.ADMITTED_CURRENT_OUTCOME = {
+    id: 'outcome:foreign', milestone: 'milestone:foreign',
+    audience: 'external:foreign', environment: 'production:foreign'
+  };
+  foreignClosureOutcome.OWNER_READBACK.admittedCurrentOutcome =
+    s1aClone(foreignClosureOutcome.ADMITTED_CURRENT_OUTCOME);
+  const { digest: oldOwnerDigest, ...foreignOwnerReadbackCore } = foreignClosureOutcome.OWNER_READBACK;
+  void oldOwnerDigest;
+  foreignClosureOutcome.OWNER_READBACK.digest = s1aHashRecord(foreignOwnerReadbackCore);
+  assert.equal(s1aValidateCommonFindingRecord(policy, foreignClosureOutcome).ok, true,
+    'foreign outcome with coherently rebound owner readback must remain a complete record on its own');
+  const foreignClosureResult = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', foreignClosureOutcome);
+  assertRejected(foreignClosureResult, 'UNRESOLVED',
+    'complete foreign outcome composed with an unchanged accepted closure readback');
+
+  const resolvedClosureRecord = s1aClone(closureBaselineRecord);
+  rebindLifecycleReadback(resolvedClosureRecord, 'RESOLVED', 'RESOLVED');
+  assert.equal(s1aValidateCommonFindingRecord(policy, resolvedClosureRecord).ok, true,
+    'mutated canonical closure record must remain internally complete');
+  const closureSourceMismatch = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', resolvedClosureRecord);
+  assertRejected(closureSourceMismatch, 'UNRESOLVED',
+    'verified closure readback source lifecycle that conflicts with the canonical record');
+  const incompleteClosureRecord = s1aClone(closureBaselineRecord);
+  delete incompleteClosureRecord.ADMITTED_CURRENT_OUTCOME;
+  assert.equal(Object.prototype.hasOwnProperty.call(incompleteClosureRecord, 'ADMITTED_CURRENT_OUTCOME'), false,
+    'closure common-field mutation must be present');
+  const missingClosureCommonField = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', incompleteClosureRecord);
+  assertRejected(missingClosureCommonField, 'UNRESOLVED',
+    'verified closure with missing admitted outcome', 'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+  const incompleteClosureReadback = s1aClone(closureBaselineRecord);
+  delete incompleteClosureReadback.closureReadback.commonRecord.ADMITTED_CURRENT_OUTCOME;
+  const missingClosureReadbackField = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', incompleteClosureReadback);
+  assertRejected(missingClosureReadbackField, 'UNRESOLVED',
+    'verified closure readback with incomplete canonical common record',
+    'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+  const incompleteClosureOutcome = s1aClone(closureBaselineRecord);
+  delete incompleteClosureOutcome.closureReadback.commonRecord.ADMITTED_CURRENT_OUTCOME.environment;
+  const missingNestedClosureOutcome = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'VERIFIED_CLOSURE', incompleteClosureOutcome);
+  assertRejected(missingNestedClosureOutcome, 'UNRESOLVED',
+    'verified closure readback with missing admitted outcome environment',
+    'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+
+  const trustedContext = Object.freeze({ currentOwnershipReadback:
+    s1aDeepFreeze(s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK)) });
+  const transferRecord = makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY);
+  const validTransfer = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+    'TRANSFER', transferRecord, trustedContext);
+  assert.equal(validTransfer.ok, true, 'complete transfer record and readback must pass on their own');
+  const contradictoryTransfer = evaluateS1aTransition(policy, 'CURRENT_SHIP_BLOCKER',
+    'UNRESOLVED', 'TRANSFER', transferRecord, trustedContext);
+  assertRejected(contradictoryTransfer, 'UNRESOLVED',
+    'valid FUTURE_OWNED transfer record with contradictory blocker arguments');
+
+  const incompleteTransfer = s1aClone(transferRecord);
+  delete incompleteTransfer.ADMITTED_CURRENT_OUTCOME;
+  const incompleteTransferResult = evaluateS1aTransition(policy, 'FUTURE_OWNED',
+    'UNRESOLVED', 'TRANSFER', incompleteTransfer, trustedContext);
+  assertRejected(incompleteTransferResult, 'UNRESOLVED',
+    'transfer with a missing admitted outcome', 'F2_COMMON_RECORD_COMPANION_COMPLETENESS');
+});
+
+test('S1-A companion context binds outcome fields and rejects coherent foreign rebinds', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const evaluate = (fixture) => evaluateS1aCompanions(policy, fixture.projections,
+    fixture.entries, fixture.historyLedger, fixture.currentInventory);
+  const baseline = makeS1aCompanionFixture();
+  assert.equal(evaluate(baseline).ok, true, 'complete matching companion baseline must pass');
+
+  for (const [field, foreignValue] of [
+    ['id', 'outcome:foreign'],
+    ['milestone', 'milestone:foreign'],
+    ['audience', 'external:foreign'],
+    ['environment', 'production:foreign']
+  ]) {
+    const fixture = makeS1aCompanionFixture();
+    assert.equal(evaluate(fixture).ok, true, 'foreign ' + field + ' case must start from a passing baseline');
+    const before = s1aClone(fixture.projections[0].ADMITTED_CURRENT_OUTCOME[field]);
+    fixture.projections[0].ADMITTED_CURRENT_OUTCOME[field] = foreignValue;
+    assert.notEqual(fixture.projections[0].ADMITTED_CURRENT_OUTCOME[field], before,
+      field + ' mutation must be present');
+    const result = evaluate(fixture);
+    assert.equal(result.ok, false, 'foreign ' + field + ' projection must reject');
+    assert.ok(result.failures.includes('COMPANION_SEMANTIC_CONTEXT_BINDING'),
+      'foreign ' + field + ' must fail on semantic context binding');
+    assert.ok(result.failures.includes('COMPANION_IDENTITY_BINDING:ADMITTED_CURRENT_OUTCOME'));
+    assert.equal(result.failures.some((failure) => /PARSER|DIGEST|EXACT_CONTENT_BINDING/.test(failure)),
+      false, 'foreign ' + field + ' must not rely on parsing or content-hash failure');
+  }
+
+  const foreignContextFixture = makeS1aCompanionFixture();
+  assert.equal(evaluate(foreignContextFixture).ok, true, 'coherent-rebind attack must start from a passing baseline');
+  const foreignRecords = foreignContextFixture.entries.map((entry) => s1aClone(entry.record));
+  const foreignRecord = foreignRecords[0];
+  foreignRecord.ADMITTED_CURRENT_OUTCOME = {
+    id: 'outcome:foreign', milestone: 'milestone:foreign',
+    audience: 'external:foreign', environment: 'production:foreign'
+  };
+  foreignRecord.OWNER_READBACK.admittedCurrentOutcome =
+    s1aClone(foreignRecord.ADMITTED_CURRENT_OUTCOME);
+  const { digest: oldReadbackDigest, ...readbackCore } = foreignRecord.OWNER_READBACK;
+  foreignRecord.OWNER_READBACK.digest = s1aHashRecord(readbackCore);
+  foreignContextFixture.currentInventory = makeS1aCurrentCompanionInventory(foreignRecords,
+    'web:inventory-revision-foreign-context');
+  foreignContextFixture.entries = s1aClone(foreignContextFixture.currentInventory.records);
+  foreignContextFixture.projections = foreignContextFixture.entries.map((entry) => {
+    const record = entry.record;
+    const mapping = S1A_ORACLE_PROJECTION_ROWS.find((row) =>
+      row.disposition === record.DISPOSITION && row.lifecycle === record.LIFECYCLE);
+    return makeS1aCompanionProjection(record, entry.ref, {
+      TWO_WAY: mapping.twoWay, V1: mapping.v1
+    });
+  });
+  assert.notEqual(oldReadbackDigest, foreignRecord.OWNER_READBACK.digest,
+    'foreign readback must be coherently rehashed');
+  assert.equal(s1aValidateCommonFindingRecord(policy, foreignRecord).ok, true,
+    'foreign common record and ownership readback must remain structurally valid');
+  assert.deepEqual(foreignContextFixture.projections[0].ADMITTED_CURRENT_OUTCOME,
+    foreignContextFixture.entries[0].record.ADMITTED_CURRENT_OUTCOME,
+    'projection must be rebound to the same foreign record context');
+  assert.equal(foreignContextFixture.entries[0].ref,
+    s1aHashRecord(foreignContextFixture.entries[0].record), 'companion content hash must match');
+  assert.equal(foreignContextFixture.projections[0].DETAIL_REF,
+    foreignContextFixture.entries[0].ref, 'projection reference must be rebound');
+  assert.equal(foreignContextFixture.currentInventory.digest,
+    s1aHashWithoutField(foreignContextFixture.currentInventory, 'digest'),
+    'complete inventory digest must match its coherently rebound bytes');
+  const foreignContextResult = evaluate(foreignContextFixture);
+  assert.equal(foreignContextResult.ok, false);
+  assert.ok(foreignContextResult.failures.includes('COMPANION_SEMANTIC_CONTEXT_BINDING'),
+    'collectively self-consistent foreign record/readback/projection must reject against accepted context');
+  assert.equal(foreignContextResult.failures.includes('COMPANION_EXACT_CONTENT_BINDING'), false,
+    'coherent foreign context must not reject because of a content hash mismatch');
+
+  const incompleteFixture = makeS1aCompanionFixture();
+  const incompleteBaseline = evaluate(incompleteFixture);
+  assert.equal(incompleteBaseline.ok, true, 'F2 attack must start from passing companions');
+  const incompleteRecords = incompleteFixture.entries.map((entry) => s1aClone(entry.record));
+  delete incompleteRecords[0].ADMITTED_CURRENT_OUTCOME;
+  assert.equal(Object.prototype.hasOwnProperty.call(incompleteRecords[0], 'ADMITTED_CURRENT_OUTCOME'), false,
+    'missing common field mutation must be present');
+  incompleteFixture.currentInventory = makeS1aCurrentCompanionInventory(incompleteRecords,
+    'web:inventory-revision-incomplete-common-record');
+  incompleteFixture.entries = s1aClone(incompleteFixture.currentInventory.records);
+  incompleteFixture.projections = incompleteFixture.entries.map((entry) => {
+    const record = entry.record;
+    const mapping = S1A_ORACLE_PROJECTION_ROWS.find((row) =>
+      row.disposition === record.DISPOSITION && row.lifecycle === record.LIFECYCLE);
+    return makeS1aCompanionProjection(record, entry.ref, {
+      TWO_WAY: mapping.twoWay, V1: mapping.v1
+    });
+  });
+  const incompleteResult = evaluate(incompleteFixture);
+  assert.equal(incompleteResult.ok, false);
+  assert.ok(incompleteResult.failures.includes('F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+    'missing common companion field must reject on the named F2 obligation');
 });
 test('S1-A clause-removal and polarity controls are rejected by the closed contract', () => {
   const removed = rewriteS1aPolicy(architecture, (policy) => {
@@ -3585,10 +4025,16 @@ test('S1-A source contract pins complete companion inventories and closure readb
   assert.throws(() => parseS1aPolicyContract(weakenedType),
     /companion identity, typed detail, current inventory/);
 
+  const incompleteClosureBinding = rewriteS1aPolicy(architecture, (policy) => {
+    policy.closureVerification.commonRecordMode = 'CALLER_REBOUND_COMMON_RECORD';
+  });
+  assert.throws(() => parseS1aPolicyContract(incompleteClosureBinding),
+    /verified closure must use the complete current Web closure readback/);
+
   const closureRule = rewriteS1aPolicy(architecture, (policy) => {
     policy.closureVerification.resolvesOnlyAfterVerifiedReadback = false;
   });
-  const correctClosureSentence = 'Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion or evidence label alone cannot resolve work.';
+  const correctClosureSentence = 'Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback binds the complete canonical common record, including the admitted outcome, milestone, audience and environment, and verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion, evidence label or recomputed digest alone cannot resolve work.';
   const weakClosureSentence = 'Resolution changes lifecycle to RESOLVED after a caller supplies a closure criterion and evidence label.';
   s1aRequire(closureRule.includes(correctClosureSentence), 'missing current closure prose mutation anchor');
   assert.throws(() => parseS1aPolicyContract(closureRule.replace(correctClosureSentence, weakClosureSentence)),
@@ -3608,18 +4054,27 @@ test('S1-A source contract pins complete companion inventories and closure readb
 });
 
 function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, trustedContext) {
+  const rejected = (failures) => ({
+    ok: false, disposition, lifecycle, transition: null, mutationEffects: [], failures
+  });
   if (!s1aSame(policy.lifecycleTransitions, S1A_ORACLE_LIFECYCLE_TRANSITIONS) ||
       !s1aSame(policy.closureVerification, S1A_ORACLE_CLOSURE_VERIFICATION)) {
-    return { ok: false, lifecycle, failures: ['LIFECYCLE_POLICY_NOT_FIXED'] };
+    return rejected(['LIFECYCLE_POLICY_NOT_FIXED']);
   }
   if (!S1A_ORACLE_DISPOSITIONS.includes(disposition)) {
-    return { ok: false, lifecycle, failures: ['LIFECYCLE_DISPOSITION_UNKNOWN'] };
+    return rejected(['LIFECYCLE_DISPOSITION_UNKNOWN']);
   }
   const matches = policy.lifecycleTransitions.filter((row) => row.event === event);
-  if (matches.length !== 1) return { ok: false, lifecycle, failures: ['LIFECYCLE_TRANSITION_MISSING_OR_AMBIGUOUS'] };
+  if (matches.length !== 1) return rejected(['LIFECYCLE_TRANSITION_MISSING_OR_AMBIGUOUS']);
   const rule = matches[0];
   const safeDetail = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : {};
   const failures = [];
+  const commonRecord = s1aValidateCommonFindingRecord(policy, safeDetail);
+  if (!commonRecord.ok) failures.push(...commonRecord.failures);
+  if ((s1aPresent(safeDetail.DISPOSITION) && safeDetail.DISPOSITION !== disposition) ||
+      (s1aPresent(safeDetail.LIFECYCLE) && safeDetail.LIFECYCLE !== lifecycle)) {
+    failures.push(policy.commonRecord.transitionConsistencyObligation);
+  }
   if (lifecycle !== rule.from) failures.push('LIFECYCLE_SOURCE_MISMATCH');
   for (const field of rule.requires) {
     if (!s1aPresent(safeDetail[field])) failures.push('LIFECYCLE_PROOF_MISSING:' + field);
@@ -3635,15 +4090,31 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, tr
   }
   if (event === 'VERIFIED_CLOSURE') {
     const closure = safeDetail.closureReadback;
+    if (closure && s1aPresent(closure.fromLifecycle) &&
+        s1aPresent(safeDetail.LIFECYCLE) && closure.fromLifecycle !== safeDetail.LIFECYCLE) {
+      failures.push(policy.commonRecord.transitionConsistencyObligation);
+    }
     const body = closure && Object.fromEntries(policy.closureVerification.bodyFields
       .map((field) => [field, closure[field]]));
+    const closureCommonRecord = closure && closure[policy.closureVerification.commonRecordField];
+    const canonicalCommonRecord = Object.fromEntries(policy.commonRecord.requiredFields
+      .map((field) => [field, safeDetail[field]]));
+    const closureCommonRecordValid = s1aHasExactKeys(closureCommonRecord, policy.commonRecord.requiredFields) &&
+      s1aValidateCommonFindingRecord(policy, closureCommonRecord).ok;
+    if (!closureCommonRecordValid) {
+      failures.push(policy.commonRecord.completenessObligation);
+    } else if (!s1aSame(canonicalCommonRecord, closureCommonRecord)) {
+      failures.push(policy.commonRecord.transitionConsistencyObligation);
+    }
     const boundToTransition = closure &&
       safeDetail.FINDING_ID === closure.findingId &&
       safeDetail.WEB_ADMITTED_REVISION === closure.webAdmittedRevision &&
-      safeDetail.DISPOSITION === disposition && closure.disposition === disposition &&
+      safeDetail.DISPOSITION === disposition && closure.disposition === safeDetail.DISPOSITION &&
       safeDetail.CLOSURE_CRITERION === closure.closureCriterion &&
       s1aSame(safeDetail.EXACT_EVIDENCE, closure.exactEvidence) &&
       s1aSame(safeDetail.CANDIDATE_IDENTITY, closure.candidateIdentity) &&
+      s1aSame(canonicalCommonRecord, closureCommonRecord) &&
+      safeDetail.LIFECYCLE === closure.fromLifecycle &&
       closure.fromLifecycle === lifecycle && closure.toLifecycle === rule.to;
     if (!s1aHasExactKeys(closure, policy.closureVerification.requiredFields) ||
         !s1aSame(closure, S1A_ORACLE_CLOSURE_READBACK) ||
@@ -3655,27 +4126,32 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, tr
       failures.push('LIFECYCLE_CLOSURE_NOT_VERIFIED');
     }
   }
+  const uniqueFailures = [...new Set(failures)];
+  const ok = uniqueFailures.length === 0;
   return {
-    ok: failures.length === 0,
+    ok,
     disposition,
-    lifecycle: failures.length === 0 ? rule.to : lifecycle,
-    failures
+    lifecycle: ok ? rule.to : lifecycle,
+    transition: ok ? { event, disposition: safeDetail.DISPOSITION, from: lifecycle, to: rule.to } : null,
+    mutationEffects: [],
+    failures: uniqueFailures
   };
 }
 
 function observeS1aLifecycleOracle(policy) {
-  const detail = {
+  const detail = makeS1aCommonFindingFields({
     FINDING_ID: S1A_ORACLE_CLOSURE_BODY.findingId,
     WEB_ADMITTED_REVISION: S1A_ORACLE_CLOSURE_BODY.webAdmittedRevision,
     DISPOSITION: S1A_ORACLE_CLOSURE_BODY.disposition,
-    VERIFIED_OWNER: 'owner:verified',
+    LIFECYCLE: S1A_ORACLE_CLOSURE_BODY.fromLifecycle,
     TIMING: 'future-release',
     TRIGGER_OR_REASON: 'reassess on accepted evidence',
     CLOSURE_CRITERION: S1A_ORACLE_CLOSURE_BODY.closureCriterion,
     EXACT_EVIDENCE: [...S1A_ORACLE_CLOSURE_BODY.exactEvidence],
     CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity),
-    closureReadback: s1aClone(S1A_ORACLE_CLOSURE_READBACK)
-  };
+    ADJUDICATION: S1A_ORACLE_CLOSURE_BODY.disposition
+  });
+  detail.closureReadback = s1aClone(S1A_ORACLE_CLOSURE_READBACK);
   const transferDetail = {
     ...detail,
     ...makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY)
@@ -3728,8 +4204,17 @@ function evaluateS1aEvidenceOnly(policy, input) {
   if (rule.independentEvidenceGatesRemainBinding !== true) {
     failures.push('EVIDENCE_ONLY_INDEPENDENT_GATES');
   }
+  const canonicalRecord = makeS1aCommonFindingFields({
+    FINDING_ID: 'finding:evidence-only',
+    WEB_ADMITTED_REVISION: 'web:evidence-only-7',
+    DISPOSITION: 'EVIDENCE_ONLY',
+    ADJUDICATION: 'EVIDENCE_ONLY',
+    LIFECYCLE: input.lifecycle,
+    RESOLUTION: input.lifecycle === 'RESOLVED' ? 'RESOLVED' : 'NOT_RESOLVED',
+    EXACT_EVIDENCE: input.evidence
+  });
   const transition = evaluateS1aTransition(policy, input.disposition, input.lifecycle,
-    'EVIDENCE_ACQUIRED', { EXACT_EVIDENCE: input.evidence });
+    'EVIDENCE_ACQUIRED', canonicalRecord);
   if (!transition.ok) failures.push(...transition.failures);
   return { ok: failures.length === 0, lifecycle: transition.lifecycle, failures };
 }
