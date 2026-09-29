@@ -1025,7 +1025,9 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
   episodeAuthority: Object.freeze({
     mode: 'CURRENT_EXPLICIT_WEB_BOUNDED_EPISODE',
     requiredFields: Object.freeze([
-      'episodeId', 'episodeKind', 'authorityReference', 'primaryOwner', 'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'digest',
+      'repository', 'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent',
+      'episodeId', 'episodeKind', 'runId', 'lockId', 'authorityReference', 'primaryOwner',
+      'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'digest',
       'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId',
       'evidenceBoundaryId'
     ]),
@@ -1035,18 +1037,22 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
   acceptedAuthorityBinding: Object.freeze({
     source: 'CURRENT_ACCEPTED_G2_EPISODE_AUTHORITY_READBACK',
     stateField: 'acceptedEpisodeAuthority',
-    requiredFields: Object.freeze(['episodeId', 'episodeKind', 'authorityReference', 'primaryOwner',
-      'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId',
-      'evidenceBoundaryId']),
+    requiredFields: Object.freeze(['repository', 'webAuthorityIdentity', 'webAuthorityRevision',
+      'webAuthorityContent', 'episodeId', 'episodeKind', 'runId', 'lockId', 'authorityReference',
+      'primaryOwner', 'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId',
+      'assuranceFloorId', 'evidenceBoundaryId']),
     mustMatchIndependentAcceptedReadback: true
   }),
   acceptedBoundaryBinding: Object.freeze({
     inputField: 'acceptedBoundary',
     source: 'CURRENT_ACCEPTED_G2_BOUNDARY_READBACK',
-    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'readBack', 'rootFamilyId',
-      'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId', 'digest']),
-    episodeFields: Object.freeze(['rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId',
-      'assuranceFloorId', 'evidenceBoundaryId']),
+    requiredFields: Object.freeze(['source', 'authoritative', 'current', 'readBack', 'repository',
+      'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent', 'episodeId', 'episodeKind',
+      'runId', 'lockId', 'authorityReference', 'rootFamilyId', 'acceptedContractId', 'trustModelId',
+      'scopeId', 'assuranceFloorId', 'evidenceBoundaryId', 'digest']),
+    episodeFields: Object.freeze(['repository', 'webAuthorityIdentity', 'webAuthorityRevision',
+      'webAuthorityContent', 'episodeId', 'episodeKind', 'runId', 'lockId', 'authorityReference',
+      'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId']),
     mustRemainExact: true
   }),
   currentStateReadback: Object.freeze({
@@ -1099,20 +1105,65 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
     resetAllowed: false
   }),
   resultFields: Object.freeze([
-    'admission', 'violatedObligationIds', 'candidateTransition', 'evidenceTransition', 'attemptEffects', 'budgetEffects'
+    'admission', 'violatedObligationIds', 'candidateTransition', 'evidenceTransition',
+    'attemptEffects', 'budgetEffects', 'mutationEffects'
   ]),
-  hostedReplacementCandidate: Object.freeze({
-    requiresExplicitCurrentWebAuthority: true,
-    allowedPrimaryOwners: Object.freeze(['HARNESS', 'TOOLKIT', 'ENVIRONMENT']),
+  replacementAuthority: Object.freeze({
+    observerSignature: 'observe(policy, request, trustedContext)',
+    trustedContextFields: Object.freeze(['currentAuthority', 'candidateReadback', 'evidenceReadback']),
+    mustBeIndependentOfRequest: true,
+    mustNotBeSelectedByCallerLabelsOrDigests: true,
+    mustNotBeMutableThroughRequest: true,
+    currentAuthorityFields: Object.freeze([
+      'source', 'repository', 'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent',
+      'episode', 'run', 'lock', 'replacementPermission', 'eligibleOwner', 'correctionMechanism',
+      'predecessorCandidate', 'replacementCandidate', 'pathEffectCeiling', 'revalidationBoundary',
+      'lifetime', 'currentness', 'permissionConsumption', 'readBack'
+    ]),
+    requiresExactCurrentReadback: true,
+    eligiblePrimaryOwners: Object.freeze(['HARNESS', 'TOOLKIT', 'ENVIRONMENT']),
+    eligibleCorrectionMechanisms: Object.freeze([
+      'HARNESS_VALIDATION', 'TOOLKIT_VALIDATION', 'ENVIRONMENT_VALIDATION'
+    ]),
     episodeKind: 'G3_RUN_LOCK',
-    preserveFailedCandidateAndEvidence: true,
-    replacementMustBeDistinctAndImmutable: true,
-    transportMayAuthorize: false,
+    permissionStateRequired: 'AVAILABLE',
+    permissionUseCount: 1,
+    rejectStaleRevokedSupersededAuthority: true,
+    pathAndEffectMustStayWithinCeiling: true,
     productAttemptDelta: 0,
     budgetResetAllowed: false
+  }),
+  replacementCandidateValidity: Object.freeze({
+    requiredFields: Object.freeze([
+      'repository', 'kind', 'objectFormat', 'commit', 'head', 'tree', 'orderedParents',
+      'baseCommit', 'commitTreeReadback', 'lineage', 'hostedBinding', 'localCustodyBinding',
+      'observedMutationScope', 'predecessorPreservation', 'revalidationLinkage'
+    ]),
+    supportedKinds: Object.freeze(['HOSTED', 'LOCAL']),
+    supportedObjectFormats: Object.freeze(['sha1', 'sha256']),
+    headMustMatchCommit: true,
+    commitTreeReadbackMustMatch: true,
+    orderedParentsAndBaseMustMatchLineage: true,
+    repositoryEpisodePredecessorMustMatch: true,
+    hostedBindingFields: Object.freeze([
+      'repository', 'prNumber', 'branch', 'headSha', 'baseCommit', 'readBack'
+    ]),
+    localCustodyBindingFields: Object.freeze([
+      'repository', 'custodyId', 'worktreeId', 'commit', 'tree', 'readBack'
+    ]),
+    observedMutationScopeMustFitAuthorityCeiling: true,
+    predecessorEvidenceMustBePreserved: true,
+    evidenceReadbackMustBindCandidateAndRevalidation: true,
+    callerHashesAreEqualityAssertionsOnly: true
+  }),
+  replacementRejection: Object.freeze({
+    admission: 'RETURN_TO_WEB',
+    candidateTransition: 'NO_ACCEPTED_TRANSITION',
+    evidenceTransition: 'NO_ACCEPTED_TRANSITION',
+    mutationEffects: Object.freeze([])
   })
 });
-const S1A_ORACLE_GOVERNED_PROSE_SHA256 = '4c0b80e8205689afcb685161fa314e395ab400679c272310588ce020ec960480';
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'd05cf916a616e599709207fea870305502670cf47631a57ff1aae9f66e6cf030';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
@@ -1127,6 +1178,11 @@ const S1A_ORACLE_PROJECTION_ROWS = Object.freeze([
 ]);
 const S1A_ORACLE_OWNERSHIP_READBACK_RULE = Object.freeze({
   source: 'CURRENT_AUTHORITATIVE_OWNERSHIP_READBACK',
+  trustedContextField: 'currentOwnershipReadback',
+  mustBeSuppliedIndependently: true,
+  mustNotAliasRequestedRecord: true,
+  mustMatchRecordReadbackExactly: true,
+  mustMatchIndependentAuthoritySnapshot: true,
   requiredFields: Object.freeze([
     'source', 'authoritative', 'current', 'readBack', 'repository', 'packetIdentity', 'findingId',
     'webAdmittedRevision', 'findingRevision', 'candidateIdentity', 'acceptedDecisionId', 'programmeId',
@@ -1358,6 +1414,16 @@ function makeS1aCommonFindingFields(identity) {
   fields.OWNER_READBACK = { ...readbackCore, digest: s1aHashRecord(readbackCore) };
   return fields;
 }
+const S1A_ORACLE_TRANSFER_FINDING_IDENTITY = Object.freeze({
+  FINDING_ID: 'finding:transfer',
+  WEB_ADMITTED_REVISION: 'web:transfer-7',
+  FINDING_REVISION: 'finding-revision:transfer-7',
+  ACCEPTED_DECISION_ID: 'decision:web:transfer-7',
+  CANDIDATE_IDENTITY: Object.freeze({ commit: 'commit:transfer', tree: 'tree:transfer' }),
+  VERIFIED_OWNER: 'owner:current'
+});
+const S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK = s1aDeepFreeze(s1aClone(
+  makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY).OWNER_READBACK));
 const S1A_ORACLE_COMPANION_TYPED_FIELDS = Object.freeze({...S1A_ORACLE_COMMON_FIELD_TYPES,
 
   FINDING_ID: 'NONEMPTY_STRING',
@@ -1635,6 +1701,15 @@ function s1aContinuationProseViolations(source) {
     ['CONTINUATION_REPLACEMENT_AUTHORITY', [
       'only the existing explicitly Web-authorised hosted non-product reclosure may create a distinct immutable replacement candidate',
       'TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.'
+    ]],
+    ['CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', [
+      'The replacement observer receives observe(policy, request, trustedContext).',
+      'trustedContext.currentAuthority, candidateReadback, and evidenceReadback are separate from the request and remain unchanged when request fields are mutated.',
+      'Caller-selected labels and caller-recomputed hashes or digests are equality assertions only; they never select or establish authority.',
+      'The independent candidate readback binds repository, HOSTED or LOCAL kind, object format, non-empty commit/head/tree identities, ordered parents, base commit, exact commit-to-tree readback, predecessor/base/parent lineage, kind-specific hosted PR/branch/head or local custody, observed mutation/effect scope, predecessor preservation and exact revalidation linkage.',
+      'HOSTED and LOCAL bindings cannot be substituted for each other.',
+      'Independent evidence readback must bind the exact replacement candidate, preserved predecessor evidence and revalidation boundary.',
+      'A rejected replacement produces no accepted candidate transition, no accepted evidence transition and no CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT effect, even when another helper condition succeeded.'
     ]]
   ];
   const failures = required.filter(([, clauses]) => clauses.some((clause) => !prose.includes(clause)))
@@ -1652,7 +1727,11 @@ function s1aContinuationProseViolations(source) {
     [/Contradiction:\s*renamed no-progress history is new progress/i, 'CONTINUATION_FAITHFUL_PATH_PROGRESS'],
     [/Contradiction:\s*a path without an actual path or evidence reference may continue/i, 'CONTINUATION_FAITHFUL_PATH_USABILITY'],
     [/Contradiction:\s*candidate, evidence, attempts, or consumed budgets may be reset/i, 'CONTINUATION_IDENTITY_BUDGET_PRESERVATION'],
-    [/Contradiction:\s*TRANSPORT may create a replacement candidate/i, 'CONTINUATION_REPLACEMENT_AUTHORITY']
+    [/Contradiction:\s*TRANSPORT may create a replacement candidate/i, 'CONTINUATION_REPLACEMENT_AUTHORITY'],
+    [/Contradiction:\s*caller-selected labels or caller-recomputed hashes or digests may select or establish authority/i, 'CONTINUATION_REPLACEMENT_AUTHORITY'],
+    [/Contradiction:\s*HOSTED and LOCAL bindings may be substituted for each other/i, 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY'],
+    [/Contradiction:\s*caller-supplied labels and rehashed evidence establish a replacement candidate/i, 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY'],
+    [/Contradiction:\s*a rejected replacement may retain a CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT effect/i, 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY']
   ];
   for (const [pattern, id] of contradictions) if (pattern.test(prose) && !failures.includes(id)) failures.push(id);
   return failures;
@@ -2215,6 +2294,17 @@ function s1aSame(left, right) {
   return s1aCanonical(left) === s1aCanonical(right);
 }
 
+function s1aObjectReferences(value) {
+  const references = new Set();
+  const visit = (entry) => {
+    if (!entry || typeof entry !== 'object' || references.has(entry)) return;
+    references.add(entry);
+    for (const child of Object.values(entry)) visit(child);
+  };
+  visit(value);
+  return references;
+}
+
 function s1aOwnershipReadbackMatches(record) {
   const readback = record && record.OWNER_READBACK;
   const rule = S1A_ORACLE_OWNERSHIP_READBACK_RULE;
@@ -2240,6 +2330,21 @@ function s1aOwnershipReadbackMatches(record) {
   const core = Object.fromEntries(rule.requiredFields.filter((field) => field !== 'digest')
     .map((field) => [field, readback[field]]));
   return readback.digest === s1aHashRecord(core);
+}
+
+function s1aOwnershipTransferReadbackMatches(record, trustedOwnershipReadback) {
+  const readback = record && record.OWNER_READBACK;
+  const rule = S1A_ORACLE_OWNERSHIP_READBACK_RULE;
+  const recordReferences = s1aObjectReferences(record);
+  const independentReferences = s1aObjectReferences(trustedOwnershipReadback);
+  const aliasesRequestedRecord = [...independentReferences].some((reference) => recordReferences.has(reference));
+  return Boolean(trustedOwnershipReadback && !aliasesRequestedRecord &&
+    s1aHasExactKeys(trustedOwnershipReadback, rule.requiredFields) &&
+    trustedOwnershipReadback.source === rule.source && trustedOwnershipReadback.authoritative === true &&
+    trustedOwnershipReadback.current === true && trustedOwnershipReadback.readBack === true &&
+    trustedOwnershipReadback.resolution === rule.resolutionMustRemain &&
+    s1aSame(trustedOwnershipReadback, S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) &&
+    s1aSame(readback, trustedOwnershipReadback) && s1aOwnershipReadbackMatches(record));
 }
 
 function evaluateS1aBlocker(policy, record, decision, companionProjection, companionEntries, currentInventory) {
@@ -3206,19 +3311,20 @@ test('S1-A lifecycle proof values remain typed and transfer or deferral cannot r
 });
 test('S1-A ownership transfer requires a current authoritative readback bound to every shared identity', () => {
   const policy = parseS1aPolicyContract(architecture);
-  const makeTransfer = () => makeS1aCommonFindingFields({
-    FINDING_ID: 'finding:transfer',
-    WEB_ADMITTED_REVISION: 'web:transfer-7',
-    FINDING_REVISION: 'finding-revision:transfer-7',
-    ACCEPTED_DECISION_ID: 'decision:web:transfer-7',
-    CANDIDATE_IDENTITY: { commit: 'commit:transfer', tree: 'tree:transfer' },
-    VERIFIED_OWNER: 'owner:current'
+  const makeTransfer = () => makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY);
+  const trustedContext = Object.freeze({
+    currentOwnershipReadback: s1aDeepFreeze(s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK))
   });
   const transfer = makeTransfer();
+  const transferBefore = s1aClone(transfer);
+  const historyLedger = makeS1aCompanionHistoryLedger();
+  const historyBefore = s1aClone(historyLedger);
   const accepted = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
-    'TRANSFER', transfer);
+    'TRANSFER', transfer, trustedContext);
   assert.equal(accepted.ok, true);
   assert.equal(accepted.lifecycle, 'UNRESOLVED');
+  assert.deepEqual(transfer, transferBefore, 'transfer preserves the admitted finding record');
+  assert.deepEqual(historyLedger, historyBefore, 'transfer preserves append-only companion history');
 
   const rebindReadback = (detail) => {
     const { digest, ...core } = detail.OWNER_READBACK;
@@ -3280,6 +3386,11 @@ test('S1-A ownership transfer requires a current authoritative readback bound to
       detail.OWNER_READBACK.owner = 'owner:other';
       rebindReadback(detail);
     }],
+    ['co-rebound owner and readback', (detail) => {
+      detail.VERIFIED_OWNER = 'owner:other';
+      detail.OWNER_READBACK.owner = 'owner:other';
+      rebindReadback(detail);
+    }],
     ['role mismatch', (detail) => {
       detail.OWNER_READBACK.ownerRole = 'OTHER_ROLE';
       rebindReadback(detail);
@@ -3292,12 +3403,33 @@ test('S1-A ownership transfer requires a current authoritative readback bound to
     const detail = makeTransfer();
     attack(detail);
     const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
-      'TRANSFER', detail);
+      'TRANSFER', detail, trustedContext);
     assert.equal(result.ok, false, name + ' must not transfer ownership');
     assert.equal(result.lifecycle, 'UNRESOLVED', name + ' must not resolve the finding');
     assert.ok(result.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'),
       name + ' must fail the ownership readback obligation');
   }
+  const aliasedTransfer = makeTransfer();
+  const aliasedResult = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+    'TRANSFER', aliasedTransfer, { currentOwnershipReadback: aliasedTransfer.OWNER_READBACK });
+  assert.equal(aliasedResult.ok, false, 'a request-owned readback cannot serve as trusted context');
+  assert.equal(aliasedResult.lifecycle, 'UNRESOLVED');
+  assert.ok(aliasedResult.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'));
+
+  const coReboundTransfer = makeTransfer();
+  coReboundTransfer.VERIFIED_OWNER = 'owner:forged';
+  coReboundTransfer.OWNER_READBACK.owner = 'owner:forged';
+  rebindReadback(coReboundTransfer);
+  const forgedTrustedReadback = s1aClone(trustedContext.currentOwnershipReadback);
+  forgedTrustedReadback.owner = 'owner:forged';
+  const { digest, ...trustedReadbackCore } = forgedTrustedReadback;
+  forgedTrustedReadback.digest = s1aHashRecord(trustedReadbackCore);
+  const forgedContextResult = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
+    'TRANSFER', coReboundTransfer, { currentOwnershipReadback: forgedTrustedReadback });
+  assert.equal(forgedContextResult.ok, false,
+    'co-rebinding request, embedded readback, digest, and a cloned fake trusted readback is rejected');
+  assert.equal(forgedContextResult.lifecycle, 'UNRESOLVED');
+  assert.ok(forgedContextResult.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'));
 });
 test('S1-A clause-removal and polarity controls are rejected by the closed contract', () => {
   const removed = rewriteS1aPolicy(architecture, (policy) => {
@@ -3475,7 +3607,7 @@ test('S1-A source contract pins complete companion inventories and closure readb
     /post-child review requires canonical current readback identities/);
 });
 
-function evaluateS1aTransition(policy, disposition, lifecycle, event, detail) {
+function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, trustedContext) {
   if (!s1aSame(policy.lifecycleTransitions, S1A_ORACLE_LIFECYCLE_TRANSITIONS) ||
       !s1aSame(policy.closureVerification, S1A_ORACLE_CLOSURE_VERIFICATION)) {
     return { ok: false, lifecycle, failures: ['LIFECYCLE_POLICY_NOT_FIXED'] };
@@ -3495,7 +3627,10 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail) {
       failures.push('LIFECYCLE_VALUE_TYPE:' + field);
     }
   }
-  if (event === 'TRANSFER' && !s1aOwnershipReadbackMatches(safeDetail)) {
+  const safeTrustedContext = trustedContext && typeof trustedContext === 'object' &&
+    !Array.isArray(trustedContext) ? trustedContext : {};
+  if (event === 'TRANSFER' && !s1aOwnershipTransferReadbackMatches(safeDetail,
+    safeTrustedContext.currentOwnershipReadback)) {
     failures.push('LIFECYCLE_OWNER_TRANSFER_READBACK');
   }
   if (event === 'VERIFIED_CLOSURE') {
@@ -3543,24 +3678,21 @@ function observeS1aLifecycleOracle(policy) {
   };
   const transferDetail = {
     ...detail,
-    ...makeS1aCommonFindingFields({
-      FINDING_ID: S1A_ORACLE_CLOSURE_BODY.findingId,
-      WEB_ADMITTED_REVISION: S1A_ORACLE_CLOSURE_BODY.webAdmittedRevision,
-      FINDING_REVISION: 'finding-revision:transfer-7',
-      ACCEPTED_DECISION_ID: 'decision:web:transfer-7',
-      CANDIDATE_IDENTITY: s1aClone(S1A_ORACLE_CLOSURE_BODY.candidateIdentity),
-      VERIFIED_OWNER: 'owner:verified'
-    })
+    ...makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY)
   };
+  const transferTrustedContext = Object.freeze({
+    currentOwnershipReadback: s1aDeepFreeze(s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK))
+  });
   const cases = [
     { id: 'lifecycle-defer', event: 'DEFER', expectedLifecycle: 'UNRESOLVED' },
-    { id: 'lifecycle-transfer', event: 'TRANSFER', detail: transferDetail, expectedLifecycle: 'UNRESOLVED' },
+    { id: 'lifecycle-transfer', event: 'TRANSFER', detail: transferDetail,
+      trustedContext: transferTrustedContext, expectedLifecycle: 'UNRESOLVED' },
     { id: 'lifecycle-evidence-acquired', event: 'EVIDENCE_ACQUIRED', expectedLifecycle: 'UNRESOLVED' },
     { id: 'lifecycle-verified-closure', event: 'VERIFIED_CLOSURE', expectedLifecycle: 'RESOLVED' }
   ];
   return cases.map((scenario) => {
     const result = evaluateS1aTransition(policy, 'FUTURE_OWNED', 'UNRESOLVED',
-      scenario.event, scenario.detail || detail);
+      scenario.event, scenario.detail || detail, scenario.trustedContext);
     const mismatch = !result.ok || result.lifecycle !== scenario.expectedLifecycle;
     return {
       id: scenario.id,
@@ -4673,144 +4805,487 @@ function makeS1aAuthorizedPublicCarrierFixture() {
 
 const S1A_ORACLE_CONTINUATION_AUTHORITY_SOURCE = 'CURRENT_OWNER_WEB_BOUNDED_EPISODE_AUTHORITY';
 const S1A_ORACLE_CONTINUATION_EFFECT_SOURCE = 'CURRENT_OWNER_EFFECT_RECONCILIATION_READBACK';
+const S1A_ORACLE_CONTINUATION_PATH_SOURCE = 'CURRENT_OWNER_FAITHFUL_PATH_INVENTORY';
+const S1A_ORACLE_CONTINUATION_REPOSITORY = 'weijunswj/ai-agent-toolkit';
+const S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS = Object.freeze([
+  'repository', 'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent',
+  'episodeId', 'episodeKind', 'runId', 'lockId', 'authorityReference', 'rootFamilyId',
+  'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId'
+]);
+const S1A_ORACLE_CONTINUATION_EPISODE_FIELDS = Object.freeze([
+  'repository', 'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent',
+  'episodeId', 'episodeKind', 'runId', 'lockId', 'authorityReference', 'primaryOwner',
+  'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'digest',
+  'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId', 'assuranceFloorId',
+  'evidenceBoundaryId'
+]);
+function s1aDeepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const entry of Object.values(value)) s1aDeepFreeze(entry);
+    Object.freeze(value);
+  }
+  return value;
+}
 function s1aCanonicalContinuationEffects(value) {
   if (!value || !Array.isArray(value.effects)) return value;
   const core = { ...value, effects: [...value.effects].sort((a, b) => String(a.effectId).localeCompare(String(b.effectId))) };
   delete core.digest;
   return { ...core, digest: s1aHashRecord(core) };
 }
-const S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED = Object.freeze(
-  s1aCanonicalContinuationEffects({
-    source: S1A_ORACLE_CONTINUATION_EFFECT_SOURCE,
-    authoritative: true, current: true, complete: true, readBack: true,
-    effects: Object.freeze([
-      Object.freeze({ effectId: 'effect:accepted-run-4', state: 'RECONCILED', evidenceRef: 'effect-evidence:4' }),
-      Object.freeze({ effectId: 'effect:accepted-worker-4', state: 'RECONCILED', evidenceRef: 'effect-evidence:worker-4' })
-    ])
-  }));
-const S1A_ORACLE_CONTINUATION_PATH_SOURCE = 'CURRENT_OWNER_FAITHFUL_PATH_INVENTORY';
-const S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS = Object.freeze([
-  'authorityReference', 'rootFamilyId', 'acceptedContractId', 'trustModelId',
-  'scopeId', 'assuranceFloorId', 'evidenceBoundaryId'
-]);
-const S1A_ORACLE_CONTINUATION_EPISODE_FIELDS = Object.freeze([
-  'episodeId', 'episodeKind', 'authorityReference', 'primaryOwner', 'source', 'authoritative', 'current',
-  'readBack', 'explicitWebBound', 'digest', 'rootFamilyId', 'acceptedContractId',
-  'trustModelId', 'scopeId', 'assuranceFloorId', 'evidenceBoundaryId'
-]);
-const S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY_CORE = Object.freeze({
-  source: 'CURRENT_ACCEPTED_G2_BOUNDARY_READBACK', authoritative: true, current: true, readBack: true,
-  rootFamilyId: 'root-family:accepted-7', acceptedContractId: 'contract:g2-accepted-7',
-  trustModelId: 'trust:model-7', scopeId: 'scope:accepted-7',
-  assuranceFloorId: 'floor:accepted-7', evidenceBoundaryId: 'boundary:evidence-7'
+const S1A_ORACLE_CONTINUATION_SCENARIO_SPECS = s1aDeepFreeze({
+  G3_RUN_LOCK_TOOLKIT: {
+    episodeKind: 'G3_RUN_LOCK', primaryOwner: 'TOOLKIT', episodeId: 'episode:g3-toolkit-7',
+    authorityReference: 'authority:web:g3-toolkit-7', webAuthorityIdentity: 'web-authority:g3-toolkit',
+    webAuthorityRevision: 'revision:g3-toolkit-7', webAuthorityContent: 'accepted g3 toolkit evidence authority',
+    rootFamilyId: 'root:g3-toolkit', acceptedContractId: 'contract:g2:g3-toolkit',
+    trustModelId: 'trust:g3-toolkit', scopeId: 'scope:g3-toolkit', assuranceFloorId: 'floor:g3-toolkit',
+    evidenceBoundaryId: 'boundary:g3-toolkit', runId: 'run:g3-toolkit-7', lockId: 'lock:g3-toolkit-7',
+    candidateCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    candidateTree: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    parentCommit: 'cccccccccccccccccccccccccccccccccccccccc',
+    baseCommit: 'dddddddddddddddddddddddddddddddddddddddd',
+    evidenceId: 'evidence:g3-toolkit-7', priorRunId: 'run:g3-toolkit-prior',
+    priorWorkerId: 'worker:g3-toolkit-prior', priorBranch: 'branch:g3-toolkit-prior',
+    priorMechanism: 'prior-g3-toolkit-mechanism', mechanism: 'toolkit-validation',
+    attemptState: { attemptCount: 4, attemptLimit: 5, productCorrectionAttempts: 2, productCorrectionLimit: 3, budgetConsumed: 7, budgetLimit: 10 },
+    effectToken: 'g3-toolkit-7', pathToken: 'g3-toolkit-7',
+    permittedEffect: 'CONTINUE_IDENTITY_PRESERVING_EVIDENCE'
+  },
+  PARENT_OWNED_LIGHT_HARNESS: {
+    episodeKind: 'PARENT_OWNED_LIGHT', primaryOwner: 'HARNESS', episodeId: 'episode:light-harness-3',
+    authorityReference: 'authority:parent-light:harness-3', webAuthorityIdentity: 'web-authority:parent-light-harness',
+    webAuthorityRevision: 'revision:parent-light-3', webAuthorityContent: 'parent-owned light operation authority',
+    rootFamilyId: 'root:light-harness', acceptedContractId: 'contract:g2:light-harness',
+    trustModelId: 'trust:light-harness', scopeId: 'scope:light-harness', assuranceFloorId: 'floor:light-harness',
+    evidenceBoundaryId: 'boundary:light-harness', runId: 'run:light-harness-3', lockId: 'lock:light-harness-3',
+    parentOwnershipReadback: { source: 'CURRENT_PARENT_OWNER_LIGHT_READBACK', repository: 'weijunswj/ai-agent-toolkit', parentId: 'programme:421', operationId: 'light:harness-3', owner: 'HARNESS', current: true, readBack: true },
+    candidateCommit: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    candidateTree: 'ffffffffffffffffffffffffffffffffffffffff',
+    parentCommit: '1111111111111111111111111111111111111111',
+    baseCommit: '2222222222222222222222222222222222222222',
+    evidenceId: 'evidence:light-harness-3', priorRunId: 'run:light-harness-prior',
+    priorWorkerId: 'worker:light-harness-prior', priorBranch: 'branch:light-harness-prior',
+    priorMechanism: 'prior-light-harness-mechanism', mechanism: 'harness-validation',
+    attemptState: { attemptCount: 2, attemptLimit: 4, productCorrectionAttempts: 0, productCorrectionLimit: 1, budgetConsumed: 2, budgetLimit: 6 },
+    effectToken: 'light-harness-3', pathToken: 'light-harness-3',
+    permittedEffect: 'CONTINUE_PARENT_OWNED_LIGHT_EVIDENCE'
+  },
+  OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT: {
+    episodeKind: 'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE', primaryOwner: 'TOOLKIT', episodeId: 'episode:web-evidence-toolkit-2',
+    authorityReference: 'authority:web:evidence-toolkit-2', webAuthorityIdentity: 'web-authority:evidence-toolkit',
+    webAuthorityRevision: 'revision:evidence-toolkit-2', webAuthorityContent: 'other accepted web-bounded evidence authority',
+    rootFamilyId: 'root:evidence-toolkit', acceptedContractId: 'contract:g2:evidence-toolkit',
+    trustModelId: 'trust:evidence-toolkit', scopeId: 'scope:evidence-toolkit', assuranceFloorId: 'floor:evidence-toolkit',
+    evidenceBoundaryId: 'boundary:evidence-toolkit', runId: 'run:evidence-toolkit-2', lockId: 'lock:evidence-toolkit-2',
+    candidateCommit: '3333333333333333333333333333333333333333',
+    candidateTree: '4444444444444444444444444444444444444444',
+    parentCommit: '5555555555555555555555555555555555555555',
+    baseCommit: '6666666666666666666666666666666666666666',
+    evidenceId: 'evidence:web-evidence-toolkit-2', priorRunId: 'run:evidence-toolkit-prior',
+    priorWorkerId: 'worker:evidence-toolkit-prior', priorBranch: 'branch:evidence-toolkit-prior',
+    priorMechanism: 'prior-evidence-toolkit-mechanism', mechanism: 'toolkit-evidence-readback',
+    attemptState: { attemptCount: 1, attemptLimit: 3, productCorrectionAttempts: 1, productCorrectionLimit: 2, budgetConsumed: 3, budgetLimit: 7 },
+    effectToken: 'evidence-toolkit-2', pathToken: 'evidence-toolkit-2',
+    permittedEffect: 'CONTINUE_ACCEPTED_WEB_BOUNDED_EVIDENCE'
+  },
+  G3_RUN_LOCK_HARNESS: {
+    episodeKind: 'G3_RUN_LOCK', primaryOwner: 'HARNESS', episodeId: 'episode:g3-harness-5',
+    authorityReference: 'authority:web:g3-harness-5', webAuthorityIdentity: 'web-authority:g3-harness',
+    webAuthorityRevision: 'revision:g3-harness-5', webAuthorityContent: 'accepted g3 harness evidence authority',
+    rootFamilyId: 'root:g3-harness', acceptedContractId: 'contract:g2:g3-harness',
+    trustModelId: 'trust:g3-harness', scopeId: 'scope:g3-harness', assuranceFloorId: 'floor:g3-harness',
+    evidenceBoundaryId: 'boundary:g3-harness', runId: 'run:g3-harness-5', lockId: 'lock:g3-harness-5',
+    candidateCommit: '7777777777777777777777777777777777777777',
+    candidateTree: '8888888888888888888888888888888888888888',
+    parentCommit: '9999999999999999999999999999999999999999',
+    baseCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
+    evidenceId: 'evidence:g3-harness-5', priorRunId: 'run:g3-harness-prior',
+    priorWorkerId: 'worker:g3-harness-prior', priorBranch: 'branch:g3-harness-prior',
+    priorMechanism: 'prior-g3-harness-mechanism', mechanism: 'harness-validation',
+    attemptState: { attemptCount: 3, attemptLimit: 5, productCorrectionAttempts: 1, productCorrectionLimit: 2, budgetConsumed: 4, budgetLimit: 8 },
+    effectToken: 'g3-harness-5', pathToken: 'g3-harness-5',
+    permittedEffect: 'CONTINUE_G3_HARNESS_EVIDENCE'
+  },
+  G3_RUN_LOCK_ENVIRONMENT: {
+    episodeKind: 'G3_RUN_LOCK', primaryOwner: 'ENVIRONMENT', episodeId: 'episode:g3-environment-6',
+    authorityReference: 'authority:web:g3-environment-6', webAuthorityIdentity: 'web-authority:g3-environment',
+    webAuthorityRevision: 'revision:g3-environment-6', webAuthorityContent: 'accepted g3 environment evidence authority',
+    rootFamilyId: 'root:g3-environment', acceptedContractId: 'contract:g2:g3-environment',
+    trustModelId: 'trust:g3-environment', scopeId: 'scope:g3-environment', assuranceFloorId: 'floor:g3-environment',
+    evidenceBoundaryId: 'boundary:g3-environment', runId: 'run:g3-environment-6', lockId: 'lock:g3-environment-6',
+    candidateCommit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    candidateTree: 'cccccccccccccccccccccccccccccccccccccccc',
+    parentCommit: 'dddddddddddddddddddddddddddddddddddddddd',
+    baseCommit: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    evidenceId: 'evidence:g3-environment-6', priorRunId: 'run:g3-environment-prior',
+    priorWorkerId: 'worker:g3-environment-prior', priorBranch: 'branch:g3-environment-prior',
+    priorMechanism: 'prior-g3-environment-mechanism', mechanism: 'environment-validation',
+    attemptState: { attemptCount: 2, attemptLimit: 4, productCorrectionAttempts: 1, productCorrectionLimit: 2, budgetConsumed: 5, budgetLimit: 8 },
+    effectToken: 'g3-environment-6', pathToken: 'g3-environment-6',
+    permittedEffect: 'CONTINUE_G3_ENVIRONMENT_EVIDENCE'
+  },
+  OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY: {
+    episodeKind: 'OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY', primaryOwner: 'VALIDATION_CARRIER',
+    episodeId: 'episode:carrier-validation-4', authorityReference: 'authority:web:carrier-validation-4',
+    webAuthorityIdentity: 'web-authority:carrier-validation', webAuthorityRevision: 'revision:carrier-4',
+    webAuthorityContent: 'accepted validation carrier evidence authority',
+    rootFamilyId: 'root:carrier-validation', acceptedContractId: 'contract:g2:carrier-validation',
+    trustModelId: 'trust:carrier-validation', scopeId: 'scope:carrier-validation',
+    assuranceFloorId: 'floor:carrier-validation', evidenceBoundaryId: 'boundary:carrier-validation',
+    runId: 'run:carrier-validation-4', lockId: 'lock:carrier-validation-4',
+    candidateCommit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc',
+    candidateTree: 'cccccccccccccccccccccccccccccccccccccccd',
+    parentCommit: 'ddddddddddddddddddddddddddddddddddddddde',
+    baseCommit: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef',
+    evidenceId: 'evidence:carrier-validation-4', priorRunId: 'run:carrier-prior',
+    priorWorkerId: 'worker:carrier-prior', priorBranch: 'branch:carrier-prior',
+    priorMechanism: 'prior-carrier-validation-mechanism', mechanism: 'carrier-readback',
+    attemptState: { attemptCount: 1, attemptLimit: 4, productCorrectionAttempts: 0, productCorrectionLimit: 2, budgetConsumed: 3, budgetLimit: 9 },
+    effectToken: 'carrier-validation-4', pathToken: 'carrier-validation-4',
+    permittedEffect: 'CONTINUE_VALIDATION_CARRIER_EVIDENCE'
+  },
+  WEB_BOUNDED_TRANSPORT: {
+    episodeKind: 'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE', primaryOwner: 'TRANSPORT',
+    episodeId: 'episode:web-transport-8', authorityReference: 'authority:web:transport-8',
+    webAuthorityIdentity: 'web-authority:transport', webAuthorityRevision: 'revision:transport-8',
+    webAuthorityContent: 'accepted web-bounded transport evidence authority',
+    rootFamilyId: 'root:transport', acceptedContractId: 'contract:g2:transport',
+    trustModelId: 'trust:transport', scopeId: 'scope:transport', assuranceFloorId: 'floor:transport',
+    evidenceBoundaryId: 'boundary:transport', runId: 'run:transport-8', lockId: 'lock:transport-8',
+    candidateCommit: 'ffffffffffffffffffffffffffffffffffffffff',
+    candidateTree: '0000000000000000000000000000000000000000',
+    parentCommit: '1111111111111111111111111111111111111111',
+    baseCommit: '2222222222222222222222222222222222222222',
+    evidenceId: 'evidence:transport-8', priorRunId: 'run:transport-prior',
+    priorWorkerId: 'worker:transport-prior', priorBranch: 'branch:transport-prior',
+    priorMechanism: 'prior-transport-mechanism', mechanism: 'transport-validation',
+    attemptState: { attemptCount: 2, attemptLimit: 3, productCorrectionAttempts: 0, productCorrectionLimit: 1, budgetConsumed: 1, budgetLimit: 5 },
+    effectToken: 'transport-8', pathToken: 'transport-8',
+    permittedEffect: 'CONTINUE_WEB_BOUNDED_TRANSPORT_EVIDENCE'
+  }
 });
-const S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY = Object.freeze(s1aSignedReadback(
-  S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY_CORE));
-const S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY = Object.freeze({
-  commit: 'continuation:commit-4', tree: 'continuation:tree-4'
-});
-const S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY = Object.freeze({
-  evidenceId: 'evidence:continuation-4', digest: 'evidence-digest:continuation-4',
-  candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY
-});
-const S1A_ORACLE_CONTINUATION_ATTEMPT_STATE = Object.freeze({
-  attemptCount: 4, attemptLimit: 5, productCorrectionAttempts: 2,
-  productCorrectionLimit: 3, budgetConsumed: 7, budgetLimit: 10
-});
-function s1aMakeAcceptedContinuationEpisodeAuthority(episodeKind, primaryOwner) {
-  const episodeToken = episodeKind.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const ownerToken = primaryOwner.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  return Object.freeze(s1aSignedReadback({
-    episodeId: 'episode:' + episodeToken + ':' + ownerToken,
-    episodeKind,
-    authorityReference: 'authority:web-episode:' + episodeToken + ':' + ownerToken,
-    primaryOwner,
+function s1aMakeAcceptedContinuationEpisodeAuthority(spec) {
+  return s1aSignedReadback({
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY,
+    webAuthorityIdentity: spec.webAuthorityIdentity,
+    webAuthorityRevision: spec.webAuthorityRevision,
+    webAuthorityContent: spec.webAuthorityContent,
+    episodeId: spec.episodeId,
+    episodeKind: spec.episodeKind,
+    runId: spec.runId,
+    lockId: spec.lockId,
+    authorityReference: spec.authorityReference,
+    primaryOwner: spec.primaryOwner,
     source: S1A_ORACLE_CONTINUATION_AUTHORITY_SOURCE,
     authoritative: true, current: true, readBack: true, explicitWebBound: true,
-    rootFamilyId: 'root-family:accepted-7', acceptedContractId: 'contract:g2-accepted-7',
-    trustModelId: 'trust:model-7', scopeId: 'scope:accepted-7',
-    assuranceFloorId: 'floor:accepted-7', evidenceBoundaryId: 'boundary:evidence-7'
-  }));
-}
-const S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
-  s1aMakeAcceptedContinuationEpisodeAuthority('G3_RUN_LOCK', 'TOOLKIT'));
-const S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
-  s1aMakeAcceptedContinuationEpisodeAuthority('OTHER_WEB_BOUNDED_EVIDENCE_EPISODE', 'TOOLKIT'));
-const S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY = Object.freeze(
-  s1aMakeAcceptedContinuationEpisodeAuthority('OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY', 'VALIDATION_CARRIER'));
-const S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE = Object.freeze({
-  rootFamilyId: 'root-family:accepted-7',
-  unresolvedBlockerIds: Object.freeze(['blocker:validation-carrier']), primaryOwner: 'TOOLKIT',
-  failedMechanism: 'accepted-runner-readback', effectClass: 'NO_PRODUCT_EFFECT',
-  evidenceBoundaryId: 'boundary:evidence-7',
-  runId: 'run:current-4', workerId: 'worker:current-4', branch: 'branch:current-4',
-  candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY,
-  episodeId: 'episode:g3-run-lock:toolkit'
-});
-const S1A_ORACLE_CONTINUATION_HISTORY = Object.freeze([{
-  outcome: 'PROGRESSED', signature: Object.freeze({
-    ...S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE, failedMechanism: 'different-mechanism',
-    runId: 'run:older-2', workerId: 'worker:older-2', branch: 'branch:older-2',
-    candidateIdentity: Object.freeze({ commit: 'continuation:old-commit', tree: 'continuation:old-tree' }),
-    episodeId: 'episode:older-2'
-  })
-}]);
-const S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY = Object.freeze(s1aSignedReadback({
-  source: S1A_ORACLE_CONTINUATION_PATH_SOURCE,
-  authoritative: true, current: true, complete: true, readBack: true,
-  paths: [Object.freeze({
-    pathId: 'path:faithful-accepted-4', faithful: true, available: true,
-    actualPath: 'accepted-validation-path', evidenceRef: 'path-evidence:accepted-4',
-    evidenceBoundaryId: 'boundary:evidence-7',
-    candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY
-  })]
-}));
-function s1aBuildFixedContinuationStateReadback(episodeAuthority) {
-  const currentFailureSignature = s1aClone(S1A_ORACLE_CONTINUATION_FAILURE_SIGNATURE);
-  currentFailureSignature.primaryOwner = episodeAuthority.primaryOwner;
-  currentFailureSignature.episodeId = episodeAuthority.episodeId;
-  return s1aSignedReadback({
-    source: 'CURRENT_ACCEPTED_G2_CONTINUATION_STATE_READBACK',
-    authoritative: true, current: true, complete: true, readBack: true,
-    episodeId: episodeAuthority.episodeId,
-    acceptedEpisodeAuthority: episodeAuthority,
-    candidateIdentity: S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY,
-    evidenceIdentity: S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY,
-    attemptState: S1A_ORACLE_CONTINUATION_ATTEMPT_STATE,
-    currentFailureSignature,
-    history: S1A_ORACLE_CONTINUATION_HISTORY,
-    effectReconciliation: S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED,
-    faithfulPathInventoryDigest: S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY.digest
+    rootFamilyId: spec.rootFamilyId, acceptedContractId: spec.acceptedContractId,
+    trustModelId: spec.trustModelId, scopeId: spec.scopeId,
+    assuranceFloorId: spec.assuranceFloorId, evidenceBoundaryId: spec.evidenceBoundaryId
   });
 }
-const S1A_ORACLE_CURRENT_CONTINUATION_STATE_READBACK = Object.freeze(
-  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY));
-const S1A_ORACLE_OTHER_WEB_CONTINUATION_STATE_READBACK = Object.freeze(
-  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY));
-const S1A_ORACLE_CARRIER_WEB_CONTINUATION_STATE_READBACK = Object.freeze(
-  s1aBuildFixedContinuationStateReadback(S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY));
-const S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS = Object.freeze({
-  G3_RUN_LOCK_TOOLKIT: Object.freeze({
-    episodeAuthority: S1A_ORACLE_CURRENT_CONTINUATION_EPISODE_AUTHORITY,
-    stateReadback: S1A_ORACLE_CURRENT_CONTINUATION_STATE_READBACK
-  }),
-  OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT: Object.freeze({
-    episodeAuthority: S1A_ORACLE_OTHER_WEB_CONTINUATION_EPISODE_AUTHORITY,
-    stateReadback: S1A_ORACLE_OTHER_WEB_CONTINUATION_STATE_READBACK
-  }),
-  OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY: Object.freeze({
-    episodeAuthority: S1A_ORACLE_CARRIER_WEB_CONTINUATION_EPISODE_AUTHORITY,
-    stateReadback: S1A_ORACLE_CARRIER_WEB_CONTINUATION_STATE_READBACK
-  })
-});
+function s1aBuildContinuationScenario(key, spec) {
+  const episodeAuthority = s1aMakeAcceptedContinuationEpisodeAuthority(spec);
+  const candidateIdentity = { commit: spec.candidateCommit, tree: spec.candidateTree };
+  const evidenceIdentity = {
+    evidenceId: spec.evidenceId, digest: 'evidence-digest:' + spec.evidenceId,
+    candidateIdentity
+  };
+  const acceptedBoundary = s1aSignedReadback({
+    source: 'CURRENT_ACCEPTED_G2_BOUNDARY_READBACK', authoritative: true, current: true, readBack: true,
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY,
+    webAuthorityIdentity: spec.webAuthorityIdentity, webAuthorityRevision: spec.webAuthorityRevision,
+    webAuthorityContent: spec.webAuthorityContent, episodeId: spec.episodeId,
+    episodeKind: spec.episodeKind, runId: spec.runId, lockId: spec.lockId,
+    authorityReference: spec.authorityReference, rootFamilyId: spec.rootFamilyId,
+    acceptedContractId: spec.acceptedContractId, trustModelId: spec.trustModelId,
+    scopeId: spec.scopeId, assuranceFloorId: spec.assuranceFloorId, evidenceBoundaryId: spec.evidenceBoundaryId
+  });
+  const currentFailureSignature = {
+    rootFamilyId: spec.rootFamilyId,
+    unresolvedBlockerIds: ['blocker:' + spec.pathToken],
+    primaryOwner: spec.primaryOwner, failedMechanism: spec.mechanism,
+    effectClass: 'NO_PRODUCT_EFFECT', evidenceBoundaryId: spec.evidenceBoundaryId,
+    runId: spec.runId, workerId: 'worker:' + spec.pathToken, branch: 'branch:' + spec.pathToken,
+    candidateIdentity, episodeId: spec.episodeId
+  };
+  const history = [{
+    outcome: 'PROGRESSED',
+    signature: {
+      ...currentFailureSignature, failedMechanism: spec.priorMechanism,
+      runId: spec.priorRunId, workerId: spec.priorWorkerId, branch: spec.priorBranch,
+      candidateIdentity: { commit: spec.parentCommit, tree: spec.baseCommit },
+      episodeId: 'episode:prior:' + spec.pathToken
+    }
+  }];
+  const effectReconciliation = s1aCanonicalContinuationEffects({
+    source: S1A_ORACLE_CONTINUATION_EFFECT_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    effects: [
+      { effectId: 'effect:' + spec.effectToken + ':run', state: 'RECONCILED', evidenceRef: 'effect-evidence:' + spec.effectToken + ':run' },
+      { effectId: 'effect:' + spec.effectToken + ':owner', state: 'RECONCILED', evidenceRef: 'effect-evidence:' + spec.effectToken + ':owner' }
+    ]
+  });
+  const faithfulPathInventory = s1aSignedReadback({
+    source: S1A_ORACLE_CONTINUATION_PATH_SOURCE,
+    authoritative: true, current: true, complete: true, readBack: true,
+    paths: [{
+      pathId: 'path:' + spec.pathToken, faithful: true, available: true,
+      actualPath: 'accepted-validation-path/' + spec.pathToken,
+      evidenceRef: 'path-evidence:' + spec.pathToken,
+      evidenceBoundaryId: spec.evidenceBoundaryId, candidateIdentity
+    }]
+  });
+  const currentStateReadback = s1aSignedReadback({
+    source: 'CURRENT_ACCEPTED_G2_CONTINUATION_STATE_READBACK',
+    authoritative: true, current: true, complete: true, readBack: true,
+    episodeId: spec.episodeId, acceptedEpisodeAuthority: episodeAuthority,
+    candidateIdentity, evidenceIdentity, attemptState: spec.attemptState,
+    currentFailureSignature, history, effectReconciliation,
+    faithfulPathInventoryDigest: faithfulPathInventory.digest
+  });
+  const attributionReadback = s1aSignedReadback({
+    source: 'CURRENT_CAUSAL_ATTRIBUTION_READBACK',
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY,
+    episodeId: spec.episodeId, candidateIdentity, evidenceIdentity,
+    primaryOwner: spec.primaryOwner, correctionMechanism: spec.mechanism,
+    productSemanticsProvenBad: 'NO', authoritative: true, current: true, complete: true, readBack: true
+  });
+  const currentAuthority = s1aSignedReadback({
+    source: 'CURRENT_WEB_AUTHORITY_AND_EPISODE_READBACK',
+    authoritative: true, current: true, complete: true, readBack: true,
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY,
+    webAuthorityIdentity: spec.webAuthorityIdentity, webAuthorityRevision: spec.webAuthorityRevision,
+    webAuthorityContent: spec.webAuthorityContent, episodeAuthority,
+    runId: spec.runId, lockId: spec.lockId, replacementPermission: null,
+    eligibleOwner: spec.primaryOwner, correctionMechanism: spec.mechanism,
+    predecessorCandidate: null, replacementCandidate: null,
+    pathEffectCeiling: { paths: ['accepted-validation-path/' + spec.pathToken], effects: [spec.permittedEffect] },
+    revalidationBoundary: spec.evidenceBoundaryId,
+    lifetime: { notBefore: '2026-01-01T00:00:00Z', expiresAt: '2027-01-01T00:00:00Z', observedAt: '2026-09-29T00:00:00Z' },
+    currentness: { current: true, revoked: false, superseded: false },
+    permissionConsumption: { state: 'NOT_GRANTED', usesRemaining: 0 },
+    permittedEffect: spec.permittedEffect
+  });
+  const candidateReadback = s1aSignedReadback({
+    source: 'POLICY_TEST_MODEL_INDEPENDENT_CANDIDATE_READBACK',
+    authoritative: true, current: true, complete: true, readBack: true,
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY, kind: 'HOSTED', objectFormat: 'sha1',
+    identity: candidateIdentity, commit: candidateIdentity.commit, head: candidateIdentity.commit,
+    tree: candidateIdentity.tree, orderedParents: [spec.parentCommit], baseCommit: spec.baseCommit,
+    commitTreeReadback: {
+      source: 'POLICY_TEST_MODEL_GIT_READBACK', repository: S1A_ORACLE_CONTINUATION_REPOSITORY,
+      objectFormat: 'sha1', commit: candidateIdentity.commit, tree: candidateIdentity.tree,
+      orderedParents: [spec.parentCommit], readBack: true
+    },
+    lineage: {
+      repository: S1A_ORACLE_CONTINUATION_REPOSITORY, episodeId: spec.episodeId,
+      runId: spec.runId, lockId: spec.lockId, predecessorCommit: spec.parentCommit,
+      baseCommit: spec.baseCommit, orderedParents: [spec.parentCommit]
+    },
+    hostedBinding: {
+      repository: S1A_ORACLE_CONTINUATION_REPOSITORY, prNumber: 495,
+      branch: 'codex/s1a-increment1-web-law-shipping', headSha: candidateIdentity.commit,
+      baseCommit: spec.baseCommit, readBack: true
+    },
+    localCustodyBinding: null,
+    observedMutationScope: { paths: ['accepted-validation-path/' + spec.pathToken], effects: [spec.permittedEffect] },
+    predecessorPreservation: { retained: true, candidateIdentity: { commit: spec.parentCommit, tree: spec.baseCommit } },
+    revalidationLinkage: { episodeId: spec.episodeId, evidenceBoundaryId: spec.evidenceBoundaryId, candidateIdentity },
+    digest: ''
+  });
+  candidateReadback.digest = s1aHashWithoutField(candidateReadback, 'digest');
+  const evidenceReadback = s1aSignedReadback({
+    source: 'POLICY_TEST_MODEL_INDEPENDENT_EVIDENCE_READBACK',
+    authoritative: true, current: true, complete: true, readBack: true,
+    repository: S1A_ORACLE_CONTINUATION_REPOSITORY, identity: evidenceIdentity,
+    candidateIdentity, evidenceId: spec.evidenceId, evidenceDigest: evidenceIdentity.digest,
+    evidenceBoundaryId: spec.evidenceBoundaryId, acceptedContractId: spec.acceptedContractId,
+    revalidationBoundaryId: spec.evidenceBoundaryId
+  });
+  const trustedContext = s1aDeepFreeze({
+    currentAuthority, candidateReadback, evidenceReadback, attributionReadback,
+    acceptedBoundaryReadback: acceptedBoundary, currentStateReadback,
+    effectReconciliation, faithfulPathInventory, permittedEffect: spec.permittedEffect,
+    parentOwnershipReadback: spec.parentOwnershipReadback || null
+  });
+  return s1aDeepFreeze({
+    key, spec, episodeAuthority, acceptedBoundary, candidateIdentity, evidenceIdentity,
+    attemptState: spec.attemptState, currentFailureSignature, history,
+    effectReconciliation, faithfulPathInventory, currentStateReadback, attributionReadback,
+    currentAuthority, candidateReadback, evidenceReadback, trustedContext
+  });
+}
+const S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS = s1aDeepFreeze(Object.fromEntries(
+  Object.entries(S1A_ORACLE_CONTINUATION_SCENARIO_SPECS).map(([key, spec]) =>
+    [key, s1aBuildContinuationScenario(key, spec)])));
 function s1aExpectedContinuationStateReadback(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
   const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
-  return scenario ? s1aClone(scenario.stateReadback) : null;
+  return scenario ? s1aClone(scenario.currentStateReadback) : null;
 }
 function s1aExpectedContinuationEpisodeAuthority(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
   const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
   return scenario ? s1aClone(scenario.episodeAuthority) : null;
 }
+function s1aExpectedContinuationTrustedContext(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
+  const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
+  return scenario ? s1aClone(scenario.trustedContext) : null;
+}
+const S1A_ORACLE_REPLACEMENT_REPOSITORY = S1A_ORACLE_CONTINUATION_REPOSITORY;
+const S1A_ORACLE_REPLACEMENT_SCENARIO =
+  S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS.G3_RUN_LOCK_TOOLKIT;
+const S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE =
+  s1aClone(S1A_ORACLE_REPLACEMENT_SCENARIO.candidateIdentity);
+const S1A_ORACLE_REPLACEMENT_PREDECESSOR_EVIDENCE =
+  s1aClone(S1A_ORACLE_REPLACEMENT_SCENARIO.evidenceIdentity);
+const S1A_ORACLE_REPLACEMENT_COMMIT = '7777777777777777777777777777777777777777';
+const S1A_ORACLE_REPLACEMENT_TREE = '8888888888888888888888888888888888888888';
+const S1A_ORACLE_REPLACEMENT_BASE = S1A_ORACLE_REPLACEMENT_SCENARIO.spec.baseCommit;
+const S1A_ORACLE_REPLACEMENT_BOUNDARY = 'boundary:g3-toolkit-revalidation-8';
+const S1A_ORACLE_REPLACEMENT_PATH = 'repo/tests/controller-policy-separation.test.cjs';
+const S1A_ORACLE_REPLACEMENT_EFFECT = 'CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT';
+const S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY = s1aDeepFreeze({
+  repository: S1A_ORACLE_REPLACEMENT_REPOSITORY, kind: 'HOSTED', objectFormat: 'sha1',
+  commit: S1A_ORACLE_REPLACEMENT_COMMIT, head: S1A_ORACLE_REPLACEMENT_COMMIT,
+  tree: S1A_ORACLE_REPLACEMENT_TREE,
+  orderedParents: [S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE.commit],
+  baseCommit: S1A_ORACLE_REPLACEMENT_BASE,
+  hostedBinding: {
+    repository: S1A_ORACLE_REPLACEMENT_REPOSITORY, prNumber: 495,
+    branch: 'codex/s1a-increment1-web-law-shipping',
+    headSha: S1A_ORACLE_REPLACEMENT_COMMIT, baseCommit: S1A_ORACLE_REPLACEMENT_BASE,
+    readBack: true
+  }
+});
+const S1A_ORACLE_REPLACEMENT_CANDIDATE_READBACK = s1aDeepFreeze(s1aSignedReadback({
+  source: 'POLICY_TEST_MODEL_INDEPENDENT_CANDIDATE_READBACK',
+  authoritative: true, current: true, complete: true, readBack: true,
+  repository: S1A_ORACLE_REPLACEMENT_REPOSITORY, kind: 'HOSTED', objectFormat: 'sha1',
+  commit: S1A_ORACLE_REPLACEMENT_COMMIT, head: S1A_ORACLE_REPLACEMENT_COMMIT,
+  tree: S1A_ORACLE_REPLACEMENT_TREE,
+  orderedParents: [S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE.commit],
+  baseCommit: S1A_ORACLE_REPLACEMENT_BASE,
+  identity: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY,
+  commitTreeReadback: {
+    source: 'POLICY_TEST_MODEL_GIT_READBACK', repository: S1A_ORACLE_REPLACEMENT_REPOSITORY,
+    objectFormat: 'sha1', commit: S1A_ORACLE_REPLACEMENT_COMMIT, tree: S1A_ORACLE_REPLACEMENT_TREE,
+    orderedParents: [S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE.commit], readBack: true
+  },
+  lineage: {
+    repository: S1A_ORACLE_REPLACEMENT_REPOSITORY,
+    episodeId: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority.episodeId,
+    runId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.runId,
+    lockId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.lockId,
+    predecessorCandidateIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+    baseCommit: S1A_ORACLE_REPLACEMENT_BASE,
+    orderedParents: [S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE.commit]
+  },
+  hostedBinding: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY.hostedBinding,
+  localCustodyBinding: null,
+  observedMutationScope: {
+    paths: [S1A_ORACLE_REPLACEMENT_PATH], effects: [S1A_ORACLE_REPLACEMENT_EFFECT]
+  },
+  predecessorPreservation: {
+    source: 'POLICY_TEST_MODEL_PREDECESSOR_READBACK',
+    retained: true, immutable: true,
+    candidateIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+    evidenceIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_EVIDENCE
+  },
+  revalidationLinkage: {
+    authorityIdentity: 'web-authority:g3-toolkit-replacement',
+    authorityRevision: 'revision:g3-toolkit-replacement-8',
+    episodeId: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority.episodeId,
+    runId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.runId,
+    lockId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.lockId,
+    revalidationBoundary: S1A_ORACLE_REPLACEMENT_BOUNDARY,
+    predecessorCandidateIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+    predecessorEvidenceIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_EVIDENCE,
+    replacementCandidateIdentity: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY
+  }
+}));
+const S1A_ORACLE_REPLACEMENT_EVIDENCE_READBACK = s1aDeepFreeze(s1aSignedReadback({
+  source: 'POLICY_TEST_MODEL_INDEPENDENT_EVIDENCE_READBACK',
+  authoritative: true, current: true, complete: true, readBack: true,
+  repository: S1A_ORACLE_REPLACEMENT_REPOSITORY,
+  evidenceId: 'evidence:g3-toolkit-revalidation-8',
+  evidenceDigest: 'sha256:modelled-revalidation-evidence-8',
+  candidateIdentity: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY,
+  predecessorCandidateIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+  predecessorEvidenceIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_EVIDENCE,
+  authorityIdentity: 'web-authority:g3-toolkit-replacement',
+  authorityRevision: 'revision:g3-toolkit-replacement-8',
+  episodeId: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority.episodeId,
+  runId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.runId,
+  lockId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.lockId,
+  revalidationBoundary: S1A_ORACLE_REPLACEMENT_BOUNDARY,
+  evidenceBoundaryId: S1A_ORACLE_REPLACEMENT_BOUNDARY
+}));
+const S1A_ORACLE_REPLACEMENT_PATH_EFFECT_CEILING = s1aDeepFreeze({
+  paths: [S1A_ORACLE_REPLACEMENT_PATH], effects: [S1A_ORACLE_REPLACEMENT_EFFECT]
+});
+const S1A_ORACLE_REPLACEMENT_CURRENT_AUTHORITY = s1aDeepFreeze(s1aSignedReadback({
+  source: 'CURRENT_WEB_HOSTED_REPLACEMENT_AUTHORITY_READBACK',
+  authoritative: true, current: true, complete: true, readBack: true,
+  repository: S1A_ORACLE_REPLACEMENT_REPOSITORY,
+  webAuthorityIdentity: 'web-authority:g3-toolkit-replacement',
+  webAuthorityRevision: 'revision:g3-toolkit-replacement-8',
+  webAuthorityContent: 'current hosted non-product replacement permission for g3 toolkit',
+  episode: {
+    episodeId: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority.episodeId,
+    episodeKind: 'G3_RUN_LOCK',
+    authorityReference: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority.authorityReference
+  },
+  run: { runId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.runId },
+  lock: { lockId: S1A_ORACLE_REPLACEMENT_SCENARIO.spec.lockId },
+  episodeAuthority: S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority,
+  replacementPermission: {
+    permissionId: 'permission:g3-toolkit-replacement-8',
+    action: S1A_ORACLE_REPLACEMENT_EFFECT,
+    state: 'AVAILABLE', usesRemaining: 1, candidateKind: 'HOSTED',
+    baseCommit: S1A_ORACLE_REPLACEMENT_BASE,
+    eligibleOwner: 'TOOLKIT', correctionMechanism: 'TOOLKIT_VALIDATION',
+    productSemanticsProvenBad: 'NO',
+    predecessorCandidateIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+    predecessorEvidenceIdentity: S1A_ORACLE_REPLACEMENT_PREDECESSOR_EVIDENCE,
+    replacementCandidateIdentity: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY,
+    candidateReadbackDigest: S1A_ORACLE_REPLACEMENT_CANDIDATE_READBACK.digest,
+    evidenceReadbackDigest: S1A_ORACLE_REPLACEMENT_EVIDENCE_READBACK.digest,
+    pathEffectCeiling: S1A_ORACLE_REPLACEMENT_PATH_EFFECT_CEILING,
+    revalidationBoundary: S1A_ORACLE_REPLACEMENT_BOUNDARY
+  },
+  eligibleOwner: 'TOOLKIT', correctionMechanism: 'TOOLKIT_VALIDATION',
+  predecessorCandidate: S1A_ORACLE_REPLACEMENT_PREDECESSOR_CANDIDATE,
+  replacementCandidate: S1A_ORACLE_REPLACEMENT_CANDIDATE_IDENTITY,
+  pathEffectCeiling: S1A_ORACLE_REPLACEMENT_PATH_EFFECT_CEILING,
+  revalidationBoundary: S1A_ORACLE_REPLACEMENT_BOUNDARY,
+  lifetime: {
+    notBefore: '2026-09-28T00:00:00Z', expiresAt: '2026-10-01T00:00:00Z',
+    observedAt: '2026-09-29T00:00:00Z'
+  },
+  currentness: { current: true, revoked: false, superseded: false },
+  permissionConsumption: {
+    permissionId: 'permission:g3-toolkit-replacement-8',
+    state: 'AVAILABLE', usesRemaining: 1, readBack: true
+  }
+}));
+const S1A_ORACLE_HOSTED_REPLACEMENT_TRUSTED_CONTEXT = s1aDeepFreeze({
+  ...S1A_ORACLE_REPLACEMENT_SCENARIO.trustedContext,
+  currentAuthority: S1A_ORACLE_REPLACEMENT_CURRENT_AUTHORITY,
+  candidateReadback: S1A_ORACLE_REPLACEMENT_CANDIDATE_READBACK,
+  evidenceReadback: S1A_ORACLE_REPLACEMENT_EVIDENCE_READBACK,
+  permittedEffect: S1A_ORACLE_REPLACEMENT_EFFECT
+});
+function s1aFixedContinuationContext(trustedContext) {
+  for (const [key, scenario] of Object.entries(S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS)) {
+    if (s1aSame(trustedContext, scenario.trustedContext)) return { key, scenario, replacement: false };
+  }
+  if (s1aSame(trustedContext, S1A_ORACLE_HOSTED_REPLACEMENT_TRUSTED_CONTEXT)) {
+    return {
+      key: 'G3_RUN_LOCK_TOOLKIT', scenario: S1A_ORACLE_REPLACEMENT_SCENARIO, replacement: true
+    };
+  }
+  return null;
+}
+
 const S1A_ORACLE_CONTINUATION_RELATIONS = Object.freeze({
   OWNER_PRODUCT: 'CONTINUATION_OWNER_PRODUCT_BOUNDARY',
   EPISODE_SCOPE: 'CONTINUATION_EPISODE_SCOPE_AUTHORITY',
@@ -4821,7 +5296,8 @@ const S1A_ORACLE_CONTINUATION_RELATIONS = Object.freeze({
   PATH_PROGRESS: 'CONTINUATION_FAITHFUL_PATH_PROGRESS',
   CURRENT_STATE: 'CONTINUATION_CURRENT_STATE_READBACK',
   IDENTITY_BUDGET: 'CONTINUATION_IDENTITY_BUDGET_PRESERVATION',
-  REPLACEMENT: 'CONTINUATION_REPLACEMENT_AUTHORITY'
+  REPLACEMENT: 'CONTINUATION_REPLACEMENT_AUTHORITY',
+  REPLACEMENT_CANDIDATE_VALIDITY: 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY'
 });
 
 function s1aSignedReadback(core) {
@@ -4830,9 +5306,10 @@ function s1aSignedReadback(core) {
 
 function makeS1aContinuationFixture(options = {}) {
   const scenarioKey = options.scenario || 'G3_RUN_LOCK_TOOLKIT';
-  const currentStateReadback = s1aExpectedContinuationStateReadback(scenarioKey);
-  const acceptedAuthority = s1aExpectedContinuationEpisodeAuthority(scenarioKey);
-  if (!currentStateReadback || !acceptedAuthority) throw new Error('unknown fixed continuation oracle scenario');
+  const oracle = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[scenarioKey];
+  if (!oracle) throw new Error('unknown fixed continuation oracle scenario');
+  const currentStateReadback = s1aClone(oracle.currentStateReadback);
+  const acceptedAuthority = s1aClone(oracle.episodeAuthority);
   const owner = options.owner || acceptedAuthority.primaryOwner;
   const episodeAuthority = s1aClone(acceptedAuthority);
   if (options.episodeKind) {
@@ -4841,21 +5318,17 @@ function makeS1aContinuationFixture(options = {}) {
   }
   const currentFailureSignature = s1aClone(currentStateReadback.currentFailureSignature);
   const attemptState = currentStateReadback.attemptState;
-  const candidateIdentity = s1aClone(S1A_ORACLE_CONTINUATION_CANDIDATE_IDENTITY);
-  const evidenceIdentity = s1aClone(S1A_ORACLE_CONTINUATION_EVIDENCE_IDENTITY);
-  const effectCore = {
-    ...S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED,
-    effects: [...S1A_ORACLE_CONTINUATION_EFFECT_READBACK_SIGNED.effects]
-  };
+  const candidateIdentity = s1aClone(oracle.candidateIdentity);
+  const evidenceIdentity = s1aClone(oracle.evidenceIdentity);
   return {
     mode: 'IDENTITY_PRESERVING', primaryOwner: owner, PRODUCT_SEMANTICS_PROVEN_BAD: 'NO',
     episodeAuthority,
-    acceptedBoundary: s1aClone(S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY),
+    acceptedBoundary: s1aClone(oracle.acceptedBoundary),
     requestedBoundary: Object.fromEntries(S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS.map((field) =>
       [field, episodeAuthority[field]])),
     currentStateReadback,
-    effectReconciliation: s1aCanonicalContinuationEffects(effectCore),
-    faithfulPathInventory: s1aClone(S1A_ORACLE_CURRENT_FAITHFUL_PATH_INVENTORY),
+    effectReconciliation: s1aClone(oracle.effectReconciliation),
+    faithfulPathInventory: s1aClone(oracle.faithfulPathInventory),
     currentFailureSignature,
     history: s1aClone(currentStateReadback.history),
     candidateBefore: s1aClone(candidateIdentity), candidateAfter: s1aClone(candidateIdentity),
@@ -4871,9 +5344,14 @@ function makeS1aContinuationFixture(options = {}) {
       budgetLimitBefore: attemptState.budgetLimit, budgetLimitAfter: attemptState.budgetLimit,
       reset: false
     },
-    replacementAuthority: null,
+    replacementAuthorityClaim: null,
     durableFailedCandidates: []
   };
+}
+function s1aContinuationTrustedContext(scenarioKey = 'G3_RUN_LOCK_TOOLKIT') {
+  const context = s1aExpectedContinuationTrustedContext(scenarioKey);
+  if (!context) throw new Error('unknown fixed trusted continuation context');
+  return context;
 }
 function s1aContinuationPolicyViolations(policy) {
   const rule = policy && policy.boundedContinuation ? policy.boundedContinuation : {};
@@ -4955,8 +5433,13 @@ function s1aContinuationPolicyViolations(policy) {
       !requiredConditions.includes('CONSUMPTION_WITHIN_ACCEPTED_LIMITS')) {
     push(S1A_ORACLE_CONTINUATION_RELATIONS.LIMITS);
   }
-  if (!s1aSame(rule.hostedReplacementCandidate, oracle.hostedReplacementCandidate)) {
+  if (!s1aSame(rule.replacementAuthority, oracle.replacementAuthority)) {
     push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT);
+  }
+  if (!s1aSame(rule.replacementCandidateValidity, oracle.replacementCandidateValidity) ||
+      !s1aSame(rule.replacementRejection, oracle.replacementRejection) ||
+      !oracle.resultFields.includes('mutationEffects')) {
+    push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT_CANDIDATE_VALIDITY);
   }
   return failures;
 }
@@ -4964,67 +5447,273 @@ function s1aEquivalentContinuationFailure(left, right, equivalenceFields) {
   return equivalenceFields.every((field) => s1aSame(left && left[field], right && right[field]));
 }
 
-function s1aReplacementAuthorityIsValid(input, episode) {
-  const authority = input.replacementAuthority;
-  const fields = [
-    'source', 'authoritative', 'current', 'readBack', 'explicitWebBound', 'authorityReference',
-    'episodeId', 'episodeKind', 'rootFamilyId', 'acceptedContractId', 'trustModelId', 'scopeId',
-    'assuranceFloorId', 'evidenceBoundaryId', 'primaryOwner', 'failedCandidateIdentity',
-    'failedEvidenceIdentity', 'replacementCandidateIdentity', 'revalidationBoundaryId',
-    'correctionMechanism', 'productCorrectionAttemptsBefore', 'productCorrectionAttemptsAfter',
-    'budgetReset', 'digest'
+function s1aNonBlankString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+function s1aObjectIdHasFormat(value, objectFormat) {
+  const length = objectFormat === 'sha1' ? 40 : objectFormat === 'sha256' ? 64 : 0;
+  return length > 0 && typeof value === 'string' && new RegExp('^[a-f0-9]{' + length + '}$', 'i').test(value);
+}
+function s1aRequestReadbackIsIndependent(request, readback) {
+  if (!request || typeof request !== 'object' || !readback || typeof readback !== 'object') return false;
+  const requestReferences = s1aObjectReferences(request);
+  return ![...s1aObjectReferences(readback)].some((reference) => requestReferences.has(reference));
+}
+function s1aMutationScopeWithinCeiling(scope, ceiling) {
+  return s1aHasExactKeys(scope, ['paths', 'effects']) &&
+    s1aHasExactKeys(ceiling, ['paths', 'effects']) &&
+    Array.isArray(scope.paths) && scope.paths.length > 0 &&
+    Array.isArray(scope.effects) && scope.effects.length > 0 &&
+    Array.isArray(ceiling.paths) && ceiling.paths.length > 0 &&
+    Array.isArray(ceiling.effects) && ceiling.effects.length > 0 &&
+    ceiling.paths.every(s1aNonBlankString) && ceiling.effects.every(s1aNonBlankString) &&
+    scope.paths.every((value) => s1aNonBlankString(value) && ceiling.paths.includes(value)) &&
+    scope.effects.every((value) => s1aNonBlankString(value) && ceiling.effects.includes(value));
+}
+function s1aReplacementAuthorityIsValid(request, trustedContext) {
+  const authority = trustedContext && trustedContext.currentAuthority;
+  const permission = authority && authority.replacementPermission;
+  const authorityIsIndependent = s1aRequestReadbackIsIndependent(request, authority);
+  const expected = S1A_ORACLE_REPLACEMENT_CURRENT_AUTHORITY;
+  const authorityFields = [
+    'source', 'authoritative', 'current', 'complete', 'readBack', 'repository',
+    'webAuthorityIdentity', 'webAuthorityRevision', 'webAuthorityContent', 'episode',
+    'run', 'lock', 'episodeAuthority', 'replacementPermission', 'eligibleOwner',
+    'correctionMechanism', 'predecessorCandidate', 'replacementCandidate',
+    'pathEffectCeiling', 'revalidationBoundary', 'lifetime', 'currentness',
+    'permissionConsumption', 'digest'
   ];
-  if (!s1aHasExactKeys(authority, fields) ||
-      authority.source !== 'CURRENT_OWNER_WEB_HOSTED_RECLOSURE_AUTHORITY' ||
-      authority.authoritative !== true || authority.current !== true || authority.readBack !== true ||
-      authority.explicitWebBound !== true || authority.authorityReference !== 'authority:hosted-reclosure:7' ||
-      authority.episodeId !== episode.episodeId || authority.episodeKind !== 'G3_RUN_LOCK' ||
-      input.episodeAuthority.episodeKind !== 'G3_RUN_LOCK' ||
-      !S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.hostedReplacementCandidate.allowedPrimaryOwners.includes(input.primaryOwner) ||
-      authority.primaryOwner !== input.primaryOwner ||
-      authority.rootFamilyId !== episode.rootFamilyId ||
-      authority.acceptedContractId !== episode.acceptedContractId ||
-      authority.trustModelId !== episode.trustModelId || authority.scopeId !== episode.scopeId ||
-      authority.assuranceFloorId !== episode.assuranceFloorId ||
-      authority.evidenceBoundaryId !== episode.evidenceBoundaryId ||
-      !s1aSame(authority.failedCandidateIdentity, input.candidateBefore) ||
-      !s1aSame(authority.failedEvidenceIdentity, input.evidenceBefore) ||
-      !s1aSame(authority.replacementCandidateIdentity, input.candidateAfter) ||
-      authority.revalidationBoundaryId !== episode.evidenceBoundaryId ||
-      !['HARNESS_VALIDATION', 'TOOLKIT_VALIDATION', 'ENVIRONMENT_VALIDATION'].includes(authority.correctionMechanism) ||
-      authority.productCorrectionAttemptsBefore !== input.attempts.productCorrectionAttemptsBefore ||
-      authority.productCorrectionAttemptsAfter !== input.attempts.productCorrectionAttemptsAfter ||
-      authority.productCorrectionAttemptsBefore !== authority.productCorrectionAttemptsAfter ||
-      authority.budgetReset !== false || authority.digest !== s1aHashWithoutField(authority, 'digest')) return false;
-  const oldEvidencePreserved = Array.isArray(input.durableFailedCandidates) &&
-    input.durableFailedCandidates.some((row) => row.immutable === true && row.preserved === true &&
-      s1aSame(row.candidateIdentity, input.candidateBefore) && s1aSame(row.evidenceIdentity, input.evidenceBefore));
-  const newIdentity = input.candidateAfter &&
-    typeof input.candidateAfter.commit === 'string' && typeof input.candidateAfter.tree === 'string' &&
-    !s1aSame(input.candidateAfter, input.candidateBefore);
-  return oldEvidencePreserved && newIdentity && input.replacementCandidateImmutable === true &&
-    input.evidenceAfter && s1aSame(input.evidenceAfter.candidateIdentity, input.candidateAfter) &&
-    input.attempts.productCorrectionAttemptsAfter === input.attempts.productCorrectionAttemptsBefore &&
-    input.attempts.budgetConsumedAfter >= input.attempts.budgetConsumedBefore &&
-    input.attempts.budgetLimitAfter <= input.attempts.budgetLimitBefore && input.attempts.reset === false;
+  const permissionFields = [
+    'permissionId', 'action', 'state', 'usesRemaining', 'candidateKind', 'baseCommit',
+    'eligibleOwner', 'correctionMechanism', 'productSemanticsProvenBad',
+    'predecessorCandidateIdentity', 'predecessorEvidenceIdentity',
+    'replacementCandidateIdentity', 'candidateReadbackDigest', 'evidenceReadbackDigest',
+    'pathEffectCeiling', 'revalidationBoundary'
+  ];
+  const lifetime = authority && authority.lifetime;
+  const currentness = authority && authority.currentness;
+  const consumption = authority && authority.permissionConsumption;
+  const observedAt = lifetime && Date.parse(lifetime.observedAt);
+  const notBefore = lifetime && Date.parse(lifetime.notBefore);
+  const expiresAt = lifetime && Date.parse(lifetime.expiresAt);
+  const permissionCurrent = Boolean(authority) &&
+    authority.source === expected.source && authority.authoritative === true &&
+    authority.current === true && authority.complete === true && authority.readBack === true &&
+    authority.repository === S1A_ORACLE_REPLACEMENT_REPOSITORY &&
+    authority.webAuthorityIdentity === expected.webAuthorityIdentity &&
+    authority.webAuthorityRevision === expected.webAuthorityRevision &&
+    authority.webAuthorityContent === expected.webAuthorityContent &&
+    authority.episode && authority.run && authority.lock &&
+    authority.episode.episodeKind === 'G3_RUN_LOCK' &&
+    s1aSame(authority.episodeAuthority, S1A_ORACLE_REPLACEMENT_SCENARIO.episodeAuthority) &&
+    authority.eligibleOwner === request.primaryOwner &&
+    S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.replacementAuthority.eligiblePrimaryOwners.includes(authority.eligibleOwner) &&
+    authority.correctionMechanism === request.correctionMechanism &&
+    S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.replacementAuthority.eligibleCorrectionMechanisms.includes(authority.correctionMechanism) &&
+    authority.episode.episodeId === (request.episodeAuthority && request.episodeAuthority.episodeId) &&
+    authority.run.runId === (request.episodeAuthority && request.episodeAuthority.runId) &&
+    authority.lock.lockId === (request.episodeAuthority && request.episodeAuthority.lockId) &&
+    s1aSame(authority.predecessorCandidate, request.candidateBefore) &&
+    authority.replacementPermission &&
+    authority.replacementPermission.state === 'AVAILABLE' &&
+    authority.replacementPermission.usesRemaining === 1 &&
+    authority.replacementPermission.candidateKind === 'HOSTED' &&
+    authority.replacementPermission.eligibleOwner === request.primaryOwner &&
+    authority.replacementPermission.correctionMechanism === request.correctionMechanism &&
+    authority.replacementPermission.productSemanticsProvenBad === 'NO' &&
+    authority.permissionConsumption && authority.permissionConsumption.state === 'AVAILABLE' &&
+    authority.permissionConsumption.permissionId === authority.replacementPermission.permissionId &&
+    authority.permissionConsumption.usesRemaining === 1 &&
+    authority.currentness && authority.currentness.current === true &&
+    authority.currentness.revoked === false && authority.currentness.superseded === false &&
+    Number.isFinite(observedAt) && Number.isFinite(notBefore) && Number.isFinite(expiresAt) &&
+    observedAt >= notBefore && observedAt < expiresAt &&
+    s1aMutationScopeWithinCeiling(request.requestedMutationScope, authority.pathEffectCeiling) &&
+    request.PRODUCT_SEMANTICS_PROVEN_BAD === 'NO' &&
+    s1aSame(request.replacementAuthorityClaim, authority) &&
+    s1aSame(authority, expected);
+  const exactAuthorityShape = s1aHasExactKeys(authority, authorityFields) &&
+    s1aHasExactKeys(permission, permissionFields) &&
+    authority.digest === s1aHashWithoutField(authority, 'digest');
+  const valid = permissionCurrent && exactAuthorityShape && authorityIsIndependent;
+  return { ok: valid, failures: valid ? [] : ['CONTINUATION_REPLACEMENT_AUTHORITY'] };
+}
+function s1aReplacementCandidateIsValid(request, trustedContext) {
+  const candidate = trustedContext && trustedContext.candidateReadback;
+  const evidence = trustedContext && trustedContext.evidenceReadback;
+  const authority = trustedContext && trustedContext.currentAuthority;
+  const permission = authority && authority.replacementPermission;
+  const candidateIsIndependent = s1aRequestReadbackIsIndependent(request, candidate);
+  const evidenceIsIndependent = s1aRequestReadbackIsIndependent(request, evidence);
+  const policy = S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.replacementCandidateValidity;
+  const requiredReadbackKeys = [
+    'source', 'authoritative', 'current', 'complete', 'readBack', ...policy.requiredFields,
+    'identity', 'digest'
+  ];
+  const candidateShape = candidate && requiredReadbackKeys.every((field) =>
+    Object.prototype.hasOwnProperty.call(candidate, field));
+  const supportedKind = candidate && policy.supportedKinds.includes(candidate.kind);
+  const validObjectFormat = candidate && policy.supportedObjectFormats.includes(candidate.objectFormat);
+  const idsValid = Boolean(candidate && validObjectFormat) &&
+    ['commit', 'head', 'tree', 'baseCommit'].every((field) =>
+      s1aObjectIdHasFormat(candidate[field], candidate.objectFormat)) &&
+    candidate.head === candidate.commit && candidate.identity &&
+    candidate.identity.head === candidate.identity.commit &&
+    Array.isArray(candidate.orderedParents) && candidate.orderedParents.length > 0 &&
+    candidate.orderedParents.every((value) => s1aObjectIdHasFormat(value, candidate.objectFormat));
+  const identityMatchesReadback = Boolean(candidate && s1aSame(request.candidateAfter, candidate.identity) &&
+    candidate.identity && candidate.identity.commit === candidate.commit &&
+    candidate.identity.head === candidate.head && candidate.identity.tree === candidate.tree &&
+    candidate.identity.baseCommit === candidate.baseCommit &&
+    s1aSame(candidate.identity.orderedParents, candidate.orderedParents) &&
+    candidate.identity.repository === candidate.repository &&
+    candidate.identity.kind === candidate.kind &&
+    candidate.identity.objectFormat === candidate.objectFormat);
+  const commitTree = candidate && candidate.commitTreeReadback;
+  const commitTreeValid = s1aHasExactKeys(commitTree,
+    ['source', 'repository', 'objectFormat', 'commit', 'tree', 'orderedParents', 'readBack']) &&
+    commitTree.source === 'POLICY_TEST_MODEL_GIT_READBACK' &&
+    commitTree.repository === candidate.repository &&
+    commitTree.objectFormat === candidate.objectFormat && commitTree.commit === candidate.commit &&
+    commitTree.tree === candidate.tree && s1aSame(commitTree.orderedParents, candidate.orderedParents) &&
+    commitTree.readBack === true;
+  const episode = authority && authority.episode;
+  const run = authority && authority.run;
+  const lock = authority && authority.lock;
+  const lineage = candidate && candidate.lineage;
+  const lineageValid = s1aHasExactKeys(lineage, [
+    'repository', 'episodeId', 'runId', 'lockId', 'predecessorCandidateIdentity',
+    'baseCommit', 'orderedParents'
+  ]) && lineage.repository === candidate.repository &&
+    lineage.episodeId === (episode && episode.episodeId) &&
+    lineage.runId === (run && run.runId) && lineage.lockId === (lock && lock.lockId) &&
+    s1aSame(lineage.predecessorCandidateIdentity, request.candidateBefore) &&
+    lineage.baseCommit === candidate.baseCommit &&
+    s1aSame(lineage.orderedParents, candidate.orderedParents);
+  const hosted = candidate && candidate.kind === 'HOSTED' && candidate.hostedBinding;
+  const hostedValid = candidate && candidate.kind === 'HOSTED'
+    ? s1aHasExactKeys(hosted, S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.replacementCandidateValidity.hostedBindingFields) &&
+      hosted.repository === candidate.repository && Number.isSafeInteger(hosted.prNumber) &&
+      s1aNonBlankString(hosted.branch) && hosted.headSha === candidate.head &&
+      hosted.baseCommit === candidate.baseCommit && hosted.readBack === true &&
+      s1aSame(hosted, candidate.identity && candidate.identity.hostedBinding) &&
+      candidate.localCustodyBinding === null
+    : false;
+  const localCustody = candidate && candidate.localCustodyBinding;
+  const localValid = candidate && candidate.kind === 'LOCAL'
+    ? s1aHasExactKeys(localCustody, S1A_ORACLE_BOUNDED_CONTINUATION_POLICY.replacementCandidateValidity.localCustodyBindingFields) &&
+      localCustody.repository === candidate.repository &&
+      s1aNonBlankString(localCustody.custodyId) && s1aNonBlankString(localCustody.worktreeId) &&
+      localCustody.commit === candidate.commit && localCustody.tree === candidate.tree &&
+      localCustody.readBack === true && candidate.hostedBinding === null &&
+      s1aSame(localCustody, candidate.identity && candidate.identity.localCustodyBinding)
+    : false;
+  const kindBindingValid = candidate && candidate.kind === (permission && permission.candidateKind) &&
+    (candidate.kind === 'HOSTED' ? hostedValid : localValid);
+  const scope = candidate && candidate.observedMutationScope;
+  const scopeWithinCeiling = Boolean(permission) &&
+    s1aMutationScopeWithinCeiling(scope, permission.pathEffectCeiling) &&
+    s1aMutationScopeWithinCeiling(request.requestedMutationScope, permission.pathEffectCeiling);
+  const predecessor = candidate && candidate.predecessorPreservation;
+  const predecessorPreserved = s1aHasExactKeys(predecessor, [
+    'source', 'retained', 'immutable', 'candidateIdentity', 'evidenceIdentity'
+  ]) && predecessor.source === 'POLICY_TEST_MODEL_PREDECESSOR_READBACK' &&
+    predecessor.retained === true && predecessor.immutable === true &&
+    s1aSame(predecessor.candidateIdentity, request.candidateBefore) &&
+    s1aSame(predecessor.evidenceIdentity, request.evidenceBefore) &&
+    Array.isArray(request.durableFailedCandidates) &&
+    request.durableFailedCandidates.some((row) => row && row.immutable === true &&
+      row.preserved === true && s1aSame(row.candidateIdentity, request.candidateBefore) &&
+      s1aSame(row.evidenceIdentity, request.evidenceBefore));
+  const revalidation = candidate && candidate.revalidationLinkage;
+  const revalidationValid = s1aHasExactKeys(revalidation, [
+    'authorityIdentity', 'authorityRevision', 'episodeId', 'runId', 'lockId',
+    'revalidationBoundary', 'predecessorCandidateIdentity', 'predecessorEvidenceIdentity',
+    'replacementCandidateIdentity'
+  ]) && revalidation.authorityIdentity === (authority && authority.webAuthorityIdentity) &&
+    revalidation.authorityRevision === (authority && authority.webAuthorityRevision) &&
+    revalidation.episodeId === (episode && episode.episodeId) &&
+    revalidation.runId === (run && run.runId) && revalidation.lockId === (lock && lock.lockId) &&
+    revalidation.revalidationBoundary === (authority && authority.revalidationBoundary) &&
+    s1aSame(revalidation.predecessorCandidateIdentity, request.candidateBefore) &&
+    s1aSame(revalidation.predecessorEvidenceIdentity, request.evidenceBefore) &&
+    s1aSame(revalidation.replacementCandidateIdentity, candidate && candidate.identity);
+  const evidenceValid = s1aHasExactKeys(evidence, [
+    'source', 'authoritative', 'current', 'complete', 'readBack', 'repository', 'evidenceId',
+    'evidenceDigest', 'candidateIdentity', 'predecessorCandidateIdentity',
+    'predecessorEvidenceIdentity', 'authorityIdentity', 'authorityRevision', 'episodeId',
+    'runId', 'lockId', 'revalidationBoundary', 'evidenceBoundaryId', 'digest'
+  ]) && evidence.source === 'POLICY_TEST_MODEL_INDEPENDENT_EVIDENCE_READBACK' &&
+    evidence.authoritative === true && evidence.current === true && evidence.complete === true &&
+    evidence.readBack === true && candidate && evidence.repository === candidate.repository &&
+    s1aNonBlankString(evidence.evidenceId) && evidence.evidenceId !==
+      (request.evidenceBefore && request.evidenceBefore.evidenceId) &&
+    s1aNonBlankString(evidence.evidenceDigest) &&
+    s1aSame(evidence.candidateIdentity, candidate && candidate.identity) &&
+    s1aSame(evidence.predecessorCandidateIdentity, request.candidateBefore) &&
+    s1aSame(evidence.predecessorEvidenceIdentity, request.evidenceBefore) &&
+    evidence.authorityIdentity === (authority && authority.webAuthorityIdentity) &&
+    evidence.authorityRevision === (authority && authority.webAuthorityRevision) &&
+    evidence.episodeId === (episode && episode.episodeId) &&
+    evidence.runId === (run && run.runId) && evidence.lockId === (lock && lock.lockId) &&
+    evidence.revalidationBoundary === (authority && authority.revalidationBoundary) &&
+    evidence.evidenceBoundaryId === (authority && authority.revalidationBoundary) &&
+    evidence.digest === s1aHashWithoutField(evidence, 'digest') &&
+    permission && permission.evidenceReadbackDigest === evidence.digest &&
+    request.replacementCandidateImmutable === true &&
+    request.evidenceAfter && request.evidenceAfter.evidenceId === evidence.evidenceId &&
+    request.evidenceAfter.digest === evidence.evidenceDigest &&
+    s1aSame(request.evidenceAfter.candidateIdentity, evidence.candidateIdentity) &&
+    request.evidenceAfter.revalidationBoundaryId === evidence.revalidationBoundary;
+  const authorityCandidateBound = Boolean(permission) &&
+    s1aSame(permission.replacementCandidateIdentity, candidate && candidate.identity) &&
+    permission.candidateReadbackDigest === (candidate && candidate.digest) &&
+    permission.evidenceReadbackDigest === (evidence && evidence.digest) &&
+    permission.baseCommit === (candidate && candidate.baseCommit) &&
+    s1aSame(authority.predecessorCandidate, request.candidateBefore) &&
+    s1aSame(authority.replacementCandidate, candidate && candidate.identity);
+  const readbacksAreFixed = s1aSame(candidate, S1A_ORACLE_REPLACEMENT_CANDIDATE_READBACK) &&
+    s1aSame(evidence, S1A_ORACLE_REPLACEMENT_EVIDENCE_READBACK);
+  const valid = Boolean(candidateShape && supportedKind && idsValid && identityMatchesReadback &&
+    commitTreeValid && lineageValid && kindBindingValid && scopeWithinCeiling &&
+    predecessorPreserved && revalidationValid && evidenceValid && authorityCandidateBound &&
+    readbacksAreFixed && candidateIsIndependent && evidenceIsIndependent);
+  return { ok: valid, failures: valid ? [] : ['CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY'] };
 }
 
-function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_TOOLKIT') {
+function evaluateS1aContinuation(policy, request, trustedContext) {
   const failures = s1aContinuationPolicyViolations(policy);
   const push = (id) => { if (!failures.includes(id)) failures.push(id); };
   const rule = S1A_ORACLE_BOUNDED_CONTINUATION_POLICY;
+  const contextMatch = s1aFixedContinuationContext(trustedContext);
+  const scenario = contextMatch && contextMatch.scenario;
+  const input = request;
   const episode = input && input.episodeAuthority;
   const requestedBoundary = input && input.requestedBoundary;
   const acceptedBoundary = input && input.acceptedBoundary;
   const owner = input && input.primaryOwner;
+  if (!contextMatch) push('CONTINUATION_ACCEPTED_AUTHORITY_READBACK');
   if (!rule.eligiblePrimaryOwners.includes(owner) || rule.excludedAutonomousOwners.includes(owner)) {
     push('CONTINUATION_PRIMARY_OWNER_NOT_ELIGIBLE');
   }
   if (!input || input.PRODUCT_SEMANTICS_PROVEN_BAD !== 'NO') {
     push('CONTINUATION_PRODUCT_CORRECTION_NOT_AUTHORISED');
   }
-  const independentlyAcceptedAuthority = s1aExpectedContinuationEpisodeAuthority(expectedScenario);
-  const acceptedState = s1aExpectedContinuationStateReadback(expectedScenario);
+  const independentlyAcceptedAuthority = scenario && scenario.episodeAuthority;
+  const acceptedState = scenario && scenario.currentStateReadback;
+  const expectedTrustedContext = contextMatch && contextMatch.replacement
+    ? S1A_ORACLE_HOSTED_REPLACEMENT_TRUSTED_CONTEXT
+    : scenario && scenario.trustedContext;
+  if (!expectedTrustedContext || !s1aSame(trustedContext, expectedTrustedContext)) {
+    push('CONTINUATION_ACCEPTED_AUTHORITY_READBACK');
+  }
+  const attribution = trustedContext && trustedContext.attributionReadback;
+  if (!scenario || !s1aSame(attribution, scenario.attributionReadback) ||
+      !attribution || attribution.primaryOwner !== owner ||
+      attribution.productSemanticsProvenBad !== 'NO' ||
+      !attribution.authoritative || !attribution.current || !attribution.readBack) {
+    push('CONTINUATION_ACCEPTED_AUTHORITY_READBACK');
+  }
   const episodeKindAccepted = episode && typeof episode.episodeKind === 'string' &&
     episode.episodeKind.trim().length > 0 && episode.explicitWebBound === true &&
     Boolean(independentlyAcceptedAuthority);
@@ -5033,14 +5722,15 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
     episode.authoritative === true && episode.current === true && episode.readBack === true &&
     episodeKindAccepted && episode.primaryOwner === owner &&
     s1aSame(episode, independentlyAcceptedAuthority) &&
-    typeof episode.episodeId === 'string' && episode.episodeId.length > 0 &&
-    typeof episode.authorityReference === 'string' && episode.authorityReference.length > 0 &&
+    s1aNonBlankString(episode.episodeId) && s1aNonBlankString(episode.authorityReference) &&
+    s1aNonBlankString(episode.runId) && s1aNonBlankString(episode.lockId) &&
     episode.digest === s1aHashWithoutField(episode, 'digest');
   const acceptedBoundaryFields = rule.acceptedBoundaryBinding.requiredFields;
-  const acceptedBoundaryBound = s1aHasExactKeys(acceptedBoundary, acceptedBoundaryFields) &&
-    s1aSame(acceptedBoundary, S1A_ORACLE_ACCEPTED_CONTINUATION_BOUNDARY) &&
+  const acceptedBoundaryBound = Boolean(scenario) &&
+    s1aHasExactKeys(acceptedBoundary, acceptedBoundaryFields) &&
+    s1aSame(acceptedBoundary, scenario.acceptedBoundary) &&
     rule.acceptedBoundaryBinding.episodeFields.every((field) =>
-      s1aSame(acceptedBoundary[field], episode && episode[field]));
+      s1aSame(acceptedBoundary && acceptedBoundary[field], episode && episode[field]));
   if (!episodeValid || !acceptedBoundaryBound ||
       !s1aHasExactKeys(requestedBoundary, S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS) ||
       !S1A_ORACLE_CONTINUATION_BOUNDARY_FIELDS.every((field) =>
@@ -5061,13 +5751,16 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
     stateReadback.source === stateRule.source && stateReadback.authoritative === true &&
     stateReadback.current === true && stateReadback.complete === true && stateReadback.readBack === true &&
     stateReadback.digest === s1aHashWithoutField(stateReadback, 'digest') &&
-    s1aSame(stateReadback, acceptedState);
+    s1aSame(stateReadback, acceptedState) &&
+    s1aSame(trustedContext && trustedContext.currentStateReadback, acceptedState);
   if (!stateReadbackValid) push('CONTINUATION_CURRENT_STATE_READBACK');
-  const historyComplete = Array.isArray(input && input.history) && input.history.length > 0 &&
-    Array.isArray(stateReadback && stateReadback.history) &&
-    s1aSame(input.history, stateReadback.history) && s1aSame(stateReadback.history, acceptedState.history);
+  const historyComplete = Boolean(acceptedState) && Array.isArray(input && input.history) &&
+    input.history.length > 0 && Array.isArray(stateReadback && stateReadback.history) &&
+    s1aSame(input.history, stateReadback.history) &&
+    s1aSame(stateReadback.history, acceptedState.history);
   if (!historyComplete) push('CONTINUATION_HISTORY_INCOMPLETE');
-  const identityBeforeMatches = s1aSame(input && input.candidateBefore, acceptedState.candidateIdentity) &&
+  const identityBeforeMatches = Boolean(acceptedState) &&
+    s1aSame(input && input.candidateBefore, acceptedState.candidateIdentity) &&
     s1aSame(input && input.evidenceBefore, acceptedState.evidenceIdentity) &&
     s1aSame(input && input.evidenceBefore && input.evidenceBefore.candidateIdentity,
       acceptedState.candidateIdentity) &&
@@ -5075,7 +5768,7 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
     s1aSame(episode && episode.episodeId, acceptedState.episodeId);
   if (!identityBeforeMatches) push('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY');
   const attempts = input && input.attempts;
-  const attemptStateMatches = stateRule.attemptFields.every((field) =>
+  const attemptStateMatches = Boolean(acceptedState) && stateRule.attemptFields.every((field) =>
     attempts && Number.isSafeInteger(attempts[field + 'Before']) &&
     attempts[field + 'Before'] === acceptedState.attemptState[field]);
   if (!attemptStateMatches) push('CONTINUATION_ATTEMPT_BUDGET_RESET');
@@ -5090,7 +5783,10 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
         typeof effect.evidenceRef !== 'string' || effect.evidenceRef.length === 0) ||
       effects.digest !== s1aCanonicalContinuationEffects(effects).digest ||
       !acceptedState || !s1aSame(s1aCanonicalContinuationEffects(effects),
-        acceptedState[rule.effectReconciliation.independentReadbackField])) {
+        acceptedState[rule.effectReconciliation.independentReadbackField]) ||
+      !scenario || !s1aSame(s1aCanonicalContinuationEffects(effects), scenario.effectReconciliation) ||
+      !s1aSame(s1aCanonicalContinuationEffects(trustedContext && trustedContext.effectReconciliation),
+        scenario.effectReconciliation)) {
     push('CONTINUATION_EFFECTS_UNRECONCILED');
   }
   const paths = input && input.faithfulPathInventory;
@@ -5098,15 +5794,16 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
   const pathRecordFields = rule.faithfulPathInventory.pathFields;
   const pathHasBoundIdentityEvidence = paths && Array.isArray(paths.paths) && paths.paths.some((path) =>
     s1aHasExactKeys(path, pathRecordFields) &&
-    typeof path.pathId === 'string' && path.pathId.trim().length > 0 &&
-    typeof path.actualPath === 'string' && path.actualPath.trim().length > 0 &&
-    typeof path.evidenceRef === 'string' && path.evidenceRef.trim().length > 0 &&
+    s1aNonBlankString(path.pathId) && s1aNonBlankString(path.actualPath) &&
+    s1aNonBlankString(path.evidenceRef) &&
     path.evidenceBoundaryId === (episode && episode.evidenceBoundaryId) &&
     s1aSame(path.candidateIdentity, input.candidateBefore));
   const pathRemains = pathHasBoundIdentityEvidence && paths.paths.some((path) =>
     path.faithful === true && path.available === true);
-  const inventoryDigestBound = Boolean(acceptedState) &&
-    paths && paths.digest === acceptedState.faithfulPathInventoryDigest;
+  const inventoryDigestBound = Boolean(acceptedState) && paths &&
+    paths.digest === acceptedState.faithfulPathInventoryDigest &&
+    scenario && s1aSame(paths, scenario.faithfulPathInventory) &&
+    s1aSame(trustedContext && trustedContext.faithfulPathInventory, scenario.faithfulPathInventory);
   if (!pathHasBoundIdentityEvidence || !inventoryDigestBound) {
     push('CONTINUATION_FAITHFUL_PATH_USABILITY');
   }
@@ -5116,7 +5813,8 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
       paths.readBack !== true || !pathRemains || !inventoryDigestBound ||
       paths.digest !== s1aHashWithoutField(paths, 'digest')) {
     push('CONTINUATION_FAITHFUL_PATH_EXHAUSTED');
-  }  const currentSignature = input && input.currentFailureSignature;
+  }
+  const currentSignature = input && input.currentFailureSignature;
   const equivalentNoProgress = Array.isArray(input && input.history) && input.history.some((entry) =>
     entry && entry.outcome === 'NO_PROGRESS' &&
     s1aEquivalentContinuationFailure(currentSignature, entry.signature, rule.equivalenceFields));
@@ -5130,13 +5828,22 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
     s1aSame(input.candidateBefore, input.candidateAfter) &&
     s1aSame(input.evidenceBefore, input.evidenceAfter) &&
     s1aSame(input.evidenceBefore && input.evidenceBefore.candidateIdentity, input.candidateBefore) &&
-    identityBeforeMatches;
+    identityBeforeMatches && !contextMatch?.replacement &&
+    scenario && s1aSame(trustedContext.candidateReadback, scenario.candidateReadback) &&
+    s1aSame(trustedContext.evidenceReadback, scenario.evidenceReadback) &&
+    trustedContext.permittedEffect === scenario.spec.permittedEffect;
   let replacementValid = false;
   if (input && input.mode === 'HOSTED_VALIDATION_RECLOSURE') {
-    replacementValid = s1aReplacementAuthorityIsValid(input, episode || {});
-    if (!replacementValid) push('CONTINUATION_REPLACEMENT_AUTHORITY');
+    const authorityResult = s1aReplacementAuthorityIsValid(input, trustedContext);
+    const candidateResult = s1aReplacementCandidateIsValid(input, trustedContext);
+    if (!authorityResult.ok) push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT);
+    if (!candidateResult.ok) push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT_CANDIDATE_VALIDITY);
+    replacementValid = authorityResult.ok && candidateResult.ok && Boolean(contextMatch?.replacement);
   } else if (!candidateAndEvidenceSame) {
     push('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY');
+    if (input && input.replacementAuthorityClaim !== null) {
+      push(S1A_ORACLE_CONTINUATION_RELATIONS.REPLACEMENT);
+    }
   }
   const counterFields = [
     'attemptCountBefore', 'attemptCountAfter', 'attemptLimitBefore', 'attemptLimitAfter',
@@ -5173,28 +5880,35 @@ function evaluateS1aContinuation(policy, input, expectedScenario = 'G3_RUN_LOCK_
     budgetLimitBefore: attempts.budgetLimitBefore,
     budgetLimitAfter: attempts.budgetLimitAfter
   } : null;
+  const accepted = failures.length === 0;
   return {
-    admission: failures.length === 0 ? 'ADMIT_BOUNDED_CONTINUATION' : 'RETURN_TO_WEB',
-    ok: failures.length === 0, violatedObligationIds: failures,
-    candidateTransition: replacementValid ? 'CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT' :
-      (candidateAndEvidenceSame ? 'PRESERVE_EXACT_IDENTITY' : 'REJECT_IDENTITY_CHANGE'),
-    evidenceTransition: replacementValid ? 'PRESERVE_FAILED_EVIDENCE_AND_BIND_NEW_REVALIDATION' :
-      (candidateAndEvidenceSame ? 'PRESERVE_EXACT_IDENTITY' : 'REJECT_IDENTITY_CHANGE'),
-    attemptEffects, budgetEffects
+    admission: accepted ? 'ADMIT_BOUNDED_CONTINUATION' : 'RETURN_TO_WEB',
+    ok: accepted, violatedObligationIds: failures,
+    candidateTransition: !accepted ? 'NO_ACCEPTED_TRANSITION' :
+      (replacementValid ? 'CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT' : 'PRESERVE_EXACT_IDENTITY'),
+    evidenceTransition: !accepted ? 'NO_ACCEPTED_TRANSITION' :
+      (replacementValid ? 'PRESERVE_FAILED_EVIDENCE_AND_BIND_NEW_REVALIDATION' : 'PRESERVE_EXACT_IDENTITY'),
+    attemptEffects, budgetEffects,
+    mutationEffects: accepted ? [replacementValid ?
+      S1A_ORACLE_REPLACEMENT_EFFECT : scenario.spec.permittedEffect] : []
   };
 }
-function observeS1aContinuationSource(source, input, claimedDigest = s1aGovernedHumanPolicyDigest(source), expectedScenario = 'G3_RUN_LOCK_TOOLKIT') {
+function observeS1aContinuationSource(source, request, trustedContext, claimedDigest = s1aGovernedHumanPolicyDigest(source)) {
   const policy = s1aInterpretPolicyContract(source);
-  const result = evaluateS1aContinuation(policy, input, expectedScenario);
+  const result = evaluateS1aContinuation(policy, request, trustedContext);
   result.governedProseDigest = claimedDigest;
   for (const id of s1aContinuationProseViolations(source)) {
     if (!result.violatedObligationIds.includes(id)) result.violatedObligationIds.push(id);
   }
   result.ok = result.violatedObligationIds.length === 0;
   result.admission = result.ok ? 'ADMIT_BOUNDED_CONTINUATION' : 'RETURN_TO_WEB';
+  if (!result.ok) {
+    result.candidateTransition = 'NO_ACCEPTED_TRANSITION';
+    result.evidenceTransition = 'NO_ACCEPTED_TRANSITION';
+    result.mutationEffects = [];
+  }
   return result;
 }
-
 test('S1-A post-child checkpoint requires canonical identity, current inputs, and terminal blind reports', () => {
   const policy = parseS1aPolicyContract(architecture);
   const valid = makeS1aReviewFixture();
@@ -5441,16 +6155,16 @@ function replaceS1aSourceClause(source,from,to) {
   if(!source.includes(from))throw new Error('missing source clause '+from);
   return source.replace(from,to);
 }
-function observeS1aContinuation(source,input) {
-  return observeS1aContinuationSource(source,input);
+function observeS1aContinuation(source, request, trustedContext = s1aContinuationTrustedContext()) {
+  return observeS1aContinuationSource(source, request, trustedContext);
 }
-function observeS1aOtherAcceptedWebContinuation(source,input) {
-  return observeS1aContinuationSource(source,input,s1aGovernedHumanPolicyDigest(source),
-    'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT');
+function observeS1aOtherAcceptedWebContinuation(source, request) {
+  return observeS1aContinuationSource(source, request,
+    s1aContinuationTrustedContext('OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT'));
 }
-function observeS1aCarrierAcceptedWebContinuation(source,input) {
-  return observeS1aContinuationSource(source,input,s1aGovernedHumanPolicyDigest(source),
-    'OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY');
+function observeS1aCarrierAcceptedWebContinuation(source, request) {
+  return observeS1aContinuationSource(source, request,
+    s1aContinuationTrustedContext('OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY'));
 }
 function observeS1aCarrier(source,input) {
   return observeS1aCarrierSource(source,input,s1aGovernedHumanPolicyDigest(source));
@@ -5477,29 +6191,90 @@ function assertS1aSixControlClasses(relation,positive,controls) {
     const item=controls[name];check(name,item.run(),item.ok,item.obligation);
   }
 }
+function s1aAssertReplacementRejected(name, expectedObligations, relation, mutate, preservedPaths = null) {
+  const fixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+  const baselineRequest = s1aClone(fixture.request);
+  const baselineContext = s1aClone(fixture.trustedContext);
+  const baseline = observeS1aContinuationSource(architecture, baselineRequest, baselineContext);
+  assert.equal(baseline.ok, true, name + ' baseline must pass: ' + s1aObservedViolations(baseline));
+  const caseValue = {
+    source: architecture,
+    request: s1aClone(baselineRequest),
+    trustedContext: s1aClone(baselineContext)
+  };
+  mutate(caseValue);
+  assert.notEqual(s1aCanonical({
+    source: caseValue.source, request: caseValue.request, trustedContext: caseValue.trustedContext
+  }), s1aCanonical({
+    source: architecture, request: baselineRequest, trustedContext: baselineContext
+  }), name + ' mutation must change the tested state');
+  const commonRequest = [
+    'request.episodeAuthority', 'request.acceptedBoundary', 'request.requestedBoundary',
+    'request.currentStateReadback', 'request.history', 'request.currentFailureSignature',
+    'request.candidateBefore', 'request.evidenceBefore', 'request.attempts',
+    'request.effectReconciliation', 'request.faithfulPathInventory'
+  ];
+  const defaults = relation === 'REPLACEMENT_AUTHORITY'
+    ? ['trustedContext.candidateReadback', 'trustedContext.evidenceReadback', ...commonRequest]
+    : ['trustedContext.currentAuthority', ...commonRequest];
+  const valueAt = (root, keyPath) => keyPath.split('.').reduce((value, key) =>
+    value == null ? undefined : value[key], root);
+  for (const keyPath of preservedPaths || defaults) {
+    assert.deepEqual(valueAt(caseValue, keyPath), valueAt({
+      request: baselineRequest, trustedContext: baselineContext
+    }, keyPath), name + ' preserves unrelated prerequisite ' + keyPath);
+  }
+  const result = observeS1aContinuationSource(
+    caseValue.source, caseValue.request, caseValue.trustedContext,
+    s1aGovernedHumanPolicyDigest(caseValue.source));
+  assert.equal(result.ok, false, name + ' must be rejected');
+  for (const obligation of Array.isArray(expectedObligations) ? expectedObligations : [expectedObligations]) {
+    assert.ok(s1aObservedViolations(result).includes(obligation),
+      name + ' must fail intended obligation ' + obligation + ': ' + s1aObservedViolations(result));
+  }
+  assert.doesNotMatch(s1aObservedViolations(result).join('|'), /PARSER|HASH|DIGEST/i,
+    name + ' must not use parser/hash-only detection');
+  assert.deepEqual(result.mutationEffects, [], name + ' rejection must have no mutation effect');
+  assert.equal(result.candidateTransition, 'NO_ACCEPTED_TRANSITION',
+    name + ' rejection must have no accepted candidate transition');
+  assert.equal(result.evidenceTransition, 'NO_ACCEPTED_TRANSITION',
+    name + ' rejection must have no accepted evidence transition');
+  return result;
+}
+function s1aReplacementEquivalentContext(source = architecture) {
+  const fixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+  const reordered = Object.fromEntries(Object.entries(fixture.trustedContext).reverse());
+  reordered.currentAuthority = Object.fromEntries(Object.entries(reordered.currentAuthority).reverse());
+  reordered.currentAuthority.replacementPermission =
+    Object.fromEntries(Object.entries(reordered.currentAuthority.replacementPermission).reverse());
+  reordered.candidateReadback = Object.fromEntries(Object.entries(reordered.candidateReadback).reverse());
+  reordered.evidenceReadback = Object.fromEntries(Object.entries(reordered.evidenceReadback).reverse());
+  assert.notEqual(reordered, fixture.trustedContext, 'equivalent context is independently constructed');
+  assert.equal(s1aCanonical(reordered), s1aCanonical(fixture.trustedContext),
+    'equivalent context preserves every trusted value');
+  return observeS1aContinuationSource(source, fixture.request, reordered);
+}
 function makeS1aHostedReplacementContinuationFixture(owner='TOOLKIT') {
-  const input=makeS1aContinuationFixture({owner});input.mode='HOSTED_VALIDATION_RECLOSURE';
-  input.candidateAfter={commit:'continuation:replacement-commit-5',tree:'continuation:replacement-tree-5'};
-  const evidence={evidenceId:'evidence:continuation-revalidation-5',
-    candidateIdentity:s1aClone(input.candidateAfter),revalidationBoundaryId:input.episodeAuthority.evidenceBoundaryId};
-  input.evidenceAfter={...evidence,digest:s1aHashRecord(evidence)};
-  input.replacementCandidateImmutable=true;
-  input.durableFailedCandidates=[{immutable:true,preserved:true,candidateIdentity:s1aClone(input.candidateBefore),
-    evidenceIdentity:s1aClone(input.evidenceBefore)}];
-  input.replacementAuthority=s1aSignedReadback({
-    source:'CURRENT_OWNER_WEB_HOSTED_RECLOSURE_AUTHORITY',authoritative:true,current:true,readBack:true,
-    explicitWebBound:true,authorityReference:'authority:hosted-reclosure:7',
-    episodeId:input.episodeAuthority.episodeId,episodeKind:input.episodeAuthority.episodeKind,
-    rootFamilyId:input.episodeAuthority.rootFamilyId,acceptedContractId:input.episodeAuthority.acceptedContractId,
-    trustModelId:input.episodeAuthority.trustModelId,scopeId:input.episodeAuthority.scopeId,
-    assuranceFloorId:input.episodeAuthority.assuranceFloorId,evidenceBoundaryId:input.episodeAuthority.evidenceBoundaryId,
-    primaryOwner:owner,failedCandidateIdentity:s1aClone(input.candidateBefore),
-    failedEvidenceIdentity:s1aClone(input.evidenceBefore),replacementCandidateIdentity:s1aClone(input.candidateAfter),
-    revalidationBoundaryId:input.episodeAuthority.evidenceBoundaryId,correctionMechanism:'TOOLKIT_VALIDATION',
-    productCorrectionAttemptsBefore:input.attempts.productCorrectionAttemptsBefore,
-    productCorrectionAttemptsAfter:input.attempts.productCorrectionAttemptsAfter,budgetReset:false
-  });
-  return input;
+  const trustedContext = s1aClone(S1A_ORACLE_HOSTED_REPLACEMENT_TRUSTED_CONTEXT);
+  const input = makeS1aContinuationFixture({ owner });
+  input.mode = 'HOSTED_VALIDATION_RECLOSURE';
+  input.correctionMechanism = 'TOOLKIT_VALIDATION';
+  input.replacementAuthorityClaim = s1aClone(trustedContext.currentAuthority);
+  input.candidateAfter = s1aClone(trustedContext.candidateReadback.identity);
+  input.evidenceAfter = {
+    evidenceId: trustedContext.evidenceReadback.evidenceId,
+    digest: trustedContext.evidenceReadback.evidenceDigest,
+    candidateIdentity: s1aClone(trustedContext.evidenceReadback.candidateIdentity),
+    revalidationBoundaryId: trustedContext.evidenceReadback.revalidationBoundary
+  };
+  input.requestedMutationScope = s1aClone(trustedContext.candidateReadback.observedMutationScope);
+  input.replacementCandidateImmutable = true;
+  input.durableFailedCandidates = [{
+    immutable: true, preserved: true,
+    candidateIdentity: s1aClone(input.candidateBefore),
+    evidenceIdentity: s1aClone(input.evidenceBefore)
+  }];
+  return { request: input, trustedContext };
 }
 
 test('S1-A continuation owner/product boundary six-control matrix',()=>{
@@ -5595,7 +6370,7 @@ test('S1-A continuation accepted-authority readback six-control matrix',()=>{
           'The episode kind and primary owner must match the independently accepted current Web authority readback.',
           'The episode kind and primary owner may be caller-rebound in the current Web authority readback.');
         const reboundDigest=s1aGovernedHumanPolicyDigest(s);
-        const result=observeS1aContinuationSource(s,s1aClone(f),reboundDigest);
+        const result=observeS1aContinuationSource(s,s1aClone(f),s1aContinuationTrustedContext(),reboundDigest);
         assert.equal(result.governedProseDigest,reboundDigest);
         assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
         return result;
@@ -5689,7 +6464,7 @@ test('S1-A continuation faithful-path usability six-control matrix',()=>{
         delete i.faithfulPathInventory.paths[0].evidenceRef;
         i.faithfulPathInventory.digest=s1aHashWithoutField(i.faithfulPathInventory,'digest');
         const reboundDigest=s1aGovernedHumanPolicyDigest(s);
-        const result=observeS1aContinuationSource(s,i,reboundDigest);
+        const result=observeS1aContinuationSource(s,i,s1aContinuationTrustedContext(),reboundDigest);
         assert.equal(result.governedProseDigest,reboundDigest);
         assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
         return result;
@@ -5718,26 +6493,489 @@ test('S1-A continuation identity/budget and replacement six-control matrices',()
   const changed=s1aClone(f);changed.candidateAfter.tree='substituted-tree';
   assert.ok(observeS1aContinuation(architecture,changed).violatedObligationIds.includes('CONTINUATION_CANDIDATE_EVIDENCE_IDENTITY'));
 
-  assertS1aSixControlClasses('CONTINUATION_REPLACEMENT_AUTHORITY',()=>observeS1aContinuation(architecture,s1aClone(f)),{
-    removal:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(
-      rewriteS1aPolicyForObserver(architecture,p=>p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners=
-        p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners.filter(x=>x!=='HARNESS')),s1aClone(f))},
-    polarity:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(architecture,
-      makeS1aHostedReplacementContinuationFixture('TRANSPORT'))},
-    contradiction:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>observeS1aContinuation(
-      appendS1aContradiction(architecture,'### Bounded non-product continuation',
-        'Contradiction: TRANSPORT may create a replacement candidate.'),s1aClone(f))},
-    equivalent:{ok:true,run:()=>observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TOOLKIT'))},
-    coherent:{ok:false,obligation:'CONTINUATION_REPLACEMENT_AUTHORITY',run:()=>{
-      let s=rewriteS1aPolicyForObserver(architecture,p=>{p.boundedContinuation.hostedReplacementCandidate.transportMayAuthorize=true;
-        p.boundedContinuation.hostedReplacementCandidate.allowedPrimaryOwners.push('TRANSPORT');});
-      s=replaceS1aSourceClause(s,'TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.',
-        'TRANSPORT-only recovery may use this replacement-candidate exception without separate explicit Web authority.');
-      return observeS1aContinuation(s,s1aClone(f));}}
+  const replacementPositive = () => {
+    const fixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+    return observeS1aContinuationSource(architecture, fixture.request, fixture.trustedContext);
+  };
+  assertS1aSixControlClasses('CONTINUATION_REPLACEMENT_AUTHORITY', replacementPositive, {
+    removal: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_AUTHORITY',
+      run: () => s1aAssertReplacementRejected('replacement authority removal',
+        'CONTINUATION_REPLACEMENT_AUTHORITY', 'REPLACEMENT_AUTHORITY', value => {
+          value.source = rewriteS1aPolicyForObserver(value.source, policy => {
+            policy.boundedContinuation.replacementAuthority.requiresExactCurrentReadback = false;
+          });
+        })
+    },
+    polarity: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_AUTHORITY',
+      run: () => s1aAssertReplacementRejected('transport owner polarity',
+        'CONTINUATION_REPLACEMENT_AUTHORITY', 'REPLACEMENT_AUTHORITY', value => {
+          value.request.primaryOwner = 'TRANSPORT';
+          value.request.correctionMechanism = 'transport-validation';
+        })
+    },
+    contradiction: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_AUTHORITY',
+      run: () => s1aAssertReplacementRejected('caller-recomputed authority contradiction',
+        'CONTINUATION_REPLACEMENT_AUTHORITY', 'REPLACEMENT_AUTHORITY', value => {
+          value.source = appendS1aContradiction(value.source, '### Bounded non-product continuation',
+            'Contradiction: caller-selected labels or caller-recomputed hashes or digests may select or establish authority.');
+        })
+    },
+    equivalent: {
+      ok: true, run: () => s1aReplacementEquivalentContext(architecture)
+    },
+    coherent: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_AUTHORITY',
+      run: () => s1aAssertReplacementRejected('coherent authority weakening',
+        'CONTINUATION_REPLACEMENT_AUTHORITY', 'REPLACEMENT_AUTHORITY', value => {
+          value.source = rewriteS1aPolicyForObserver(value.source, policy => {
+            policy.boundedContinuation.replacementAuthority.mustNotBeSelectedByCallerLabelsOrDigests = false;
+          });
+          value.source = replaceS1aSourceClause(value.source,
+            'Caller-selected labels and caller-recomputed hashes or digests are equality assertions only; they never select or establish authority.',
+            'Caller-selected labels and caller-recomputed hashes may establish authority when internally consistent.');
+        })
+    }
   });
-  assert.equal(observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TOOLKIT')).ok,true);
-  assert.ok(observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TRANSPORT'))
+  assertS1aSixControlClasses('CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', replacementPositive, {
+    removal: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY',
+      run: () => s1aAssertReplacementRejected('replacement candidate field removal',
+        'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+          value.source = rewriteS1aPolicyForObserver(value.source, policy => {
+            policy.boundedContinuation.replacementCandidateValidity.requiredFields =
+              policy.boundedContinuation.replacementCandidateValidity.requiredFields
+                .filter(field => field !== 'commitTreeReadback');
+          });
+        })
+    },
+    polarity: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY',
+      run: () => s1aAssertReplacementRejected('candidate request identity polarity',
+        'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+          value.request.candidateAfter.tree = '9999999999999999999999999999999999999999';
+        })
+    },
+    contradiction: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY',
+      run: () => s1aAssertReplacementRejected('hosted-local substitution contradiction',
+        'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+          value.source = appendS1aContradiction(value.source, '### Bounded non-product continuation',
+            'Contradiction: HOSTED and LOCAL bindings may be substituted for each other.');
+        })
+    },
+    equivalent: {
+      ok: true, run: () => s1aReplacementEquivalentContext(architecture)
+    },
+    coherent: {
+      ok: false, obligation: 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY',
+      run: () => s1aAssertReplacementRejected('coherent candidate validity weakening',
+        'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+          value.source = rewriteS1aPolicyForObserver(value.source, policy => {
+            const rule = policy.boundedContinuation.replacementCandidateValidity;
+            rule.requiredFields = rule.requiredFields.filter(field =>
+              !['commitTreeReadback', 'hostedBinding', 'localCustodyBinding',
+                'predecessorPreservation', 'revalidationLinkage'].includes(field));
+            rule.headMustMatchCommit = false;
+            rule.commitTreeReadbackMustMatch = false;
+            rule.observedMutationScopeMustFitAuthorityCeiling = false;
+            rule.callerHashesAreEqualityAssertionsOnly = false;
+          });
+          value.source = replaceS1aSourceClause(value.source,
+            'The independent candidate readback binds repository, HOSTED or LOCAL kind, object format, non-empty commit/head/tree identities, ordered parents, base commit, exact commit-to-tree readback, predecessor/base/parent lineage, kind-specific hosted PR/branch/head or local custody, observed mutation/effect scope, predecessor preservation and exact revalidation linkage.',
+            'Caller-supplied labels and rehashed evidence may establish replacement identity, lineage, scope, predecessor preservation and revalidation.');
+        })
+    }
+  });
+  assert.equal(replacementPositive().ok, true, 'the fixed authorized replacement remains positive');
+  assert.deepEqual(replacementPositive().mutationEffects, [S1A_ORACLE_REPLACEMENT_EFFECT],
+    'the authorized replacement has only its explicit bounded effect');
+  assert.ok(observeS1aContinuation(architecture,makeS1aHostedReplacementContinuationFixture('TRANSPORT').request,
+    makeS1aHostedReplacementContinuationFixture('TRANSPORT').trustedContext)
     .violatedObligationIds.includes('CONTINUATION_REPLACEMENT_AUTHORITY'));
+});
+
+test('S1-A continuation independently binds seven positive Web-bounded episode readbacks', () => {
+  const keys = [
+    'G3_RUN_LOCK_TOOLKIT',
+    'PARENT_OWNED_LIGHT_HARNESS',
+    'OTHER_WEB_BOUNDED_EVIDENCE_EPISODE_TOOLKIT',
+    'G3_RUN_LOCK_HARNESS',
+    'G3_RUN_LOCK_ENVIRONMENT',
+    'OWNER_ACCEPTED_CARRIER_EVIDENCE_REPLAY',
+    'WEB_BOUNDED_TRANSPORT'
+  ];
+  const dimensions = {
+    authority: [], episode: [], attribution: [], history: [], candidate: [],
+    evidence: [], attempts: [], effect: [], context: []
+  };
+  for (const key of keys) {
+    const scenario = S1A_ORACLE_CONTINUATION_READBACK_SCENARIOS[key];
+    const request = makeS1aContinuationFixture({ scenario: key });
+    const trustedContext = s1aContinuationTrustedContext(key);
+    const result = observeS1aContinuationSource(architecture, request, trustedContext);
+    assert.equal(result.ok, true, key + ' independently authorized positive: ' + s1aObservedViolations(result));
+    assert.deepEqual(result.mutationEffects, [scenario.spec.permittedEffect], key + ' exact permitted effect');
+    assert.equal(result.candidateTransition, 'PRESERVE_EXACT_IDENTITY', key + ' preserves its candidate');
+    assert.equal(result.evidenceTransition, 'PRESERVE_EXACT_IDENTITY', key + ' preserves its evidence');
+    const negativeRequest = s1aClone(request);
+    const negativeContext = s1aClone(trustedContext);
+    const reboundOwner = scenario.spec.primaryOwner === 'TOOLKIT' ? 'HARNESS' : 'TOOLKIT';
+    negativeRequest.primaryOwner = reboundOwner;
+    negativeContext.attributionReadback.primaryOwner = reboundOwner;
+    negativeContext.attributionReadback.digest =
+      s1aHashWithoutField(negativeContext.attributionReadback, 'digest');
+    const negative = observeS1aContinuationSource(architecture, negativeRequest, negativeContext);
+    assert.equal(negative.ok, false, key + ' same-boundary coordinated owner/readback rebind is rejected');
+    assert.ok(s1aObservedViolations(negative).includes('CONTINUATION_ACCEPTED_AUTHORITY_READBACK'),
+      key + ' rejects owner/readback rebind on accepted-authority relation: ' + s1aObservedViolations(negative));
+    assert.deepEqual(negative.mutationEffects, [], key + ' rejected continuation has no mutation effects');
+    assert.equal(negative.candidateTransition, 'NO_ACCEPTED_TRANSITION', key + ' rejected continuation has no candidate transition');
+    assert.equal(negative.evidenceTransition, 'NO_ACCEPTED_TRANSITION', key + ' rejected continuation has no evidence transition');
+    if (key === 'PARENT_OWNED_LIGHT_HARNESS') {
+      assert.deepEqual(trustedContext.parentOwnershipReadback, scenario.spec.parentOwnershipReadback,
+        'LIGHT authority independently includes its parent-owned operation readback');
+    } else {
+      assert.equal(trustedContext.parentOwnershipReadback, null, key + ' has no borrowed parent ownership');
+    }
+    dimensions.authority.push(s1aCanonical([
+      trustedContext.currentAuthority.webAuthorityIdentity,
+      trustedContext.currentAuthority.webAuthorityRevision,
+      trustedContext.currentAuthority.webAuthorityContent
+    ]));
+    dimensions.episode.push(s1aCanonical(trustedContext.currentAuthority.episodeAuthority));
+    dimensions.attribution.push(s1aCanonical(trustedContext.attributionReadback));
+    dimensions.history.push(s1aCanonical(request.history));
+    dimensions.candidate.push(s1aCanonical(scenario.candidateIdentity));
+    dimensions.evidence.push(s1aCanonical(scenario.evidenceIdentity));
+    dimensions.attempts.push(s1aCanonical(scenario.attemptState));
+    dimensions.effect.push(s1aCanonical([scenario.spec.permittedEffect]));
+    dimensions.context.push(s1aCanonical(trustedContext));
+  }
+  for (const [dimension, values] of Object.entries(dimensions)) {
+    assert.equal(new Set(values).size, keys.length,
+      'accepted positive scenarios independently bind distinct ' + dimension);
+  }
+});
+
+
+test('S1-A replacement readbacks reject rehashed, stale, replayed, and mismatched candidates', () => {
+  const commonPreserved = [
+    'request.episodeAuthority', 'request.acceptedBoundary', 'request.requestedBoundary',
+    'request.currentStateReadback', 'request.history', 'request.currentFailureSignature',
+    'request.candidateBefore', 'request.evidenceBefore', 'request.attempts',
+    'request.effectReconciliation', 'request.faithfulPathInventory'
+  ];
+  const authorityCase = (name, mutate, syncClaim = true) =>
+    s1aAssertReplacementRejected(name, 'CONTINUATION_REPLACEMENT_AUTHORITY',
+      'REPLACEMENT_AUTHORITY', value => {
+        mutate(value);
+        if (syncClaim) {
+          value.trustedContext.currentAuthority.digest =
+            s1aHashWithoutField(value.trustedContext.currentAuthority, 'digest');
+          value.request.replacementAuthorityClaim =
+            s1aClone(value.trustedContext.currentAuthority);
+        }
+      });
+  const candidateCase = (name, mutate, expected = 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY',
+    preserved = null) => s1aAssertReplacementRejected(name, expected,
+      'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+        mutate(value);
+        const candidate = value.trustedContext.candidateReadback;
+        candidate.digest = s1aHashWithoutField(candidate, 'digest');
+        if (candidate.identity) value.request.candidateAfter = s1aClone(candidate.identity);
+      }, preserved || undefined);
+  const evidenceCase = (name, mutate) => s1aAssertReplacementRejected(name,
+    'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+      mutate(value);
+      const evidence = value.trustedContext.evidenceReadback;
+      evidence.digest = s1aHashWithoutField(evidence, 'digest');
+      value.request.evidenceAfter = {
+        evidenceId: evidence.evidenceId,
+        digest: evidence.evidenceDigest,
+        candidateIdentity: s1aClone(evidence.candidateIdentity),
+        revalidationBoundaryId: evidence.revalidationBoundary
+      };
+    });
+  const auth = value => value.trustedContext.currentAuthority;
+  const candidate = value => value.trustedContext.candidateReadback;
+  const evidence = value => value.trustedContext.evidenceReadback;
+  const refreshCandidate = value => {
+    candidate(value).digest = s1aHashWithoutField(candidate(value), 'digest');
+    value.request.candidateAfter = s1aClone(candidate(value).identity);
+  };
+  const refreshEvidence = value => {
+    evidence(value).digest = s1aHashWithoutField(evidence(value), 'digest');
+    value.request.evidenceAfter = {
+      evidenceId: evidence(value).evidenceId,
+      digest: evidence(value).evidenceDigest,
+      candidateIdentity: s1aClone(evidence(value).candidateIdentity),
+      revalidationBoundaryId: evidence(value).revalidationBoundary
+    };
+  };
+  const refreshAuthorityAndClaim = value => {
+    auth(value).digest = s1aHashWithoutField(auth(value), 'digest');
+    value.request.replacementAuthorityClaim = s1aClone(auth(value));
+  };
+  const otherObject = '9999999999999999999999999999999999999999';
+
+  const detachedFixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+  const detachedContextBefore = s1aClone(detachedFixture.trustedContext);
+  detachedFixture.request.replacementAuthorityClaim.webAuthorityRevision = 'revision:caller-mutation';
+  detachedFixture.request.candidateAfter.tree = otherObject;
+  detachedFixture.request.evidenceAfter.digest = 'sha256:caller-mutation';
+  assert.deepEqual(detachedFixture.trustedContext, detachedContextBefore,
+    'request mutation cannot mutate independently supplied authority, candidate, or evidence context');
+
+  const aliasAttacks = [
+    ['request claim aliases authority', 'CONTINUATION_REPLACEMENT_AUTHORITY', fixture => {
+      const before = fixture.request.replacementAuthorityClaim;
+      fixture.request.replacementAuthorityClaim = fixture.trustedContext.currentAuthority;
+      return [before, fixture.request.replacementAuthorityClaim];
+    }],
+    ['request candidate aliases candidate readback', 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', fixture => {
+      const before = fixture.request.candidateAfter;
+      fixture.request.candidateAfter = fixture.trustedContext.candidateReadback.identity;
+      return [before, fixture.request.candidateAfter];
+    }],
+    ['request evidence aliases evidence readback', 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', fixture => {
+      const before = fixture.request.evidenceAfter.candidateIdentity;
+      fixture.request.evidenceAfter.candidateIdentity = fixture.trustedContext.evidenceReadback.candidateIdentity;
+      return [before, fixture.request.evidenceAfter.candidateIdentity];
+    }]
+  ];
+  for (const [name, obligation, createAlias] of aliasAttacks) {
+    const fixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+    const [before, after] = createAlias(fixture);
+    assert.notStrictEqual(before, after, name + ' changes object identity');
+    const result = observeS1aContinuationSource(architecture, fixture.request, fixture.trustedContext);
+    assert.equal(result.ok, false, name + ' is rejected');
+    assert.ok(s1aObservedViolations(result).includes(obligation),
+      name + ' fails its intended semantic obligation: ' + s1aObservedViolations(result));
+    assert.doesNotMatch(s1aObservedViolations(result).join('|'), /PARSER|HASH|DIGEST/i,
+      name + ' is not rejected by parser/hash-only failure');
+    assert.deepEqual(result.mutationEffects, [], name + ' has no replacement effect');
+    assert.equal(result.candidateTransition, 'NO_ACCEPTED_TRANSITION');
+    assert.equal(result.evidenceTransition, 'NO_ACCEPTED_TRANSITION');
+  }
+
+  s1aAssertReplacementRejected('missing current replacement authority readback',
+    'CONTINUATION_REPLACEMENT_AUTHORITY', 'REPLACEMENT_AUTHORITY', value => {
+      delete value.trustedContext.currentAuthority;
+    });
+  authorityCase('caller self-rehashed Web identity', value => {
+    auth(value).webAuthorityIdentity = 'web-authority:caller-rebound';
+    auth(value).webAuthorityRevision = 'revision:caller-rebound';
+    auth(value).webAuthorityContent = 'caller supplied matching text';
+  });
+  authorityCase('stale replacement authority', value => {
+    auth(value).current = false;
+    auth(value).currentness.current = false;
+  });
+  authorityCase('revoked replacement authority', value => {
+    auth(value).currentness.revoked = true;
+  });
+  authorityCase('superseded replacement authority', value => {
+    auth(value).currentness.superseded = true;
+  });
+  authorityCase('missing current RUN binding', value => { delete auth(value).run; });
+  authorityCase('missing replacement path ceiling', value => { delete auth(value).pathEffectCeiling; });
+  authorityCase('expired replacement authority', value => {
+    auth(value).lifetime.observedAt = '2027-01-02T00:00:00Z';
+  });
+  authorityCase('wrong authority repository', value => {
+    auth(value).repository = 'attacker/other-repo';
+  });
+  authorityCase('wrong authority episode', value => {
+    auth(value).episode.episodeId = 'episode:other';
+  });
+  authorityCase('wrong authority RUN', value => {
+    auth(value).run.runId = 'run:other';
+  });
+  authorityCase('wrong authority Lock', value => {
+    auth(value).lock.lockId = 'lock:other';
+  });
+  authorityCase('wrong authority owner and mechanism', value => {
+    auth(value).eligibleOwner = 'ENVIRONMENT';
+    auth(value).correctionMechanism = 'ENVIRONMENT_VALIDATION';
+    auth(value).replacementPermission.eligibleOwner = 'ENVIRONMENT';
+    auth(value).replacementPermission.correctionMechanism = 'ENVIRONMENT_VALIDATION';
+  });
+  authorityCase('consumed permission replay', value => {
+    auth(value).replacementPermission.state = 'CONSUMED';
+    auth(value).replacementPermission.usesRemaining = 0;
+    auth(value).permissionConsumption.state = 'CONSUMED';
+    auth(value).permissionConsumption.usesRemaining = 0;
+  });
+  authorityCase('caller self-asserted authority claim', value => {
+    value.request.replacementAuthorityClaim.webAuthorityRevision = 'revision:caller-selected';
+    value.request.replacementAuthorityClaim.digest =
+      s1aHashWithoutField(value.request.replacementAuthorityClaim, 'digest');
+  }, false);
+  authorityCase('requested effect outside authority ceiling', value => {
+    value.request.requestedMutationScope.effects = ['UNAUTHORISED_EXTERNAL_WRITE'];
+  });
+
+  s1aAssertReplacementRejected('missing independent candidate readback',
+    'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+      delete value.trustedContext.candidateReadback;
+    });
+  s1aAssertReplacementRejected('missing independent evidence readback',
+    'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+      delete value.trustedContext.evidenceReadback;
+    });
+  candidateCase('blank candidate head', value => {
+    candidate(value).head = '';
+    candidate(value).identity.head = '';
+    candidate(value).hostedBinding.headSha = '';
+  });
+  candidateCase('blank candidate tree', value => {
+    candidate(value).tree = '';
+    candidate(value).identity.tree = '';
+    candidate(value).commitTreeReadback.tree = '';
+  });
+  candidateCase('valid head with mismatched tree readback', value => {
+    candidate(value).tree = otherObject;
+    candidate(value).identity.tree = otherObject;
+  });
+  candidateCase('wrong replacement predecessor lineage', value => {
+    candidate(value).lineage.predecessorCandidateIdentity.commit = otherObject;
+  });
+  candidateCase('wrong replacement base lineage', value => {
+    candidate(value).baseCommit = otherObject;
+    candidate(value).identity.baseCommit = otherObject;
+    candidate(value).hostedBinding.baseCommit = otherObject;
+    candidate(value).lineage.baseCommit = otherObject;
+  });
+  candidateCase('wrong replacement parent lineage', value => {
+    candidate(value).orderedParents = [otherObject];
+    candidate(value).identity.orderedParents = [otherObject];
+    candidate(value).commitTreeReadback.orderedParents = [otherObject];
+    candidate(value).lineage.orderedParents = [otherObject];
+    candidate(value).lineage.predecessorCandidateIdentity.commit = otherObject;
+  });
+  candidateCase('hosted PR binding rebound from candidate identity', value => {
+    candidate(value).hostedBinding.prNumber = 494;
+  });
+  candidateCase('hosted branch binding rebound from candidate identity', value => {
+    candidate(value).hostedBinding.branch = 'codex/other-branch';
+  });
+  candidateCase('hosted head binding rebound from candidate identity', value => {
+    candidate(value).hostedBinding.headSha = otherObject;
+  });
+  candidateCase('unsupported candidate object format', value => {
+    candidate(value).objectFormat = 'sha512';
+    candidate(value).identity.objectFormat = 'sha512';
+    candidate(value).commitTreeReadback.objectFormat = 'sha512';
+  });
+  candidateCase('wrong candidate repository', value => {
+    candidate(value).repository = 'attacker/other-repo';
+    candidate(value).identity.repository = 'attacker/other-repo';
+    candidate(value).commitTreeReadback.repository = 'attacker/other-repo';
+    candidate(value).lineage.repository = 'attacker/other-repo';
+    candidate(value).hostedBinding.repository = 'attacker/other-repo';
+  });
+  for (const [name, field] of [
+    ['wrong candidate episode', 'episodeId'],
+    ['wrong candidate RUN', 'runId'],
+    ['wrong candidate Lock', 'lockId']
+  ]) {
+    candidateCase(name, value => {
+      candidate(value).lineage[field] = name + ':rebound';
+    });
+  }
+  candidateCase('candidate mutation outside ceiling', value => {
+    candidate(value).observedMutationScope.paths = ['repo/AGENTS.md'];
+  });
+  candidateCase('LOCAL candidate presented with HOSTED binding', value => {
+    const record = candidate(value);
+    record.kind = 'LOCAL';
+    record.identity.kind = 'LOCAL';
+    record.localCustodyBinding = {
+      repository: record.repository, custodyId: 'custody:model', worktreeId: 'worktree:model',
+      commit: record.commit, tree: record.tree, readBack: true
+    };
+  });
+  candidateCase('HOSTED candidate presented with LOCAL custody', value => {
+    const record = candidate(value);
+    record.hostedBinding = null;
+    record.localCustodyBinding = {
+      repository: record.repository, custodyId: 'custody:model', worktreeId: 'worktree:model',
+      commit: record.commit, tree: record.tree, readBack: true
+    };
+  });
+  s1aAssertReplacementRejected('candidate request rebound to another tree',
+    'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+      value.request.candidateAfter.tree = otherObject;
+    });
+  evidenceCase('copied predecessor evidence replay', value => {
+    evidence(value).evidenceId = value.request.evidenceBefore.evidenceId;
+    evidence(value).evidenceDigest = value.request.evidenceBefore.digest;
+    evidence(value).candidateIdentity = s1aClone(value.request.candidateBefore);
+  });
+  evidenceCase('missing replacement revalidation evidence', value => {
+    delete evidence(value).revalidationBoundary;
+  });
+  evidenceCase('swapped replacement revalidation evidence', value => {
+    evidence(value).authorityIdentity = 'web-authority:other';
+    evidence(value).authorityRevision = 'revision:other';
+    evidence(value).revalidationBoundary = 'boundary:other';
+    evidence(value).evidenceBoundaryId = 'boundary:other';
+  });
+  s1aAssertReplacementRejected('caller rebound evidence after readback',
+    'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY', 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+      value.request.evidenceAfter.candidateIdentity = s1aClone(value.request.candidateBefore);
+    });
+  candidateCase('lost failed predecessor preservation', value => {
+    candidate(value).predecessorPreservation.retained = false;
+  });
+
+  s1aAssertReplacementRejected('changed candidate plus rehashed caller authority and evidence', [
+    'CONTINUATION_REPLACEMENT_AUTHORITY', 'CONTINUATION_REPLACEMENT_CANDIDATE_VALIDITY'
+  ], 'REPLACEMENT_CANDIDATE_VALIDITY', value => {
+    const record = candidate(value);
+    record.commit = '6666666666666666666666666666666666666666';
+    record.head = record.commit;
+    record.tree = '5555555555555555555555555555555555555555';
+    record.identity.commit = record.commit;
+    record.identity.head = record.head;
+    record.identity.tree = record.tree;
+    record.commitTreeReadback.commit = record.commit;
+    record.commitTreeReadback.tree = record.tree;
+    record.hostedBinding.headSha = record.head;
+    record.revalidationLinkage.replacementCandidateIdentity = s1aClone(record.identity);
+    record.digest = s1aHashWithoutField(record, 'digest');
+    evidence(value).candidateIdentity = s1aClone(record.identity);
+    evidence(value).digest = s1aHashWithoutField(evidence(value), 'digest');
+    auth(value).replacementCandidate = s1aClone(record.identity);
+    auth(value).replacementPermission.replacementCandidateIdentity = s1aClone(record.identity);
+    auth(value).replacementPermission.candidateReadbackDigest = record.digest;
+    auth(value).replacementPermission.evidenceReadbackDigest = evidence(value).digest;
+    refreshAuthorityAndClaim(value);
+    value.request.candidateAfter = s1aClone(record.identity);
+    refreshEvidence(value);
+  }, commonPreserved);
+
+  s1aAssertReplacementRejected('valid helper plus unrelated over-budget rejection',
+    'CONTINUATION_ATTEMPT_LIMIT_EXCEEDED', 'REPLACEMENT_AUTHORITY', value => {
+      assert.equal(s1aReplacementAuthorityIsValid(value.request, value.trustedContext).ok, true,
+        'replacement authority helper remains valid before unrelated rejection');
+      assert.equal(s1aReplacementCandidateIsValid(value.request, value.trustedContext).ok, true,
+        'replacement candidate helper remains valid before unrelated rejection');
+      value.request.attempts.attemptCountAfter = value.request.attempts.attemptLimitAfter + 1;
+    }, commonPreserved.filter(field => field !== 'request.attempts'));
+  const rejectedWithValidReplacement = (() => {
+    const fixture = makeS1aHostedReplacementContinuationFixture('TOOLKIT');
+    fixture.request.attempts.attemptCountAfter = fixture.request.attempts.attemptLimitAfter + 1;
+    return observeS1aContinuationSource(architecture, fixture.request, fixture.trustedContext);
+  })();
+  assert.equal(rejectedWithValidReplacement.admission, 'RETURN_TO_WEB');
+  assert.deepEqual(rejectedWithValidReplacement.mutationEffects, [],
+    'unrelated rejection cannot retain a replacement mutation effect');
+  assert.equal(rejectedWithValidReplacement.candidateTransition, 'NO_ACCEPTED_TRANSITION');
+  assert.equal(rejectedWithValidReplacement.evidenceTransition, 'NO_ACCEPTED_TRANSITION');
 });
 
 test('S1-A continuation attempt and budget limits six-control matrix',()=>{
@@ -5768,7 +7006,7 @@ test('S1-A continuation attempt and budget limits six-control matrix',()=>{
           'Attempt, product-correction and consumed-budget counts may exceed their accepted limits and continue.');
         const i=s1aClone(f);i.attempts.attemptCountAfter=6;i.attempts.budgetConsumedAfter=11;
         const reboundDigest=s1aGovernedHumanPolicyDigest(s);
-        const result=observeS1aContinuationSource(s,i,reboundDigest);
+        const result=observeS1aContinuationSource(s,i,s1aContinuationTrustedContext(),reboundDigest);
         assert.equal(result.governedProseDigest,reboundDigest);
         assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
         return result;
@@ -5803,7 +7041,7 @@ test('S1-A continuation current accepted-state readback six-control matrix',()=>
         'Omitted, stale, partial or caller-rebound authority, history, identities, counters or limits return to Web.',
         'A caller-provided partial history may replace the accepted state readback.');
       const reboundDigest=s1aGovernedHumanPolicyDigest(s);
-      const result=observeS1aContinuationSource(s,s1aClone(f),reboundDigest);
+      const result=observeS1aContinuationSource(s,s1aClone(f),s1aContinuationTrustedContext(),reboundDigest);
       assert.equal(result.governedProseDigest,reboundDigest);
       assert.notEqual(reboundDigest,S1A_ORACLE_GOVERNED_PROSE_SHA256);
       return result;

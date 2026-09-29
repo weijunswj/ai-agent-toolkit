@@ -775,6 +775,11 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       },
       "ownerReadback": {
         "source": "CURRENT_AUTHORITATIVE_OWNERSHIP_READBACK",
+        "trustedContextField": "currentOwnershipReadback",
+        "mustBeSuppliedIndependently": true,
+        "mustNotAliasRequestedRecord": true,
+        "mustMatchRecordReadbackExactly": true,
+        "mustMatchIndependentAuthoritySnapshot": true,
         "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "packetIdentity", "findingId", "webAdmittedRevision", "findingRevision", "candidateIdentity", "acceptedDecisionId", "programmeId", "childId", "frontierId", "controllerId", "acceptedContractId", "subjectId", "observedBehavior", "requiredBehavior", "primaryOwner", "adjudication", "ownerRole", "owner", "resolution", "revision", "digest"],
         "recordBindings": [
           { "readback": "repository", "record": "REPOSITORY" },
@@ -1067,21 +1072,21 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
     "productSemanticsRequired": "NO",
     "episodeAuthority": {
       "mode": "CURRENT_EXPLICIT_WEB_BOUNDED_EPISODE",
-      "requiredFields": ["episodeId", "episodeKind", "authorityReference", "primaryOwner", "source", "authoritative", "current", "readBack", "explicitWebBound", "digest", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "requiredFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "primaryOwner", "source", "authoritative", "current", "readBack", "explicitWebBound", "digest", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
       "kindBinding": "EXACT_CURRENT_INDEPENDENT_WEB_READBACK",
       "anyExplicitWebBoundKindAllowedWhenIndependentlyAccepted": true
     },
     "acceptedAuthorityBinding": {
       "source": "CURRENT_ACCEPTED_G2_EPISODE_AUTHORITY_READBACK",
       "stateField": "acceptedEpisodeAuthority",
-      "requiredFields": ["episodeId", "episodeKind", "authorityReference", "primaryOwner", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "requiredFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "primaryOwner", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
       "mustMatchIndependentAcceptedReadback": true
     },
     "acceptedBoundaryBinding": {
       "inputField": "acceptedBoundary",
       "source": "CURRENT_ACCEPTED_G2_BOUNDARY_READBACK",
-      "requiredFields": ["source", "authoritative", "current", "readBack", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId", "digest"],
-      "episodeFields": ["rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId", "digest"],
+      "episodeFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
       "mustRemainExact": true
     },
     "currentStateReadback": {
@@ -1120,16 +1125,45 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
       "overLimitResult": "RETURN_TO_WEB",
       "resetAllowed": false
     },
-    "resultFields": ["admission", "violatedObligationIds", "candidateTransition", "evidenceTransition", "attemptEffects", "budgetEffects"],
-    "hostedReplacementCandidate": {
-      "requiresExplicitCurrentWebAuthority": true,
-      "allowedPrimaryOwners": ["HARNESS", "TOOLKIT", "ENVIRONMENT"],
+    "resultFields": ["admission", "violatedObligationIds", "candidateTransition", "evidenceTransition", "attemptEffects", "budgetEffects", "mutationEffects"],
+    "replacementAuthority": {
+      "observerSignature": "observe(policy, request, trustedContext)",
+      "trustedContextFields": ["currentAuthority", "candidateReadback", "evidenceReadback"],
+      "mustBeIndependentOfRequest": true,
+      "mustNotBeSelectedByCallerLabelsOrDigests": true,
+      "mustNotBeMutableThroughRequest": true,
+      "currentAuthorityFields": ["source", "repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episode", "run", "lock", "replacementPermission", "eligibleOwner", "correctionMechanism", "predecessorCandidate", "replacementCandidate", "pathEffectCeiling", "revalidationBoundary", "lifetime", "currentness", "permissionConsumption", "readBack"],
+      "requiresExactCurrentReadback": true,
+      "eligiblePrimaryOwners": ["HARNESS", "TOOLKIT", "ENVIRONMENT"],
+      "eligibleCorrectionMechanisms": ["HARNESS_VALIDATION", "TOOLKIT_VALIDATION", "ENVIRONMENT_VALIDATION"],
       "episodeKind": "G3_RUN_LOCK",
-      "preserveFailedCandidateAndEvidence": true,
-      "replacementMustBeDistinctAndImmutable": true,
-      "transportMayAuthorize": false,
+      "permissionStateRequired": "AVAILABLE",
+      "permissionUseCount": 1,
+      "rejectStaleRevokedSupersededAuthority": true,
+      "pathAndEffectMustStayWithinCeiling": true,
       "productAttemptDelta": 0,
       "budgetResetAllowed": false
+    },
+    "replacementCandidateValidity": {
+      "requiredFields": ["repository", "kind", "objectFormat", "commit", "head", "tree", "orderedParents", "baseCommit", "commitTreeReadback", "lineage", "hostedBinding", "localCustodyBinding", "observedMutationScope", "predecessorPreservation", "revalidationLinkage"],
+      "supportedKinds": ["HOSTED", "LOCAL"],
+      "supportedObjectFormats": ["sha1", "sha256"],
+      "headMustMatchCommit": true,
+      "commitTreeReadbackMustMatch": true,
+      "orderedParentsAndBaseMustMatchLineage": true,
+      "repositoryEpisodePredecessorMustMatch": true,
+      "hostedBindingFields": ["repository", "prNumber", "branch", "headSha", "baseCommit", "readBack"],
+      "localCustodyBindingFields": ["repository", "custodyId", "worktreeId", "commit", "tree", "readBack"],
+      "observedMutationScopeMustFitAuthorityCeiling": true,
+      "predecessorEvidenceMustBePreserved": true,
+      "evidenceReadbackMustBindCandidateAndRevalidation": true,
+      "callerHashesAreEqualityAssertionsOnly": true
+    },
+    "replacementRejection": {
+      "admission": "RETURN_TO_WEB",
+      "candidateTransition": "NO_ACCEPTED_TRANSITION",
+      "evidenceTransition": "NO_ACCEPTED_TRANSITION",
+      "mutationEffects": []
     }
   }
 }
@@ -1201,7 +1235,7 @@ Current-blocker admission is conjunctive. Every row below must be present, exact
 | PRIMARY_OWNER | Exact canonical primary-owner identity retained with the finding. |
 | ADJUDICATION | Exact Web-admitted disposition assigned to this finding revision. |
 | OWNER_ROLE | Exact role held by the verified continuing owner for this obligation. |
-| OWNER_READBACK | Current authoritative readback bound to repository, packet, finding and Web revisions, candidate, accepted decision, programme/child/frontier/controller/contract/subject context, observed and required behavior, primary owner, adjudication, verified owner and role, and unresolved state. Transfer leaves the lifecycle UNRESOLVED. |
+| OWNER_READBACK | Current authoritative readback bound to repository, packet, finding and Web revisions, candidate, accepted decision, programme/child/frontier/controller/contract/subject context, observed and required behavior, primary owner, adjudication, verified owner and role, and unresolved state. Transfer compares the complete requested record and its embedded readback with a separate, non-aliasing current authoritative ownership-state readback; caller-rebound owner/readback fields and a recomputed digest do not authorize transfer. Transfer leaves the lifecycle UNRESOLVED. |
 | RESOLUTION | Exact lifecycle resolution state; transfer or deferral alone remains unresolved. |
 
 Initial admission rule: DISPOSITION=CURRENT_SHIP_BLOCKER, LIFECYCLE=UNRESOLVED, and every declared field is required. Every scalar identity, outcome, owner, timing, criterion, correction and closure value is a non-empty string; evidence references are non-empty arrays of non-empty unique strings; nested outcome, consequence, deferral and closure records have exactly their declared fields and types. The full common finding record and every blocker-specific field must be present, non-empty, mutually consistent and bound to the exact candidate, accepted outcome, criterion/floor, durable evidence and Web-admitted revision. The decision itself must be read back from the current authoritative Web admission, and its exact body digest binds the complete decision including the detailed companion reference. Web durably reconciles the full predicate against that exact identity. Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion or evidence label alone cannot resolve work. Resolution retains the admitted disposition and evidence. Deferral, evidence acquisition or ownership transfer never resolves an unfinished obligation; an ownership transfer binds the complete current finding record and authoritative readback while `RESOLUTION=NOT_RESOLVED` on both sides. Severity, novelty, a G4 label, a critical evidence gap by itself, or a prior blocker label cannot substitute for any field. If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.
@@ -1228,6 +1262,10 @@ Read back required receipt IDs and complete applicable-check membership before o
 A bounded non-product continuation may recover an accepted evidence path within the exact current G3 RUN/Lock, a parent-owned already-authorised LIGHT operation, or any other currently accepted Web-bounded evidence episode recorded by its authoritative readback. G3 and LIGHT are examples, not an exclusive episode set. It requires conclusive primary attribution to HARNESS, TOOLKIT, ENVIRONMENT, VALIDATION_CARRIER, or TRANSPORT and PRODUCT_SEMANTICS_PROVEN_BAD=NO. PRODUCT or UNKNOWN never grants autonomous continuation, and PRODUCT_SEMANTICS_PROVEN_BAD=YES is not product-correction authority. The current episode authority, primary owner, semantics, root, trust model, scope, assurance floor and accepted evidence boundary remain exact. The episode kind and primary owner must match the independently accepted current Web authority readback. A complete current accepted-G2 state readback binds the exact episode authority and owner, candidate and evidence identities, attempt and budget counters and limits, current failure signature, faithful-path inventory digest, and full continuation history. Omitted, stale, partial or caller-rebound authority, history, identities, counters or limits return to Web. Attempt, product-correction and consumed-budget counts may not exceed their accepted limits; any over-limit count returns to Web. Independently reconcile effects and faithful-path inventory; an unreconciled effect or exhausted faithful path returns to Web. A remaining faithful path must have an exact non-empty path identity, actual path and evidence reference bound to the accepted candidate, evidence boundary and independent accepted-state inventory digest; missing or caller-rebound path evidence returns to Web. Identity-preserving recovery keeps the exact candidate and evidence identities, and every candidate remains immutable. Repeated materially equivalent no-progress history returns to Web even when run, worker, branch or candidate labels change.
 
 For a published/hosted candidate, only the existing explicitly Web-authorised hosted non-product reclosure may create a distinct immutable replacement candidate in the same RUN/Lock/G3 episode. That exception requires primary owner HARNESS, TOOLKIT, or ENVIRONMENT; PRODUCT_SEMANTICS_PROVEN_BAD=NO; unchanged product semantics, root/trust, accepted G2 contract and assurance floor; and correction bounded to the exact validation/harness/tooling/environment mechanism. Preserve the failed candidate as durable evidence, bind the replacement's new commit/tree and exact revalidation boundary, consume no product/G3 correction attempt, and reset no budget. This is hosted validation reclosure, not local pre-publication product correction. TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.
+
+The replacement observer receives observe(policy, request, trustedContext). Its independently supplied trustedContext.currentAuthority, candidateReadback, and evidenceReadback are separate from the request and remain unchanged when request fields are mutated. Caller-selected labels and caller-recomputed hashes or digests are equality assertions only; they never select or establish authority. The current authority readback binds the exact repository; Web authority identity, revision and content; episode, RUN and Lock; one-use replacement permission; eligible non-product owner and correction mechanism; predecessor and exact replacement candidate; path and effect ceiling; exact revalidation boundary; and authority lifetime, currentness, revocation, supersession and permission-consumption state. A stale, revoked, superseded or already-consumed permission returns to Web.
+
+The independent candidate readback binds repository, HOSTED or LOCAL kind, object format, non-empty commit/head/tree identities, ordered parents, base commit, exact commit-to-tree readback, predecessor/base/parent lineage, kind-specific hosted PR/branch/head or local custody, observed mutation/effect scope, predecessor preservation and exact revalidation linkage. HOSTED and LOCAL bindings cannot be substituted for each other. Independent evidence readback must bind the exact replacement candidate, preserved predecessor evidence and revalidation boundary. A rejected replacement produces no accepted candidate transition, no accepted evidence transition and no CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT effect, even when another helper condition succeeded. These source-policy fixtures model independently captured authority and Git/readback evidence; they do not perform live Git or GitHub verification and do not claim runtime enforcement.
 
 Neither path grants product correction or aliases a replacement under an old identity. It does not widen the existing authority, mutation boundary, accepted scope/floor or prerequisite graph, grant a new continuation, reset a budget, shop outcomes, or decide PASS/merge/finality. A product RED follows ordinary G3 correction with immutable candidate handling. Material semantic, authority, scope, floor or evidence-contract ambiguity, unknown ownership, or repeated materially equivalent non-product RED without material progress returns to Web through the existing typed decision path.
 
