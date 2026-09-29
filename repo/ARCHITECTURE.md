@@ -246,6 +246,1129 @@ G4 is not an automatic review of every commit or internal increment.
 
 Web retains merge and child-finality authority after exact candidate, base, checks, findings, authority and required evidence are reconciled.
 
+## Shipping disposition and current blocker admission
+
+### Machine-readable S1-A policy contract
+
+This Architecture-owned block is the canonical machine-readable semantic contract for the following policy. It is policy-source structure for closed regression interpretation, not a runtime or wire schema and not a C2/D1 implementation. The accompanying prose explains the same rules for humans. A consumer must retain the detailed companion record referenced by every coarse projection.
+
+~~~s1a-policy-contract-v1
+{
+  "schema": "toolkit.s1a.policy-contract.v1",
+  "dispositions": [
+    "CURRENT_SHIP_BLOCKER",
+    "IMMEDIATE_POST_SHIP",
+    "FUTURE_OWNED",
+    "OBSERVE",
+    "EVIDENCE_ONLY"
+  ],
+  "lifecycles": [
+    "UNRESOLVED",
+    "RESOLVED"
+  ],
+  "evidenceOnly": {
+    "effect": "CUSTODY_ONLY",
+    "assertsProductDefect": false,
+    "authorizesProductCorrection": false,
+    "independentEvidenceGatesRemainBinding": true
+  },
+  "commonRecord": {
+    "requiredFields": [
+      "FINDING_ID", "REPOSITORY", "PACKET_IDENTITY", "FINDING_REVISION",
+      "WEB_ADMITTED_REVISION", "ACCEPTED_DECISION_ID", "ADMITTED_CURRENT_OUTCOME",
+      "PROGRAMME_ID", "CHILD_ID", "FRONTIER_ID", "TIMING", "TRIGGER_OR_REASON",
+      "CLOSURE_CRITERION", "EXACT_EVIDENCE", "CONTROLLER_ID", "ACCEPTED_CONTRACT_ID",
+      "SUBJECT_ID", "CANDIDATE_IDENTITY", "ATTRIBUTION", "PRIMARY_OWNER", "ADJUDICATION",
+      "OBSERVED_BEHAVIOR", "REQUIRED_BEHAVIOR", "DISPOSITION", "LIFECYCLE",
+      "VERIFIED_OWNER", "OWNER_ROLE", "OWNER_READBACK", "RESOLUTION"
+    ],
+    "typedFields": {
+      "FINDING_ID": "NONEMPTY_STRING",
+      "REPOSITORY": "NONEMPTY_STRING",
+      "PACKET_IDENTITY": "NONEMPTY_OBJECT",
+      "FINDING_REVISION": "NONEMPTY_STRING",
+      "WEB_ADMITTED_REVISION": "NONEMPTY_STRING",
+      "ACCEPTED_DECISION_ID": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME": "NONEMPTY_OBJECT",
+      "PROGRAMME_ID": "NONEMPTY_STRING",
+      "CHILD_ID": "NONEMPTY_STRING",
+      "FRONTIER_ID": "NONEMPTY_STRING",
+      "TIMING": "NONEMPTY_STRING",
+      "TRIGGER_OR_REASON": "NONEMPTY_STRING",
+      "CLOSURE_CRITERION": "NONEMPTY_STRING",
+      "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES",
+      "CONTROLLER_ID": "NONEMPTY_STRING",
+      "ACCEPTED_CONTRACT_ID": "NONEMPTY_STRING",
+      "SUBJECT_ID": "NONEMPTY_STRING",
+      "CANDIDATE_IDENTITY": "NONEMPTY_OBJECT",
+      "ATTRIBUTION": "NONEMPTY_STRING",
+      "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ADJUDICATION": "NONEMPTY_STRING",
+      "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
+      "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
+      "DISPOSITION": "NONEMPTY_STRING",
+      "LIFECYCLE": "NONEMPTY_STRING",
+      "VERIFIED_OWNER": "NONEMPTY_STRING",
+      "OWNER_ROLE": "NONEMPTY_STRING",
+      "OWNER_READBACK": "NONEMPTY_OBJECT",
+      "RESOLUTION": "NONEMPTY_STRING"
+    },
+    "nestedRequiredFields": [
+      { "record": "PACKET_IDENTITY", "fields": ["repository", "packetId", "packetRevision"] },
+      { "record": "CANDIDATE_IDENTITY", "fields": ["commit", "tree"] },
+      { "record": "ADMITTED_CURRENT_OUTCOME", "fields": ["id", "milestone", "audience", "environment"] }
+    ],
+    "nestedBindings": [
+      { "left": "PACKET_IDENTITY.repository", "right": "REPOSITORY" }
+    ],
+    "rejectedRequestState": {
+      "ok": false,
+      "transition": null,
+      "mutationEffects": [],
+      "dispositionField": "DISPOSITION",
+      "lifecycleField": "LIFECYCLE",
+      "requestValuesMaySelectState": false
+    },
+    "transitionBindings": [
+      { "transition": "disposition", "record": "DISPOSITION" },
+      { "transition": "sourceLifecycle", "record": "LIFECYCLE" }
+    ],
+    "canonicalRecordAuthoritative": true,
+    "adjudicationMustMatchDisposition": true,
+    "resolutionLifecycleBindings": [
+      { "lifecycle": "UNRESOLVED", "resolution": "NOT_RESOLVED" },
+      { "lifecycle": "RESOLVED", "resolution": "RESOLVED" }
+    ],
+    "completenessObligation": "F2_COMMON_RECORD_COMPANION_COMPLETENESS",
+    "transitionConsistencyObligation": "F1_RECORD_TRANSITION_CONSISTENCY"
+  },
+  "projectionRows": [
+    {
+      "disposition": "CURRENT_SHIP_BLOCKER",
+      "lifecycle": "UNRESOLVED",
+      "twoWay": "SHIP_BLOCKER",
+      "v1": "BLOCKING"
+    },
+    {
+      "disposition": "CURRENT_SHIP_BLOCKER",
+      "lifecycle": "RESOLVED",
+      "twoWay": "SHIP_BLOCKER",
+      "v1": "RESOLVED"
+    },
+    {
+      "disposition": "IMMEDIATE_POST_SHIP",
+      "lifecycle": "UNRESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "NON_BLOCKING"
+    },
+    {
+      "disposition": "IMMEDIATE_POST_SHIP",
+      "lifecycle": "RESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "RESOLVED"
+    },
+    {
+      "disposition": "FUTURE_OWNED",
+      "lifecycle": "UNRESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "NON_BLOCKING"
+    },
+    {
+      "disposition": "FUTURE_OWNED",
+      "lifecycle": "RESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "RESOLVED"
+    },
+    {
+      "disposition": "OBSERVE",
+      "lifecycle": "UNRESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "NON_BLOCKING"
+    },
+    {
+      "disposition": "OBSERVE",
+      "lifecycle": "RESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "RESOLVED"
+    },
+    {
+      "disposition": "EVIDENCE_ONLY",
+      "lifecycle": "UNRESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "NON_BLOCKING"
+    },
+    {
+      "disposition": "EVIDENCE_ONLY",
+      "lifecycle": "RESOLVED",
+      "twoWay": "POST_SHIP",
+      "v1": "RESOLVED"
+    }
+  ],
+  "blocker": {
+    "requiredFields": [
+      "WEB_ADMITTED_REVISION",
+      "ADMITTED_CURRENT_OUTCOME",
+      "LOCKED_CRITERION_OR_FLOOR",
+      "SHIP_NOW_CONSEQUENCE",
+      "REQUIRED_OUTCOME_EFFECT",
+      "SAFE_DEFERRAL_IMPOSSIBLE",
+      "SMALLEST_CORRECTION",
+      "VERIFIABLE_CLOSURE",
+      "EXACT_EVIDENCE",
+      "CANDIDATE_IDENTITY",
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_REVISION",
+      "ACCEPTED_DECISION_ID",
+      "PROGRAMME_ID",
+      "CHILD_ID",
+      "FRONTIER_ID",
+      "CONTROLLER_ID",
+      "ACCEPTED_CONTRACT_ID",
+      "SUBJECT_ID",
+      "OBSERVED_BEHAVIOR",
+      "REQUIRED_BEHAVIOR",
+      "PRIMARY_OWNER",
+      "ATTRIBUTION",
+      "ADJUDICATION",
+      "OWNER_ROLE",
+      "OWNER_READBACK",
+      "RESOLUTION"
+    ],
+    "identityFields": [
+      "FINDING_ID",
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_REVISION",
+      "WEB_ADMITTED_REVISION",
+      "CANDIDATE_IDENTITY",
+      "ACCEPTED_DECISION_ID",
+      "DISPOSITION",
+      "LIFECYCLE",
+      "DETAIL_REF"
+    ],
+    "recordFields": [
+      "FINDING_ID",
+      "WEB_ADMITTED_REVISION",
+      "DISPOSITION",
+      "LIFECYCLE",
+      "TIMING",
+      "VERIFIED_OWNER",
+      "TRIGGER_OR_REASON",
+      "CLOSURE_CRITERION",
+      "EXACT_EVIDENCE",
+      "CANDIDATE_IDENTITY",
+      "DETAIL_REF",
+      "ADMITTED_CURRENT_OUTCOME",
+      "LOCKED_CRITERION_OR_FLOOR",
+      "SHIP_NOW_CONSEQUENCE",
+      "REQUIRED_OUTCOME_EFFECT",
+      "SAFE_DEFERRAL_IMPOSSIBLE",
+      "SMALLEST_CORRECTION",
+      "VERIFIABLE_CLOSURE",
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_REVISION",
+      "ACCEPTED_DECISION_ID",
+      "PROGRAMME_ID",
+      "CHILD_ID",
+      "FRONTIER_ID",
+      "CONTROLLER_ID",
+      "ACCEPTED_CONTRACT_ID",
+      "SUBJECT_ID",
+      "OBSERVED_BEHAVIOR",
+      "REQUIRED_BEHAVIOR",
+      "PRIMARY_OWNER",
+      "ATTRIBUTION",
+      "ADJUDICATION",
+      "OWNER_ROLE",
+      "OWNER_READBACK",
+      "RESOLUTION"
+    ],
+    "typedPaths": {
+      "FINDING_ID": "NONEMPTY_STRING",
+      "WEB_ADMITTED_REVISION": "NONEMPTY_STRING",
+      "DISPOSITION": "NONEMPTY_STRING",
+      "LIFECYCLE": "NONEMPTY_STRING",
+      "TIMING": "NONEMPTY_STRING",
+      "VERIFIED_OWNER": "NONEMPTY_STRING",
+      "TRIGGER_OR_REASON": "NONEMPTY_STRING",
+      "CLOSURE_CRITERION": "NONEMPTY_STRING",
+      "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES",
+      "CANDIDATE_IDENTITY": "NONEMPTY_OBJECT",
+      "DETAIL_REF": "SHA256_REFERENCE",
+      "REPOSITORY": "NONEMPTY_STRING",
+      "PACKET_IDENTITY": "NONEMPTY_OBJECT",
+      "FINDING_REVISION": "NONEMPTY_STRING",
+      "ACCEPTED_DECISION_ID": "NONEMPTY_STRING",
+      "PROGRAMME_ID": "NONEMPTY_STRING",
+      "CHILD_ID": "NONEMPTY_STRING",
+      "FRONTIER_ID": "NONEMPTY_STRING",
+      "CONTROLLER_ID": "NONEMPTY_STRING",
+      "ACCEPTED_CONTRACT_ID": "NONEMPTY_STRING",
+      "SUBJECT_ID": "NONEMPTY_STRING",
+      "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
+      "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
+      "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ATTRIBUTION": "NONEMPTY_STRING",
+      "ADJUDICATION": "NONEMPTY_STRING",
+      "OWNER_ROLE": "NONEMPTY_STRING",
+      "OWNER_READBACK": "NONEMPTY_OBJECT",
+      "RESOLUTION": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME.id": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME.milestone": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME.audience": "NONEMPTY_STRING",
+      "ADMITTED_CURRENT_OUTCOME.environment": "NONEMPTY_STRING",
+      "LOCKED_CRITERION_OR_FLOOR": "NONEMPTY_STRING",
+      "SHIP_NOW_CONSEQUENCE.description": "NONEMPTY_STRING",
+      "SHIP_NOW_CONSEQUENCE.effect": "ALLOWED_EFFECT",
+      "SHIP_NOW_CONSEQUENCE.evidenceRefs": "NONEMPTY_EVIDENCE_REFERENCES",
+      "REQUIRED_OUTCOME_EFFECT": "ALLOWED_EFFECT",
+      "SAFE_DEFERRAL_IMPOSSIBLE.satisfied": "EXACT_TRUE",
+      "SAFE_DEFERRAL_IMPOSSIBLE.evidenceRefs": "NONEMPTY_EVIDENCE_REFERENCES",
+      "SMALLEST_CORRECTION": "NONEMPTY_STRING",
+      "VERIFIABLE_CLOSURE.oracleId": "NONEMPTY_STRING",
+      "VERIFIABLE_CLOSURE.positiveControlId": "NONEMPTY_STRING",
+      "VERIFIABLE_CLOSURE.evidenceRefs": "NONEMPTY_EVIDENCE_REFERENCES"
+    },
+    "nestedShapeMode": "EXACT_DECLARED_FIELDS",
+    "admissionReadback": {
+      "mode": "CURRENT_AUTHORITATIVE_READBACK",
+      "field": "admissionReadback",
+      "source": "CANONICAL_WEB_ADMISSION",
+      "requiredFields": [
+        "source", "authoritative", "current", "readBack",
+        "repository", "revision", "body", "bodyDigest"
+      ],
+      "bodySchema": "toolkit.s1a.web-admission.v1",
+      "bodyDigestMode": "SHA256_EXACT_READBACK_BODY"
+    },
+    "admittedDisposition": "CURRENT_SHIP_BLOCKER",
+    "admittedLifecycle": "UNRESOLVED",
+    "allowedEffects": [
+      "FALSE",
+      "MATERIALLY_UNSAFE",
+      "UNASSURABLE"
+    ],
+    "bindings": [
+      {
+        "record": "FINDING_ID",
+        "decision": "findingId"
+      },
+      {
+        "record": "REPOSITORY",
+        "decision": "repository"
+      },
+      {
+        "record": "PACKET_IDENTITY",
+        "decision": "packetIdentity"
+      },
+      {
+        "record": "FINDING_REVISION",
+        "decision": "findingRevision"
+      },
+      {
+        "record": "ACCEPTED_DECISION_ID",
+        "decision": "acceptedDecisionId"
+      },
+      {
+        "record": "ADJUDICATION",
+        "decision": "adjudication"
+      },
+      {
+        "record": "WEB_ADMITTED_REVISION",
+        "decision": "webRevision"
+      },
+      {
+        "record": "ADMITTED_CURRENT_OUTCOME",
+        "decision": "currentOutcome"
+      },
+      {
+        "record": "REQUIRED_OUTCOME_EFFECT",
+        "decision": "requiredOutcomeEffect"
+      },
+      {
+        "record": "VERIFIABLE_CLOSURE.oracleId",
+        "decision": "closureCriterion"
+      },
+      {
+        "record": "CANDIDATE_IDENTITY",
+        "decision": "candidateIdentity"
+      },
+      {
+        "record": "DETAIL_REF",
+        "decision": "detailRef"
+      }
+    ],
+    "membershipBindings": [
+      {
+        "record": "LOCKED_CRITERION_OR_FLOOR",
+        "decision": "acceptedCriteria"
+      },
+      {
+        "record": "EXACT_EVIDENCE",
+        "decision": "evidenceRefs"
+      }
+    ],
+    "truthChecks": [
+      {
+        "record": "SAFE_DEFERRAL_IMPOSSIBLE",
+        "path": "satisfied",
+        "value": true
+      }
+    ],
+    "nestedRequiredFields": [
+      {
+        "record": "ADMITTED_CURRENT_OUTCOME",
+        "fields": [
+          "id",
+          "milestone",
+          "audience",
+          "environment"
+        ]
+      },
+      {
+        "record": "SHIP_NOW_CONSEQUENCE",
+        "fields": [
+          "description",
+          "effect",
+          "evidenceRefs"
+        ]
+      },
+      {
+        "record": "SAFE_DEFERRAL_IMPOSSIBLE",
+        "fields": [
+          "satisfied",
+          "evidenceRefs"
+        ]
+      },
+      {
+        "record": "VERIFIABLE_CLOSURE",
+        "fields": [
+          "oracleId",
+          "positiveControlId",
+          "evidenceRefs"
+        ]
+      }
+    ],
+    "evidenceReferencePaths": [
+      "EXACT_EVIDENCE",
+      "SHIP_NOW_CONSEQUENCE.evidenceRefs",
+      "SAFE_DEFERRAL_IMPOSSIBLE.evidenceRefs",
+      "VERIFIABLE_CLOSURE.evidenceRefs"
+    ],
+    "effectBinding": {
+      "record": "REQUIRED_OUTCOME_EFFECT",
+      "consequence": "SHIP_NOW_CONSEQUENCE.effect"
+    },
+    "proofBinding": {
+      "mode": "SAME_CONTENT_ADDRESSED_COMPANION_RECORD",
+      "fields": [
+        "FINDING_ID",
+        "WEB_ADMITTED_REVISION",
+        "DISPOSITION",
+        "LIFECYCLE",
+        "TIMING",
+        "VERIFIED_OWNER",
+        "TRIGGER_OR_REASON",
+        "CLOSURE_CRITERION",
+        "EXACT_EVIDENCE",
+        "CANDIDATE_IDENTITY",
+        "ADMITTED_CURRENT_OUTCOME",
+        "LOCKED_CRITERION_OR_FLOOR",
+        "SHIP_NOW_CONSEQUENCE",
+        "REQUIRED_OUTCOME_EFFECT",
+        "SAFE_DEFERRAL_IMPOSSIBLE",
+        "SMALLEST_CORRECTION",
+        "VERIFIABLE_CLOSURE",
+        "REPOSITORY",
+        "PACKET_IDENTITY",
+        "FINDING_REVISION",
+        "ACCEPTED_DECISION_ID",
+        "PROGRAMME_ID",
+        "CHILD_ID",
+        "FRONTIER_ID",
+        "CONTROLLER_ID",
+        "ACCEPTED_CONTRACT_ID",
+        "SUBJECT_ID",
+        "OBSERVED_BEHAVIOR",
+        "REQUIRED_BEHAVIOR",
+        "PRIMARY_OWNER",
+        "ATTRIBUTION",
+        "ADJUDICATION",
+        "OWNER_ROLE",
+        "OWNER_READBACK",
+        "RESOLUTION"
+      ]
+    }
+  },
+  "companion": {
+    "requiredFields": [
+      "FINDING_ID",
+      "WEB_ADMITTED_REVISION",
+      "DISPOSITION",
+      "LIFECYCLE",
+      "TIMING",
+      "VERIFIED_OWNER",
+      "TRIGGER_OR_REASON",
+      "CLOSURE_CRITERION",
+      "EXACT_EVIDENCE",
+      "CANDIDATE_IDENTITY",
+      "ADMITTED_CURRENT_OUTCOME",
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_REVISION",
+      "ACCEPTED_DECISION_ID",
+      "PROGRAMME_ID",
+      "CHILD_ID",
+      "FRONTIER_ID",
+      "CONTROLLER_ID",
+      "ACCEPTED_CONTRACT_ID",
+      "SUBJECT_ID",
+      "OBSERVED_BEHAVIOR",
+      "REQUIRED_BEHAVIOR",
+      "PRIMARY_OWNER",
+      "ATTRIBUTION",
+      "ADJUDICATION",
+      "OWNER_ROLE",
+      "OWNER_READBACK",
+      "RESOLUTION"
+    ],
+    "projectionBindingFields": [
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_ID",
+      "FINDING_REVISION",
+      "WEB_ADMITTED_REVISION",
+      "DISPOSITION",
+      "LIFECYCLE",
+      "CANDIDATE_IDENTITY",
+      "ACCEPTED_DECISION_ID",
+      "ADMITTED_CURRENT_OUTCOME",
+      "ATTRIBUTION"
+    ],
+    "legacyProjectionFields": [
+      "TWO_WAY",
+      "V1"
+    ],
+    "referenceField": "DETAIL_REF",
+    "recordReferenceField": "ref",
+    "referenceMode": "CANONICAL_RECORD_SHA256",
+    "currentUniquenessFields": [
+      "REPOSITORY",
+      "PACKET_IDENTITY",
+      "FINDING_ID",
+      "WEB_ADMITTED_REVISION",
+      "CANDIDATE_IDENTITY"
+    ],
+    "typedFields": {
+      "FINDING_ID": "NONEMPTY_STRING",
+      "WEB_ADMITTED_REVISION": "NONEMPTY_STRING",
+      "DISPOSITION": "NONEMPTY_STRING",
+      "LIFECYCLE": "NONEMPTY_STRING",
+      "TIMING": "NONEMPTY_STRING",
+      "VERIFIED_OWNER": "NONEMPTY_STRING",
+      "TRIGGER_OR_REASON": "NONEMPTY_STRING",
+      "CLOSURE_CRITERION": "NONEMPTY_STRING",
+      "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES",
+      "CANDIDATE_IDENTITY": "NONEMPTY_OBJECT",
+      "ADMITTED_CURRENT_OUTCOME": "NONEMPTY_OBJECT",
+      "REPOSITORY": "NONEMPTY_STRING",
+      "PACKET_IDENTITY": "NONEMPTY_OBJECT",
+      "FINDING_REVISION": "NONEMPTY_STRING",
+      "ACCEPTED_DECISION_ID": "NONEMPTY_STRING",
+      "PROGRAMME_ID": "NONEMPTY_STRING",
+      "CHILD_ID": "NONEMPTY_STRING",
+      "FRONTIER_ID": "NONEMPTY_STRING",
+      "CONTROLLER_ID": "NONEMPTY_STRING",
+      "ACCEPTED_CONTRACT_ID": "NONEMPTY_STRING",
+      "SUBJECT_ID": "NONEMPTY_STRING",
+      "OBSERVED_BEHAVIOR": "NONEMPTY_STRING",
+      "REQUIRED_BEHAVIOR": "NONEMPTY_STRING",
+      "PRIMARY_OWNER": "NONEMPTY_STRING",
+      "ATTRIBUTION": "NONEMPTY_STRING",
+      "ADJUDICATION": "NONEMPTY_STRING",
+      "OWNER_ROLE": "NONEMPTY_STRING",
+      "OWNER_READBACK": "NONEMPTY_OBJECT",
+      "RESOLUTION": "NONEMPTY_STRING"
+    },
+    "currentInventory": {
+      "mode": "CURRENT_AUTHORITATIVE_COMPLETE_READBACK",
+      "source": "CURRENT_WEB_ADMISSION_COMPANION_INVENTORY",
+      "readbackFields": [
+        "source",
+        "authoritative",
+        "current",
+        "complete",
+        "readBack",
+        "repository",
+        "packetIdentity",
+        "acceptedDecisionIds",
+        "candidateIdentities",
+        "revision",
+        "records",
+        "digest"
+      ],
+      "recordFields": ["ref", "record"],
+      "digestMode": "CANONICAL_COMPLETE_RECORD_INVENTORY_SHA256",
+      "recordsField": "records"
+    },
+    "historicalEvidenceMode": "APPEND_ONLY_CONTENT_ADDRESSED",
+    "historySource": "CANONICAL_IMMUTABLE_COMPANION_LEDGER",
+    "historyAnchor": {
+      "source": "CURRENT_CANONICAL_PARENT_CONTRACT",
+      "field": "companionHistoryDigest",
+      "digestMode": "CANONICAL_LEDGER_SHA256",
+      "ledgerDigestBinds": "COMPLETE_APPEND_ONLY_RECORDS",
+      "readBackRequired": true,
+      "parentReadbackFields": ["source", "authoritative", "current", "readBack", "repository", "revision", "body", "bodyDigest"],
+      "parentBodyBindsLedgerDigest": true
+    }
+  },
+  "lifecycleTransitions": [
+    {
+      "event": "DEFER",
+      "from": "UNRESOLVED",
+      "to": "UNRESOLVED",
+      "requires": [
+        "VERIFIED_OWNER",
+        "TIMING",
+        "TRIGGER_OR_REASON"
+      ],
+      "requiredValueTypes": {
+        "VERIFIED_OWNER": "NONEMPTY_STRING",
+        "TIMING": "NONEMPTY_STRING",
+        "TRIGGER_OR_REASON": "NONEMPTY_STRING"
+      }
+    },
+    {
+      "event": "TRANSFER",
+      "from": "UNRESOLVED",
+      "to": "UNRESOLVED",
+      "requires": [
+        "VERIFIED_OWNER",
+        "OWNER_READBACK"
+      ],
+      "requiredValueTypes": {
+        "VERIFIED_OWNER": "NONEMPTY_STRING",
+        "OWNER_READBACK": "NONEMPTY_OBJECT"
+      },
+      "ownerReadback": {
+        "source": "CURRENT_AUTHORITATIVE_OWNERSHIP_READBACK",
+        "trustedContextField": "currentOwnershipReadback",
+        "mustBeSuppliedIndependently": true,
+        "mustNotAliasRequestedRecord": true,
+        "mustMatchRecordReadbackExactly": true,
+        "mustMatchIndependentAuthoritySnapshot": true,
+        "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "packetIdentity", "findingId", "webAdmittedRevision", "findingRevision", "candidateIdentity", "acceptedDecisionId", "admittedCurrentOutcome", "programmeId", "childId", "frontierId", "timing", "triggerOrReason", "closureCriterion", "exactEvidence", "controllerId", "acceptedContractId", "subjectId", "attribution", "observedBehavior", "requiredBehavior", "primaryOwner", "adjudication", "disposition", "lifecycle", "ownerRole", "owner", "resolution", "revision", "digest"],
+        "recordBindings": [
+          { "readback": "repository", "record": "REPOSITORY" },
+          { "readback": "packetIdentity", "record": "PACKET_IDENTITY" },
+          { "readback": "findingId", "record": "FINDING_ID" },
+          { "readback": "webAdmittedRevision", "record": "WEB_ADMITTED_REVISION" },
+          { "readback": "findingRevision", "record": "FINDING_REVISION" },
+          { "readback": "candidateIdentity", "record": "CANDIDATE_IDENTITY" },
+          { "readback": "acceptedDecisionId", "record": "ACCEPTED_DECISION_ID" },
+          { "readback": "admittedCurrentOutcome", "record": "ADMITTED_CURRENT_OUTCOME" },
+          { "readback": "programmeId", "record": "PROGRAMME_ID" },
+          { "readback": "childId", "record": "CHILD_ID" },
+          { "readback": "frontierId", "record": "FRONTIER_ID" },
+          { "readback": "timing", "record": "TIMING" },
+          { "readback": "triggerOrReason", "record": "TRIGGER_OR_REASON" },
+          { "readback": "closureCriterion", "record": "CLOSURE_CRITERION" },
+          { "readback": "exactEvidence", "record": "EXACT_EVIDENCE" },
+          { "readback": "controllerId", "record": "CONTROLLER_ID" },
+          { "readback": "acceptedContractId", "record": "ACCEPTED_CONTRACT_ID" },
+          { "readback": "subjectId", "record": "SUBJECT_ID" },
+          { "readback": "attribution", "record": "ATTRIBUTION" },
+          { "readback": "observedBehavior", "record": "OBSERVED_BEHAVIOR" },
+          { "readback": "requiredBehavior", "record": "REQUIRED_BEHAVIOR" },
+          { "readback": "primaryOwner", "record": "PRIMARY_OWNER" },
+          { "readback": "adjudication", "record": "ADJUDICATION" },
+          { "readback": "disposition", "record": "DISPOSITION" },
+          { "readback": "lifecycle", "record": "LIFECYCLE" },
+          { "readback": "ownerRole", "record": "OWNER_ROLE" },
+          { "readback": "owner", "record": "VERIFIED_OWNER" },
+          { "readback": "resolution", "record": "RESOLUTION" }
+        ],
+        "digestMode": "CANONICAL_READBACK_CORE_SHA256",
+        "resolutionMustRemain": "NOT_RESOLVED"
+      }
+    },
+    {
+      "event": "EVIDENCE_ACQUIRED",
+      "from": "UNRESOLVED",
+      "to": "UNRESOLVED",
+      "requires": [
+        "EXACT_EVIDENCE"
+      ],
+      "requiredValueTypes": {
+        "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES"
+      }
+    },
+    {
+      "event": "VERIFIED_CLOSURE",
+      "from": "UNRESOLVED",
+      "to": "RESOLVED",
+      "requires": [
+        "CLOSURE_CRITERION",
+        "EXACT_EVIDENCE"
+      ],
+      "requiredValueTypes": {
+        "CLOSURE_CRITERION": "NONEMPTY_STRING",
+        "EXACT_EVIDENCE": "NONEMPTY_EVIDENCE_REFERENCES"
+      }
+    }
+  ],
+  "closureVerification": {
+    "mode": "CURRENT_AUTHORITATIVE_WEB_CLOSURE_READBACK",
+    "source": "CURRENT_WEB_CLOSURE_ADMISSION",
+    "commonRecordField": "commonRecord",
+    "commonRecordMode": "EXACT_CANONICAL_TRANSITION_SOURCE_RECORD",
+    "commonRecordFieldsFrom": "commonRecord.requiredFields",
+    "requiredFields": [
+      "source", "authoritative", "current", "readBack", "repository", "revision",
+      "findingId", "webAdmittedRevision", "disposition", "fromLifecycle", "toLifecycle",
+      "closureCriterion", "exactEvidence", "candidateIdentity", "commonRecord", "body", "bodyDigest"
+    ],
+    "bodyFields": [
+      "repository", "findingId", "webAdmittedRevision", "disposition",
+      "fromLifecycle", "toLifecycle", "closureCriterion", "exactEvidence", "candidateIdentity", "commonRecord"
+    ],
+    "digestMode": "SHA256_EXACT_READBACK_BODY",
+    "resolvesOnlyAfterVerifiedReadback": true,
+    "retainsAdmittedDisposition": true
+  },
+  "postChildReview": {
+    "trigger": "FINAL_DELIVERY_CHILD_MERGE",
+    "scope": "WHOLE_PROGRAMME",
+    "readOnly": true,
+    "parentContractMode": "CURRENT_CANONICAL_AUTHORITATIVE",
+    "parentContractBodyField": "body",
+    "parentContractDigestField": "bodyDigest",
+    "parentContractDigestMode": "SHA256_EXACT_READBACK_BODY",
+    "parentContractReadbackFields": [
+      "source", "authoritative", "current", "readBack", "repository", "revision", "body", "bodyDigest"
+    ],
+    "integratedIdentityField": "integratedIdentityReadback",
+    "integratedIdentityMode": "CANONICAL_MERGED_DELIVERY_CHILD_READBACK",
+    "integratedIdentityReadbackFields": [
+      "source", "authoritative", "current", "readBack", "repository", "deliveryChildId",
+      "commit", "tree", "mergeReceiptId", "digest"
+    ],
+    "deliveryChildStateIdentityField": "childId",
+    "childStateCurrentField": "current",
+    "childStateMustBeCurrent": true,
+    "childStateReadbackMode": "CURRENT_AUTHORITATIVE_CANONICAL_READBACK",
+    "receiptInventoryField": "terminalReceiptIds",
+    "checkInventoryField": "applicableIntegratedCheckIds",
+    "acceptedChildStates": [
+      "CURRENT",
+      "COMPLETED"
+    ],
+    "reviewSlots": [
+      {
+        "slot": "A",
+        "scope": "WHOLE_PROGRAMME",
+        "readOnly": true,
+        "routeSlot": "A"
+      },
+      {
+        "slot": "B",
+        "scope": "WHOLE_PROGRAMME",
+        "readOnly": true,
+        "routeSlot": "B"
+      }
+    ],
+    "reviewRouteAuthorityMode": "CURRENT_OWNER_WEB_AUTHORITY_READBACK",
+    "reviewRouteAuthorityField": "reviewRouteAuthority",
+    "reviewRouteAuthorityFields": [
+      "source", "authoritative", "current", "readBack", "authorityReference", "revision", "routes", "digest"
+    ],
+    "reviewRouteFields": ["provider", "model", "reasoning"],
+    "reviewerIdentityFields": ["reviewerId", "contextId"],
+    "sameSnapshotFields": [
+      "repository",
+      "deliveryChildId",
+      "commit",
+      "tree",
+      "reviewRouteAuthorityRevision",
+      "reviewRouteAuthorityDigest",
+      "parentContractRevision",
+      "parentContractDigest",
+      "childStateRevision",
+      "childStateDigest",
+      "terminalReceiptIds",
+      "applicableIntegratedCheckIds"
+    ],
+    "blindUntil": "BOTH_REPORTS_TERMINAL",
+    "trace": {
+      "requiredEvents": [
+        "FINAL_DELIVERY_CHILD_MERGED",
+        "INTEGRATED_IDENTITY_READ_BACK",
+        "CURRENT_PARENT_CONTRACT_READ_BACK",
+        "CURRENT_CHILD_STATE_READ_BACK",
+        "REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK",
+        "APPLICABLE_CHECK_MEMBERSHIP_READ_BACK",
+        "MERGE_TRIGGERED_CI_STARTED",
+        "REVIEW_A_STARTED",
+        "REVIEW_B_STARTED",
+        "REPORT_A_TERMINAL",
+        "REPORT_B_TERMINAL",
+        "TERMINAL_RECEIPTS_READ_BACK",
+        "TERMINAL_RECEIPTS_TERMINAL",
+        "APPLICABLE_CHECKS_READ_BACK",
+        "APPLICABLE_CHECKS_TERMINAL",
+        "WEB_ADJUDICATION"
+      ],
+      "reviewStartsAfter": [
+        "FINAL_DELIVERY_CHILD_MERGED",
+        "INTEGRATED_IDENTITY_READ_BACK",
+        "CURRENT_PARENT_CONTRACT_READ_BACK",
+        "CURRENT_CHILD_STATE_READ_BACK",
+        "REQUIRED_RECEIPT_MEMBERSHIP_READ_BACK",
+        "APPLICABLE_CHECK_MEMBERSHIP_READ_BACK"
+      ],
+      "peerVisibilityEvents": [
+        "REPORT_A_VISIBLE_TO_B",
+        "REPORT_B_VISIBLE_TO_A"
+      ],
+      "bothReviewsStartBeforeAnyReport": true,
+      "adjudicationAfter": [
+        "REPORT_A_TERMINAL",
+        "REPORT_B_TERMINAL",
+        "TERMINAL_RECEIPTS_READ_BACK",
+        "TERMINAL_RECEIPTS_TERMINAL",
+        "APPLICABLE_CHECKS_READ_BACK",
+        "APPLICABLE_CHECKS_TERMINAL"
+      ],
+      "terminalReadbackPrecedes": [
+        ["TERMINAL_RECEIPTS_READ_BACK", "TERMINAL_RECEIPTS_TERMINAL"],
+        ["APPLICABLE_CHECKS_READ_BACK", "APPLICABLE_CHECKS_TERMINAL"]
+      ]
+    },
+    "frontierEffect": "DEPENDENT_NEXT_CHILD",
+    "receiptInventoryMode": "CANONICAL_AUTHORITATIVE_COMPLETE_TERMINAL_READBACK",
+    "checkInventoryMode": "CANONICAL_AUTHORITATIVE_COMPLETE_TERMINAL_READBACK",
+    "childStateDigestMode": "CANONICAL_STATE_SHA256",
+    "inventorySources": {
+      "receipts": "CANONICAL_TERMINAL_OBJECT_RECEIPT_READBACK",
+      "checks": "CANONICAL_APPLICABLE_INTEGRATED_CHECK_READBACK"
+    }
+  },
+  "faithfulCarrier": {
+    "inventory": {
+      "mode": "CURRENT_AUTHORITATIVE_COMPLETE_READBACK",
+      "inputField": "authoritativeInventory",
+      "source": "CURRENT_OWNER_WEB_CARRIER_INVENTORY",
+      "requiredFields": ["source", "authoritative", "current", "complete", "readBack", "repository", "revision", "criterion", "candidateIdentity", "records", "digest"],
+      "recordFields": ["carrierId", "identity", "executionSubstrate", "available", "authorized", "ownerProvisioned", "faithful", "actualPath", "acceptedExecutionPath", "enforcementBoundary", "reconciliation", "provisioning"],
+      "reconciliationFields": ["source", "authoritative", "current", "complete", "readBack", "inventoryRevision", "carrierId", "identity", "actualPath", "suitability", "necessity", "digest"],
+      "localFirstWhenFaithful": true,
+      "reconcileExistingBeforeProvisioning": true,
+      "provisionOnlyAfterNecessityProven": true,
+      "requestCannotChangeInventory": true
+    },
+    "selectionOrder": [
+      "LOCAL_DEV",
+      "AUTHORIZED_EXISTING_OWNER",
+      "NEW_OWNER_PROVISIONED"
+    ],
+    "defaultExposure": "PRIVATE_NONPUBLIC",
+    "acceptedBoundaryId": "ACCEPTED_PRODUCTION_BOUNDARY",
+    "faithfulnessRule": "EXERCISED_ACCEPTED_BOUNDARY",
+    "boundaryExercise": {
+      "mode": "INDEPENDENTLY_BOUND_TERMINAL_EXECUTION_EVIDENCE",
+      "evidenceInputField": "acceptedBoundaryEvidence",
+      "carrierIdentityField": "identity",
+      "acceptedCarrierIds": ["LOCAL_DEV", "AUTHORIZED_EXISTING_OWNER", "NEW_OWNER_PROVISIONED"],
+      "readbackFields": [
+        "source", "authoritative", "current", "complete", "readBack", "repository",
+        "acceptedCriterion", "carrierId", "carrierIdentity", "actualPath", "candidateIdentity",
+        "enforcementBoundary", "run", "receipt", "digest"
+      ],
+      "requiredFields": [
+        "receiptId",
+        "acceptedCriterion",
+        "carrierId",
+        "carrierIdentity",
+        "candidateIdentity",
+        "boundaryId",
+        "enforcementBoundary",
+        "actualPath",
+        "executionPath",
+        "outcome",
+        "terminal",
+        "evidenceRef",
+        "runId",
+        "runEvents",
+        "executionEvidenceDigest",
+        "receiptDigest"
+      ],
+      "acceptedExecutionPath": "ACCEPTED_PRODUCTION_PATH",
+      "acceptedOutcome": "BOUNDARY_EXERCISED",
+      "requiredRunEvents": [
+        "CANDIDATE_BOUND",
+        "ACCEPTED_BOUNDARY_INVOKED",
+        "BOUNDARY_OUTCOME_OBSERVED",
+        "RUN_TERMINAL"
+      ]
+    },
+    "publicExposureRequires": [
+      "ACCEPTED_CRITERION",
+      "EXPLICIT_EXPOSURE_AUTHORITY",
+      "CONSUMER",
+      "PROTOCOL",
+      "PATH",
+      "HOSTNAME",
+      "NECESSITY",
+      "AUDIENCE",
+      "BOUNDARY",
+      "LIFETIME",
+      "CLEANUP"
+    ],
+    "publicExposureAuthority": {
+      "mode": "CURRENT_OWNER_WEB_AUTHORITY_READBACK",
+      "inputField": "exposureAuthority",
+      "requestField": "publicExposureRequest",
+      "requestMatchFields": ["consumer", "protocol", "path", "hostnameRequired", "hostname", "lifetime", "cleanup", "necessity"],
+      "source": "CURRENT_OWNER_WEB_AUTHORITY",
+      "requiredFields": [
+        "source", "authoritative", "current", "readBack", "authorityReference",
+        "criterion", "exposure", "consumer", "protocol", "path", "hostnameRequired", "hostname",
+        "audience", "boundary", "lifetime", "cleanup", "necessity", "requiredOperations", "digest"
+      ],
+      "digestMode": "SHA256_CANONICAL_AUTHORITY_READBACK",
+      "exposureValue": "PUBLIC"
+    },
+    "domainDnsAuthority": {
+      "requiredOperationsField": "requiredOperations",
+    "domainInputField": "domainAuthority",
+      "dnsInputField": "dnsAuthority",
+      "requiredFields": [
+        "source", "authoritative", "current", "readBack", "authorityReference",
+        "exposureReference", "operation", "target", "digest"
+      ],
+      "domainOperation": "DOMAIN_REGISTRATION",
+      "dnsOperation": "DNS_CONFIGURATION",
+      "referencesMustDiffer": true,
+      "eachReferenceMustDifferFromExposure": true
+    },
+    "domainDnsRequiresSeparateAuthority": true,
+    "persistenceImpliesExposure": false
+  },
+  "boundedContinuation": {
+    "eligiblePrimaryOwners": ["HARNESS", "TOOLKIT", "ENVIRONMENT", "VALIDATION_CARRIER", "TRANSPORT"],
+    "excludedAutonomousOwners": ["PRODUCT", "UNKNOWN"],
+    "productSemanticsRequired": "NO",
+    "episodeAuthority": {
+      "mode": "CURRENT_EXPLICIT_WEB_BOUNDED_EPISODE",
+      "requiredFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "primaryOwner", "source", "authoritative", "current", "readBack", "explicitWebBound", "digest", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "kindBinding": "EXACT_CURRENT_INDEPENDENT_WEB_READBACK",
+      "anyExplicitWebBoundKindAllowedWhenIndependentlyAccepted": true
+    },
+    "acceptedAuthorityBinding": {
+      "source": "CURRENT_ACCEPTED_G2_EPISODE_AUTHORITY_READBACK",
+      "stateField": "acceptedEpisodeAuthority",
+      "requiredFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "primaryOwner", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "mustMatchIndependentAcceptedReadback": true
+    },
+    "acceptedBoundaryBinding": {
+      "inputField": "acceptedBoundary",
+      "source": "CURRENT_ACCEPTED_G2_BOUNDARY_READBACK",
+      "requiredFields": ["source", "authoritative", "current", "readBack", "repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId", "digest"],
+      "episodeFields": ["repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episodeId", "episodeKind", "runId", "lockId", "authorityReference", "rootFamilyId", "acceptedContractId", "trustModelId", "scopeId", "assuranceFloorId", "evidenceBoundaryId"],
+      "mustRemainExact": true
+    },
+    "currentStateReadback": {
+      "inputField": "currentStateReadback",
+      "source": "CURRENT_ACCEPTED_G2_CONTINUATION_STATE_READBACK",
+      "requiredFields": ["source", "authoritative", "current", "complete", "readBack", "episodeId", "acceptedEpisodeAuthority", "candidateIdentity", "evidenceIdentity", "attemptState", "currentFailureSignature", "history", "effectReconciliation", "faithfulPathInventoryDigest", "digest"],
+      "attemptFields": ["attemptCount", "attemptLimit", "productCorrectionAttempts", "productCorrectionLimit", "budgetConsumed", "budgetLimit"],
+      "historyMustMatchExactly": true,
+      "mustMatchIndependentAcceptedReadback": true
+    },
+    "requiredConditions": ["CONCLUSIVE_PRIMARY_OWNER", "PRODUCT_SEMANTICS_PROVEN_BAD_NO", "RECONCILED_EFFECTS", "FAITHFUL_PATH_REMAINS", "NO_EQUIVALENT_NO_PROGRESS_REPEAT", "SAME_ROOT_TRUST_AUTHORITY_SCOPE", "SAME_ASSURANCE_FLOOR_AND_EVIDENCE_BOUNDARY", "EXACT_CANDIDATE_AND_EVIDENCE_IDENTITY", "NO_ATTEMPT_OR_BUDGET_RESET", "AUTHORITATIVE_CURRENT_STATE_READBACK", "ACCEPTED_EPISODE_AUTHORITY_READBACK", "CONSUMPTION_WITHIN_ACCEPTED_LIMITS", "FAITHFUL_PATH_HAS_BOUND_EVIDENCE"],
+    "effectReconciliation": {
+      "requiredFields": ["source", "authoritative", "current", "complete", "readBack", "effects", "digest"],
+      "acceptedEffectState": "RECONCILED",
+      "independentReadbackField": "effectReconciliation",
+      "mustMatchCurrentAcceptedStateReadback": true,
+      "equivalentEffectOrderAllowed": true
+    },
+    "faithfulPathInventory": {
+      "requiredFields": ["source", "authoritative", "current", "complete", "readBack", "paths", "digest"],
+      "requiresRemainingFaithfulPath": true,
+      "pathFields": ["pathId", "faithful", "available", "actualPath", "evidenceRef", "evidenceBoundaryId", "candidateIdentity"],
+      "pathInventoryDigestBoundToCurrentState": true
+    },
+    "equivalenceFields": ["rootFamilyId", "unresolvedBlockerIds", "primaryOwner", "failedMechanism", "effectClass", "evidenceBoundaryId"],
+    "equivalenceIgnoresLabels": ["runId", "workerId", "branch", "candidateIdentity", "episodeId"],
+    "candidateTransition": "PRESERVE_EXACT_IDENTITY",
+    "evidenceTransition": "PRESERVE_EXACT_IDENTITY",
+    "attemptAndBudget": {
+      "attemptCountMayDecrease": false,
+      "budgetSpentMayDecrease": false,
+      "limitsMayIncrease": false,
+      "attemptCountMayExceedLimit": false,
+      "productCorrectionsMayExceedLimit": false,
+      "budgetConsumedMayExceedLimit": false,
+      "overLimitResult": "RETURN_TO_WEB",
+      "resetAllowed": false
+    },
+    "resultFields": ["admission", "violatedObligationIds", "candidateTransition", "evidenceTransition", "attemptEffects", "budgetEffects", "mutationEffects"],
+    "replacementAuthority": {
+      "observerSignature": "observe(policy, request, trustedContext)",
+      "trustedContextFields": ["currentAuthority", "candidateReadback", "evidenceReadback"],
+      "mustBeIndependentOfRequest": true,
+      "mustNotBeSelectedByCallerLabelsOrDigests": true,
+      "mustNotBeMutableThroughRequest": true,
+      "currentAuthorityFields": ["source", "repository", "webAuthorityIdentity", "webAuthorityRevision", "webAuthorityContent", "episode", "run", "lock", "replacementPermission", "eligibleOwner", "correctionMechanism", "predecessorCandidate", "replacementCandidate", "pathEffectCeiling", "revalidationBoundary", "lifetime", "currentness", "permissionConsumption", "readBack"],
+      "requiresExactCurrentReadback": true,
+      "eligiblePrimaryOwners": ["HARNESS", "TOOLKIT", "ENVIRONMENT"],
+      "eligibleCorrectionMechanisms": ["HARNESS_VALIDATION", "TOOLKIT_VALIDATION", "ENVIRONMENT_VALIDATION"],
+      "episodeKind": "G3_RUN_LOCK",
+      "permissionStateRequired": "AVAILABLE",
+      "permissionUseCount": 1,
+      "rejectStaleRevokedSupersededAuthority": true,
+      "pathAndEffectMustStayWithinCeiling": true,
+      "productAttemptDelta": 0,
+      "budgetResetAllowed": false
+    },
+    "replacementCandidateValidity": {
+      "requiredFields": ["repository", "kind", "objectFormat", "commit", "head", "tree", "orderedParents", "baseCommit", "commitTreeReadback", "lineage", "hostedBinding", "localCustodyBinding", "observedMutationScope", "predecessorPreservation", "revalidationLinkage"],
+      "supportedKinds": ["HOSTED", "LOCAL"],
+      "supportedObjectFormats": ["sha1", "sha256"],
+      "headMustMatchCommit": true,
+      "commitTreeReadbackMustMatch": true,
+      "orderedParentsAndBaseMustMatchLineage": true,
+      "repositoryEpisodePredecessorMustMatch": true,
+      "hostedBindingFields": ["repository", "prNumber", "branch", "headSha", "baseCommit", "readBack"],
+      "localCustodyBindingFields": ["repository", "custodyId", "worktreeId", "commit", "tree", "readBack"],
+      "observedMutationScopeMustFitAuthorityCeiling": true,
+      "predecessorEvidenceMustBePreserved": true,
+      "evidenceReadbackMustBindCandidateAndRevalidation": true,
+      "callerHashesAreEqualityAssertionsOnly": true
+    },
+    "replacementRejection": {
+      "admission": "RETURN_TO_WEB",
+      "candidateTransition": "NO_ACCEPTED_TRANSITION",
+      "evidenceTransition": "NO_ACCEPTED_TRANSITION",
+      "mutationEffects": []
+    }
+  }
+}
+~~~
+
+### Canonical disposition vocabulary
+
+A finding has exactly one current disposition and a separate lifecycle. Disposition answers what kind of work the evidence supports; lifecycle records whether that obligation remains unresolved. A disposition never grants mutation, ownership, scope, budget, dependency, merge or finality authority.
+
+| Disposition | Meaning and timing |
+| --- | --- |
+| CURRENT_SHIP_BLOCKER | An admitted finding that satisfied every current-blocker predicate when classified; while UNRESOLVED, shipping the admitted current outcome is false, materially unsafe, or unassurable now. |
+| IMMEDIATE_POST_SHIP | A concrete correction for the next post-ship opportunity that does not make the admitted current outcome or minimum floor fail now. |
+| FUTURE_OWNED | A verified continuing owner and future home exist; the finding is deliberately outside the current outcome and remains unresolved until that owner closes or validly transfers it. |
+| OBSERVE | Preserve a signal, trigger, or threshold for reassessment; no current correction is admitted without new evidence and Web adjudication. |
+| EVIDENCE_ONLY | Acquire, preserve or verify evidence as a custody-only action; it neither asserts a product defect nor authorises product correction. Evidence acquisition does not resolve or discard the obligation; required evidence gates remain independently binding. |
+
+`UNRESOLVED` and `RESOLVED` are lifecycle values, not dispositions. Resolving a finding never erases its original disposition, evidence, timing, owner, or closure proof.
+
+### Lossless legacy projections
+
+For consumers that still accept only the two-way or v1 vocabularies, project the canonical state as follows. The canonical disposition and lifecycle sidecar is mandatory: the projected label alone is not a lossless record.
+
+| Canonical disposition | Lifecycle | Two-way projection | v1 projection |
+| --- | --- | --- | --- |
+| CURRENT_SHIP_BLOCKER | UNRESOLVED | SHIP_BLOCKER | BLOCKING |
+| CURRENT_SHIP_BLOCKER | RESOLVED | SHIP_BLOCKER | RESOLVED |
+| IMMEDIATE_POST_SHIP | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| IMMEDIATE_POST_SHIP | RESOLVED | POST_SHIP | RESOLVED |
+| FUTURE_OWNED | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| FUTURE_OWNED | RESOLVED | POST_SHIP | RESOLVED |
+| OBSERVE | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| OBSERVE | RESOLVED | POST_SHIP | RESOLVED |
+| EVIDENCE_ONLY | UNRESOLVED | POST_SHIP | NON_BLOCKING |
+| EVIDENCE_ONLY | RESOLVED | POST_SHIP | RESOLVED |
+
+Persist the complete canonical common finding record alongside either projection, including the admitted outcome, milestone, audience and environment; repository, packet, finding/revision, accepted decision and candidate; programme, child, frontier, Controller, contract and subject; timing, trigger, closure criterion and exact evidence; attribution, adjudication, disposition and lifecycle; and verified owner role/readback. The canonical record is authoritative: a transition disposition and source lifecycle repeated in transition input must agree with the record, including verified closure. Reject a contradiction under F1_RECORD_TRANSITION_CONSISTENCY before transition or effect. Reject missing applicable common fields under F2_COMMON_RECORD_COMPANION_COMPLETENESS. A resolved blocker still projects as `SHIP_BLOCKER` in the two-way field and as `RESOLVED` in v1; the sidecar preserves both its original class and lifecycle.
+
+Nested identity composition is exact: PACKET_IDENTITY is an object with own nonblank string repository, packetId and packetRevision fields; its repository equals common REPOSITORY. CANDIDATE_IDENTITY is an object with own nonblank string commit and tree fields. Preserve these exact nested identities across the canonical record, owner readback, companion projection, current inventory, closure readback and blocker admission. Transfer also requires a separate independently anchored current ownership readback. Hashes and digests bind bytes but never establish authority. For every rejected transition request, including early validation returns, return ok=false, transition=null, mutationEffects=[], and the canonical record's DISPOSITION and LIFECYCLE; request values never select the resulting state.
+
+Every coarse row carries a content-addressed DETAIL_REF to exactly one complete companion record; consumers recompute its canonical record digest. Every applicable current or historical record carries the complete common semantic context. Each companion projection binds repository, packet, finding/revision, candidate, accepted decision and the complete admitted outcome object (outcome, milestone, audience and environment); hashes and coherent caller rebinding cannot replace current authoritative context. Every current companion row and its complete inventory must be read back from the current authoritative Web admission source, with the inventory digest binding every exact record and reference. The independent contract interpreter checks every declared field type and rejects missing, duplicate, swapped, altered or contradictory records even when caller-supplied hashes are recomputed. For CURRENT_SHIP_BLOCKER, the same hashed record contains every blocker field and nested proof value, and admission binds each proof field to that exact record and Web-admitted DETAIL_REF. At most one current disposition is admitted for each repository, accepted packet, finding, Web-admitted revision and candidate identity; FINDING_REVISION and ACCEPTED_DECISION_ID remain bound in each record and projection but do not create another current uniqueness slot. Historical evidence remains immutable and append-only: the complete ledger digest is read back from the CURRENT canonical parent contract, every retained record is content-addressed, and an existing record and digest are never rewritten; later state receives a new Web-admitted revision and DETAIL_REF.
+
+### Current blocker field contract
+
+Current-blocker admission is conjunctive. Every row below must be present, exact, evidence-backed, and admitted by Web for the revision being decided. The effect set is exactly {FALSE, MATERIALLY_UNSAFE, UNASSURABLE}. ALL_FIELDS_REQUIRED=YES.
+
+| Required field | Bound value or proof |
+| --- | --- |
+| WEB_ADMITTED_REVISION | Exact durable Web-admitted revision for the current decision; it binds the accepted outcome, milestone, audience, supported environment, timing and current authority. |
+| ADMITTED_CURRENT_OUTCOME | The exact non-empty outcome id, milestone, intended audience and supported environment admitted for this shipment. |
+| LOCKED_CRITERION_OR_FLOOR | Exact locked acceptance-criterion identifier or applicable minimum-safety-floor obligation; no criterion is invented from a suggestion or severity label. |
+| SHIP_NOW_CONSEQUENCE | Concrete, evidence-backed consequence of shipping the current candidate against that criterion or floor. |
+| REQUIRED_OUTCOME_EFFECT | One demonstrated effect in {FALSE, MATERIALLY_UNSAFE, UNASSURABLE} on the admitted current outcome or minimum floor. |
+| SAFE_DEFERRAL_IMPOSSIBLE | Evidence showing why an existing or newly verified future owner cannot safely close the finding later while the current outcome remains correct and assurable. |
+| SMALLEST_CORRECTION | The smallest correction that closes the demonstrated current failure; any correction outside accepted authority or scope returns to Web for decision. |
+| VERIFIABLE_CLOSURE | A falsifiable closure oracle at the relevant consequential boundary, including the required positive control where applicable. |
+| EXACT_EVIDENCE | Durable exact evidence references for the observed failure, current consequence, deferral analysis and closure oracle. |
+| CANDIDATE_IDENTITY | Exact object with own nonblank string commit and tree fields, identifying the accepted immutable candidate to which the evidence applies. |
+| REPOSITORY | Exact canonical repository identity shared by the accepted packet, finding, candidate and current Web decision. |
+| PACKET_IDENTITY | Exact object with own nonblank string repository, packetId and packetRevision fields; repository equals REPOSITORY, and the identity remains bound to the programme, child, frontier and accepted contract. |
+| FINDING_REVISION | Exact immutable finding revision evaluated by the accepted decision. |
+| ACCEPTED_DECISION_ID | Exact current Web-admitted decision identifier bound to this finding and candidate. |
+| PROGRAMME_ID | Exact parent programme identity for this accepted finding. |
+| CHILD_ID | Exact delivery-child identity that owns the accepted work. |
+| FRONTIER_ID | Exact dependent current frontier whose outcome is evaluated. |
+| CONTROLLER_ID | Exact controller decision identity for the current admission. |
+| ACCEPTED_CONTRACT_ID | Exact accepted contract identifier governing required behavior and closure. |
+| SUBJECT_ID | Exact subject identity bound to the finding and accepted candidate. |
+| OBSERVED_BEHAVIOR | Evidence-backed observed behavior for this exact subject and candidate. |
+| REQUIRED_BEHAVIOR | Exact accepted behavior required by the locked criterion or floor. |
+| PRIMARY_OWNER | Exact canonical primary-owner identity retained with the finding. |
+| ATTRIBUTION | Exact accepted causal or learning attribution for this finding, preserved separately from its disposition and lifecycle. |
+| ADJUDICATION | Exact Web-admitted disposition assigned to this finding revision. |
+| OWNER_ROLE | Exact role held by the verified continuing owner for this obligation. |
+| OWNER_READBACK | Current authoritative readback bound to every applicable common-record value: repository, packet, finding/revisions, accepted decision and complete admitted outcome; programme/child/frontier; timing, trigger, closure and exact evidence; Controller/contract/subject/candidate; attribution, primary owner, adjudication, disposition and lifecycle; verified owner, owner role and resolution. Transfer compares the complete requested record and embedded readback with a separate, non-aliasing current authoritative ownership-state readback; caller-rebound values and recomputed digests do not authorize transfer. Transfer leaves lifecycle UNRESOLVED. |
+| RESOLUTION | Exact lifecycle resolution state; transfer or deferral alone remains unresolved. |
+
+Initial admission rule: DISPOSITION=CURRENT_SHIP_BLOCKER, LIFECYCLE=UNRESOLVED, and every declared field is required. Every scalar identity, outcome, owner, timing, criterion, correction and closure value is a non-empty string; evidence references are non-empty arrays of non-empty unique strings; nested outcome, consequence, deferral and closure records have exactly their declared fields and types. The full common finding record and every blocker-specific field must be present, non-empty, mutually consistent and bound to the exact candidate, accepted outcome, criterion/floor, durable evidence and Web-admitted revision. The decision itself must be read back from the current authoritative Web admission, and its exact body digest binds the complete decision including the detailed companion reference. Web durably reconciles the full predicate against that exact identity. Resolution changes only lifecycle to RESOLVED after an authoritative, current Web closure readback binds the complete canonical common record, including the admitted outcome, milestone, audience and environment, and verifies the exact finding, admitted disposition, closure criterion, evidence references, candidate identity and transition; a caller-supplied criterion, evidence label or recomputed digest alone cannot resolve work. Resolution retains the admitted disposition and evidence. Deferral, evidence acquisition or ownership transfer never resolves an unfinished obligation; an ownership transfer binds the complete current finding record and authoritative readback while `RESOLUTION=NOT_RESOLVED` on both sides. Severity, novelty, a G4 label, a critical evidence gap by itself, or a prior blocker label cannot substitute for any field. If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.
+
+### Current-frontier effect and examples
+
+Only a properly admitted, unresolved `CURRENT_SHIP_BLOCKER` may block the finding-derived dependent current frontier. Its dependency must be explicit and limited to the work that cannot safely proceed without closure. It cannot suppress or replace independent CI, assurance, authority, evidence, checkpoint, or other accepted gates. Every non-blocking disposition retains its evidence and required continuing owner/trigger; it cannot widen current mutation scope, budget, prerequisite graph, or authority.
+
+| Example | Evidence result | Disposition |
+| --- | --- | --- |
+| An alpha edge is safely deferrable to its verified future owner and does not violate an admitted current criterion or minimum floor. | Safe deferral is demonstrated; current outcome remains correct and assurable. | FUTURE_OWNED |
+| An admitted alpha journey has a demonstrated data-integrity or safety-floor defect and every required predicate above is satisfied for the exact candidate and Web-admitted revision. | Shipping now is false, materially unsafe, or unassurable; safe deferral is impossible and closure is verifiable. | CURRENT_SHIP_BLOCKER |
+
+### Post-child integrated dual review
+
+This law applies only to explicitly Toolkit-managed repositories. Trigger it after each Delivery Child's final PR is merged and the resulting canonical commit/tree is read back with its exact Delivery Child identity and merge receipt. Read back the exact merged identity and the relevant current or terminal child state from their canonical sources; both readbacks must be authoritative, current and explicit. The CURRENT canonical parent programme contract is an authoritative input to both reviews. Read back its exact body and verify its body digest against those bytes. Before or at review launch, read back the complete required receipt IDs and applicable integration-check membership from the current canonical child state. Bind those stable IDs, the exact integrated identity, parent/child state revisions and digests, and current Owner/Web reviewer-route authority to one immutable review snapshot. Both reviews receive the same accepted inputs and the same immutable snapshot. Both reviews cover the whole programme from the same snapshot. Bind applicable integration CI to that same exact integrated identity and check membership. Do not bind terminal-status digests into that launch snapshot. Start both independent whole-programme reviews alongside merge-triggered CI; CI and reviews may finish in either order. After reports return, read back the complete terminal object-receipt inventory from its canonical ledger and the complete applicable integration-check inventory from its canonical source. Individually read back each receipt and applicable check. Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication. Supporting or incremental PRs do not trigger a child checkpoint.
+
+The route for each review is supplied by current Owner/Web authority and is not an authoritative default or permanent Architecture route law. Record the exact provider/model/reasoning bindings from that current readback. Both are independent, read-only whole-programme reviews. Each reviewer receives the same accepted scope and evidence but neither sees the other's report before both reports are returned to Web. A missing route or unavailable reviewer is a typed hold/Web decision; there is no silent route substitution.
+
+Read back required receipt IDs and complete applicable-check membership before or at review launch and bind those stable IDs to the shared snapshot. The independent reviews may launch alongside merge-triggered CI; CI and reviews may finish in either order. Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication. Reviewers are mutually blind until both reports have returned. Web adjudicates both reports against the exact integrated identity and current parent/child inputs. Do not copy programme-wide parent law into every child. The checkpoint may block only a dependent next-child frontier; unrelated authorised lanes continue. The final integrated programme review occurs at the final Delivery Child checkpoint for this lifecycle. It is not per-commit G4 and does not replace pre-merge G4 or a separately required Final Audit. Web retains all merge, programme and finality authority.
+
+### Bounded non-product continuation
+
+A bounded non-product continuation may recover an accepted evidence path within the exact current G3 RUN/Lock, a parent-owned already-authorised LIGHT operation, or any other currently accepted Web-bounded evidence episode recorded by its authoritative readback. G3 and LIGHT are examples, not an exclusive episode set. It requires conclusive primary attribution to HARNESS, TOOLKIT, ENVIRONMENT, VALIDATION_CARRIER, or TRANSPORT and PRODUCT_SEMANTICS_PROVEN_BAD=NO. PRODUCT or UNKNOWN never grants autonomous continuation, and PRODUCT_SEMANTICS_PROVEN_BAD=YES is not product-correction authority. The current episode authority, primary owner, semantics, root, trust model, scope, assurance floor and accepted evidence boundary remain exact. The episode kind and primary owner must match the independently accepted current Web authority readback. A complete current accepted-G2 state readback binds the exact episode authority and owner, candidate and evidence identities, attempt and budget counters and limits, current failure signature, faithful-path inventory digest, and full continuation history. Omitted, stale, partial or caller-rebound authority, history, identities, counters or limits return to Web. Attempt, product-correction and consumed-budget counts may not exceed their accepted limits; any over-limit count returns to Web. Independently reconcile effects and faithful-path inventory; an unreconciled effect or exhausted faithful path returns to Web. A remaining faithful path must have an exact non-empty path identity, actual path and evidence reference bound to the accepted candidate, evidence boundary and independent accepted-state inventory digest; missing or caller-rebound path evidence returns to Web. Identity-preserving recovery keeps the exact candidate and evidence identities, and every candidate remains immutable. Repeated materially equivalent no-progress history returns to Web even when run, worker, branch or candidate labels change.
+
+For a published/hosted candidate, only the existing explicitly Web-authorised hosted non-product reclosure may create a distinct immutable replacement candidate in the same RUN/Lock/G3 episode. That exception requires primary owner HARNESS, TOOLKIT, or ENVIRONMENT; PRODUCT_SEMANTICS_PROVEN_BAD=NO; unchanged product semantics, root/trust, accepted G2 contract and assurance floor; and correction bounded to the exact validation/harness/tooling/environment mechanism. Preserve the failed candidate as durable evidence, bind the replacement's new commit/tree and exact revalidation boundary, consume no product/G3 correction attempt, and reset no budget. This is hosted validation reclosure, not local pre-publication product correction. TRANSPORT-only recovery does not use this replacement-candidate exception without separate explicit Web authority.
+
+The replacement observer receives observe(policy, request, trustedContext). Its independently supplied trustedContext.currentAuthority, candidateReadback, and evidenceReadback are separate from the request and remain unchanged when request fields are mutated. Caller-selected labels and caller-recomputed hashes or digests are equality assertions only; they never select or establish authority. The current authority readback binds the exact repository; Web authority identity, revision and content; episode, RUN and Lock; one-use replacement permission; eligible non-product owner and correction mechanism; predecessor and exact replacement candidate; path and effect ceiling; exact revalidation boundary; and authority lifetime, currentness, revocation, supersession and permission-consumption state. A stale, revoked, superseded or already-consumed permission returns to Web.
+
+The independent candidate readback binds repository, HOSTED or LOCAL kind, object format, non-empty commit/head/tree identities, ordered parents, base commit, exact commit-to-tree readback, predecessor/base/parent lineage, kind-specific hosted PR/branch/head or local custody, observed mutation/effect scope, predecessor preservation and exact revalidation linkage. HOSTED and LOCAL bindings cannot be substituted for each other. Independent evidence readback must bind the exact replacement candidate, preserved predecessor evidence and revalidation boundary. A rejected replacement produces no accepted candidate transition, no accepted evidence transition and no CREATE_DISTINCT_WEB_AUTHORISED_REPLACEMENT effect, even when another helper condition succeeded. These source-policy fixtures model independently captured authority and Git/readback evidence; they do not perform live Git or GitHub verification and do not claim runtime enforcement.
+
+Neither path grants product correction or aliases a replacement under an old identity. It does not widen the existing authority, mutation boundary, accepted scope/floor or prerequisite graph, grant a new continuation, reset a budget, shop outcomes, or decide PASS/merge/finality. A product RED follows ordinary G3 correction with immutable candidate handling. Material semantic, authority, scope, floor or evidence-contract ambiguity, unknown ownership, or repeated materially equivalent non-product RED without material progress returns to Web through the existing typed decision path.
+
+### Faithful validation carrier
+
+Treat the carrier inventory as an authoritative current readback, not caller-supplied availability. A carrier is an execution substrate, not one dedicated test application per repository; app/service lifecycle or topology matters only when the accepted validation criterion requires it. Select faithful local/dev first, then reconcile suitable existing Owner-authorised execution infrastructure, and provision or expand only after that reconciliation proves necessity. Bind the selected carrier identity and actual path to the candidate, accepted criterion, accepted execution path, enforcement boundary and required terminal execution/readback evidence. The default carrier remains PRIVATE/NONPUBLIC without domain registration, DNS or public ingress. Persistence does not imply exposure. Public ingress is admissible only when a specific accepted validation criterion requires it and a current authoritative Owner/Web readback binds the exact exposure and public request, including consumer, protocol, path, hostname requirement and hostname, accepted criterion, necessity, audience, boundary, lifetime and cleanup. If domain registration or DNS is required, each operation needs its own current authoritative Owner/Web readback bound to that exposure with a distinct authority reference; one combined grant is insufficient.
+
+A carrier is faithful only when independently bound read-back evidence contains a terminal execution receipt from an actual invocation of the selected carrier path and accepted production path, and binds that exact carrier identity, accepted criterion, immutable candidate and enforcement boundary to its ordered run events and execution-evidence digest. Source-policy regression fixtures may model such a verified receipt but do not execute or qualify a carrier. Caller-supplied labels, hashes, mocks, fixtures or indirect observations do not establish runtime boundary exercise. If no such evidence is available within authority, report incomplete evidence or a typed HOLD.
+
 ### G1 re-convergence
 
 G1_RECONVERGENCE is a read-only, leaf-only, non-gating G1-class root-model reconsideration/synthesis role that Web may invoke after bounded focused recovery fails to converge at the same/root-related boundary. It is not invoked automatically merely to avoid Web adjudication.
