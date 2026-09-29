@@ -2463,6 +2463,20 @@ function s1aOwnershipReadbackMatches(record) {
   return readback.digest === s1aHashRecord(core);
 }
 
+function s1aIdentityBoundaryComplete(policy, identityField, value) {
+  const requirement = policy.commonRecord.nestedRequiredFields.find((row) =>
+    row.record === identityField);
+  return Boolean(requirement && s1aHasExactKeys(value, requirement.fields) &&
+    requirement.fields.every((field) => s1aTypeMatches(value[field], 'NONEMPTY_STRING')));
+}
+
+function s1aOwnershipReadbackIdentityComplete(policy, readback) {
+  return Boolean(readback && typeof readback === 'object' && !Array.isArray(readback) &&
+    s1aTypeMatches(readback.repository, 'NONEMPTY_STRING') &&
+    s1aIdentityBoundaryComplete(policy, 'PACKET_IDENTITY', readback.packetIdentity) &&
+    s1aIdentityBoundaryComplete(policy, 'CANDIDATE_IDENTITY', readback.candidateIdentity));
+}
+
 function s1aValidateCommonFindingRecord(policy, record) {
   const failures = [];
   const rule = policy.commonRecord;
@@ -2483,8 +2497,10 @@ function s1aValidateCommonFindingRecord(policy, record) {
     const left = s1aPath(record, binding.left);
     const right = s1aPath(record, binding.right);
     if (!s1aTypeMatches(left, 'NONEMPTY_STRING') ||
-        !s1aTypeMatches(right, 'NONEMPTY_STRING') || !s1aSame(left, right)) {
+        !s1aTypeMatches(right, 'NONEMPTY_STRING')) {
       failures.push(rule.completenessObligation);
+    } else if (!s1aSame(left, right)) {
+      failures.push('COMMON_RECORD_NESTED_IDENTITY_BINDING:' + binding.left);
     }
   }
   if (record && S1A_ORACLE_DISPOSITIONS.includes(record.DISPOSITION) &&
@@ -2498,7 +2514,12 @@ function s1aValidateCommonFindingRecord(policy, record) {
   } else {
     failures.push(rule.completenessObligation);
   }
-  if (!s1aOwnershipReadbackMatches(record)) failures.push(rule.completenessObligation);
+  if (!s1aOwnershipReadbackIdentityComplete(policy, record && record.OWNER_READBACK)) {
+    failures.push(rule.completenessObligation);
+  }
+  if (!s1aOwnershipReadbackMatches(record)) {
+    failures.push('COMMON_RECORD_OWNER_READBACK_BINDING');
+  }
   return { ok: failures.length === 0, failures: [...new Set(failures)] };
 }
 
@@ -2633,7 +2654,7 @@ function makeS1aBlockerFixture() {
     record: { ...proofRecord, DETAIL_REF: detailRef },
     decision: s1aClone(S1A_ORACLE_WEB_ADMISSION_DECISION),
     companionProjection,
-    companionEntries: [{ ref: detailRef, record: proofRecord }],
+    companionEntries: [{ ref: detailRef, record: s1aClone(proofRecord) }],
     currentInventory: s1aClone(S1A_ORACLE_BLOCKER_COMPANION_INVENTORY)
   };
 }
@@ -2810,6 +2831,129 @@ function assertS1aOracleMismatch(source, scenarioId, obligation) {
 
 function s1aClone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function s1aSnapshot(value, references = new Map()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (references.has(value)) return references.get(value);
+  const copy = Array.isArray(value) ? [] : {};
+  references.set(value, copy);
+  for (const [key, child] of Object.entries(value)) copy[key] = s1aSnapshot(child, references);
+  return copy;
+}
+
+function s1aReadbackInputs(inputs) {
+  const readbacks = [];
+  const active = new Set();
+  const visit = (value, path, segments, insideReadback = false) => {
+    if (!value || typeof value !== 'object' || active.has(value)) return;
+    active.add(value);
+    if (insideReadback) {
+      readbacks.push({ path, segments, live: value, snapshot: s1aSnapshot(value) });
+    }
+    for (const [field, child] of Object.entries(value)) {
+      const childPath = path + '.' + field;
+      const childSegments = [...segments, field];
+      visit(child, childPath, childSegments,
+        insideReadback || /readback/i.test(field));
+    }
+    active.delete(value);
+  };
+  inputs.forEach((input, index) => visit(input, 'input' + index, [index]));
+  return readbacks;
+}
+
+function s1aInputValueAtPath(inputs, segments) {
+  return segments.reduce((value, segment) =>
+    value === null || value === undefined ? undefined : value[segment], inputs);
+}
+
+function s1aInputObjectReferences(inputs) {
+  const references = [];
+  const active = new Set();
+  const visit = (value, path, segments) => {
+    if (!value || typeof value !== 'object') return;
+    references.push({ path, segments, live: value });
+    if (active.has(value)) return;
+    active.add(value);
+    for (const [field, child] of Object.entries(value)) {
+      visit(child, path + '.' + field, [...segments, field]);
+    }
+    active.delete(value);
+  };
+  inputs.forEach((input, index) => visit(input, 'input' + index, [index]));
+  return references;
+}
+
+function s1aObserveInputPreservation(inputs, evaluate) {
+  const snapshots = inputs.map((input) => s1aSnapshot(input));
+  const readbacks = s1aReadbackInputs(inputs);
+  const objectReferences = s1aInputObjectReferences(inputs);
+  const result = evaluate();
+  const inputChecks = inputs.map((live, index) => ({
+    index,
+    unchanged: s1aSame(live, snapshots[index])
+  }));
+  const readbackChecks = readbacks.map((readback) => ({
+    path: readback.path,
+    unchanged: s1aSame(readback.live, readback.snapshot),
+    referenceUnchanged: s1aInputValueAtPath(inputs, readback.segments) === readback.live
+  }));
+  const referenceChecks = objectReferences.map((reference) => ({
+    path: reference.path,
+    unchanged: s1aInputValueAtPath(inputs, reference.segments) === reference.live
+  }));
+  return {
+    result,
+    snapshots,
+    readbacks,
+    inputChecks,
+    readbackChecks,
+    referenceChecks,
+    inputsUnchanged: inputChecks.every((check) => check.unchanged) &&
+      readbackChecks.every((check) => check.unchanged && check.referenceUnchanged) &&
+      referenceChecks.every((check) => check.unchanged)
+  };
+}
+
+function s1aObserveTransitionRejection(policy, request, canonicalRecord, trustedContext, evaluator) {
+  const inputObservation = s1aObserveInputPreservation(
+    [policy, request, canonicalRecord, trustedContext],
+    () => evaluator ? evaluator(policy, request, canonicalRecord, trustedContext)
+      : evaluateS1aTransition(policy, request.disposition, request.lifecycle,
+        request.event, canonicalRecord, trustedContext));
+  const canonicalSnapshot = inputObservation.snapshots[2];
+  const expectedCanonicalState = {
+    disposition: canonicalSnapshot && canonicalSnapshot.DISPOSITION,
+    lifecycle: canonicalSnapshot && canonicalSnapshot.LIFECYCLE
+  };
+  const returnedCanonicalState = {
+    disposition: inputObservation.result && inputObservation.result.disposition,
+    lifecycle: inputObservation.result && inputObservation.result.lifecycle
+  };
+  const observerFailures = [];
+  if (!inputObservation.inputsUnchanged) observerFailures.push('EVALUATOR_MUTATED_INPUT');
+  if (!s1aSame(returnedCanonicalState, expectedCanonicalState)) {
+    observerFailures.push('RETURNED_STATE_DIFFERS_FROM_PRE_CALL_CANONICAL');
+  }
+  if (!inputObservation.result || inputObservation.result.ok !== false) {
+    observerFailures.push('EXPECTED_REJECTION');
+  }
+  if (!inputObservation.result || inputObservation.result.transition !== null) {
+    observerFailures.push('REJECTION_TRANSITION_NOT_NULL');
+  }
+  if (!inputObservation.result || !Array.isArray(inputObservation.result.mutationEffects) ||
+      inputObservation.result.mutationEffects.length !== 0) {
+    observerFailures.push('REJECTION_HAS_MUTATION_EFFECTS');
+  }
+  return {
+    ...inputObservation,
+    canonicalSnapshot,
+    expectedCanonicalState,
+    returnedCanonicalState,
+    observerFailures,
+    observerPassed: observerFailures.length === 0
+  };
 }
 
 function s1aHashRecord(record) {
@@ -3283,7 +3427,6 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
     s1aHasExactKeys(inventoryPacketIdentity, packetIdentityFields) &&
     packetIdentityFields.every((field) =>
       s1aTypeMatches(inventoryPacketIdentity[field], 'NONEMPTY_STRING')) &&
-    inventoryPacketIdentity.repository === currentInventory.repository &&
     Array.isArray(inventoryCandidateIdentities) &&
     inventoryCandidateIdentities.every((identity) =>
       s1aHasExactKeys(identity, candidateIdentityFields) &&
@@ -3350,6 +3493,12 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
     }
   }
   for (const projection of projections) {
+    if (!s1aIdentityBoundaryComplete(policy, 'PACKET_IDENTITY',
+      projection && projection.PACKET_IDENTITY) ||
+        !s1aIdentityBoundaryComplete(policy, 'CANDIDATE_IDENTITY',
+          projection && projection.CANDIDATE_IDENTITY)) {
+      failures.push(policy.commonRecord.completenessObligation);
+    }
     const ref = projection[refField];
     const matches = entries.filter((entry) => entry[recordRefField] === ref);
     if (!s1aPresent(ref) || matches.length !== 1) {
@@ -4148,12 +4297,22 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, tr
   }
   const safeTrustedContext = trustedContext && typeof trustedContext === 'object' &&
     !Array.isArray(trustedContext) ? trustedContext : {};
-  if (event === 'TRANSFER' && !s1aOwnershipTransferReadbackMatches(safeDetail,
-    safeTrustedContext.currentOwnershipReadback)) {
-    failures.push('LIFECYCLE_OWNER_TRANSFER_READBACK');
+  if (event === 'TRANSFER') {
+    if (!s1aOwnershipReadbackIdentityComplete(policy,
+      safeTrustedContext.currentOwnershipReadback)) {
+      failures.push(policy.commonRecord.completenessObligation);
+    }
+    if (!s1aOwnershipTransferReadbackMatches(safeDetail,
+      safeTrustedContext.currentOwnershipReadback)) {
+      failures.push('LIFECYCLE_OWNER_TRANSFER_READBACK');
+    }
   }
   if (event === 'VERIFIED_CLOSURE') {
     const closure = safeDetail.closureReadback;
+    if (!s1aIdentityBoundaryComplete(policy, 'CANDIDATE_IDENTITY',
+      closure && closure.candidateIdentity)) {
+      failures.push(policy.commonRecord.completenessObligation);
+    }
     if (closure && s1aPresent(closure.fromLifecycle) &&
         s1aPresent(safeDetail.LIFECYCLE) && closure.fromLifecycle !== safeDetail.LIFECYCLE) {
       failures.push(policy.commonRecord.transitionConsistencyObligation);
@@ -4163,9 +4322,11 @@ function evaluateS1aTransition(policy, disposition, lifecycle, event, detail, tr
     const closureCommonRecord = closure && closure[policy.closureVerification.commonRecordField];
     const canonicalCommonRecord = Object.fromEntries(policy.commonRecord.requiredFields
       .map((field) => [field, safeDetail[field]]));
-    const closureCommonRecordValid = s1aHasExactKeys(closureCommonRecord, policy.commonRecord.requiredFields) &&
-      s1aValidateCommonFindingRecord(policy, closureCommonRecord).ok;
-    if (!closureCommonRecordValid) {
+    const closureCommonRecordValidation = s1aValidateCommonFindingRecord(policy, closureCommonRecord);
+    const closureCommonRecordComplete = s1aHasExactKeys(closureCommonRecord,
+      policy.commonRecord.requiredFields) &&
+      !closureCommonRecordValidation.failures.includes(policy.commonRecord.completenessObligation);
+    if (!closureCommonRecordComplete) {
       failures.push(policy.commonRecord.completenessObligation);
     } else if (!s1aSame(canonicalCommonRecord, closureCommonRecord)) {
       failures.push(policy.commonRecord.transitionConsistencyObligation);
@@ -4226,11 +4387,14 @@ const S1A_TARGET_F2_SURFACES = Object.freeze([
   'common-defer',
   'owner-readback',
   'companion-current-record',
+  'companion-projection',
   'companion-history-record',
   'inventory-header',
   'transfer-record',
+  'transfer-trusted-readback',
   'closure-source-record',
   'closure-common-record',
+  'closure-top-level',
   'blocker-record',
   'blocker-companion-record'
 ]);
@@ -4279,6 +4443,16 @@ function s1aRefreshCurrentCompanionFixture(fixture, revision) {
   });
 }
 
+function s1aRefreshIsolatedCurrentCompanionRecord(fixture, index, revision) {
+  const entry = fixture.entries[index];
+  entry.ref = s1aHashRecord(entry.record);
+  fixture.projections[index].DETAIL_REF = entry.ref;
+  fixture.currentInventory.revision = revision;
+  fixture.currentInventory.records = s1aClone(fixture.entries);
+  fixture.currentInventory.digest = s1aHashWithoutField(
+    fixture.currentInventory, 'digest');
+}
+
 function s1aRefreshHistoryFixture(historyLedger) {
   for (const entry of historyLedger.records) entry.ref = s1aHashRecord(entry.record);
   const core = {
@@ -4317,6 +4491,11 @@ function s1aMatrixTransitionContext(event) {
   } : undefined;
 }
 
+function s1aAcceptedTransitionBaseline(policy, record, event) {
+  return evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
+    event, record, s1aMatrixTransitionContext(event));
+}
+
 function s1aMatrixRecordForEvent(event, disposition = 'FUTURE_OWNED', lifecycle = 'UNRESOLVED') {
   let record;
   if (event === 'TRANSFER') {
@@ -4352,7 +4531,11 @@ function s1aMatrixBlockerResult(policy, fixture) {
 function s1aApplyTargetIdentityEdit(parent, identity, edit) {
   const alias = identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity';
   const field = Object.prototype.hasOwnProperty.call(parent, identity) ? identity : alias;
+  const before = s1aSnapshot(parent[field]);
   edit(parent, field);
+  if (s1aSame(before, parent[field])) {
+    throw new Error('identity mutation did not occur for ' + identity);
+  }
 }
 
 function s1aApplyTargetLeafMutation(parent, identity, field, mutation) {
@@ -4363,9 +4546,15 @@ function s1aApplyTargetLeafMutation(parent, identity, field, mutation) {
   mutation.apply(parent, identity, field);
 }
 
+function s1aTargetIdentitiesForSurface(surface) {
+  return surface === 'closure-top-level'
+    ? ['CANDIDATE_IDENTITY'] : ['PACKET_IDENTITY', 'CANDIDATE_IDENTITY'];
+}
+
 function s1aRunF2IdentitySurface(policy, surface, identity, edit) {
   let baseline;
   let result;
+  let observation;
   if (surface === 'common-defer' || surface === 'owner-readback' ||
       surface === 'transfer-record' || surface === 'closure-source-record') {
     const event = surface === 'transfer-record' ? 'TRANSFER'
@@ -4380,9 +4569,22 @@ function s1aRunF2IdentitySurface(policy, surface, identity, edit) {
     const parent = surface === 'owner-readback' ? record.OWNER_READBACK : record;
     s1aApplyTargetIdentityEdit(parent, identity, edit);
     if (surface === 'owner-readback') s1aRefreshReadbackDigest(record.OWNER_READBACK);
-    else s1aRefreshCommonOwnerReadback(record);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      event, record, trusted);
+    observation = s1aObserveTransitionRejection(policy, {
+      disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event
+    }, record, trusted);
+    result = observation.result;
+  } else if (surface === 'transfer-trusted-readback') {
+    const record = makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY);
+    const trusted = { currentOwnershipReadback:
+      s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) };
+    baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
+      'TRANSFER', record, trusted);
+    s1aApplyTargetIdentityEdit(trusted.currentOwnershipReadback, identity, edit);
+    s1aRefreshReadbackDigest(trusted.currentOwnershipReadback);
+    observation = s1aObserveTransitionRejection(policy, {
+      disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event: 'TRANSFER'
+    }, record, trusted);
+    result = observation.result;
   } else if (surface === 'companion-current-record' ||
       surface === 'inventory-header' || surface === 'companion-history-record') {
     const fixture = makeS1aCompanionFixture();
@@ -4402,71 +4604,114 @@ function s1aRunF2IdentitySurface(policy, surface, identity, edit) {
     } else if (surface === 'companion-history-record') {
       const record = fixture.historyLedger.records[0].record;
       s1aApplyTargetIdentityEdit(record, identity, edit);
-      s1aRefreshCommonOwnerReadback(record);
       s1aRefreshHistoryFixture(fixture.historyLedger);
     } else {
       const record = fixture.entries[0].record;
       s1aApplyTargetIdentityEdit(record, identity, edit);
-      s1aRefreshCommonOwnerReadback(record);
-      s1aRefreshCurrentCompanionFixture(fixture, 'web:inventory-revision-target-f2');
+      s1aRefreshIsolatedCurrentCompanionRecord(fixture, 0,
+        'web:inventory-revision-target-f2');
     }
-    result = s1aMatrixCompanionResult(policy, fixture);
+    observation = s1aObserveInputPreservation(
+      [policy, fixture.projections, fixture.entries, fixture.historyLedger, fixture.currentInventory],
+      () => s1aMatrixCompanionResult(policy, fixture));
+    result = observation.result;
+  } else if (surface === 'companion-projection') {
+    const fixture = makeS1aCompanionFixture();
+    baseline = s1aMatrixCompanionResult(policy, fixture);
+    s1aApplyTargetIdentityEdit(fixture.projections[0], identity, edit);
+    observation = s1aObserveInputPreservation(
+      [policy, fixture.projections, fixture.entries, fixture.historyLedger, fixture.currentInventory],
+      () => s1aMatrixCompanionResult(policy, fixture));
+    result = observation.result;
   } else if (surface === 'closure-common-record') {
     const record = s1aMatrixClosureRecord();
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'VERIFIED_CLOSURE', record);
     const commonRecord = record.closureReadback.commonRecord;
     s1aApplyTargetIdentityEdit(commonRecord, identity, edit);
-    s1aRefreshCommonOwnerReadback(commonRecord);
     s1aRefreshClosureReadback(record.closureReadback);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
+    observation = s1aObserveTransitionRejection(policy, {
+      disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event: 'VERIFIED_CLOSURE'
+    }, record);
+    result = observation.result;
+  } else if (surface === 'closure-top-level') {
+    const record = s1aMatrixClosureRecord();
+    baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'VERIFIED_CLOSURE', record);
+    s1aApplyTargetIdentityEdit(record.closureReadback, identity, edit);
+    s1aRefreshClosureReadback(record.closureReadback);
+    observation = s1aObserveTransitionRejection(policy, {
+      disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event: 'VERIFIED_CLOSURE'
+    }, record);
+    result = observation.result;
   } else if (surface === 'blocker-record') {
     const fixture = makeS1aBlockerFixture();
     baseline = s1aMatrixBlockerResult(policy, fixture);
     s1aApplyTargetIdentityEdit(fixture.record, identity, edit);
-    s1aRefreshCommonOwnerReadback(fixture.record);
-    refreshS1aBlockerFixture(fixture, true);
-    result = s1aMatrixBlockerResult(policy, fixture);
+    const detailRef = fixture.companionEntries[0].ref;
+    fixture.record.DETAIL_REF = detailRef;
+    fixture.decision.detailRef = detailRef;
+    s1aRefreshWebAdmissionReadback(fixture.decision);
+    observation = s1aObserveInputPreservation(
+      [policy, fixture.record, fixture.decision, fixture.companionProjection,
+        fixture.companionEntries, fixture.currentInventory],
+      () => s1aMatrixBlockerResult(policy, fixture));
+    result = observation.result;
   } else if (surface === 'blocker-companion-record') {
     const fixture = makeS1aBlockerFixture();
     baseline = s1aMatrixBlockerResult(policy, fixture);
+    const primaryIdentitySnapshot = s1aSnapshot({
+      PACKET_IDENTITY: fixture.record.PACKET_IDENTITY,
+      CANDIDATE_IDENTITY: fixture.record.CANDIDATE_IDENTITY
+    });
     const record = fixture.companionEntries[0].record;
     s1aApplyTargetIdentityEdit(record, identity, edit);
-    s1aRefreshCommonOwnerReadback(record);
     const ref = s1aHashRecord(record);
     fixture.companionEntries = [{ ref, record: s1aClone(record) }];
-    fixture.companionProjection = makeS1aCompanionProjection(record, ref, {
-      TWO_WAY: 'SHIP_BLOCKER', V1: 'BLOCKING'
-    });
-    fixture.currentInventory = makeS1aCurrentCompanionInventory(
-      [record], 'web:inventory-revision-target-blocker-f2');
+    fixture.companionProjection.DETAIL_REF = ref;
+    fixture.currentInventory.revision = 'web:inventory-revision-target-blocker-f2';
+    fixture.currentInventory.records = s1aClone(fixture.companionEntries);
+    fixture.currentInventory.digest = s1aHashWithoutField(
+      fixture.currentInventory, 'digest');
     fixture.record.DETAIL_REF = ref;
     fixture.decision.detailRef = ref;
     s1aRefreshWebAdmissionReadback(fixture.decision);
-    result = s1aMatrixBlockerResult(policy, fixture);
+    if (!s1aSame(primaryIdentitySnapshot, {
+      PACKET_IDENTITY: fixture.record.PACKET_IDENTITY,
+      CANDIDATE_IDENTITY: fixture.record.CANDIDATE_IDENTITY
+    })) {
+      throw new Error('blocker companion mutation aliased the primary proof record');
+    }
+    observation = s1aObserveInputPreservation(
+      [policy, fixture.record, fixture.decision, fixture.companionProjection,
+        fixture.companionEntries, fixture.currentInventory],
+      () => s1aMatrixBlockerResult(policy, fixture));
+    result = observation.result;
   } else {
     throw new Error('unknown F2 surface: ' + surface);
   }
-  return { baseline, result };
+  return { baseline, result, observation, mutationProven: true };
 }
 
 function s1aBuildF2IdentityRows(policy) {
   const rows = [];
   for (const surface of S1A_TARGET_F2_SURFACES) {
-    for (const item of S1A_TARGET_IDENTITY_LEAVES) {
-      for (const mutation of S1A_TARGET_LEAF_MUTATIONS) {
-        rows.push({
-          id: 'F2/' + surface + '/' + item.identity + '.' + item.field + '/' + mutation.id,
-          category: 'F2',
-          run: () => s1aRunF2IdentitySurface(policy, surface, item.identity,
-            (parent, identity) => s1aApplyTargetLeafMutation(parent, identity, item.field, mutation))
-        });
+    for (const identity of s1aTargetIdentitiesForSurface(surface)) {
+      for (const item of S1A_TARGET_IDENTITY_LEAVES.filter((row) => row.identity === identity)) {
+        for (const mutation of S1A_TARGET_LEAF_MUTATIONS) {
+          rows.push({
+            id: 'F2/' + surface + '/' + item.identity + '.' + item.field + '/' + mutation.id,
+            category: 'F2',
+            run: () => s1aRunF2IdentitySurface(policy, surface, item.identity,
+              (parent, identityField) =>
+                s1aApplyTargetLeafMutation(parent, identityField, item.field, mutation))
+          });
+        }
       }
     }
   }
   for (const surface of S1A_TARGET_F2_SURFACES) {
-    for (const identity of ['PACKET_IDENTITY', 'CANDIDATE_IDENTITY']) {
+    for (const identity of s1aTargetIdentitiesForSurface(surface)) {
       rows.push({
         id: 'F2/' + surface + '/' + identity + '/missing-object',
         category: 'F2',
@@ -4475,22 +4720,11 @@ function s1aBuildF2IdentityRows(policy) {
       });
     }
   }
-  for (const surface of S1A_TARGET_F2_SURFACES) {
-    rows.push({
-      id: 'F2/' + surface + '/PACKET_IDENTITY.repository-common-mismatch',
-      category: 'F2',
-      run: () => s1aRunF2IdentitySurface(policy, surface, 'PACKET_IDENTITY',
-        (parent) => {
-          const field = Object.prototype.hasOwnProperty.call(parent, 'PACKET_IDENTITY')
-            ? 'PACKET_IDENTITY' : 'packetIdentity';
-          if (!parent[field] || typeof parent[field] !== 'object' ||
-              Array.isArray(parent[field])) throw new Error('packet identity is not mutable');
-          parent[field].repository = 'other/repository';
-        })
-    });
-  }
-  for (const surface of ['common-defer', 'companion-current-record', 'blocker-record']) {
-    for (const identity of ['PACKET_IDENTITY', 'CANDIDATE_IDENTITY']) {
+  for (const surface of [
+    'common-defer', 'companion-current-record', 'blocker-record',
+    'transfer-trusted-readback', 'companion-projection', 'closure-top-level'
+  ]) {
+    for (const identity of s1aTargetIdentitiesForSurface(surface)) {
       for (const shape of S1A_TARGET_BAD_IDENTITY_SHAPES) {
         rows.push({
           id: 'F2/' + surface + '/' + identity + '/shape-' + shape.id,
@@ -4504,7 +4738,10 @@ function s1aBuildF2IdentityRows(policy) {
   for (const [surface, identity, extraField] of [
     ['common-defer', 'PACKET_IDENTITY', 'callerField'],
     ['companion-current-record', 'CANDIDATE_IDENTITY', 'callerField'],
-    ['blocker-record', 'PACKET_IDENTITY', 'callerField']
+    ['blocker-record', 'PACKET_IDENTITY', 'callerField'],
+    ['transfer-trusted-readback', 'PACKET_IDENTITY', 'callerField'],
+    ['companion-projection', 'CANDIDATE_IDENTITY', 'callerField'],
+    ['closure-top-level', 'CANDIDATE_IDENTITY', 'callerField']
   ]) {
     rows.push({
       id: 'F2/' + surface + '/' + identity + '/extra-own-field',
@@ -4524,98 +4761,135 @@ function s1aRunBindingCopySurface(policy, surface, identity, field, coherent) {
   const changed = 'caller-copy:' + field;
   let baseline;
   let result;
+  let observation;
+  let mutationProven = false;
+  const mutate = (target, update) => {
+    const before = s1aSnapshot(target);
+    update();
+    if (s1aSame(before, target)) throw new Error('binding-copy mutation did not occur');
+    mutationProven = true;
+  };
+  const observeTransition = (event, record, trustedContext) =>
+    s1aObserveTransitionRejection(policy, {
+      disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event
+    }, record, trustedContext);
+  const observeCompanions = (fixture) => s1aObserveInputPreservation(
+    [policy, fixture.projections, fixture.entries, fixture.historyLedger, fixture.currentInventory],
+    () => s1aMatrixCompanionResult(policy, fixture));
+  const observeBlocker = (fixture) => s1aObserveInputPreservation(
+    [policy, fixture.record, fixture.decision, fixture.companionProjection,
+      fixture.companionEntries, fixture.currentInventory],
+    () => s1aMatrixBlockerResult(policy, fixture));
   if (surface === 'owner-readback') {
     const record = makeS1aCommonFindingFields({});
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'DEFER', record);
-    record.OWNER_READBACK[identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'][field] = changed;
+    const identityRecord = record.OWNER_READBACK[
+      identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) s1aRefreshReadbackDigest(record.OWNER_READBACK);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      'DEFER', record);
+    observation = observeTransition('DEFER', record);
+    result = observation.result;
   } else if (surface === 'companion-projection') {
     const fixture = makeS1aCompanionFixture();
     baseline = s1aMatrixCompanionResult(policy, fixture);
     if (coherent) {
-      fixture.entries[0].record[identity][field] = changed;
+      const identityRecord = fixture.entries[0].record[identity];
+      mutate(identityRecord, () => { identityRecord[field] = changed; });
       s1aRefreshCommonOwnerReadback(fixture.entries[0].record);
       s1aRefreshCurrentCompanionFixture(fixture, 'web:inventory-revision-binding-copy');
     } else {
-      fixture.projections[0][identity][field] = changed;
+      const identityRecord = fixture.projections[0][identity];
+      mutate(identityRecord, () => { identityRecord[field] = changed; });
     }
-    result = s1aMatrixCompanionResult(policy, fixture);
+    observation = observeCompanions(fixture);
+    result = observation.result;
   } else if (surface === 'inventory-header') {
     const fixture = makeS1aCompanionFixture();
     baseline = s1aMatrixCompanionResult(policy, fixture);
-    if (identity === 'PACKET_IDENTITY') {
-      fixture.currentInventory.packetIdentity[field] = changed;
-    } else {
-      fixture.currentInventory.candidateIdentities[0][field] = changed;
-    }
+    const identityRecord = identity === 'PACKET_IDENTITY'
+      ? fixture.currentInventory.packetIdentity
+      : fixture.currentInventory.candidateIdentities[0];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) fixture.currentInventory.digest =
       s1aHashWithoutField(fixture.currentInventory, 'digest');
-    result = s1aMatrixCompanionResult(policy, fixture);
+    observation = observeCompanions(fixture);
+    result = observation.result;
   } else if (surface === 'transfer-owner-readback') {
     const record = makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY);
     const trusted = s1aMatrixTransitionContext('TRANSFER');
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'TRANSFER', record, trusted);
-    record.OWNER_READBACK[identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'][field] = changed;
+    const identityRecord = record.OWNER_READBACK[
+      identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) s1aRefreshReadbackDigest(record.OWNER_READBACK);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      'TRANSFER', record, trusted);
+    observation = observeTransition('TRANSFER', record, trusted);
+    result = observation.result;
   } else if (surface === 'transfer-trusted-readback') {
     const record = makeS1aCommonFindingFields(S1A_ORACLE_TRANSFER_FINDING_IDENTITY);
     const context = { currentOwnershipReadback: s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) };
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'TRANSFER', record, context);
-    context.currentOwnershipReadback[identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'][field] = changed;
+    const identityRecord = context.currentOwnershipReadback[
+      identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity'];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) s1aRefreshReadbackDigest(context.currentOwnershipReadback);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      'TRANSFER', record, context);
+    observation = observeTransition('TRANSFER', record, context);
+    result = observation.result;
   } else if (surface === 'closure-top-level') {
     const record = s1aMatrixClosureRecord();
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'VERIFIED_CLOSURE', record);
     const closure = record.closureReadback;
-    if (identity === 'PACKET_IDENTITY') closure.repository = changed;
-    else closure.candidateIdentity[field] = changed;
+    if (identity === 'PACKET_IDENTITY') {
+      mutate(closure, () => { closure.repository = changed; });
+    } else {
+      const identityRecord = closure.candidateIdentity;
+      mutate(identityRecord, () => { identityRecord[field] = changed; });
+    }
     if (coherent) s1aRefreshClosureReadback(closure);
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      'VERIFIED_CLOSURE', record);
+    observation = observeTransition('VERIFIED_CLOSURE', record);
+    result = observation.result;
   } else if (surface === 'closure-common-record') {
     const record = s1aMatrixClosureRecord();
     baseline = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
       'VERIFIED_CLOSURE', record);
     const commonRecord = record.closureReadback.commonRecord;
-    commonRecord[identity][field] = changed;
+    const identityRecord = commonRecord[identity];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) {
       s1aRefreshCommonOwnerReadback(commonRecord);
       s1aRefreshClosureReadback(record.closureReadback);
     }
-    result = evaluateS1aTransition(policy, record.DISPOSITION, record.LIFECYCLE,
-      'VERIFIED_CLOSURE', record);
+    observation = observeTransition('VERIFIED_CLOSURE', record);
+    result = observation.result;
   } else if (surface === 'admission-decision') {
     const fixture = makeS1aBlockerFixture();
     baseline = s1aMatrixBlockerResult(policy, fixture);
     const decisionField = identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity';
-    fixture.decision[decisionField][field] = changed;
+    const identityRecord = fixture.decision[decisionField];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) s1aRefreshWebAdmissionReadback(fixture.decision);
-    result = s1aMatrixBlockerResult(policy, fixture);
+    observation = observeBlocker(fixture);
+    result = observation.result;
   } else if (surface === 'blocker-record') {
     const fixture = makeS1aBlockerFixture();
     baseline = s1aMatrixBlockerResult(policy, fixture);
-    fixture.record[identity][field] = changed;
+    const identityRecord = fixture.record[identity];
+    mutate(identityRecord, () => { identityRecord[field] = changed; });
     if (coherent) {
       s1aRefreshCommonOwnerReadback(fixture.record);
       const decisionField = identity === 'PACKET_IDENTITY' ? 'packetIdentity' : 'candidateIdentity';
       fixture.decision[decisionField] = s1aClone(fixture.record[identity]);
       refreshS1aBlockerFixture(fixture, true);
     }
-    result = s1aMatrixBlockerResult(policy, fixture);
+    observation = observeBlocker(fixture);
+    result = observation.result;
   } else {
     throw new Error('unknown binding/copy surface: ' + surface);
   }
-  return { baseline, result };
+  return { baseline, result, observation, mutationProven };
 }
 
 function s1aBuildBindingCopyRows(policy) {
@@ -4663,51 +4937,60 @@ function s1aBuildBindingCopyRows(policy) {
 
 function s1aMakeF1Rows(policy) {
   const rows = [];
+  const addObservedRow = (spec) => {
+    const event = spec.event || spec.request.event;
+    const trustedContext = s1aMatrixTransitionContext(event);
+    const observation = s1aObserveTransitionRejection(spec.effectivePolicy || policy,
+      spec.request, spec.record, trustedContext);
+    rows.push({
+      ...spec,
+      category: 'F1',
+      canonicalRecord: observation.canonicalSnapshot,
+      observation,
+      result: observation.result
+    });
+  };
   for (const event of ['DEFER', 'TRANSFER', 'VERIFIED_CLOSURE']) {
     for (const lifecycle of ['UNRESOLVED', 'RESOLVED']) {
-      for (const disposition of ['FUTURE_OWNED', 'CURRENT_SHIP_BLOCKER', 'OBSERVE']) {
-        const record = s1aMatrixRecordForEvent(event, disposition, lifecycle);
-        const requestedLifecycle = lifecycle === 'UNRESOLVED' ? 'RESOLVED' : 'UNRESOLVED';
-        rows.push({
-          id: 'F1/' + event + '/lifecycle-' + lifecycle + '-request-' + requestedLifecycle +
-            '/' + disposition,
-          category: 'F1',
-          canonicalRecord: record,
-          baseline: s1aValidateCommonFindingRecord(policy, record),
-          result: evaluateS1aTransition(policy, record.DISPOSITION,
-            requestedLifecycle, event, record, s1aMatrixTransitionContext(event))
-        });
+      if (event === 'VERIFIED_CLOSURE' && lifecycle === 'RESOLVED') continue;
+      const record = s1aMatrixRecordForEvent(event, 'FUTURE_OWNED', 'UNRESOLVED');
+      const baseline = s1aAcceptedTransitionBaseline(policy, record, event);
+      if (lifecycle === 'RESOLVED') {
+        record.LIFECYCLE = 'RESOLVED';
+        record.RESOLUTION = 'RESOLVED';
+        s1aRefreshCommonOwnerReadback(record);
       }
-    }
-  }
-  for (const event of ['DEFER', 'TRANSFER', 'VERIFIED_CLOSURE']) {
-    for (const [canonicalDisposition, requestDisposition] of [
-      ['FUTURE_OWNED', 'CURRENT_SHIP_BLOCKER'],
-      ['CURRENT_SHIP_BLOCKER', 'FUTURE_OWNED']
-    ]) {
-      const record = s1aMatrixRecordForEvent(event, canonicalDisposition, 'UNRESOLVED');
-      rows.push({
-        id: 'F1/' + event + '/disposition-' + canonicalDisposition + '-request-' + requestDisposition,
-        category: 'F1',
-        canonicalRecord: record,
-        baseline: s1aValidateCommonFindingRecord(policy, record),
-        result: evaluateS1aTransition(policy, requestDisposition,
-          'UNRESOLVED', event, record, s1aMatrixTransitionContext(event))
+      const requestedLifecycle = lifecycle === 'UNRESOLVED' ? 'RESOLVED' : 'UNRESOLVED';
+      addObservedRow({
+        id: 'F1/' + event + '/lifecycle-' + lifecycle + '-request-' + requestedLifecycle +
+          '/FUTURE_OWNED',
+        record,
+        request: { disposition: 'FUTURE_OWNED', lifecycle: requestedLifecycle, event },
+        baseline
       });
     }
   }
   for (const event of ['DEFER', 'TRANSFER', 'VERIFIED_CLOSURE']) {
+    const record = s1aMatrixRecordForEvent(event, 'FUTURE_OWNED', 'UNRESOLVED');
+    const baseline = s1aAcceptedTransitionBaseline(policy, record, event);
+    addObservedRow({
+      id: 'F1/' + event + '/disposition-FUTURE_OWNED-request-CURRENT_SHIP_BLOCKER',
+      record,
+      request: { disposition: 'CURRENT_SHIP_BLOCKER', lifecycle: 'UNRESOLVED', event },
+      baseline
+    });
+  }
+  for (const event of ['DEFER', 'TRANSFER']) {
     const record = s1aMatrixRecordForEvent(event);
+    const baseline = s1aAcceptedTransitionBaseline(policy, record, event);
     record.DISPOSITION = 'OBSERVE';
     record.ADJUDICATION = 'OBSERVE';
     s1aRefreshCommonOwnerReadback(record);
-    rows.push({
+    addObservedRow({
       id: 'F1/' + event + '/coherently-rehashed-disposition-request',
-      category: 'F1',
-      canonicalRecord: record,
-      baseline: s1aValidateCommonFindingRecord(policy, record),
-      result: evaluateS1aTransition(policy, 'FUTURE_OWNED',
-        'UNRESOLVED', event, record, s1aMatrixTransitionContext(event))
+      record,
+      request: { disposition: 'FUTURE_OWNED', lifecycle: 'UNRESOLVED', event },
+      baseline
     });
   }
   const conflictingState = (record) => ({
@@ -4727,58 +5010,329 @@ function s1aMakeF1Rows(policy) {
         request: (record) => ({ policy, ...conflictingState(record), event: 'EARLY_REJECTED_EVENT' }) }
     ]) {
       const record = s1aMatrixRecordForEvent(event);
+      const trustedContext = s1aMatrixTransitionContext(event);
       const baseline = evaluateS1aTransition(policy, record.DISPOSITION,
-        record.LIFECYCLE, event, record, s1aMatrixTransitionContext(event));
-      const request = early.request(record);
+        record.LIFECYCLE, event, record, trustedContext);
+      const requestValues = early.request(record);
+      const request = {
+        disposition: requestValues.disposition,
+        lifecycle: requestValues.lifecycle,
+        event: requestValues.event
+      };
+      const observation = s1aObserveTransitionRejection(requestValues.policy, request,
+        record, s1aMatrixTransitionContext(event));
+      const requestSnapshot = observation.snapshots[1];
       rows.push({
         id: 'F1/' + event + '/early-' + early.id,
         category: 'F1',
         earlyFailure: early.expected,
-        canonicalRecord: record,
+        canonicalRecord: observation.canonicalSnapshot,
         baseline,
-        requestStateContradiction: request.disposition !== record.DISPOSITION &&
-          request.lifecycle !== record.LIFECYCLE,
-        result: evaluateS1aTransition(request.policy, request.disposition,
-          request.lifecycle, request.event, record, s1aMatrixTransitionContext(event))
+        requestStateContradiction: requestSnapshot.disposition !== observation.canonicalSnapshot.DISPOSITION &&
+          requestSnapshot.lifecycle !== observation.canonicalSnapshot.LIFECYCLE,
+        observation,
+        result: observation.result
       });
     }
   }
   for (const event of ['DEFER', 'TRANSFER', 'VERIFIED_CLOSURE']) {
     for (const inconsistency of ['adjudication', 'resolution']) {
       const record = s1aMatrixRecordForEvent(event);
-      const baseline = s1aValidateCommonFindingRecord(policy, record);
+      const baseline = s1aAcceptedTransitionBaseline(policy, record, event);
       if (inconsistency === 'adjudication') {
         record.ADJUDICATION = 'OBSERVE';
       } else {
         record.RESOLUTION = 'RESOLVED';
       }
       s1aRefreshCommonOwnerReadback(record);
-      rows.push({
+      addObservedRow({
         id: 'F1/' + event + '/final-canonical-' + inconsistency + '-mismatch',
-        category: 'F1',
-        canonicalRecord: record,
-        baseline,
-        result: evaluateS1aTransition(policy, record.DISPOSITION,
-          record.LIFECYCLE, event, record, s1aMatrixTransitionContext(event))
+        record,
+        request: { disposition: record.DISPOSITION, lifecycle: record.LIFECYCLE, event },
+        baseline
       });
     }
   }
   const closureRecord = s1aMatrixRecordForEvent('VERIFIED_CLOSURE');
-  const closureBaseline = s1aValidateCommonFindingRecord(policy, closureRecord);
+  const closureBaseline = s1aAcceptedTransitionBaseline(policy, closureRecord,
+    'VERIFIED_CLOSURE');
   closureRecord.closureReadback.commonRecord.PACKET_IDENTITY.packetId =
     'packet:coherently-rebound-closure';
   s1aRefreshCommonOwnerReadback(closureRecord.closureReadback.commonRecord);
   s1aRefreshClosureReadback(closureRecord.closureReadback);
-  rows.push({
+  addObservedRow({
     id: 'F1/VERIFIED_CLOSURE/final-coherently-rehashed-common-record',
-    category: 'F1',
-    canonicalRecord: closureRecord,
-    baseline: closureBaseline,
-    result: evaluateS1aTransition(policy, closureRecord.DISPOSITION,
-      closureRecord.LIFECYCLE, 'VERIFIED_CLOSURE', closureRecord)
+    record: closureRecord,
+    request: { disposition: closureRecord.DISPOSITION,
+      lifecycle: closureRecord.LIFECYCLE, event: 'VERIFIED_CLOSURE' },
+    baseline: closureBaseline
   });
   return rows;
 }
+
+test('S1-A F1 observer snapshots canonical, request, and authoritative readbacks independently', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const makePassingTransfer = () => {
+    const canonicalRecord = s1aMatrixRecordForEvent('TRANSFER');
+    const trustedContext = { currentOwnershipReadback:
+      s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) };
+    const baseline = evaluateS1aTransition(policy, canonicalRecord.DISPOSITION,
+      canonicalRecord.LIFECYCLE, 'TRANSFER', canonicalRecord, trustedContext);
+    assert.equal(baseline.ok, true, 'each observer mutation control starts from passing TRANSFER');
+    return { canonicalRecord, trustedContext };
+  };
+  const request = { disposition: 'OBSERVE', lifecycle: 'RESOLVED', event: 'TRANSFER' };
+  const rejectedF1 = (canonicalRecord) => ({
+    ok: false,
+    disposition: canonicalRecord.DISPOSITION,
+    lifecycle: canonicalRecord.LIFECYCLE,
+    transition: null,
+    mutationEffects: [],
+    failures: ['F1_RECORD_TRANSITION_CONSISTENCY']
+  });
+
+  const canonicalCase = makePassingTransfer();
+  const canonicalMutant = (inputPolicy, inputRequest, canonicalRecord) => {
+    canonicalRecord.DISPOSITION = inputRequest.disposition;
+    canonicalRecord.LIFECYCLE = inputRequest.lifecycle;
+    return rejectedF1(canonicalRecord);
+  };
+  const canonicalObservation = s1aObserveTransitionRejection(policy, { ...request },
+    canonicalCase.canonicalRecord, canonicalCase.trustedContext, canonicalMutant);
+  assert.equal(canonicalObservation.result.ok, false,
+    'the exact G4 mutant still returns rejected F1');
+  assert.deepEqual(canonicalObservation.expectedCanonicalState,
+    { disposition: 'FUTURE_OWNED', lifecycle: 'UNRESOLVED' },
+    'expected state comes from the independent pre-call canonical snapshot');
+  assert.equal(canonicalCase.canonicalRecord.DISPOSITION, 'OBSERVE',
+    'the canonical mutation is present');
+  assert.equal(canonicalCase.canonicalRecord.LIFECYCLE, 'RESOLVED',
+    'the lifecycle mutation is present');
+  assert.equal(canonicalObservation.inputChecks[2].unchanged, false,
+    'the observer detects mutation of the live canonical object');
+  assert.ok(canonicalObservation.observerFailures.includes(
+    'RETURNED_STATE_DIFFERS_FROM_PRE_CALL_CANONICAL'),
+  'the mutated rejection state differs from the independent pre-call state');
+  assert.equal(canonicalObservation.observerPassed, false,
+    'the observer fails the exact G4 mutant');
+
+  const requestCase = makePassingTransfer();
+  const mutableRequest = { ...request };
+  const requestMutant = (inputPolicy, inputRequest, canonicalRecord) => {
+    inputRequest.event = 'DEFER';
+    return rejectedF1(canonicalRecord);
+  };
+  const requestObservation = s1aObserveTransitionRejection(policy, mutableRequest,
+    requestCase.canonicalRecord, requestCase.trustedContext, requestMutant);
+  assert.equal(mutableRequest.event, 'DEFER', 'the request mutation is present');
+  assert.equal(requestObservation.inputChecks[1].unchanged, false,
+    'the observer detects mutation of the request object');
+  assert.equal(requestObservation.observerPassed, false);
+
+  const aliasCase = makePassingTransfer();
+  assert.notStrictEqual(aliasCase.trustedContext.currentOwnershipReadback,
+    aliasCase.canonicalRecord.OWNER_READBACK,
+  'passing ownership readback and canonical owner readback are distinct objects');
+  assert.deepEqual(aliasCase.trustedContext.currentOwnershipReadback,
+    aliasCase.canonicalRecord.OWNER_READBACK,
+  'the independent ownership readbacks have equal canonical values');
+  const aliasMutant = (inputPolicy, inputRequest, canonicalRecord, trustedContext) => {
+    trustedContext.currentOwnershipReadback = canonicalRecord.OWNER_READBACK;
+    return rejectedF1(canonicalRecord);
+  };
+  const aliasObservation = s1aObserveTransitionRejection(policy, { ...request },
+    aliasCase.canonicalRecord, aliasCase.trustedContext, aliasMutant);
+  assert.equal(aliasObservation.inputChecks[3].unchanged, true,
+    'deep value comparison alone misses the equal-valued alias replacement');
+  assert.equal(aliasObservation.readbackChecks.some((check) =>
+    check.path === 'input3.currentOwnershipReadback' && !check.referenceUnchanged), true,
+  'the observer detects replacement of the trusted readback reference');
+  assert.equal(aliasObservation.inputsUnchanged, false);
+  assert.ok(aliasObservation.observerFailures.includes('EVALUATOR_MUTATED_INPUT'));
+  assert.equal(aliasObservation.observerPassed, false,
+    'equal-valued readback aliasing cannot pass the rejection observer');
+
+  const reverseAliasCase = makePassingTransfer();
+  assert.notStrictEqual(reverseAliasCase.canonicalRecord.PACKET_IDENTITY,
+    reverseAliasCase.trustedContext.currentOwnershipReadback.packetIdentity,
+  'passing canonical packet and trusted packet identities are distinct objects');
+  assert.deepEqual(reverseAliasCase.canonicalRecord.PACKET_IDENTITY,
+    reverseAliasCase.trustedContext.currentOwnershipReadback.packetIdentity,
+  'the independent packet identities have equal canonical values');
+  const reverseAliasMutant = (inputPolicy, inputRequest, canonicalRecord, trustedContext) => {
+    canonicalRecord.PACKET_IDENTITY = trustedContext.currentOwnershipReadback.packetIdentity;
+    return rejectedF1(canonicalRecord);
+  };
+  const reverseAliasObservation = s1aObserveTransitionRejection(policy, { ...request },
+    reverseAliasCase.canonicalRecord, reverseAliasCase.trustedContext, reverseAliasMutant);
+  assert.equal(reverseAliasObservation.inputChecks[2].unchanged, true,
+    'deep value comparison alone misses the canonical-side alias replacement');
+  assert.equal(reverseAliasObservation.referenceChecks.some((check) =>
+    check.path === 'input2.PACKET_IDENTITY' && !check.unchanged), true,
+  'the observer detects an aliased canonical identity reference');
+  assert.equal(reverseAliasObservation.inputsUnchanged, false);
+  assert.equal(reverseAliasObservation.observerPassed, false,
+    'canonical-side aliasing cannot pass the rejection observer');
+
+  const readbackCase = makePassingTransfer();
+  const readbackMutant = (inputPolicy, inputRequest, canonicalRecord, trustedContext) => {
+    trustedContext.currentOwnershipReadback.current = false;
+    return rejectedF1(canonicalRecord);
+  };
+  const readbackObservation = s1aObserveTransitionRejection(policy, { ...request },
+    readbackCase.canonicalRecord, readbackCase.trustedContext, readbackMutant);
+  assert.equal(readbackCase.trustedContext.currentOwnershipReadback.current, false,
+    'the authoritative readback mutation is present');
+  assert.equal(readbackObservation.readbackChecks.some((check) => !check.unchanged), true,
+    'the observer detects mutation of the authoritative readback input');
+  assert.equal(readbackObservation.inputChecks[3].unchanged, false,
+    'the observer also detects mutation of the containing trusted context');
+  assert.equal(readbackObservation.observerPassed, false);
+});
+
+test('S1-A F2 consumer completeness survives coherent transfer, companion, and closure readbacks', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const transferCases = [
+    ['packetId', 'packetIdentity'],
+    ['packetRevision', 'packetIdentity'],
+    ['repository', 'packetIdentity'],
+    ['commit', 'candidateIdentity'],
+    ['tree', 'candidateIdentity']
+  ];
+  for (const [field, identity] of transferCases) {
+    const canonicalRecord = s1aMatrixRecordForEvent('TRANSFER');
+    const trustedContext = { currentOwnershipReadback:
+      s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) };
+    const baseline = evaluateS1aTransition(policy, canonicalRecord.DISPOSITION,
+      canonicalRecord.LIFECYCLE, 'TRANSFER', canonicalRecord, trustedContext);
+    assert.equal(baseline.ok, true, 'TRANSFER baseline passes before omitting ' + identity + '.' + field);
+    delete trustedContext.currentOwnershipReadback[identity][field];
+    assert.equal(Object.prototype.hasOwnProperty.call(
+      trustedContext.currentOwnershipReadback[identity], field), false,
+    'transfer nested identity omission is present: ' + identity + '.' + field);
+    s1aRefreshReadbackDigest(trustedContext.currentOwnershipReadback);
+    assert.equal(trustedContext.currentOwnershipReadback.digest,
+      s1aHashWithoutField(trustedContext.currentOwnershipReadback, 'digest'),
+    'transfer readback digest is coherently recomputed');
+    const request = { disposition: canonicalRecord.DISPOSITION,
+      lifecycle: canonicalRecord.LIFECYCLE, event: 'TRANSFER' };
+    const observation = s1aObserveTransitionRejection(policy, request,
+      canonicalRecord, trustedContext);
+    assert.equal(observation.result.ok, false, 'incomplete trusted readback rejects');
+    assert.ok(observation.result.failures.includes('F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+      'incomplete trusted readback includes F2');
+    assert.ok(observation.result.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'),
+      'independent ownership readback rejection remains');
+    assert.deepEqual(observation.returnedCanonicalState,
+      { disposition: 'FUTURE_OWNED', lifecycle: 'UNRESOLVED' },
+    'canonical transfer state is preserved');
+    assert.equal(observation.result.transition, null);
+    assert.deepEqual(observation.result.mutationEffects, []);
+    assert.equal(observation.inputsUnchanged, true,
+      'all live inputs match independent pre-call snapshots');
+  }
+
+  const companionFixture = makeS1aCompanionFixture();
+  const companionBaseline = s1aMatrixCompanionResult(policy, companionFixture);
+  assert.equal(companionBaseline.ok, true, 'companion omission starts from a passing fixture');
+  const historyBefore = s1aClone(companionFixture.historyLedger);
+  const companionRecord = companionFixture.entries[0].record;
+  delete companionRecord.CANDIDATE_IDENTITY.tree;
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    companionRecord.CANDIDATE_IDENTITY, 'tree'), false, 'companion omission is present');
+  s1aRefreshIsolatedCurrentCompanionRecord(companionFixture, 0,
+    'web:inventory-revision-coherent-incomplete-identity');
+  assert.equal(companionFixture.historyLedger.digest, historyBefore.digest,
+    'unrelated history authority remains unchanged');
+  assert.equal(companionFixture.currentInventory.digest,
+    s1aHashWithoutField(companionFixture.currentInventory, 'digest'),
+  'inventory digest is coherently recomputed');
+  assert.equal(companionFixture.entries[0].ref,
+    s1aHashRecord(companionFixture.entries[0].record), 'companion record ref is recomputed');
+  assert.equal(companionFixture.currentInventory.records[0].ref,
+    companionFixture.entries[0].ref, 'inventory entry rebinds to the changed record');
+  assert.equal(companionFixture.projections[0].DETAIL_REF,
+    companionFixture.entries[0].ref, 'projection rebinds to the changed record');
+  assert.equal(s1aIdentityBoundaryComplete(policy, 'PACKET_IDENTITY',
+    companionFixture.currentInventory.packetIdentity), true,
+  'inventory packet identity remains structurally complete');
+  assert.equal(companionFixture.currentInventory.candidateIdentities.every((identity) =>
+    s1aIdentityBoundaryComplete(policy, 'CANDIDATE_IDENTITY', identity)), true,
+  'inventory candidate identities remain structurally complete');
+  assert.equal(s1aIdentityBoundaryComplete(policy, 'PACKET_IDENTITY',
+    companionFixture.projections[0].PACKET_IDENTITY), true,
+  'projection packet identity remains structurally complete');
+  assert.equal(s1aIdentityBoundaryComplete(policy, 'CANDIDATE_IDENTITY',
+    companionFixture.projections[0].CANDIDATE_IDENTITY), true,
+  'projection candidate identity remains structurally complete');
+  const directCommonValidation = s1aValidateCommonFindingRecord(policy, companionRecord);
+  assert.ok(directCommonValidation.failures.includes(
+    'F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+  'the mutated current record boundary independently reports F2');
+  const companionObservation = s1aObserveInputPreservation(
+    [policy, companionFixture.projections, companionFixture.entries,
+      companionFixture.historyLedger, companionFixture.currentInventory],
+    () => s1aMatrixCompanionResult(policy, companionFixture));
+  assert.equal(companionObservation.result.ok, false);
+  assert.ok(companionObservation.result.failures.includes('F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+    'coherently rebound companion omission includes F2 from its common record');
+  assert.equal(companionObservation.result.transition, null);
+  assert.deepEqual(companionObservation.result.mutationEffects, []);
+  assert.equal(companionObservation.inputsUnchanged, true,
+    'companion evaluator preserves every independently snapshotted input');
+
+  const closureRecord = s1aMatrixClosureRecord();
+  const closureBaseline = evaluateS1aTransition(policy, closureRecord.DISPOSITION,
+    closureRecord.LIFECYCLE, 'VERIFIED_CLOSURE', closureRecord);
+  assert.equal(closureBaseline.ok, true, 'closure omission starts from a passing fixture');
+  delete closureRecord.closureReadback.candidateIdentity.commit;
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    closureRecord.closureReadback.candidateIdentity, 'commit'), false,
+  'outer closure candidate omission is present');
+  s1aRefreshClosureReadback(closureRecord.closureReadback);
+  assert.equal(closureRecord.closureReadback.bodyDigest,
+    s1aHashText(closureRecord.closureReadback.body),
+  'closure body digest is coherently recomputed');
+  const closureObservation = s1aObserveTransitionRejection(policy, {
+    disposition: closureRecord.DISPOSITION,
+    lifecycle: closureRecord.LIFECYCLE,
+    event: 'VERIFIED_CLOSURE'
+  }, closureRecord);
+  assert.equal(closureObservation.result.ok, false);
+  assert.ok(closureObservation.result.failures.includes('F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+    'outer closure omission includes F2');
+  assert.ok(closureObservation.result.failures.includes('LIFECYCLE_CLOSURE_NOT_VERIFIED'),
+    'existing closure readback rejection remains');
+  assert.deepEqual(closureObservation.returnedCanonicalState,
+    { disposition: 'FUTURE_OWNED', lifecycle: 'UNRESOLVED' },
+  'closure canonical state is preserved');
+  assert.equal(closureObservation.result.transition, null);
+  assert.deepEqual(closureObservation.result.mutationEffects, []);
+  assert.equal(closureObservation.inputsUnchanged, true);
+
+  const foreignRecord = s1aMatrixRecordForEvent('TRANSFER');
+  const foreignContext = { currentOwnershipReadback:
+    s1aClone(S1A_ORACLE_TRANSFER_TRUSTED_OWNERSHIP_READBACK) };
+  const foreignBaseline = evaluateS1aTransition(policy, foreignRecord.DISPOSITION,
+    foreignRecord.LIFECYCLE, 'TRANSFER', foreignRecord, foreignContext);
+  assert.equal(foreignBaseline.ok, true, 'foreign identity control starts from a passing transfer');
+  foreignContext.currentOwnershipReadback.packetIdentity.packetId = 'packet:complete-foreign';
+  s1aRefreshReadbackDigest(foreignContext.currentOwnershipReadback);
+  assert.equal(s1aOwnershipReadbackIdentityComplete(policy,
+    foreignContext.currentOwnershipReadback), true,
+  'foreign identity remains structurally complete');
+  const foreignObservation = s1aObserveTransitionRejection(policy, {
+    disposition: foreignRecord.DISPOSITION,
+    lifecycle: foreignRecord.LIFECYCLE,
+    event: 'TRANSFER'
+  }, foreignRecord, foreignContext);
+  assert.equal(foreignObservation.result.ok, false);
+  assert.ok(foreignObservation.result.failures.includes('LIFECYCLE_OWNER_TRANSFER_READBACK'),
+    'complete foreign identity fails the authoritative readback binding');
+  assert.equal(foreignObservation.result.failures.includes('F2_COMMON_RECORD_COMPANION_COMPLETENESS'),
+    false, 'complete foreign identity is not structural incompleteness');
+  assert.equal(foreignObservation.inputsUnchanged, true);
+});
 
 test('S1-A final common-record identity and rejection matrix', (t) => {
   const policy = parseS1aPolicyContract(architecture);
@@ -4857,6 +5411,22 @@ test('S1-A final common-record identity and rejection matrix', (t) => {
         if (!Array.isArray(result.mutationEffects) || result.mutationEffects.length !== 0) {
           throw new Error('rejection returned mutation effects');
         }
+        if (!row.observation || row.observation.inputsUnchanged !== true) {
+          throw new Error('evaluator mutated an input or readback');
+        }
+        if ((row.category === 'F2' || row.category === 'BINDING_COPY') &&
+            row.mutationProven !== true) {
+          throw new Error('identity mutation was not proved');
+        }
+        if (row.category === 'F1' && row.observation.observerPassed !== true) {
+          throw new Error('F1 snapshot observer failed: ' +
+            (row.observation.observerFailures || []).join(','));
+        }
+        if (row.category === 'BINDING_COPY' && result.failures &&
+            result.failures.some((failure) => failure === 'F2_COMMON_RECORD_COMPANION_COMPLETENESS' ||
+              failure.endsWith('_F2_COMMON_RECORD_COMPANION_COMPLETENESS'))) {
+          throw new Error('complete foreign identity was misclassified as F2 completeness');
+        }
         if (row.category === 'F2' &&
             !result.failures.some((failure) => failure === 'F2_COMMON_RECORD_COMPANION_COMPLETENESS' ||
               failure.endsWith('_F2_COMMON_RECORD_COMPANION_COMPLETENESS'))) {
@@ -4883,10 +5453,10 @@ test('S1-A final common-record identity and rejection matrix', (t) => {
     }
   }
   assert.deepEqual(counts, {
-    total: 357, positive: 15, bindingCopy: 86, f2: 213, f1: 43
+    total: 399, positive: 15, bindingCopy: 86, f2: 272, f1: 26
   });
   assert.equal(errors.length, 0, errors.join('\n'));
-  t.diagnostic('357 rows: 15 positive/state, 86 binding/copy, 213 F2, 43 F1, 0 control/execution errors');
+  t.diagnostic('399 rows: 15 positive/state, 86 binding/copy, 272 F2, 26 F1, 0 control/execution errors');
 });
 function observeS1aLifecycleOracle(policy) {
   const detail = makeS1aCommonFindingFields({
