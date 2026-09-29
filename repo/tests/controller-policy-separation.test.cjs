@@ -2470,6 +2470,14 @@ function s1aIdentityBoundaryComplete(policy, identityField, value) {
     requirement.fields.every((field) => s1aTypeMatches(value[field], 'NONEMPTY_STRING')));
 }
 
+function s1aCommonRecordNestedIdentitiesComplete(policy, record) {
+  const identities = policy.commonRecord.nestedRequiredFields.filter((nested) =>
+    nested.record === 'PACKET_IDENTITY' || nested.record === 'CANDIDATE_IDENTITY');
+  return Boolean(record && typeof record === 'object' && !Array.isArray(record) &&
+    identities.length === 2 && identities.every((nested) =>
+      s1aIdentityBoundaryComplete(policy, nested.record, record[nested.record])));
+}
+
 function s1aOwnershipReadbackIdentityComplete(policy, readback) {
   return Boolean(readback && typeof readback === 'object' && !Array.isArray(readback) &&
     s1aTypeMatches(readback.repository, 'NONEMPTY_STRING') &&
@@ -2550,6 +2558,15 @@ function evaluateS1aBlocker(policy, record, decision, companionProjection, compa
   const commonRecord = s1aValidateCommonFindingRecord(policy, record);
   if (!commonRecord.ok) failures.push(...commonRecord.failures);
   if (!s1aOwnershipReadbackMatches(record)) failures.push('BLOCKER_OWNER_READBACK');
+  for (const nested of policy.commonRecord.nestedRequiredFields.filter((row) =>
+    row.record === 'PACKET_IDENTITY' || row.record === 'CANDIDATE_IDENTITY')) {
+    const decisionField = nested.record === 'PACKET_IDENTITY'
+      ? 'packetIdentity' : 'candidateIdentity';
+    if (!s1aIdentityBoundaryComplete(policy, nested.record,
+      decision && decision[decisionField])) {
+      failures.push(policy.commonRecord.completenessObligation);
+    }
+  }
   for (const requirement of blocker.nestedRequiredFields) {
     const nested = record && record[requirement.record];
     if (!s1aHasExactKeys(nested, requirement.fields)) {
@@ -3433,6 +3450,10 @@ function evaluateS1aCompanions(policy, projections, entries, historyLedger, curr
       candidateIdentityFields.every((field) =>
         s1aTypeMatches(identity[field], 'NONEMPTY_STRING')));
   if (!inventoryNestedIdentitiesComplete) {
+    failures.push(policy.commonRecord.completenessObligation);
+  }
+  if (currentInventory.records.some((entry) =>
+    !s1aCommonRecordNestedIdentitiesComplete(policy, entry && entry.record))) {
     failures.push(policy.commonRecord.completenessObligation);
   }
   if (!s1aHasExactKeys(currentInventory, policy.companion.currentInventory.readbackFields) ||
@@ -4383,6 +4404,19 @@ const S1A_TARGET_BAD_IDENTITY_SHAPES = Object.freeze([
   Object.freeze({ id: 'string', value: 'identity' }),
   Object.freeze({ id: 'empty-object', value: Object.freeze({}) })
 ]);
+const S1A_RESIDUAL_NESTED_IDENTITY_MUTATIONS = Object.freeze([
+  Object.freeze({ id: 'omitted' }),
+  Object.freeze({ id: 'empty-string', value: '' }),
+  Object.freeze({ id: 'whitespace', value: '   ' }),
+  Object.freeze({ id: 'null', value: null }),
+  Object.freeze({ id: 'numeric', value: 17 }),
+  Object.freeze({ id: 'array', value: Object.freeze([]) })
+]);
+const S1A_RESIDUAL_NESTED_IDENTITY_BOUNDARIES = Object.freeze([
+  'blocker-admission',
+  'inventory-embedded-record'
+]);
+
 const S1A_TARGET_F2_SURFACES = Object.freeze([
   'common-defer',
   'owner-readback',
@@ -4693,6 +4727,125 @@ function s1aRunF2IdentitySurface(policy, surface, identity, edit) {
   return { baseline, result, observation, mutationProven: true };
 }
 
+function s1aApplyResidualNestedIdentityMutation(identityRecord, field, mutation) {
+  const before = s1aSnapshot(identityRecord);
+  if (mutation.id === 'omitted') {
+    delete identityRecord[field];
+  } else {
+    identityRecord[field] = s1aClone(mutation.value);
+  }
+  const hasField = Object.prototype.hasOwnProperty.call(identityRecord, field);
+  const intendedShapeProven = mutation.id === 'omitted'
+    ? !hasField
+    : hasField && s1aSame(identityRecord[field], mutation.value);
+  return !s1aSame(before, identityRecord) && intendedShapeProven;
+}
+
+function s1aRunResidualNestedIdentitySurface(policy, boundary, identity, field, mutation) {
+  if (boundary === 'blocker-admission') {
+    const fixture = makeS1aBlockerFixture();
+    const baseline = s1aMatrixBlockerResult(policy, fixture);
+    const authoritativeBefore = s1aSnapshot({
+      record: fixture.record,
+      companionProjection: fixture.companionProjection,
+      companionEntries: fixture.companionEntries,
+      currentInventory: fixture.currentInventory
+    });
+    const decisionField = identity === 'PACKET_IDENTITY'
+      ? 'packetIdentity' : 'candidateIdentity';
+    const mutationProven = s1aApplyResidualNestedIdentityMutation(
+      fixture.decision[decisionField], field, mutation);
+    s1aRefreshWebAdmissionReadback(fixture.decision);
+    const readback = fixture.decision.admissionReadback;
+    const callerBindingsRefreshed = readback.revision === fixture.decision.webRevision &&
+      readback.body === s1aWebAdmissionBody(fixture.decision) &&
+      readback.bodyDigest === s1aHashText(readback.body);
+    const observation = s1aObserveInputPreservation(
+      [policy, fixture.record, fixture.decision, fixture.companionProjection,
+        fixture.companionEntries, fixture.currentInventory],
+      () => s1aMatrixBlockerResult(policy, fixture));
+    const independentAuthorityPreserved = s1aSame(authoritativeBefore, {
+      record: fixture.record,
+      companionProjection: fixture.companionProjection,
+      companionEntries: fixture.companionEntries,
+      currentInventory: fixture.currentInventory
+    });
+    return {
+      baseline,
+      result: observation.result,
+      observation,
+      mutationProven,
+      callerBindingsRefreshed,
+      independentAuthorityPreserved,
+      requiredFailures: [
+        'BLOCKER_BINDING_MISMATCH:' + identity,
+        'BLOCKER_CURRENT_WEB_ADMISSION_READBACK'
+      ]
+    };
+  }
+
+  if (boundary === 'inventory-embedded-record') {
+    const fixture = makeS1aCompanionFixture();
+    const baseline = s1aMatrixCompanionResult(policy, fixture);
+    const independentAuthorityBefore = s1aSnapshot({
+      projections: fixture.projections,
+      entries: fixture.entries,
+      historyLedger: fixture.historyLedger
+    });
+    const inventoryEntry = fixture.currentInventory.records[0];
+    const mutationProven = s1aApplyResidualNestedIdentityMutation(
+      inventoryEntry.record[identity], field, mutation);
+    s1aRefreshCommonOwnerReadback(inventoryEntry.record);
+    inventoryEntry.ref = s1aHashRecord(inventoryEntry.record);
+    fixture.currentInventory.digest = s1aHashWithoutField(
+      fixture.currentInventory, 'digest');
+    const callerBindingsRefreshed =
+      s1aOwnershipReadbackMatches(inventoryEntry.record) &&
+      inventoryEntry.ref === s1aHashRecord(inventoryEntry.record) &&
+      fixture.currentInventory.digest === s1aHashWithoutField(
+        fixture.currentInventory, 'digest');
+    const observation = s1aObserveInputPreservation(
+      [policy, fixture.projections, fixture.entries, fixture.historyLedger,
+        fixture.currentInventory],
+      () => s1aMatrixCompanionResult(policy, fixture));
+    const independentAuthorityPreserved = s1aSame(independentAuthorityBefore, {
+      projections: fixture.projections,
+      entries: fixture.entries,
+      historyLedger: fixture.historyLedger
+    });
+    return {
+      baseline,
+      result: observation.result,
+      observation,
+      mutationProven,
+      callerBindingsRefreshed,
+      independentAuthorityPreserved,
+      requiredFailures: ['COMPANION_CURRENT_INVENTORY_READBACK']
+    };
+  }
+
+  throw new Error('unknown residual nested identity boundary: ' + boundary);
+}
+
+function s1aBuildResidualNestedIdentityRows(policy) {
+  const rows = [];
+  for (const boundary of S1A_RESIDUAL_NESTED_IDENTITY_BOUNDARIES) {
+    for (const item of S1A_TARGET_IDENTITY_LEAVES) {
+      for (const mutation of S1A_RESIDUAL_NESTED_IDENTITY_MUTATIONS) {
+        rows.push({
+          id: 'F2/residual/' + boundary + '/' + item.identity + '.' + item.field +
+            '/' + mutation.id,
+          category: 'F2',
+          residualNestedIdentity: true,
+          run: () => s1aRunResidualNestedIdentitySurface(policy, boundary,
+            item.identity, item.field, mutation)
+        });
+      }
+    }
+  }
+  return rows;
+}
+
 function s1aBuildF2IdentityRows(policy) {
   const rows = [];
   for (const surface of S1A_TARGET_F2_SURFACES) {
@@ -4754,6 +4907,7 @@ function s1aBuildF2IdentityRows(policy) {
       })
     });
   }
+  rows.push(...s1aBuildResidualNestedIdentityRows(policy));
   return rows;
 }
 
@@ -5334,6 +5488,52 @@ test('S1-A F2 consumer completeness survives coherent transfer, companion, and c
   assert.equal(foreignObservation.inputsUnchanged, true);
 });
 
+test('S1-A residual nested identity complete-foreign controls remain binding failures', () => {
+  const policy = parseS1aPolicyContract(architecture);
+
+  const blocker = makeS1aBlockerFixture();
+  assert.equal(s1aMatrixBlockerResult(policy, blocker).ok, true,
+    'blocker foreign-identity control starts from a passing fixture');
+  blocker.decision.packetIdentity.packetId = 'packet:complete-foreign';
+  s1aRefreshWebAdmissionReadback(blocker.decision);
+  const blockerObservation = s1aObserveInputPreservation(
+    [policy, blocker.record, blocker.decision, blocker.companionProjection,
+      blocker.companionEntries, blocker.currentInventory],
+    () => s1aMatrixBlockerResult(policy, blocker));
+  assert.equal(blockerObservation.result.ok, false);
+  assert.ok(blockerObservation.result.failures.includes(
+    'BLOCKER_BINDING_MISMATCH:PACKET_IDENTITY'));
+  assert.ok(blockerObservation.result.failures.includes(
+    'BLOCKER_CURRENT_WEB_ADMISSION_READBACK'));
+  assert.equal(blockerObservation.result.failures.includes(
+    'F2_COMMON_RECORD_COMPANION_COMPLETENESS'), false,
+  'complete foreign blocker identity is not structural incompleteness');
+  assert.equal(blockerObservation.inputsUnchanged, true);
+
+  const companion = makeS1aCompanionFixture();
+  assert.equal(s1aMatrixCompanionResult(policy, companion).ok, true,
+    'inventory foreign-identity control starts from a passing fixture');
+  const inventoryEntry = companion.currentInventory.records[0];
+  inventoryEntry.record.CANDIDATE_IDENTITY.tree = 'tree:complete-foreign';
+  s1aRefreshCommonOwnerReadback(inventoryEntry.record);
+  inventoryEntry.ref = s1aHashRecord(inventoryEntry.record);
+  companion.currentInventory.digest = s1aHashWithoutField(
+    companion.currentInventory, 'digest');
+  assert.equal(s1aCommonRecordNestedIdentitiesComplete(policy, inventoryEntry.record), true,
+    'complete foreign embedded identity remains structurally complete');
+  const companionObservation = s1aObserveInputPreservation(
+    [policy, companion.projections, companion.entries, companion.historyLedger,
+      companion.currentInventory],
+    () => s1aMatrixCompanionResult(policy, companion));
+  assert.equal(companionObservation.result.ok, false);
+  assert.ok(companionObservation.result.failures.includes(
+    'COMPANION_CURRENT_INVENTORY_READBACK'));
+  assert.equal(companionObservation.result.failures.includes(
+    'F2_COMMON_RECORD_COMPANION_COMPLETENESS'), false,
+  'complete foreign embedded identity is not structural incompleteness');
+  assert.equal(companionObservation.inputsUnchanged, true);
+});
+
 test('S1-A final common-record identity and rejection matrix', (t) => {
   const policy = parseS1aPolicyContract(architecture);
   const positiveRows = S1A_ORACLE_PROJECTION_ROWS.map((expected) => ({
@@ -5376,7 +5576,10 @@ test('S1-A final common-record identity and rejection matrix', (t) => {
   const binding = s1aBuildBindingCopyRows(policy).map((row) => ({
     ...row, ...row.run()
   }));
-  const f2 = s1aBuildF2IdentityRows(policy).map((row) => ({
+  const f2Rows = s1aBuildF2IdentityRows(policy);
+  assert.equal(f2Rows.filter((row) => row.residualNestedIdentity).length, 60,
+    'the residual matrix has exactly 2 boundaries x 5 fields x 6 malformed forms');
+  const f2 = f2Rows.map((row) => ({
     ...row, ...row.run()
   }));
   const f1 = s1aMakeF1Rows(policy);
@@ -5432,6 +5635,19 @@ test('S1-A final common-record identity and rejection matrix', (t) => {
               failure.endsWith('_F2_COMMON_RECORD_COMPANION_COMPLETENESS'))) {
           throw new Error('missing named F2 completeness failure');
         }
+        for (const failure of row.requiredFailures || []) {
+          if (!result.failures.includes(failure)) {
+            throw new Error('missing independently applicable failure: ' + failure);
+          }
+        }
+        if (row.residualNestedIdentity) {
+          if (row.callerBindingsRefreshed !== true) {
+            throw new Error('caller-controlled digest, reference, body, or readback copy was not refreshed');
+          }
+          if (row.independentAuthorityPreserved !== true) {
+            throw new Error('independent authoritative companion inputs were changed');
+          }
+        }
         if (row.category === 'F1') {
           if (result.disposition !== row.canonicalRecord.DISPOSITION) {
             throw new Error('rejected disposition echoed request instead of canonical record');
@@ -5453,10 +5669,10 @@ test('S1-A final common-record identity and rejection matrix', (t) => {
     }
   }
   assert.deepEqual(counts, {
-    total: 399, positive: 15, bindingCopy: 86, f2: 272, f1: 26
+    total: 459, positive: 15, bindingCopy: 86, f2: 332, f1: 26
   });
   assert.equal(errors.length, 0, errors.join('\n'));
-  t.diagnostic('399 rows: 15 positive/state, 86 binding/copy, 272 F2, 26 F1, 0 control/execution errors');
+  t.diagnostic('459 rows: 15 positive/state, 86 binding/copy, 332 F2, 26 F1, 0 control/execution errors');
 });
 function observeS1aLifecycleOracle(policy) {
   const detail = makeS1aCommonFindingFields({
