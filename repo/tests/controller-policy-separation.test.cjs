@@ -10731,19 +10731,22 @@ const D1_ORACLE_INTEGRATION_PREDICATE_READBACKS = Object.freeze([
   d1OracleIntegrationPredicateReadback({ materialIntegrationUncertainty: true, dualSnapshotBindable: false }),
   d1OracleIntegrationPredicateReadback({ materialIntegrationUncertainty: true, reviewerAvailability: { A: true, B: false } })
 ]);
-const D1_ORACLE_GOVERNED_SOURCE_SHA256 = '1601444ea5df640fc2a41f2612574ab378034f8f8e9f4cee8c3242946727ac85';
+const D1_ORACLE_GOVERNED_SOURCE_SHA256 = '3adbd64ef930af84b9c5a84f7ca8261fbc966aa9dede0abbe49ec27749a43e08';
 function d1GovernedSourceSegments(sources) {
-  const controllerLaw = s1aProseRange(sources.controller,
+  const controllerSource = sources.controller.replace(/\r\n?/g, '\n');
+  const architectureSource = sources.architecture.replace(/\r\n?/g, '\n');
+  const baselineSource = (sources.baseline || '').replace(/\r\n?/g, '\n');
+  const controllerLaw = s1aProseRange(controllerSource,
     '## Discovery, root, and final-merge law', '\n## Shipping-first scope and repair decisions');
-  const architectureDiscovery = s1aProseRange(sources.architecture,
+  const architectureDiscovery = s1aProseRange(architectureSource,
     '### Programme discovery basis', '\n### G1 — Root convergence, architecture and authority');
-  const architectureRoot = s1aProseRange(sources.architecture,
+  const architectureRoot = s1aProseRange(architectureSource,
     '### Stable-root G3 convergence accounting', '\n### Increment 1 ownership fences');
-  const architectureOwners = s1aProseRange(sources.architecture,
+  const architectureOwners = s1aProseRange(architectureSource,
     '### Increment 1 ownership fences', '\n### G4 — Child-final independent assurance');
-  const architecturePostChild = s1aProseRange(sources.architecture,
+  const architecturePostChild = s1aProseRange(architectureSource,
     '### Post-child integrated dual review', '\n### Bounded non-product continuation');
-  const baseline = sources.baseline || '';
+  const baseline = baselineSource;
   const segments = { controllerLaw, architectureDiscovery, architectureRoot, architectureOwners, architecturePostChild, baseline };
   const expectedOwnerRows = [
     '| A1 | Route registration/resolution, including concrete `G0.discovery`. |',
