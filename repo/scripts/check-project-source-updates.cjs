@@ -25,6 +25,258 @@ const {
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
 const githubApiBaseUrl = 'https://api.github.com';
 
+const MAX_OWNED_REPORT_BYTES = 65536;
+const MAX_OWNED_REPORT_FRAME_BYTES = MAX_OWNED_REPORT_BYTES * 6 + 1024;
+const OWNED_REPORT_CONTROL_MAX_BYTES = 1024;
+const OWNED_REPORT_ACK_MAX_PAYLOAD_BYTES = 1024;
+const OWNED_REPORT_MODE = 'source-update-v1';
+const OWNED_REPORT_TOKEN_PATTERN = /^[a-f0-9]{48}$/;
+function reportFrame(value) {
+  const payload = Buffer.from(JSON.stringify(value), 'utf8');
+  const frame = Buffer.allocUnsafe(payload.length + 4);
+  frame.writeUInt32BE(payload.length, 0);
+  payload.copy(frame, 4);
+  return frame;
+}
+
+function decodeOwnedFrame(frame, maxFrameBytes, maxPayloadBytes, label) {
+  if (!Buffer.isBuffer(frame) || frame.length < 5 || frame.length > maxFrameBytes) {
+    throw new Error((label || 'Owned IPC message') + ' is missing or oversized.');
+  }
+  const payloadLength = frame.readUInt32BE(0);
+  if (payloadLength < 1 || payloadLength > maxPayloadBytes || payloadLength !== frame.length - 4) {
+    throw new Error((label || 'Owned IPC message') + ' must contain exactly one complete frame.');
+  }
+  const payload = frame.subarray(4);
+  const json = payload.toString('utf8');
+  if (!Buffer.from(json, 'utf8').equals(payload)) throw new Error((label || 'Owned IPC message') + ' is not valid UTF-8.');
+  let message;
+  try { message = JSON.parse(json); }
+  catch (_) { throw new Error((label || 'Owned IPC message') + ' is malformed JSON.'); }
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    throw new Error((label || 'Owned IPC message') + ' must be an object.');
+  }
+  return message;
+}
+
+function assertOwnedEnvelope(message, expectedToken, expectedKeys, label) {
+  if (typeof expectedToken !== 'string' || !OWNED_REPORT_TOKEN_PATTERN.test(expectedToken)) {
+    throw new Error('Owned report token is invalid.');
+  }
+  const keys = Object.keys(message).sort().join(',');
+  if (keys !== expectedKeys || message.version !== 1 || message.token !== expectedToken) {
+    throw new Error((label || 'Owned IPC message') + ' has an unsupported shape, version, or token.');
+  }
+}
+
+function parseAdmissionControlFrame(frame, expectedToken) {
+  const message = decodeOwnedFrame(frame, OWNED_REPORT_CONTROL_MAX_BYTES,
+    OWNED_REPORT_CONTROL_MAX_BYTES - 4, 'Owned report admission message');
+  assertOwnedEnvelope(message, expectedToken, 'token,type,version', 'Owned report admission message');
+  if (!['BROKER_HELLO', 'BROKER_READY', 'BROKER_READY_ACK'].includes(message.type)) {
+    throw new Error('Owned report admission message has an unexpected phase.');
+  }
+  return message;
+}
+
+function parseOwnedReportAckFrame(frame, expectedToken) {
+  const message = decodeOwnedFrame(frame, OWNED_REPORT_ACK_MAX_PAYLOAD_BYTES + 4,
+    OWNED_REPORT_ACK_MAX_PAYLOAD_BYTES, 'Owned report acknowledgement');
+  assertOwnedEnvelope(message, expectedToken, 'acknowledged,token,version', 'Owned report acknowledgement');
+  if (typeof message.acknowledged !== 'boolean') throw new Error('Owned report acknowledgement is malformed.');
+  return message;
+}
+
+function parseOwnedReportFrame(frame, expectedToken) {
+  const request = decodeOwnedFrame(frame, MAX_OWNED_REPORT_FRAME_BYTES,
+    MAX_OWNED_REPORT_FRAME_BYTES - 4, 'Owned report request');
+  const keys = Object.keys(request).sort().join(',');
+  if ((keys !== 'token,type,version' && keys !== 'content,token,type,version')
+      || request.version !== 1 || request.token !== expectedToken
+      || typeof expectedToken !== 'string' || !OWNED_REPORT_TOKEN_PATTERN.test(expectedToken)
+      || !['PUT_REPORT', 'REMOVE_REPORT'].includes(request.type)) {
+    throw new Error('Owned report request has an unsupported shape or destination.');
+  }
+  if (request.type === 'PUT_REPORT') {
+    if (typeof request.content !== 'string'
+        || Buffer.byteLength(request.content, 'utf8') > MAX_OWNED_REPORT_BYTES) {
+      throw new Error('Owned report exceeds the reserved 65,536-byte payload.');
+    }
+    return { type: 'PUT_REPORT', content: request.content };
+  }
+  if (Object.hasOwn(request, 'content')) throw new Error('REMOVE_REPORT cannot carry content.');
+  return { type: 'REMOVE_REPORT' };
+}
+
+async function mediateOwnedReportFrame(frame, token, commit) {
+  if (typeof commit !== 'function') throw new Error('Owned report commit authority is missing.');
+  const request = parseOwnedReportFrame(frame, token);
+  await commit(request);
+  return request.type;
+}
+
+function ownedReportRequestFrame(request, token) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('Owned report request is invalid.');
+  const normalized = request.type === 'PUT_REPORT'
+    ? { version: 1, token, type: request.type, content: request.content }
+    : request.type === 'REMOVE_REPORT'
+      ? { version: 1, token, type: request.type }
+      : null;
+  if (!normalized) throw new Error('Owned report request type is invalid.');
+  const frame = reportFrame(normalized);
+  parseOwnedReportFrame(frame, token);
+  return frame;
+}
+
+function hasOwnedReportIpc(ipc = process, env = process.env) {
+  return Boolean(env && env.TOOLKIT_OWNED_TEMP_MODE === OWNED_REPORT_MODE
+    && typeof env.TOOLKIT_OWNED_TEMP_REPORT_TOKEN === 'string'
+    && OWNED_REPORT_TOKEN_PATTERN.test(env.TOOLKIT_OWNED_TEMP_REPORT_TOKEN)
+    && ipc && ipc.channel && ipc.connected === true && typeof ipc.send === 'function');
+}
+
+function ownedIpcError(message, cause, code = 'TEMP_CHILD_PROTOCOL') {
+  const failure = new Error(message);
+  failure.code = code;
+  if (cause !== undefined) failure.cause = cause;
+  return failure;
+}
+
+function sendMessageFrame(frame, ipc, label) {
+  if (!Buffer.isBuffer(frame)) throw ownedIpcError((label || 'Owned report IPC message') + ' is invalid.');
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (caught) => {
+      if (settled) return;
+      settled = true;
+      if (caught) reject(ownedIpcError((label || 'Owned report IPC send') + ' failed.', caught));
+      else resolve();
+    };
+    try { ipc.send(frame, done); }
+    catch (caught) { done(caught); }
+  });
+}
+
+function createOwnedReportIpcClient(ipc = process, env = process.env) {
+  if (!env || env.TOOLKIT_OWNED_TEMP_MODE !== OWNED_REPORT_MODE) throw ownedIpcError('Owned report mode is missing or unsupported.');
+  const token = env.TOOLKIT_OWNED_TEMP_REPORT_TOKEN;
+  if (typeof token !== 'string' || !OWNED_REPORT_TOKEN_PATTERN.test(token)) throw ownedIpcError('Owned report token is invalid.');
+  if (!ipc || !ipc.channel || ipc.connected !== true || typeof ipc.send !== 'function'
+      || typeof ipc.on !== 'function' || typeof ipc.removeListener !== 'function') {
+    throw ownedIpcError('Owned report broker IPC channel is missing or unusable.');
+  }
+
+  let phase = 'ADMITTING';
+  let failure = null;
+  let disposed = false;
+  let terminalSent = false;
+  let helloSent = false;
+  let readyAckSent = false;
+  let resolveAdmission;
+  let rejectAdmission;
+  let resolveRequest;
+  let rejectRequest;
+  let watchdog;
+  const admission = new Promise((resolve, reject) => { resolveAdmission = resolve; rejectAdmission = reject; });
+  const latch = (caught) => {
+    if (failure) return failure;
+    failure = caught instanceof Error ? caught : ownedIpcError('Owned report IPC transport failed.', caught);
+    if (phase !== 'ADMITTED' && phase !== 'REQUEST_SENT' && phase !== 'ACK_RECEIVED') rejectAdmission(failure);
+    if (rejectRequest) rejectRequest(failure);
+    return failure;
+  };
+  const sendControl = (value, label) => {
+    const frame = reportFrame(value);
+    if (frame.length > OWNED_REPORT_CONTROL_MAX_BYTES) return Promise.reject(ownedIpcError('Owned report admission message is oversized.'));
+    return sendMessageFrame(frame, ipc, label);
+  };
+  const maybeAdmit = () => {
+    if (failure || !helloSent || !readyAckSent) return;
+    phase = 'ADMITTED';
+    if (watchdog) clearTimeout(watchdog);
+    resolveAdmission();
+  };
+  const onMessage = (message, handle) => {
+    if (failure || disposed) return;
+    if (handle !== undefined && handle !== null) {
+      latch(ownedIpcError('Owned report IPC message transferred an unexpected handle.'));
+      return;
+    }
+    if (phase === 'ADMITTING') {
+      let control;
+      try { control = parseAdmissionControlFrame(message, token); }
+      catch (caught) { latch(ownedIpcError('Owned report broker admission failed.', caught)); return; }
+      if (control.type !== 'BROKER_READY') {
+        latch(ownedIpcError('Owned report broker sent an unexpected admission phase.'));
+        return;
+      }
+      phase = 'READY_RECEIVED';
+      void sendControl({ version: 1, token, type: 'BROKER_READY_ACK' }, 'Owned report READY_ACK').then(() => {
+        if (failure || disposed) return;
+        readyAckSent = true;
+        maybeAdmit();
+      }, (caught) => { latch(caught); });
+      return;
+    }
+    if (phase === 'REQUEST_SENT' && rejectRequest) {
+      let acknowledgement;
+      try { acknowledgement = parseOwnedReportAckFrame(message, token); }
+      catch (caught) { latch(ownedIpcError('Owned report acknowledgement is invalid.', caught)); return; }
+      if (acknowledgement.acknowledged !== true) {
+        latch(ownedIpcError('Owned report request was rejected by the parent.'));
+        return;
+      }
+      phase = 'ACK_RECEIVED';
+      const resolve = resolveRequest;
+      resolveRequest = null;
+      rejectRequest = null;
+      resolve(true);
+      return;
+    }
+    latch(ownedIpcError('Owned report IPC message arrived in an unexpected phase.'));
+  };
+  const onError = (caught) => { latch(ownedIpcError('Owned report IPC channel failed.', caught)); };
+  const onDisconnect = () => { latch(ownedIpcError('Owned report IPC channel disconnected.')); };
+
+  ipc.on('message', onMessage);
+  ipc.on('error', onError);
+  ipc.on('disconnect', onDisconnect);
+  watchdog = setTimeout(() => latch(ownedIpcError('Owned report broker admission timed out.', undefined, 'TEMP_CHILD_ADMISSION_TIMEOUT')), 5000);
+  void sendControl({ version: 1, token, type: 'BROKER_HELLO' }, 'Owned report BROKER_HELLO').then(() => {
+    helloSent = true;
+    maybeAdmit();
+  }, (caught) => { latch(caught); });
+
+  return {
+    token,
+    admit() { return admission; },
+    async send(request) {
+      if (failure) throw failure;
+      if (phase !== 'ADMITTED' || terminalSent) throw ownedIpcError('Owned report terminal request is unavailable or already consumed.');
+      const frame = ownedReportRequestFrame(request, token);
+      terminalSent = true;
+      phase = 'REQUEST_SENT';
+      const acknowledgement = new Promise((resolve, reject) => { resolveRequest = resolve; rejectRequest = reject; });
+      const sent = sendMessageFrame(frame, ipc, 'Owned report request');
+      try {
+        await Promise.all([sent, acknowledgement]);
+        return request.type;
+      } catch (caught) {
+        throw latch(caught);
+      }
+    },
+    get phase() { return phase; },
+    get failure() { return failure; },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (watchdog) clearTimeout(watchdog);
+      ipc.removeListener('message', onMessage);
+      ipc.removeListener('error', onError);
+      ipc.removeListener('disconnect', onDisconnect);
+    }
+  };
+}
 function slash(value) {
   return value.split(path.sep).join('/');
 }
@@ -265,7 +517,11 @@ async function checkProjectSourceUpdates({
   report,
   advisoryDoc = defaultAdvisoryDocPath,
   reviewState = defaultReviewStatePath
-}, env = process.env) {
+}, env = process.env, reportTransport = null) {
+  if (env.TOOLKIT_OWNED_TEMP_MODE !== undefined
+      && (env.TOOLKIT_OWNED_TEMP_MODE !== OWNED_REPORT_MODE || !reportTransport)) {
+    throw new Error('Owned report mode requires its parent broker transport.');
+  }
   const locks = discoverSourceLocks(workspace);
   const activeLocks = activeThirdPartyLocks(locks);
   const reviewStateDocument = readReviewState(workspace, reviewState);
@@ -303,7 +559,8 @@ async function checkProjectSourceUpdates({
   const advisoryUpdates = advisoryResult.findings;
 
   if (updates.length === 0 && advisoryUpdates.length === 0) {
-    removeReportIfPresent(workspace, report);
+    if (reportTransport) await reportTransport({ type: 'REMOVE_REPORT' });
+    else removeReportIfPresent(workspace, report);
     if (activeLocks.length === 0 && advisoryResult.target_count === 0) {
       return {
         report_written: false,
@@ -322,11 +579,27 @@ async function checkProjectSourceUpdates({
     };
   }
 
-  const reportPath = writeReport(workspace, report, renderReviewReport({
+  const markdown = renderReviewReport({
     updates,
     advisoryUpdates,
     advisoryDocPath: advisoryDoc
-  }));
+  });
+  if (reportTransport) {
+    const payload = markdown.endsWith('\n') ? markdown : markdown + '\n';
+    if (Buffer.byteLength(payload, 'utf8') > MAX_OWNED_REPORT_BYTES) {
+      throw new Error('Owned report exceeds the reserved 65,536-byte payload.');
+    }
+    await reportTransport({ type: 'PUT_REPORT', content: payload });
+    return {
+      report_written: true,
+      updates,
+      advisory_updates: advisoryUpdates,
+      summary: advisoryUpdates.length > 0
+        ? 'PR needed: yes (' + updates.length + ' source update' + (updates.length === 1 ? '' : 's') + ', ' + advisoryUpdates.length + ' advisory action' + (advisoryUpdates.length === 1 ? '' : 's') + ').'
+        : 'PR needed: yes (' + updates.length + ' active third-party source update' + (updates.length === 1 ? '' : 's') + ' detected).'
+    };
+  }
+  const reportPath = writeReport(workspace, report, markdown);
   return {
     report_written: true,
     report_path: reportPath,
@@ -344,9 +617,22 @@ async function main() {
     console.log(usage());
     return;
   }
-  const result = await checkProjectSourceUpdates(args);
+  const mode = process.env.TOOLKIT_OWNED_TEMP_MODE;
+  if (mode !== undefined && mode !== OWNED_REPORT_MODE) throw new Error('Unsupported owned report mode.');
+  let result;
+  if (mode === OWNED_REPORT_MODE) {
+    const reportClient = createOwnedReportIpcClient(process, process.env);
+    try {
+      await reportClient.admit();
+      result = await checkProjectSourceUpdates(args, process.env, (request) => reportClient.send(request));
+    } finally {
+      reportClient.dispose();
+    }
+  } else {
+    result = await checkProjectSourceUpdates(args, process.env);
+  }
   console.log(result.summary);
-  if (result.report_written) console.log(`Wrote ${slash(path.relative(args.workspace, result.report_path))}`);
+  if (result.report_written && mode !== OWNED_REPORT_MODE) console.log('Wrote ' + slash(path.relative(args.workspace, result.report_path)));
 }
 
 if (require.main === module) {
@@ -363,6 +649,13 @@ module.exports = {
   isActiveThirdPartyLock,
   latestCommitForLock,
   parseArgs,
+  parseOwnedReportFrame,
+  mediateOwnedReportFrame,
+  ownedReportRequestFrame,
+  hasOwnedReportIpc,
+  parseAdmissionControlFrame,
+  parseOwnedReportAckFrame,
+  createOwnedReportIpcClient,
   parseGitHubRepo,
   renderReviewReport,
   renderSourceUpdatesSection
