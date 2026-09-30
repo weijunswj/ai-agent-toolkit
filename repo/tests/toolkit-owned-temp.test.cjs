@@ -2133,3 +2133,250 @@ test('raw same-user paths are unaccounted and hostile-same-user atomic protectio
     assert.equal(fs.readFileSync(path.join(lease.root, 'raw-probe.txt'), 'utf8'), 'unaccounted');
   });
 });
+
+async function recoverDescendantStale(state) {
+  // Advance only the recovery clock past the real, untouched lease expiry.
+  // Child ownership, PID/start identities and group liveness remain production evidence.
+  const expiry = JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).lease_expires_at_ms;
+  const originalNow = Date.now;
+  Date.now = () => Math.max(originalNow(), expiry + 1);
+  try { return await recoverStaleOwnedTemps(); } finally { Date.now = originalNow; }
+}
+
+function descendantOwnerCode(primaryFailure, unconfirmed, persistenceFailure) {
+  const descendant = [
+    "const fs=require('node:fs'),path=require('node:path'),os=require('node:os');",
+    "const tmp=os.tmpdir(),release=path.join(tmp,'dcp-release');",
+    "const fields=fs.readFileSync('/proc/self/stat','utf8').split(')')[1].trim().split(/\\s+/);",
+    "fs.writeFileSync(path.join(tmp,'dcp-ready.json'),JSON.stringify({pid:process.pid,pgid:Number(fields[2]),release}));",
+    ...(persistenceFailure ? ["process.on('SIGTERM',()=>{});"] : []),
+    "setInterval(()=>{if(fs.existsSync(release))process.exit(0);},10);",
+  ].join('\n');
+  const leader = [
+    "const fs=require('node:fs'),path=require('node:path'),os=require('node:os');",
+    "const child=require('node:child_process').spawn(process.execPath,['-e'," + JSON.stringify(descendant) + "],{detached:false,stdio:'ignore'});",
+    "child.unref();const ready=path.join(os.tmpdir(),'dcp-ready.json'),deadline=Date.now()+30000;",
+    "function poll(){if(fs.existsSync(ready)){const proof=JSON.parse(fs.readFileSync(ready,'utf8'));if(proof.pid!==child.pid)throw Error('Wrong descendant');process.stdout.write(JSON.stringify({leaderPid:process.pid,...proof})+'\\n');return;}if(Date.now()>deadline)throw Error('Descendant READY timed out');setTimeout(poll,10);}poll();",
+  ].join('\n');
+  return modulePrelude() + [
+    "const assert=require('node:assert/strict');let root,claimId,proof,primary=new Error('DCP primary task failure');primary.code='DCP_PRIMARY';const originalKill=process.kill;let deniedProbes=0;const originalRename=fs.renameSync,injectedPersistenceError=Object.assign(new Error('DCP RUNNING persistence failure'),{code:'EIO'});let failedRunningPersistence=false;",
+    ...(unconfirmed ? ["process.kill=function(pid,signal){if(pid<0&&signal===0){deniedProbes++;throw Object.assign(new Error('DCP denied group observation'),{code:'EPERM'});}return originalKill.call(this,pid,signal);};"] : []),
+    ...(persistenceFailure ? ["fs.renameSync=function(from,to){let staged;try{staged=JSON.parse(fs.readFileSync(from,'utf8'));}catch{}if(!failedRunningPersistence&&String(to).endsWith('.lease.json')&&staged&&staged.owned_children&&staged.owned_children.some(child=>child.phase==='RUNNING')){failedRunningPersistence=true;const ready=path.join(root,'child-temp/dcp-ready.json'),deadline=Date.now()+15000;while(!fs.existsSync(ready)){if(Date.now()>deadline)throw Error('Real descendant did not reach READY');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,150);throw injectedPersistenceError;}return originalRename.call(this,from,to);};"] : []),
+    "(async()=>{let caught;try{await runtime.withOwnedTemp({schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'dcp-real-descendant',budgetBytes:65536},async lease=>{",
+    "root=lease.root;claimId=runtime.inspectOwnedTemps().records.find(row=>row.rootPath===root).claimId;",
+    "const result=await lease.run(process.execPath,['-e'," + JSON.stringify(leader) + "]);proof=JSON.parse(result.stdout);",
+    "assert.equal(proof.pgid,proof.leaderPid);assert.notEqual(proof.pid,proof.leaderPid);originalKill.call(process,proof.pid,0);originalKill.call(process,-proof.pgid,0);",
+    ...(primaryFailure ? ["throw primary;"] : ["return 'DCP task success';"]),
+    "});}catch(error){caught=error;}assert.ok(caught,'live descendant must prevent successful terminal cleanup');",
+    "const leasePath=path.join(path.dirname(path.dirname(root)),'claims',claimId+'.lease.json');",
+    "const durable=JSON.parse(fs.readFileSync(leasePath,'utf8'));process.kill=originalKill;fs.renameSync=originalRename;if(!proof){proof=JSON.parse(fs.readFileSync(path.join(root,'child-temp/dcp-ready.json'),'utf8'));proof.leaderPid=proof.pgid;}",
+    "process.stdout.write('DCP_OWNER '+JSON.stringify({ownerPid:process.pid,root,claimId,leasePath,proof,deniedProbes,failedRunningPersistence,persistenceFailurePreserved:Boolean(caught.cause&&caught.cause.cause===injectedPersistenceError),ownedChildren:durable.owned_children,errorCode:caught.code,primaryIdentity:caught===primary,cleanupCode:caught.cleanupCode||null,cleanupStatus:caught.cleanupStatus,rootExists:fs.existsSync(root)})+'\\n',()=>process.exit(0));",
+    "})().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});",
+  ].join('\n');
+}
+
+const DESCENDANT_REAPER_CODE = [
+  'import ctypes,json,os,select,signal,subprocess,sys,time',
+  'libc=ctypes.CDLL(None,use_errno=True)',
+  "if libc.prctl(36,1,0,0,0)!=0:raise RuntimeError('Fixture subreaper prerequisite unavailable')",
+  'owner=subprocess.Popen([sys.argv[1],"-e",sys.argv[2]],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)',
+  'proof=None;reaped=False',
+  'try:',
+  ' stdout,stderr=owner.communicate(timeout=45)',
+  " if owner.returncode!=0:raise RuntimeError('Owner failed: '+stderr)",
+  ' rows=[json.loads(line[10:]) for line in stdout.splitlines() if line.startswith("DCP_OWNER ")]',
+  " if len(rows)!=1:raise RuntimeError('Missing owner boundary evidence: '+stdout)",
+  ' proof=rows[0]',
+  ' print("DCP_READY "+json.dumps({**proof,"ownerExited":True,"ownerExitCode":owner.returncode,"reaperPid":os.getpid()}),flush=True)',
+  ' if not select.select([sys.stdin],[],[],45)[0]:raise RuntimeError("Fixture release timed out")',
+  ' if sys.stdin.readline().strip()!="RELEASE":raise RuntimeError("Invalid fixture release")',
+  ' release=proof["proof"]["release"]',
+  ' with open(release,"w") as target:target.write("release")',
+  ' deadline=time.monotonic()+15',
+  ' while True:',
+  '  pid,status=os.waitpid(proof["proof"]["pid"],os.WNOHANG)',
+  '  if pid:reaped=True;break',
+  '  if time.monotonic()>deadline:raise RuntimeError("Descendant extinction timed out")',
+  '  time.sleep(.01)',
+  ' if os.waitstatus_to_exitcode(status)!=0:raise RuntimeError("Descendant did not exit successfully")',
+  ' print("DCP_REAPED "+json.dumps({"pid":pid,"pgid":proof["proof"]["pgid"],"exitCode":0}),flush=True)',
+  'finally:',
+  ' if owner.poll() is None:owner.kill();owner.wait()',
+  ' if proof is not None and not reaped:',
+  '  try:',
+  '   pid,status=os.waitpid(proof["proof"]["pid"],os.WNOHANG)',
+  '   if pid==0:os.kill(proof["proof"]["pid"],signal.SIGKILL);os.waitpid(proof["proof"]["pid"],0)',
+  '  except ChildProcessError:pass',
+].join('\n');
+
+async function controlledDescendant(primaryFailure = false, unconfirmed = false, persistenceFailure = false) {
+  const child = spawn('python3', ['-c', DESCENDANT_REAPER_CODE, process.execPath, descendantOwnerCode(primaryFailure, unconfirmed, persistenceFailure)], {
+    stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+  });
+  const observation = { stdout: '', stderr: '', closed: false, code: null, signal: null, error: null };
+  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { observation.stdout += chunk; });
+  child.stderr.on('data', (chunk) => { observation.stderr += chunk; });
+  child.once('error', (error) => { observation.error = error; });
+  const closed = new Promise((resolve) => child.once('close', (code, signal) => {
+    Object.assign(observation, { closed: true, code, signal }); resolve();
+  }));
+  let released = false;
+  const waitLine = async (prefix) => {
+    await waitUntil(() => {
+      if (observation.error) throw observation.error;
+      if (observation.closed && observation.code !== 0) throw new Error('DCP reaper failed: ' + observation.stderr);
+      return observation.stdout.split('\n').some((line) => line.startsWith(prefix));
+    }, 'real descendant boundary ' + prefix, 60000);
+    return JSON.parse(observation.stdout.split('\n').find((line) => line.startsWith(prefix)).slice(prefix.length));
+  };
+  const release = async () => {
+    if (!released) { released = true; child.stdin.end('RELEASE\n'); }
+    const reaped = await waitLine('DCP_REAPED ');
+    await closed;
+    assert.equal(observation.code, 0, observation.stderr);
+    assert.equal(observation.signal, null);
+    return reaped;
+  };
+  try {
+    const state = await waitLine('DCP_READY ');
+    return { state, release, finish: async () => {
+      if (!observation.closed) await release();
+      if (fs.existsSync(state.leasePath)) await recoverDescendantStale(state);
+    } };
+  } catch (error) {
+    if (!observation.closed) { child.stdin.end('RELEASE\n'); await closed; }
+    throw error;
+  }
+}
+
+function assertRealDescendantProtection(state, primaryFailure = false, primaryCode = null) {
+  assert.equal(state.ownerExited, true);
+  assert.equal(state.ownerExitCode, 0);
+  assert.throws(() => process.kill(state.ownerPid, 0), (error) => error.code === 'ESRCH');
+  assert.throws(() => process.kill(state.proof.leaderPid, 0), (error) => error.code === 'ESRCH');
+  process.kill(state.proof.pid, 0);
+  process.kill(-state.proof.pgid, 0);
+  const descendantState = fs.readFileSync('/proc/' + state.proof.pid + '/stat', 'utf8').split(')')[1].trim().split(/\s+/)[0];
+  assert.notEqual(descendantState, 'Z', 'protected descendant must be live, not a zombie');
+  assert.equal(state.proof.pgid, state.proof.leaderPid);
+  assert.equal(state.ownedChildren.length, 1);
+  assert.equal(state.ownedChildren[0].pid, state.proof.leaderPid);
+  assert.equal(state.ownedChildren[0].process_group, true);
+  assert.equal(state.ownedChildren[0].phase, 'RUNNING');
+  assert.equal(typeof state.ownedChildren[0].start_identity, 'string');
+  assert.equal(state.rootExists, true);
+  assert.equal(state.cleanupStatus.status, 'CLEANUP_INCOMPLETE');
+  assert.equal(state.cleanupStatus.code, 'TEMP_CLEANUP_INCOMPLETE');
+  assert.equal(state.primaryIdentity, primaryFailure);
+  assert.equal(state.errorCode, primaryCode || (primaryFailure ? 'DCP_PRIMARY' : 'TEMP_CLEANUP_INCOMPLETE'));
+  assert.equal(JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).owned_children.length, 1);
+  console.log('DCP_PROTECTED '+JSON.stringify(state));
+}
+
+async function assertDescendantStaleHold(state, code = 'TEMP_CHILD_LIVE') {
+  const result = await recoverDescendantStale(state);
+  assert.equal(result.find((row) => row.claimId === state.claimId).status, 'HOLD');
+  assert.equal(result.find((row) => row.claimId === state.claimId).code, code);
+  console.log('DCP_STALE_HOLD '+JSON.stringify({claimId:state.claimId,pgid:state.proof.pgid,result:result.find(row=>row.claimId===state.claimId)}));
+  assert.equal(fs.existsSync(state.root), true);
+  assert.equal(JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).owned_children.length, 1);
+}
+
+async function assertDescendantExtinctionRecovery(fixture, baseline) {
+  const reaped = await fixture.release();
+  assert.equal(reaped.pid, fixture.state.proof.pid);
+  assert.throws(() => process.kill(-fixture.state.proof.pgid, 0), (error) => error.code === 'ESRCH');
+  const result = await recoverDescendantStale(fixture.state);
+  assert.equal(result.find((row) => row.claimId === fixture.state.claimId).status, 'REMOVED');
+  assert.equal(fs.existsSync(fixture.state.root), false);
+  assert.equal(fs.existsSync(fixture.state.leasePath), false);
+  assert.deepEqual(usage(), baseline);
+  console.log('DCP_EXTINCT_CLEAN '+JSON.stringify({claimId:fixture.state.claimId,reaped,result:result.find(row=>row.claimId===fixture.state.claimId),cleanup:usage()}));
+}
+
+test('DCP01_POSIX_SURVIVING_DESCENDANT_PROTECTED real child and creator-dead stale recovery', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage(), fixture = await controlledDescendant();
+  try {
+    assertRealDescendantProtection(fixture.state);
+    await assertDescendantStaleHold(fixture.state);
+    await assertDescendantExtinctionRecovery(fixture, baseline);
+  } finally { await fixture.finish(); }
+});
+
+test('DCP02_POSIX_EVENTUAL_EXTINCTION_CLEANS same root clears protection after real group extinction', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage(), fixture = await controlledDescendant();
+  try {
+    assertRealDescendantProtection(fixture.state);
+    await assertDescendantStaleHold(fixture.state);
+    await assertDescendantExtinctionRecovery(fixture, baseline);
+  } finally { await fixture.finish(); }
+});
+
+test('DCP03_UNCONFIRMED_GROUP_EXTINCTION_FAILS_SAFE real recovery retains protection on denied liveness probe', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage(), fixture = await controlledDescendant(false, true);
+  const originalKill = process.kill;
+  try {
+    assertRealDescendantProtection(fixture.state);
+    assert.ok(fixture.state.deniedProbes > 0, 'real bounded cleanup must encounter denied group observations');
+    await fixture.release();
+    assert.throws(() => originalKill.call(process, -fixture.state.proof.pgid, 0), (error) => error.code === 'ESRCH');
+    process.kill = function (pid, signal) {
+      if (pid === -fixture.state.proof.pgid && signal === 0) throw Object.assign(new Error('DCP liveness cannot be confirmed'), { code: 'EPERM' });
+      return originalKill.call(this, pid, signal);
+    };
+    await assertDescendantStaleHold(fixture.state, 'TEMP_CHILD_UNKNOWN');
+    process.kill = originalKill;
+    const result = await recoverDescendantStale(fixture.state);
+    assert.equal(result.find((row) => row.claimId === fixture.state.claimId).status, 'REMOVED');
+    assert.equal(fs.existsSync(fixture.state.root), false);
+    assert.deepEqual(usage(), baseline);
+  } finally { process.kill = originalKill; await fixture.finish(); }
+});
+
+test('DCP04_PRIMARY_RESULT_NOT_MASKED real descendant cleanup hold stays secondary', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage(), fixture = await controlledDescendant(true);
+  try {
+    assertRealDescendantProtection(fixture.state, true);
+    assert.equal(fixture.state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
+    await assertDescendantStaleHold(fixture.state);
+    await assertDescendantExtinctionRecovery(fixture, baseline);
+  } finally { await fixture.finish(); }
+});
+
+test('DCP05_NO_DESCENDANT_POSITIVE_CONTROL ordinary POSIX child clears durable ownership', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage();
+  await runOwned(spec('dcp-no-descendant'), async (lease) => {
+    const result = await lease.run(process.execPath, ['-e', "process.stdout.write('DCP ordinary child');"]);
+    assert.equal(result.stdout, 'DCP ordinary child');
+    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+    const leasePath = path.join(path.dirname(path.dirname(lease.root)), 'claims', row.claimId + '.lease.json');
+    assert.deepEqual(JSON.parse(fs.readFileSync(leasePath, 'utf8')).owned_children, []);
+  });
+  assert.deepEqual(usage(), baseline);
+});
+
+test('DCP06_WINDOWS_NONREGRESSION ordinary Windows child retains cleanup and recovery behavior', { skip: process.platform !== 'win32' }, async () => {
+  const baseline = usage();
+  await runOwned(spec('dcp-windows-child'), async (lease) => {
+    const result = await lease.run(process.execPath, ['-e', "process.stdout.write('DCP Windows child');"]);
+    assert.equal(result.stdout, 'DCP Windows child');
+    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+    const leasePath = path.join(path.dirname(path.dirname(lease.root)), 'claims', row.claimId + '.lease.json');
+    assert.deepEqual(JSON.parse(fs.readFileSync(leasePath, 'utf8')).owned_children, []);
+    assert.equal((await recoverStaleOwnedTemps()).find((record) => record.claimId === row.claimId).status, 'HOLD');
+  });
+  assert.deepEqual(usage(), baseline);
+});
+
+test('DCP07_RUNNING_LEDGER_WRITE_FAILURE keeps real descendant protection and the original failure', { skip: process.platform !== 'linux' }, async () => {
+  const baseline = usage(), fixture = await controlledDescendant(false, false, true);
+  try {
+    assertRealDescendantProtection(fixture.state, false, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(fixture.state.failedRunningPersistence, true);
+    assert.equal(fixture.state.persistenceFailurePreserved, true);
+    assert.equal(fixture.state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
+    await assertDescendantStaleHold(fixture.state);
+    await assertDescendantExtinctionRecovery(fixture, baseline);
+  } finally { await fixture.finish(); }
+});

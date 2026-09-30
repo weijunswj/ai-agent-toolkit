@@ -1429,9 +1429,27 @@ function startOwnedChild(r, owner) {
 }
 
 function clearOwnedChild(r, token, owner) {
-  if ((r.lease.owned_children || []).some((row) => row.token === token)) {
-    recordChild(r, token, null, owner);
+  const child = (r.lease.owned_children || []).find((row) => row.token === token);
+  if (!child) return true;
+  // Direct child close does not prove that its POSIX process group is gone.
+  // Keep durable recovery protection while liveness is positive or uncertain.
+  if (!win() && child.process_group) {
+    const tracked = [...r.children.values()].find((record) => record.token === token);
+    const protection = child.phase === 'RUNNING'
+      ? { group: true, pid: child.pid, start: child.start_identity, closed: true } : tracked;
+    if (protection && groupAlive(protection)) {
+      if (child.phase === 'STARTING' && tracked && tracked.pid) {
+        // A failed spawn-ledger write must not discard the real child's protection.
+        // Retry its known identity; another failure keeps STARTING protected and
+        // preserves the original persistence error as the primary result.
+        try { recordChild(r, token, { phase: 'RUNNING', pid: tracked.pid, start_identity: tracked.start }, owner); }
+        catch (caught) { tracked.persistError = tracked.persistError || caught; }
+      }
+      return false;
+    }
   }
+  recordChild(r, token, null, owner);
+  return true;
 }
 
 function noteChildEvent(rec, type) {
