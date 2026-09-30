@@ -9,6 +9,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const controller = fs.readFileSync(path.join(repoRoot, 'repo', 'CONTROLLER.md'), 'utf8');
 const architecture = fs.readFileSync(path.join(repoRoot, 'repo', 'ARCHITECTURE.md'), 'utf8');
+const programmeDiscoveryBaseline = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'PROGRAMME-DISCOVERY-BASELINE.md'), 'utf8');
 const registry = JSON.parse(fs.readFileSync(
   path.join(repoRoot, 'repo', 'contracts', 'controller-kernel', 'stack-registry-v2.json'),
   'utf8'
@@ -958,13 +959,13 @@ test('S1A increment 1 blocker predicate rejects clause removal and negation', ()
 test('S1A increment 1 post-child review binds the integrated Toolkit checkpoint', () => {
   const section = s1aSection(architecture, '### Post-child integrated dual review');
   assert.match(section, /only to explicitly Toolkit-managed repositories/);
-  assert.match(section, /after each Delivery Child's final PR is merged/);
-  assert.match(section, /canonical commit\/tree is read back/);
+  assert.ok(section.includes('Only a current canonical merge/event and child-state readback identifying the final Delivery Child merge triggers deterministic reconciliation; a caller label cannot suppress it'));
+  assert.match(section, /exact integrated commit\/tree and merge receipt/);
   assert.match(section, /supporting or incremental PRs do not trigger/i);
-  assert.match(section, /route for each review is supplied by current Owner\/Web authority/);
+  assert.match(section, /route for each `DUAL_MAX` review is supplied by current Owner\/Web authority/);
   assert.match(section, /not an authoritative default or permanent Architecture route law/);
   assert.match(section, /exact provider\/model\/reasoning bindings from that current readback/);
-  assert.match(section, /integration CI to that same exact integrated identity/);
+  assert.match(section, /When `DUAL_MAX` is selected, start both independent whole-programme reviews alongside merge-triggered CI/);
   assert.match(section, /Each reviewer receives.*neither sees the other's report/);
   assert.match(section, /only a dependent next-child frontier/);
   assert.match(section, /final integrated programme review/);
@@ -972,15 +973,15 @@ test('S1A increment 1 post-child review binds the integrated Toolkit checkpoint'
   assert.match(section, /relevant current or terminal child state/);
   assert.match(section, /complete terminal object-receipt inventory from its canonical ledger/);
   assert.match(section, /complete applicable integration-check inventory from its canonical source/);
-  assert.match(section, /whole programme from the same snapshot/);
-  assert.match(section, /Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication/);
-  assert.match(section, /mutually blind until both reports have returned/);
+  assert.match(section, /same immutable post-merge snapshot/);
+  assert.match(section, /When `DUAL_MAX` is selected, both reports, terminal receipts and all applicable checks must be terminal before Web adjudication/);
+  assert.match(section, /neither sees the other's report before both reports are returned to Web/);
   assert.match(section, /only a dependent next-child frontier/);
   assert.match(section, /final integrated programme review occurs at the final Delivery Child checkpoint for this lifecycle/);
-  assert.match(controller, /Launch two independent read-only whole-programme reviews alongside merge-triggered CI/);
-  assert.match(controller, /Read back the complete terminal receipt\/check inventories after completion and before Web adjudication/);
-  assert.doesNotMatch(controller, /Verify both complete inventories before the reviews start/);
-  assert.match(controller, /post-child dual review.*does not replace pre-merge G4/);
+  assert.match(controller, /`DUAL_MAX` requires both independent read-only reviews on one immutable snapshot/);
+  assert.match(section, /For `DUAL_MAX`, after both reports return, read back the complete terminal object-receipt inventory from its canonical ledger/);
+  assert.match(section, /Before mode selection, read back the complete required receipt IDs and applicable integration-check membership/);
+  assert.match(controller, /Post-child binary checkpoint.*does not replace pre-merge G4/);
 });
 
 test('S1A increment 1 non-product continuation stays bounded to accepted work', () => {
@@ -1163,7 +1164,7 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
     mutationEffects: Object.freeze([])
   })
 });
-const S1A_ORACLE_GOVERNED_PROSE_SHA256 = '96b6c9be1dc374a8a0682171d3f51903056d8ec30449e81160a5a9d69fc0d890';
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'd96e82c0c6685928e808a89f3d9208db9f51bc4ea4787b1b562d0f7b6c89fe58';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
@@ -1773,12 +1774,17 @@ function s1aGovernedHumanPolicyDigest(source) {
     'If any field is missing or contradictory, do not admit this disposition; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
   const acceptedEquivalentFailClosed =
     'If any field is missing or contradictory, this disposition must fail closed; preserve the unresolved evidence/hold obligation under its proper type, and keep independent required gates binding.';
+  const canonicalReconcilePrerequisite =
+    'Selecting `RECONCILE_ONLY` never bypasses a missing or stale shared prerequisite.';
+  const acceptedEquivalentReconcilePrerequisite =
+    'Once all shared prerequisites pass, `RECONCILE_ONLY` may omit only reviewer work.';
   // G1 re-convergence is separate policy. Normalize line endings; the machine contract is independently interpreted below.
   const governedHumanPolicy = governedSection.slice(0, g1Start)
     .replace(/~~~s1a-policy-contract-v1\r?\n[\s\S]*?\r?\n~~~/,
       '~~~s1a-policy-contract-v1\n[fixed-machine-contract]\n~~~')
     .replace(/\r\n?/g, '\n')
-    .replace(acceptedEquivalentFailClosed, canonicalFailClosed);
+    .replace(acceptedEquivalentFailClosed, canonicalFailClosed)
+    .replace(acceptedEquivalentReconcilePrerequisite, canonicalReconcilePrerequisite);
   return crypto.createHash('sha256').update(governedHumanPolicy, 'utf8').digest('hex');
 }
 function s1aProseRange(source, startHeading, endHeading) {
@@ -2093,7 +2099,8 @@ function s1aReadPolicy(source) {
 
   const review = policy.postChildReview;
   s1aExactKeys(review, [
-    'trigger', 'scope', 'readOnly', 'parentContractMode', 'parentContractBodyField',
+    'trigger', 'scope', 'readOnly', 'assuranceModes', 'forbiddenModes', 'sharedPrerequisites',
+    'modeSelection', 'checkMembership', 'dualMaxReview', 'parentContractMode', 'parentContractBodyField',
     'parentContractDigestField', 'parentContractDigestMode', 'receiptInventoryField',
     'checkInventoryField', 'acceptedChildStates', 'reviewSlots', 'sameSnapshotFields',
     'blindUntil', 'trace', 'frontierEffect', 'receiptInventoryMode', 'checkInventoryMode',
@@ -2104,6 +2111,70 @@ function s1aReadPolicy(source) {
     'reviewRouteAuthorityMode', 'reviewRouteAuthorityField', 'reviewRouteAuthorityFields',
     'reviewRouteFields'
   ], 'postChildReview');
+  s1aRequire(s1aSame(review.assuranceModes, ['RECONCILE_ONLY', 'DUAL_MAX']) &&
+    s1aSame(review.forbiddenModes, ['SINGLE_MAX']) &&
+    s1aSame(review.sharedPrerequisites, [
+      'EXACT_INTEGRATED_IDENTITY', 'CURRENT_PARENT_STATE', 'CURRENT_CHILD_STATE',
+      'RECEIPT_MEMBERSHIP', 'CHECK_MEMBERSHIP', 'FINALITY_AND_DEPENDENCY_STATE'
+    ]) && review.modeSelection.selectionRequiresSharedPrerequisites === true &&
+    review.modeSelection.treeEqualityIsSufficientByItself === false &&
+    review.modeSelection.controllerOrArchitectureTouchAloneTriggersDual === false &&
+    s1aSame(review.modeSelection.reconcileOnlyRequiredPredicates, [
+      'MERGE_TREE_EQUALS_ASSURED_CHILD_TREE',
+      'NO_UNASSURED_CONCURRENT_OR_MULTI_CHILD_COMPOSITION',
+      'NO_CONFLICT_RESOLUTION_SEMANTIC_DELTA',
+      'CHILD_TERMINAL_FINALITY_COHERENT',
+      'PARENT_CURRENT_FRONTIER_DEPENDENCIES_COHERENT',
+      'NO_UNRESOLVED_MATERIAL_DEPENDENT_FINDING',
+      'COMPLETE_APPLICABLE_MERGE_CHECK_MEMBERSHIP',
+      'ALL_APPLICABLE_MERGE_CHECKS_TERMINAL_GREEN',
+      'NO_EXPLICIT_DUAL_REQUIREMENT',
+      'NOT_FINAL_DELIVERY_CHILD'
+    ]) && s1aSame(review.modeSelection.dualMaxTriggers, [
+      'INTEGRATION_TREE_DELTA',
+      'CONCURRENT_OR_MULTI_CHILD_COMPOSITION',
+      'MATERIAL_ROOT_TRUST_AUTHORITY_INTEGRATION_OUTSIDE_ASSURED_TREE',
+      'UNRESOLVED_INTEGRATION_UNCERTAINTY',
+      'EXPLICIT_OWNER_WEB_G4_REQUIREMENT',
+      'FINAL_DELIVERY_CHILD'
+    ]), 'post-child modes and triggers must match the binary contract');
+  s1aExactKeys(review.checkMembership, [
+    'deriveBeforeResults', 'includeAllApplicableFirstPartyChecks', 'binds', 'authorityReadbacks', 'membershipIdentityFields', 'terminalReadbackFields',
+    'emptyMembershipValidWhenProven', 'falseGreenRejections'
+  ], 'checkMembership');
+  s1aExactKeys(review.checkMembership.authorityReadbacks, [
+    'configuration', 'terminalRuns', 'allIdentityFieldsRequired', 'bindExpectedMembershipTo',
+    'emptyMembershipRequiresCompleteAuthoritativeReadback'
+  ], 'checkMembership.authorityReadbacks');
+  s1aRequire(s1aSame(review.checkMembership.authorityReadbacks, {
+      configuration: 'CURRENT_CANONICAL_CHECK_CONFIGURATION_READBACK',
+      terminalRuns: 'CURRENT_CANONICAL_LATEST_RUN_READBACK',
+      allIdentityFieldsRequired: true,
+      bindExpectedMembershipTo: ['EVENT_TRIGGER_HEAD', 'CANONICAL_CHILD_INVENTORY', 'TERMINAL_RESULT_INVENTORY', 'REVIEW_SNAPSHOT'],
+      emptyMembershipRequiresCompleteAuthoritativeReadback: true
+    }) && s1aSame(review.checkMembership.binds, [
+      'AUTHORITATIVE_CHECK_CONFIGURATION', 'EVENT_BRANCH_PATH_CONDITIONS', 'CHILD_REQUIRED_CHECKS',
+      'ALL_APPLICABLE_FIRST_PARTY_MERGE_TRIGGERED_CHECKS', 'EXPECTED_MERGE_CHECK_MEMBERSHIP', 'MEMBERSHIP_FREEZE_POINT', 'TERMINAL_READBACK_RULE',
+      'PREMERGE_ONLY_VS_MERGE_TRIGGERED_RULE', 'MISSING_EXPECTED_CHECK_RULE', 'NOT_APPLICABLE_RULE'
+    ]) && review.checkMembership.deriveBeforeResults === true && review.checkMembership.includeAllApplicableFirstPartyChecks === true &&
+    s1aSame(review.checkMembership.membershipIdentityFields, [
+      'producerId', 'workflowId', 'workflowRevision', 'checkId', 'matrixLeg', 'eventIdentity', 'triggerId', 'headSha'
+    ]) && s1aSame(review.checkMembership.terminalReadbackFields, [
+      'producerId', 'workflowId', 'workflowRevision', 'runId', 'checkId', 'matrixLeg', 'eventIdentity',
+      'triggerId', 'headSha', 'terminalReadback', 'terminal', 'conclusion'
+    ]) &&
+    review.checkMembership.emptyMembershipValidWhenProven === true &&
+    s1aSame(review.checkMembership.falseGreenRejections, [
+      'GREENS_ONLY_MEMBERSHIP', 'CO_OMITTED_EXPECTED_CHECK', 'WRONG_PRODUCER_SAME_DISPLAY_NAME',
+      'SKIPPED_CANCELLED_FAILED_DEPENDENCY_AS_NOT_APPLICABLE', 'AMBIGUOUS_DYNAMIC_MATRIX_EXPANSION',
+      'STALE_SUCCESSFUL_RERUN_OR_PREDECESSOR', 'NEW_APPLICABLE_CONFIGURATION_AFTER_FREEZE'
+    ]) && review.dualMaxReview.bothSlotsRequired === true &&
+    review.dualMaxReview.readOnly === true && review.dualMaxReview.sameImmutableSnapshot === true &&
+    review.dualMaxReview.mutuallyBlindUntil === 'BOTH_REPORTS_TERMINAL' &&
+    review.dualMaxReview.unavailableReviewerOutcome === 'HOLD' &&
+    review.dualMaxReview.singleReviewFallback === false &&
+    review.dualMaxReview.finalDeliveryChildRequiresDual === true,
+    'post-child check membership and dual review requirements are incomplete');
   s1aRequire(review.trigger === 'FINAL_DELIVERY_CHILD_MERGE' &&
     review.scope === 'WHOLE_PROGRAMME' && review.readOnly === true &&
     review.parentContractMode === 'CURRENT_CANONICAL_AUTHORITATIVE' &&
@@ -2329,14 +2400,17 @@ function s1aReadPolicy(source) {
   const postChildEnd = source.indexOf('### Bounded non-product continuation', postChildStart);
   const postChildProse = postChildStart >= 0 && postChildEnd > postChildStart
     ? source.slice(postChildStart, postChildEnd) : '';
-  s1aRequire(postChildProse.includes('The CURRENT canonical parent programme contract is an authoritative input to both reviews.') &&
-    postChildProse.includes('Read back the exact merged identity and the relevant current or terminal child state from their canonical sources; both readbacks must be authoritative, current and explicit.') &&
-    postChildProse.includes('Both reviews receive the same accepted inputs and the same immutable snapshot.') &&
-    postChildProse.includes('Both are independent, read-only whole-programme reviews.') &&
-    postChildProse.includes('Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication.') &&
+  s1aRequire(postChildProse.includes('Only a current canonical merge/event and child-state readback identifying the final Delivery Child merge triggers deterministic reconciliation; a caller label cannot suppress it.') &&
+    postChildProse.includes('The only assurance modes are `RECONCILE_ONLY` and `DUAL_MAX`; `SINGLE_MAX` does not exist.') &&
+    (postChildProse.includes('Selecting `RECONCILE_ONLY` never bypasses a missing or stale shared prerequisite.') ||
+      postChildProse.includes('Once all shared prerequisites pass, `RECONCILE_ONLY` may omit only reviewer work.')) &&
+    postChildProse.includes('Both reviews are independent, read-only whole-programme reviews.') &&
+    postChildProse.includes('When `DUAL_MAX` is selected, both reports, terminal receipts and all applicable checks must be terminal before Web adjudication.') &&
+    postChildProse.includes('A provably empty expected membership is valid only when the complete authoritative configuration readback and those inventories agree that it is empty.') &&
     postChildProse.includes('Do not copy programme-wide parent law into every child.') &&
     !/(?:completed|terminal|current) child state.{0,120}(?:may be accepted|is accepted|suffices).{0,120}(?:child[- ]local summary|summary).{0,120}without.{0,80}(?:current )?canonical readback/i.test(policyLawProse) &&
-    !/parent programme contract (?:is|may be) optional|adjudicat(?:e|ion) before both reports|reviewers? may see the other report before both reports are terminal/i.test(postChildProse),
+    !/parent programme contract (?:is|may be) optional|adjudicat(?:e|ion) before both reports|reviewers? may see the other report before both reports are terminal/i.test(postChildProse) &&
+    !/RECONCILE_ONLY.{0,100}(?:may|can|is allowed to)\s+(?:bypass|skip).{0,80}(?:shared|prerequisite|readback)/i.test(postChildProse),
     'post-child prose must bind current inputs, independent blind reviews and terminal adjudication order');
   const carrierStart = source.indexOf('### Faithful validation carrier');
   const carrierEnd = source.indexOf('### G1 re-convergence', carrierStart);
@@ -3124,8 +3198,8 @@ const S1A_ORACLE_REVIEW_ROUTE_AUTHORITY_CORE = Object.freeze({
   authorityReference: 'authority:review-routes:3',
   revision: 'authority:route-revision-3',
   routes: Object.freeze([
-    Object.freeze({ slot: 'A', provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' }),
-    Object.freeze({ slot: 'B', provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' })
+    Object.freeze({ slot: 'A', provider: 'openai', model: 'gpt-6-astra', reasoning: 'max' }),
+    Object.freeze({ slot: 'B', provider: 'anthropic', model: 'opus-5.5', reasoning: 'max' })
   ])
 });
 const S1A_ORACLE_REVIEW_ROUTE_AUTHORITY = Object.freeze({
@@ -3614,7 +3688,8 @@ test('S1-A blocker observer applies fixed outcomes to complete, missing, and con
     !item.id.startsWith('blocker-missing-nested-')).length,
     S1A_ORACLE_BLOCKER_FIELDS.length + S1A_ORACLE_IDENTITY_FIELDS.length);
   assert.equal(results.filter((item) => item.id.startsWith('blocker-missing-nested-')).length,
-    S1A_ORACLE_BLOCKER_NESTED_FIELDS.reduce((count, row) => count + row.fields.length, 0));  assert.equal(results.find((item) => item.id === 'blocker-complete-current-record').observed, true);
+    S1A_ORACLE_BLOCKER_NESTED_FIELDS.reduce((count, row) => count + row.fields.length, 0));
+   assert.equal(results.find((item) => item.id === 'blocker-complete-current-record').observed, true);
 });
 
 test('S1-A blocker admission rejects wrong value types and caller-rehashed Web decisions', () => {
@@ -5794,9 +5869,12 @@ function observeS1aEvidenceOnlyOracle(policy) {
   });
 }
 
+const D1_ORACLE_VERIFIED_POST_CHILD_MEMBERSHIP_PROOFS = new WeakMap();
 function evaluateS1aPostChildReview(policy, input) {
   const rule = policy.postChildReview;
   const failures = [];
+  const assuranceMode = input.assuranceMode || 'DUAL_MAX';
+  if (!rule.assuranceModes.includes(assuranceMode)) failures.push('POST_CHILD_ASSURANCE_MODE');
   if (rule.trigger !== 'ANY_CHILD_MERGE' && input.trigger !== rule.trigger) {
     failures.push('POST_CHILD_TRIGGER');
   }
@@ -5841,16 +5919,29 @@ function evaluateS1aPostChildReview(policy, input) {
     failures.push('POST_CHILD_PARENT_CONTRACT_MISSING');
   }
   const child = input.childState || {};
+  const d1CheckMembershipProof = input.d1CheckMembershipProof || null;
+  const d1VerifiedProof = d1CheckMembershipProof &&
+    D1_ORACLE_VERIFIED_POST_CHILD_MEMBERSHIP_PROOFS.get(d1CheckMembershipProof);
+  const d1ExpectedCheckIds = d1VerifiedProof ? d1VerifiedProof.expectedCheckIds : [];
+  const d1CheckProofValid = Boolean(d1VerifiedProof) && d1VerifiedProof.status === 'GREEN' &&
+    s1aSame(d1VerifiedProof.identity, identity) && s1aSame(d1VerifiedProof.childState, child) &&
+    s1aSame(d1VerifiedProof.checkInventory, input.checkInventory) &&
+    s1aSame(d1VerifiedProof.checks, input.checks) &&
+    s1aSame(d1VerifiedProof.reviewSnapshot, input.reviewSnapshot) &&
+    new Set(d1ExpectedCheckIds).size === d1ExpectedCheckIds.length &&
+    s1aSame(d1ExpectedCheckIds, Array.isArray(child.applicableIntegratedCheckIds)
+      ? child.applicableIntegratedCheckIds.slice().sort() : []);
   if (child.source !== 'CANONICAL_CHILD' || child.authoritative !== true ||
       child.repository !== identity.repository || child[rule.deliveryChildStateIdentityField] !== identity.deliveryChildId ||
       child[rule.childStateCurrentField] !== rule.childStateMustBeCurrent ||
       child.readBack !== true || !s1aPresent(child.revision) || !s1aPresent(child.stateDigest) ||
       !rule.acceptedChildStates.includes(child.lifecycle) ||
       child.stateDigest !== s1aHashWithoutField(child, 'stateDigest') ||
-      !S1A_ORACLE_POST_CHILD_STATES.some((oracle) => s1aSame(child, oracle))) {
+      (!S1A_ORACLE_POST_CHILD_STATES.some((oracle) => s1aSame(child, oracle)) && !d1CheckProofValid)) {
     failures.push('POST_CHILD_RELEVANT_CHILD_STATE');
   }
   const reviewRouteAuthority = input[rule.reviewRouteAuthorityField] || {};
+  if (assuranceMode === 'DUAL_MAX') {
   const routeFields = rule.reviewRouteAuthorityFields;
   if (!s1aHasExactKeys(reviewRouteAuthority, routeFields) ||
       !s1aSame(reviewRouteAuthority, S1A_ORACLE_REVIEW_ROUTE_AUTHORITY) ||
@@ -5866,6 +5957,7 @@ function evaluateS1aPostChildReview(policy, input) {
       new Set(reviewRouteAuthority.routes.map((route) =>
         [route.provider, route.model, route.reasoning].join('/'))).size !== rule.reviewSlots.length) {
     failures.push('POST_CHILD_REVIEW_ROUTE_AUTHORITY');
+  }
   }
   const receiptInventory = input.receiptInventory || {};
   const requiredReceiptIds = child[rule.receiptInventoryField];
@@ -5887,6 +5979,7 @@ function evaluateS1aPostChildReview(policy, input) {
     failures.push('POST_CHILD_TERMINAL_RECEIPT_INVENTORY');
   }
   const checkInventory = input.checkInventory || {};
+  const requiredPolicyCheckIds = d1CheckProofValid ? d1ExpectedCheckIds : S1A_ORACLE_POST_CHILD_CHECK_IDS;
   const requiredCheckIds = child[rule.checkInventoryField];
   const actualCheckIds = Array.isArray(input.checks) ? input.checks.map((check) => check.id) : [];
   const inventoryCheckIds = Array.isArray(checkInventory.items)
@@ -5896,8 +5989,8 @@ function evaluateS1aPostChildReview(policy, input) {
       !s1aSame(checkInventory.identity, identity) ||
       !Array.isArray(requiredCheckIds) || !Array.isArray(input.checks) ||
       !Array.isArray(checkInventory.items) ||
-      !s1aSame(requiredCheckIds, S1A_ORACLE_POST_CHILD_CHECK_IDS) ||
-      !s1aSame(inventoryCheckIds, S1A_ORACLE_POST_CHILD_CHECK_IDS) ||
+      !s1aSame(requiredCheckIds, requiredPolicyCheckIds) ||
+      !s1aSame(inventoryCheckIds, requiredPolicyCheckIds) ||
       !s1aSame(actualCheckIds, inventoryCheckIds) ||
       !s1aSame(input.checks, checkInventory.items) ||
       checkInventory.digest !== s1aHashWithoutField(checkInventory, 'digest') ||
@@ -5905,6 +5998,7 @@ function evaluateS1aPostChildReview(policy, input) {
         check.readBack !== true || !s1aSame(check.identity, identity))) {
     failures.push('POST_CHILD_APPLICABLE_CHECK_INVENTORY');
   }
+  if (assuranceMode === 'DUAL_MAX') {
   const slots = rule.reviewSlots;
   if (!Array.isArray(input.reviews) || input.reviews.length !== slots.length) {
     failures.push('POST_CHILD_REVIEW_COUNT');
@@ -6013,6 +6107,7 @@ function evaluateS1aPostChildReview(policy, input) {
     if (!(eventIndex.get(event) < adjudicationAt)) {
       failures.push('POST_CHILD_ADJUDICATION_ORDER:' + event);
     }
+  }
   }
   return { ok: failures.length === 0, failures, frontierEffect: rule.frontierEffect };
 }
@@ -6157,6 +6252,7 @@ function makeS1aReviewFixture() {
     childState,
     receiptInventory,
     checkInventory,
+    reviewSnapshot: s1aClone(snapshot),
     reviews,
     receipts,
     checks,
@@ -8100,9 +8196,9 @@ test('S1-A source prose rejects polarity, appended contradiction, and coherent m
   assert.throws(() => parseS1aPolicyContract(coherentBlockerWeakening),
     /blocker value types or authoritative admission readback are incomplete/);
 
-  const postChildTerminal = 'Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication.';
-  const postChildPolarity = architecture.replace(postChildTerminal,
-    'Web may adjudicate before both reports, terminal receipts and applicable checks are terminal.');
+  const postChildTerminal = 'When `DUAL_MAX` is selected, both reports, terminal receipts and all applicable checks must be terminal before Web adjudication.';
+  const postChildPolarity = architecture.replace('### Bounded non-product continuation',
+    'Web may adjudicate before both reports, terminal receipts and applicable checks are terminal.\n\n### Bounded non-product continuation');
   assert.throws(() => parseS1aPolicyContract(postChildPolarity),
     /post-child prose must bind current inputs/);
 
@@ -9219,4 +9315,2406 @@ test('S1-A carrier private-persistence six-control matrix keeps stored data priv
   });
   const persisted=observeS1aCarrier(architecture,makeS1aCarrierFixture());
   assert.equal(persisted.ok,true);assert.equal(persisted.exposure,'PRIVATE_NONPUBLIC');
+});
+
+const D1_DISCOVERY_STATUS_VALUES = Object.freeze([
+  'OBSERVED', 'DOCUMENTED_NOT_DEMONSTRATED', 'INFERRED', 'PROPOSED', 'UNKNOWN', 'ACCEPTED'
+]);
+const D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_CONSUMER_SCOPE_READBACK',
+  authoritative: true, current: true, readBack: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4
+});
+const D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_READBACK = Object.freeze({
+  ...D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_CORE,
+  digest: s1aHashRecord(D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_CORE)
+});
+const D1_ORACLE_ADOPTED_EVIDENCE_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_EVIDENCE_READBACK',
+  authoritative: true,
+  current: true,
+  readBack: true,
+  sourceIdentity: Object.freeze({ repository: 'repo:example/discovery', path: 'docs/investigation.md', revision: 'source:rev-7' }),
+  evidenceId: 'evidence:exact-investigation-7',
+  safeReverificationReference: 'repo:example/discovery/docs/investigation.md@source:rev-7#finding-7',
+  sanitised: true
+});
+const D1_ORACLE_ADOPTED_EVIDENCE_READBACK = Object.freeze({
+  ...D1_ORACLE_ADOPTED_EVIDENCE_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_ADOPTED_EVIDENCE_READBACK_CORE)
+});
+const D1_ORACLE_ADOPTED_APPLICABILITY_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_ADOPTED_EVIDENCE_APPLICABILITY_READBACK',
+  authoritative: true, current: true, readBack: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  sourceIdentity: D1_ORACLE_ADOPTED_EVIDENCE_READBACK.sourceIdentity,
+  evidenceId: D1_ORACLE_ADOPTED_EVIDENCE_READBACK.evidenceId,
+  findingIds: Object.freeze(['F-LOGIN-CONTRACT-01']),
+  coveredMaterialFacts: Object.freeze([]), applicability: 'ADEQUATE_FOR_CONSUMER'
+});
+const D1_ORACLE_ADOPTED_APPLICABILITY_READBACK = Object.freeze({
+  ...D1_ORACLE_ADOPTED_APPLICABILITY_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_ADOPTED_APPLICABILITY_READBACK_CORE)
+});
+const D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK_CORE = Object.freeze({
+  ...D1_ORACLE_ADOPTED_APPLICABILITY_READBACK_CORE,
+  findingIds: Object.freeze(['F-PORTAL']),
+  coveredMaterialFacts: Object.freeze(['portal:submit']),
+  digest: undefined
+});
+const D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK = Object.freeze({
+  ...D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK_CORE,
+  digest: s1aHashWithoutField(D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK_CORE, 'digest')
+});
+const D1_ORACLE_G1_WEB_DECISION_BODY = Object.freeze({
+  schema: 'toolkit.g1.web-decision.v1',
+  decisionId: 'decision:accepted-8',
+  repository: 'repo:example/product',
+  programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1',
+  childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01',
+  baselineRevision: 4,
+  findingIds: Object.freeze(['F-LOGIN-CONTRACT-01']),
+  evidenceIds: Object.freeze(['evidence:exact-investigation-7']),
+  outcome: 'ACCEPTED'
+});
+const D1_ORACLE_G1_WEB_DECISION_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_G1_WEB_DECISION_READBACK',
+  authoritative: true,
+  current: true,
+  readBack: true,
+  repository: 'repo:example/product',
+  programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1',
+  childRevision: 'child:settings-rev-11',
+  revision: 'web-decision:rev-8',
+  body: D1_ORACLE_G1_WEB_DECISION_BODY,
+  bodyDigest: s1aHashRecord(D1_ORACLE_G1_WEB_DECISION_BODY)
+});
+const D1_ORACLE_G1_WEB_DECISION_READBACK = Object.freeze({
+  ...D1_ORACLE_G1_WEB_DECISION_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_G1_WEB_DECISION_READBACK_CORE)
+});
+const D1_ORACLE_X3_WEB_AUTHORITY_CORE = Object.freeze({
+  source: 'CURRENT_X3_WEB_OPERATION_AUTHORITY_READBACK',
+  authoritative: true,
+  current: true,
+  readBack: true,
+  repository: 'repo:example/product',
+  programmeId: 'programme:discovery-1', childId: 'child:settings-1',
+  childRevision: 'child:settings-rev-11', baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  operation: 'EFFECTFUL_DISCOVERY_PROBE',
+  scope: 'programme:discovery-1/child:settings-1',
+  authorityId: 'x3-authority:probe-4'
+});
+const D1_ORACLE_X3_WEB_AUTHORITY = Object.freeze({
+  ...D1_ORACLE_X3_WEB_AUTHORITY_CORE,
+  digest: s1aHashRecord(D1_ORACLE_X3_WEB_AUTHORITY_CORE)
+});
+const D1_ORACLE_PRIVATE_CUSTODY_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_AUTHORISED_PRIVATE_CUSTODY_READBACK',
+  authoritative: true,
+  current: true,
+  readBack: true,
+  custodyReceiptId: 'custody:receipt-7',
+  reference: 'owner-custody:opaque-ref-07',
+  consumer: 'programme:discovery-1/child:settings-1',
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  recoverable: true
+});
+const D1_ORACLE_PRIVATE_CUSTODY_READBACK = Object.freeze({
+  ...D1_ORACLE_PRIVATE_CUSTODY_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_PRIVATE_CUSTODY_READBACK_CORE)
+});
+const D1_ORACLE_REUSE_APPLICABILITY_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_APPLICABILITY_READBACK',
+  authoritative: true, current: true, readBack: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  reusedFindingIds: Object.freeze(['F-LOGIN-CONTRACT-01']),
+  checkedDependencyIdentities: Object.freeze(['auth:contract', 'ui:header']),
+  checkedInvalidationTriggers: Object.freeze(['auth:contract-change', 'ui:header-change']),
+  result: 'UNCHANGED_APPLICABLE', dedicatedDiscovery: 'NONE'
+});
+const D1_ORACLE_REUSE_APPLICABILITY_READBACK = Object.freeze({
+  ...D1_ORACLE_REUSE_APPLICABILITY_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_REUSE_APPLICABILITY_READBACK_CORE)
+});
+const D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_DEPENDENCY_READBACK',
+  authoritative: true, current: true, readBack: true, complete: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  findings: Object.freeze([
+    Object.freeze({ FINDING_ID: 'F-UI', DEPENDENT_IDENTITIES: Object.freeze(['ui:settings-panel']),
+      INVALIDATION_TRIGGERS: Object.freeze(['ui:settings-panel-redesign']) }),
+    Object.freeze({ FINDING_ID: 'F-AUTH', DEPENDENT_IDENTITIES: Object.freeze(['auth:contract']),
+      INVALIDATION_TRIGGERS: Object.freeze(['auth:contract-change']) }),
+    Object.freeze({ FINDING_ID: 'F-STALE', DEPENDENT_IDENTITIES: Object.freeze(['route:v1']),
+      INVALIDATION_TRIGGERS: Object.freeze(['route:v2']) }),
+    Object.freeze({ FINDING_ID: 'F-PORTAL', DEPENDENT_IDENTITIES: Object.freeze(['portal:submit']),
+      INVALIDATION_TRIGGERS: Object.freeze(['portal:submit-contract']) }),
+    Object.freeze({ FINDING_ID: 'F-PRIVATE', DEPENDENT_IDENTITIES: Object.freeze(['private:claim']),
+      INVALIDATION_TRIGGERS: Object.freeze(['private:claim-change']) }),
+    Object.freeze({ FINDING_ID: 'F-EXTERNAL', DEPENDENT_IDENTITIES: Object.freeze(['external:submit']),
+      INVALIDATION_TRIGGERS: Object.freeze(['external:submit-change']) })
+  ])
+});
+const D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK = Object.freeze({
+  ...D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK_CORE)
+});
+const D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_ENACTMENT_RECEIPT_READBACK',
+  authoritative: true, current: true, readBack: true, terminal: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  operationAuthorityId: D1_ORACLE_X3_WEB_AUTHORITY.authorityId,
+  operation: 'EFFECTFUL_DISCOVERY_PROBE', status: 'COMPLETED', effectReconciled: true,
+  evidenceId: 'evidence:portal-enactment-9',
+  safeEvidenceOrReverifyReference: 'repo:example/product/docs/evidence/portal-enactment-9.md@source:rev-12#event-9'
+});
+const D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT = Object.freeze({
+  ...D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT_CORE,
+  digest: s1aHashRecord(D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT_CORE)
+});
+const D1_ORACLE_DISCOVERY_OBSERVATION_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DISCOVERY_OBSERVATION_READBACK',
+  authoritative: true, current: true, readBack: true,
+  repository: 'repo:example/product', programmeId: 'programme:discovery-1',
+  childId: 'child:settings-1', childRevision: 'child:settings-rev-11',
+  baselineId: 'BASELINE-EXAMPLE-01', baselineRevision: 4,
+  findingIds: Object.freeze(['F-PORTAL']),
+  changedMaterialFacts: Object.freeze(['portal:submit']),
+  status: 'OBSERVED', representativeEnactment: true,
+  evidenceId: 'evidence:portal-enactment-9',
+  safeEvidenceOrReverifyReference:
+    'repo:example/product/docs/evidence/portal-enactment-9.md@source:rev-12#event-9',
+  enactmentReceiptId: 'enactment:portal-9',
+  enactmentReceiptReadback: D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT,
+  observationContext: 'authorised representative portal workflow completed and recovered',
+  operationAuthorityId: D1_ORACLE_X3_WEB_AUTHORITY.authorityId
+});
+const D1_ORACLE_DISCOVERY_OBSERVATION_READBACK = Object.freeze({
+  ...D1_ORACLE_DISCOVERY_OBSERVATION_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_DISCOVERY_OBSERVATION_READBACK_CORE)
+});
+function d1ExactCurrentReadback(actual, expected) {
+  return actual !== null && typeof actual === 'object' &&
+    s1aSame(actual, expected) && actual.authoritative === true &&
+    actual.current === true && actual.readBack === true &&
+    actual.digest === s1aHashWithoutField(actual, 'digest');
+}
+function d1DiscoveryScopeMatches(input) {
+  const scope = input.consumerScopeReadback || {};
+  return d1ExactCurrentReadback(scope, D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_READBACK) &&
+    input.repository === scope.repository && input.programmeId === scope.programmeId &&
+    input.childId === scope.childId && input.childRevision === scope.childRevision &&
+    input.baselineId === scope.baselineId && input.baselineRevision === scope.baselineRevision;
+}
+function d1MakeDiscoveryInput(input = {}) {
+  const scope = D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_CORE;
+  const findings = D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK.findings;
+  return {
+    repository: scope.repository, programmeId: scope.programmeId, childId: scope.childId,
+    childRevision: scope.childRevision, baselineId: scope.baselineId, baselineRevision: scope.baselineRevision,
+    consumerScopeReadback: D1_ORACLE_DISCOVERY_CONSUMER_SCOPE_READBACK,
+    reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK,
+    reusedFindingIds: ['F-LOGIN-CONTRACT-01'],
+    reusedDependencyIdentities: ['auth:contract', 'ui:header'],
+    reusedInvalidationTriggers: ['auth:contract-change', 'ui:header-change'],
+    currentDependencyFindingInventory: s1aClone(findings),
+    currentFindingIds: findings.map((finding) => finding.FINDING_ID).sort(),
+    adoptedFindingIds: ['F-LOGIN-CONTRACT-01'],
+    ...input
+  };
+}
+function evaluateD1DiscoveryBasis(input) {
+  const scopeMatches = d1DiscoveryScopeMatches(input);
+  const changedFactsProvided = Object.prototype.hasOwnProperty.call(input, 'changedMaterialFacts');
+  const changedFactsValid = !changedFactsProvided || (Array.isArray(input.changedMaterialFacts) &&
+    input.changedMaterialFacts.every((fact) => typeof fact === 'string' && s1aPresent(fact)) &&
+    new Set(input.changedMaterialFacts).size === input.changedMaterialFacts.length);
+  const changedFacts = changedFactsProvided && changedFactsValid ? input.changedMaterialFacts : [];
+  const changedIdentities = new Set(changedFacts);
+  const adoptionApplicability = input.adoptedApplicabilityReadback || {};
+  const adoptionApplicabilityValid = scopeMatches &&
+    [D1_ORACLE_ADOPTED_APPLICABILITY_READBACK, D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK].some((expected) =>
+      d1ExactCurrentReadback(adoptionApplicability, expected) &&
+      adoptionApplicability.repository === input.repository &&
+      adoptionApplicability.programmeId === input.programmeId &&
+      adoptionApplicability.childId === input.childId &&
+      adoptionApplicability.childRevision === input.childRevision &&
+      adoptionApplicability.baselineId === input.baselineId &&
+      adoptionApplicability.baselineRevision === input.baselineRevision &&
+      s1aSame(adoptionApplicability.sourceIdentity, input.adoptedEvidenceReadback && input.adoptedEvidenceReadback.sourceIdentity) &&
+      adoptionApplicability.evidenceId === (input.adoptedEvidenceReadback && input.adoptedEvidenceReadback.evidenceId) &&
+      s1aSame(input.adoptedFindingIds, adoptionApplicability.findingIds) &&
+      changedFacts.every((fact) => adoptionApplicability.coveredMaterialFacts.includes(fact)) &&
+      adoptionApplicability.applicability === 'ADEQUATE_FOR_CONSUMER');
+  const adoptedEvidenceValid = scopeMatches &&
+    d1ExactCurrentReadback(input.adoptedEvidenceReadback, D1_ORACLE_ADOPTED_EVIDENCE_READBACK) &&
+    input.adoptedEvidenceReadback.evidenceId === D1_ORACLE_ADOPTED_EVIDENCE_READBACK.evidenceId &&
+    input.adoptedEvidenceReadback.safeReverificationReference ===
+      D1_ORACLE_ADOPTED_EVIDENCE_READBACK.safeReverificationReference &&
+    adoptionApplicabilityValid;
+  let basis = 'REUSE';
+  if (input.materialUnknown === true && input.requiresProgrammeScopeInvestigation === true) {
+    if (adoptedEvidenceValid) basis = 'ADOPTED_EQUIVALENT';
+    else if (input.safeToInvestigate === true) basis = 'FULL';
+    else if (changedFacts.length > 0) basis = 'DELTA';
+  } else if (input.adoptExisting === true && adoptedEvidenceValid) {
+    basis = 'ADOPTED_EQUIVALENT';
+  } else if (changedFacts.length > 0) {
+    basis = 'DELTA';
+  }
+  const reuse = input.reuseApplicabilityReadback || {};
+  const reuseApplicabilityValid = basis !== 'REUSE' || (scopeMatches &&
+    d1ExactCurrentReadback(reuse, D1_ORACLE_REUSE_APPLICABILITY_READBACK) &&
+    reuse.repository === input.repository && reuse.programmeId === input.programmeId &&
+    reuse.childId === input.childId && reuse.childRevision === input.childRevision && reuse.baselineId === input.baselineId &&
+    reuse.baselineRevision === input.baselineRevision &&
+    s1aSame(input.reusedFindingIds, reuse.reusedFindingIds) &&
+    s1aSame(input.reusedDependencyIdentities, reuse.checkedDependencyIdentities) &&
+    s1aSame(input.reusedInvalidationTriggers, reuse.checkedInvalidationTriggers));
+  const dependency = input.discoveryDependencyReadback || {};
+  const currentFindingIds = Array.isArray(input.currentDependencyFindingInventory)
+    ? input.currentDependencyFindingInventory.map((finding) => finding.FINDING_ID).sort() : [];
+  const dependencyReadbackValid = basis !== 'DELTA' || (scopeMatches &&
+    d1ExactCurrentReadback(dependency, D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK) &&
+    dependency.repository === input.repository && dependency.programmeId === input.programmeId &&
+    dependency.childId === input.childId && dependency.childRevision === input.childRevision && dependency.baselineId === input.baselineId &&
+    dependency.baselineRevision === input.baselineRevision && dependency.complete === true &&
+    s1aSame(input.currentDependencyFindingInventory, dependency.findings) &&
+    s1aSame(input.currentFindingIds, currentFindingIds) &&
+    changedFacts.length > 0 && new Set(changedFacts).size === changedFacts.length &&
+    s1aSame([...(input.changedDependencyIdentities || [])].sort(), [...changedFacts].sort()) &&
+    changedFacts.every((identity) => dependency.findings.some((finding) =>
+      finding.DEPENDENT_IDENTITIES.includes(identity) || finding.INVALIDATION_TRIGGERS.includes(identity))));
+  const invalidatedFindingIds = dependencyReadbackValid && basis === 'DELTA' ?
+    dependency.findings.filter((finding) =>
+      (finding.DEPENDENT_IDENTITIES || []).some((identity) => changedIdentities.has(identity)) ||
+      (finding.INVALIDATION_TRIGGERS || []).some((trigger) => changedIdentities.has(trigger)))
+      .map((finding) => finding.FINDING_ID) : [];
+  let status = input.requestedStatus || 'PROPOSED';
+  let disposition = input.disposition || null;
+  if (!D1_DISCOVERY_STATUS_VALUES.includes(status)) {
+    status = 'UNKNOWN';
+    disposition = disposition || 'UNKNOWN_STATUS_REQUIRES_OWNER_WEB';
+  }
+  const unsafeInvestigation = input.materialUnknown === true &&
+    input.requiresProgrammeScopeInvestigation === true && input.safeToInvestigate !== true && !adoptedEvidenceValid;
+  const unsafeEvidence = input.unsafeRepresentativeEnactment === true || unsafeInvestigation;
+  if (unsafeEvidence) {
+    status = input.documentedPartialEvidence === true ? 'DOCUMENTED_NOT_DEMONSTRATED' : 'UNKNOWN';
+    disposition = disposition || 'OWNER_WEB_DECISION_REQUIRED';
+  }
+  let unsupportedObservation = false;
+  if (status === 'OBSERVED') {
+    const observation = input.observationReadback;
+    const observationValid = !unsafeEvidence && scopeMatches &&
+      d1ExactCurrentReadback(observation, D1_ORACLE_DISCOVERY_OBSERVATION_READBACK) &&
+      observation.repository === input.repository && observation.programmeId === input.programmeId &&
+      observation.childId === input.childId && observation.childRevision === input.childRevision &&
+      observation.baselineId === input.baselineId && observation.baselineRevision === input.baselineRevision &&
+      s1aSame(input.observationFindingIds, observation.findingIds) &&
+      s1aSame(changedFacts, observation.changedMaterialFacts) &&
+      observation.representativeEnactment === true &&
+      observation.enactmentReceiptId === 'enactment:portal-9' &&
+      d1ExactCurrentReadback(observation.enactmentReceiptReadback, D1_ORACLE_DISCOVERY_ENACTMENT_RECEIPT) &&
+      observation.enactmentReceiptReadback.operationAuthorityId === observation.operationAuthorityId &&
+      observation.enactmentReceiptReadback.evidenceId === observation.evidenceId &&
+      observation.safeEvidenceOrReverifyReference === observation.enactmentReceiptReadback.safeEvidenceOrReverifyReference &&
+      input.safeToInvestigate === true;
+    if (!observationValid) {
+      status = input.documentedPartialEvidence === true ? 'DOCUMENTED_NOT_DEMONSTRATED' : 'UNKNOWN';
+      disposition = disposition || 'CURRENT_OBSERVATION_READBACK_REQUIRED';
+      unsupportedObservation = true;
+    }
+  }
+  let unsupportedAcceptance = false;
+  if (status === 'ACCEPTED') {
+    const decision = input.g1WebDecisionReadback;
+    const scopeMatchesDecision = scopeMatches && d1ExactCurrentReadback(decision, D1_ORACLE_G1_WEB_DECISION_READBACK) &&
+      input.exactG1WebDecisionId === decision.body.decisionId &&
+      input.repository === decision.repository && input.programmeId === decision.programmeId &&
+      input.childId === decision.childId && input.childRevision === decision.childRevision &&
+      input.childRevision === decision.body.childRevision && input.baselineId === decision.body.baselineId &&
+      input.baselineRevision === decision.body.baselineRevision &&
+      s1aSame(input.consumingFindingIds, decision.body.findingIds) &&
+      s1aSame(input.evidenceIds, decision.body.evidenceIds);
+    if (!scopeMatchesDecision) {
+      status = input.documentedPartialEvidence === true ? 'DOCUMENTED_NOT_DEMONSTRATED' : 'UNKNOWN';
+      disposition = disposition || 'EXACT_CURRENT_G1_WEB_DECISION_READBACK_REQUIRED';
+      unsupportedAcceptance = true;
+    }
+  }
+  const rawPrivateMaterialIncluded = input.rawPrivateMaterialIncluded === true;
+  const privateEvidencePresent = input.privateEvidencePresent === true ||
+    input.privateEvidenceReference !== undefined || rawPrivateMaterialIncluded;
+  const custody = input.privateCustodyReadback;
+  const privateReferenceValid = scopeMatches && !rawPrivateMaterialIncluded && (!privateEvidencePresent ||
+    (input.privateEvidenceReference === D1_ORACLE_PRIVATE_CUSTODY_READBACK.reference &&
+      d1ExactCurrentReadback(custody, D1_ORACLE_PRIVATE_CUSTODY_READBACK) &&
+      custody.reference === input.privateEvidenceReference && custody.recoverable === true &&
+      custody.repository === input.repository && custody.programmeId === input.programmeId &&
+      custody.childId === input.childId && custody.childRevision === input.childRevision && custody.baselineId === input.baselineId &&
+      custody.baselineRevision === input.baselineRevision));
+  const effectfulProbe = input.effectfulProbe === true;
+  const x3 = input.x3WebAuthorityReadback;
+  const effectAuthorized = effectfulProbe && scopeMatches &&
+    d1ExactCurrentReadback(x3, D1_ORACLE_X3_WEB_AUTHORITY) &&
+    x3.repository === input.repository && x3.programmeId === input.programmeId &&
+    x3.childId === input.childId && x3.childRevision === input.childRevision && x3.baselineId === input.baselineId &&
+    x3.baselineRevision === input.baselineRevision && x3.operation === 'EFFECTFUL_DISCOVERY_PROBE';
+  const outcome = !scopeMatches || !changedFactsValid || !reuseApplicabilityValid || !dependencyReadbackValid ||
+    (effectfulProbe && !effectAuthorized) || unsafeEvidence || unsupportedObservation ||
+    unsupportedAcceptance || rawPrivateMaterialIncluded || (privateEvidencePresent && !privateReferenceValid)
+    ? 'HOLD' : 'PASS';
+  return {
+    basis, outcome, status, disposition, invalidatedFindingIds,
+    dedicatedDiscovery: basis === 'DELTA' || basis === 'FULL',
+    createsGate: false, createsRole: false, createsLocalG2: false, createsLocalG3: false, createsLocalG4: false,
+    g0ReadOnly: true, effectPerformedByG0: false, effectAuthorized,
+    privateReferenceValid, rawPrivateMaterialIncluded
+  };
+}function d1RootRecord(rootId, causalFamilyId, attemptIds, options = {}) {
+  const uniqueAttemptIds = [...new Set(attemptIds)];
+  return {
+    ROOT_ID: rootId,
+    ACCEPTED_G2_OBLIGATION: options.obligation || 'obligation:accepted-g2-1',
+    CAUSAL_MECHANISM_OR_BOUNDARY: options.causalBoundary || 'boundary:' + causalFamilyId,
+    AFFECTED_SURFACE: options.surface || 'surface:settings',
+    MUTATION_SCOPE: options.mutationScope || ['repo/CONTROLLER.md'],
+    DEPENDENCIES: options.dependencies || ['dependency:current'],
+    ATTEMPT_IDS: attemptIds,
+    ATTEMPTS_CONSUMED: options.declaredAttempts === undefined ? uniqueAttemptIds.length : options.declaredAttempts,
+    STATE: options.state || 'OPEN',
+    NEW_ROOT_DISCOVERED: options.newlyDiscovered === true
+  };
+}
+const D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY = JSON.stringify(['obligation:accepted-g2-1', 'boundary:attempt-family-1']);
+const D1_ORACLE_CROSS_ROOT_FAMILY_KEY = JSON.stringify(['obligation:accepted-g2-1', 'boundary:attempt-family-2']);
+const D1_ORACLE_RELABELED_ROOT_FAMILY_KEY = JSON.stringify(['obligation:accepted-g2-1', 'boundary:cause:new-label']);
+const D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_G3_PRIOR_ATTRIBUTION_AUDIT_READBACK',
+  authoritative: true,
+  current: true,
+  readBack: true,
+  complete: true,
+  repository: 'weijunswj/ai-agent-toolkit',
+  programmeId: '421',
+  deliveryChildId: '461',
+  runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+  lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+  revision: 'root-ledger:revision-9',
+  rootFamilyKey: JSON.stringify(['obligation:accepted-g2-1', 'boundary:cause:new']),
+  historicalEpisodeAttemptIds: Object.freeze(['A1', 'A2', 'A3']),
+  previouslyAddressedFamilies: Object.freeze(['["obligation:accepted-g2-1","boundary:cause:prior"]']),
+  verifiedUntouched: true
+});
+const D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT = Object.freeze({
+  ...D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT_CORE,
+  digest: s1aHashRecord(D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT_CORE)
+});function d1StableRootFamilyKey(record) {
+  return JSON.stringify([record.ACCEPTED_G2_OBLIGATION, record.CAUSAL_MECHANISM_OR_BOUNDARY]);
+}
+const D1_ORACLE_TRUSTED_ROOT_LEDGER_READBACKS = new WeakMap();
+function makeD1RootLedgerAuthority(records, options = {}) {
+  const inferredPriorAttemptAttributionByFamily = {};
+  for (const record of records) {
+    if (Array.isArray(record.ATTEMPT_IDS) && record.ATTEMPT_IDS.length > 0 && record.NEW_ROOT_DISCOVERED !== true) {
+      const familyKey = d1StableRootFamilyKey(record);
+      inferredPriorAttemptAttributionByFamily[familyKey] = [...new Set([
+        ...(inferredPriorAttemptAttributionByFamily[familyKey] || []), ...record.ATTEMPT_IDS
+      ])];
+    }
+  }
+  const priorAttemptAttributionByFamily = options.priorAttemptAttributionByFamily === undefined ?
+    inferredPriorAttemptAttributionByFamily : options.priorAttemptAttributionByFamily;
+  const previouslyAddressedFamilies = options.previouslyAddressedFamilies === undefined ?
+    Object.keys(inferredPriorAttemptAttributionByFamily) : options.previouslyAddressedFamilies;
+  const core = {
+    source: 'CURRENT_CANONICAL_G3_ROOT_LEDGER_READBACK',
+    authoritative: true,
+    current: true,
+    readBack: true,
+    complete: true,
+    repository: 'weijunswj/ai-agent-toolkit',
+    programmeId: '421',
+    deliveryChildId: '461',
+    runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+    lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+    revision: 'root-ledger:revision-9',
+    currentRecords: s1aClone(records),
+    historicalEpisodeAttemptIds: [...new Set(options.historicalEpisodeAttemptIds || records.flatMap((record) => record.ATTEMPT_IDS))],
+    attemptHistory: {
+      ordinaryAttemptIds: [...(options.ordinaryAttemptIds || options.historicalEpisodeAttemptIds || records.flatMap((record) => record.ATTEMPT_IDS))],
+      wdcAttemptIds: [...(options.wdcAttemptIds || [])],
+      reconvergedAttemptIds: [...(options.reconvergedAttemptIds || [])]
+    },
+    priorAttemptAttributionByFamily: s1aClone(priorAttemptAttributionByFamily),
+    previouslyAddressedFamilies: [...previouslyAddressedFamilies],
+    verifiedUntouchedRootFamilies: [...(options.verifiedUntouchedRootFamilies || [])],
+    narrowingProgressByFamily: s1aClone(options.narrowingProgressByFamily || {}),
+    narrowingProgressReadbacksByFamily: s1aClone(options.narrowingProgressReadbacksByFamily || {}),
+    attributionAuditComplete: options.attributionAuditComplete === true,
+    zeroRootPriorAttributionAuditReadback: options.includeUntouchedRootAudit === true ?
+      D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT : null
+  };
+  const rootLedgerReadback = { ...core, digest: s1aHashRecord(core) };
+  const trustedRootLedgerSnapshot = s1aClone(core);
+  D1_ORACLE_TRUSTED_ROOT_LEDGER_READBACKS.set(rootLedgerReadback, trustedRootLedgerSnapshot);
+  return { rootLedgerReadback, trustedRootLedgerSnapshot };
+}
+function makeD1AttemptLedger(options = {}) {
+  const ordinaryAttemptIds = [...(options.ordinaryAttemptIds || [])];
+  const wdcAttemptIds = [...(options.wdcAttemptIds || [])];
+  const reconvergedAttemptIds = [...(options.reconvergedAttemptIds || [])];
+  const historicalEpisodeAttemptIds = [...new Set([...ordinaryAttemptIds, ...wdcAttemptIds, ...reconvergedAttemptIds])];
+  const root = d1RootRecord('root:attempt-family-1', 'attempt-family-1', ordinaryAttemptIds,
+    { causalBoundary: 'boundary:attempt-family-1' });
+  return makeD1RootLedgerAuthority([root], {
+    historicalEpisodeAttemptIds, ordinaryAttemptIds, wdcAttemptIds, reconvergedAttemptIds,
+    narrowingProgressByFamily: options.narrowingProgressByFamily || {},
+    narrowingProgressReadbacksByFamily: options.narrowingProgressReadbacksByFamily || {}
+  });
+}function evaluateD1RootLedger(records, context = {}) {
+  const failures = [];
+  const requiredReadbackKeys = [
+    'source', 'authoritative', 'current', 'readBack', 'complete', 'repository', 'programmeId',
+    'runId', 'lockId', 'deliveryChildId', 'revision', 'currentRecords', 'historicalEpisodeAttemptIds', 'attemptHistory',
+    'priorAttemptAttributionByFamily', 'previouslyAddressedFamilies', 'verifiedUntouchedRootFamilies',
+    'narrowingProgressByFamily', 'narrowingProgressReadbacksByFamily', 'attributionAuditComplete', 'zeroRootPriorAttributionAuditReadback', 'digest'
+  ];
+  const readback = context.rootLedgerReadback || {};
+  const trusted = D1_ORACLE_TRUSTED_ROOT_LEDGER_READBACKS.get(readback) || {};
+  const readbackCore = { ...readback };
+  delete readbackCore.digest;
+  if (!s1aHasExactKeys(readback, requiredReadbackKeys) ||
+      !s1aSame(records, readback.currentRecords) ||
+      !s1aSame(readbackCore, trusted) ||
+      readback.digest !== s1aHashRecord(readbackCore) ||
+      readback.source !== 'CURRENT_CANONICAL_G3_ROOT_LEDGER_READBACK' ||
+      readback.authoritative !== true || readback.current !== true || readback.readBack !== true ||
+      readback.complete !== true || readback.repository !== 'weijunswj/ai-agent-toolkit' ||
+      readback.programmeId !== '421' || readback.deliveryChildId !== '461' ||
+      readback.runId !== 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001' ||
+      readback.lockId !== 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001' || !s1aPresent(readback.revision) ||
+      !Array.isArray(readback.historicalEpisodeAttemptIds) ||
+      new Set(readback.historicalEpisodeAttemptIds).size !== readback.historicalEpisodeAttemptIds.length ||
+      !Array.isArray(readback.previouslyAddressedFamilies) ||
+      !Array.isArray(readback.verifiedUntouchedRootFamilies) ||
+      typeof readback.attributionAuditComplete !== 'boolean') {
+    failures.push('ROOT_LEDGER_CURRENT_AUTHORITATIVE_READBACK');
+  }
+  const episodeHistory = readback.attemptHistory || {};
+  const historyFields = ['ordinaryAttemptIds', 'wdcAttemptIds', 'reconvergedAttemptIds'];
+  const historyLists = historyFields.map((field) => episodeHistory[field]);
+  const historyIds = new Set(historyLists.flatMap((ids) => Array.isArray(ids) ? ids : []));
+  if (!s1aHasExactKeys(episodeHistory, historyFields) ||
+      !historyLists.every(d1AttemptIdList) || historyIds.size !== historyLists.flatMap((ids) => ids).length ||
+      !s1aSame([...historyIds].sort(), [...(readback.historicalEpisodeAttemptIds || [])].sort()) ||
+      !readback.narrowingProgressReadbacksByFamily || typeof readback.narrowingProgressReadbacksByFamily !== 'object') {
+    failures.push('ROOT_EPISODE_ATTEMPT_HISTORY_READBACK');
+  }
+  const requiredRecordFields = [
+    'ROOT_ID', 'ACCEPTED_G2_OBLIGATION', 'CAUSAL_MECHANISM_OR_BOUNDARY', 'AFFECTED_SURFACE',
+    'MUTATION_SCOPE', 'DEPENDENCIES', 'ATTEMPT_IDS', 'ATTEMPTS_CONSUMED', 'STATE', 'NEW_ROOT_DISCOVERED'
+  ];
+  const groups = new Map();
+  const seenRootIds = new Map();
+  const historicalIds = new Set(readback.historicalEpisodeAttemptIds || []);
+  for (const record of records) {
+    if (requiredRecordFields.some((field) => !Object.hasOwn(record, field)) ||
+        !s1aPresent(record.ROOT_ID) || !s1aPresent(record.ACCEPTED_G2_OBLIGATION) ||
+        !s1aPresent(record.CAUSAL_MECHANISM_OR_BOUNDARY) || !s1aPresent(record.AFFECTED_SURFACE) ||
+        !Array.isArray(record.MUTATION_SCOPE) || record.MUTATION_SCOPE.length === 0 ||
+        !record.MUTATION_SCOPE.every(s1aPresent) || !Array.isArray(record.DEPENDENCIES) ||
+        !record.DEPENDENCIES.every(s1aPresent) || !Array.isArray(record.ATTEMPT_IDS) ||
+        !record.ATTEMPT_IDS.every(s1aPresent) || new Set(record.ATTEMPT_IDS).size !== record.ATTEMPT_IDS.length ||
+        !Number.isInteger(record.ATTEMPTS_CONSUMED) || record.ATTEMPTS_CONSUMED !== record.ATTEMPT_IDS.length ||
+        !['OPEN', 'CLOSED', 'HOLD', 'NONCONVERGED'].includes(record.STATE) ||
+        typeof record.NEW_ROOT_DISCOVERED !== 'boolean') {
+      failures.push('ROOT_RECORD_OR_ATTEMPT_BINDING');
+      continue;
+    }
+    const key = d1StableRootFamilyKey(record);
+    if (seenRootIds.has(record.ROOT_ID) && seenRootIds.get(record.ROOT_ID) !== key) {
+      failures.push('ROOT_ID_REBOUND_TO_DIFFERENT_CAUSAL_FAMILY');
+    }
+    seenRootIds.set(record.ROOT_ID, key);
+    const group = groups.get(key) || { familyKey: key, rootIds: [], attemptIds: new Set(), states: new Set(), newRootDiscovered: false };
+    group.rootIds.push(record.ROOT_ID);
+    group.states.add(record.STATE);
+    group.newRootDiscovered = group.newRootDiscovered || record.NEW_ROOT_DISCOVERED;
+    for (const attemptId of record.ATTEMPT_IDS) {
+      group.attemptIds.add(attemptId);
+      if (!historicalIds.has(attemptId)) failures.push('CURRENT_ATTEMPT_MISSING_FROM_EPISODE_HISTORY:' + attemptId);
+    }
+    groups.set(key, group);
+  }
+  const priorMap = readback.priorAttemptAttributionByFamily || {};
+  for (const [key, ids] of Object.entries(priorMap)) {
+    if (!Array.isArray(ids) || !ids.every(s1aPresent) || new Set(ids).size !== ids.length) {
+      failures.push('PRIOR_ROOT_ATTRIBUTION_READBACK_INVALID:' + key);
+      continue;
+    }
+    for (const attemptId of ids) {
+      if (!historicalIds.has(attemptId)) failures.push('ATTRIBUTED_ATTEMPT_MISSING_FROM_EPISODE_HISTORY:' + attemptId);
+    }
+  }
+  const ordinaryHistoryIds = new Set(episodeHistory.ordinaryAttemptIds || []);
+  const rootAttributedAttemptIds = new Set([
+    ...records.flatMap((record) => Array.isArray(record.ATTEMPT_IDS) ? record.ATTEMPT_IDS : []),
+    ...Object.values(priorMap).flatMap((ids) => Array.isArray(ids) ? ids : [])
+  ]);
+  for (const attemptId of ordinaryHistoryIds) {
+    if (!rootAttributedAttemptIds.has(attemptId)) {
+      failures.push('ORDINARY_EPISODE_ATTEMPT_MISSING_STABLE_ROOT_ATTRIBUTION:' + attemptId);
+    }
+  }
+  for (const attemptId of rootAttributedAttemptIds) {
+    if (!ordinaryHistoryIds.has(attemptId)) {
+      failures.push('ROOT_ATTEMPT_NOT_CLASSIFIED_AS_ORDINARY_HISTORY:' + attemptId);
+    }
+  }
+  for (const [key, group] of groups) {
+    for (const attemptId of priorMap[key] || []) group.attemptIds.add(attemptId);
+    if (group.states.size > 1) failures.push('EQUIVALENT_ROOT_STATE_CONFLICT:' + key);
+    const priorFamilyAttemptIds = priorMap[key] || [];
+    const familyHasPriorAttemptAttribution = priorFamilyAttemptIds.length > 0;
+    if (group.attemptIds.size === 0 || group.newRootDiscovered || !familyHasPriorAttemptAttribution) {
+      const audit = readback.zeroRootPriorAttributionAuditReadback;
+      const auditBindsWholeHistory = d1ExactCurrentReadback(audit, D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT) &&
+        audit.rootFamilyKey === key && audit.repository === readback.repository &&
+        audit.programmeId === readback.programmeId && audit.deliveryChildId === readback.deliveryChildId &&
+        audit.runId === readback.runId &&
+        audit.lockId === readback.lockId && audit.revision === readback.revision &&
+        s1aSame(audit.historicalEpisodeAttemptIds, readback.historicalEpisodeAttemptIds) &&
+        s1aSame(audit.previouslyAddressedFamilies, readback.previouslyAddressedFamilies);
+      if (!readback.attributionAuditComplete || !group.newRootDiscovered || !auditBindsWholeHistory ||
+          !readback.verifiedUntouchedRootFamilies.includes(key) ||
+          readback.previouslyAddressedFamilies.includes(key) || priorFamilyAttemptIds.length > 0) {
+        failures.push('NEW_ROOT_WITHOUT_BOUND_UNTOUCHED_ATTRIBUTION_AUDIT');
+      }
+    }
+    if (group.attemptIds.size > 5) failures.push('SAME_ROOT_ABSOLUTE_ATTEMPT_CEILING_EXCEEDED:' + key);
+    for (let requiredAttemptNumber = 4; requiredAttemptNumber <= Math.min(group.attemptIds.size, 5); requiredAttemptNumber += 1) {
+      const familyProgressReadbacks = (readback.narrowingProgressReadbacksByFamily || {})[key] || {};
+      if (!d1ProgressReadbackValid({
+        narrowingProgressReadback: familyProgressReadbacks[requiredAttemptNumber]
+      }, key, requiredAttemptNumber, readback)) {
+        failures.push('LATE_ROOT_ATTEMPTS_REQUIRE_BOUND_NARROWING_PROGRESS:' + key + ':' + requiredAttemptNumber);
+      }
+    }
+  }
+  const rootGroups = [...groups.values()].map((group) => ({
+    rootIds: group.rootIds,
+    attemptIds: [...group.attemptIds].sort(),
+    attemptsConsumed: group.attemptIds.size,
+    state: group.states.size === 1 ? [...group.states][0] : 'HOLD'
+  }));
+  return {
+    ok: failures.length === 0,
+    failures: [...new Set(failures)],
+    rootGroups,
+    historicalAttemptCount: historicalIds.size
+  };
+}
+function d1EvaluateRootRecords(records, options = {}) {
+  return evaluateD1RootLedger(records, makeD1RootLedgerAuthority(records, options));
+}
+function evaluateD1NextRootAttempt(attemptNumber, narrowingProgress) {
+  if (!Number.isInteger(attemptNumber) || attemptNumber < 1) return false;
+  if (attemptNumber <= 3) return true;
+  return attemptNumber <= 5 && narrowingProgress === true;
+}
+const D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES = Object.freeze([
+  { classification: 'EXISTING_ROOT', repeatedCrossRootReopening: false, findingId: 'finding:existing-root', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) },
+  { classification: 'NEW_ROOT_DISCOVERED', repeatedCrossRootReopening: false, findingId: 'finding:new-root', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) },
+  { classification: 'CROSS_ROOT_INTERACTION', repeatedCrossRootReopening: false, findingId: 'finding:cross-root-single', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, D1_ORACLE_CROSS_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze(['A1']) },
+  { classification: 'CROSS_ROOT_INTERACTION', repeatedCrossRootReopening: true, findingId: 'finding:cross-root-reopen', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, D1_ORACLE_CROSS_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze(['A1', 'A2']) },
+  { classification: 'EXISTING_ROOT', repeatedCrossRootReopening: false, findingId: 'finding:relabelled-current', stableRootFamilyKeys: Object.freeze([D1_ORACLE_RELABELED_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) },
+  { classification: 'G2_CONTRACT_GAP', repeatedCrossRootReopening: false, findingId: 'finding:g2-gap', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) },
+  { classification: 'G1_ROOT_TRUST_CHANGE', repeatedCrossRootReopening: false, findingId: 'finding:g1-trust', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) },
+  { classification: 'NON_PRODUCT_BLOCKER', repeatedCrossRootReopening: false, findingId: 'finding:non-product', stableRootFamilyKeys: Object.freeze([D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY]), reopeningAttemptIds: Object.freeze([]) }
+].map((item) => Object.freeze({
+  source: 'CURRENT_CANONICAL_G3_FINDING_CLASSIFICATION_READBACK',
+  authoritative: true, current: true, readBack: true,
+  repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+  runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+  lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+  rootLedgerRevision: 'root-ledger:revision-9',
+  ...item, digest: s1aHashRecord({
+    source: 'CURRENT_CANONICAL_G3_FINDING_CLASSIFICATION_READBACK',
+    authoritative: true, current: true, readBack: true,
+    repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+    runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+    lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+    rootLedgerRevision: 'root-ledger:revision-9', ...item
+  })
+})))
+function evaluateD1RootClassification(classification, classificationReadback) {
+  const readbackValid = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.some((expected) =>
+    s1aSame(classificationReadback, expected) && classificationReadback.classification === classification &&
+    d1ExactCurrentReadback(classificationReadback, expected));
+  if (!readbackValid) return { disposition: 'HOLD_MISSING_CURRENT_CLASSIFICATION_READBACK', createsBudget: false };
+  const routes = {
+    EXISTING_ROOT: 'CONTINUE_EXISTING_ROOT_ACCOUNTING',
+    NEW_ROOT_DISCOVERED: 'OPEN_ONLY_AFTER_UNTOUCHED_ROOT_AUDIT',
+    CROSS_ROOT_INTERACTION: classificationReadback.repeatedCrossRootReopening ? 'RETURN_TO_WEB' : 'CONTINUE_EXISTING_ROOT_ACCOUNTING',
+    G2_CONTRACT_GAP: 'TARGETED_G2_REENTRY',
+    G1_ROOT_TRUST_CHANGE: 'G1_RECONVERGENCE',
+    NON_PRODUCT_BLOCKER: 'NON_PRODUCT_HOLD'
+  };
+  if (!Object.hasOwn(routes, classification)) return { disposition: 'HOLD_UNKNOWN_CLASSIFICATION', createsBudget: false };
+  return { disposition: routes[classification], createsBudget: false };
+}function d1AttemptIdList(values) {
+  return Array.isArray(values) && values.every(s1aPresent) && new Set(values).size === values.length;
+}
+function d1RootProgressReadback(rootFamilyKey, attemptNumber) {
+  const core = { source: 'CURRENT_G3_ROOT_PROGRESS_READBACK', authoritative: true, current: true,
+    readBack: true, rootFamilyKey, attemptNumber, narrowingOrProgress: true };
+  return { ...core, digest: s1aHashRecord(core) };
+}
+function d1ProgressReadbackValid(event, rootFamilyKey, nextNumber, rootLedgerReadback) {
+  if (nextNumber <= 3) return true;
+  const progress = event.narrowingProgressReadback || {};
+  const familyReadbacks = (rootLedgerReadback.narrowingProgressReadbacksByFamily || {})[rootFamilyKey] || {};
+  const trusted = familyReadbacks[nextNumber] || {};
+  return (rootLedgerReadback.narrowingProgressByFamily || {})[rootFamilyKey] === true &&
+    d1ExactCurrentReadback(progress, trusted) && progress.source === 'CURRENT_G3_ROOT_PROGRESS_READBACK' &&
+    progress.authoritative === true && progress.current === true && progress.readBack === true &&
+    progress.rootFamilyKey === rootFamilyKey && progress.attemptNumber === nextNumber &&
+    progress.narrowingOrProgress === true;
+}
+const D1_ORACLE_EXCEPTIONAL_ROOT_AUTHORITY_SCOPE = Object.freeze([
+  'repo/CONTROLLER.md', 'repo/ARCHITECTURE.md',
+  'repo/docs/PROGRAMME-DISCOVERY-BASELINE.md', 'repo/tests/controller-policy-separation.test.cjs'
+]);
+const D1_ORACLE_WDC_AUTHORITY_CORE = Object.freeze({
+  source: 'CURRENT_WEB_DIRECTED_CONTINUATION_READBACK', authoritative: true, current: true, readBack: true,
+  authorityId: '#461:5891401359', repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+  runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+  lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+  rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, attemptId: 'WDC-1',
+  scope: D1_ORACLE_EXCEPTIONAL_ROOT_AUTHORITY_SCOPE, operation: 'WEB_DIRECTED_CONTINUATION'
+});
+const D1_ORACLE_WDC_AUTHORITY = Object.freeze({
+  ...D1_ORACLE_WDC_AUTHORITY_CORE, digest: s1aHashRecord(D1_ORACLE_WDC_AUTHORITY_CORE)
+});
+const D1_ORACLE_RECONVERGED_AUTHORITY_CORE = Object.freeze({
+  source: 'CURRENT_RECONVERGED_CORRECTION_AUTHORITY_READBACK', authoritative: true, current: true, readBack: true,
+  authorityId: 'reconverged-authority:461-1', repository: 'weijunswj/ai-agent-toolkit', programmeId: '421',
+  deliveryChildId: '461', runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+  lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+  rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, attemptId: 'RC-1',
+  scope: D1_ORACLE_EXCEPTIONAL_ROOT_AUTHORITY_SCOPE, operation: 'RECONVERGED_CORRECTION'
+});
+const D1_ORACLE_RECONVERGED_AUTHORITY = Object.freeze({
+  ...D1_ORACLE_RECONVERGED_AUTHORITY_CORE, digest: s1aHashRecord(D1_ORACLE_RECONVERGED_AUTHORITY_CORE)
+});
+const D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_G3_CANDIDATE_READBACK', authoritative: true, current: true, readBack: true,
+  repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+  runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+  lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+  rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, candidateId: 'candidate:d1-validation-1',
+  commit: 'candidate:commit-1', tree: 'candidate:tree-1', parentCommit: 'candidate:parent-1',
+  byteDigest: 'sha256:d1-candidate-byte-content-1'
+});
+const D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK = Object.freeze({
+  ...D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK_CORE,
+  digest: s1aHashRecord(D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK_CORE)
+});
+const D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS = Object.freeze([
+  {
+    source: 'CURRENT_CANONICAL_G3_ATTEMPT_CLASSIFICATION_READBACK', authoritative: true, current: true, readBack: true,
+    repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+    runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+    lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+    rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, attemptId: 'HOLD-1',
+    eventKind: 'NON_PRODUCT_HOLD_RECOVERY', classification: 'NON_PRODUCT_BLOCKER',
+    primaryOwner: 'TOOLKIT', productSemanticsProvenBad: 'NO', candidateBytesChanged: false,
+    byteComparison: 'UNCHANGED', candidateByteDigest: 'sha256:d1-candidate-byte-content-1',
+    priorCandidateByteDigest: 'sha256:d1-candidate-byte-content-1', effectReconciled: true,
+    candidateReadbackDigest: D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK.digest
+  },
+  {
+    source: 'CURRENT_CANONICAL_G3_ATTEMPT_CLASSIFICATION_READBACK', authoritative: true, current: true, readBack: true,
+    repository: 'weijunswj/ai-agent-toolkit', programmeId: '421', deliveryChildId: '461',
+    runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+    lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+    rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, attemptId: 'REVIEW-1',
+    eventKind: 'UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION', classification: 'EVIDENCE_ONLY',
+    primaryOwner: 'TOOLKIT', productSemanticsProvenBad: 'NO', candidateBytesChanged: false,
+    byteComparison: 'UNCHANGED', candidateByteDigest: 'sha256:d1-candidate-byte-content-1',
+    priorCandidateByteDigest: 'sha256:d1-candidate-byte-content-1', effectReconciled: true,
+    candidateReadbackDigest: D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK.digest
+  }
+].map((core) => Object.freeze({ ...core, digest: s1aHashRecord(core) })))
+function evaluateD1AttemptEvent(event, history = {}) {
+  const ledgerReadback = history.rootLedgerReadback;
+  if (!ledgerReadback || !Array.isArray(ledgerReadback.currentRecords)) {
+    return { hold: true, productAttempt: false, reason: 'CURRENT_ROOT_LEDGER_READBACK_REQUIRED' };
+  }
+  const ledger = evaluateD1RootLedger(ledgerReadback.currentRecords, { rootLedgerReadback: ledgerReadback });
+  if (!ledger.ok) return { hold: true, productAttempt: false, reason: 'CURRENT_ROOT_LEDGER_INVALID', failures: ledger.failures };
+  const attemptHistory = ledgerReadback.attemptHistory;
+  const ordinary = [...attemptHistory.ordinaryAttemptIds];
+  const wdc = [...attemptHistory.wdcAttemptIds];
+  const reconverged = [...attemptHistory.reconvergedAttemptIds];
+  const allIds = new Set([...ordinary, ...wdc, ...reconverged]);
+  const rootFamilyKey = event && (event.rootFamilyKey || history.rootFamilyKey);
+  const familyRecords = ledgerReadback.currentRecords.filter((record) => d1StableRootFamilyKey(record) === rootFamilyKey);
+  if (!event || !s1aPresent(event.attemptId) || !s1aPresent(rootFamilyKey) || familyRecords.length === 0) {
+    return { hold: true, productAttempt: false, reason: 'ATTEMPT_EVENT_OR_ROOT_MISSING' };
+  }
+  if (allIds.has(event.attemptId)) {
+    return { hold: true, productAttempt: false, reason: 'ATTEMPT_ID_MISSING_OR_REPLAYED' };
+  }
+  const rootAttemptIds = new Set([
+    ...familyRecords.flatMap((record) => record.ATTEMPT_IDS),
+    ...(ledgerReadback.priorAttemptAttributionByFamily[rootFamilyKey] || [])
+  ]);
+  if (event.kind === 'NON_PRODUCT_HOLD_RECOVERY' || event.kind === 'UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION') {
+    const expected = D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS.find((readback) =>
+      readback.eventKind === event.kind && readback.attemptId === event.attemptId);
+    if (!expected || !d1ExactCurrentReadback(event.candidateReadback, D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK) ||
+        !d1ExactCurrentReadback(event.attemptClassificationReadback, expected) ||
+        expected.rootFamilyKey !== rootFamilyKey ||
+        event.attemptClassificationReadback.candidateReadbackDigest !== event.candidateReadback.digest ||
+        event.attemptClassificationReadback.byteComparison !== 'UNCHANGED' ||
+        event.attemptClassificationReadback.candidateBytesChanged !== false ||
+        event.attemptClassificationReadback.candidateByteDigest !== event.candidateReadback.byteDigest ||
+        event.attemptClassificationReadback.priorCandidateByteDigest !== event.candidateReadback.byteDigest) {
+      return { hold: true, productAttempt: false, reason: 'NON_PRODUCT_CURRENT_CANDIDATE_AND_CLASSIFICATION_READBACK_REQUIRED' };
+    }
+    return { productAttempt: false, ordinaryAttemptIds: ordinary, wdcAttemptIds: wdc,
+      reconvergedAttemptIds: reconverged, totalHistoricalAttempts: allIds.size };
+  }
+  if (event.kind === 'WDC') {
+    const authority = event.authorityReadback;
+    if (!d1ExactCurrentReadback(authority, D1_ORACLE_WDC_AUTHORITY) ||
+        authority.attemptId !== event.attemptId || authority.rootFamilyKey !== rootFamilyKey ||
+        authority.repository !== ledgerReadback.repository || authority.runId !== ledgerReadback.runId ||
+        authority.lockId !== ledgerReadback.lockId) {
+      return { hold: true, productAttempt: false, reason: 'WDC_CURRENT_AUTHORITY_READBACK_REQUIRED' };
+    }
+    wdc.push(event.attemptId);
+    return { productAttempt: true, ordinaryBudgetReset: false, ordinaryAttemptIds: ordinary,
+      wdcAttemptIds: wdc, reconvergedAttemptIds: reconverged,
+      totalHistoricalAttempts: new Set([...ordinary, ...wdc, ...reconverged]).size };
+  }
+  if (event.kind === 'RECONVERGED_CORRECTION') {
+    const authority = event.authorityReadback;
+    if (!d1ExactCurrentReadback(authority, D1_ORACLE_RECONVERGED_AUTHORITY) ||
+        authority.attemptId !== event.attemptId || authority.rootFamilyKey !== rootFamilyKey ||
+        authority.repository !== ledgerReadback.repository || authority.runId !== ledgerReadback.runId ||
+        authority.lockId !== ledgerReadback.lockId) {
+      return { hold: true, productAttempt: false, reason: 'RECONVERGED_CURRENT_AUTHORITY_READBACK_REQUIRED' };
+    }
+    reconverged.push(event.attemptId);
+    return { productAttempt: true, ordinaryBudgetReset: false, ordinaryAttemptIds: ordinary,
+      wdcAttemptIds: wdc, reconvergedAttemptIds: reconverged,
+      totalHistoricalAttempts: new Set([...ordinary, ...wdc, ...reconverged]).size };
+  }
+  if (event.kind !== 'G3_PRODUCT_CORRECTION') return { hold: true, productAttempt: false, reason: 'UNKNOWN_ATTEMPT_EVENT_KIND' };
+  const classificationReadback = event.classificationReadback;
+  const classificationResult = evaluateD1RootClassification(
+    classificationReadback && classificationReadback.classification, classificationReadback);
+  const currentStableRootFamilies = [...new Set(ledgerReadback.currentRecords.map(d1StableRootFamilyKey))].sort();
+  if (!s1aPresent(event.findingId) || !classificationReadback ||
+      classificationReadback.findingId !== event.findingId ||
+      classificationReadback.rootLedgerRevision !== ledgerReadback.revision ||
+      !Array.isArray(classificationReadback.stableRootFamilyKeys) ||
+      !s1aSame([...classificationReadback.stableRootFamilyKeys].sort(), currentStableRootFamilies) ||
+      !currentStableRootFamilies.includes(rootFamilyKey)) {
+    return { hold: true, productAttempt: false, reason: 'CURRENT_ROOT_CLASSIFICATION_REQUIRED' };
+  }
+  if (!['CONTINUE_EXISTING_ROOT_ACCOUNTING', 'OPEN_ONLY_AFTER_UNTOUCHED_ROOT_AUDIT'].includes(classificationResult.disposition)) {
+    return { hold: true, productAttempt: false, reason: 'ROOT_CLASSIFICATION_REQUIRES_REENTRY', disposition: classificationResult.disposition };
+  }
+  if (classificationResult.disposition === 'OPEN_ONLY_AFTER_UNTOUCHED_ROOT_AUDIT' &&
+      !familyRecords.some((record) => record.NEW_ROOT_DISCOVERED === true)) {
+    return { hold: true, productAttempt: false, reason: 'NEW_ROOT_CLASSIFICATION_MISSING_ROOT_AUDIT_STATE' };
+  }
+  if (!familyRecords.some((record) => record.STATE === 'OPEN')) {
+    return { hold: true, productAttempt: false, reason: 'PRODUCT_CORRECTION_ROOT_NOT_OPEN' };
+  }
+  const ordinaryForRoot = ordinary.filter((attemptId) => rootAttemptIds.has(attemptId));
+  const nextAttempt = ordinaryForRoot.length + 1;
+  if (!evaluateD1NextRootAttempt(nextAttempt, ledgerReadback.narrowingProgressByFamily[rootFamilyKey] === true) ||
+      !d1ProgressReadbackValid(event, rootFamilyKey, nextAttempt, ledgerReadback)) {
+    return { hold: true, productAttempt: false, reason: 'ROOT_ATTEMPT_BUDGET_OR_PROGRESS' };
+  }
+  ordinary.push(event.attemptId);
+  return { productAttempt: true, ordinaryBudgetReset: false, ordinaryAttemptIds: ordinary,
+    wdcAttemptIds: wdc, reconvergedAttemptIds: reconverged,
+    totalHistoricalAttempts: new Set([...ordinary, ...wdc, ...reconverged]).size };
+}const D1_ORACLE_MERGE_EVENT = Object.freeze({
+  event: 'merge_group', branch: 'main', eventIdentity: 'event:merge-8', triggerId: 'delivery:merge-8',
+  headSha: S1A_ORACLE_INTEGRATED_IDENTITY.commit
+});
+function d1IsFirstPartyCheck(check) {
+  return check.producerAuthority === 'FIRST_PARTY';
+}const D1_CHECK_IDENTITY_FIELDS = Object.freeze([
+  'producerId', 'workflowId', 'workflowRevision', 'checkId', 'matrixLeg', 'eventIdentity', 'triggerId', 'headSha'
+]);
+function d1CheckIdentity(check) {
+  if (!check || typeof check !== 'object' || D1_CHECK_IDENTITY_FIELDS.some((field) => !s1aPresent(check[field]))) return null;
+  return JSON.stringify(D1_CHECK_IDENTITY_FIELDS.map((field) => check[field]));
+}
+function d1CheckPathApplies(patterns, changedPaths) {
+  if (!patterns || patterns.length === 0) return true;
+  return patterns.some((pattern) => pattern === '*' ||
+    (pattern.endsWith('/**') && changedPaths.some((file) => file.startsWith(pattern.slice(0, -2)))) ||
+    changedPaths.includes(pattern));
+}
+const D1_ORACLE_TRUSTED_CHECK_MEMBERSHIP_INPUTS = new WeakMap();
+function d1CurrentAuthorityReadback(readback, trustedCore, source, coreFields) {
+  const core = { ...readback };
+  delete core.digest;
+  return s1aHasExactKeys(readback, [...coreFields, 'digest']) &&
+    s1aSame(core, trustedCore) && readback.source === source && readback.authoritative === true &&
+    readback.current === true && readback.readBack === true && readback.digest === s1aHashRecord(core);
+}
+function d1CheckAuthorityCore(configuration, revision, eventContext, childRequiredChecks,
+  childInventoryCheckIds, checkInventoryIds, reviewSnapshotCheckIds) {
+  return {
+    source: 'CURRENT_CANONICAL_CHECK_CONFIGURATION_READBACK', authoritative: true, current: true,
+    readBack: true, complete: true, configurationRevision: revision,
+    integratedCommit: S1A_ORACLE_INTEGRATED_IDENTITY.commit,
+    configuration: s1aClone(configuration), eventContext: s1aClone(eventContext),
+    childRequiredChecks: s1aClone(childRequiredChecks), childInventoryCheckIds: s1aClone(childInventoryCheckIds),
+    checkInventoryIds: s1aClone(checkInventoryIds), reviewSnapshotCheckIds: s1aClone(reviewSnapshotCheckIds)
+  };
+}
+function d1LatestRunAuthorityCore(results, revision, eventContext) {
+  return {
+    source: 'CURRENT_CANONICAL_LATEST_RUN_READBACK', authoritative: true, current: true,
+    readBack: true, complete: true, configurationRevision: revision,
+    eventContext: s1aClone(eventContext), results: s1aClone(results)
+  };
+}
+function evaluateD1MergeCheckMembership(input) {
+  const failures = [];
+  const trustedFixture = D1_ORACLE_TRUSTED_CHECK_MEMBERSHIP_INPUTS.get(input);
+  if (!trustedFixture) failures.push('CHECK_MEMBERSHIP_NO_INDEPENDENT_SOURCE_FIXTURE');
+  const configurationFields = ['source', 'authoritative', 'current', 'readBack', 'complete', 'configurationRevision',
+    'integratedCommit', 'configuration', 'eventContext', 'childRequiredChecks', 'childInventoryCheckIds', 'checkInventoryIds',
+    'reviewSnapshotCheckIds'];
+  const runFields = ['source', 'authoritative', 'current', 'readBack', 'complete', 'configurationRevision',
+    'eventContext', 'results'];
+  if (input.configurationComplete !== true || input.membershipFreezePoint !== 'BEFORE_RESULT_ADJUDICATION' ||
+      input.configurationRevision !== input.frozenConfigurationRevision ||
+      (input.configurationChangesAfterFreeze || []).length > 0) {
+    failures.push('CHECK_MEMBERSHIP_CONFIGURATION_NOT_FROZEN');
+  }
+  if (input.ambiguousMatrixExpansion === true) failures.push('AMBIGUOUS_DYNAMIC_MATRIX_EXPANSION');
+  if (!Array.isArray(input.configuration) || !Array.isArray(input.childRequiredChecks) ||
+      !Array.isArray(input.results) || !Array.isArray(input.childInventoryCheckIds) ||
+      !Array.isArray(input.checkInventoryIds) || !Array.isArray(input.reviewSnapshotCheckIds)) {
+    failures.push('CHECK_MEMBERSHIP_INPUT_INCOMPLETE');
+  }
+  const event = input.eventContext || {};
+  if (!s1aPresent(event.event) || !s1aPresent(event.branch) || !Array.isArray(event.changedPaths) ||
+      !s1aPresent(event.eventIdentity) || !s1aPresent(event.triggerId) || !s1aPresent(event.headSha) ||
+      event.event !== D1_ORACLE_MERGE_EVENT.event || event.branch !== D1_ORACLE_MERGE_EVENT.branch ||
+      event.eventIdentity !== D1_ORACLE_MERGE_EVENT.eventIdentity ||
+      event.triggerId !== D1_ORACLE_MERGE_EVENT.triggerId ||
+      event.headSha !== D1_ORACLE_MERGE_EVENT.headSha) {
+    failures.push('CHECK_MEMBERSHIP_EVENT_IDENTITY_INCOMPLETE');
+  }
+  const configurationCore = input.configurationReadback || {};
+  const trustedConfiguration = trustedFixture ? trustedFixture.configuration : {};
+  if (!d1CurrentAuthorityReadback(configurationCore, trustedConfiguration,
+      'CURRENT_CANONICAL_CHECK_CONFIGURATION_READBACK', configurationFields) ||
+      !s1aSame(configurationCore.configuration, input.configuration) ||
+      configurationCore.configurationRevision !== input.configurationRevision ||
+      configurationCore.integratedCommit !== D1_ORACLE_MERGE_EVENT.headSha ||
+      !s1aSame(configurationCore.eventContext, input.eventContext) ||
+      !s1aSame(configurationCore.childRequiredChecks, input.childRequiredChecks) ||
+      !s1aSame(configurationCore.childInventoryCheckIds, input.childInventoryCheckIds) ||
+      !s1aSame(configurationCore.checkInventoryIds, input.checkInventoryIds) ||
+      !s1aSame(configurationCore.reviewSnapshotCheckIds, input.reviewSnapshotCheckIds)) {
+    failures.push('CHECK_CONFIGURATION_AUTHORITATIVE_READBACK');
+  }
+  const latestReadback = input.latestRunReadback || {};
+  const trustedLatest = trustedFixture ? trustedFixture.latestRuns : {};
+  if (!d1CurrentAuthorityReadback(latestReadback, trustedLatest,
+      'CURRENT_CANONICAL_LATEST_RUN_READBACK', runFields) ||
+      !s1aSame(latestReadback.results, input.results) ||
+      latestReadback.configurationRevision !== input.configurationRevision ||
+      !s1aSame(latestReadback.eventContext, input.eventContext)) {
+    failures.push('CHECK_LATEST_RUN_AUTHORITATIVE_READBACK');
+  }
+  if (failures.length > 0) return { status: 'HOLD', failures, expected: [] };
+  const configuration = input.configuration;
+  if (configuration.some((check) => d1CheckIdentity(check) === null)) {
+    failures.push('CHECK_CONFIGURATION_IDENTITY_INCOMPLETE');
+  }
+  if (configuration.some((check) => !['FIRST_PARTY', 'EXTERNAL'].includes(check.producerAuthority))) {
+    failures.push('CHECK_PRODUCER_AUTHORITY_CLASSIFICATION_INCOMPLETE');
+  }
+  for (const requiredId of input.childRequiredChecks) {
+    if (!configuration.some((check) => check.requirementId === requiredId)) {
+      failures.push('CHILD_REQUIRED_CHECK_HAS_NO_CONFIGURATION:' + requiredId);
+    }
+  }
+  const expectedChecks = configuration.filter((check) => {
+    if (check.phase === 'PREMERGE_ONLY') return false;
+    if (check.phase !== 'MERGE_TRIGGERED') {
+      failures.push('UNKNOWN_CHECK_PHASE:' + check.checkId);
+      return false;
+    }
+    const childRequired = input.childRequiredChecks.includes(check.requirementId);
+    const requiredByConfiguration = check.requiredAtMerge === true || childRequired;
+    const isRequired = requiredByConfiguration || d1IsFirstPartyCheck(check);
+    if (requiredByConfiguration && check.enabled !== true) {
+      failures.push('REQUIRED_MERGE_CHECK_DISABLED:' + check.checkId);
+      return false;
+    }
+    const eventApplies = Array.isArray(check.events) && check.events.includes(event.event);
+    const branchApplies = !check.branches || check.branches.includes(event.branch);
+    const pathApplies = d1CheckPathApplies(check.pathConditions, event.changedPaths);
+    if (check.enabled !== true || !isRequired || !eventApplies || !branchApplies || !pathApplies) return false;
+    const exactEventIdentity = check.eventIdentity === event.eventIdentity &&
+      check.triggerId === event.triggerId && check.headSha === event.headSha;
+    if (!exactEventIdentity) {
+      failures.push('CHECK_CONFIGURATION_EVENT_IDENTITY_MISMATCH:' + check.checkId);
+      return false;
+    }
+    return true;
+  });
+  const expectedKeys = expectedChecks.map(d1CheckIdentity).sort();
+  const expectedIds = expectedChecks.map((check) => check.checkId).sort();
+  if (expectedKeys.includes(null) || new Set(expectedKeys).size !== expectedKeys.length) failures.push('DUPLICATE_OR_INCOMPLETE_EXPECTED_CHECK_IDENTITY');
+  if (input.claimedExpectedMembership &&
+      JSON.stringify([...input.claimedExpectedMembership].sort()) !== JSON.stringify(expectedKeys)) {
+    failures.push('CLAIMED_MEMBERSHIP_DIFFERS_FROM_CONFIGURATION');
+  }
+  const latestRunIds = input.latestRunReadback.results.map((result) => result.checkId).sort();
+  if (input.latestRunReadback.results.some((result) => !s1aPresent(result.runId))) {
+    failures.push('CHECK_LATEST_RUN_ID_MISSING');
+  }
+  if (new Set(latestRunIds).size !== latestRunIds.length ||
+      !s1aSame(expectedIds, input.childInventoryCheckIds.slice().sort()) ||
+      !s1aSame(expectedIds, input.checkInventoryIds.slice().sort()) ||
+      !s1aSame(expectedIds, latestRunIds) ||
+      !s1aSame(expectedIds, input.reviewSnapshotCheckIds.slice().sort())) {
+    failures.push('EXPECTED_MEMBERSHIP_DIFFERS_FROM_CANONICAL_INVENTORIES');
+  }
+  if (failures.length > 0) return { status: 'HOLD', failures, expected: expectedChecks };
+  const blockers = [];
+  const missing = [];
+  for (const check of expectedChecks) {
+    const identity = d1CheckIdentity(check);
+    const matches = input.latestRunReadback.results.filter((result) => d1CheckIdentity(result) === identity);
+    if (matches.length === 0) {
+      missing.push('MISSING_EXPECTED_CHECK:' + check.checkId);
+      continue;
+    }
+    if (matches.length !== 1) {
+      failures.push('AMBIGUOUS_TERMINAL_CHECK_READBACK:' + check.checkId);
+      continue;
+    }
+    const result = matches[0];
+    if (!s1aPresent(result.runId) || result.terminalReadback !== true || result.terminal !== true ||
+        result.conclusion !== 'SUCCESS') {
+      blockers.push('APPLICABLE_CHECK_NOT_TERMINAL_GREEN:' + check.checkId);
+    }
+  }
+  if (failures.length > 0) return { status: 'HOLD', failures, expected: expectedChecks };
+  if (missing.length > 0) return { status: 'HOLD', failures: missing, expected: expectedChecks };
+  if (blockers.length > 0) return { status: 'BLOCKED', failures: blockers, expected: expectedChecks };
+  return { status: 'GREEN', failures: [], expected: expectedChecks };
+}
+function makeD1CheckMembership(options = {}) {
+  const eventIdentity = options.eventIdentity || D1_ORACLE_MERGE_EVENT.eventIdentity;
+  const triggerId = options.triggerId || D1_ORACLE_MERGE_EVENT.triggerId;
+  const headSha = options.headSha || D1_ORACLE_MERGE_EVENT.headSha;
+  const eventContext = { event: D1_ORACLE_MERGE_EVENT.event, branch: D1_ORACLE_MERGE_EVENT.branch,
+    changedPaths: options.changedPaths || ['repo/CONTROLLER.md'], eventIdentity, triggerId, headSha };
+  const shared = {
+    workflowRevision: 'workflow-revision-3', matrixLeg: 'linux-x64',
+    events: ['merge_group'], branches: ['main'], pathConditions: ['repo/**'],
+    phase: 'MERGE_TRIGGERED', enabled: true, requiredAtMerge: true,
+    producerAuthority: 'FIRST_PARTY', eventIdentity, triggerId, headSha
+  };
+  const configuration = options.emptyMembership ? [] : [
+    { ...shared, producerId: 'actions/validator', workflowId: '.github/workflows/validate.yml',
+      requirementId: 'integration', checkId: 'check:integration', displayName: 'Validate' },
+    { ...shared, producerId: 'toolkit/policy', workflowId: '.github/workflows/policy.yml',
+      requirementId: 'policy', checkId: 'check:policy', displayName: 'Validate' }
+  ];
+  if (options.includePremergeCodeql) configuration.push({
+    ...shared, producerId: 'actions/codeql', workflowId: '.github/workflows/codeql.yml',
+    workflowRevision: 'workflow-revision-2', requirementId: 'codeql', checkId: 'check:codeql',
+    displayName: 'CodeQL', events: ['pull_request'], phase: 'PREMERGE_ONLY'
+  });
+  if (options.includeOptionalFirstPartyCheck) configuration.push({
+    ...shared, producerId: 'actions/optional-first-party', workflowId: '.github/workflows/optional.yml',
+    requirementId: 'optional-first-party', checkId: 'check:optional-first-party',
+    displayName: 'Optional first-party', requiredAtMerge: false
+  });
+  if (options.includeNewFirstPartyCheck) configuration.push({
+    ...shared, producerId: 'actions/new-first-party', workflowId: '.github/workflows/new-first-party.yml',
+    requirementId: 'new-first-party', checkId: 'check:new-first-party',
+    displayName: 'New first-party', requiredAtMerge: false
+  });
+  const staleEventCheck = configuration.find((check) => check.checkId === options.staleEventIdentityCheckId);
+  if (staleEventCheck) staleEventCheck.eventIdentity = options.staleEventIdentity || 'event:previous-merge';
+  const disabledCheck = configuration.find((check) => check.checkId === options.disabledCheckId);
+  if (disabledCheck) disabledCheck.enabled = false;
+  const nonApplicableEventCheck = configuration.find((check) => check.checkId === options.nonApplicableEventCheckId);
+  if (nonApplicableEventCheck) nonApplicableEventCheck.events = ['pull_request'];
+  const inventoryConfiguration = configuration.filter((check) => check.checkId !== options.omitCheckIdFromInventories);
+  const results = inventoryConfiguration.filter((check) => check.phase === 'MERGE_TRIGGERED').map((check) => ({
+    ...check, runId: 'run:merge:' + check.checkId,
+    terminalReadback: true, terminal: true, conclusion: 'SUCCESS'
+  }));
+  if (options.omitCheckId) {
+    const index = results.findIndex((result) => result.checkId === options.omitCheckId);
+    if (index >= 0) results.splice(index, 1);
+  }
+  if (options.resultConclusion) results[0].conclusion = options.resultConclusion;
+  if (options.resultTerminal === false) results[0].terminal = false;
+  if (options.markNotApplicable === true) results[0].notApplicable = true;
+  const required = options.childRequiredChecks || (options.emptyMembership ? [] : ['integration', 'policy']);
+  const canonicalIds = inventoryConfiguration.filter((check) => check.phase === 'MERGE_TRIGGERED')
+    .map((check) => check.checkId).sort();
+  const revision = options.configurationRevision || 'configuration:9';
+  const configurationCore = d1CheckAuthorityCore(configuration, revision, eventContext, required,
+    canonicalIds, canonicalIds, canonicalIds);
+  const latestCore = d1LatestRunAuthorityCore(results, revision, eventContext);
+  const fixture = {
+    configurationComplete: true, configurationRevision: revision,
+    frozenConfigurationRevision: options.frozenConfigurationRevision || revision,
+    configurationChangesAfterFreeze: options.configurationChangesAfterFreeze || [],
+    membershipFreezePoint: 'BEFORE_RESULT_ADJUDICATION',
+    ambiguousMatrixExpansion: options.ambiguousMatrixExpansion === true,
+    configuration, childRequiredChecks: required, eventContext, results,
+    childInventoryCheckIds: canonicalIds, checkInventoryIds: canonicalIds, reviewSnapshotCheckIds: canonicalIds,
+    configurationReadback: { ...configurationCore, digest: s1aHashRecord(configurationCore) },
+    trustedConfigurationSnapshot: s1aClone(configurationCore),
+    latestRunReadback: { ...latestCore, digest: s1aHashRecord(latestCore) },
+    trustedLatestRunSnapshot: s1aClone(latestCore)
+  };
+  D1_ORACLE_TRUSTED_CHECK_MEMBERSHIP_INPUTS.set(fixture, Object.freeze({
+    configuration: s1aClone(configurationCore), latestRuns: s1aClone(latestCore)
+  }));
+  return fixture;
+}
+function makeD1FinalityDependencyReadback(input, overrides = {}) {
+  const core = {
+    source: 'CURRENT_PARENT_CHILD_FRONTIER_READBACK', authoritative: true, current: true, readBack: true,
+    programmeId: '421', runId: 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001',
+    lockId: 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001',
+    repository: S1A_ORACLE_INTEGRATED_IDENTITY.repository,
+    deliveryChildId: S1A_ORACLE_INTEGRATED_IDENTITY.deliveryChildId,
+    integratedCommit: S1A_ORACLE_INTEGRATED_IDENTITY.commit,
+    integratedTree: S1A_ORACLE_INTEGRATED_IDENTITY.tree,
+    parentRevision: input.parentContract.revision, childRevision: input.childState.revision,
+    checkpointKind: input.checkpointKind,
+    mergeReceiptId: input.checkpointKind === 'FINAL_DELIVERY_CHILD_MERGE' ? 'receipt:merge' : null,
+    childTerminalCoherent: true, parentCurrent: true, frontierCurrent: true, dependenciesCurrent: true,
+    unresolvedMaterialDependentFinding: false, finalDeliveryChild: false, explicitDualRequirement: false,
+    ...overrides
+  };
+  return { ...core, digest: s1aHashRecord(core) };
+}
+const D1_ORACLE_TRUSTED_POST_CHILD_INPUTS = new WeakMap();
+function validateD1FinalityDependencyReadback(input) {
+  const readback = input.finalityDependencyReadback || {};
+  const fields = [
+    'source', 'authoritative', 'current', 'readBack', 'repository', 'programmeId', 'deliveryChildId',
+    'runId', 'lockId', 'integratedCommit', 'integratedTree', 'parentRevision', 'childRevision',
+    'checkpointKind', 'mergeReceiptId', 'childTerminalCoherent', 'parentCurrent', 'frontierCurrent',
+    'dependenciesCurrent', 'unresolvedMaterialDependentFinding', 'finalDeliveryChild', 'explicitDualRequirement', 'digest'
+  ];
+  const trustedFixture = D1_ORACLE_TRUSTED_POST_CHILD_INPUTS.get(input);
+  if (!trustedFixture) return false;
+  const trusted = trustedFixture.finalityDependencySnapshot;
+  const finalMergeEvent = d1ExactCurrentReadback(input.mergeEventReadback, D1_ORACLE_FINAL_CHILD_MERGE_EVENT_READBACK);
+  const supportingEvent = d1ExactCurrentReadback(input.mergeEventReadback, D1_ORACLE_SUPPORTING_PR_EVENT_READBACK);
+  const knownFinalityState = D1_ORACLE_FINALITY_READBACKS.some((expected) => s1aSame(readback, expected));
+  const canonicalChildState = S1A_ORACLE_POST_CHILD_STATES.some((expected) => s1aSame(input.childState, expected)) ||
+    s1aSame(input.childState, D1_ORACLE_EMPTY_CHILD_STATE);
+  const currentFinality = d1CurrentAuthorityReadback(readback, trusted,
+    'CURRENT_PARENT_CHILD_FRONTIER_READBACK', fields.slice(0, -1));
+  if (!currentFinality || !knownFinalityState || !canonicalChildState ||
+      !s1aHasExactKeys(readback, fields) || readback.repository !== input.identity.repository ||
+      readback.deliveryChildId !== input.identity.deliveryChildId || readback.runId !== 'D1_G3_GOVERNANCE_FOUNDATION_INCREMENT_1_001' ||
+      readback.lockId !== 'DL-D1-G3-GOVERNANCE-FOUNDATION-INCREMENT-1-001' ||
+      readback.programmeId !== '421' || readback.integratedCommit !== input.identity.commit ||
+      readback.integratedTree !== input.identity.tree || readback.parentRevision !== input.parentContract.revision ||
+      readback.childRevision !== input.childState.revision || input.checkpointKind !== readback.checkpointKind ||
+      !['FINAL_DELIVERY_CHILD_MERGE', 'SUPPORTING_PR'].includes(readback.checkpointKind) ||
+      typeof readback.unresolvedMaterialDependentFinding !== 'boolean' ||
+      typeof readback.finalDeliveryChild !== 'boolean' || typeof readback.explicitDualRequirement !== 'boolean') {
+    return false;
+  }
+  if (finalMergeEvent) {
+    return readback.checkpointKind === 'FINAL_DELIVERY_CHILD_MERGE' &&
+      readback.mergeReceiptId === input.mergeEventReadback.mergeReceiptId &&
+      input.trigger === 'FINAL_DELIVERY_CHILD_MERGE' &&
+      d1ExactCurrentReadback(input.integratedIdentityReadback, D1_ORACLE_FINAL_MERGED_IDENTITY_READBACK);
+  }
+  if (supportingEvent) {
+    return readback.checkpointKind === 'SUPPORTING_PR' && readback.mergeReceiptId === null &&
+      readback.finalDeliveryChild === false && input.trigger === 'SUPPORTING_PR' &&
+      d1ExactCurrentReadback(input.integratedIdentityReadback, D1_ORACLE_SUPPORTING_PR_IDENTITY_READBACK);
+  }
+  return false;
+}
+function makeD1IntegrationPredicateReadback(input) {
+  const core = {
+    source: 'CURRENT_CANONICAL_INTEGRATION_PREDICATE_READBACK', authoritative: true, current: true, readBack: true,
+    repository: input.identity.repository, deliveryChildId: input.identity.deliveryChildId,
+    commit: input.identity.commit, tree: input.identity.tree,
+    parentRevision: input.parentContract.revision, childRevision: input.childState.revision,
+    assuredChildTree: input.assuredChildTree,
+    unassuredConcurrentOrMultiChildComposition: input.unassuredConcurrentOrMultiChildComposition,
+    conflictResolutionSemanticDelta: input.conflictResolutionSemanticDelta,
+    materialRootTrustAuthorityIntegrationOutsideAssuredTree: input.materialRootTrustAuthorityIntegrationOutsideAssuredTree,
+    materialIntegrationUncertainty: input.materialIntegrationUncertainty,
+    dualSnapshotBindable: input.dualSnapshotBindable,
+    reviewerAvailability: s1aClone(input.reviewerAvailability)
+  };
+  return { ...core, digest: s1aHashRecord(core) };
+}
+function validateD1IntegrationPredicateReadback(input) {
+  const readback = input.integrationPredicateReadback || {};
+  const fields = [
+    'source', 'authoritative', 'current', 'readBack', 'repository', 'deliveryChildId', 'commit', 'tree',
+    'parentRevision', 'childRevision', 'assuredChildTree', 'unassuredConcurrentOrMultiChildComposition',
+    'conflictResolutionSemanticDelta', 'materialRootTrustAuthorityIntegrationOutsideAssuredTree',
+    'materialIntegrationUncertainty', 'dualSnapshotBindable', 'reviewerAvailability', 'digest'
+  ];
+  const trustedFixture = D1_ORACLE_TRUSTED_POST_CHILD_INPUTS.get(input);
+  if (!trustedFixture) return false;
+  const trusted = trustedFixture.integrationPredicateSnapshot;
+  const acceptedByCanonicalSource = D1_ORACLE_INTEGRATION_PREDICATE_READBACKS.some((expected) =>
+    s1aSame(readback, expected));
+  return acceptedByCanonicalSource && d1CurrentAuthorityReadback(readback, trusted,
+    'CURRENT_CANONICAL_INTEGRATION_PREDICATE_READBACK', fields.slice(0, -1)) &&
+    readback.repository === input.identity.repository && readback.deliveryChildId === input.identity.deliveryChildId &&
+    readback.commit === input.identity.commit && readback.tree === input.identity.tree &&
+    readback.parentRevision === input.parentContract.revision && readback.childRevision === input.childState.revision &&
+    readback.assuredChildTree === input.assuredChildTree &&
+    readback.unassuredConcurrentOrMultiChildComposition === input.unassuredConcurrentOrMultiChildComposition &&
+    readback.conflictResolutionSemanticDelta === input.conflictResolutionSemanticDelta &&
+    readback.materialRootTrustAuthorityIntegrationOutsideAssuredTree === input.materialRootTrustAuthorityIntegrationOutsideAssuredTree &&
+    readback.materialIntegrationUncertainty === input.materialIntegrationUncertainty &&
+    readback.dualSnapshotBindable === input.dualSnapshotBindable &&
+    s1aSame(readback.reviewerAvailability, input.reviewerAvailability) &&
+    ['unassuredConcurrentOrMultiChildComposition', 'conflictResolutionSemanticDelta',
+      'materialRootTrustAuthorityIntegrationOutsideAssuredTree', 'materialIntegrationUncertainty', 'dualSnapshotBindable']
+      .every((field) => typeof readback[field] === 'boolean') &&
+    readback.reviewerAvailability && typeof readback.reviewerAvailability.A === 'boolean' &&
+    typeof readback.reviewerAvailability.B === 'boolean';
+}
+function evaluateD1PostChildAssurance(policy, input) {
+  if (!input || typeof input !== 'object' || !input.checkMembership || typeof input.checkMembership !== 'object') {
+    return { outcome: 'HOLD', mode: null, failures: ['POST_CHILD_CHECK_MEMBERSHIP_READBACK_MISSING'] };
+  }
+  if (!validateD1FinalityDependencyReadback(input)) {
+    return { outcome: 'HOLD', mode: null, failures: ['POST_CHILD_FINALITY_DEPENDENCY_READBACK'] };
+  }
+  if (!validateD1IntegrationPredicateReadback(input)) {
+    return { outcome: 'HOLD', mode: null, failures: ['POST_CHILD_INTEGRATION_PREDICATE_READBACK'] };
+  }
+  const state = input.finalityDependencyReadback;
+  if (input.mergeEventReadback.checkpointKind === 'SUPPORTING_PR') {
+    return { outcome: 'NO_CHECKPOINT', mode: null, failures: [] };
+  }
+  if (input.mergeEventReadback.checkpointKind !== 'FINAL_DELIVERY_CHILD_MERGE') {
+    return { outcome: 'HOLD', mode: null, failures: ['UNKNOWN_CHECKPOINT_KIND'] };
+  }
+  const membership = evaluateD1MergeCheckMembership(input.checkMembership);
+  const expectedCheckIds = membership.expected.map((check) => check.checkId).sort();
+  const childCheckIds = input.childState && input.childState.applicableIntegratedCheckIds;
+  const inventoryItems = input.checkInventory && input.checkInventory.items;
+  const reviewCheckIds = input.reviewSnapshot && input.reviewSnapshot.applicableIntegratedCheckIds;
+  if (membership.status === 'GREEN' &&
+      (!Array.isArray(childCheckIds) || !Array.isArray(inventoryItems) ||
+       !inventoryItems.every((item) => item && s1aPresent(item.id)) || !Array.isArray(reviewCheckIds))) {
+    return { outcome: 'HOLD', mode: null, failures: ['POST_CHILD_BOUND_MEMBERSHIP_INVENTORY_MISSING_OR_MALFORMED'], membership };
+  }
+  if (membership.status === 'GREEN' &&
+      (!s1aSame(expectedCheckIds, childCheckIds.slice().sort()) ||
+       !s1aSame(expectedCheckIds, inventoryItems.map((item) => item.id).sort()) ||
+       !s1aSame(expectedCheckIds, reviewCheckIds.slice().sort()))) {
+    return { outcome: 'HOLD', mode: null, failures: ['POST_CHILD_MEMBERSHIP_DIFFERS_FROM_BOUND_CHILD_INVENTORIES'], membership };
+  }
+  if (membership.status !== 'GREEN') {
+    return { outcome: membership.status, mode: null, failures: membership.failures, membership };
+  }
+  const verifiedMembershipProof = Object.freeze({});
+  D1_ORACLE_VERIFIED_POST_CHILD_MEMBERSHIP_PROOFS.set(verifiedMembershipProof, {
+    status: membership.status, expectedCheckIds,
+    identity: s1aClone(input.identity), childState: s1aClone(input.childState),
+    checkInventory: s1aClone(input.checkInventory), checks: s1aClone(input.checks),
+    reviewSnapshot: s1aClone(input.reviewSnapshot),
+    checkMembershipInput: s1aClone(input.checkMembership),
+    expectedIdentities: membership.expected.map(d1CheckIdentity).sort()
+  });
+  const shared = evaluateS1aPostChildReview(policy, {
+    ...input, assuranceMode: 'RECONCILE_ONLY', d1CheckMembershipProof: verifiedMembershipProof
+  });
+  if (!shared.ok) return { outcome: 'HOLD', mode: null, failures: shared.failures };
+  const predicate = input.integrationPredicateReadback;
+  const treeDelta = input.identity.tree !== predicate.assuredChildTree || predicate.conflictResolutionSemanticDelta === true;
+  const triggers = [];
+  if (treeDelta) triggers.push('INTEGRATION_TREE_DELTA');
+  if (predicate.unassuredConcurrentOrMultiChildComposition === true) triggers.push('CONCURRENT_OR_MULTI_CHILD_COMPOSITION');
+  if (predicate.materialRootTrustAuthorityIntegrationOutsideAssuredTree === true) {
+    triggers.push('MATERIAL_ROOT_TRUST_AUTHORITY_INTEGRATION_OUTSIDE_ASSURED_TREE');
+  }
+  if (predicate.materialIntegrationUncertainty === true || state.unresolvedMaterialDependentFinding === true) {
+    triggers.push('UNRESOLVED_INTEGRATION_UNCERTAINTY');
+  }
+  if (state.explicitDualRequirement === true) triggers.push('EXPLICIT_OWNER_WEB_G4_REQUIREMENT');
+  if (state.finalDeliveryChild === true) triggers.push('FINAL_DELIVERY_CHILD');
+  const mode = triggers.length > 0 ? 'DUAL_MAX' : 'RECONCILE_ONLY';
+  if (input.requestedMode && input.requestedMode !== mode) {
+    return { outcome: 'HOLD', mode, failures: ['POST_CHILD_MODE_DOES_NOT_MATCH_CURRENT_PREDICATES'], triggers };
+  }
+  if (mode === 'RECONCILE_ONLY') return { outcome: 'PASS', mode, failures: [], triggers, membership };
+  if (predicate.dualSnapshotBindable !== true) {
+    return { outcome: 'HOLD', mode, failures: ['DUAL_MAX_SNAPSHOT_UNBINDABLE'], triggers };
+  }
+  if (predicate.reviewerAvailability.A !== true || predicate.reviewerAvailability.B !== true) {
+    return { outcome: 'HOLD', mode, failures: ['DUAL_MAX_REVIEWER_UNAVAILABLE'], triggers };
+  }
+  const dual = evaluateS1aPostChildReview(policy, {
+    ...input, assuranceMode: 'DUAL_MAX', d1CheckMembershipProof: verifiedMembershipProof
+  });
+  if (!dual.ok) return { outcome: 'HOLD', mode, failures: dual.failures, triggers };
+  return { outcome: 'PASS', mode, failures: [], triggers, membership };
+}
+function makeD1PostChildScenario(overrides = {}) {
+  const input = makeS1aReviewFixture();
+  input.checkpointKind = 'FINAL_DELIVERY_CHILD_MERGE';
+  input.assuredChildTree = S1A_ORACLE_INTEGRATED_IDENTITY.tree;
+  input.unassuredConcurrentOrMultiChildComposition = false;
+  input.conflictResolutionSemanticDelta = false;
+  input.materialRootTrustAuthorityIntegrationOutsideAssuredTree = false;
+  input.materialIntegrationUncertainty = false;
+  input.mergeCheckMembershipComplete = true;
+  input.allApplicableMergeChecksTerminalGreen = true;
+  input.dualSnapshotBindable = true;
+  input.reviewerAvailability = { A: true, B: true };
+  input.checkMembership = makeD1CheckMembership();
+  let finalityOverrides = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (key === 'finalityOverrides') {
+      finalityOverrides = value;
+    } else if (key === 'checkMembershipOptions') {
+      input.checkMembership = makeD1CheckMembership(value);
+    } else if (key === 'emptyMergeCheckMembership') {
+      input.checkMembership = makeD1CheckMembership({ emptyMembership: true });
+    } else {
+      input[key] = value;
+    }
+  }
+  if (input.checkpointKind === 'SUPPORTING_PR') {
+    input.trigger = 'SUPPORTING_PR';
+    input.mergeEventReadback = D1_ORACLE_SUPPORTING_PR_EVENT_READBACK;
+    input.integratedIdentityReadback = D1_ORACLE_SUPPORTING_PR_IDENTITY_READBACK;
+  } else {
+    input.checkpointKind = 'FINAL_DELIVERY_CHILD_MERGE';
+    input.trigger = 'FINAL_DELIVERY_CHILD_MERGE';
+    input.mergeEventReadback = D1_ORACLE_FINAL_CHILD_MERGE_EVENT_READBACK;
+  }
+  if (overrides.emptyMergeCheckMembership === true) {
+    input.childState = s1aClone(D1_ORACLE_EMPTY_CHILD_STATE);
+    input.checkInventory = makeS1aInventory('CANONICAL_APPLICABLE_INTEGRATED_CHECK_READBACK',
+      input.identity, []);
+    input.checks = [];
+    input.reviewSnapshot.applicableIntegratedCheckIds = [];
+  }
+  input.finalityDependencyReadback = makeD1FinalityDependencyReadback(input, finalityOverrides);
+  const finalityCore = { ...input.finalityDependencyReadback };
+  delete finalityCore.digest;
+  input.trustedFinalityDependencySnapshot = s1aClone(finalityCore);
+  input.integrationPredicateReadback = makeD1IntegrationPredicateReadback(input);
+  const integrationPredicateCore = { ...input.integrationPredicateReadback };
+  delete integrationPredicateCore.digest;
+  input.trustedIntegrationPredicateSnapshot = s1aClone(integrationPredicateCore);
+  D1_ORACLE_TRUSTED_POST_CHILD_INPUTS.set(input, Object.freeze({
+    finalityDependencySnapshot: s1aClone(finalityCore),
+    integrationPredicateSnapshot: s1aClone(integrationPredicateCore)
+  }));
+  return input;
+}
+
+const D1_ORACLE_EMPTY_CHILD_STATE_CORE = Object.freeze({
+  ...S1A_ORACLE_POST_CHILD_STATE_CORE,
+  applicableIntegratedCheckIds: Object.freeze([])
+});
+const D1_ORACLE_EMPTY_CHILD_STATE = Object.freeze({
+  ...D1_ORACLE_EMPTY_CHILD_STATE_CORE,
+  stateDigest: s1aHashRecord(D1_ORACLE_EMPTY_CHILD_STATE_CORE)
+});const D1_ORACLE_FINAL_CHILD_MERGE_EVENT_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DELIVERY_CHILD_EVENT_READBACK', authoritative: true, current: true, readBack: true,
+  repository: S1A_ORACLE_INTEGRATED_IDENTITY.repository, deliveryChildId: S1A_ORACLE_INTEGRATED_IDENTITY.deliveryChildId,
+  commit: S1A_ORACLE_INTEGRATED_IDENTITY.commit, tree: S1A_ORACLE_INTEGRATED_IDENTITY.tree,
+  checkpointKind: 'FINAL_DELIVERY_CHILD_MERGE', eventIdentity: 'delivery-child-merge:event-41', mergeReceiptId: 'receipt:merge'
+});
+const D1_ORACLE_FINAL_CHILD_MERGE_EVENT_READBACK = Object.freeze({
+  ...D1_ORACLE_FINAL_CHILD_MERGE_EVENT_CORE, digest: s1aHashRecord(D1_ORACLE_FINAL_CHILD_MERGE_EVENT_CORE)
+});
+const D1_ORACLE_SUPPORTING_PR_EVENT_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_DELIVERY_CHILD_EVENT_READBACK', authoritative: true, current: true, readBack: true,
+  repository: S1A_ORACLE_INTEGRATED_IDENTITY.repository, deliveryChildId: S1A_ORACLE_INTEGRATED_IDENTITY.deliveryChildId,
+  commit: S1A_ORACLE_INTEGRATED_IDENTITY.commit, tree: S1A_ORACLE_INTEGRATED_IDENTITY.tree,
+  checkpointKind: 'SUPPORTING_PR', eventIdentity: 'supporting-pr:event-12', mergeReceiptId: null
+});
+const D1_ORACLE_SUPPORTING_PR_EVENT_READBACK = Object.freeze({
+  ...D1_ORACLE_SUPPORTING_PR_EVENT_CORE, digest: s1aHashRecord(D1_ORACLE_SUPPORTING_PR_EVENT_CORE)
+});
+const D1_ORACLE_FINAL_MERGED_IDENTITY_READBACK = Object.freeze(
+  s1aClone(makeS1aReviewFixture().integratedIdentityReadback));
+const D1_ORACLE_SUPPORTING_PR_IDENTITY_CORE = Object.freeze({
+  source: 'CURRENT_CANONICAL_SUPPORTING_PR_READBACK', authoritative: true, current: true, readBack: true,
+  ...S1A_ORACLE_INTEGRATED_IDENTITY, mergeReceiptId: null, pullRequestId: 'pr:supporting-12'
+});
+const D1_ORACLE_SUPPORTING_PR_IDENTITY_READBACK = Object.freeze({
+  ...D1_ORACLE_SUPPORTING_PR_IDENTITY_CORE,
+  digest: s1aHashRecord(D1_ORACLE_SUPPORTING_PR_IDENTITY_CORE)
+});
+function d1OracleFinalityReadback(overrides = {}, checkpointKind = 'FINAL_DELIVERY_CHILD_MERGE') {
+  const fixture = makeS1aReviewFixture();
+  fixture.checkpointKind = checkpointKind;
+  const core = makeD1FinalityDependencyReadback(fixture, overrides);
+  return core;
+}
+const D1_ORACLE_FINALITY_READBACKS = Object.freeze([
+  d1OracleFinalityReadback(),
+  d1OracleFinalityReadback({ finalDeliveryChild: true }),
+  d1OracleFinalityReadback({ explicitDualRequirement: true }),
+  d1OracleFinalityReadback({}, 'SUPPORTING_PR')
+]);
+function d1OracleIntegrationPredicateReadback(overrides = {}) {
+  const fixture = makeS1aReviewFixture();
+  return makeD1IntegrationPredicateReadback({
+    ...fixture,
+    assuredChildTree: S1A_ORACLE_INTEGRATED_IDENTITY.tree,
+    unassuredConcurrentOrMultiChildComposition: false,
+    conflictResolutionSemanticDelta: false,
+    materialRootTrustAuthorityIntegrationOutsideAssuredTree: false,
+    materialIntegrationUncertainty: false,
+    dualSnapshotBindable: true,
+    reviewerAvailability: { A: true, B: true },
+    ...overrides
+  });
+}
+const D1_ORACLE_INTEGRATION_PREDICATE_READBACKS = Object.freeze([
+  d1OracleIntegrationPredicateReadback(),
+  d1OracleIntegrationPredicateReadback({ assuredChildTree: 'assured:prior-tree' }),
+  d1OracleIntegrationPredicateReadback({ unassuredConcurrentOrMultiChildComposition: true }),
+  d1OracleIntegrationPredicateReadback({ conflictResolutionSemanticDelta: true }),
+  d1OracleIntegrationPredicateReadback({ materialRootTrustAuthorityIntegrationOutsideAssuredTree: true }),
+  d1OracleIntegrationPredicateReadback({ materialIntegrationUncertainty: true, dualSnapshotBindable: false }),
+  d1OracleIntegrationPredicateReadback({ materialIntegrationUncertainty: true, reviewerAvailability: { A: true, B: false } })
+]);
+const D1_ORACLE_GOVERNED_SOURCE_SHA256 = '1601444ea5df640fc2a41f2612574ab378034f8f8e9f4cee8c3242946727ac85';
+function d1GovernedSourceSegments(sources) {
+  const controllerLaw = s1aProseRange(sources.controller,
+    '## Discovery, root, and final-merge law', '\n## Shipping-first scope and repair decisions');
+  const architectureDiscovery = s1aProseRange(sources.architecture,
+    '### Programme discovery basis', '\n### G1 — Root convergence, architecture and authority');
+  const architectureRoot = s1aProseRange(sources.architecture,
+    '### Stable-root G3 convergence accounting', '\n### Increment 1 ownership fences');
+  const architectureOwners = s1aProseRange(sources.architecture,
+    '### Increment 1 ownership fences', '\n### G4 — Child-final independent assurance');
+  const architecturePostChild = s1aProseRange(sources.architecture,
+    '### Post-child integrated dual review', '\n### Bounded non-product continuation');
+  const baseline = sources.baseline || '';
+  const segments = { controllerLaw, architectureDiscovery, architectureRoot, architectureOwners, architecturePostChild, baseline };
+  const expectedOwnerRows = [
+    '| A1 | Route registration/resolution, including concrete `G0.discovery`. |',
+    '| C2 | CURRENT, packets, discovery-basis receipts, durable root ledger, post-child checkpoint runtime. |',
+    '| H | Host/browser/computer/native qualification. |',
+    '| X1 | Secret References and Private Custody. |',
+    '| X2 | Sensitive-File Access Guard. |',
+    '| X3 | External Operation Authority and effectful probes. |',
+    '| X4 | Privacy-Safe Operational Evidence. |',
+    '| W2 | Temporary workspace lifecycle. |',
+    '| D1 | Semantics and deterministic policy oracles only. |'
+  ];
+  const actualOwnerRows = architectureOwners.split(/\r?\n/).filter((line) =>
+    /^\| (?:A1|C2|H|X1|X2|X3|X4|W2|D1) \|/.test(line));
+  s1aRequire(s1aSame(actualOwnerRows, expectedOwnerRows),
+    'D1 architecture owner-fence table missing, duplicated, or contradictory');
+  for (const [name, value] of Object.entries(segments)) {
+    s1aRequire(value.length > 0, 'D1 governed source section missing: ' + name);
+  }
+  const requiredClauses = {
+    controllerLaw: [
+      'binds adequate existing investigation to exact source, revision and recoverable evidence identity.',
+      'Every receipt and X3/Web authority is bound to the exact consuming repository, programme, child identity/revision and baseline identity/revision.',
+      'caller history arrays cannot reset them.',
+      'Every ordinary episode attempt must be attributed to at least one stable root family before the ledger can pass',
+      'current candidate bytes, an exact byte-comparison readback',
+      'the complete stable root-family set',
+      'unknown classification holds for Web.',
+      'attempt 5 is absolute.',
+      'missing or contradictory shared evidence is', 'never defaults false.',
+      'An otherwise-applicable required check with stale event/trigger/head identity, or a disabled check declared child-required or required-at-merge, causes HOLD rather than silent omission.'
+    ],
+    architectureDiscovery: [
+      'requires an authoritative current source readback binding exact repository/path/revision and recoverable evidence identity',
+      'requires a current authoritative G1/Web decision readback binding the exact repository, programme, child, baseline revision, finding IDs, evidence identities, outcome, decision body and body digest',
+      'is admitted only by a current applicability readback bound to the consuming repository, programme, child revision, baseline revision, finding IDs and every material fact covered',
+      'a current authoritative observation readback bound to the exact consuming repository, programme, child revision, baseline revision, finding IDs and changed facts, plus a safe evidence/reverification reference and current terminal enactment receipt',
+      'a receipt cannot be replayed across consumers',
+      'X3/Web authority bound to the exact consuming repository, programme, child, baseline revision and operation',
+      'Raw private material is never admitted into a baseline.'
+    ],
+    architectureRoot: [
+      'unknown or ambiguous class is a Web HOLD.', 'Caller root names, hashes or booleans cannot establish a new family, separability or prior-attribution audit.',
+      'attempt 5 is the same-root absolute ceiling, and a sixth ordinary attempt is rejected.',
+      'Attempt-event observers reject unknown event kinds and enforce the same-root ceiling.',
+      'Ordinary, WDC, reconverged and episode-history membership comes only from the complete current canonical episode-ledger readback',
+      'exact current candidate bytes, unchanged-byte comparison and non-product classification readbacks bind the same repository, child, RUN/Lock and root family',
+      'Every ordinary episode attempt must be attributed to at least one stable root family in the current records or prior-attribution map'
+    ],
+    architectureOwners: [
+      'The D1 deterministic post-child membership oracle treats an otherwise-applicable required merge check with stale event/trigger/head identity, or a disabled child-required or required-at-merge merge check, as HOLD; event, branch and path non-applicability is evaluated before exact identity matching.'
+    ],
+    architecturePostChild: [
+      'Only a current canonical merge/event and child-state readback identifying the final Delivery Child merge triggers deterministic reconciliation; a caller label cannot suppress it.',
+      'Every trigger and reconciliation predicate must have explicit current proof;', 'never false.',
+      'Validate the child, check and review inventory shapes before dereferencing them; a missing or malformed inventory is',
+      'Bind the same expected check identities across configuration, canonical child inventory, terminal result inventory and review snapshot.',
+      'A provably empty expected membership is valid only when the complete authoritative configuration readback and those inventories agree that it is empty.',
+      'every enabled applicable first-party merge-triggered check',
+
+
+
+      'First-party ownership comes from the current authoritative configuration metadata, not a finite local producer allowlist.'
+    ],
+    baseline: [
+      'Raw private material always invalidates repository admission, even if a custody reference is also present.',
+      'A digest by itself is not a recoverable private-evidence reference.',
+      'requires a current applicability receipt bound to the exact consuming repository, programme, child identity/revision and baseline identity/revision',
+      'requires a current authoritative observation readback bound to the exact consuming repository, programme, child revision, baseline revision, finding IDs and changed facts, plus a safe evidence/reverification reference and current terminal enactment receipt',
+      'Adoption requires a current applicability readback bound to the exact consuming repository, programme, child revision, baseline revision, finding IDs and covered material facts',
+      'X3/Web authority bound to the exact consuming repository, programme, child, baseline revision and operation',
+      'ADOPTED_EQUIVALENT', 'G1/Web decision readback'
+    ]
+  };
+  for (const [name, clauses] of Object.entries(requiredClauses)) {
+    for (const clause of clauses) {
+      s1aRequire(segments[name].includes(clause), 'D1 governed source clause missing or weakened: ' + name + ':' + clause);
+    }
+  }
+  return Object.fromEntries(Object.entries(segments).map(([name, value]) => [name, value.replace(/\r\n?/g, '\n')]));
+}
+function d1GovernedSourceDigest(sources) {
+  const segments = d1GovernedSourceSegments(sources);
+  return crypto.createHash('sha256').update(JSON.stringify(segments), 'utf8').digest('hex');
+}
+
+const D1_G3_FINDING_CLASSIFICATIONS = Object.freeze([
+  'EXISTING_ROOT', 'NEW_ROOT_DISCOVERED', 'CROSS_ROOT_INTERACTION',
+  'G2_CONTRACT_GAP', 'G1_ROOT_TRUST_CHANGE', 'NON_PRODUCT_BLOCKER'
+]);
+
+test('D1 governed source oracle covers controller, architecture and discovery baseline', () => {
+  const sources = { controller, architecture, baseline: programmeDiscoveryBaseline };
+  assert.equal(d1GovernedSourceDigest(sources), D1_ORACLE_GOVERNED_SOURCE_SHA256,
+    'D1 governed prose and complete baseline match the fixed source oracle');
+  const weakenings = [
+    { ...sources, architecture: architecture.replace('requires an authoritative current source readback', 'may use caller-supplied material') },
+    { ...sources, architecture: architecture.replace('attempt 5 is the same-root absolute ceiling, and a sixth ordinary attempt is rejected.', 'attempts have no fixed ceiling.') },
+    { ...sources, baseline: programmeDiscoveryBaseline.replace('Raw private material always invalidates repository admission, even if a custody reference is also present.', 'Private material may be admitted with a custody reference.') },
+
+
+    { ...sources, architecture: architecture.replace('The D1 deterministic post-child membership oracle treats', 'The D1 deterministic post-child membership oracle may ignore') },
+    { ...sources, architecture: architecture.replace('Every trigger and reconciliation predicate must have explicit current proof;', 'Missing predicates are false;') }
+  ];
+  for (const weakened of weakenings) {
+    assert.throws(() => d1GovernedSourceDigest(weakened), /D1 governed source clause missing or weakened/,
+      'recomputed source digests cannot bless a weakened D1 policy clause');
+  }
+  const duplicatedOwnerRow = { ...sources, architecture: architecture.replace(
+    '| D1 | Semantics and deterministic policy oracles only. |',
+    '| D1 | Semantics and deterministic policy oracles only. |\n| D1 | Runtime authority. |') };
+  assert.throws(() => d1GovernedSourceDigest(duplicatedOwnerRow), /owner-fence table missing, duplicated, or contradictory/,
+    'the complete exact owner-fence table rejects a duplicate or conflicting D1 row');
+});
+
+test('D1 Discovery Basis deterministic scenarios D01-D10 reject forbidden shortcuts', () => {
+  assert.deepEqual(D1_DISCOVERY_STATUS_VALUES,
+    ['OBSERVED', 'DOCUMENTED_NOT_DEMONSTRATED', 'INFERRED', 'PROPOSED', 'UNKNOWN', 'ACCEPTED']);
+  const cases = [
+    { id: 'D01', input: { stableBugfix: true, changedMaterialFacts: [], reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK }, basis: 'REUSE' },
+    { id: 'D02', input: { newChat: true, newDay: true, newWorker: true, takeover: true, daysElapsed: 400, changedMaterialFacts: [], reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK }, basis: 'REUSE' },
+    { id: 'D03', input: { materialUnknown: true, requiresProgrammeScopeInvestigation: true, safeToInvestigate: true,
+      unknownPortal: true, modalities: ['desktop', 'native'] }, basis: 'FULL' },
+    { id: 'D04', input: { materialUnknown: true, requiresProgrammeScopeInvestigation: true,
+      adequateExistingInvestigation: true, adoptExisting: true,
+      adoptedEvidenceReadback: D1_ORACLE_ADOPTED_EVIDENCE_READBACK,
+      adoptedFindingIds: ['F-LOGIN-CONTRACT-01'],
+      adoptedApplicabilityReadback: D1_ORACLE_ADOPTED_APPLICABILITY_READBACK }, basis: 'ADOPTED_EQUIVALENT' },
+    { id: 'D05', input: { changedMaterialFacts: ['ui:settings-panel'], changedDependencyIdentities: ['ui:settings-panel'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK,
+      findings: [
+        { FINDING_ID: 'F-UI', DEPENDENT_IDENTITIES: ['ui:settings-panel'], INVALIDATION_TRIGGERS: [] },
+        { FINDING_ID: 'F-AUTH', DEPENDENT_IDENTITIES: ['auth:contract'], INVALIDATION_TRIGGERS: [] }
+      ] }, basis: 'DELTA' },
+    { id: 'D06', input: { changedMaterialFacts: ['route:v2'], changedDependencyIdentities: ['route:v2'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK,
+      findings: [
+        { FINDING_ID: 'F-STALE', DEPENDENT_IDENTITIES: [], INVALIDATION_TRIGGERS: ['route:v2'] },
+        { FINDING_ID: 'F-UNCHANGED', DEPENDENT_IDENTITIES: ['ui:header'], INVALIDATION_TRIGGERS: [] }
+      ] }, basis: 'DELTA' },
+    { id: 'D07', input: { changedMaterialFacts: ['portal:submit'], changedDependencyIdentities: ['portal:submit'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK, unsafeRepresentativeEnactment: true,
+      documentedPartialEvidence: true, disposition: 'OWNER_WEB_DECISION_REQUIRED' }, basis: 'DELTA', outcome: 'HOLD' },
+    { id: 'D08', input: { changedMaterialFacts: ['private:claim'], changedDependencyIdentities: ['private:claim'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK, privateEvidencePresent: true,
+      privateEvidenceReference: 'owner-custody:opaque-ref-07', privateCustodyReadback: D1_ORACLE_PRIVATE_CUSTODY_READBACK,
+      rawPrivateMaterialIncluded: false }, basis: 'DELTA' },
+    { id: 'D09', input: { changedMaterialFacts: [], unchangedReuse: true, reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK }, basis: 'REUSE' },
+    { id: 'D10', input: { changedMaterialFacts: ['external:submit'], changedDependencyIdentities: ['external:submit'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK, effectfulProbe: true,
+      currentX3WebAuthority: false }, basis: 'DELTA', outcome: 'HOLD' }
+  ];
+  for (const scenario of cases) {
+    const result = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(scenario.input));
+    assert.equal(result.basis, scenario.basis, scenario.id + ' basis');
+    assert.equal(result.outcome, scenario.outcome || 'PASS', scenario.id + ' outcome');
+    assert.equal(result.createsGate, false, scenario.id + ' cannot make Discovery Basis a gate');
+    assert.equal(result.createsRole, false, scenario.id + ' cannot make Discovery Basis a role');
+    assert.equal(result.createsLocalG2, false, scenario.id + ' cannot create local G2');
+    assert.equal(result.createsLocalG3, false, scenario.id + ' cannot create local G3');
+    assert.equal(result.createsLocalG4, false, scenario.id + ' cannot create local G4');
+    assert.equal(result.g0ReadOnly, true, scenario.id + ' keeps G0 read-only');
+    assert.equal(result.effectPerformedByG0, false, scenario.id + ' G0 has no effect execution');
+  }
+  for (const malformedFacts of ['portal:submit', [{}], [' '], ['portal:submit', 'portal:submit']]) {
+    const malformed = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+      changedMaterialFacts: malformedFacts,
+      reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK
+    }));
+    assert.equal(malformed.outcome, 'HOLD',
+      'malformed, blank, or duplicate changed material facts fail closed');
+  }
+  assert.deepEqual(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[1].input)).invalidatedFindingIds, [],
+    'new chat/day/worker or baseline age alone cannot expire evidence');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[2].input)).basis, 'FULL',
+    'material safely investigable unknown portal behaviour takes programme-scope FULL');
+  assert.deepEqual(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[4].input)).invalidatedFindingIds, ['F-UI'],
+    'UI drift invalidates only findings dependent on that surface');
+  assert.deepEqual(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[5].input)).invalidatedFindingIds, ['F-STALE'],
+    'one stale finding invalidates locally');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[3].input)).basis, 'ADOPTED_EQUIVALENT',
+    'D04 requires exact source/revision/evidence readback');
+  const forgedAdopted = s1aClone(cases[3].input);
+  forgedAdopted.adoptedEvidenceReadback.revision = 'source:attacker-revision';
+  forgedAdopted.adoptedEvidenceReadback.digest = s1aHashWithoutField(forgedAdopted.adoptedEvidenceReadback, 'digest');
+  assert.notEqual(evaluateD1DiscoveryBasis(forgedAdopted).basis, 'ADOPTED_EQUIVALENT',
+    'a rehashed caller revision cannot replace the exact authoritative evidence readback');
+  const unsafe = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[6].input));
+  assert.equal(unsafe.status, 'DOCUMENTED_NOT_DEMONSTRATED');
+  assert.equal(unsafe.disposition, 'OWNER_WEB_DECISION_REQUIRED');
+  assert.notEqual(unsafe.status, 'OBSERVED', 'unsafe enactment cannot be presented as observed behaviour');
+  const privateEvidence = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[7].input));
+  assert.equal(privateEvidence.privateReferenceValid, true);
+  assert.equal(privateEvidence.rawPrivateMaterialIncluded, false);
+  const staleCustody = s1aClone(D1_ORACLE_PRIVATE_CUSTODY_READBACK);
+  staleCustody.childRevision = 'child:settings-rev-10';
+  staleCustody.digest = s1aHashWithoutField(staleCustody, 'digest');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ ...cases[7].input,
+    privateCustodyReadback: staleCustody })).outcome, 'HOLD',
+    'private custody receipt from an earlier child revision cannot pass');
+  const rawPrivate = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ privateEvidencePresent: true,
+    privateEvidenceReference: 'owner-custody:opaque-ref-07', privateCustodyReadback: D1_ORACLE_PRIVATE_CUSTODY_READBACK,
+    rawPrivateMaterialIncluded: true }));
+  assert.equal(rawPrivate.outcome, 'HOLD', 'raw private material is rejected even with a custody receipt');
+  assert.equal(evaluateD1DiscoveryBasis({ privateEvidencePresent: true, rawPrivateMaterialIncluded: false }).outcome,
+    'HOLD', 'a bare private reference cannot pass without an exact consumer-resolvable custody readback');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[8].input)).dedicatedDiscovery, false,
+    'unchanged REUSE does no dedicated discovery work');
+  const foreignReuse = d1MakeDiscoveryInput({ ...cases[0].input, childId: 'child:foreign' });
+  assert.equal(evaluateD1DiscoveryBasis(foreignReuse).outcome, 'HOLD', 'REUSE receipts cannot cross consuming children');
+  const staleReuse = s1aClone(D1_ORACLE_REUSE_APPLICABILITY_READBACK);
+  staleReuse.childRevision = 'child:settings-rev-10';
+  staleReuse.digest = s1aHashWithoutField(staleReuse, 'digest');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ reuseApplicabilityReadback: staleReuse })).outcome, 'HOLD',
+    'a REUSE receipt from an earlier child revision cannot be replayed');
+  const staleDelta = s1aClone(D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK);
+  staleDelta.childRevision = 'child:settings-rev-10';
+  staleDelta.digest = s1aHashWithoutField(staleDelta, 'digest');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ changedMaterialFacts: ['portal:submit'],
+    changedDependencyIdentities: ['portal:submit'], discoveryDependencyReadback: staleDelta })).outcome, 'HOLD',
+    'a DELTA inventory from an earlier child revision cannot be replayed');
+  const foreignDelta = d1MakeDiscoveryInput({ ...cases[4].input, repository: 'repo:foreign' });
+  assert.equal(evaluateD1DiscoveryBasis(foreignDelta).outcome, 'HOLD', 'DELTA inventory cannot cross repositories');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ ...cases[0].input,
+    reusedFindingIds: ['F-ATTACK'] })).outcome, 'HOLD', 'REUSE must bind the exact finding set');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ ...cases[4].input,
+    currentFindingIds: ['F-ATTACK'] })).outcome, 'HOLD', 'DELTA must bind the complete current finding inventory');
+  const foreignAdoption = d1MakeDiscoveryInput({ ...cases[3].input, programmeId: 'programme:foreign' });
+  assert.notEqual(evaluateD1DiscoveryBasis(foreignAdoption).basis, 'ADOPTED_EQUIVALENT',
+    'adopted evidence cannot establish another consuming programme');
+  const adoptedCoveredFact = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+    materialUnknown: true, requiresProgrammeScopeInvestigation: true, safeToInvestigate: false,
+    adequateExistingInvestigation: true, adoptExisting: true,
+    adoptedEvidenceReadback: D1_ORACLE_ADOPTED_EVIDENCE_READBACK,
+    adoptedFindingIds: ['F-PORTAL'], changedMaterialFacts: ['portal:submit'],
+    adoptedApplicabilityReadback: D1_ORACLE_ADOPTED_PORTAL_APPLICABILITY_READBACK
+  }));
+  assert.equal(adoptedCoveredFact.basis, 'ADOPTED_EQUIVALENT');
+  assert.equal(adoptedCoveredFact.outcome, 'PASS',
+    'adoption passes only when a current consumer receipt covers the exact finding and material fact');
+  const unmappedAdoption = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+    materialUnknown: true, requiresProgrammeScopeInvestigation: true, safeToInvestigate: false,
+    adequateExistingInvestigation: true, adoptExisting: true,
+    adoptedEvidenceReadback: D1_ORACLE_ADOPTED_EVIDENCE_READBACK,
+    adoptedApplicabilityReadback: D1_ORACLE_ADOPTED_APPLICABILITY_READBACK,
+    changedMaterialFacts: ['unmapped:new-workflow-fact']
+  }));
+  assert.notEqual(unmappedAdoption.basis, 'ADOPTED_EQUIVALENT',
+    'source identity and caller adequacy cannot adopt an uncovered material fact');
+  assert.equal(unmappedAdoption.outcome, 'HOLD');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ effectfulProbe: true, safeToInvestigate: true,
+    x3WebAuthorityReadback: D1_ORACLE_X3_WEB_AUTHORITY, childId: 'child:foreign' })).outcome, 'HOLD',
+    'X3 authority cannot cross consuming children');
+  const staleX3 = s1aClone(D1_ORACLE_X3_WEB_AUTHORITY);
+  staleX3.childRevision = 'child:settings-rev-10';
+  staleX3.digest = s1aHashWithoutField(staleX3, 'digest');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ effectfulProbe: true, safeToInvestigate: true,
+    x3WebAuthorityReadback: staleX3 })).outcome, 'HOLD',
+    'X3 authority from an earlier child revision cannot authorize a current probe');
+  const unprovenObservation = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+    requestedStatus: 'OBSERVED', materialUnknown: true, requiresProgrammeScopeInvestigation: true,
+    safeToInvestigate: false, reuseApplicabilityReadback: D1_ORACLE_REUSE_APPLICABILITY_READBACK
+  }));
+  assert.notEqual(unprovenObservation.status, 'OBSERVED', 'caller status cannot claim an unproven observation');
+  assert.equal(unprovenObservation.outcome, 'HOLD', 'unsafe unknown behaviour remains held without observation evidence');
+  const observed = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+    changedMaterialFacts: ['portal:submit'], changedDependencyIdentities: ['portal:submit'],
+    discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK,
+    requestedStatus: 'OBSERVED', observationFindingIds: ['F-PORTAL'], safeToInvestigate: true,
+    observationReadback: D1_ORACLE_DISCOVERY_OBSERVATION_READBACK
+  }));
+  assert.equal(observed.outcome, 'PASS');
+  assert.equal(observed.status, 'OBSERVED', 'observed status requires current evidence for the exact child and changed fact');
+  const unrecoverableObservation = s1aClone(D1_ORACLE_DISCOVERY_OBSERVATION_READBACK);
+  delete unrecoverableObservation.safeEvidenceOrReverifyReference;
+  unrecoverableObservation.digest = s1aHashWithoutField(unrecoverableObservation, 'digest');
+  const missingObservationEvidence = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({
+    changedMaterialFacts: ['portal:submit'], changedDependencyIdentities: ['portal:submit'],
+    discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK,
+    requestedStatus: 'OBSERVED', observationFindingIds: ['F-PORTAL'], safeToInvestigate: true,
+    observationReadback: unrecoverableObservation
+  }));
+  assert.equal(missingObservationEvidence.outcome, 'HOLD',
+    'an opaque evidence ID without a recoverable reference cannot establish OBSERVED');
+  assert.notEqual(missingObservationEvidence.status, 'OBSERVED');
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(cases[9].input)).effectAuthorized, false,
+    'effectful probes require current X3/Web authority');
+  const authorisedProbe = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ effectfulProbe: true,
+    safeToInvestigate: true, x3WebAuthorityReadback: D1_ORACLE_X3_WEB_AUTHORITY }));
+  assert.equal(authorisedProbe.effectAuthorized, true, 'a current exact X3/Web operation readback may authorise the probe');
+  assert.equal(authorisedProbe.g0ReadOnly, true, 'X3 authority does not make G0 effectful');
+  assert.equal(evaluateD1DiscoveryBasis({ materialUnknown: true, requiresProgrammeScopeInvestigation: true, safeToInvestigate: false }).outcome, 'HOLD', 'an unsafe unresolved programme unknown cannot pass as REUSE without an exact applicability receipt');
+  assert.equal(evaluateD1DiscoveryBasis({ changedMaterialFacts: ['ui:settings-panel'], changedDependencyIdentities: [] }).outcome, 'HOLD', 'DELTA without a complete current changed-fact dependency map cannot pass');
+  assert.equal(evaluateD1DiscoveryBasis({ changedMaterialFacts: ['unmapped:change'], changedDependencyIdentities: ['unmapped:change'], discoveryDependencyReadback: D1_ORACLE_DISCOVERY_DEPENDENCY_READBACK }).outcome, 'HOLD', 'a changed fact outside the authoritative dependency inventory cannot pass');
+  const unaccepted = evaluateD1DiscoveryBasis({ requestedStatus: 'ACCEPTED' });
+  assert.notEqual(unaccepted.status, 'ACCEPTED', 'ACCEPTED requires an exact G1/Web decision');
+  const unsupportedAcceptance = evaluateD1DiscoveryBasis(d1MakeDiscoveryInput({ requestedStatus: 'ACCEPTED' }));
+  assert.equal(unsupportedAcceptance.outcome, 'HOLD',
+    'an invalid acceptance readback is a HOLD rather than a green discovery outcome');
+  const acceptedInput = {
+    requestedStatus: 'ACCEPTED', exactG1WebDecisionId: D1_ORACLE_G1_WEB_DECISION_BODY.decisionId,
+    repository: D1_ORACLE_G1_WEB_DECISION_BODY.repository, programmeId: D1_ORACLE_G1_WEB_DECISION_BODY.programmeId,
+    childId: D1_ORACLE_G1_WEB_DECISION_BODY.childId, baselineId: D1_ORACLE_G1_WEB_DECISION_BODY.baselineId,
+    baselineRevision: D1_ORACLE_G1_WEB_DECISION_BODY.baselineRevision,
+    consumingFindingIds: D1_ORACLE_G1_WEB_DECISION_BODY.findingIds,
+    evidenceIds: D1_ORACLE_G1_WEB_DECISION_BODY.evidenceIds,
+    g1WebDecisionReadback: D1_ORACLE_G1_WEB_DECISION_READBACK
+  };
+  assert.equal(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(acceptedInput)).status, 'ACCEPTED',
+    'an exact current G1/Web decision readback bound to the consuming baseline and evidence may be accepted');
+  const staleDecision = s1aClone(acceptedInput);
+  staleDecision.g1WebDecisionReadback.current = false;
+  staleDecision.g1WebDecisionReadback.digest = s1aHashWithoutField(staleDecision.g1WebDecisionReadback, 'digest');
+  assert.notEqual(evaluateD1DiscoveryBasis(d1MakeDiscoveryInput(staleDecision)).status, 'ACCEPTED',
+    'stale current-source decision readback cannot accept a finding');
+});
+
+test('D1 stable causal root accounting scenarios R01-R12 preserve unique attempt history', () => {
+  assert.deepEqual(D1_G3_FINDING_CLASSIFICATIONS, [
+    'EXISTING_ROOT', 'NEW_ROOT_DISCOVERED', 'CROSS_ROOT_INTERACTION',
+    'G2_CONTRACT_GAP', 'G1_ROOT_TRUST_CHANGE', 'NON_PRODUCT_BLOCKER'
+  ]);
+  const independent = d1EvaluateRootRecords([
+    d1RootRecord('root:A', 'cause:A', ['A1']), d1RootRecord('root:B', 'cause:B', ['A2']),
+    d1RootRecord('root:C', 'cause:C', ['A3'])
+  ], { historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'] });
+  assert.equal(independent.ok, true, 'R01 independent roots are valid');
+  assert.deepEqual(independent.rootGroups.map((root) => root.attemptsConsumed), [1, 1, 1]);
+  assert.equal(independent.historicalAttemptCount, 3, 'R01 chronology retains three attempts');
+
+  const renamed = d1EvaluateRootRecords([
+    d1RootRecord('root:parser-original', 'cause:parser', ['A1']),
+    d1RootRecord('root:parser-renamed', 'cause:parser', ['A2']),
+    d1RootRecord('root:parser-new-label', 'cause:parser', ['A3'])
+  ], { historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'] });
+  assert.equal(renamed.rootGroups.length, 1, 'R02 renaming remains one causal root');
+  assert.equal(renamed.rootGroups[0].attemptsConsumed, 3);
+
+  const sharedAttempt = d1EvaluateRootRecords([
+    d1RootRecord('root:A', 'cause:A', ['A1']), d1RootRecord('root:B', 'cause:B', ['A1'])
+  ], { historicalEpisodeAttemptIds: ['A1'] });
+  assert.deepEqual(sharedAttempt.rootGroups.map((root) => root.attemptIds), [['A1'], ['A1']]);
+  assert.equal(sharedAttempt.historicalAttemptCount, 1, 'R03 shared attribution does not inflate chronology');
+
+  const equivalent = evaluateD1RootLedger([
+    d1RootRecord('root:equiv-A', 'cause:shared', ['A1', 'A2']),
+    d1RootRecord('root:equiv-B', 'cause:shared', ['A2', 'A3'])
+  ], makeD1RootLedgerAuthority([], { historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'] }));
+  assert.equal(equivalent.ok, false, 'R04 record/readback disagreement fails closed');
+  const equivalentRecords = [
+    d1RootRecord('root:equiv-A', 'cause:shared', ['A1', 'A2']),
+    d1RootRecord('root:equiv-B', 'cause:shared', ['A2', 'A3'])
+  ];
+  const equivalentLedger = d1EvaluateRootRecords(equivalentRecords, { historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'] });
+  assert.equal(equivalentLedger.rootGroups.length, 1, 'R04 equivalent roots merge');
+  assert.deepEqual(equivalentLedger.rootGroups[0].attemptIds, ['A1', 'A2', 'A3']);
+
+  const priorRoot = d1RootRecord('root:prior', 'cause:prior', ['A1', 'A2', 'A3'], { state: 'CLOSED' });
+  const untouched = d1RootRecord('root:new', 'cause:new', [], { newlyDiscovered: true });
+  const newRoot = d1EvaluateRootRecords([priorRoot, untouched], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'], previouslyAddressedFamilies: [d1StableRootFamilyKey(priorRoot)],
+    verifiedUntouchedRootFamilies: [d1StableRootFamilyKey(untouched)], attributionAuditComplete: true,
+    includeUntouchedRootAudit: true
+  });
+  assert.equal(newRoot.rootGroups.find((root) => root.attemptsConsumed === 0).state, 'OPEN',
+    'R05 independently audited untouched root starts at zero');
+  const unprovenNewRoot = d1EvaluateRootRecords([priorRoot, untouched], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3'], previouslyAddressedFamilies: [d1StableRootFamilyKey(priorRoot)],
+    verifiedUntouchedRootFamilies: [d1StableRootFamilyKey(untouched)], attributionAuditComplete: true
+  });
+  assert.equal(unprovenNewRoot.ok, false, 'R05 zero requires a completed prior-attribution audit');
+
+  const repeatedReadback = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === 'CROSS_ROOT_INTERACTION' && item.repeatedCrossRootReopening);
+  const singleReadback = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === 'CROSS_ROOT_INTERACTION' && !item.repeatedCrossRootReopening);
+  assert.equal(evaluateD1RootClassification('CROSS_ROOT_INTERACTION').disposition,
+    'HOLD_MISSING_CURRENT_CLASSIFICATION_READBACK', 'R06 missing reopening history cannot default to continue');
+  assert.equal(evaluateD1RootClassification('CROSS_ROOT_INTERACTION', true).disposition,
+    'HOLD_MISSING_CURRENT_CLASSIFICATION_READBACK', 'caller booleans cannot prove repeated reopening');
+  assert.equal(evaluateD1RootClassification('CROSS_ROOT_INTERACTION', singleReadback).disposition,
+    'CONTINUE_EXISTING_ROOT_ACCOUNTING');
+  const reopened = evaluateD1RootClassification('CROSS_ROOT_INTERACTION', repeatedReadback);
+  assert.equal(reopened.disposition, 'RETURN_TO_WEB', 'R06 repeated A/B reopening returns to Web');
+  assert.equal(reopened.createsBudget, false, 'R06 cross-root interaction creates no automatic budget');
+  const repeatedCrossRootLedger = makeD1RootLedgerAuthority([
+    d1RootRecord('root:attempt-family-1', 'attempt-family-1', ['A1', 'A2'], { causalBoundary: 'boundary:attempt-family-1' }),
+    d1RootRecord('root:attempt-family-2', 'attempt-family-2', ['A1'], { causalBoundary: 'boundary:attempt-family-2' })
+  ], { historicalEpisodeAttemptIds: ['A1', 'A2'] });
+  const blockedRepeatedCrossRootAttempt = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION',
+    attemptId: 'A3', rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, findingId: 'finding:cross-root-reopen',
+    classificationReadback: repeatedReadback }, { rootLedgerReadback: repeatedCrossRootLedger.rootLedgerReadback });
+  assert.equal(blockedRepeatedCrossRootAttempt.hold, true);
+  assert.equal(blockedRepeatedCrossRootAttempt.disposition, 'RETURN_TO_WEB',
+    'attempt admission consumes repeated cross-root classification and returns to Web');
+  const forgedReopening = s1aClone(repeatedReadback);
+  forgedReopening.repeatedCrossRootReopening = false;
+  forgedReopening.digest = s1aHashWithoutField(forgedReopening, 'digest');
+  assert.equal(evaluateD1RootClassification('CROSS_ROOT_INTERACTION', forgedReopening).disposition,
+    'HOLD_MISSING_CURRENT_CLASSIFICATION_READBACK', 'rehashing cannot erase canonical repeated reopening');
+
+  const symptoms = ['symptom-1', 'symptom-2', 'symptom-3', 'symptom-4', 'symptom-5']
+    .map((symptom) => d1RootRecord('root:' + symptom, 'cause:one-mechanism', ['A1']));
+  const symptomLedger = d1EvaluateRootRecords(symptoms, { historicalEpisodeAttemptIds: ['A1'] });
+  assert.equal(symptomLedger.rootGroups.length, 1, 'R07 five symptoms share one root absent separability proof');
+  assert.equal(symptomLedger.rootGroups[0].attemptsConsumed, 1);
+
+  assert.equal(evaluateD1NextRootAttempt(4, false), false, 'R08 attempt 4 requires narrowing/progress');
+  assert.equal(evaluateD1NextRootAttempt(4, true), true);
+  assert.equal(evaluateD1NextRootAttempt(5, false), false, 'R08 attempt 5 requires narrowing/progress');
+  assert.equal(evaluateD1NextRootAttempt(5, true), true);
+  assert.equal(evaluateD1NextRootAttempt(6, true), false, 'R08 attempt 5 is absolute');
+  const rootFamilyKey = D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY;
+  const threeAttemptLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1', 'A2', 'A3'] });
+  assert.equal(evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A6', rootFamilyKey },
+    { ordinaryAttemptIds: [] }).hold, true, 'attempt-event observer requires the canonical current ledger');
+  assert.equal(evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A4', rootFamilyKey },
+    { rootLedgerReadback: threeAttemptLedger.rootLedgerReadback }).hold, true,
+    'attempt 4 holds without independently bound narrowing/progress evidence');
+  const progressReadback = d1RootProgressReadback(rootFamilyKey, 4);
+  const progressLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1', 'A2', 'A3'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true },
+    narrowingProgressReadbacksByFamily: { [rootFamilyKey]: { 4: progressReadback } } });
+  const fourAttemptRecord = d1RootRecord('root:attempt-family-1', 'attempt-family-1',
+    ['A1', 'A2', 'A3', 'A4'], { causalBoundary: 'boundary:attempt-family-1' });
+  const fourWithoutProgressReceipt = d1EvaluateRootRecords([fourAttemptRecord], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3', 'A4'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true }
+  });
+  assert.equal(fourWithoutProgressReceipt.ok, false,
+    'recorded attempt 4 cannot pass from a bare progress boolean without its bound receipt');
+  const fourWithProgressReceipt = d1EvaluateRootRecords([fourAttemptRecord], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3', 'A4'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true },
+    narrowingProgressReadbacksByFamily: { [rootFamilyKey]: { 4: progressReadback } }
+  });
+  assert.equal(fourWithProgressReceipt.ok, true,
+    'recorded attempt 4 passes with the exact current family/attempt progress receipt');
+  const existingRootClassification = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === 'EXISTING_ROOT');
+  const fourthWithoutClassification = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A4', rootFamilyKey,
+    findingId: 'finding:existing-root', narrowingProgressReadback: progressReadback },
+  { rootLedgerReadback: progressLedger.rootLedgerReadback });
+  assert.equal(fourthWithoutClassification.hold, true,
+    'ordinary attempt admission requires its current finding classification readback');
+  const fourth = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A4', rootFamilyKey,
+    findingId: 'finding:existing-root', classificationReadback: existingRootClassification,
+    narrowingProgressReadback: progressReadback }, { rootLedgerReadback: progressLedger.rootLedgerReadback });
+  assert.equal(fourth.productAttempt, true, 'attempt 4 can proceed with ledger-bound current progress evidence');
+
+  const nonProductLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1'] });
+  const nonProductEvent = { kind: 'NON_PRODUCT_HOLD_RECOVERY', attemptId: 'HOLD-1', rootFamilyKey,
+    candidateReadback: D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK,
+    attemptClassificationReadback: D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS[0] };
+  const nonProduct = evaluateD1AttemptEvent(nonProductEvent, { rootLedgerReadback: nonProductLedger.rootLedgerReadback });
+  assert.equal(nonProduct.productAttempt, false, 'R09 sourced non-product HOLD recovery is not a product attempt');
+  assert.deepEqual(nonProduct.ordinaryAttemptIds, ['A1']);
+  const unprovenNonProduct = evaluateD1AttemptEvent({ kind: 'NON_PRODUCT_HOLD_RECOVERY', attemptId: 'HOLD-1', rootFamilyKey },
+    { rootLedgerReadback: nonProductLedger.rootLedgerReadback });
+  assert.equal(unprovenNonProduct.hold, true, 'a caller label cannot exempt a product correction');
+  const changedCandidate = s1aClone(D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK);
+  changedCandidate.tree = 'candidate:product-changing-tree';
+  changedCandidate.digest = s1aHashWithoutField(changedCandidate, 'digest');
+  const changedClassification = s1aClone(D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS[0]);
+  changedClassification.candidateReadbackDigest = changedCandidate.digest;
+  changedClassification.digest = s1aHashWithoutField(changedClassification, 'digest');
+  assert.equal(evaluateD1AttemptEvent({ ...nonProductEvent, candidateReadback: changedCandidate,
+    attemptClassificationReadback: changedClassification }, { rootLedgerReadback: nonProductLedger.rootLedgerReadback }).hold, true,
+    'candidate change cannot be relabelled as non-product even after caller rehash');
+  const unchanged = evaluateD1AttemptEvent({ kind: 'UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION', attemptId: 'REVIEW-1',
+    rootFamilyKey, candidateReadback: D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK,
+    attemptClassificationReadback: D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS[1] },
+  { rootLedgerReadback: nonProductLedger.rootLedgerReadback });
+  assert.equal(unchanged.productAttempt, false, 'R10 exact unchanged-byte reviewer supplementation is not a product attempt');
+  assert.equal(unchanged.totalHistoricalAttempts, 1);
+  assert.equal(evaluateD1AttemptEvent({ kind: 'UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION', attemptId: 'REVIEW-1',
+    rootFamilyKey }, { rootLedgerReadback: nonProductLedger.rootLedgerReadback }).hold, true,
+    'an unchanged-byte caller label without candidate/classification proof holds');
+  const changedBytesForSupplement = s1aClone(D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK);
+  changedBytesForSupplement.byteDigest = 'sha256:changed-candidate-byte-content';
+  changedBytesForSupplement.digest = s1aHashWithoutField(changedBytesForSupplement, 'digest');
+  const forgedSupplementClassification = s1aClone(D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS[1]);
+  forgedSupplementClassification.candidateByteDigest = changedBytesForSupplement.byteDigest;
+  forgedSupplementClassification.priorCandidateByteDigest = changedBytesForSupplement.byteDigest;
+  forgedSupplementClassification.candidateReadbackDigest = changedBytesForSupplement.digest;
+  forgedSupplementClassification.digest = s1aHashWithoutField(forgedSupplementClassification, 'digest');
+  assert.equal(evaluateD1AttemptEvent({ kind: 'UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION', attemptId: 'REVIEW-1',
+    rootFamilyKey, candidateReadback: changedBytesForSupplement,
+    attemptClassificationReadback: forgedSupplementClassification },
+  { rootLedgerReadback: nonProductLedger.rootLedgerReadback }).hold, true,
+  'a coherently rehashed candidate byte change cannot be relabelled unchanged');
+
+  const wdcLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1', 'A2', 'A3'] });
+  const wdc = evaluateD1AttemptEvent({ kind: 'WDC', attemptId: 'WDC-1', rootFamilyKey,
+    authorityReadback: D1_ORACLE_WDC_AUTHORITY }, { rootLedgerReadback: wdcLedger.rootLedgerReadback });
+  assert.equal(wdc.ordinaryBudgetReset, false, 'R11 WDC retains exhausted ordinary history');
+  assert.deepEqual(wdc.ordinaryAttemptIds, ['A1', 'A2', 'A3']);
+  assert.deepEqual(wdc.wdcAttemptIds, ['WDC-1']);
+  assert.equal(wdc.totalHistoricalAttempts, 4, 'R11 chronology includes separately classified WDC');
+  const reconvergedLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1', 'A2', 'A3'], wdcAttemptIds: ['WDC-1'] });
+  const reconverged = evaluateD1AttemptEvent({ kind: 'RECONVERGED_CORRECTION', attemptId: 'RC-1', rootFamilyKey,
+    authorityReadback: D1_ORACLE_RECONVERGED_AUTHORITY }, { rootLedgerReadback: reconvergedLedger.rootLedgerReadback });
+  assert.equal(reconverged.ordinaryBudgetReset, false, 'R12 reconverged correction does not reset ordinary history');
+  assert.deepEqual(reconverged.ordinaryAttemptIds, ['A1', 'A2', 'A3']);
+  assert.deepEqual(reconverged.wdcAttemptIds, ['WDC-1']);
+  assert.deepEqual(reconverged.reconvergedAttemptIds, ['RC-1']);
+  assert.equal(evaluateD1AttemptEvent({ kind: 'RECONVERGED_CORRECTION', attemptId: 'RC-2', rootFamilyKey,
+    authority: 'EXPLICIT_RECONVERGED_AUTHORITY' }, { rootLedgerReadback: reconvergedLedger.rootLedgerReadback }).hold, true,
+    'R12 exceptional history requires an exact current authority readback');
+  const forgedWdc = s1aClone(D1_ORACLE_WDC_AUTHORITY);
+  forgedWdc.rootFamilyKey = 'family:renamed';
+  forgedWdc.digest = s1aHashWithoutField(forgedWdc, 'digest');
+  assert.equal(evaluateD1AttemptEvent({ kind: 'WDC', attemptId: 'WDC-1', rootFamilyKey: 'family:renamed',
+    authorityReadback: forgedWdc }, { rootLedgerReadback: wdcLedger.rootLedgerReadback }).hold, true,
+    'R11 a rehashed authority for another root cannot reset history');
+});
+test('D1 root-accounting false-green controls reject rename/split/merge and history resets', () => {
+  const prior = ['A1', 'A2', 'A3'];
+  const priorFive = ['A1', 'A2', 'A3', 'A4', 'A5'];
+  const renamedRecord = d1RootRecord('root:renamed-zero', 'cause:known', []);
+  const stableFamily = d1StableRootFamilyKey(renamedRecord);
+  const renamedFiveProgressReadback = d1RootProgressReadback(stableFamily, 5);
+  const renamedFourProgressReadback = d1RootProgressReadback(stableFamily, 4);
+  const renamedZero = d1EvaluateRootRecords([renamedRecord], {
+    previouslyAddressedFamilies: [stableFamily],
+    priorAttemptAttributionByFamily: { [stableFamily]: priorFive },
+    historicalEpisodeAttemptIds: priorFive,
+    narrowingProgressByFamily: { [stableFamily]: true },
+    narrowingProgressReadbacksByFamily: { [stableFamily]: {
+      4: renamedFourProgressReadback, 5: renamedFiveProgressReadback
+    } }
+  });
+  assert.equal(renamedZero.rootGroups[0].attemptsConsumed, 5, 'renaming a family with five historical attempts cannot return it to zero');
+  assert.equal(renamedZero.ok, true, 'all five attempts remain valid only with bound progress evidence');
+  const oldCausalFamily = d1RootRecord('root:known-closed', 'cause:known', priorFive, { state: 'CLOSED' });
+  const renamedFamily = d1RootRecord('root:renamed-family', 'cause:new', [], { newlyDiscovered: true });
+  const renamedFamilyKey = d1StableRootFamilyKey(renamedFamily);
+  const oldCausalFamilyKey = d1StableRootFamilyKey(oldCausalFamily);
+  const orphanedOrdinaryHistory = makeD1RootLedgerAuthority([
+    d1RootRecord('root:relabelled-one-attempt', 'cause:new-label', ['A1'])
+  ], { historicalEpisodeAttemptIds: priorFive });
+  assert.equal(evaluateD1RootLedger(orphanedOrdinaryHistory.rootLedgerReadback.currentRecords,
+    { rootLedgerReadback: orphanedOrdinaryHistory.rootLedgerReadback }).ok, false,
+    'ordinary episode attempts cannot become orphaned when a root is relabelled');
+  assert.equal(evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A6',
+    rootFamilyKey: d1StableRootFamilyKey(d1RootRecord('root:relabelled-one-attempt', 'cause:new-label', [])) },
+  { rootLedgerReadback: orphanedOrdinaryHistory.rootLedgerReadback }).hold, true,
+  'an A6 correction holds when the authoritative ledger does not attribute A1-A5 to stable root families');
+
+  const relabelledCurrentRecord = d1RootRecord('root:relabelled-current', 'cause:new-label', ['A6'], { newlyDiscovered: true });
+  const relabelledCurrentLedger = makeD1RootLedgerAuthority([relabelledCurrentRecord], {
+    historicalEpisodeAttemptIds: [...priorFive, 'A6'], previouslyAddressedFamilies: [oldCausalFamilyKey],
+    priorAttemptAttributionByFamily: { [oldCausalFamilyKey]: priorFive }
+  });
+  assert.equal(evaluateD1RootLedger(relabelledCurrentLedger.rootLedgerReadback.currentRecords,
+    { rootLedgerReadback: relabelledCurrentLedger.rootLedgerReadback }).ok, false,
+    'a new causal label with A6 already attributed still requires the prior-attribution audit');
+  const relabelledA7 = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A7',
+    rootFamilyKey: D1_ORACLE_RELABELED_ROOT_FAMILY_KEY, findingId: 'finding:relabelled-current',
+    classificationReadback: D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+      item.findingId === 'finding:relabelled-current') },
+  { rootLedgerReadback: relabelledCurrentLedger.rootLedgerReadback });
+  assert.equal(relabelledA7.hold, true, 'a relabelled A1-A5 family cannot admit A7 as attempt 2');
+
+  const relabelledFalseFlagRecord = d1RootRecord('root:relabelled-current', 'cause:new-label', ['A6']);
+  const relabelledFalseFlagLedger = makeD1RootLedgerAuthority([relabelledFalseFlagRecord], {
+    historicalEpisodeAttemptIds: [...priorFive, 'A6'], previouslyAddressedFamilies: [oldCausalFamilyKey],
+    priorAttemptAttributionByFamily: { [oldCausalFamilyKey]: priorFive }
+  });
+  assert.equal(evaluateD1RootLedger(relabelledFalseFlagLedger.rootLedgerReadback.currentRecords,
+    { rootLedgerReadback: relabelledFalseFlagLedger.rootLedgerReadback }).ok, false,
+    'a family missing from complete prior attribution cannot use EXISTING_ROOT when NEW_ROOT_DISCOVERED is false');
+  const relabelledFalseFlagA7 = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A7',
+    rootFamilyKey: D1_ORACLE_RELABELED_ROOT_FAMILY_KEY, findingId: 'finding:relabelled-current',
+    classificationReadback: D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+      item.findingId === 'finding:relabelled-current') },
+  { rootLedgerReadback: relabelledFalseFlagLedger.rootLedgerReadback });
+  assert.equal(relabelledFalseFlagA7.hold, true);
+  assert.equal(relabelledFalseFlagA7.productAttempt, false,
+    'an unrecorded causal family with the new-root flag false cannot admit A7 after A1-A6');
+  const relabelledListedFalseFlagLedger = makeD1RootLedgerAuthority([relabelledFalseFlagRecord], {
+    historicalEpisodeAttemptIds: [...priorFive, 'A6'],
+    previouslyAddressedFamilies: [oldCausalFamilyKey, D1_ORACLE_RELABELED_ROOT_FAMILY_KEY],
+    priorAttemptAttributionByFamily: { [oldCausalFamilyKey]: priorFive }
+  });
+  assert.equal(evaluateD1RootLedger(relabelledListedFalseFlagLedger.rootLedgerReadback.currentRecords,
+    { rootLedgerReadback: relabelledListedFalseFlagLedger.rootLedgerReadback }).ok, false,
+    'previouslyAddressedFamilies membership alone cannot establish exact prior attempt debt for a relabelled family');
+  const relabelledListedFalseFlagA7 = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A7',
+    rootFamilyKey: D1_ORACLE_RELABELED_ROOT_FAMILY_KEY, findingId: 'finding:relabelled-current',
+    classificationReadback: D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+      item.findingId === 'finding:relabelled-current') },
+  { rootLedgerReadback: relabelledListedFalseFlagLedger.rootLedgerReadback });
+  assert.equal(relabelledListedFalseFlagA7.hold, true);
+  assert.equal(relabelledListedFalseFlagA7.productAttempt, false);
+
+  const forgedLedger = makeD1RootLedgerAuthority([oldCausalFamily, renamedFamily], {
+    attributionAuditComplete: true, includeUntouchedRootAudit: true, historicalEpisodeAttemptIds: priorFive,
+    previouslyAddressedFamilies: [oldCausalFamilyKey], verifiedUntouchedRootFamilies: [renamedFamilyKey],
+    priorAttemptAttributionByFamily: { [oldCausalFamilyKey]: priorFive },
+    narrowingProgressByFamily: { [oldCausalFamilyKey]: true }
+  });
+  const forgedAuditCore = {
+    ...D1_ORACLE_ZERO_ROOT_PRIOR_ATTRIBUTION_AUDIT_CORE,
+    rootFamilyKey: renamedFamilyKey,
+    historicalEpisodeAttemptIds: priorFive,
+    previouslyAddressedFamilies: [oldCausalFamilyKey]
+  };
+  forgedLedger.rootLedgerReadback.zeroRootPriorAttributionAuditReadback = {
+    ...forgedAuditCore, digest: s1aHashRecord(forgedAuditCore)
+  };
+  const forgedLedgerCore = { ...forgedLedger.rootLedgerReadback };
+  delete forgedLedgerCore.digest;
+  forgedLedger.rootLedgerReadback.digest = s1aHashRecord(forgedLedgerCore);
+  forgedLedger.trustedRootLedgerSnapshot = s1aClone(forgedLedgerCore);
+  assert.equal(evaluateD1RootLedger([oldCausalFamily, renamedFamily], forgedLedger).ok, false,
+    'a caller-built, rehashed untouched claim cannot reset a previously attempted causal family under a renamed boundary');
+  assert.equal(d1EvaluateRootRecords([renamedRecord]).ok, false, 'missing authoritative root-ledger readback is not a green');
+  assert.equal(evaluateD1RootLedger([renamedRecord], {
+    priorAttributionAuditComplete: true, previouslyAddressedFamilies: ['cause:known'],
+    priorAttemptAttributionByFamily: { 'cause:known': priorFive }, historicalEpisodeAttemptIds: priorFive
+  }).ok, false, 'legacy caller booleans and renamed-family labels cannot substitute for the current source readback');
+  const boundRecord = d1RootRecord('root:bound', 'cause:bound', ['A1']);
+  const boundAuthority = makeD1RootLedgerAuthority([boundRecord], { historicalEpisodeAttemptIds: ['A1'] });
+  boundAuthority.rootLedgerReadback.historicalEpisodeAttemptIds.push('A2');
+  boundAuthority.rootLedgerReadback.digest = s1aHashWithoutField(boundAuthority.rootLedgerReadback, 'digest');
+  assert.equal(evaluateD1RootLedger([boundRecord], boundAuthority).ok, false,
+    'a self-consistent rehash cannot replace the separately trusted current episode ledger');
+
+  const split = d1EvaluateRootRecords([
+    d1RootRecord('root:split-1', 'cause:one', ['A1']),
+    d1RootRecord('root:split-2', 'cause:one', ['A2', 'A3'])
+  ], { historicalEpisodeAttemptIds: prior });
+  assert.equal(split.rootGroups.length, 1, 'R08 root splitting cannot create fresh budgets');
+  assert.equal(split.rootGroups[0].attemptsConsumed, 3);
+
+  const duplicateIds = d1EvaluateRootRecords([
+    d1RootRecord('root:duplicate', 'cause:duplicate', ['A1', 'A1'], { declaredAttempts: 2 })
+  ]);
+  assert.equal(duplicateIds.ok, false, 'duplicate attempt IDs cannot inflate or satisfy a root count');
+  const repeatedReadback = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === 'CROSS_ROOT_INTERACTION' && item.repeatedCrossRootReopening);
+  const automaticInteraction = evaluateD1RootClassification('CROSS_ROOT_INTERACTION', repeatedReadback);
+  assert.equal(automaticInteraction.createsBudget, false, 'cross-root interaction cannot mint automatic budget');
+  const routeFor = (classification) => D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === classification);
+  assert.equal(evaluateD1RootClassification('G1_ROOT_TRUST_CHANGE', routeFor('G1_ROOT_TRUST_CHANGE')).disposition, 'G1_RECONVERGENCE');
+  assert.equal(evaluateD1RootClassification('G2_CONTRACT_GAP', routeFor('G2_CONTRACT_GAP')).disposition, 'TARGETED_G2_REENTRY');
+  assert.equal(evaluateD1RootClassification('NON_PRODUCT_BLOCKER', routeFor('NON_PRODUCT_BLOCKER')).disposition, 'NON_PRODUCT_HOLD');
+  assert.equal(evaluateD1RootClassification('UNKNOWN').disposition, 'HOLD_MISSING_CURRENT_CLASSIFICATION_READBACK');
+
+  const mixedLedger = makeD1AttemptLedger({ ordinaryAttemptIds: prior, wdcAttemptIds: ['WDC-1'], reconvergedAttemptIds: ['RC-1'] });
+  const nonProduct = evaluateD1AttemptEvent({ kind: 'NON_PRODUCT_HOLD_RECOVERY', attemptId: 'HOLD-1',
+    rootFamilyKey: D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY, candidateReadback: D1_ORACLE_NON_PRODUCT_CANDIDATE_READBACK,
+    attemptClassificationReadback: D1_ORACLE_NON_PRODUCT_ATTEMPT_READBACKS[0] },
+  { rootLedgerReadback: mixedLedger.rootLedgerReadback });
+  assert.deepEqual(nonProduct.ordinaryAttemptIds, prior);
+  assert.deepEqual(nonProduct.wdcAttemptIds, ['WDC-1']);
+  assert.deepEqual(nonProduct.reconvergedAttemptIds, ['RC-1'], 'non-product recovery cannot reset WDC/reconverged history');
+  assert.equal(nonProduct.productAttempt, false);
+  const sixth = d1EvaluateRootRecords([d1RootRecord('root:ceiling', 'cause:ceiling',
+    ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'])], { historicalEpisodeAttemptIds: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
+    narrowingProgressByFamily: { [d1StableRootFamilyKey(d1RootRecord('root:ceiling', 'cause:ceiling', []))]: true } });
+  assert.equal(sixth.ok, false, 'root ledger rejects a sixth ordinary attempt');
+  const rootFamilyKey = D1_ORACLE_ATTEMPT_ROOT_FAMILY_KEY;
+  const progressFourForFiveLedger = d1RootProgressReadback(rootFamilyKey, 4);
+  const progressFive = d1RootProgressReadback(rootFamilyKey, 5);
+  const fiveAttemptLedgerA5Only = d1EvaluateRootRecords([
+    d1RootRecord('root:attempt-family-1', 'attempt-family-1', ['A1', 'A2', 'A3', 'A4', 'A5'],
+      { causalBoundary: 'boundary:attempt-family-1' })
+  ], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3', 'A4', 'A5'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true },
+    narrowingProgressReadbacksByFamily: { [rootFamilyKey]: { 5: progressFive } }
+  });
+  assert.equal(fiveAttemptLedgerA5Only.ok, false,
+    'an A5 receipt cannot substitute for the separately required A4 receipt');
+  const fiveAttemptLedgerA4Only = d1EvaluateRootRecords([
+    d1RootRecord('root:attempt-family-1', 'attempt-family-1', ['A1', 'A2', 'A3', 'A4', 'A5'],
+      { causalBoundary: 'boundary:attempt-family-1' })
+  ], {
+    historicalEpisodeAttemptIds: ['A1', 'A2', 'A3', 'A4', 'A5'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true },
+    narrowingProgressReadbacksByFamily: { [rootFamilyKey]: { 4: progressFourForFiveLedger } }
+  });
+  assert.equal(fiveAttemptLedgerA4Only.ok, false,
+    'an A4 receipt cannot substitute for the separately required A5 receipt');
+  const fiveAttemptLedger = makeD1AttemptLedger({ ordinaryAttemptIds: ['A1', 'A2', 'A3', 'A4', 'A5'],
+    narrowingProgressByFamily: { [rootFamilyKey]: true },
+    narrowingProgressReadbacksByFamily: { [rootFamilyKey]: { 4: progressFourForFiveLedger, 5: progressFive } } });
+  const existingRootClassification = D1_ORACLE_ROOT_CLASSIFICATION_READBACK_CORES.find((item) =>
+    item.classification === 'EXISTING_ROOT');
+  assert.equal(evaluateD1RootLedger(fiveAttemptLedger.rootLedgerReadback.currentRecords,
+    { rootLedgerReadback: fiveAttemptLedger.rootLedgerReadback }).ok, true,
+    'recorded attempt 5 retains its exact bound progress receipt');
+  const sixthEvent = evaluateD1AttemptEvent({ kind: 'G3_PRODUCT_CORRECTION', attemptId: 'A6', rootFamilyKey,
+    findingId: 'finding:existing-root', classificationReadback: existingRootClassification },
+    { ordinaryAttemptIds: [], rootLedgerReadback: fiveAttemptLedger.rootLedgerReadback });
+  assert.equal(sixthEvent.hold, true, 'event observer derives five prior attempts from the current ledger even when caller arrays are empty');
+  assert.equal(evaluateD1AttemptEvent({ kind: 'UNRECOGNISED', attemptId: 'X1', rootFamilyKey },
+    { rootLedgerReadback: fiveAttemptLedger.rootLedgerReadback }).hold, true, 'unknown attempt event kinds hold');
+});
+
+test('D1 binary post-child assurance scenarios P01-P16 require reconciliation or both reviews', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const p01 = makeD1PostChildScenario();
+  p01.reviews = [];
+  p01.trace = [];
+  delete p01.reviewRouteAuthority;
+  p01.requestedMode = 'RECONCILE_ONLY';
+  const p02 = makeD1PostChildScenario({ checkMembershipOptions: {
+    changedPaths: ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md']
+  } });
+  p02.reviews = [];
+  p02.trace = [];
+  delete p02.reviewRouteAuthority;
+  const p03 = makeD1PostChildScenario({ historyShape: ['many commits', 'reordered labels', 'old worker retries'] });
+  p03.reviews = [];
+  p03.trace = [];
+  delete p03.reviewRouteAuthority;
+  const p04 = makeD1PostChildScenario({ assuredChildTree: 'assured:prior-tree' });
+  const p05 = makeD1PostChildScenario({ unassuredConcurrentOrMultiChildComposition: true });
+  const p06 = makeD1PostChildScenario({ conflictResolutionSemanticDelta: true });
+  const p07 = makeD1PostChildScenario({ materialIntegrationUncertainty: true, dualSnapshotBindable: false });
+  const p08 = makeD1PostChildScenario({ materialRootTrustAuthorityIntegrationOutsideAssuredTree: true });
+  const p09 = makeD1PostChildScenario({ finalityOverrides: { finalDeliveryChild: true } });
+  const p10 = makeD1PostChildScenario({ materialIntegrationUncertainty: true, reviewerAvailability: { A: true, B: false } });
+  const p11 = makeD1PostChildScenario({ checkpointKind: 'SUPPORTING_PR' });
+  const p12 = makeD1PostChildScenario({
+    checkMembershipOptions: { includePremergeCodeql: true, childRequiredChecks: ['integration', 'policy', 'codeql'] }
+  });
+  const p13 = makeD1PostChildScenario({ checkMembershipOptions: { omitCheckId: 'check:policy' } });
+  const p14 = makeD1PostChildScenario({ checkMembershipOptions: { resultConclusion: 'PENDING' } });
+  const p15 = makeD1PostChildScenario({ emptyMergeCheckMembership: true });
+  const p16Missing = makeD1PostChildScenario();
+  delete p16Missing.conflictResolutionSemanticDelta;
+  const cases = [
+    ['P01', p01, 'PASS', 'RECONCILE_ONLY'], ['P02', p02, 'PASS', 'RECONCILE_ONLY'],
+    ['P03', p03, 'PASS', 'RECONCILE_ONLY'], ['P04', p04, 'PASS', 'DUAL_MAX'],
+    ['P05', p05, 'PASS', 'DUAL_MAX'], ['P06', p06, 'PASS', 'DUAL_MAX'],
+    ['P07', p07, 'HOLD', 'DUAL_MAX'], ['P08', p08, 'PASS', 'DUAL_MAX'],
+    ['P09', p09, 'PASS', 'DUAL_MAX'], ['P10', p10, 'HOLD', 'DUAL_MAX'],
+    ['P11', p11, 'NO_CHECKPOINT', null], ['P12', p12, 'PASS', 'RECONCILE_ONLY'],
+    ['P13', p13, 'HOLD', null], ['P14', p14, 'BLOCKED', null],
+    ['P15', p15, 'PASS', 'RECONCILE_ONLY'], ['P16', p16Missing, 'HOLD', null]
+  ];
+  for (const [id, scenario, expectedOutcome, expectedMode] of cases) {
+    const result = evaluateD1PostChildAssurance(policy, scenario);
+    assert.equal(result.outcome, expectedOutcome, id + ' outcome: ' + result.failures.join(','));
+    if (expectedMode) assert.equal(result.mode, expectedMode, id + ' mode');
+  }
+  assert.equal(p12.checkMembership.configuration.some((check) => check.checkId === 'check:codeql' && check.phase === 'PREMERGE_ONLY'),
+    true, 'P12 retains the premerge-only CodeQL configuration fact');
+  assert.equal(evaluateD1MergeCheckMembership(p12.checkMembership).expected.some((check) => check.checkId === 'check:codeql'),
+    false, 'P12 does not fabricate a missing merge-triggered CodeQL check');
+  const missingReceipt = makeD1PostChildScenario();
+  missingReceipt.receiptInventory.complete = false;
+  assert.equal(evaluateD1PostChildAssurance(policy, missingReceipt).outcome, 'HOLD',
+    'RECONCILE_ONLY cannot bypass missing shared receipt membership');
+  const missingFinality = makeD1PostChildScenario();
+  delete missingFinality.finalityDependencyReadback;
+  assert.equal(evaluateD1PostChildAssurance(policy, missingFinality).outcome, 'HOLD',
+    'RECONCILE_ONLY cannot bypass missing finality/dependency readback');
+  const contradictoryPredicate = makeD1PostChildScenario();
+  contradictoryPredicate.conflictResolutionSemanticDelta = true;
+  assert.equal(evaluateD1PostChildAssurance(policy, contradictoryPredicate).outcome, 'HOLD',
+    'caller predicate cannot change reconciliation mode without a matching independent readback');
+  const missingPredicateReadback = makeD1PostChildScenario();
+  delete missingPredicateReadback.integrationPredicateReadback;
+  assert.equal(evaluateD1PostChildAssurance(policy, p15).outcome, 'PASS',
+    'a full checkpoint accepts provably empty merge-check membership without inventing a check');
+  const directEmptyChild = makeD1PostChildScenario({ emptyMergeCheckMembership: true });
+  directEmptyChild.assuranceMode = 'RECONCILE_ONLY';
+  directEmptyChild.reviews = [];
+  directEmptyChild.trace = [];
+  delete directEmptyChild.reviewRouteAuthority;
+  directEmptyChild.d1CheckMembershipProof = { status: 'GREEN', expected: [] };
+  assert.equal(evaluateS1aPostChildReview(policy, directEmptyChild).ok, false,
+    'a caller-created D1 proof cannot bypass the fixed S1-A child/check inventory');
+  directEmptyChild.d1CheckMembershipProof = evaluateD1MergeCheckMembership(
+    makeD1CheckMembership({ emptyMembership: true }));
+  assert.equal(evaluateS1aPostChildReview(policy, directEmptyChild).ok, false,
+    'a standalone membership result is not the wrapper-only S1-A proof');
+  assert.equal(evaluateD1PostChildAssurance(policy, missingPredicateReadback).outcome, 'HOLD',
+    'missing composition/conflict/root-trust/uncertainty predicates never default false');
+  const forgedSupporting = makeD1PostChildScenario();
+  forgedSupporting.checkpointKind = 'SUPPORTING_PR';
+  forgedSupporting.trigger = 'SUPPORTING_PR';
+  forgedSupporting.finalityDependencyReadback.checkpointKind = 'SUPPORTING_PR';
+  forgedSupporting.finalityDependencyReadback.mergeReceiptId = null;
+  forgedSupporting.finalityDependencyReadback.digest = s1aHashWithoutField(forgedSupporting.finalityDependencyReadback, 'digest');
+  const forgedSupportingFinalityCore = { ...forgedSupporting.finalityDependencyReadback };
+  delete forgedSupportingFinalityCore.digest;
+  forgedSupporting.trustedFinalityDependencySnapshot = s1aClone(forgedSupportingFinalityCore);
+  assert.equal(evaluateD1PostChildAssurance(policy, forgedSupporting).outcome, 'HOLD',
+    'a final merge cannot be relabelled SUPPORTING_PR by changing caller and finality labels while its canonical event remains final');
+  const forgedComposition = makeD1PostChildScenario({ unassuredConcurrentOrMultiChildComposition: true });
+  forgedComposition.unassuredConcurrentOrMultiChildComposition = false;
+  forgedComposition.integrationPredicateReadback.unassuredConcurrentOrMultiChildComposition = false;
+  forgedComposition.integrationPredicateReadback.digest = s1aHashWithoutField(forgedComposition.integrationPredicateReadback, 'digest');
+  forgedComposition.trustedIntegrationPredicateSnapshot.unassuredConcurrentOrMultiChildComposition = false;
+  assert.equal(evaluateD1PostChildAssurance(policy, forgedComposition).outcome, 'HOLD',
+    'coherently rehashed caller and trusted snapshots cannot erase unassured composition');
+});
+test('D1 merge-check membership is configuration-derived and rejects false-green controls', () => {
+  const base = makeD1CheckMembership();
+  const expected = base.configuration.map(d1CheckIdentity).sort();
+  const greensOnly = { ...base, claimedExpectedMembership: [d1CheckIdentity(base.results[0])] };
+  assert.equal(evaluateD1MergeCheckMembership(greensOnly).status, 'HOLD',
+    'greens-only membership cannot omit the configured expected check');
+  const coOmitted = { ...base, claimedExpectedMembership: [expected[0]], results: [base.results[0]] };
+  assert.equal(evaluateD1MergeCheckMembership(coOmitted).status, 'HOLD',
+    'a check cannot be co-omitted from membership and results');
+  const wrongProducer = s1aClone(base);
+  wrongProducer.results[0].producerId = 'untrusted/other-producer';
+  assert.equal(evaluateD1MergeCheckMembership(wrongProducer).status, 'HOLD',
+    'same display name from the wrong producer is not a substitute');
+  for (const conclusion of ['SKIPPED', 'CANCELLED', 'FAILURE']) {
+    const dependency = makeD1CheckMembership({ resultConclusion: conclusion, markNotApplicable: true });
+    assert.equal(evaluateD1MergeCheckMembership(dependency).status, 'BLOCKED',
+      conclusion + ' dependency cannot be treated as not applicable');
+  }
+  const ambiguousMatrix = { ...base, ambiguousMatrixExpansion: true };
+  assert.equal(evaluateD1MergeCheckMembership(ambiguousMatrix).status, 'HOLD');
+  const stalePredecessor = s1aClone(base);
+  stalePredecessor.results[0].eventIdentity = 'event:predecessor';
+  assert.equal(evaluateD1MergeCheckMembership(stalePredecessor).status, 'HOLD',
+    'a stale successful predecessor is not the current event result');
+  const missingIdentity = s1aClone(base);
+  delete missingIdentity.configuration[0].workflowRevision;
+  assert.equal(evaluateD1MergeCheckMembership(missingIdentity).status, 'HOLD',
+    'every producer/workflow/revision/check/matrix/event/trigger/head identity is required');
+  assert.equal(evaluateD1MergeCheckMembership(makeD1CheckMembership({ headSha: 'head:foreign' })).status, 'HOLD',
+    'check membership head must match the exact integrated child commit');
+  assert.equal(evaluateD1MergeCheckMembership(makeD1CheckMembership({ triggerId: 'delivery:predecessor' })).status, 'HOLD',
+    'a predecessor trigger cannot supply current terminal checks');
+  const oldRunId = s1aClone(base);
+  oldRunId.results[0].runId = 'run:old-success';
+  oldRunId.latestRunReadback.results[0].runId = 'run:old-success';
+  oldRunId.latestRunReadback.digest = s1aHashWithoutField(oldRunId.latestRunReadback, 'digest');
+  assert.equal(evaluateD1MergeCheckMembership(oldRunId).status, 'HOLD',
+    'a rehashed same-event predecessor cannot replace the current canonical latest run');
+  const optionalFirstParty = makeD1CheckMembership({ includeOptionalFirstPartyCheck: true,
+    omitCheckId: 'check:optional-first-party' });
+  assert.equal(evaluateD1MergeCheckMembership(optionalFirstParty).status, 'HOLD',
+    'an enabled triggered first-party check remains expected even when requiredAtMerge is false');
+  const newProducer = makeD1CheckMembership({ includeNewFirstPartyCheck: true,
+    omitCheckId: 'check:new-first-party' });
+  const newProducerResult = evaluateD1MergeCheckMembership(newProducer);
+  assert.equal(newProducerResult.status, 'HOLD',
+    'an enabled first-party producer is derived from current configuration metadata, not a fixed producer allowlist');
+  assert.ok(newProducerResult.expected.some((check) => check.checkId === 'check:new-first-party'),
+    'a newly configured first-party producer is part of expected membership even when its result is omitted');
+  const greenNewProducer = evaluateD1MergeCheckMembership(makeD1CheckMembership({ includeNewFirstPartyCheck: true }));
+  assert.equal(greenNewProducer.status, 'GREEN',
+    'a newly configured first-party producer passes when its independently read-back terminal result is green');
+  const staleEventCoOmitted = makeD1CheckMembership({
+    includeNewFirstPartyCheck: true,
+    staleEventIdentityCheckId: 'check:new-first-party',
+    omitCheckIdFromInventories: 'check:new-first-party'
+  });
+  const staleEventResult = evaluateD1MergeCheckMembership(staleEventCoOmitted);
+  assert.equal(staleEventResult.status, 'HOLD',
+    'an otherwise-applicable enabled check with stale event identity cannot be co-omitted from inventories and results');
+  assert.ok(staleEventResult.failures.includes('CHECK_CONFIGURATION_EVENT_IDENTITY_MISMATCH:check:new-first-party'));
+  const staleIdentityOnNonApplicableEvent = makeD1CheckMembership({
+    includeNewFirstPartyCheck: true,
+    staleEventIdentityCheckId: 'check:new-first-party',
+    nonApplicableEventCheckId: 'check:new-first-party',
+    omitCheckIdFromInventories: 'check:new-first-party'
+  });
+  const nonApplicableEventResult = evaluateD1MergeCheckMembership(staleIdentityOnNonApplicableEvent);
+  assert.equal(nonApplicableEventResult.status, 'GREEN',
+    'a check outside current event applicability is not made expected by a stale identity');
+  assert.equal(nonApplicableEventResult.expected.some((check) => check.checkId === 'check:new-first-party'), false);
+  const disabledChildRequired = makeD1CheckMembership({
+    disabledCheckId: 'check:policy',
+    omitCheckIdFromInventories: 'check:policy'
+  });
+  const disabledChildRequiredResult = evaluateD1MergeCheckMembership(disabledChildRequired);
+  assert.equal(disabledChildRequiredResult.status, 'HOLD',
+    'a disabled child-required merge check cannot disappear from membership');
+  assert.ok(disabledChildRequiredResult.failures.includes('REQUIRED_MERGE_CHECK_DISABLED:check:policy'));
+  const staleConfigSnapshot = s1aClone(base);
+  staleConfigSnapshot.configurationReadback.configuration[0].workflowRevision = 'workflow:attacker';
+  staleConfigSnapshot.configurationReadback.digest = s1aHashWithoutField(staleConfigSnapshot.configurationReadback, 'digest');
+  assert.equal(evaluateD1MergeCheckMembership(staleConfigSnapshot).status, 'HOLD',
+    'rehashing a caller-mutated configuration cannot replace the trusted current snapshot');
+  const changedAfterFreeze = makeD1CheckMembership({ configurationRevision: 'configuration:10',
+    frozenConfigurationRevision: 'configuration:9', configurationChangesAfterFreeze: ['new:applicable-check'] });
+  assert.equal(evaluateD1MergeCheckMembership(changedAfterFreeze).status, 'HOLD',
+    'a newly applicable configuration after freeze invalidates membership');
+  const bareEmpty = evaluateD1MergeCheckMembership({
+    configurationComplete: true, configurationRevision: 'configuration:empty',
+    frozenConfigurationRevision: 'configuration:empty', configurationChangesAfterFreeze: [],
+    membershipFreezePoint: 'BEFORE_RESULT_ADJUDICATION', ambiguousMatrixExpansion: false,
+    configuration: [], childRequiredChecks: [], results: [], claimedExpectedMembership: []
+  });
+  assert.equal(bareEmpty.status, 'HOLD', 'caller-supplied empty arrays are not authoritative proof');
+  const provenEmpty = evaluateD1MergeCheckMembership(makeD1CheckMembership({ emptyMembership: true }));
+  assert.equal(provenEmpty.status, 'GREEN', 'empty membership is valid only with complete authoritative readbacks and matching inventories');
+  assert.deepEqual(provenEmpty.expected, [], 'empty membership does not invent checks');
+});
+
+test('D1 post-child law retains the six-control source-sensitivity pattern', () => {
+  const policy = parseS1aPolicyContract(architecture);
+  const positive = makeD1PostChildScenario();
+  const missingMembershipReadback = makeD1PostChildScenario();
+  delete missingMembershipReadback.checkMembership;
+  assert.equal(evaluateD1PostChildAssurance(policy, missingMembershipReadback).outcome, 'HOLD',
+    'missing check-membership readback holds without throwing');
+  positive.assuranceMode = 'RECONCILE_ONLY';
+  positive.reviews = [];
+  positive.trace = [];
+  delete positive.reviewRouteAuthority;
+  assert.equal(evaluateD1PostChildAssurance(policy, positive).outcome, 'PASS', 'positive exact reconciliation');
+  const missingBoundInventory = makeD1PostChildScenario();
+  delete missingBoundInventory.checkInventory;
+  assert.equal(evaluateD1PostChildAssurance(policy, missingBoundInventory).outcome, 'HOLD',
+    'missing check inventory returns HOLD before any property dereference');
+  const missingReviewMembership = makeD1PostChildScenario();
+  delete missingReviewMembership.reviewSnapshot.applicableIntegratedCheckIds;
+  assert.equal(evaluateD1PostChildAssurance(policy, missingReviewMembership).outcome, 'HOLD',
+    'missing review-snapshot inventory returns HOLD');
+
+  const invalid = makeD1PostChildScenario({ assuredChildTree: 'assured:prior-tree', requestedMode: 'RECONCILE_ONLY' });
+  assert.equal(evaluateD1PostChildAssurance(policy, invalid).outcome, 'HOLD',
+    'invalid forced reconcile mode is rejected when the tree differs');
+
+  const machineWeakening = rewriteS1aPolicy(architecture, (next) => {
+    next.postChildReview.modeSelection.reconcileOnlyRequiredPredicates =
+      next.postChildReview.modeSelection.reconcileOnlyRequiredPredicates.filter((item) => item !== 'NOT_FINAL_DELIVERY_CHILD');
+  });
+  assert.throws(() => parseS1aPolicyContract(machineWeakening), /post-child modes and triggers/,
+    'machine weakening is rejected by the fixed oracle');
+
+  const canonicalClause = 'Selecting `RECONCILE_ONLY` never bypasses a missing or stale shared prerequisite.';
+  const weakenedClause = '`RECONCILE_ONLY` may bypass shared readbacks when trees match.';
+  const proseWeakening = architecture.replace(canonicalClause, weakenedClause);
+  assert.throws(() => parseS1aPolicyContract(proseWeakening), /post-child prose/,
+    'prose polarity weakening is rejected');
+
+  const contradiction = architecture.replace('### Bounded non-product continuation',
+    'Contradiction: `RECONCILE_ONLY` may bypass shared readbacks when trees match.\n\n### Bounded non-product continuation');
+  assert.throws(() => parseS1aPolicyContract(contradiction), /post-child prose/,
+    'appended contradictory prose is rejected');
+
+  const equivalentClause = 'Once all shared prerequisites pass, `RECONCILE_ONLY` may omit only reviewer work.';
+  const equivalent = architecture.replace(canonicalClause, equivalentClause);
+  assert.notEqual(equivalent, architecture);
+  assert.equal(s1aGovernedHumanPolicyDigest(equivalent), S1A_ORACLE_GOVERNED_PROSE_SHA256,
+    'semantics-preserving wording normalizes to the same governed digest');
+  assert.doesNotThrow(() => parseS1aPolicyContract(equivalent));
+
+  const coherentWeakening = rewriteS1aPolicy(architecture, (next) => {
+    next.postChildReview.modeSelection.treeEqualityIsSufficientByItself = true;
+  }).replace(canonicalClause, weakenedClause);
+  const reboundDigest = s1aGovernedHumanPolicyDigest(coherentWeakening);
+  assert.notEqual(reboundDigest, S1A_ORACLE_GOVERNED_PROSE_SHA256,
+    'coherent weakening changes the governed prose digest');
+  assert.throws(() => parseS1aPolicyContract(coherentWeakening), /post-child modes and triggers/,
+    'recomputing/rebinding a digest does not make machine or semantic weakening pass');
+});
+
+test('D1 owner fences keep discovery/runtime and effect authority with their accepted owners', () => {
+  for (const [owner, boundary] of [
+    ['A1', 'Route registration/resolution, including concrete `G0.discovery`.'],
+    ['C2', 'CURRENT, packets, discovery-basis receipts, durable root ledger, post-child checkpoint runtime.'],
+    ['H', 'Host/browser/computer/native qualification.'],
+    ['X1', 'Secret References and Private Custody.'],
+    ['X2', 'Sensitive-File Access Guard.'],
+    ['X3', 'External Operation Authority and effectful probes.'],
+    ['X4', 'Privacy-Safe Operational Evidence.'],
+    ['W2', 'Temporary workspace lifecycle.'],
+    ['D1', 'Semantics and deterministic policy oracles only.']
+  ]) {
+    assert.ok(architecture.includes('| ' + owner + ' | ' + boundary + ' |'), owner + ' fence');
+  }
 });
