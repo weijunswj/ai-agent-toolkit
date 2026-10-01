@@ -1738,7 +1738,7 @@ function executeIntegration(plan, fixture) {
     assert.deepEqual(Object.keys(stack.routes), ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER']);
     assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1);
     assert.deepEqual(stack.routes.G2, { provider: 'openai', model: 'gpt-6-astra', reasoning: 'high' });
-    assert.deepEqual(stack.routes.G3.adversarial_subagent, { provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' });
+    assert.deepEqual(stack.routes.G3.adversarial_subagent, { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' });
     assert.equal(Object.hasOwn(stack, 'subagents'), false);
     const policyTests = fs.readFileSync(path.join(root, 'repo/tests/controller-policy-separation.test.cjs'), 'utf8');
     for (const phrase of [

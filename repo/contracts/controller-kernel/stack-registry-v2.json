@@ -6,8 +6,8 @@
       "routes": {
         "G_FRAME": {
           "provider": "openai",
-          "model": "gpt-6-sol",
-          "reasoning": "max"
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
         },
         "G0": {
           "provider": "openai",
@@ -21,13 +21,13 @@
         },
         "G1": {
           "provider": "openai",
-          "model": "gpt-6-sol",
-          "reasoning": "max"
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
         },
         "G1_RECONVERGENCE": {
           "provider": "openai",
-          "model": "gpt-6-sol",
-          "reasoning": "max"
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
         },
         "G2": {
           "provider": "openai",
@@ -45,8 +45,8 @@
           },
           "adversarial_subagent": {
             "provider": "openai",
-            "model": "gpt-6-sol",
-            "reasoning": "max"
+            "model": "gpt-6.1-sol",
+            "reasoning": "high"
           }
         },
         "G4": {
@@ -61,8 +61,8 @@
         },
         "BROWSER": {
           "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "medium"
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
         }
       }
     },
@@ -126,7 +126,7 @@
         "BROWSER": {
           "provider": "anthropic",
           "model": "opus-5.5",
-          "reasoning": "high"
+          "reasoning": "medium"
         }
       }
     },
@@ -158,22 +158,22 @@
           "reasoning": "high"
         },
         "G2": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
+          "provider": "anthropic",
+          "model": "opus-5.5",
           "reasoning": "high"
         },
         "G3": {
-          "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium",
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max",
           "subagent": {
-            "provider": "anthropic",
-            "model": "opus-5.5",
-            "reasoning": "medium"
+            "provider": "openai",
+            "model": "gpt-6-luna",
+            "reasoning": "max"
           },
           "adversarial_subagent": {
-            "provider": "anthropic",
-            "model": "opus-5.5",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
             "reasoning": "high"
           }
         },
@@ -183,14 +183,14 @@
           "reasoning": "high"
         },
         "FINAL_AUDIT": {
-          "provider": "openai",
-          "model": "gpt-6-astra",
+          "provider": "anthropic",
+          "model": "opus-5.5",
           "reasoning": "max"
         },
         "BROWSER": {
           "provider": "openai",
-          "model": "gpt-6-astra",
-          "reasoning": "medium"
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
         }
       }
     }
