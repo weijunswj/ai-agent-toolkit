@@ -102,8 +102,8 @@ function sha256Text(value) { return crypto.createHash('sha256').update(value, 'u
 function completeRead(body, revision = null) {
   return { body, complete: true, byte_length: Buffer.byteLength(body, 'utf8'), body_sha256: sha256Text(body), revision };
 }
+const CURRENT_STACK_REGISTRY_PATH = 'repo/contracts/controller-kernel/stack-registry-v2.json';
 const CURRENT_MAIN_EXACT_PATHS = Object.freeze([
-  'repo/contracts/controller-kernel/stack-registry-v2.json',
   'repo/contracts/controller-kernel/stack-registry-v2.schema.json',
   'repo/tests/controller-lifecycle-law.test.cjs',
 ]);
@@ -1733,7 +1733,7 @@ function executeIntegration(plan, fixture) {
       'COMMIT_REQUIRED_VALIDATION=YES', 'Candidate immutability is per exact candidate identity',
       'paired convergence cycle inside the same G3 episode', 'implementation-ready diagnostic handoff rather than a bare verdict',
     ]) assert.ok(architecture.includes(phrase), `integrated Architecture clause retained: ${phrase}`);
-    const registry = JSON.parse(fs.readFileSync(path.join(root, CURRENT_MAIN_EXACT_PATHS[0]), 'utf8'));
+    const registry = JSON.parse(fs.readFileSync(path.join(root, CURRENT_STACK_REGISTRY_PATH), 'utf8'));
     const stack = registry.stacks['owner-openai-default'];
     assert.deepEqual(Object.keys(stack.routes), ['G_FRAME', 'G0', 'G1', 'G1_RECONVERGENCE', 'G2', 'G3', 'G4', 'FINAL_AUDIT', 'BROWSER']);
     assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1);

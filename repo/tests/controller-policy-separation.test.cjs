@@ -193,7 +193,7 @@ test('ordinary semantic executors receive bounded authority instead of being tol
   assert.match(architecture, /full Controller is control-plane source material and is not a default worker prerequisite/i);
 });
 
-test('Claude stack mirrors current OpenAI role classes without leaking model names into policy', () => {
+test('Claude and OpenAI stacks preserve the current owner-selected route classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
   assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
   assert.equal(claude.routes['G_FRAME'].reasoning, 'high');
@@ -201,53 +201,43 @@ test('Claude stack mirrors current OpenAI role classes without leaking model nam
   assert.equal(claude.routes.G1.reasoning, 'high');
   const openai = registry.stacks['owner-openai-default'];
   for (const [role, route] of Object.entries(openai.routes)) {
-    if (route.model === 'gpt-6-sol') assert.equal(route.reasoning, 'max', `OpenAI Sol route must be max: ${role}`);
+    if (route.model === 'gpt-6.1-sol') assert.equal(route.reasoning, 'high', `OpenAI Sol route must be high: ${role}`);
+    assert.notEqual(route.model, 'gpt-6-sol', `obsolete OpenAI Sol route must not remain current: ${role}`);
   }
-  assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'max');
+  assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'high');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G2.reasoning, 'high');
   assert.equal(claude.routes.G3.reasoning, 'medium');
   assert.equal(claude.routes.G4.reasoning, 'xhigh');
   assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
   assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
-  assert.equal(claude.routes.BROWSER.reasoning, 'high');
+  assert.equal(claude.routes.BROWSER.reasoning, 'medium');
   assert.equal(claude.routes.G0.subagent.reasoning, 'medium');
   assert.equal(claude.routes.G3.subagent.reasoning, 'medium');
 });
 
-test('mixed Claude/GPT stack uses Opus for framing/G1 and every OpenAI Luna Max worker slot', () => {
-  const openai = registry.stacks['owner-openai-default'];
+test('mixed Claude/GPT stack uses Claude for G0/G1/G2 and Codex for G3/G4 with Opus final audit', () => {
   const mixed = registry.stacks['owner-mixed-claude-gpt'];
   assert.ok(mixed);
 
   assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G0, {
+    provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium',
+    subagent: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }
+  });
   assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G1_RECONVERGENCE, mixed.routes.G1);
-
-  for (const role of requiredRoutes) {
-    if (['G_FRAME', 'G1', 'G1_RECONVERGENCE'].includes(role)) continue;
-    const openaiRoute = openai.routes[role];
-    const mixedRoute = mixed.routes[role];
-    const openaiRoot = { provider: openaiRoute.provider, model: openaiRoute.model, reasoning: openaiRoute.reasoning };
-    const mixedRoot = { provider: mixedRoute.provider, model: mixedRoute.model, reasoning: mixedRoute.reasoning };
-
-    if (openaiRoot.provider === 'openai' && openaiRoot.model === 'gpt-6-luna' && openaiRoot.reasoning === 'max') {
-      assert.deepEqual(mixedRoot, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna replacement mismatch: ${role}`);
-    } else {
-      assert.deepEqual(mixedRoot, openaiRoot, `mixed route must mirror OpenAI for ${role}`);
-    }
-
-    if (['G0', 'G3'].includes(role)) {
-      const openaiSubagent = openaiRoute.subagent;
-      const mixedSubagent = mixedRoute.subagent;
-      if (openaiSubagent && openaiSubagent.provider === 'openai' && openaiSubagent.model === 'gpt-6-luna' && openaiSubagent.reasoning === 'max') {
-        assert.deepEqual(mixedSubagent, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }, `mixed Luna subagent replacement mismatch: ${role}`);
-      } else {
-        assert.deepEqual(mixedSubagent, openaiSubagent, `mixed subagent route must mirror OpenAI for ${role}`);
-      }
-    }
-  }
+  assert.deepEqual(mixed.routes.G2, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.G3, {
+    provider: 'openai', model: 'gpt-6-luna', reasoning: 'max',
+    subagent: { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' },
+    adversarial_subagent: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' }
+  });
+  assert.deepEqual(mixed.routes.G4, { provider: 'openai', model: 'gpt-6-astra', reasoning: 'high' });
+  assert.deepEqual(mixed.routes.FINAL_AUDIT, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'max' });
+  assert.deepEqual(mixed.routes.BROWSER, { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' });
 });
+
 test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
   for (const [stackId, stack] of Object.entries(registry.stacks)) {
     assert.deepEqual(stack.routes.G1_RECONVERGENCE, stack.routes.G1, stackId);
@@ -692,11 +682,11 @@ test('complex G3 uses paired implementation and strong-review convergence attemp
   assert.match(architecture, /It is not another gate/);
 
   const openai = registry.stacks['owner-openai-default'].routes.G3.adversarial_subagent;
-  assert.deepEqual(openai, { provider: 'openai', model: 'gpt-6-sol', reasoning: 'max' });
+  assert.deepEqual(openai, { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' });
   const claude = registry.stacks['owner-claude'].routes.G3.adversarial_subagent;
   assert.deepEqual(claude, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   const mixed = registry.stacks['owner-mixed-claude-gpt'].routes.G3.adversarial_subagent;
-  assert.deepEqual(mixed, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
+  assert.deepEqual(mixed, { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' });
 });
 
 test('commit-required validation sequencing freezes each candidate identity before clean-head validators without publishing it', () => {
