@@ -13,6 +13,74 @@ const NAMESPACE_OWNER=Symbol('owned-temp-namespace-owner');
 const active=new Map();let namespaceCache=null,startupRecovery=false;
 
 function error(code,message,details){const e=new Error(message||code);e.name='OwnedTempError';e.code=code;e.status=code;if(details)Object.assign(e,details);return e;}
+function isRfc3339DateTime(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1];
+}
+function createCanonicalValidators() {
+  try {
+    const Ajv2020 = require('ajv/dist/2020');
+    const schemaPath = path.join(__dirname, '..', 'contracts', 'owned-temp', 'owned-temp-v1.schema.json');
+    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+    const ajv = new Ajv2020({
+      strict: true,
+      strictTypes: false,
+      coerceTypes: false,
+      useDefaults: false,
+      removeAdditional: false
+    });
+    ajv.addFormat('date-time', isRfc3339DateTime);
+    const spec = ajv.compile(schema);
+    const records = Object.create(null);
+    for (const name of ['claim', 'lease', 'marker', 'rootMarker', 'namespaceMarker', 'admissionLock']) {
+      records[name] = ajv.compile({ $ref: schema.$id + '#/$defs/' + name });
+    }
+    return Object.freeze({ spec, records: Object.freeze(records) });
+  } catch (_) {
+    throw error('TEMP_SCHEMA_INVALID', 'Canonical owned-temp schema validators are unavailable.');
+  }
+}
+const canonicalValidators = createCanonicalValidators();
+const durableRecordSchemaNames = Object.freeze({
+  [SCHEMA + '.namespace']: 'namespaceMarker',
+  [SCHEMA + '.claim']: 'claim',
+  [SCHEMA + '.lease']: 'lease',
+  [SCHEMA + '.marker']: 'marker',
+  [SCHEMA + '.root-marker']: 'rootMarker',
+  [SCHEMA + '.lock']: 'admissionLock'
+});
+const durableRecordReadTypes = Object.freeze({
+  'Namespace marker': 'namespaceMarker',
+  'Partial lease': 'lease',
+  Claim: 'claim',
+  Lease: 'lease',
+  Marker: 'marker',
+  'Root marker': 'rootMarker',
+  'Admission lock': 'admissionLock',
+  'Orphan lease': 'lease'
+});
+function assertDurableRecord(value, label) {
+  const name = value && durableRecordSchemaNames[value.schema];
+  const validate = name && canonicalValidators.records[name];
+  if (!validate || !validate(value)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', (label || 'Metadata') + ' does not match the canonical durable-record schema.');
+  }
+}
+function assertDurableSnapshot(value, label) {
+  const name = durableRecordReadTypes[label];
+  const validate = name && canonicalValidators.records[name];
+  if (!validate || !validate(value)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', (label || 'Metadata') + ' does not match the canonical durable-record schema.');
+  }
+}
 function win(){return process.platform==='win32';}
 function identity(s){const dev=String(s.dev),ino=String(s.ino);if(!dev||!ino||ino==='0')throw error('TEMP_OWNERSHIP_UNCERTAIN','Filesystem resource identity is unavailable.');return{dev,ino};}
 function sameId(a,b){return Boolean(a&&b&&String(a.dev)===String(b.dev)&&String(a.ino)===String(b.ino));}
@@ -42,8 +110,30 @@ function getProcessStart(pid){if(win()){const s="$ErrorActionPreference='Stop';(
 function processStatus(pid,start){try{process.kill(pid,0);}catch(e){if(e.code==='ESRCH')return'dead';}const actual=getProcessStart(pid);if(!actual||!start)return'unknown';return actual===start?'live':'mismatched';}
 function rootTemp(){const p=path.resolve(os.tmpdir());chain(p);return p;}
 
-function readJson(p,id,label,max=65536){const verified=privateFile(p,id,label);let fd;try{fd=fs.openSync(p,fs.constants.O_RDONLY);if(!sameId(identity(fs.fstatSync(fd,{bigint:true})),verified))throw error('TEMP_OWNERSHIP_UNCERTAIN','Metadata changed while opening.');const b=Buffer.alloc(max+1),n=fs.readSync(fd,b,0,b.length,0);if(n>max)throw error('TEMP_OWNERSHIP_UNCERTAIN','Metadata exceeds its size limit.');const x=JSON.parse(b.subarray(0,n).toString('utf8'));if(!x||typeof x!=='object'||Array.isArray(x))throw new Error('not object');return{data:x,id:verified};}catch(e){if(e.code==='TEMP_OWNERSHIP_UNCERTAIN')throw e;throw error('TEMP_OWNERSHIP_UNCERTAIN',(label||'Metadata')+' cannot be read safely.',{cause:e});}finally{if(fd!==undefined)try{fs.closeSync(fd);}catch(_){}}}
+function readJson(p, id, label, max = 65536) {
+  const verified = privateFile(p, id, label);
+  let fd;
+  try {
+    fd = fs.openSync(p, fs.constants.O_RDONLY);
+    if (!sameId(identity(fs.fstatSync(fd, { bigint: true })), verified)) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Metadata changed while opening.');
+    }
+    const buffer = Buffer.alloc(max + 1);
+    const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    if (count > max) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Metadata exceeds its size limit.');
+    const value = JSON.parse(buffer.subarray(0, count).toString('utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not object');
+    assertDurableSnapshot(value, label);
+    return { data: value, id: verified };
+  } catch (caught) {
+    if (caught.code === 'TEMP_OWNERSHIP_UNCERTAIN') throw caught;
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', (label || 'Metadata') + ' cannot be read safely.', { cause: caught });
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch (_) {}
+  }
+}
 function writeExclusive(p, data, label) {
+  assertDurableRecord(data, label);
   const parent = path.dirname(p);
   const parentId = identity(fs.lstatSync(parent, { bigint: true }));
   let fd;
@@ -93,6 +183,7 @@ function writeExclusive(p, data, label) {
 }
 
 function atomicJson(p, data, oldId, expectedParentId = null) {
+  assertDurableRecord(data, 'Lease');
   const parent = path.dirname(p);
   const parentId = expectedParentId || identity(fs.lstatSync(parent, { bigint: true }));
   const tmp = p + '.next-' + crypto.randomBytes(12).toString('hex');
@@ -148,8 +239,20 @@ function validateNamespace(ns) {
   dir(ns.temp, ns.tempId, 'Temp root');
   dir(ns.base, ns.baseId, 'Temp namespace');
   file(ns.marker, ns.markerId, 'Namespace marker');
+  validateNamespaceMarker(ns);
   dir(ns.claims, ns.claimsId, 'Claims');
   dir(ns.roots, ns.rootsId, 'Roots');
+}
+
+function validateNamespaceMarker(ns) {
+  const marker = readJson(ns.marker, ns.markerId, 'Namespace marker', 16384).data;
+  if (marker.path !== ns.base
+      || marker.temp_root !== ns.temp
+      || marker.user_identity !== ns.user
+      || !sameId(marker.base_identity, ns.baseId)
+      || marker.namespace_id !== ns.namespaceId) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Namespace marker identity mismatch.');
+  }
 }
 
 function namespace(create) {
@@ -387,7 +490,63 @@ function namespace(create) {
     throw cause;
   }
 }
-function normalize(spec){if(!spec||typeof spec!=='object'||Array.isArray(spec)||spec.schema!==SPEC)throw error('TEMP_SPEC_INVALID','Owned-temp spec schema is required.');const keys=new Set(['schema','purpose','repoRoot','episode','runId','lockId','budgetBytes','signal','retention']);if(Object.keys(spec).some(k=>!keys.has(k)))throw error('TEMP_SPEC_INVALID','Owned-temp spec has unsupported fields.');const cap=spec.purpose==='source-update'?LIMITS.sourceUpdate:spec.purpose==='portability'?LIMITS.portability:spec.purpose==='foundation-test'?LIMITS.foundationTest:0;if(!cap)throw error('TEMP_SPEC_INVALID','Owned-temp purpose is invalid.');const repo=realDir(spec.repoRoot,'Repository root');const ident=(v,label)=>{if(typeof v!=='string'||v.length<1||v.length>128||!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(v))throw error('TEMP_SPEC_INVALID',label+' is invalid.');return v;};const budget=spec.budgetBytes===undefined?cap:spec.budgetBytes;if(!Number.isSafeInteger(budget)||budget<1||budget>cap)throw error('TEMP_SPEC_INVALID','Budget exceeds the purpose limit.');if(spec.signal!==undefined&&(!spec.signal||typeof spec.signal.aborted!=='boolean'||typeof spec.signal.addEventListener!=='function'))throw error('TEMP_SPEC_INVALID','signal must be an AbortSignal.');let retention=null;if(spec.retention!==undefined){const r=spec.retention;if(!r||typeof r!=='object'||Object.keys(r).some(k=>!['reason','owner','maxBytes','expiresAt'].includes(k)))throw error('TEMP_SPEC_INVALID','Retention record is invalid.');const now=Date.now(),expires=Date.parse(r.expiresAt);if(typeof r.reason!=='string'||!r.reason.trim()||r.reason.length>512||!Number.isSafeInteger(r.maxBytes)||r.maxBytes<1||r.maxBytes>LIMITS.retainedBytes||!Number.isFinite(expires)||expires<=now||expires-now>LIMITS.retainedMs)throw error('TEMP_SPEC_INVALID','Retention must have a bounded reason, owner, size, and expiry.');retention={reason:r.reason.trim(),owner:ident(r.owner,'Retention owner'),maxBytes:r.maxBytes,expiresAtMs:expires};}return{purpose:spec.purpose,repo,episode:ident(spec.episode,'Episode'),runId:ident(spec.runId||crypto.randomBytes(16).toString('hex'),'Run'),lockId:ident(spec.lockId||crypto.randomBytes(16).toString('hex'),'Lock'),budget,retention,signal:spec.signal||null};}
+function normalize(spec) {
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+    throw error('TEMP_SPEC_INVALID', 'Owned-temp spec schema is required.');
+  }
+  let valid = false;
+  try { valid = canonicalValidators.spec(spec); } catch (_) {}
+  if (!valid) throw error('TEMP_SPEC_INVALID', 'Owned-temp spec does not match the canonical schema.');
+
+  const cap = spec.purpose === 'source-update' ? LIMITS.sourceUpdate
+    : spec.purpose === 'portability' ? LIMITS.portability
+      : spec.purpose === 'foundation-test' ? LIMITS.foundationTest : 0;
+  if (!cap) throw error('TEMP_SPEC_INVALID', 'Owned-temp purpose is invalid.');
+  const repo = realDir(spec.repoRoot, 'Repository root');
+  const ident = (value, label) => {
+    if (typeof value !== 'string' || value.length < 1 || value.length > 128
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
+      throw error('TEMP_SPEC_INVALID', label + ' is invalid.');
+    }
+    return value;
+  };
+  const budget = spec.budgetBytes === undefined ? cap : spec.budgetBytes;
+  if (!Number.isSafeInteger(budget) || budget < 1 || budget > cap) {
+    throw error('TEMP_SPEC_INVALID', 'Budget exceeds the purpose limit.');
+  }
+  if (spec.signal !== undefined
+      && (!spec.signal || typeof spec.signal.aborted !== 'boolean' || typeof spec.signal.addEventListener !== 'function')) {
+    throw error('TEMP_SPEC_INVALID', 'signal must be an AbortSignal.');
+  }
+
+  let retention = null;
+  if (spec.retention !== undefined) {
+    const value = spec.retention;
+    const now = Date.now();
+    const expires = Date.parse(value.expiresAt);
+    if (!value.reason.trim() || value.reason.length > 512
+        || value.maxBytes < 1 || value.maxBytes > LIMITS.retainedBytes
+        || !Number.isFinite(expires) || expires <= now || expires - now > LIMITS.retainedMs) {
+      throw error('TEMP_SPEC_INVALID', 'Retention must have a bounded reason, owner, size, and expiry.');
+    }
+    retention = {
+      reason: value.reason.trim(),
+      owner: ident(value.owner, 'Retention owner'),
+      maxBytes: value.maxBytes,
+      expiresAtMs: expires
+    };
+  }
+  return {
+    purpose: spec.purpose,
+    repo,
+    episode: ident(spec.episode, 'Episode'),
+    runId: ident(spec.runId || crypto.randomBytes(16).toString('hex'), 'Run'),
+    lockId: ident(spec.lockId || crypto.randomBytes(16).toString('hex'), 'Lock'),
+    budget,
+    retention,
+    signal: spec.signal || null
+  };
+}
 
 function claim(ns, spec) {
   const id = crypto.randomBytes(16).toString('hex');
@@ -430,6 +589,7 @@ function claim(ns, spec) {
     c.claim_identity = cid;
     dir(ns.claims, ns.claimsId, 'Claims');
     if (!sameId(identity(fs.fstatSync(fd, { bigint: true })), cid)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim changed while opening.');
+    assertDurableRecord(c, 'Claim');
     fs.writeFileSync(fd, Buffer.from(JSON.stringify(c)));
     dir(ns.claims, ns.claimsId, 'Claims');
     fs.fsyncSync(fd);
@@ -530,7 +690,6 @@ function load(ns, cp) {
     throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim does not bind exact canonical paths and identity.');
   }
 if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
-      || Object.keys(c.retention).sort().join(',') !== 'expiresAtMs,maxBytes,owner,reason'
       || typeof c.retention.reason !== 'string' || !c.retention.reason.trim() || c.retention.reason.length > 512
       || typeof c.retention.owner !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(c.retention.owner)
       || !Number.isSafeInteger(c.retention.maxBytes) || c.retention.maxBytes < 1 || c.retention.maxBytes > LIMITS.retainedBytes
@@ -546,7 +705,7 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
     'CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED', 'RETAINED'
   ]);
   const persistedIdentity = (value) => value === null || Boolean(value && typeof value === 'object'
-    && !Array.isArray(value) && Object.keys(value).sort().join(',') === 'dev,ino'
+    && !Array.isArray(value)
     && typeof value.dev === 'string' && value.dev.length > 0
     && typeof value.ino === 'string' && value.ino.length > 0);
   if (l.schema !== SCHEMA + '.lease'
@@ -573,9 +732,7 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
     throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Lease is malformed or contains unsupported recovery evidence.');
   }
   for (const child of l.owned_children) {
-    const keys = child && typeof child === 'object' && !Array.isArray(child) ? Object.keys(child).sort().join(',') : '';
-    if (keys !== 'phase,pid,process_group,start_identity,token'
-        || !/^[a-f0-9]{32}$/.test(child.token)
+    if (!/^[a-f0-9]{32}$/.test(child.token)
         || !['STARTING', 'RUNNING'].includes(child.phase)
         || ![true, false].includes(child.process_group)
         || (child.phase === 'STARTING'
@@ -585,10 +742,10 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
       throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child metadata is malformed.');
     }
   }
-  if (l.status === 'RETAINED') {
+  if (l.status === 'RETAINED' || l.retention !== null) {
     const t = l.retention;
     if (!t || typeof t !== 'object'
-        || Object.keys(t).sort().join(',') !== 'bytes,expires_at_ms,max_bytes,owner,reason'
+        || !['RETAINED', 'TERMINAL', 'CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status)
         || typeof t.reason !== 'string'
         || typeof t.owner !== 'string'
         || !Number.isSafeInteger(t.max_bytes)
@@ -600,7 +757,7 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
         || t.owner !== c.retention?.owner
         || t.max_bytes !== c.retention?.maxBytes
         || t.bytes > t.max_bytes
-        || l.lease_expires_at_ms !== t.expires_at_ms) {
+        || (l.status === 'RETAINED' && l.lease_expires_at_ms !== t.expires_at_ms)) {
       throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Retained lease metadata is malformed.');
     }
   }
@@ -1001,6 +1158,11 @@ function parentDirs(r, parts, owner = null) {
   return p;
 }
 
+function growthBudgetError(r, message, details) {
+  if (r) r.admissionClosed = true;
+  return error('TEMP_BUDGET_EXCEEDED', message, details);
+}
+
 function leasePath(r, value) {
   if (typeof value !== 'string' || !value || path.isAbsolute(value) || /^[A-Za-z]:/.test(value)) {
     throw error('TEMP_PATH_ESCAPE', 'Use a relative owned-temp path.');
@@ -1050,7 +1212,7 @@ function reserveEntries(r, count = 1, owner = null) {
 function ensureDir(r, p, depth, owner = null) {
   assertGrowthAllowed(r, owner);
   contained(r.rp, p);
-  if (depth > LIMITS.depth) throw error('TEMP_BUDGET_EXCEEDED', 'Maximum directory depth exceeded.');
+  if (depth > LIMITS.depth) throw growthBudgetError(r, 'Maximum directory depth exceeded.');
   const parent = path.dirname(p);
   const parentId = dir(parent, null, 'Owned directory parent');
   let exists = false;
@@ -1093,9 +1255,9 @@ async function writeFile(r, rel, data, append = false, precharged = false, owner
   assertGrowthAllowed(r, owner);
   validate(r);
   const target = leasePath(r, rel);
-  if (target.parts.length > LIMITS.depth) throw error('TEMP_BUDGET_EXCEEDED', 'Maximum path depth exceeded.');
+  if (target.parts.length > LIMITS.depth) throw growthBudgetError(r, 'Maximum path depth exceeded.');
   const bytes = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
-  if (bytes.length > LIMITS.file) throw error('TEMP_BUDGET_EXCEEDED', 'Maximum file size exceeded.');
+  if (bytes.length > LIMITS.file) throw growthBudgetError(r, 'Maximum file size exceeded.');
   let existing = null;
   let parents;
   if (append) {
@@ -1103,7 +1265,7 @@ async function writeFile(r, rel, data, append = false, precharged = false, owner
     revalidateParents(r, parents);
     existing = file(target.p, null, 'Append target');
     if (Number(existing.stats.size) + bytes.length > LIMITS.file) {
-      throw error('TEMP_BUDGET_EXCEEDED', 'Maximum file size exceeded.');
+      throw growthBudgetError(r, 'Maximum file size exceeded.');
     }
   }
   if (!precharged) charge(r, bytes.length, owner);
@@ -1172,7 +1334,7 @@ async function writeFile(r, rel, data, append = false, precharged = false, owner
   }
 }
 
-function planCopy(source, filter) {
+function planCopy(source, filter, growthRecord = null) {
   const src = realDir(source, 'Copy source');
   const list = [];
   let total = 0;
@@ -1186,7 +1348,7 @@ function planCopy(source, filter) {
       }
       const relative = rel ? path.join(rel, name) : name;
       if (depth + 1 > LIMITS.depth || list.length + 1 > LIMITS.entries) {
-        throw error('TEMP_BUDGET_EXCEEDED', 'Copy source exceeds depth or entry limits.');
+        throw growthBudgetError(growthRecord, 'Copy source exceeds depth or entry limits.');
       }
       if (stats.isDirectory()) {
         list.push({ s: sourcePath, rp: relative, type: 'dir', id: identity(stats) });
@@ -1194,7 +1356,7 @@ function planCopy(source, filter) {
       } else {
         const size = Number(stats.size);
         if (!Number.isSafeInteger(size) || size > LIMITS.file) {
-          throw error('TEMP_BUDGET_EXCEEDED', 'Copy source file exceeds size limit.');
+          throw growthBudgetError(growthRecord, 'Copy source file exceeds size limit.');
         }
         total += size;
         list.push({ s: sourcePath, rp: relative, type: 'file', id: identity(stats), size });
@@ -1230,12 +1392,12 @@ async function copyTree(r, source, options = {}, owner = null) {
   if (Object.keys(options).some((key) => key !== 'filter')) {
     throw error('TEMP_SPEC_INVALID', 'Unsupported copy option.');
   }
-  const plan = planCopy(source, options.filter);
+  const plan = planCopy(source, options.filter, r);
   if (within(plan.src.path, r.rp) || within(r.rp, plan.src.path)) {
     throw error('TEMP_PATH_ESCAPE', 'Copy roots overlap.');
   }
   if (r.entries + plan.list.length > LIMITS.entries) {
-    throw error('TEMP_BUDGET_EXCEEDED', 'Copy exceeds the remaining entry allowance.');
+    throw growthBudgetError(r, 'Copy exceeds the remaining entry allowance.');
   }
   charge(r, plan.total, owner);
   const directories = plan.list.filter((item) => item.type === 'dir')
@@ -1416,9 +1578,10 @@ function recordChild(r, token, patch, owner) {
 
 function startOwnedChild(r, owner) {
   assertMutationOwner(r, owner);
+  assertGrowthAllowed(r, owner);
   const token = crypto.randomBytes(16).toString('hex');
   const rows = r.lease.owned_children || [];
-  if (rows.length >= LIMITS.entries) throw error('TEMP_BUDGET_EXCEEDED', 'Owned child metadata limit exceeded.');
+  if (rows.length >= LIMITS.entries) throw growthBudgetError(r, 'Owned child metadata limit exceeded.');
   setLease(r, {
     owned_children: [...rows, {
       phase: 'STARTING', pid: null, process_group: !win(),
@@ -1431,19 +1594,14 @@ function startOwnedChild(r, owner) {
 function clearOwnedChild(r, token, owner) {
   const child = (r.lease.owned_children || []).find((row) => row.token === token);
   if (!child) return true;
-  // Direct child close does not prove that its POSIX process group is gone.
-  // Keep durable recovery protection while liveness is positive or uncertain.
   if (!win() && child.process_group) {
     const tracked = [...r.children.values()].find((record) => record.token === token);
     const protection = child.phase === 'RUNNING'
       ? { group: true, pid: child.pid, start: child.start_identity, closed: true } : tracked;
     if (protection && groupAlive(protection)) {
       if (child.phase === 'STARTING' && tracked && tracked.pid) {
-        // A failed spawn-ledger write must not discard the real child's protection.
-        // Retry its known identity; another failure keeps STARTING protected and
-        // preserves the original persistence error as the primary result.
         try { recordChild(r, token, { phase: 'RUNNING', pid: tracked.pid, start_identity: tracked.start }, owner); }
-        catch (caught) { tracked.persistError = tracked.persistError || caught; }
+        catch (caught) { latchChildPersistenceFailure(tracked, caught, 'child-start-retirement'); }
       }
       return false;
     }
@@ -1462,6 +1620,7 @@ function latchChildFailure(rec, caught, kind) {
   const eventOrder = noteChildEvent(rec, 'failure:' + kind);
   if (!rec.failure) {
     rec.failure = { error: caught, kind, eventOrder };
+    if (!rec.primary) rec.primary = rec.failure;
     const r = rec.owner;
     if (rec.profile === 'source-update' && r && r.sourceUpdateAdmitted
         && !r.sourceUpdateSucceeded && !r.profileTerminalFailure) {
@@ -1474,9 +1633,56 @@ function latchChildFailure(rec, caught, kind) {
 
 function latchChildOutcome(rec, caught, kind) {
   const eventOrder = noteChildEvent(rec, 'outcome:' + kind);
-  if (!rec.outcome) rec.outcome = { error: caught, kind, eventOrder };
+  if (!rec.outcome) {
+    rec.outcome = { error: caught, kind, eventOrder };
+    if (!rec.primary) rec.primary = rec.outcome;
+  }
   return rec.outcome.error;
 }
+
+function latchChildPersistenceFailure(rec, caught, kind) {
+  const eventOrder = noteChildEvent(rec, 'persistence-failure:' + kind);
+  if (!rec.persistError) {
+    rec.persistError = caught;
+    rec.persistErrorEventOrder = eventOrder;
+    rec.persistResolved = false;
+  }
+  return rec.persistError;
+}
+
+function confirmChildPersistence(r, rec, token) {
+  if (rec.persistError && !(r.lease.owned_children || []).some((row) => row.token === token)) {
+    rec.persistResolved = true;
+  }
+}
+
+function childTerminalError(r, rec, chunks) {
+  const primary = rec.primary || rec.failure || rec.outcome;
+  const persistenceFirst = rec.persistError
+    && (!primary || rec.persistErrorEventOrder < primary.eventOrder);
+  if (persistenceFirst) {
+    if (!rec.persistResolved) {
+      closeMutationAdmission(r, 'owned child termination evidence could not be persisted', false, true);
+    }
+    return error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child termination evidence could not be persisted.', {
+      cause: rec.persistError
+    });
+  }
+  if (!primary) return null;
+  const caught = primary.error;
+  if (primary.kind === 'child-close' && caught.code === 'TEMP_CHILD_FAILED') {
+    caught.stdout = Buffer.concat(chunks.stdout).toString('utf8');
+    caught.stderr = Buffer.concat(chunks.stderr).toString('utf8');
+  }
+  if (rec.persistError) {
+    closeMutationAdmission(r, 'owned child termination evidence could not be persisted', false, true);
+    caught.cleanupCode = 'TEMP_CLEANUP_INCOMPLETE';
+    caught.cleanupStatus = { status: 'CLEANUP_INCOMPLETE', code: 'TEMP_OWNERSHIP_UNCERTAIN' };
+    caught.cleanupCause = rec.persistError;
+  }
+  return caught;
+}
+
 function spawnProfileChild(r, profile, token, owner) {
   assertMutationOwner(r, owner);
   validateNamespace(r.ns);
@@ -1511,14 +1717,11 @@ function spawnProfileChild(r, profile, token, owner) {
     catch (cleanup) { caught.cleanupCode = cleanup.code || 'TEMP_OWNERSHIP_UNCERTAIN'; }
     throw error('TEMP_CHILD_SPAWN_FAILED', 'Owned child profile could not be spawned.', { cause: caught });
   }
-  return trackOwnedChild(r, child, childToken, owner, profile);
-}
-
-function trackOwnedChild(r, child, childToken, owner, profile) {
   const record = {
     child, pid: null, group: !win(), start: null, closed: false, termination: null,
     owner: r, token: childToken, mutationContext: owner,
-    persistError: null, operationalError: null, brokerOperations: new Set(),
+    persistError: null, persistErrorEventOrder: null, persistResolved: false,
+    primary: null, operationalError: null, brokerOperations: new Set(),
     brokerClosed: false, profile, phase: profile === 'source-update' ? 'SPAWNING' : null,
     eventOrder: 0, failure: null, outcome: null, reportSettled: false,
     terminalConsumed: false, acknowledgementAttempted: false
@@ -1545,7 +1748,7 @@ function trackOwnedChild(r, child, childToken, owner, profile) {
           caught = error('TEMP_CHILD_PROTOCOL', 'Owned child closed before its terminal report request.', { exitCode: code, signal });
         }
         if (caught) latchChildFailure(record, caught, 'child-close');
-      } else if (profile !== 'source-update' && code !== 0 && code !== null) {
+      } else if (profile !== 'source-update' && ((code !== 0 && code !== null) || signal)) {
         record.operationalError = error('TEMP_CHILD_FAILED', 'Owned child exited unsuccessfully.', { exitCode: code, signal });
         latchChildOutcome(record, record.operationalError, 'child-close');
       }
@@ -1553,8 +1756,10 @@ function trackOwnedChild(r, child, childToken, owner, profile) {
       if (record.remove) record.remove();
       if (record.removeAbort) record.removeAbort();
       if (r.mutationOwner === owner) {
-        try { clearOwnedChild(r, childToken, owner); }
-        catch (caught) { record.persistError = caught; }
+        try {
+          clearOwnedChild(r, childToken, owner);
+          confirmChildPersistence(r, record, childToken);
+        } catch (caught) { latchChildPersistenceFailure(record, caught, 'child-close-retirement'); }
       } else {
         record.ledgerClearPending = true;
       }
@@ -1599,7 +1804,7 @@ function trackOwnedChild(r, child, childToken, owner, profile) {
         phase: 'RUNNING', pid: record.pid, start_identity: record.start
       }, owner);
     } catch (caught) {
-      record.persistError = caught;
+      latchChildPersistenceFailure(record, caught, 'child-start-record');
       if (profile === 'source-update') {
         latchChildFailure(record, error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child termination evidence could not be persisted.', { cause: caught }), 'child-ledger-failure');
       }
@@ -1608,152 +1813,6 @@ function trackOwnedChild(r, child, childToken, owner, profile) {
     if (r.stop.signal.aborted) void requestStop(record);
   });
   return record;
-}
-function runDataProperties(value, allowed, label) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-      || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
-    throw error('TEMP_SPEC_INVALID', label + ' must be a plain data object.');
-  }
-  const result = Object.create(null);
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  for (const key of Reflect.ownKeys(descriptors)) {
-    const descriptor = descriptors[key];
-    if (typeof key !== 'string' || (allowed && !allowed.has(key)) || !Object.hasOwn(descriptor, 'value')) {
-      throw error('TEMP_SPEC_INVALID', label + ' contains an unsupported property.');
-    }
-    result[key] = descriptor.value;
-  }
-  return result;
-}
-
-function genericRunSpec(command, args, options) {
-  if (typeof command !== 'string' || !command || command.includes('\0')
-      || !Array.isArray(args) || Object.getPrototypeOf(args) !== Array.prototype) {
-    throw error('TEMP_SPEC_INVALID', 'Invalid child command.');
-  }
-  const descriptors = Object.getOwnPropertyDescriptors(args);
-  const argv = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const descriptor = descriptors[index];
-    if (!descriptor || !Object.hasOwn(descriptor, 'value') || typeof descriptor.value !== 'string'
-        || descriptor.value.includes('\0')) throw error('TEMP_SPEC_INVALID', 'Child arguments must be strings.');
-    argv.push(descriptor.value);
-  }
-  if (Reflect.ownKeys(descriptors).some((key) => key !== 'length'
-      && (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= args.length))) {
-    throw error('TEMP_SPEC_INVALID', 'Child arguments contain an unsupported property.');
-  }
-  const opts = options === undefined ? Object.create(null) : runDataProperties(options,
-    new Set(['cwd', 'env', 'signal', 'timeoutMs', 'maxOutputBytes']), 'Child options');
-  const timeoutMs = opts.timeoutMs === undefined ? 0 : opts.timeoutMs;
-  const maxOutputBytes = opts.maxOutputBytes === undefined ? MiB : opts.maxOutputBytes;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647
-      || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0 || maxOutputBytes > 16 * MiB
-      || (opts.cwd !== undefined && typeof opts.cwd !== 'string')
-      || (opts.signal !== undefined && !(opts.signal instanceof AbortSignal))) {
-    throw error('TEMP_SPEC_INVALID', 'Invalid child options or limits.');
-  }
-  const env = opts.env === undefined ? process.env : runDataProperties(opts.env, null, 'Child environment');
-  const projectedEnv = Object.create(null);
-  for (const [key, value] of Object.entries(env)) {
-    if (!key || key.includes('=') || key.includes('\0') || typeof value !== 'string' || value.includes('\0')) {
-      throw error('TEMP_SPEC_INVALID', 'Child environment must contain string values.');
-    }
-    if (!['TEMP', 'TMP', 'TMPDIR'].includes(key.toUpperCase())) projectedEnv[key] = value;
-  }
-  return { command, args: argv, cwd: opts.cwd, env: projectedEnv, signal: opts.signal, timeoutMs, maxOutputBytes };
-}
-
-function spawnGenericChild(r, spec, owner) {
-  assertMutationOwner(r, owner);
-  validateNamespace(r.ns);
-  validate(r);
-  const cwd = spec.cwd === undefined ? r.rp : contained(r.rp, spec.cwd);
-  dir(cwd, null, 'Child working directory');
-  const env = { ...spec.env, TEMP: r.ct, TMP: r.ct, TMPDIR: r.ct };
-  const childToken = startOwnedChild(r, owner);
-  let child;
-  try {
-    validate(r);
-    dir(cwd, null, 'Child working directory');
-    child = spawnProcess(spec.command, spec.args, {
-      cwd, env, shell: false, detached: !win(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
-    });
-  } catch (caught) {
-    try { clearOwnedChild(r, childToken, owner); }
-    catch (cleanup) { caught.cleanupCode = cleanup.code || 'TEMP_OWNERSHIP_UNCERTAIN'; }
-    throw error('TEMP_CHILD_SPAWN_FAILED', 'Owned child could not be spawned.', { cause: caught });
-  }
-  return trackOwnedChild(r, child, childToken, owner, 'generic');
-}
-
-function capturedChildOutcome(outcome, chunks) {
-  const caught = outcome.error;
-  if (outcome.kind === 'child-close' && caught.code === 'TEMP_CHILD_FAILED') {
-    caught.stdout = Buffer.concat(chunks.stdout).toString('utf8');
-    caught.stderr = Buffer.concat(chunks.stderr).toString('utf8');
-  }
-  return caught;
-}
-
-async function runGenericChild(r, spec, owner) {
-  const record = spawnGenericChild(r, spec, owner);
-  const chunks = { stdout: [], stderr: [], bytes: 0 };
-  const collect = (target, chunk) => {
-    noteChildEvent(record, 'output');
-    chunks.bytes += chunk.length;
-    if (chunks.bytes > spec.maxOutputBytes) {
-      latchChildOutcome(record, error('TEMP_BUDGET_EXCEEDED', 'Owned child output limit exceeded.'), 'output-limit');
-      void requestStop(record);
-      return;
-    }
-    target.push(chunk);
-  };
-  record.child.stdout.on('data', (chunk) => collect(chunks.stdout, chunk));
-  record.child.stderr.on('data', (chunk) => collect(chunks.stderr, chunk));
-  const cancel = () => {
-    latchChildOutcome(record, error('TEMP_CHILD_CANCELLED', 'Owned child was cancelled.'), 'cancelled');
-    void requestStop(record);
-  };
-  const signal = spec.signal;
-  if (signal) {
-    const aborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get.call(signal);
-    if (aborted) cancel();
-    else EventTarget.prototype.addEventListener.call(signal, 'abort', cancel, { once: true });
-  }
-  const timer = spec.timeoutMs ? setTimeout(() => {
-    latchChildOutcome(record, error('TEMP_CHILD_TIMEOUT', 'Owned child exceeded timeout.'), 'timeout');
-    void requestStop(record);
-  }, spec.timeoutMs) : null;
-  let first;
-  try {
-    first = await Promise.race([
-      record.done.then((exit) => ({ kind: 'close', exit })),
-      record.stopSignal.then((terminated) => ({ kind: 'stop', terminated }))
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    if (signal) EventTarget.prototype.removeEventListener.call(signal, 'abort', cancel);
-  }
-  if (first.kind === 'stop' && !first.terminated) {
-    closeMutationAdmission(r, 'owned child termination is unconfirmed', false, true);
-    const caught = record.outcome ? capturedChildOutcome(record.outcome, chunks)
-      : error('TEMP_CLEANUP_INCOMPLETE', 'Owned child termination is not confirmed.');
-    caught.cleanupCode = 'TEMP_CLEANUP_INCOMPLETE';
-    caught.cleanupStatus = { status: 'CLEANUP_INCOMPLETE', code: 'TEMP_CLEANUP_INCOMPLETE' };
-    throw caught;
-  }
-  const exit = first.kind === 'close' ? first.exit : await record.done;
-  assertMutationOwner(r, owner);
-  if (!record.closed) throw error('TEMP_CLEANUP_INCOMPLETE', 'Owned child termination is not confirmed.');
-  if (record.persistError) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child termination evidence could not be persisted.', { cause: record.persistError });
-  if (record.outcome) throw capturedChildOutcome(record.outcome, chunks);
-  if (exit.code !== 0) throw error('TEMP_CHILD_FAILED', 'Owned child exited unsuccessfully.', {
-    exitCode: exit.code, signal: exit.signal,
-    stdout: Buffer.concat(chunks.stdout).toString('utf8'), stderr: Buffer.concat(chunks.stderr).toString('utf8')
-  });
-  return { pid: record.child.pid, code: exit.code,
-    stdout: Buffer.concat(chunks.stdout).toString('utf8'), stderr: Buffer.concat(chunks.stderr).toString('utf8') };
 }
 function frameJson(value) {
   const payload = Buffer.from(JSON.stringify(value), 'utf8');
@@ -1798,7 +1857,7 @@ async function writeReservedReport(r, token, content, owner) {
   const destination = 'workspace/repo/source-watch/reviews/active-third-party-updates.md';
   const pending = destination + '.pending-' + token;
   const bytes = Buffer.from(content, 'utf8');
-  if (bytes.length > OWNED_REPORT_MAX_BYTES) throw error('TEMP_BUDGET_EXCEEDED', 'Owned report exceeds its reserved payload.');
+  if (bytes.length > OWNED_REPORT_MAX_BYTES) throw growthBudgetError(r, 'Owned report exceeds its reserved payload.');
   const target = leasePath(r, destination);
   parentDirs(r, target.parts, owner);
   const parents = snapshotParents(r, target.parts);
@@ -2145,15 +2204,8 @@ async function runCooperatingProfileAttempt(r, profile, owner) {
   await waitBrokerOperations(r, owner);
   assertMutationOwner(r, owner);
   if (!childRecord.closed) throw error('TEMP_CLEANUP_INCOMPLETE', 'Owned child termination is not confirmed.');
-  if (childRecord.failure) {
-    if (childRecord.failure.kind === 'child-close' && childRecord.failure.error.code === 'TEMP_CHILD_FAILED') {
-      childRecord.failure.error.stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      childRecord.failure.error.stderr = Buffer.concat(chunks.stderr).toString('utf8');
-    }
-    throw childRecord.failure.error;
-  }
-  if (childRecord.persistError) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child termination evidence could not be persisted.', { cause: childRecord.persistError });
-  if (childRecord.outcome) throw capturedChildOutcome(childRecord.outcome, chunks);
+  const terminalChildError = childTerminalError(r, childRecord, chunks);
+  if (terminalChildError) throw terminalChildError;
   if (childRecord.operationalError) throw error('TEMP_CHILD_OPERATIONAL_ERROR', 'Owned child reported an operational error.', { cause: childRecord.operationalError });
   if (childRecord.timedOut) throw error('TEMP_CHILD_TIMEOUT', 'Owned child exceeded the fixed 30-second deadline.');
   if (r.abort.signal.aborted) throw error('TEMP_CHILD_CANCELLED', 'Owned child was cancelled.');
@@ -2230,6 +2282,7 @@ function leaseApi(r) {
     path: (value) => { assertUsable(r); return leasePath(r, value).p; },
     mkdir: (value) => operation(r, (owner) => {
       const target = leasePath(r, value);
+      if (target.parts.length > LIMITS.depth) throw growthBudgetError(r, 'Maximum directory depth exceeded.');
       parentDirs(r, target.parts, owner);
       return ensureDir(r, target.p, target.parts.length, owner);
     }),
@@ -2249,13 +2302,6 @@ function leaseApi(r) {
       if (!isMissing(target.p)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Unlinked target reappeared.');
     }),
     copyTree: (value, options) => operation(r, (owner) => copyTree(r, value, options, owner)),
-    run: (...args) => {
-      if (args.length < 2 || args.length > 3) return Promise.reject(error('TEMP_SPEC_INVALID', 'A child command and arguments are required.'));
-      let spec;
-      try { spec = genericRunSpec(args[0], args[1], args[2]); }
-      catch (caught) { return Promise.reject(caught); }
-      return operation(r, (owner) => runGenericChild(r, spec, owner));
-    },
     runProfile,
     retain: () => {
       assertUsable(r);
@@ -2273,8 +2319,11 @@ async function stopChildren(r, owner = null) {
     const child = children[index];
     if (!results[index] || !child.closed) continue;
     if ((r.lease.owned_children || []).some((row) => row.token === child.token)) {
-      try { clearOwnedChild(r, child.token, owner); }
-      catch (caught) { child.persistError = child.persistError || caught; }
+      if (r.ownershipFenced && child.persistError && !child.persistResolved) continue;
+      try {
+        clearOwnedChild(r, child.token, owner);
+        confirmChildPersistence(r, child, child.token);
+      } catch (caught) { latchChildPersistenceFailure(child, caught, 'stop-retirement'); }
     }
   }
   for (const child of children) {
@@ -2691,8 +2740,13 @@ async function withOwnedTemp(spec, fn) {
   if (transition.status === 'RETAINED' && !primary) return value;
   if (transition.status !== 'REMOVED') {
     if (primary) {
-      primary.cleanupStatus = transition;
-      primary.cleanupCode = 'TEMP_CLEANUP_INCOMPLETE';
+      const ownershipCleanup = primary.cleanupCode === 'TEMP_CLEANUP_INCOMPLETE'
+        && primary.cleanupStatus && primary.cleanupStatus.status === 'CLEANUP_INCOMPLETE'
+        && primary.cleanupStatus.code === 'TEMP_OWNERSHIP_UNCERTAIN';
+      if (!ownershipCleanup) {
+        primary.cleanupStatus = transition;
+        primary.cleanupCode = 'TEMP_CLEANUP_INCOMPLETE';
+      }
       throw primary;
     }
     if (transition.retentionError) {

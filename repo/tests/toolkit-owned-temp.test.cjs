@@ -47,6 +47,27 @@ function usage() {
   };
 }
 
+function findDurableRecord(records, claimId, claimPath) {
+  return records.find((record) => record.claimId === claimId || record.claimPath === claimPath);
+}
+
+async function copyPortabilityRepo(lease) {
+  await lease.copyTree(repoRoot, {
+    filter(source) {
+      const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
+      if (!rel) return true;
+      return (
+        rel === 'repo' ||
+        rel === 'repo/scripts' ||
+        rel === 'repo/scripts/audit-skill-portability.cjs' ||
+        rel === 'skills' ||
+        rel === 'skills/windows-local-dev-services' ||
+        rel.startsWith('skills/windows-local-dev-services/')
+      );
+    }
+  });
+}
+
 async function assertClean(promise) {
   await promise;
   assert.deepEqual(usage(), { records: 0, outstandingReservationsBytes: 0, retainedRoots: 0 });
@@ -296,6 +317,620 @@ test('owned-temp schema defines strict public and private record contracts', () 
     retainedBytes: 64 * 1024 * 1024,
     retainedMs: 24 * 60 * 60 * 1000
   });
+});
+
+test('canonical AJV 2020 options reject lossy records and validator loss fails closed', async () => {
+  const missingValidator = [
+    "const Module=require('node:module');",
+    'const load=Module._load;',
+    "Module._load=function(request,parent,isMain){if(request==='ajv/dist/2020'){const caught=new Error('validator unavailable');caught.code='MODULE_NOT_FOUND';throw caught;}return load.call(this,request,parent,isMain);};",
+    'try{require(' + JSON.stringify(runtimePath) + ');process.stdout.write(\'LOADED\');}',
+    "catch(caught){process.stdout.write(caught.code||'UNKNOWN');}"
+  ].join('\n');
+  const unavailable = await helper(null, missingValidator);
+  assert.equal(unavailable.code, 0, unavailable.stderr);
+  assert.equal(unavailable.stdout, 'TEMP_SCHEMA_INVALID');
+
+  const source = fs.readFileSync(runtimePath, 'utf8');
+  for (const option of [
+    'strict: true',
+    'strictTypes: false',
+    'coerceTypes: false',
+    'useDefaults: false',
+    'removeAdditional: false'
+  ]) assert.ok(source.includes(option), 'missing canonical AJV option ' + option);
+  assert.equal(source.includes('strict: false'), false, 'global AJV strict mode must remain enabled');
+
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const invalidDateTime = expiresAt.replace('T', ' ');
+  await assert.rejects(withOwnedTemp(spec('f1-invalid-date-time', {
+    retention: { reason: 'invalid date-time control', owner: 'toolkit-owned-temp-test', maxBytes: 32, expiresAt: invalidDateTime }
+  }), async () => assert.fail('invalid retention date-time reached callback')), errorCode('TEMP_SPEC_INVALID'));
+});
+
+test('cached namespace marker rereads fail closed across inspection, recovery, and admission', async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-cached-namespace-'));
+  const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+  const code = [
+    "const fs=require('node:fs');",
+    "const path=require('node:path');",
+    "const runtime=require(" + JSON.stringify(runtimePath) + ");",
+    "const repoRoot=" + JSON.stringify(repoRoot) + ';',
+    "const spec={schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1-cached-namespace'};",
+    "async function main(){await runtime.withOwnedTemp(spec,async()=>{});const markerPath=path.join(process.env.TEMP,'.ai-agent-toolkit-owned-temp-v1','namespace.json');const original=fs.readFileSync(markerPath,'utf8');const malformed=JSON.parse(original);malformed.evidenceDisposition='hold';fs.writeFileSync(markerPath,JSON.stringify(malformed));let inspectCode=null,recoveryCode=null,admissionCode=null,callbackReached=false;try{runtime.inspectOwnedTemps();}catch(error){inspectCode=error.code;}try{await runtime.recoverStaleOwnedTemps();}catch(error){recoveryCode=error.code;}try{await runtime.withOwnedTemp({...spec,episode:'f1-cached-namespace-admission'},async()=>{callbackReached=true;});}catch(error){admissionCode=error.code;}fs.writeFileSync(markerPath,original);const recovered=await runtime.recoverStaleOwnedTemps();const inspected=runtime.inspectOwnedTemps();process.stdout.write(JSON.stringify({inspectCode,recoveryCode,admissionCode,callbackReached,recoveredCount:recovered.length,recordCount:inspected.records.length}));}",
+    "main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+  ].join('\n');
+  try {
+    const result = await helper(null, code, { env });
+    assert.equal(result.code, 0, result.stderr);
+    const state = JSON.parse(result.stdout);
+    assert.equal(state.inspectCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.recoveryCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.admissionCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.callbackReached, false);
+    assert.equal(state.recoveredCount, 0);
+    assert.equal(state.recordCount, 0);
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('active namespace marker tampering blocks lease writes and terminal cleanup', async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-active-namespace-'));
+  const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+  const code = [
+    "const fs=require('node:fs');",
+    "const path=require('node:path');",
+    "const runtime=require(" + JSON.stringify(runtimePath) + ");",
+    "const repoRoot=" + JSON.stringify(repoRoot) + ';',
+    "const spec={schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1-active-namespace'};",
+    "async function main(){let root=null,claimId=null,markerPath=null,original=null,writeCode=null,outerCode=null,cleanupStatus=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===root);claimId=row.claimId;markerPath=path.join(process.env.TEMP,'.ai-agent-toolkit-owned-temp-v1','namespace.json');original=fs.readFileSync(markerPath,'utf8');const malformed=JSON.parse(original);malformed.evidenceDisposition='hold';fs.writeFileSync(markerPath,JSON.stringify(malformed));try{await lease.writeFile('must-not-exist.txt','blocked');}catch(error){writeCode=error.code;}});}catch(error){outerCode=error.code;cleanupStatus=error.cleanupStatus||null;}if(original)fs.writeFileSync(markerPath,original);const leasePath=path.join(process.env.TEMP,'.ai-agent-toolkit-owned-temp-v1','claims',claimId+'.lease.json');if(fs.existsSync(leasePath)){const leaseRecord=JSON.parse(fs.readFileSync(leasePath,'utf8'));leaseRecord.lease_expires_at_ms=Date.now()-1;fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));}process.stdout.write(JSON.stringify({root,claimId,writeCode,outerCode,cleanupStatus,rootExists:fs.existsSync(root),fileExists:fs.existsSync(path.join(root,'must-not-exist.txt'))}));}",
+    "main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+  ].join('\n');
+  try {
+    const created = await helper(null, code, { env });
+    assert.equal(created.code, 0, created.stderr);
+    const state = JSON.parse(created.stdout);
+    assert.equal(state.writeCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.outerCode, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.ok(state.cleanupStatus);
+    assert.equal(state.rootExists, true);
+    assert.equal(state.fileExists, false);
+    const recovered = await helper(null, recoveryCode(), { env, timeoutMs: 60000 });
+    assert.equal(recovered.code, 0, recovered.stderr);
+    const rows = JSON.parse(recovered.stdout);
+    assert.equal(rows.find((row) => row.claimId === state.claimId).status, 'REMOVED');
+    assert.equal(fs.existsSync(state.root), false);
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('public durable inventory, recovery, and admission hold unknown evidenceDisposition fields', async () => {
+  const baseline = usage();
+  await runOwned(spec('f1-unknown-durable-field'), async (lease) => {
+    await lease.writeFile('keep.txt', 'preserve');
+    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+    const base = path.dirname(path.dirname(lease.root));
+    const claimPath = path.join(base, 'claims', row.claimId + '.claim.json');
+    const leasePath = path.join(base, 'claims', row.claimId + '.lease.json');
+    const original = fs.readFileSync(leasePath, 'utf8');
+    const malformed = JSON.parse(original);
+    malformed.evidenceDisposition = 'hold';
+    try {
+      fs.writeFileSync(leasePath, JSON.stringify(malformed));
+      const inspected = findDurableRecord(inspectOwnedTemps().records, row.claimId, claimPath);
+      assert.equal(inspected.state, 'HOLD');
+      assert.equal(inspected.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+      const recovered = await recoverStaleOwnedTemps();
+      const heldRecovery = findDurableRecord(recovered, row.claimId, claimPath);
+      assert.equal(heldRecovery.status, 'HOLD');
+      assert.equal(heldRecovery.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+      assert.equal(fs.readFileSync(lease.path('keep.txt'), 'utf8'), 'preserve');
+      assert.equal(fs.existsSync(lease.root), true);
+
+      let callbackReached = false;
+      await assert.rejects(withOwnedTemp(spec('f1-unknown-field-admission'), async () => {
+        callbackReached = true;
+      }), errorCode('TEMP_CAPACITY_UNKNOWN'));
+      assert.equal(callbackReached, false);
+    } finally {
+      fs.writeFileSync(leasePath, original);
+    }
+  });
+  assert.deepEqual(usage(), baseline);
+});
+
+test('retention schema and cross-record bounds hold malformed snapshots and recover valid expiry', async () => {
+  const baseline = usage();
+  const expiresAt = new Date(Date.now() + 60000).toISOString();
+  await runOwned(spec('f1-retention-record', {
+    retention: { reason: 'F1 public recovery evidence', owner: 'toolkit-owned-temp-test', maxBytes: 32, expiresAt }
+  }), async (lease) => {
+    await lease.writeFile('evidence.txt', 'retained evidence');
+    lease.retain();
+  });
+
+  const row = inspectOwnedTemps().records.find((record) => record.episode === 'f1-retention-record');
+  assert.ok(row && row.retained);
+  const base = path.dirname(path.dirname(row.rootPath));
+  const claimPath = path.join(base, 'claims', row.claimId + '.claim.json');
+  const leasePath = path.join(base, 'claims', row.claimId + '.lease.json');
+  const originalClaim = fs.readFileSync(claimPath, 'utf8');
+  const original = fs.readFileSync(leasePath, 'utf8');
+  const originalLease = JSON.parse(original);
+  const variants = [
+    ['retention byte type', (lease) => { lease.retention.bytes = '1'; }],
+    ['retention byte bounds', (lease) => { lease.retention.bytes = lease.retention.max_bytes + 1; }],
+    ['retention maximum bounds', (lease) => { lease.retention.max_bytes = LIMITS.retainedBytes + 1; }],
+    ['retention lifecycle state', (lease) => { lease.status = 'ACTIVE'; }]
+  ];
+
+  try {
+    for (const [label, mutate] of variants) {
+      const malformed = JSON.parse(original);
+      mutate(malformed);
+      fs.writeFileSync(leasePath, JSON.stringify(malformed));
+      const inspected = findDurableRecord(inspectOwnedTemps().records, row.claimId, claimPath);
+      assert.equal(inspected.state, 'HOLD', label);
+      assert.equal(inspected.code, 'TEMP_OWNERSHIP_UNCERTAIN', label);
+      const recovered = await recoverStaleOwnedTemps();
+      const heldRecovery = findDurableRecord(recovered, row.claimId, claimPath);
+      assert.equal(heldRecovery.status, 'HOLD', label);
+      assert.equal(heldRecovery.code, 'TEMP_OWNERSHIP_UNCERTAIN', label);
+      assert.equal(fs.existsSync(row.rootPath), true, label);
+      assert.equal(fs.readFileSync(path.join(row.rootPath, 'evidence.txt'), 'utf8'), 'retained evidence', label);
+      fs.writeFileSync(leasePath, original);
+    }
+
+    const claim = JSON.parse(fs.readFileSync(claimPath, 'utf8'));
+    claim.namespace_id = '0'.repeat(32);
+    fs.writeFileSync(claimPath, JSON.stringify(claim));
+    assert.equal(findDurableRecord(inspectOwnedTemps().records, row.claimId, claimPath).state, 'HOLD');
+    assert.equal(findDurableRecord(await recoverStaleOwnedTemps(), row.claimId, claimPath).status, 'HOLD');
+    assert.equal(fs.existsSync(row.rootPath), true);
+  } finally {
+    fs.writeFileSync(leasePath, original);
+    fs.writeFileSync(claimPath, originalClaim);
+    const retainedExpiry = originalLease.retention.expires_at_ms;
+    const originalNow = Date.now;
+    try {
+      Date.now = () => retainedExpiry + 1;
+      await recoverStaleOwnedTemps();
+    } finally {
+      Date.now = originalNow;
+    }
+  }
+  assert.equal(inspectOwnedTemps().records.some((record) => record.claimId === row.claimId), false);
+  assert.deepEqual(usage(), baseline);
+});
+
+test('stale recovery validates a lease malformed after its valid first read', async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-reread-'));
+  const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+  let root;
+  let leasePath;
+  let originalLease;
+  try {
+    const created = await helper(null, staleChildCode(false), { env });
+    assert.equal(created.code, 0, created.stderr);
+    root = JSON.parse(created.stdout.trim()).root;
+    const claimId = path.basename(root).slice('root-'.length);
+    const base = path.dirname(path.dirname(root));
+    const claimPath = path.join(base, 'claims', claimId + '.claim.json');
+    leasePath = path.join(base, 'claims', claimId + '.lease.json');
+    originalLease = fs.readFileSync(leasePath, 'utf8');
+    const malformedLease = JSON.stringify({ ...JSON.parse(originalLease), after_first_read: true });
+    const recoveryWithMalformedReread = modulePrelude() + [
+      'const target=path.resolve(' + JSON.stringify(leasePath) + ');',
+      'const originalOpen=fs.openSync,originalRead=fs.readSync,originalWrite=fs.writeSync,originalFtruncate=fs.ftruncateSync,originalClose=fs.closeSync;',
+      'const targetFds=new Set();let mutated=false;',
+      'fs.openSync=function(filePath,...args){const fd=originalOpen.call(this,filePath,...args);if(path.resolve(String(filePath))===target)targetFds.add(fd);return fd;};',
+      'fs.readSync=function(fd,...args){const count=originalRead.call(this,fd,...args);if(!mutated&&targetFds.has(fd)){mutated=true;const bytes=Buffer.from(' + JSON.stringify(malformedLease) + ');const writer=originalOpen.call(fs,target,fs.constants.O_WRONLY|fs.constants.O_TRUNC);try{originalWrite.call(fs,writer,bytes,0,bytes.length,0);originalFtruncate.call(fs,writer,bytes.length);}finally{originalClose.call(fs,writer);}}return count;};',
+      'runtime.recoverStaleOwnedTemps().then(rows=>process.stdout.write(JSON.stringify({rows,mutated,rootExists:fs.existsSync(' + JSON.stringify(root) + '),leaseExists:fs.existsSync(target)}))).catch(caught=>{process.stderr.write(String(caught));process.exitCode=1;});'
+    ].join('\n');
+    const result = await helper(null, recoveryWithMalformedReread, { env, timeoutMs: 60000 });
+    assert.equal(result.code, 0, result.stderr);
+    const state = JSON.parse(result.stdout);
+    assert.equal(state.mutated, true, 'the first lease read must complete before bytes change');
+    const held = findDurableRecord(state.rows, claimId, claimPath);
+    assert.ok(held, JSON.stringify(state.rows));
+    assert.equal(held.status, 'HOLD');
+    assert.equal(held.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.rootExists, true);
+    assert.equal(state.leaseExists, true);
+  } finally {
+    if (originalLease && leasePath && fs.existsSync(leasePath)) fs.writeFileSync(leasePath, originalLease);
+    if (fs.existsSync(probeRoot)) {
+      const recovered = await helper(null, recoveryCode(), { env, timeoutMs: 60000 });
+      assert.equal(recovered.code, 0, recovered.stderr);
+      const inspected = await helper(null, modulePrelude()
+        + '\nprocess.stdout.write(JSON.stringify(runtime.inspectOwnedTemps()));', { env, timeoutMs: 30000 });
+      assert.equal(inspected.code, 0, inspected.stderr);
+      const remaining = JSON.parse(inspected.stdout);
+      const namespace = path.join(probeRoot, '.ai-agent-toolkit-owned-temp-v1');
+      const claims = path.join(namespace, 'claims');
+      const roots = path.join(namespace, 'roots');
+      if (remaining.records.length === 0
+          && fs.existsSync(claims) && fs.readdirSync(claims).length === 0
+          && fs.existsSync(roots) && fs.readdirSync(roots).length === 0
+          && (!root || !fs.existsSync(root))) {
+        fs.rmSync(probeRoot, { recursive: true, force: true });
+      } else {
+        throw new Error('F1 reread namespace did not return to an empty verified state.');
+      }
+    }
+  }
+});
+
+test('malformed orphan leases are held before public recovery or admission', async () => {
+  const baseline = usage();
+  await runOwned(spec('f1-malformed-orphan'), async (lease) => {
+    await lease.writeFile('keep.txt', 'preserve');
+    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+    const base = path.dirname(path.dirname(lease.root));
+    const leasePath = path.join(base, 'claims', row.claimId + '.lease.json');
+    const originalLease = fs.readFileSync(leasePath, 'utf8');
+    const orphanId = crypto.randomBytes(16).toString('hex');
+    const orphanPath = path.join(base, 'claims', orphanId + '.lease.json');
+    const orphan = JSON.parse(originalLease);
+    Object.assign(orphan, {
+      claim_id: orphanId,
+      status: 'REMOVED',
+      root_identity: null,
+      root_marker_identity: null,
+      marker_identity: null,
+      root_marker_removed: true,
+      root_removed: true,
+      metadata_cleanup_phase: 'CLAIM_REMOVAL_PENDING',
+      bytes_reserved: 0,
+      retention: null,
+      owned_children: []
+    });
+    orphan.evidenceDisposition = 'hold';
+    try {
+      fs.writeFileSync(orphanPath, JSON.stringify(orphan));
+      assert.equal(findDurableRecord(inspectOwnedTemps().records, orphanId, orphanPath).state, 'HOLD');
+      const recovered = await recoverStaleOwnedTemps();
+      const recoveryHold = findDurableRecord(recovered, orphanId, orphanPath);
+      assert.equal(recoveryHold.status, 'HOLD');
+      assert.equal(recoveryHold.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+      assert.equal(fs.existsSync(orphanPath), true);
+      let callbackReached = false;
+      await assert.rejects(withOwnedTemp(spec('f1-orphan-admission'), async () => {
+        callbackReached = true;
+      }), errorCode('TEMP_CAPACITY_UNKNOWN'));
+      assert.equal(callbackReached, false);
+      assert.equal(fs.readFileSync(lease.path('keep.txt'), 'utf8'), 'preserve');
+      assert.equal(fs.existsSync(lease.root), true);
+    } finally {
+      if (fs.existsSync(orphanPath)) fs.unlinkSync(orphanPath);
+      fs.writeFileSync(leasePath, originalLease);
+    }
+  });
+  assert.deepEqual(usage(), baseline);
+});
+
+test('F2-N1..N7 preserve child-close primary across failed ledger retirement and fence recovery', async () => {
+  const baseline = usage();
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f2-child-repo-'));
+  const childScript = path.join(childRepoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
+  fs.mkdirSync(path.dirname(childScript), { recursive: true });
+  fs.writeFileSync(childScript, [
+    "process.stdout.write('F2_STDOUT_MARKER\\n');",
+    "process.stderr.write('F2_STDERR_MARKER\\n');",
+    'process.exitCode = 1;'
+  ].join('\n'));
+  try {
+    const code = [
+      "const fs=require('node:fs');",
+      "const path=require('node:path');",
+      "const runtime=require(" + JSON.stringify(runtimePath) + ");",
+      "const repoRoot=" + JSON.stringify(childRepoRoot) + ';',
+      "const spec={schema:runtime.SPEC_SCHEMA,purpose:'portability',repoRoot,episode:'f2-primary-retirement',budgetBytes:16*1024*1024};",
+      "const originalStatfs=fs.statfsSync;fs.statfsSync=()=>({bavail:16n*1024n*1024n*1024n,bsize:1n});",
+      "const originalRename=fs.renameSync;const ChildProcess=require('node:child_process').ChildProcess;const originalEmit=ChildProcess.prototype.emit;",
+      "let root=null,claimId=null,leasePath=null,closeSeen=false,ledgerFailureInjected=false;",
+      "ChildProcess.prototype.emit=function(event,...args){",
+      "const profileChild=Array.isArray(this.spawnargs)&&this.spawnargs.some(value=>String(value).includes('audit-skill-portability.cjs'));",
+      "const trigger=event==='close'&&profileChild&&!closeSeen;",
+      "if(trigger){closeSeen=true;fs.renameSync=function(from,to,...renameArgs){if(!ledgerFailureInjected&&path.resolve(String(to))===path.resolve(leasePath)){ledgerFailureInjected=true;throw Object.assign(new Error('injected child ledger retirement failure'),{code:'EIO'});}return originalRename.call(this,from,to,...renameArgs);};}",
+      "try{return originalEmit.call(this,event,...args);}finally{if(trigger)fs.renameSync=originalRename;}",
+      "};",
+      "async function main(){let captured=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===root);claimId=row.claimId;const base=path.dirname(path.dirname(root));leasePath=path.join(base,'claims',claimId+'.lease.json');await lease.runProfile('skill-portability');});captured={code:'SUCCESS'};}catch(error){captured={code:error.code,exitCode:error.exitCode,signal:error.signal,stdout:error.stdout,stderr:error.stderr,cleanupCode:error.cleanupCode,cleanupStatus:error.cleanupStatus||null,cleanupCauseCode:error.cleanupCause&&error.cleanupCause.code,cleanupCauseOriginalCode:error.cleanupCause&&error.cleanupCause.cause&&error.cleanupCause.cause.code};}finally{ChildProcess.prototype.emit=originalEmit;fs.renameSync=originalRename;fs.statfsSync=originalStatfs;}const row=runtime.inspectOwnedTemps().records.find(value=>value.claimId===claimId);captured.root=root;captured.claimId=claimId;captured.closeSeen=closeSeen;captured.ledgerFailureInjected=ledgerFailureInjected;captured.rootExists=!!root&&fs.existsSync(root);captured.leaseExists=!!leasePath&&fs.existsSync(leasePath);captured.rowState=row&&row.state;if(leasePath&&fs.existsSync(leasePath)){const durableLease=JSON.parse(fs.readFileSync(leasePath,'utf8'));durableLease.lease_expires_at_ms=Date.now()-1;fs.writeFileSync(leasePath,JSON.stringify(durableLease));}process.stdout.write(JSON.stringify(captured)+'\\n');}",
+      "main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+    ].join('\n');
+    const result = await helper(null, code);
+    assert.equal(result.code, 0, result.stderr);
+    const state = JSON.parse(result.stdout.trim());
+    const recovered = await recoverStaleOwnedTemps();
+    assert.equal(state.closeSeen, true, 'F2-N1 fault is ordered at real child close');
+    assert.equal(state.ledgerFailureInjected, true, 'F2-N1 fault hits durable lease retirement');
+    assert.equal(state.code, 'TEMP_CHILD_FAILED', 'F2-N1 child failure remains primary');
+    assert.equal(state.exitCode, 1, 'F2-N2 exit code remains primary');
+    assert.equal(state.signal, null, 'F2-N3 signal remains primary');
+    assert.match(state.stdout, /F2_STDOUT_MARKER/, 'F2-N4 stdout remains available: ' + JSON.stringify(state));
+    assert.match(state.stderr, /F2_STDERR_MARKER/, 'F2-N5 stderr remains available: ' + JSON.stringify(state));
+    assert.equal(state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE', 'F2-N6 retirement failure is secondary cleanup state');
+    assert.deepEqual(state.cleanupStatus, { status: 'CLEANUP_INCOMPLETE', code: 'TEMP_OWNERSHIP_UNCERTAIN' });
+    assert.equal(state.cleanupCauseCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.cleanupCauseOriginalCode, 'EIO');
+    assert.equal(state.rootExists, true, 'F2-N7 ownership fence preserves the root');
+    assert.equal(state.leaseExists, true, 'F2-N7 durable child evidence is retained for recovery');
+    assert.ok(recovered.some((record) => record.claimId === state.claimId && record.status === 'REMOVED'));
+    assert.deepEqual(usage(), baseline);
+  } finally {
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
+});
+test('F2 signaled portability child failure remains primary across failed ledger retirement', async () => {
+  const baseline = usage();
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f2-signal-repo-'));
+  const childScript = path.join(childRepoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
+  fs.mkdirSync(path.dirname(childScript), { recursive: true });
+  fs.writeFileSync(childScript, [
+    "process.stdout.write('F2_SIGNAL_STDOUT_MARKER\\n');",
+    "process.stderr.write('F2_SIGNAL_STDERR_MARKER\\n');",
+    "if(process.platform==='win32')process.exitCode=1;else process.kill(process.pid,'SIGTERM');"
+  ].join('\n'));
+  try {
+    const code = [
+      "const fs=require('node:fs');",
+      "const path=require('node:path');",
+      "const runtime=require(" + JSON.stringify(runtimePath) + ");",
+      "const repoRoot=" + JSON.stringify(childRepoRoot) + ';',
+      "const spec={schema:runtime.SPEC_SCHEMA,purpose:'portability',repoRoot,episode:'f2-signaled-primary-retirement',budgetBytes:16*1024*1024};",
+      "const originalStatfs=fs.statfsSync;fs.statfsSync=()=>({bavail:16n*1024n*1024n*1024n,bsize:1n});",
+      "const originalRename=fs.renameSync;const ChildProcess=require('node:child_process').ChildProcess;const originalEmit=ChildProcess.prototype.emit;",
+      "let root=null,claimId=null,leasePath=null,closeSeen=false,ledgerFailureInjected=false;",
+      "ChildProcess.prototype.emit=function(event,...args){const profileChild=Array.isArray(this.spawnargs)&&this.spawnargs.some(value=>String(value).includes('audit-skill-portability.cjs'));const trigger=event==='close'&&profileChild&&!closeSeen;if(trigger){closeSeen=true;fs.renameSync=function(from,to,...renameArgs){if(!ledgerFailureInjected&&path.resolve(String(to))===path.resolve(leasePath)){ledgerFailureInjected=true;throw Object.assign(new Error('injected signaled-child ledger retirement failure'),{code:'EIO'});}return originalRename.call(this,from,to,...renameArgs);};}const deliveredArgs=trigger&&process.platform==='win32'?[null,'SIGTERM']:args;try{return originalEmit.call(this,event,...deliveredArgs);}finally{if(trigger)fs.renameSync=originalRename;}};",
+      "async function main(){let captured=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===root);claimId=row.claimId;const base=path.dirname(path.dirname(root));leasePath=path.join(base,'claims',claimId+'.lease.json');await lease.runProfile('skill-portability');});captured={code:'SUCCESS'};}catch(error){captured={code:error.code,exitCode:error.exitCode,signal:error.signal,stdout:error.stdout,stderr:error.stderr,cleanupCode:error.cleanupCode,cleanupStatus:error.cleanupStatus||null,cleanupCauseOriginalCode:error.cleanupCause&&error.cleanupCause.cause&&error.cleanupCause.cause.code};}finally{ChildProcess.prototype.emit=originalEmit;fs.renameSync=originalRename;fs.statfsSync=originalStatfs;}const row=runtime.inspectOwnedTemps().records.find(value=>value.claimId===claimId);captured.claimId=claimId;captured.closeSeen=closeSeen;captured.ledgerFailureInjected=ledgerFailureInjected;captured.rootExists=!!root&&fs.existsSync(root);captured.leaseExists=!!leasePath&&fs.existsSync(leasePath);if(leasePath&&fs.existsSync(leasePath)){const durableLease=JSON.parse(fs.readFileSync(leasePath,'utf8'));durableLease.lease_expires_at_ms=Date.now()-1;fs.writeFileSync(leasePath,JSON.stringify(durableLease));}captured.rowState=row&&row.state;process.stdout.write(JSON.stringify(captured)+'\\n');}main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+    ].join('\n');
+    const result = await helper(null, code, { timeoutMs: 60000 });
+    assert.equal(result.code, 0, result.stderr);
+    const state = JSON.parse(result.stdout.trim());
+    const recovered = await recoverStaleOwnedTemps();
+    assert.equal(state.closeSeen, true);
+    assert.equal(state.ledgerFailureInjected, true);
+    assert.equal(state.code, 'TEMP_CHILD_FAILED');
+    assert.equal(state.exitCode, null);
+    assert.equal(state.signal, 'SIGTERM');
+    assert.match(state.stdout, /F2_SIGNAL_STDOUT_MARKER/);
+    assert.match(state.stderr, /F2_SIGNAL_STDERR_MARKER/);
+    assert.equal(state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.deepEqual(state.cleanupStatus, { status: 'CLEANUP_INCOMPLETE', code: 'TEMP_OWNERSHIP_UNCERTAIN' });
+    assert.equal(state.cleanupCauseOriginalCode, 'EIO');
+    assert.equal(state.rootExists, true);
+    assert.equal(state.leaseExists, true);
+    assert.ok(recovered.some((record) => record.claimId === state.claimId && record.status === 'REMOVED'));
+    assert.deepEqual(usage(), baseline);
+  } finally {
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
+});
+
+test('F2-P1..P3 keep clean retirement successful and ownership-first failure primary', async () => {
+  await runOwned(spec('f2-clean-retirement', { purpose: 'portability', budgetBytes: 16 * 1024 * 1024 }), async (lease) => {
+    await copyPortabilityRepo(lease);
+    const result = await lease.runProfile('skill-portability');
+    assert.equal(result.code, 0, result.stderr);
+  });
+
+  const baseline = usage();
+  const code = [
+    "const fs=require('node:fs');",
+    "const path=require('node:path');",
+    "const runtime=require(" + JSON.stringify(runtimePath) + ");",
+    "const repoRoot=" + JSON.stringify(repoRoot) + ';',
+    "const spec={schema:runtime.SPEC_SCHEMA,purpose:'portability',repoRoot,episode:'f2-persistence-first',budgetBytes:1024};",
+    "const originalStatfs=fs.statfsSync;fs.statfsSync=()=>({bavail:16n*1024n*1024n*1024n,bsize:1n});",
+    "const originalRename=fs.renameSync;const ChildProcess=require('node:child_process').ChildProcess;const originalEmit=ChildProcess.prototype.emit;",
+    "let root=null,claimId=null,leasePath=null,spawnSeen=false,ledgerFailureInjected=false;",
+    "ChildProcess.prototype.emit=function(event,...args){",
+    "const profileChild=Array.isArray(this.spawnargs)&&this.spawnargs.some(value=>String(value).includes('audit-skill-portability.cjs'));",
+    "const trigger=event==='spawn'&&profileChild&&!spawnSeen;",
+    "if(trigger){spawnSeen=true;fs.renameSync=function(from,to,...renameArgs){if(!ledgerFailureInjected&&path.resolve(String(to))===path.resolve(leasePath)){ledgerFailureInjected=true;throw Object.assign(new Error('injected pre-primary child ledger failure'),{code:'EIO'});}return originalRename.call(this,from,to,...renameArgs);};}",
+    "try{return originalEmit.call(this,event,...args);}finally{if(trigger)fs.renameSync=originalRename;}",
+    "};",
+    "async function main(){let captured=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===root);claimId=row.claimId;const base=path.dirname(path.dirname(root));leasePath=path.join(base,'claims',claimId+'.lease.json');await lease.runProfile('skill-portability');});captured={code:'SUCCESS'};}catch(error){captured={code:error.code,causeCode:error.cause&&error.cause.code,causeOriginalCode:error.cause&&error.cause.cause&&error.cause.cause.code,cleanupCode:error.cleanupCode};}finally{ChildProcess.prototype.emit=originalEmit;fs.renameSync=originalRename;fs.statfsSync=originalStatfs;}captured.root=root;captured.claimId=claimId;captured.spawnSeen=spawnSeen;captured.ledgerFailureInjected=ledgerFailureInjected;captured.rootExists=!!root&&fs.existsSync(root);process.stdout.write(JSON.stringify(captured)+'\\n');}",
+    "main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+  ].join('\n');
+  const result = await helper(null, code);
+  assert.equal(result.code, 0, result.stderr);
+  const state = JSON.parse(result.stdout.trim());
+  const recovered = await recoverStaleOwnedTemps();
+  assert.equal(state.spawnSeen, true);
+  assert.equal(state.ledgerFailureInjected, true);
+  assert.equal(state.code, 'TEMP_OWNERSHIP_UNCERTAIN', 'F2-P2 persistence failure before a child primary remains primary');
+  assert.equal(state.causeCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+  assert.equal(state.causeOriginalCode, 'EIO');
+  assert.equal(state.rootExists, false, 'F2-P3 confirmed child retirement permits cleanup after the primary is preserved');
+  assert.equal(recovered.some((record) => record.claimId === state.claimId), false);
+  assert.deepEqual(usage(), baseline);
+});
+
+test('F3-N1..N3 poison later public growth after mkdir, file-size, and append-size limits', async () => {
+  const baseline = usage();
+  const deepPath = Array(LIMITS.depth + 1).fill('d').join('/');
+  const tooLarge = Buffer.alloc(LIMITS.file + 1);
+  await runOwned(spec('f3-depth-poison'), async (lease) => {
+    await assert.rejects(lease.mkdir(deepPath), errorCode('TEMP_BUDGET_EXCEEDED'));
+    await assert.rejects(lease.writeFile('after-depth.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    assert.equal(fs.existsSync(path.join(lease.root, 'd')), false);
+    assert.equal(fs.existsSync(path.join(lease.root, 'after-depth.txt')), false);
+  });
+
+  await runOwned(spec('f3-file-size-poison'), async (lease) => {
+    await assert.rejects(lease.writeFile('nested/too-large.bin', tooLarge), errorCode('TEMP_BUDGET_EXCEEDED'));
+    await assert.rejects(lease.mkdir('after-file-limit'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    assert.equal(fs.existsSync(path.join(lease.root, 'nested')), false);
+    assert.equal(fs.existsSync(path.join(lease.root, 'after-file-limit')), false);
+  });
+
+  await runOwned(spec('f3-append-size-poison', { budgetBytes: 2 }), async (lease) => {
+    const target = lease.path('append.txt');
+    await lease.writeFile('append.txt', 'x');
+    const originalLstat = fs.lstatSync;
+    try {
+      fs.lstatSync = function (filePath, ...args) {
+        if (path.resolve(String(filePath)) !== path.resolve(target)) return originalLstat.call(this, filePath, ...args);
+        const stats = originalLstat.call(this, filePath, ...args);
+        return {
+          dev: stats.dev, ino: stats.ino, size: BigInt(LIMITS.file),
+          isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false
+        };
+      };
+      await assert.rejects(lease.appendFile('append.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    } finally {
+      fs.lstatSync = originalLstat;
+    }
+    await assert.rejects(lease.writeFile('after-append-limit.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    assert.equal(fs.readFileSync(target, 'utf8'), 'x');
+    assert.equal(fs.existsSync(path.join(lease.root, 'after-append-limit.txt')), false);
+  });
+  assert.deepEqual(usage(), baseline);
+});
+
+test('F3-N4..N7 poison copy-plan depth, entry, file-size, and destination-reservation failures', async () => {
+  const baseline = usage();
+  const runCopyFailure = async (episode, source, beforeCopy = null, budgetBytes = 1024) => {
+    await runOwned(spec(episode, { budgetBytes }), async (lease) => {
+      if (beforeCopy) await beforeCopy(lease);
+      await assert.rejects(lease.copyTree(source), errorCode('TEMP_BUDGET_EXCEEDED'));
+      await assert.rejects(lease.writeFile('after-copy-limit.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+      assert.equal(fs.existsSync(path.join(lease.root, 'after-copy-limit.txt')), false);
+    });
+  };
+
+  const deepSource = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f3-copy-depth-'));
+  const entrySource = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f3-copy-entries-'));
+  const fileSource = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f3-copy-file-'));
+  const smallSource = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f3-copy-reservation-'));
+  const originalReaddir = fs.readdirSync;
+  const originalLstat = fs.lstatSync;
+  try {
+    let cursor = deepSource;
+    for (let index = 0; index <= LIMITS.depth; index += 1) {
+      cursor = path.join(cursor, 'd');
+      fs.mkdirSync(cursor);
+    }
+    await runCopyFailure('f3-copy-depth', deepSource);
+
+    fs.writeFileSync(path.join(entrySource, 'placeholder'), 'x');
+    await runOwned(spec('f3-copy-entry-poison'), async (lease) => {
+      try {
+        fs.readdirSync = function (directory, ...args) {
+          if (path.resolve(String(directory)) === path.resolve(entrySource)) {
+            return Array.from({ length: LIMITS.entries + 1 }, (_, index) => 'f' + index);
+          }
+          return originalReaddir.call(this, directory, ...args);
+        };
+        fs.lstatSync = function (filePath, ...args) {
+          const absolute = path.resolve(String(filePath));
+          if (path.dirname(absolute) === path.resolve(entrySource)) {
+            const index = Number(path.basename(absolute).slice(1));
+            return { dev: 1n, ino: BigInt(index + 1), size: 0n,
+              isSymbolicLink: () => false, isFile: () => true, isDirectory: () => false };
+          }
+          return originalLstat.call(this, filePath, ...args);
+        };
+        await assert.rejects(lease.copyTree(entrySource), errorCode('TEMP_BUDGET_EXCEEDED'));
+      } finally {
+        fs.readdirSync = originalReaddir;
+        fs.lstatSync = originalLstat;
+      }
+      await assert.rejects(lease.writeFile('after-copy-entry-limit.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+      assert.equal(fs.existsSync(path.join(lease.root, 'f0')), false);
+    });
+
+    const oversizedSourceFile = path.join(fileSource, 'oversized.bin');
+    fs.writeFileSync(oversizedSourceFile, 'x');
+    await runOwned(spec('f3-copy-file-size-poison'), async (lease) => {
+      try {
+        fs.lstatSync = function (filePath, ...args) {
+          if (path.resolve(String(filePath)) === path.resolve(oversizedSourceFile)) {
+            const stats = originalLstat.call(this, filePath, ...args);
+            return { dev: stats.dev, ino: stats.ino, size: BigInt(LIMITS.file + 1),
+              isSymbolicLink: () => false, isFile: () => true, isDirectory: () => false };
+          }
+          return originalLstat.call(this, filePath, ...args);
+        };
+        await assert.rejects(lease.copyTree(fileSource), errorCode('TEMP_BUDGET_EXCEEDED'));
+      } finally {
+        fs.lstatSync = originalLstat;
+      }
+      await assert.rejects(lease.mkdir('after-copy-file-limit'), errorCode('TEMP_BUDGET_EXCEEDED'));
+      assert.equal(fs.existsSync(path.join(lease.root, 'oversized.bin')), false);
+    });
+
+    fs.writeFileSync(path.join(smallSource, 'small.txt'), '123');
+    await runCopyFailure('f3-copy-reservation-poison', smallSource, null, 2);
+  } finally {
+    fs.readdirSync = originalReaddir;
+    fs.lstatSync = originalLstat;
+    fs.rmSync(deepSource, { recursive: true, force: true });
+    fs.rmSync(entrySource, { recursive: true, force: true });
+    fs.rmSync(fileSource, { recursive: true, force: true });
+    fs.rmSync(smallSource, { recursive: true, force: true });
+  }
+  assert.deepEqual(usage(), baseline);
+});
+
+test('F3-N8..N9 poison child-record and source-update reservation growth while F3-P exact limits remain valid', async () => {
+  await runOwned(spec('f3-exact-depth', { budgetBytes: 1 }), async (lease) => {
+    const exactDepthPath = Array(LIMITS.depth).fill('d').join('/');
+    await lease.mkdir(exactDepthPath);
+    await lease.writeFile('exact.txt', 'x');
+    assert.equal(fs.existsSync(lease.path(exactDepthPath)), true);
+  });
+
+  await runOwned(spec('f3-child-record-metadata-poison', { purpose: 'portability', budgetBytes: 1024 }), async (lease) => {
+    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+    const base = path.dirname(path.dirname(lease.root));
+    const leasePath = path.join(base, 'claims', row.claimId + '.lease.json');
+    const leaseSchema = JSON.parse(fs.readFileSync(leasePath, 'utf8')).schema;
+    const originalStringify = JSON.stringify;
+    try {
+      JSON.stringify = function (value, ...args) {
+        if (value && value.schema === leaseSchema && Array.isArray(value.owned_children) && value.owned_children.length === 1) {
+          return 'x'.repeat(LIMITS.metadata + 1);
+        }
+        return originalStringify.call(this, value, ...args);
+      };
+      await assert.rejects(lease.runProfile('skill-portability'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    await assert.rejects(lease.writeFile('after-child-metadata-limit.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    await assert.rejects(lease.runProfile('skill-portability'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    assert.equal(fs.existsSync(path.join(lease.root, 'after-child-metadata-limit.txt')), false);
+    assert.equal(leaseSchema.length > 0, true);
+  });
+
+  await runOwned(spec('f3-source-update-reservation-poison', { purpose: 'source-update', budgetBytes: 65535 }), async (lease) => {
+    await assert.rejects(lease.runProfile('source-update'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    await assert.rejects(lease.writeFile('after-report-reservation.txt', 'x'), errorCode('TEMP_BUDGET_EXCEEDED'));
+    assert.equal(fs.existsSync(path.join(lease.root, 'workspace')), false);
+    assert.equal(inspectOwnedTemps().records.find((record) => record.rootPath === lease.root).bytesReserved, 0);
+  });
+});
+
+test('F3-P class-B profile output limit does not poison later filesystem growth', async () => {
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f3-output-repo-'));
+  const childScript = path.join(childRepoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
+  fs.mkdirSync(path.dirname(childScript), { recursive: true });
+  fs.writeFileSync(childScript, "process.stdout.write('x'.repeat(1024*1024+1));");
+  try {
+    const specification = spec('f3-class-b-output', { purpose: 'portability', budgetBytes: 16 * 1024 * 1024 });
+    specification.repoRoot = childRepoRoot;
+    await runOwned(specification, async (lease) => {
+      await assert.rejects(lease.runProfile('skill-portability'), errorCode('TEMP_CHILD_OUTPUT_LIMIT'));
+      await lease.writeFile('after-class-b-output-limit.txt', 'ok');
+      assert.equal(fs.readFileSync(lease.path('after-class-b-output-limit.txt'), 'utf8'), 'ok');
+    });
+  } finally {
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
 });
 
 test('successful and failed callback episodes clean their exact roots and preserve primary errors', async () => {
@@ -836,20 +1471,12 @@ test('writeFile and copyTree reject parent substitution at deterministic I/O bar
   }
   assert.deepEqual(usage(), baseline);
 });
-test('generic run is bounded and only the two purpose-bound child profiles are admitted', async () => {
+test('only the two purpose-bound child profiles are exposed', async () => {
   await runOwned(spec('child-profile-rejection'), async (lease) => {
     assert.equal(lease.spawn, undefined);
-    assert.equal(typeof lease.run, 'function');
+    assert.equal(lease.run, undefined);
     assert.equal(lease.childEnv, undefined);
     assert.equal(lease.childTemp, undefined);
-    let getterEvaluated = false;
-    await assert.rejects(lease.run(process.execPath, ['-e', ''], {
-      get timeoutMs() { getterEvaluated = true; return 1; }
-    }), errorCode('TEMP_SPEC_INVALID'));
-    assert.equal(getterEvaluated, false);
-    await assert.rejects(lease.run(process.execPath, ['-e', ''], {
-      maxOutputBytes: 16 * 1024 * 1024 + 1
-    }), errorCode('TEMP_SPEC_INVALID'));
     await assert.rejects(lease.runProfile('node', { command: 'anything' }), errorCode('TEMP_SPEC_INVALID'));
     await assert.rejects(lease.runProfile('skill-portability'), errorCode('TEMP_SPEC_INVALID'));
     await assert.rejects(lease.runProfile('unknown-profile'), errorCode('TEMP_SPEC_INVALID'));
@@ -860,61 +1487,6 @@ test('generic run is bounded and only the two purpose-bound child profiles are a
   });
 });
 
-test('caught generic child failure preserves exact bounded output without a profile terminal failure', async () => {
-  const baseline = usage();
-  let root;
-  const value = await runOwned(spec('generic-negative-output', { purpose: 'source-update', budgetBytes: 65536 + 128 }), async (lease) => {
-    root = lease.root;
-    let caught;
-    try {
-      await lease.run(process.execPath, ['-e',
-        "process.stdout.write('GENERIC_NEGATIVE_STDOUT');process.stderr.write('GENERIC_NEGATIVE_STDERR');process.exitCode=23;"]);
-    } catch (error) { caught = error; }
-    assert.ok(caught, 'the non-zero child must reject');
-    assert.equal(caught.code, 'TEMP_CHILD_FAILED');
-    assert.equal(caught.exitCode, 23);
-    assert.equal(caught.stdout, 'GENERIC_NEGATIVE_STDOUT');
-    assert.equal(caught.stderr, 'GENERIC_NEGATIVE_STDERR');
-    assert.equal(lease.signal.aborted, false);
-    await lease.writeFile('after-caught-child.txt', 'still usable');
-    const profile = await lease.runProfile('source-update');
-    assert.equal(profile.code, 0, profile.stderr);
-    return 'caught-without-profile-failure';
-  });
-  assert.equal(value, 'caught-without-profile-failure');
-  assert.equal(fs.existsSync(root), false);
-  assert.deepEqual(usage(), baseline);
-});
-
-test('zero-exit generic child returns exact stdout and stderr and cleans its owned state', async () => {
-  const baseline = usage();
-  let root;
-  const result = await runOwned(spec('generic-positive-output'), async (lease) => {
-    root = lease.root;
-    return lease.run(process.execPath, ['-e',
-      "process.stdout.write('GENERIC_POSITIVE_STDOUT');process.stderr.write('GENERIC_POSITIVE_STDERR');"]);
-  });
-  assert.equal(result.code, 0);
-  assert.equal(result.stdout, 'GENERIC_POSITIVE_STDOUT');
-  assert.equal(result.stderr, 'GENERIC_POSITIVE_STDERR');
-  assert.equal(fs.existsSync(root), false);
-  assert.deepEqual(usage(), baseline);
-});
-
-test('generic timeout and cancellation wait for child termination and clean the root', async () => {
-  const baseline = usage();
-  await assert.rejects(runOwned(spec('generic-timeout'), async (lease) => {
-    await lease.run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 50 });
-  }), errorCode('TEMP_CHILD_TIMEOUT'));
-  assert.deepEqual(usage(), baseline);
-  const controller = new AbortController();
-  await assert.rejects(runOwned(spec('generic-cancel'), async (lease) => {
-    const pending = lease.run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { signal: controller.signal });
-    setTimeout(() => controller.abort('controlled generic cancellation'), 50);
-    await pending;
-  }), errorCode('TEMP_CHILD_CANCELLED'));
-  assert.deepEqual(usage(), baseline);
-});
 test('fixed child profile cancellation waits for confirmed close', async () => {
   const baseline = usage();
   const controller = new AbortController();
@@ -2134,48 +2706,76 @@ test('raw same-user paths are unaccounted and hostile-same-user atomic protectio
   });
 });
 
-async function recoverDescendantStale(state) {
-  // Advance only the recovery clock past the real, untouched lease expiry.
-  // Child ownership, PID/start identities and group liveness remain production evidence.
-  const expiry = JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).lease_expires_at_ms;
-  const originalNow = Date.now;
-  Date.now = () => Math.max(originalNow(), expiry + 1);
-  try { return await recoverStaleOwnedTemps(); } finally { Date.now = originalNow; }
-}
-
-function descendantOwnerCode(primaryFailure, unconfirmed, persistenceFailure) {
+function writeDcpProfile(childRepoRoot, withDescendant) {
+  const scriptPath = path.join(childRepoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  if (!withDescendant) {
+    fs.writeFileSync(scriptPath, "process.stdout.write('DCP ordinary child');\n");
+    return;
+  }
   const descendant = [
-    "const fs=require('node:fs'),path=require('node:path'),os=require('node:os');",
-    "const tmp=os.tmpdir(),release=path.join(tmp,'dcp-release');",
+    "const fs=require('node:fs'),path=require('node:path');",
+    "const temp=process.env.TMPDIR,ready=path.join(temp,'dcp-ready.json'),release=path.join(temp,'dcp-release');",
     "const fields=fs.readFileSync('/proc/self/stat','utf8').split(')')[1].trim().split(/\\s+/);",
-    "fs.writeFileSync(path.join(tmp,'dcp-ready.json'),JSON.stringify({pid:process.pid,pgid:Number(fields[2]),release}));",
-    ...(persistenceFailure ? ["process.on('SIGTERM',()=>{});"] : []),
-    "setInterval(()=>{if(fs.existsSync(release))process.exit(0);},10);",
+    "fs.writeFileSync(ready,JSON.stringify({pid:process.pid,pgid:Number(fields[2]),release}));",
+    "setInterval(()=>{if(fs.existsSync(release))process.exit(0);},10);"
   ].join('\n');
-  const leader = [
-    "const fs=require('node:fs'),path=require('node:path'),os=require('node:os');",
-    "const child=require('node:child_process').spawn(process.execPath,['-e'," + JSON.stringify(descendant) + "],{detached:false,stdio:'ignore'});",
-    "child.unref();const ready=path.join(os.tmpdir(),'dcp-ready.json'),deadline=Date.now()+30000;",
-    "function poll(){if(fs.existsSync(ready)){const proof=JSON.parse(fs.readFileSync(ready,'utf8'));if(proof.pid!==child.pid)throw Error('Wrong descendant');process.stdout.write(JSON.stringify({leaderPid:process.pid,...proof})+'\\n');return;}if(Date.now()>deadline)throw Error('Descendant READY timed out');setTimeout(poll,10);}poll();",
+  fs.writeFileSync(scriptPath, [
+    "const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process');",
+    "const temp=process.env.TMPDIR,ready=path.join(temp,'dcp-ready.json');",
+    "const child=spawn(process.execPath,['-e'," + JSON.stringify(descendant) + "],{detached:false,stdio:'ignore'});child.unref();",
+    "const deadline=Date.now()+30000;function poll(){if(fs.existsSync(ready)){const proof=JSON.parse(fs.readFileSync(ready,'utf8'));if(proof.pid!==child.pid)throw Error('Wrong descendant');process.stdout.write(JSON.stringify({leaderPid:process.pid,...proof})+'\\n');return;}if(Date.now()>deadline)throw Error('Descendant READY timed out');setTimeout(poll,10);}poll();"
+  ].join('\n'));
+}
+
+function writeDcpRunningLedgerProfile(childRepoRoot) {
+  const scriptPath = path.join(childRepoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  const descendant = [
+    "const fs=require('node:fs'),path=require('node:path');",
+    "const temp=process.env.TMPDIR,ready=path.join(temp,'dcp-ready.json'),release=path.join(temp,'dcp-release');",
+    "const fields=fs.readFileSync('/proc/self/stat','utf8').split(')')[1].trim().split(/\\s+/);",
+    "fs.writeFileSync(ready,JSON.stringify({pid:process.pid,pgid:Number(fields[2]),release}));",
+    "setInterval(()=>{if(fs.existsSync(release))process.exit(0);},10);"
   ].join('\n');
+  fs.writeFileSync(scriptPath, [
+    "const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process');",
+    "const temp=process.env.TMPDIR,ready=path.join(temp,'dcp-ready.json'),leaderReady=path.join(temp,'dcp-leader-ready.json');",
+    "const child=spawn(process.execPath,['-e'," + JSON.stringify(descendant) + "],{detached:false,stdio:'ignore'});child.unref();",
+    "const deadline=Date.now()+30000;function poll(){if(fs.existsSync(ready)){const proof=JSON.parse(fs.readFileSync(ready,'utf8'));if(proof.pid!==child.pid)throw Error('Wrong descendant');fs.writeFileSync(leaderReady,JSON.stringify({leaderPid:process.pid,...proof}));return;}if(Date.now()>deadline)throw Error('Descendant READY timed out');setTimeout(poll,10);}poll();"
+  ].join('\n'));
+}
+
+function dcpOwnerCode(childRepoRoot) {
   return modulePrelude() + [
-    "const assert=require('node:assert/strict');let root,claimId,proof,primary=new Error('DCP primary task failure');primary.code='DCP_PRIMARY';const originalKill=process.kill;let deniedProbes=0;const originalRename=fs.renameSync,injectedPersistenceError=Object.assign(new Error('DCP RUNNING persistence failure'),{code:'EIO'});let failedRunningPersistence=false;",
-    ...(unconfirmed ? ["process.kill=function(pid,signal){if(pid<0&&signal===0){deniedProbes++;throw Object.assign(new Error('DCP denied group observation'),{code:'EPERM'});}return originalKill.call(this,pid,signal);};"] : []),
-    ...(persistenceFailure ? ["fs.renameSync=function(from,to){let staged;try{staged=JSON.parse(fs.readFileSync(from,'utf8'));}catch{}if(!failedRunningPersistence&&String(to).endsWith('.lease.json')&&staged&&staged.owned_children&&staged.owned_children.some(child=>child.phase==='RUNNING')){failedRunningPersistence=true;const ready=path.join(root,'child-temp/dcp-ready.json'),deadline=Date.now()+15000;while(!fs.existsSync(ready)){if(Date.now()>deadline)throw Error('Real descendant did not reach READY');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,150);throw injectedPersistenceError;}return originalRename.call(this,from,to);};"] : []),
-    "(async()=>{let caught;try{await runtime.withOwnedTemp({schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'dcp-real-descendant',budgetBytes:65536},async lease=>{",
-    "root=lease.root;claimId=runtime.inspectOwnedTemps().records.find(row=>row.rootPath===root).claimId;",
-    "const result=await lease.run(process.execPath,['-e'," + JSON.stringify(leader) + "]);proof=JSON.parse(result.stdout);",
-    "assert.equal(proof.pgid,proof.leaderPid);assert.notEqual(proof.pid,proof.leaderPid);originalKill.call(process,proof.pid,0);originalKill.call(process,-proof.pgid,0);",
-    ...(primaryFailure ? ["throw primary;"] : ["return 'DCP task success';"]),
-    "});}catch(error){caught=error;}assert.ok(caught,'live descendant must prevent successful terminal cleanup');",
-    "const leasePath=path.join(path.dirname(path.dirname(root)),'claims',claimId+'.lease.json');",
-    "const durable=JSON.parse(fs.readFileSync(leasePath,'utf8'));process.kill=originalKill;fs.renameSync=originalRename;if(!proof){proof=JSON.parse(fs.readFileSync(path.join(root,'child-temp/dcp-ready.json'),'utf8'));proof.leaderPid=proof.pgid;}",
-    "process.stdout.write('DCP_OWNER '+JSON.stringify({ownerPid:process.pid,root,claimId,leasePath,proof,deniedProbes,failedRunningPersistence,persistenceFailurePreserved:Boolean(caught.cause&&caught.cause.cause===injectedPersistenceError),ownedChildren:durable.owned_children,errorCode:caught.code,primaryIdentity:caught===primary,cleanupCode:caught.cleanupCode||null,cleanupStatus:caught.cleanupStatus,rootExists:fs.existsSync(root)})+'\\n',()=>process.exit(0));",
-    "})().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});",
+    "const assert=require('node:assert/strict');",
+    "const childRepoRoot=" + JSON.stringify(childRepoRoot) + ";",
+    "const spec={schema:runtime.SPEC_SCHEMA,purpose:'portability',repoRoot:childRepoRoot,episode:'dcp-real-descendant',budgetBytes:65536};",
+    "let root=null,claimId=null,proof=null;const primary=new Error('DCP primary task failure');primary.code='DCP_PRIMARY';",
+    "async function run(){let caught=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;claimId=runtime.inspectOwnedTemps().records.find(row=>row.rootPath===root).claimId;const result=await lease.runProfile('skill-portability');proof=JSON.parse(result.stdout.trim());assert.equal(proof.pgid,proof.leaderPid);assert.notEqual(proof.pid,proof.leaderPid);process.kill(proof.pid,0);process.kill(-proof.pgid,0);throw primary;});}catch(error){caught=error;}const leasePath=path.join(path.dirname(path.dirname(root)),'claims',claimId+'.lease.json');const durable=JSON.parse(fs.readFileSync(leasePath,'utf8'));process.stdout.write('DCP_OWNER '+JSON.stringify({ownerPid:process.pid,root,claimId,leasePath,proof,errorCode:caught&&caught.code,primaryIdentity:caught===primary,cleanupCode:caught&&caught.cleanupCode||null,cleanupStatus:caught&&caught.cleanupStatus||null,rootExists:fs.existsSync(root),ownedChildren:durable.owned_children})+'\\n',()=>process.exit(0));}",
+    "run().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
   ].join('\n');
 }
 
-const DESCENDANT_REAPER_CODE = [
+function dcpRunningLedgerFailureOwnerCode(childRepoRoot) {
+  return modulePrelude() + [
+    "const childProcess=require('node:child_process');",
+    "const ChildProcess=childProcess.ChildProcess;const originalEmit=ChildProcess.prototype.emit;const originalRename=fs.renameSync;const originalKill=process.kill;",
+    "const childRepoRoot=" + JSON.stringify(childRepoRoot) + ";",
+    "const spec={schema:runtime.SPEC_SCHEMA,purpose:'portability',repoRoot:childRepoRoot,episode:'dcp-running-ledger-failure',budgetBytes:65536};",
+    "const injected=Object.assign(new Error('injected DCP07 RUNNING ledger persistence failure'),{code:'EIO'});",
+    "let root=null,claimId=null,leasePath=null,leaderPid=null,proof=null,runningRow=null,failureInjected=false,directExitedBeforeFailure=false,groupAliveAtFailure=false,directExitedAtOwnerExit=false,groupAliveAtOwnerExit=false,suppressedGroupSignals=0;",
+    "function procState(pid){try{const text=fs.readFileSync('/proc/'+pid+'/stat','utf8'),end=text.lastIndexOf(')');return text.slice(end+1).trim().split(/\\s+/)[0];}catch(error){if(error.code==='ENOENT')return null;throw error;}}",
+    "function waitFor(check,label){const deadline=Date.now()+15000;while(!check()){if(Date.now()>deadline)throw new Error('DCP07 timed out waiting for '+label);Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}}",
+    "process.kill=function(pid,signal){if(Number(pid)<0&&(signal==='SIGTERM'||signal==='SIGKILL')){suppressedGroupSignals+=1;return true;}return originalKill.call(this,pid,signal);};",
+    "fs.renameSync=function(from,to,...args){let staged=null;try{staged=JSON.parse(fs.readFileSync(from,'utf8'));}catch(_){}const row=staged&&Array.isArray(staged.owned_children)&&staged.owned_children.find(value=>value.phase==='RUNNING');if(!failureInjected&&leasePath&&path.resolve(String(to))===path.resolve(leasePath)&&row){failureInjected=true;runningRow=row;const readyPath=path.join(root,'child-temp','dcp-leader-ready.json');waitFor(()=>fs.existsSync(readyPath),'real descendant readiness and leader proof');proof=JSON.parse(fs.readFileSync(readyPath,'utf8'));if(proof.leaderPid!==leaderPid||proof.pgid!==leaderPid||proof.pid===leaderPid)throw new Error('DCP07 process-group evidence did not match the owned profile child');waitFor(()=>{const state=procState(leaderPid);return state==='Z'||state===null;},'the owned profile child to exit');directExitedBeforeFailure=true;const descendantState=procState(proof.pid);if(!descendantState||descendantState==='Z')throw new Error('DCP07 descendant was not live after direct child exit');try{originalKill.call(process,-proof.pgid,0);groupAliveAtFailure=true;}catch(error){if(error.code!=='ESRCH')throw error;}if(!groupAliveAtFailure)throw new Error('DCP07 process group was not live after direct child exit');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,150);throw injected;}return originalRename.call(this,from,to,...args);};",
+    "ChildProcess.prototype.emit=function(event,...args){const profileChild=Array.isArray(this.spawnargs)&&this.spawnargs.some(value=>String(value).includes('audit-skill-portability.cjs'));if(event==='spawn'&&profileChild)leaderPid=this.pid;return originalEmit.call(this,event,...args);};",
+    "async function main(){let caught=null;try{await runtime.withOwnedTemp(spec,async lease=>{root=lease.root;claimId=runtime.inspectOwnedTemps().records.find(row=>row.rootPath===root).claimId;leasePath=path.join(path.dirname(path.dirname(root)),'claims',claimId+'.lease.json');await lease.runProfile('skill-portability');});}catch(error){caught=error;}finally{ChildProcess.prototype.emit=originalEmit;fs.renameSync=originalRename;process.kill=originalKill;}if(!proof&&root&&fs.existsSync(path.join(root,'child-temp','dcp-leader-ready.json')))proof=JSON.parse(fs.readFileSync(path.join(root,'child-temp','dcp-leader-ready.json'),'utf8'));if(proof)proof.leaderPid=leaderPid;if(leaderPid!==null){try{originalKill.call(process,leaderPid,0);const state=procState(leaderPid);directExitedAtOwnerExit=state===null||state==='Z';}catch(error){if(error.code==='ESRCH')directExitedAtOwnerExit=true;else throw error;}}if(proof){try{originalKill.call(process,-proof.pgid,0);groupAliveAtOwnerExit=true;}catch(error){if(error.code!=='ESRCH')throw error;}}const leaseExists=!!leasePath&&fs.existsSync(leasePath);const durable=leaseExists?JSON.parse(fs.readFileSync(leasePath,'utf8')):null;const row=durable&&durable.owned_children&&durable.owned_children.find(value=>value.pid===leaderPid);process.stdout.write('DCP_OWNER '+JSON.stringify({ownerPid:process.pid,root,claimId,leasePath,proof,runningRow,failureInjected,directExitedBeforeFailure,groupAliveAtFailure,directExitedAtOwnerExit,groupAliveAtOwnerExit,suppressedGroupSignals,ownedChildren:durable&&durable.owned_children,errorCode:caught&&caught.code,errorMessage:caught&&caught.message,causeCode:caught&&caught.cause&&caught.cause.code,causeMessage:caught&&caught.cause&&caught.cause.message,causeOriginalCode:caught&&caught.cause&&caught.cause.cause&&caught.cause.cause.code,causeOriginalMessage:caught&&caught.cause&&caught.cause.cause&&caught.cause.cause.message,persistenceFailurePreserved:!!caught&&caught.cause&&caught.cause.cause===injected,cleanupCode:caught&&caught.cleanupCode||null,cleanupStatus:caught&&caught.cleanupStatus||null,rootExists:!!root&&fs.existsSync(root),leaseExists,rowPhase:row&&row.phase})+'\\n',()=>process.exit(0));}",
+    "main().catch(error=>{process.stderr.write(error.stack||String(error));process.exitCode=1;});"
+  ].join('\n');
+}
+
+const DCP_REAPER_CODE = [
   'import ctypes,json,os,select,signal,subprocess,sys,time',
   'libc=ctypes.CDLL(None,use_errno=True)',
   "if libc.prctl(36,1,0,0,0)!=0:raise RuntimeError('Fixture subreaper prerequisite unavailable')",
@@ -2183,200 +2783,227 @@ const DESCENDANT_REAPER_CODE = [
   'proof=None;reaped=False',
   'try:',
   ' stdout,stderr=owner.communicate(timeout=45)',
-  " if owner.returncode!=0:raise RuntimeError('Owner failed: '+stderr)",
-  ' rows=[json.loads(line[10:]) for line in stdout.splitlines() if line.startswith("DCP_OWNER ")]',
-  " if len(rows)!=1:raise RuntimeError('Missing owner boundary evidence: '+stdout)",
+  " if owner.returncode!=0:raise RuntimeError('Owner failed: '+stderr+'; stdout='+stdout)",
+  ' rows=[json.loads(line[len("DCP_OWNER "):]) for line in stdout.splitlines() if line.startswith("DCP_OWNER ")]',
+  " if len(rows)!=1:raise RuntimeError('Missing owner evidence: '+stdout)",
   ' proof=rows[0]',
-  ' print("DCP_READY "+json.dumps({**proof,"ownerExited":True,"ownerExitCode":owner.returncode,"reaperPid":os.getpid()}),flush=True)',
+  ' print("DCP_READY "+json.dumps({**proof,"ownerExited":True,"ownerExitCode":owner.returncode}),flush=True)',
   ' if not select.select([sys.stdin],[],[],45)[0]:raise RuntimeError("Fixture release timed out")',
   ' if sys.stdin.readline().strip()!="RELEASE":raise RuntimeError("Invalid fixture release")',
-  ' release=proof["proof"]["release"]',
-  ' with open(release,"w") as target:target.write("release")',
+  ' with open(proof["proof"]["release"],"w") as target:target.write("release")',
   ' deadline=time.monotonic()+15',
   ' while True:',
   '  pid,status=os.waitpid(proof["proof"]["pid"],os.WNOHANG)',
   '  if pid:reaped=True;break',
   '  if time.monotonic()>deadline:raise RuntimeError("Descendant extinction timed out")',
   '  time.sleep(.01)',
-  ' if os.waitstatus_to_exitcode(status)!=0:raise RuntimeError("Descendant did not exit successfully")',
-  ' print("DCP_REAPED "+json.dumps({"pid":pid,"pgid":proof["proof"]["pgid"],"exitCode":0}),flush=True)',
+  ' if os.waitstatus_to_exitcode(status)!=0:raise RuntimeError("Descendant exit was unsuccessful")',
+  ' print("DCP_REAPED "+json.dumps({"pid":pid,"pgid":proof["proof"]["pgid"]}),flush=True)',
   'finally:',
   ' if owner.poll() is None:owner.kill();owner.wait()',
   ' if proof is not None and not reaped:',
-  '  try:',
-  '   pid,status=os.waitpid(proof["proof"]["pid"],os.WNOHANG)',
-  '   if pid==0:os.kill(proof["proof"]["pid"],signal.SIGKILL);os.waitpid(proof["proof"]["pid"],0)',
-  '  except ChildProcessError:pass',
+  '  try:os.killpg(proof["proof"]["pgid"],signal.SIGKILL)',
+  '  except ProcessLookupError:pass',
+  '  try:os.waitpid(proof["proof"]["pid"],0)',
+  '  except ChildProcessError:pass'
 ].join('\n');
 
-async function controlledDescendant(primaryFailure = false, unconfirmed = false, persistenceFailure = false) {
-  const child = spawn('python3', ['-c', DESCENDANT_REAPER_CODE, process.execPath, descendantOwnerCode(primaryFailure, unconfirmed, persistenceFailure)], {
-    stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+async function controlledDcp(childRepoRoot, ownerCode = dcpOwnerCode(childRepoRoot)) {
+  const child = spawn('python3', ['-c', DCP_REAPER_CODE, process.execPath, ownerCode], {
+    stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true
   });
-  const observation = { stdout: '', stderr: '', closed: false, code: null, signal: null, error: null };
-  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => { observation.stdout += chunk; });
-  child.stderr.on('data', (chunk) => { observation.stderr += chunk; });
-  child.once('error', (error) => { observation.error = error; });
-  const closed = new Promise((resolve) => child.once('close', (code, signal) => {
-    Object.assign(observation, { closed: true, code, signal }); resolve();
+  const state = { child, stdout: '', stderr: '', closeResult: null };
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { state.stdout += chunk; });
+  child.stderr.on('data', (chunk) => { state.stderr += chunk; });
+  state.closed = new Promise((resolve) => child.once('close', (code, signal) => {
+    state.closeResult = { code, signal };
+    resolve(state.closeResult);
   }));
+  const waitLine = (prefix) => new Promise((resolve, reject) => {
+    let timer;
+    const check = () => {
+      const line = state.stdout.split('\n').find((value) => value.startsWith(prefix));
+      if (line) { clearTimeout(timer); child.stdout.removeListener('data', check); resolve(line); }
+      else if (state.closeResult) { clearTimeout(timer); reject(new Error('DCP helper closed early: ' + state.stderr)); }
+    };
+    timer = setTimeout(() => reject(new Error('DCP helper timed out: ' + state.stderr)), 60000);
+    child.stdout.on('data', check);
+    state.closed.then(check);
+    check();
+  });
+  const ready = await waitLine('DCP_READY ');
+  const dcpState = JSON.parse(ready.slice('DCP_READY '.length));
   let released = false;
-  const waitLine = async (prefix) => {
-    await waitUntil(() => {
-      if (observation.error) throw observation.error;
-      if (observation.closed && observation.code !== 0) throw new Error('DCP reaper failed: ' + observation.stderr);
-      return observation.stdout.split('\n').some((line) => line.startsWith(prefix));
-    }, 'real descendant boundary ' + prefix, 60000);
-    return JSON.parse(observation.stdout.split('\n').find((line) => line.startsWith(prefix)).slice(prefix.length));
-  };
   const release = async () => {
-    if (!released) { released = true; child.stdin.end('RELEASE\n'); }
-    const reaped = await waitLine('DCP_REAPED ');
-    await closed;
-    assert.equal(observation.code, 0, observation.stderr);
-    assert.equal(observation.signal, null);
+    if (released) return null;
+    released = true;
+    child.stdin.end('RELEASE\n');
+    const line = await waitLine('DCP_REAPED ');
+    const reaped = JSON.parse(line.slice('DCP_REAPED '.length));
+    const closed = await state.closed;
+    assert.equal(closed.code, 0, state.stderr);
+    assert.equal(closed.signal, null);
     return reaped;
   };
-  try {
-    const state = await waitLine('DCP_READY ');
-    return { state, release, finish: async () => {
-      if (!observation.closed) await release();
-      if (fs.existsSync(state.leasePath)) await recoverDescendantStale(state);
-    } };
-  } catch (error) {
-    if (!observation.closed) { child.stdin.end('RELEASE\n'); await closed; }
-    throw error;
-  }
+  return {
+    state: dcpState,
+    release,
+    finish: async () => {
+      if (!released) await release();
+      if (fs.existsSync(dcpState.leasePath)) await recoverDcpStale(dcpState);
+    }
+  };
 }
 
-function assertRealDescendantProtection(state, primaryFailure = false, primaryCode = null) {
-  assert.equal(state.ownerExited, true);
-  assert.equal(state.ownerExitCode, 0);
-  assert.throws(() => process.kill(state.ownerPid, 0), (error) => error.code === 'ESRCH');
-  assert.throws(() => process.kill(state.proof.leaderPid, 0), (error) => error.code === 'ESRCH');
-  process.kill(state.proof.pid, 0);
-  process.kill(-state.proof.pgid, 0);
-  const descendantState = fs.readFileSync('/proc/' + state.proof.pid + '/stat', 'utf8').split(')')[1].trim().split(/\s+/)[0];
-  assert.notEqual(descendantState, 'Z', 'protected descendant must be live, not a zombie');
-  assert.equal(state.proof.pgid, state.proof.leaderPid);
-  assert.equal(state.ownedChildren.length, 1);
-  assert.equal(state.ownedChildren[0].pid, state.proof.leaderPid);
-  assert.equal(state.ownedChildren[0].process_group, true);
-  assert.equal(state.ownedChildren[0].phase, 'RUNNING');
-  assert.equal(typeof state.ownedChildren[0].start_identity, 'string');
-  assert.equal(state.rootExists, true);
-  assert.equal(state.cleanupStatus.status, 'CLEANUP_INCOMPLETE');
-  assert.equal(state.cleanupStatus.code, 'TEMP_CLEANUP_INCOMPLETE');
-  assert.equal(state.primaryIdentity, primaryFailure);
-  assert.equal(state.errorCode, primaryCode || (primaryFailure ? 'DCP_PRIMARY' : 'TEMP_CLEANUP_INCOMPLETE'));
-  assert.equal(JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).owned_children.length, 1);
-  console.log('DCP_PROTECTED '+JSON.stringify(state));
+async function recoverDcpStale(state) {
+  const expiry = JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).lease_expires_at_ms;
+  const originalNow = Date.now;
+  Date.now = () => Math.max(originalNow(), expiry + 1);
+  try { return await recoverStaleOwnedTemps(); } finally { Date.now = originalNow; }
 }
 
-async function assertDescendantStaleHold(state, code = 'TEMP_CHILD_LIVE') {
-  const result = await recoverDescendantStale(state);
-  assert.equal(result.find((row) => row.claimId === state.claimId).status, 'HOLD');
-  assert.equal(result.find((row) => row.claimId === state.claimId).code, code);
-  console.log('DCP_STALE_HOLD '+JSON.stringify({claimId:state.claimId,pgid:state.proof.pgid,result:result.find(row=>row.claimId===state.claimId)}));
-  assert.equal(fs.existsSync(state.root), true);
-  assert.equal(JSON.parse(fs.readFileSync(state.leasePath, 'utf8')).owned_children.length, 1);
-}
-
-async function assertDescendantExtinctionRecovery(fixture, baseline) {
-  const reaped = await fixture.release();
-  assert.equal(reaped.pid, fixture.state.proof.pid);
-  assert.throws(() => process.kill(-fixture.state.proof.pgid, 0), (error) => error.code === 'ESRCH');
-  const result = await recoverDescendantStale(fixture.state);
-  assert.equal(result.find((row) => row.claimId === fixture.state.claimId).status, 'REMOVED');
-  assert.equal(fs.existsSync(fixture.state.root), false);
-  assert.equal(fs.existsSync(fixture.state.leasePath), false);
-  assert.deepEqual(usage(), baseline);
-  console.log('DCP_EXTINCT_CLEAN '+JSON.stringify({claimId:fixture.state.claimId,reaped,result:result.find(row=>row.claimId===fixture.state.claimId),cleanup:usage()}));
-}
-
-test('DCP01_POSIX_SURVIVING_DESCENDANT_PROTECTED real child and creator-dead stale recovery', { skip: process.platform !== 'linux' }, async () => {
-  const baseline = usage(), fixture = await controlledDescendant();
-  try {
-    assertRealDescendantProtection(fixture.state);
-    await assertDescendantStaleHold(fixture.state);
-    await assertDescendantExtinctionRecovery(fixture, baseline);
-  } finally { await fixture.finish(); }
-});
-
-test('DCP02_POSIX_EVENTUAL_EXTINCTION_CLEANS same root clears protection after real group extinction', { skip: process.platform !== 'linux' }, async () => {
-  const baseline = usage(), fixture = await controlledDescendant();
-  try {
-    assertRealDescendantProtection(fixture.state);
-    await assertDescendantStaleHold(fixture.state);
-    await assertDescendantExtinctionRecovery(fixture, baseline);
-  } finally { await fixture.finish(); }
-});
-
-test('DCP03_UNCONFIRMED_GROUP_EXTINCTION_FAILS_SAFE real recovery retains protection on denied liveness probe', { skip: process.platform !== 'linux' }, async () => {
-  const baseline = usage(), fixture = await controlledDescendant(false, true);
+test('DCP01_POSIX_DESCENDANT_CUSTODY preserves primary error and holds until group extinction', {
+  skip: process.platform !== 'linux'
+}, async () => {
+  const baseline = usage();
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-dcp-child-repo-'));
+  writeDcpProfile(childRepoRoot, true);
   const originalKill = process.kill;
+  let fixture = null;
   try {
-    assertRealDescendantProtection(fixture.state);
-    assert.ok(fixture.state.deniedProbes > 0, 'real bounded cleanup must encounter denied group observations');
-    await fixture.release();
-    assert.throws(() => originalKill.call(process, -fixture.state.proof.pgid, 0), (error) => error.code === 'ESRCH');
+    fixture = await controlledDcp(childRepoRoot);
+    const state = fixture.state;
+    assert.equal(state.ownerExited, true);
+    assert.equal(state.ownerExitCode, 0);
+    assert.throws(() => process.kill(state.ownerPid, 0), (caught) => caught.code === 'ESRCH');
+    assert.throws(() => process.kill(state.proof.leaderPid, 0), (caught) => caught.code === 'ESRCH');
+    process.kill(state.proof.pid, 0);
+    process.kill(-state.proof.pgid, 0);
+    const childState = fs.readFileSync('/proc/' + state.proof.pid + '/stat', 'utf8').split(')')[1].trim().split(/\s+/)[0];
+    assert.notEqual(childState, 'Z');
+    assert.equal(state.proof.pgid, state.proof.leaderPid);
+    assert.equal(state.ownedChildren.length, 1);
+    assert.equal(state.ownedChildren[0].pid, state.proof.leaderPid);
+    assert.equal(state.ownedChildren[0].process_group, true);
+    assert.equal(state.ownedChildren[0].phase, 'RUNNING');
+    assert.equal(state.rootExists, true);
+    assert.equal(state.primaryIdentity, true);
+    assert.equal(state.errorCode, 'DCP_PRIMARY');
+    assert.equal(state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.equal(state.cleanupStatus.status, 'CLEANUP_INCOMPLETE');
+    assert.equal(state.cleanupStatus.code, 'TEMP_CLEANUP_INCOMPLETE');
+
+    const live = (await recoverDcpStale(state)).find((row) => row.claimId === state.claimId);
+    assert.equal(live.status, 'HOLD', JSON.stringify(live));
+    assert.equal(live.code, 'TEMP_CHILD_LIVE', JSON.stringify(live));
+
+    const reaped = await fixture.release();
+    assert.equal(reaped.pid, state.proof.pid);
+    assert.throws(() => originalKill.call(process, -state.proof.pgid, 0), (caught) => caught.code === 'ESRCH');
     process.kill = function (pid, signal) {
-      if (pid === -fixture.state.proof.pgid && signal === 0) throw Object.assign(new Error('DCP liveness cannot be confirmed'), { code: 'EPERM' });
+      if (pid === -state.proof.pgid && signal === 0) {
+        throw Object.assign(new Error('DCP liveness cannot be confirmed'), { code: 'EPERM' });
+      }
       return originalKill.call(this, pid, signal);
     };
-    await assertDescendantStaleHold(fixture.state, 'TEMP_CHILD_UNKNOWN');
+    const unknown = (await recoverDcpStale(state)).find((row) => row.claimId === state.claimId);
+    assert.equal(unknown.status, 'HOLD', JSON.stringify(unknown));
+    assert.equal(unknown.code, 'TEMP_CHILD_UNKNOWN', JSON.stringify(unknown));
+    assert.equal(fs.existsSync(state.root), true);
     process.kill = originalKill;
-    const result = await recoverDescendantStale(fixture.state);
-    assert.equal(result.find((row) => row.claimId === fixture.state.claimId).status, 'REMOVED');
-    assert.equal(fs.existsSync(fixture.state.root), false);
+
+    const removed = (await recoverDcpStale(state)).find((row) => row.claimId === state.claimId);
+    assert.equal(removed.status, 'REMOVED', JSON.stringify(removed));
+    assert.equal(fs.existsSync(state.root), false);
+    assert.equal(fs.existsSync(state.leasePath), false);
     assert.deepEqual(usage(), baseline);
-  } finally { process.kill = originalKill; await fixture.finish(); }
+  } finally {
+    process.kill = originalKill;
+    if (fixture) await fixture.finish();
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
 });
 
-test('DCP04_PRIMARY_RESULT_NOT_MASKED real descendant cleanup hold stays secondary', { skip: process.platform !== 'linux' }, async () => {
-  const baseline = usage(), fixture = await controlledDescendant(true);
-  try {
-    assertRealDescendantProtection(fixture.state, true);
-    assert.equal(fixture.state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
-    await assertDescendantStaleHold(fixture.state);
-    await assertDescendantExtinctionRecovery(fixture, baseline);
-  } finally { await fixture.finish(); }
-});
-
-test('DCP05_NO_DESCENDANT_POSITIVE_CONTROL ordinary POSIX child clears durable ownership', { skip: process.platform !== 'linux' }, async () => {
+test('DCP07_RUNNING_LEDGER_WRITE_FAILURE_WITH_SURVIVING_DESCENDANT holds custody until group extinction', {
+  skip: process.platform !== 'linux'
+}, async () => {
   const baseline = usage();
-  await runOwned(spec('dcp-no-descendant'), async (lease) => {
-    const result = await lease.run(process.execPath, ['-e', "process.stdout.write('DCP ordinary child');"]);
-    assert.equal(result.stdout, 'DCP ordinary child');
-    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
-    const leasePath = path.join(path.dirname(path.dirname(lease.root)), 'claims', row.claimId + '.lease.json');
-    assert.deepEqual(JSON.parse(fs.readFileSync(leasePath, 'utf8')).owned_children, []);
-  });
-  assert.deepEqual(usage(), baseline);
-});
-
-test('DCP06_WINDOWS_NONREGRESSION ordinary Windows child retains cleanup and recovery behavior', { skip: process.platform !== 'win32' }, async () => {
-  const baseline = usage();
-  await runOwned(spec('dcp-windows-child'), async (lease) => {
-    const result = await lease.run(process.execPath, ['-e', "process.stdout.write('DCP Windows child');"]);
-    assert.equal(result.stdout, 'DCP Windows child');
-    const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
-    const leasePath = path.join(path.dirname(path.dirname(lease.root)), 'claims', row.claimId + '.lease.json');
-    assert.deepEqual(JSON.parse(fs.readFileSync(leasePath, 'utf8')).owned_children, []);
-    assert.equal((await recoverStaleOwnedTemps()).find((record) => record.claimId === row.claimId).status, 'HOLD');
-  });
-  assert.deepEqual(usage(), baseline);
-});
-
-test('DCP07_RUNNING_LEDGER_WRITE_FAILURE keeps real descendant protection and the original failure', { skip: process.platform !== 'linux' }, async () => {
-  const baseline = usage(), fixture = await controlledDescendant(false, false, true);
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-dcp-running-ledger-child-repo-'));
+  writeDcpRunningLedgerProfile(childRepoRoot);
+  const originalKill = process.kill;
+  let fixture = null;
   try {
-    assertRealDescendantProtection(fixture.state, false, 'TEMP_OWNERSHIP_UNCERTAIN');
-    assert.equal(fixture.state.failedRunningPersistence, true);
-    assert.equal(fixture.state.persistenceFailurePreserved, true);
-    assert.equal(fixture.state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
-    await assertDescendantStaleHold(fixture.state);
-    await assertDescendantExtinctionRecovery(fixture, baseline);
-  } finally { await fixture.finish(); }
+    fixture = await controlledDcp(childRepoRoot, dcpRunningLedgerFailureOwnerCode(childRepoRoot));
+    const state = fixture.state;
+    assert.equal(state.ownerExited, true);
+    assert.equal(state.ownerExitCode, 0);
+    assert.throws(() => process.kill(state.ownerPid, 0), (caught) => caught.code === 'ESRCH');
+    assert.throws(() => process.kill(state.proof.leaderPid, 0), (caught) => caught.code === 'ESRCH');
+    process.kill(state.proof.pid, 0);
+    process.kill(-state.proof.pgid, 0);
+    const descendantState = fs.readFileSync('/proc/' + state.proof.pid + '/stat', 'utf8').split(')')[1].trim().split(/\s+/)[0];
+    assert.notEqual(descendantState, 'Z', 'DCP07 descendant remains live after the direct child exits');
+    assert.equal(state.proof.pgid, state.proof.leaderPid);
+    assert.equal(state.failureInjected, true, 'DCP07 faults the real atomic RUNNING-ledger write');
+    assert.equal(state.runningRow.phase, 'RUNNING');
+    assert.equal(state.runningRow.pid, state.proof.leaderPid);
+    assert.equal(state.directExitedBeforeFailure, true, JSON.stringify(state));
+    assert.equal(state.groupAliveAtFailure, true);
+    assert.equal(state.directExitedAtOwnerExit, true);
+    assert.equal(state.groupAliveAtOwnerExit, true);
+    assert.ok(state.suppressedGroupSignals > 0, 'DCP07 fixture keeps the real group alive for stale-recovery observation');
+    assert.equal(state.rowPhase, 'RUNNING');
+    assert.equal(state.ownedChildren.length, 1);
+    assert.equal(state.ownedChildren[0].pid, state.proof.leaderPid);
+    assert.equal(state.ownedChildren[0].process_group, true);
+    assert.equal(state.ownedChildren[0].phase, 'RUNNING');
+    assert.equal(state.errorCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.causeCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.causeOriginalCode, 'EIO');
+    assert.equal(state.persistenceFailurePreserved, true);
+    assert.equal(state.cleanupCode, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.equal(state.cleanupStatus.status, 'CLEANUP_INCOMPLETE');
+    assert.equal(state.cleanupStatus.code, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.equal(state.rootExists, true);
+
+    const live = (await recoverDcpStale(state)).find((row) => row.claimId === state.claimId);
+    assert.equal(live.status, 'HOLD', JSON.stringify(live));
+    assert.equal(live.code, 'TEMP_CHILD_LIVE', JSON.stringify(live));
+    assert.equal(fs.existsSync(state.root), true);
+
+    const reaped = await fixture.release();
+    assert.equal(reaped.pid, state.proof.pid);
+    assert.throws(() => originalKill.call(process, -state.proof.pgid, 0), (caught) => caught.code === 'ESRCH');
+    const removed = (await recoverDcpStale(state)).find((row) => row.claimId === state.claimId);
+    assert.equal(removed.status, 'REMOVED', JSON.stringify(removed));
+    assert.equal(fs.existsSync(state.root), false);
+    assert.equal(fs.existsSync(state.leasePath), false);
+    assert.deepEqual(usage(), baseline);
+  } finally {
+    process.kill = originalKill;
+    if (fixture) await fixture.finish();
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
+});
+
+test('DCP05_NONREGRESSION ordinary purpose-bound profile retires child metadata', async () => {
+  const baseline = usage();
+  const childRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-dcp-clean-child-repo-'));
+  writeDcpProfile(childRepoRoot, false);
+  try {
+    await runOwned({ ...spec('dcp-no-descendant', { purpose: 'portability', budgetBytes: 65536 }),
+      repoRoot: childRepoRoot }, async (lease) => {
+      const result = await lease.runProfile('skill-portability');
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout, 'DCP ordinary child');
+      const row = inspectOwnedTemps().records.find((record) => record.rootPath === lease.root);
+      const leasePath = path.join(path.dirname(path.dirname(lease.root)), 'claims', row.claimId + '.lease.json');
+      assert.deepEqual(JSON.parse(fs.readFileSync(leasePath, 'utf8')).owned_children, []);
+    });
+    assert.deepEqual(usage(), baseline);
+  } finally {
+    fs.rmSync(childRepoRoot, { recursive: true, force: true });
+  }
 });
