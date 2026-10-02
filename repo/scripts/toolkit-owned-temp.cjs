@@ -1,5 +1,6 @@
 'use strict';
 const crypto=require('node:crypto'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {isDeepStrictEqual}=require('node:util');
 const {spawn:spawnProcess,spawnSync}=require('node:child_process');
 const SCHEMA='ai-agent-toolkit.owned-temp.v1', SPEC='ai-agent-toolkit.owned-temp.spec.v1', MARKER='.ai-agent-toolkit-owned-temp-marker.json', NS='.ai-agent-toolkit-owned-temp-v1';
 const MiB=1024*1024, GiB=1024*MiB;
@@ -182,7 +183,7 @@ function writeExclusive(p, data, label) {
   }
 }
 
-function atomicJson(p, data, oldId, expectedParentId = null) {
+function atomicJson(p, data, oldId, expectedParentId = null, expectedCurrent = null) {
   assertDurableRecord(data, 'Lease');
   const parent = path.dirname(p);
   const parentId = expectedParentId || identity(fs.lstatSync(parent, { bigint: true }));
@@ -204,13 +205,27 @@ function atomicJson(p, data, oldId, expectedParentId = null) {
     fs.closeSync(fd);
     fd = undefined;
     dir(parent, parentId, 'Metadata parent');
-    if (oldId) privateFile(p, oldId, 'Lease');
-    else if (!isMissing(p)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Metadata destination appeared before publication.');
+    const assertDestination = () => {
+      if (!oldId) {
+        if (!isMissing(p)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Metadata destination appeared before publication.');
+        return;
+      }
+      const current = readJson(p, oldId, 'Lease').data;
+      if (expectedCurrent && !isDeepStrictEqual(current, expectedCurrent)) {
+        throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Metadata destination changed before publication.');
+      }
+    };
+    const staged = readJson(tmp, id, 'Lease').data;
+    if (!isDeepStrictEqual(staged, data)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Staged metadata differs from its validated successor.');
+    assertDestination();
     dir(parent, parentId, 'Metadata parent');
     file(tmp, id, 'Temporary lease');
+    assertDestination();
     fs.renameSync(tmp, p);
     renamed = true;
     dir(parent, parentId, 'Metadata parent');
+    const published = readJson(p, id, 'Lease').data;
+    if (!isDeepStrictEqual(published, data)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Published metadata differs from its validated successor.');
     return privateFile(p, id, 'Lease');
   } catch (e) {
     if (fd !== undefined) try { fs.closeSync(fd); } catch (_) {}
@@ -669,6 +684,118 @@ function claim(ns, spec) {
     throw failure;
   }
 }
+function sameOwnerTuple(left, right) {
+  return Boolean(left && right
+    && left.pid === right.pid
+    && left.instance_id === right.instance_id
+    && left.start_identity === right.start_identity);
+}
+
+function assertSemanticSnapshot(ns, c, l, marker = null, rootMarker = null, ids = {}, runtime = null, construction = false) {
+  const cap = c.purpose === 'source-update' ? LIMITS.sourceUpdate
+    : c.purpose === 'skill-portability' ? LIMITS.portability : LIMITS.foundationTest;
+  if (!Number.isSafeInteger(c.budget_bytes) || c.budget_bytes < 1 || c.budget_bytes > cap
+      || c.metadata_bytes !== LIMITS.metadata
+      || !Number.isSafeInteger(c.reservation_bytes)
+      || c.reservation_bytes !== c.budget_bytes + LIMITS.metadata
+      || !Number.isSafeInteger(l.reservation_bytes)
+      || l.reservation_bytes !== c.reservation_bytes
+      || !Number.isSafeInteger(l.bytes_reserved) || l.bytes_reserved < 0 || l.bytes_reserved > c.budget_bytes) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and lease reservation snapshot is inconsistent.');
+  }
+
+  const authorized = c.retention;
+  if (authorized !== null && (!authorized || typeof authorized !== 'object'
+      || typeof authorized.reason !== 'string' || !authorized.reason.trim() || authorized.reason.length > 512
+      || typeof authorized.owner !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(authorized.owner)
+      || !Number.isSafeInteger(authorized.maxBytes) || authorized.maxBytes < 1 || authorized.maxBytes > LIMITS.retainedBytes
+      || !Number.isSafeInteger(authorized.expiresAtMs)
+      || authorized.expiresAtMs <= c.created_at_ms
+      || authorized.expiresAtMs > c.created_at_ms + LIMITS.retainedMs)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim retention authorization is malformed.');
+  }
+  const retained = l.retention;
+  if (l.status === 'RETAINED' && retained === null) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Retained lease is missing its retention record.');
+  }
+  if (retained !== null && (!retained || typeof retained !== 'object'
+      || !['RETAINED', 'TERMINAL', 'CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status)
+      || !authorized
+      || retained.reason !== authorized.reason
+      || retained.owner !== authorized.owner
+      || retained.max_bytes !== authorized.maxBytes
+      || retained.expires_at_ms !== authorized.expiresAtMs
+      || !Number.isSafeInteger(retained.bytes) || retained.bytes < 0 || retained.bytes > retained.max_bytes
+      || !Number.isSafeInteger(retained.expires_at_ms)
+      || retained.expires_at_ms <= c.created_at_ms
+      || (l.status === 'RETAINED' && l.lease_expires_at_ms !== retained.expires_at_ms))) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and lease retention snapshot is inconsistent.');
+  }
+
+  const assertProcess = (record, label) => {
+    if (record && !sameOwnerTuple(c.process, record.process)) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and ' + label + ' owner tuples do not match.');
+    }
+  };
+  const assertRootBinding = (record, label) => {
+    if (!record) return;
+    if (record.claim_id !== c.claim_id
+        || !sameId(record.claim_identity, c.claim_identity)
+        || record.namespace_id !== c.namespace_id
+        || record.root_path !== c.root_path
+        || (l.root_identity && !sameId(record.root_identity, l.root_identity))
+        || (construction && runtime && runtime.rid && !l.root_identity && !sameId(record.root_identity, runtime.rid))
+        || !isDeepStrictEqual(record.repository, c.repository)
+        || record.episode !== c.episode
+        || record.run_id !== c.run_id
+        || record.lock_id !== c.lock_id
+        || record.created_at_ms !== c.created_at_ms) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and ' + label + ' do not bind the same root snapshot.');
+    }
+    assertProcess(record, label);
+  };
+
+  if (marker) {
+    if (marker.claim_id !== c.claim_id
+        || !sameId(marker.claim_identity, c.claim_identity)
+        || marker.namespace_id !== c.namespace_id
+        || marker.namespace_path !== ns.base
+        || marker.claim_path !== c.claim_path
+        || marker.root_path !== c.root_path
+        || (l.root_identity && !sameId(marker.root_identity, l.root_identity))
+        || (construction && runtime && runtime.rid && !l.root_identity && !sameId(marker.root_identity, runtime.rid))
+        || (l.root_marker_identity && !sameId(marker.root_marker_identity, l.root_marker_identity))
+        || (construction && runtime && runtime.rmid && !l.root_marker_identity && !sameId(marker.root_marker_identity, runtime.rmid))
+        || !isDeepStrictEqual(marker.repository, c.repository)
+        || marker.episode !== c.episode
+        || marker.run_id !== c.run_id
+        || marker.lock_id !== c.lock_id
+        || marker.created_at_ms !== c.created_at_ms
+        || (ids.markerId && l.marker_identity && !sameId(ids.markerId, l.marker_identity))
+        || (construction && runtime && runtime.mid && ids.markerId && !l.marker_identity && !sameId(ids.markerId, runtime.mid))) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and marker do not bind the same durable snapshot.');
+    }
+    assertProcess(marker, 'marker');
+    assertRootBinding(marker.root_marker, 'embedded root marker');
+    if (marker.root_marker_identity && l.root_marker_identity
+        && !sameId(marker.root_marker_identity, l.root_marker_identity)) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Marker root-marker identity does not match the lease.');
+    }
+  }
+  assertRootBinding(rootMarker, 'physical root marker');
+  if (rootMarker && ids.rootMarkerId && l.root_marker_identity
+      && !sameId(ids.rootMarkerId, l.root_marker_identity)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Physical root-marker identity does not match the lease.');
+  }
+  if (rootMarker && construction && runtime && runtime.rmid && ids.rootMarkerId
+      && !l.root_marker_identity && !sameId(ids.rootMarkerId, runtime.rmid)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Physical root marker differs from the construction receipt.');
+  }
+  if (marker && rootMarker && !isDeepStrictEqual(marker.root_marker, rootMarker)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Embedded and physical root-marker snapshots differ.');
+  }
+}
+
 function load(ns, cp) {
   const cfile = readJson(cp, null, 'Claim');
   const c = cfile.data;
@@ -688,15 +815,6 @@ function load(ns, cp) {
       || typeof c.created_at_ms !== 'number'
       || !Number.isSafeInteger(c.reservation_bytes)) {
     throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim does not bind exact canonical paths and identity.');
-  }
-if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
-      || typeof c.retention.reason !== 'string' || !c.retention.reason.trim() || c.retention.reason.length > 512
-      || typeof c.retention.owner !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(c.retention.owner)
-      || !Number.isSafeInteger(c.retention.maxBytes) || c.retention.maxBytes < 1 || c.retention.maxBytes > LIMITS.retainedBytes
-      || !Number.isSafeInteger(c.retention.expiresAtMs)
-      || c.retention.expiresAtMs <= c.created_at_ms
-      || c.retention.expiresAtMs > c.created_at_ms + LIMITS.retainedMs)) {
-    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim retention metadata is malformed.');
   }
   const lf = file(c.lease_path, null, 'Lease');
   const l = readJson(c.lease_path, lf.id, 'Lease').data;
@@ -742,25 +860,6 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
       throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Owned child metadata is malformed.');
     }
   }
-  if (l.status === 'RETAINED' || l.retention !== null) {
-    const t = l.retention;
-    if (!t || typeof t !== 'object'
-        || !['RETAINED', 'TERMINAL', 'CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status)
-        || typeof t.reason !== 'string'
-        || typeof t.owner !== 'string'
-        || !Number.isSafeInteger(t.max_bytes)
-        || !Number.isSafeInteger(t.bytes)
-        || !Number.isSafeInteger(t.expires_at_ms)
-        || t.expires_at_ms < c.created_at_ms
-        || t.expires_at_ms !== c.retention?.expiresAtMs
-        || t.reason !== c.retention?.reason
-        || t.owner !== c.retention?.owner
-        || t.max_bytes !== c.retention?.maxBytes
-        || t.bytes > t.max_bytes
-        || (l.status === 'RETAINED' && l.lease_expires_at_ms !== t.expires_at_ms)) {
-      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Retained lease metadata is malformed.');
-    }
-  }
   const r = {
     ns, id, cp, lp: c.lease_path, mp: c.marker_path, rp: c.root_path, c, cid: c.claim_identity,
     lid: lf.id, mid: l.marker_identity || null, rid: l.root_identity || null,
@@ -778,7 +877,7 @@ if (c.retention !== null && (!c.retention || typeof c.retention !== 'object'
   validate(r);
   return r;
 }
-function verifyClaim(r){const x=readJson(r.cp,r.cid,'Claim').data;if(x.claim_id!==r.id||x.claim_path!==r.cp||x.root_path!==r.rp||x.lease_path!==r.lp||x.marker_path!==r.mp||!sameId(x.claim_identity,r.cid)||x.namespace_id!==r.ns.namespaceId||x.episode!==r.c.episode||x.run_id!==r.c.run_id||x.lock_id!==r.c.lock_id||x.process.pid!==r.c.process.pid||x.process.instance_id!==r.c.process.instance_id||x.created_at_ms!==r.c.created_at_ms)throw error('TEMP_OWNERSHIP_UNCERTAIN','Claim changed.');return x;}
+function verifyClaim(r){const x=readJson(r.cp,r.cid,'Claim').data;if(!isDeepStrictEqual(x,r.c)||x.claim_id!==r.id||x.claim_path!==r.cp||x.root_path!==r.rp||x.lease_path!==r.lp||x.marker_path!==r.mp||!sameId(x.claim_identity,r.cid)||x.namespace_id!==r.ns.namespaceId)throw error('TEMP_OWNERSHIP_UNCERTAIN','Claim changed.');return x;}
 function readLease(r){const l=readJson(r.lp,r.lid,'Lease').data;if(l.schema!==SCHEMA+'.lease'||l.claim_id!==r.id||!sameId(l.claim_identity,r.cid))throw error('TEMP_OWNERSHIP_UNCERTAIN','Lease does not match claim.');return l;}
 function assertMutationOwner(r, owner) {
   if (!owner || owner !== r.mutationOwner || owner[MUTATION_OWNER] !== r) {
@@ -900,9 +999,8 @@ function closeMutationAdmission(r, reason, taskAbort = true, ownershipFence = fa
 
 function setLease(r, patch, owner = null) {
   assertMutationAccess(r, owner);
-  validateNamespace(r.ns);
-  verifyClaim(r);
-  const current = readLease(r);
+  const snapshot = validate(r, { construction: true });
+  const current = snapshot.l;
   const previousBytes = Number(current.bytes_reserved || 0);
   const previousEntries = Number(current.entries || 0);
   const next = { ...current, ...patch, updated_at_ms: Date.now() };
@@ -915,8 +1013,10 @@ function setLease(r, patch, owner = null) {
     r.admissionClosed = true;
     throw error('TEMP_BUDGET_EXCEEDED', 'Owned-temp metadata budget would be exceeded.');
   }
+  assertSemanticSnapshot(r.ns, snapshot.c, next, snapshot.m, snapshot.rootMarker,
+    { markerId: snapshot.markerId, rootMarkerId: snapshot.rootMarkerId }, r, r.creator);
   try {
-    r.lid = atomicJson(r.lp, next, r.lid, r.ns.claimsId);
+    r.lid = atomicJson(r.lp, next, r.lid, r.ns.claimsId, current);
   } catch (caught) {
     r.admissionClosed = true;
     throw caught;
@@ -927,6 +1027,11 @@ function setLease(r, patch, owner = null) {
   r.rmid = next.root_marker_identity || r.rmid;
   r.mid = next.marker_identity || r.mid;
   r.rootMarkerRemoved = next.root_marker_removed === true;
+  const published = validate(r, { construction: true });
+  if (!isDeepStrictEqual(published.l, next)) {
+    r.admissionClosed = true;
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Published lease does not match its validated successor.');
+  }
   return next;
 }
 
@@ -934,6 +1039,11 @@ function validate(r, opts = {}) {
   validateNamespace(r.ns);
   const c = verifyClaim(r);
   const l = readLease(r);
+  if (!isDeepStrictEqual(l, r.lease)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Lease changed from the active episode snapshot.');
+  }
+  const construction = opts.construction === true && r.creator;
+  assertSemanticSnapshot(r.ns, c, l, null, null, {}, r, construction);
   if (l.root_identity) {
     try { dir(r.rp, l.root_identity, 'Owned root'); }
     catch (caught) {
@@ -942,43 +1052,36 @@ function validate(r, opts = {}) {
       if (!missing || !(opts.allowMissing || l.root_removed || (cleaning && l.root_marker_removed))) throw caught;
     }
   }
-  let marker;
-  try { marker = readJson(r.mp, l.marker_identity, 'Marker').data; }
+  let rootMarker = null;
+  let rootMarkerId = null;
+  if (l.root_identity) {
+    try {
+      const read = readJson(path.join(r.rp, MARKER), l.root_marker_identity, 'Root marker');
+      rootMarker = read.data;
+      rootMarkerId = read.id;
+    } catch (caught) {
+      const missing = caught.cause && caught.cause.code === 'ENOENT';
+      const cleaning = ['CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status);
+      const removable = l.root_marker_removed && cleaning && missing;
+      const constructing = construction && l.status === 'CREATED' && !l.root_marker_identity && missing;
+      if (!removable && !constructing) throw caught;
+    }
+  }
+  let marker = null;
+  let markerId = null;
+  try {
+    const read = readJson(r.mp, l.marker_identity, 'Marker');
+    marker = read.data;
+    markerId = read.id;
+  }
   catch (caught) {
     const missing = caught.cause && caught.cause.code === 'ENOENT';
     const partial = r.creator && !l.marker_identity;
     const done = l.root_removed && ['CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status);
-    if (missing && (partial || done)) return { c, l, m: null };
-    throw caught;
+    if (!(missing && (partial || done))) throw caught;
   }
-  if (marker.schema !== SCHEMA + '.marker'
-      || marker.claim_id !== r.id
-      || !sameId(marker.claim_identity, r.cid)
-      || marker.root_path !== r.rp
-      || !sameId(marker.root_identity, l.root_identity)
-      || !sameId(marker.root_marker_identity, l.root_marker_identity)
-      || marker.repository.path !== c.repository.path
-      || !sameId(marker.repository.identity, c.repository.identity)
-      || marker.process.instance_id !== c.process.instance_id
-      || marker.episode !== c.episode
-      || marker.run_id !== c.run_id
-      || marker.lock_id !== c.lock_id) {
-    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim and marker do not match.');
-  }
-  if (l.root_identity) {
-    try {
-      const rootMarker = readJson(path.join(r.rp, MARKER), l.root_marker_identity, 'Root marker').data;
-      if (JSON.stringify(rootMarker) !== JSON.stringify(marker.root_marker)) {
-        throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Root marker content mismatch.');
-      }
-    } catch (caught) {
-      const removable = l.root_marker_removed
-        && ['CLEANING', 'CLEANUP_INCOMPLETE', 'REMOVED'].includes(l.status)
-        && caught.cause && caught.cause.code === 'ENOENT';
-      if (!removable) throw caught;
-    }
-  }
-  return { c, l, m: marker };
+  assertSemanticSnapshot(r.ns, c, l, marker, rootMarker, { markerId, rootMarkerId }, r, construction);
+  return { c, l, m: marker, rootMarker, markerId, rootMarkerId };
 }
 function makeMarker(r){const rootMarker={schema:SCHEMA+'.root-marker',claim_id:r.id,claim_identity:r.cid,namespace_id:r.ns.namespaceId,root_path:r.rp,root_identity:r.rid,repository:r.c.repository,episode:r.c.episode,run_id:r.c.run_id,lock_id:r.c.lock_id,process:r.c.process,created_at_ms:r.c.created_at_ms};r.rmid=writeExclusive(path.join(r.rp,MARKER),rootMarker,'Root marker');const m={schema:SCHEMA+'.marker',claim_id:r.id,claim_identity:r.cid,namespace_id:r.ns.namespaceId,namespace_path:r.ns.base,claim_path:r.cp,root_path:r.rp,root_identity:r.rid,root_marker_identity:r.rmid,root_marker:rootMarker,repository:r.c.repository,episode:r.c.episode,run_id:r.c.run_id,lock_id:r.c.lock_id,process:r.c.process,created_at_ms:r.c.created_at_ms};r.mid=writeExclusive(r.mp,m,'Marker');setLease(r,{status:'MARKED',root_identity:r.rid,root_marker_identity:r.rmid,marker_identity:r.mid});}
 
@@ -1105,15 +1208,15 @@ function orphanLeaseInventory(ns) {
   }
   return rows;
 }
-async function recoverOrphanLease(ns, row, namespaceOwner) {
-  if (row.malformed || !row.id) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Malformed orphan lease name is preserved.');
-  dir(ns.claims, ns.claimsId, 'Claims');
-  const leaseFile = file(row.path, null, 'Orphan lease');
-  const lease = readJson(row.path, leaseFile.id, 'Orphan lease').data;
+function assertOrphanLeaseSnapshot(ns, row, lease, expected = null) {
   const id = row.id;
   const claimPath = path.join(ns.claims, id + '.claim.json');
   const markerPath = path.join(ns.claims, id + '.marker.json');
   const rootPath = path.join(ns.roots, 'root-' + id);
+  if (expected && !isDeepStrictEqual(lease, expected)) {
+    throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Orphan lease content changed after validation.');
+  }
+  const retained = lease.retention;
   if (lease.schema !== SCHEMA + '.lease' || lease.claim_id !== id
       || !lease.claim_identity || typeof lease.claim_identity.dev !== 'string' || typeof lease.claim_identity.ino !== 'string'
       || lease.status !== 'REMOVED' || lease.root_removed !== true
@@ -1122,11 +1225,26 @@ async function recoverOrphanLease(ns, row, namespaceOwner) {
       || (lease.root_identity && lease.root_marker_removed !== true)
       || !Number.isSafeInteger(lease.reservation_bytes) || lease.reservation_bytes < 1
       || !Number.isSafeInteger(lease.bytes_reserved) || lease.bytes_reserved < 0
+      || !Number.isSafeInteger(lease.lease_expires_at_ms) || lease.lease_expires_at_ms > Date.now()
+      || (retained !== null && (!retained
+        || !Number.isSafeInteger(retained.max_bytes) || retained.max_bytes < 1 || retained.max_bytes > LIMITS.retainedBytes
+        || !Number.isSafeInteger(retained.bytes) || retained.bytes < 0 || retained.bytes > retained.max_bytes
+        || !Number.isSafeInteger(retained.expires_at_ms) || retained.expires_at_ms > Date.now()))
       || !isMissing(claimPath) || !isMissing(markerPath) || !isMissing(rootPath)) {
     throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Orphan lease lacks complete durable metadata-cleanup evidence.');
   }
+}
+
+async function recoverOrphanLease(ns, row, namespaceOwner) {
+  if (row.malformed || !row.id) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Malformed orphan lease name is preserved.');
+  const id = row.id;
   dir(ns.claims, ns.claimsId, 'Claims');
-  await unlinkMetadataWithRetry(ns, row.path, leaseFile.id, 'Orphan lease', namespaceOwner);
+  const leaseFile = file(row.path, null, 'Orphan lease');
+  const lease = readJson(row.path, leaseFile.id, 'Orphan lease').data;
+  assertOrphanLeaseSnapshot(ns, row, lease);
+  dir(ns.claims, ns.claimsId, 'Claims');
+  await unlinkMetadataWithRetry(ns, row.path, leaseFile.id, 'Orphan lease', namespaceOwner,
+    (current) => assertOrphanLeaseSnapshot(ns, row, current, lease));
   return { status: 'REMOVED', claimId: id, metadataOnly: true };
 }
 function inventory(ns, exclude) {
@@ -2454,7 +2572,12 @@ function isMissing(p) {
   catch (caught) { if (caught.code === 'ENOENT') return true; throw caught; }
 }
 
-async function unlinkMetadataWithRetry(ns, target, expectedId, label, namespaceOwner) {
+async function unlinkMetadataWithRetry(ns, target, expectedId, label, namespaceOwner, validateAttempt = null) {
+  const validateCurrent = async () => {
+    const current = readJson(target, expectedId, label).data;
+    if (validateAttempt) await validateAttempt(current);
+    return current;
+  };
   let last;
   for (const pause of delays()) {
     if (pause) await wait(pause);
@@ -2468,6 +2591,7 @@ async function unlinkMetadataWithRetry(ns, target, expectedId, label, namespaceO
       throw caught;
     }
     if (!sameId(current, expectedId)) throw error('TEMP_OWNERSHIP_UNCERTAIN', label + ' identity changed.');
+    await validateCurrent();
     validateNamespace(ns);
     if (namespaceOwner) assertNamespaceOwner(namespaceOwner, ns);
     dir(ns.claims, ns.claimsId, 'Claims metadata parent');
@@ -2477,6 +2601,7 @@ async function unlinkMetadataWithRetry(ns, target, expectedId, label, namespaceO
       if (namespaceOwner) assertNamespaceOwner(namespaceOwner, ns);
       dir(ns.claims, ns.claimsId, 'Claims metadata parent');
       privateFile(target, expectedId, label);
+      await validateCurrent();
       await fs.promises.unlink(target);
       validateNamespace(ns);
       if (namespaceOwner) assertNamespaceOwner(namespaceOwner, ns);
@@ -2514,7 +2639,15 @@ async function cleanupMeta(r, owner = null, namespaceOwner) {
         if (!(missing && phase === 'MARKER_REMOVAL_PENDING')) throw caught;
       }
       if (phase === null) setLease(r, { metadata_cleanup_phase: 'MARKER_REMOVAL_PENDING' }, owner);
-      if (marker) await unlinkMetadataWithRetry(r.ns, r.mp, marker.id, 'Marker', namespaceOwner);
+      if (marker) await unlinkMetadataWithRetry(r.ns, r.mp, marker.id, 'Marker', namespaceOwner, (current) => {
+        if (!isDeepStrictEqual(current, marker.data) || !isMissing(r.rp)) {
+          throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Marker snapshot changed before metadata removal.');
+        }
+        const snapshot = validate(r);
+        if (!snapshot.m || !isDeepStrictEqual(snapshot.m, marker.data)) {
+          throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Marker companions changed before metadata removal.');
+        }
+      });
     }
     setLease(r, { metadata_cleanup_phase: 'MARKER_REMOVED' }, owner);
     phase = 'MARKER_REMOVED';
@@ -2528,8 +2661,23 @@ async function cleanupMeta(r, owner = null, namespaceOwner) {
   if (!isMissing(r.rp) || !isMissing(r.mp)) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Recovery evidence does not prove metadata-only cleanup.');
   const currentClaim = readJson(r.cp, r.cid, 'Claim');
   if (currentClaim.data.claim_id !== r.id) throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim changed during metadata cleanup.');
-  await unlinkMetadataWithRetry(r.ns, r.cp, r.cid, 'Claim', namespaceOwner);
-  await unlinkMetadataWithRetry(r.ns, r.lp, r.lid, 'Lease', namespaceOwner);
+  await unlinkMetadataWithRetry(r.ns, r.cp, r.cid, 'Claim', namespaceOwner, (current) => {
+    if (!isDeepStrictEqual(current, currentClaim.data) || !isMissing(r.rp) || !isMissing(r.mp)) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim snapshot changed before metadata removal.');
+    }
+    const snapshot = validate(r);
+    if (!isDeepStrictEqual(snapshot.c, currentClaim.data) || snapshot.m !== null) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Claim companions changed before metadata removal.');
+    }
+  });
+  const leaseSnapshot = r.lease;
+  await unlinkMetadataWithRetry(r.ns, r.lp, r.lid, 'Lease', namespaceOwner, (current) => {
+    if (!isDeepStrictEqual(current, leaseSnapshot)
+        || current.status !== 'REMOVED' || current.metadata_cleanup_phase !== 'CLAIM_REMOVAL_PENDING'
+        || !isMissing(r.cp) || !isMissing(r.mp) || !isMissing(r.rp)) {
+      throw error('TEMP_OWNERSHIP_UNCERTAIN', 'Final lease snapshot changed before metadata removal.');
+    }
+  });
 }
 
 async function cleanupLocked(r, reason, owner, namespaceOwner) {

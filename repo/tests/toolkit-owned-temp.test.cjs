@@ -77,6 +77,11 @@ function errorCode(code) {
   return (error) => error && error.code === code;
 }
 
+function makeProbeRoot(prefix) {
+  const physicalTemp = fs.realpathSync.native(os.tmpdir());
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(physicalTemp, prefix)));
+}
+
 async function helper(_lease, code, options = {}) {
   const result = spawnSync(process.execPath, ['-e', code], {
     encoding: 'utf8',
@@ -349,7 +354,7 @@ test('canonical AJV 2020 options reject lossy records and validator loss fails c
 });
 
 test('cached namespace marker rereads fail closed across inspection, recovery, and admission', async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-cached-namespace-'));
+  const probeRoot = makeProbeRoot('owned-temp-f1-cached-namespace-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   const code = [
     "const fs=require('node:fs');",
@@ -376,7 +381,7 @@ test('cached namespace marker rereads fail closed across inspection, recovery, a
 });
 
 test('active namespace marker tampering blocks lease writes and terminal cleanup', async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-active-namespace-'));
+  const probeRoot = makeProbeRoot('owned-temp-f1-active-namespace-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   const code = [
     "const fs=require('node:fs');",
@@ -506,7 +511,7 @@ test('retention schema and cross-record bounds hold malformed snapshots and reco
 });
 
 test('stale recovery validates a lease malformed after its valid first read', async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-f1-reread-'));
+  const probeRoot = makeProbeRoot('owned-temp-f1-reread-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   let root;
   let leasePath;
@@ -609,6 +614,250 @@ test('malformed orphan leases are held before public recovery or admission', asy
     }
   });
   assert.deepEqual(usage(), baseline);
+});
+
+test('F1B orphan lease retry revalidates same-inode bytes and preserves POSIX attempt policy', async () => {
+  const probeRoot = makeProbeRoot('owned-temp-f1b-orphan-retry-');
+  const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+  const code = modulePrelude() + [
+    'async function main(){',
+    'const state={ids:{},cleanupCodes:{},recoveryCodes:{},counts:{A:0,B:0}};let readyCount=0;let readyResolve;let releaseResolve;const ready=new Promise(resolve=>{readyResolve=resolve;});const gate=new Promise(resolve=>{releaseResolve=resolve;});const paths={};const originalUnlink=fs.promises.unlink;',
+    "const create=(label)=>runtime.withOwnedTemp({schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1b-orphan-'+label,budgetBytes:4096},async lease=>{await lease.writeFile('keep.txt',label);const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===lease.root);const base=path.dirname(path.dirname(lease.root));state.ids[label]=row.claimId;paths[label]=path.join(base,'claims',row.claimId+'.lease.json');readyCount++;if(readyCount===2)readyResolve();await gate;});",
+    'const episodes=[create(\'A\'),create(\'B\')];await ready;',
+    "fs.promises.unlink=async function(filePath,...args){const label=Object.keys(paths).find(key=>path.resolve(String(filePath))===path.resolve(paths[key]));if(label){state.counts[label]++;throw Object.assign(new Error('injected orphan creation failure'),{code:'EIO'});}return originalUnlink.call(this,filePath,...args);};releaseResolve();const created=await Promise.allSettled(episodes);fs.promises.unlink=originalUnlink;for(let i=0;i<created.length;i++)state.cleanupCodes[i===0?'A':'B']=created[i].status==='rejected'?created[i].reason.code:'OK';",
+    "state.orphanPresent={A:fs.existsSync(paths.A),B:fs.existsSync(paths.B)};state.claimAbsent={A:!fs.existsSync(paths.A.replace('.lease.json','.claim.json')),B:!fs.existsSync(paths.B.replace('.lease.json','.claim.json'))};",
+    'state.counts={A:0,B:0};state.sameInode=false;state.mutationApplied=false;',
+    "fs.promises.unlink=async function(filePath,...args){const label=Object.keys(paths).find(key=>path.resolve(String(filePath))===path.resolve(paths[key]));if(label){state.counts[label]++;if(state.counts[label]===1){const failure=Object.assign(new Error('injected retry lock'),{code:'EBUSY'});if(label==='A'){const before=fs.lstatSync(filePath,{bigint:true});return Promise.reject(failure).catch(caught=>{try{const record=JSON.parse(fs.readFileSync(filePath,'utf8'));record.evidenceDisposition='hold';fs.writeFileSync(filePath,JSON.stringify(record));const after=fs.lstatSync(filePath,{bigint:true});state.sameInode=String(before.dev)===String(after.dev)&&String(before.ino)===String(after.ino);state.mutationApplied=JSON.parse(fs.readFileSync(filePath,'utf8')).evidenceDisposition==='hold';}catch(_){}throw caught;});}throw failure;}return originalUnlink.call(this,filePath,...args);}return originalUnlink.call(this,filePath,...args);};",
+    'state.first=await runtime.recoverStaleOwnedTemps();fs.promises.unlink=originalUnlink;state.second=await runtime.recoverStaleOwnedTemps();',
+    "const find=(rows,label)=>rows.find(value=>value.claimId===state.ids[label]||value.claimPath===paths[label]);for(const label of ['A','B']){const first=find(state.first,label);const second=find(state.second,label);state.recoveryCodes[label]={firstStatus:first&&first.status,firstCode:first&&first.code,secondStatus:second&&second.status,secondCode:second&&second.code};}state.finalPresent={A:fs.existsSync(paths.A),B:fs.existsSync(paths.B)};fs.writeSync(1,JSON.stringify(state));",
+    '}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});'
+  ].join('\n');
+  try {
+    const result = await helper(null, code, { env, timeoutMs: 90000 });
+    assert.equal(result.code, 0, result.stderr);
+    const state = JSON.parse(result.stdout);
+    assert.deepEqual(state.cleanupCodes, { A: 'TEMP_CLEANUP_INCOMPLETE', B: 'TEMP_CLEANUP_INCOMPLETE' });
+    assert.deepEqual(state.orphanPresent, { A: true, B: true });
+    assert.deepEqual(state.claimAbsent, { A: true, B: true });
+    assert.equal(state.mutationApplied, true, JSON.stringify(state));
+    assert.equal(state.sameInode, true, 'the retry mutation must retain the orphan lease inode');
+    assert.equal(state.counts.A, 1, 'changed orphan bytes must not reach a second target unlink');
+    if (process.platform === 'win32') {
+      assert.equal(state.recoveryCodes.A.firstStatus, 'HOLD');
+      assert.equal(state.recoveryCodes.A.firstCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+      assert.equal(state.recoveryCodes.B.firstStatus, 'REMOVED');
+      assert.equal(state.counts.B, 2, 'unchanged Windows control reaches its retry');
+      assert.equal(state.finalPresent.A, true);
+      assert.equal(state.finalPresent.B, false);
+    } else {
+      assert.equal(state.recoveryCodes.A.firstStatus, 'HOLD');
+      assert.equal(state.recoveryCodes.B.firstStatus, 'HOLD');
+      assert.equal(state.recoveryCodes.A.secondStatus, 'HOLD');
+      assert.equal(state.recoveryCodes.A.secondCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+      assert.equal(state.recoveryCodes.B.secondStatus, 'REMOVED');
+      assert.equal(state.counts.B, 1, 'POSIX keeps one unlink attempt per recovery invocation');
+      assert.equal(state.finalPresent.A, true);
+      assert.equal(state.finalPresent.B, false);
+    }
+    const changedLease = path.join(probeRoot, '.ai-agent-toolkit-owned-temp-v1', 'claims', state.ids.A + '.lease.json');
+    const changed = JSON.parse(fs.readFileSync(changedLease, 'utf8'));
+    assert.equal(changed.evidenceDisposition, 'hold');
+  } finally {
+    if (fs.existsSync(probeRoot)) fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('F1A schema-valid retention/lifecycle contradiction cannot be sanitized by terminal cleanup', async () => {
+  const invalidRoot = makeProbeRoot('owned-temp-f1a-semantic-');
+  const positiveRoot = makeProbeRoot('owned-temp-f1a-positive-');
+  const invalidEnv = { ...process.env, TEMP: invalidRoot, TMP: invalidRoot, TMPDIR: invalidRoot };
+  const positiveEnv = { ...process.env, TEMP: positiveRoot, TMP: positiveRoot, TMPDIR: positiveRoot };
+  const invalidCode = modulePrelude() + [
+    'async function main(){',
+    "const specification={schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1a-semantic',budgetBytes:4096,retention:{reason:'F1A retention',owner:'toolkit-owned-temp-test',maxBytes:4096,expiresAt:new Date(Date.now()+60000).toISOString()}};",
+    'const state={};',
+    'try{await runtime.withOwnedTemp(specification,async lease=>{',
+    "await lease.writeFile('keep.txt','retention evidence');",
+    "const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===lease.root);",
+    "const base=path.dirname(path.dirname(lease.root));",
+    "state.root=lease.root;state.claimId=row.claimId;state.claimPath=path.join(base,'claims',row.claimId+'.claim.json');state.leasePath=path.join(base,'claims',row.claimId+'.lease.json');state.payloadPath=path.join(lease.root,'keep.txt');",
+    'state.originalLease=fs.readFileSync(state.leasePath,\'utf8\');',
+    'const claim=JSON.parse(fs.readFileSync(state.claimPath,\'utf8\'));',
+    'const leaseRecord=JSON.parse(state.originalLease);',
+    "leaseRecord.status='ACTIVE';leaseRecord.retention={reason:claim.retention.reason,owner:claim.retention.owner,max_bytes:claim.retention.maxBytes,expires_at_ms:claim.retention.expiresAtMs,bytes:18};",
+    'state.invalidLease=JSON.stringify(leaseRecord);fs.writeFileSync(state.leasePath,state.invalidLease);',
+    'state.inspectBefore=runtime.inspectOwnedTemps().records.find(value=>value.claimId===state.claimId||value.claimPath===state.claimPath);',
+    '});}catch(caught){state.outerCode=caught.code;state.outerMessage=caught.message;state.cleanupStatus=caught.cleanupStatus||null;}',
+    'state.rootExists=!!state.root&&fs.existsSync(state.root);state.payloadExists=!!state.payloadPath&&fs.existsSync(state.payloadPath);',
+    'state.payload=state.payloadExists?fs.readFileSync(state.payloadPath,\'utf8\'):null;',
+    'state.claimExists=!!state.claimPath&&fs.existsSync(state.claimPath);state.leaseExists=!!state.leasePath&&fs.existsSync(state.leasePath);',
+    'state.leaseAfter=state.leaseExists?fs.readFileSync(state.leasePath,\'utf8\'):null;',
+    'state.inspectAfter=runtime.inspectOwnedTemps().records.find(value=>value.claimId===state.claimId||value.claimPath===state.claimPath);',
+    'process.stdout.write(JSON.stringify(state));',
+    '}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});'
+  ].join('\n');
+  const positiveCode = modulePrelude() + [
+    'async function main(){',
+    "const state={};try{await runtime.withOwnedTemp({schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1a-positive'},async lease=>{state.root=lease.root;await lease.writeFile('keep.txt','ordinary disposable state');});}catch(caught){state.outerCode=caught.code;}",
+    'state.rootExists=!!state.root&&fs.existsSync(state.root);process.stdout.write(JSON.stringify(state));',
+    '}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});'
+  ].join('\n');
+  try {
+    const negative = await helper(null, invalidCode, { env: invalidEnv, timeoutMs: 60000 });
+    assert.equal(negative.code, 0, negative.stderr);
+    const state = JSON.parse(negative.stdout);
+    assert.ok(state.inspectBefore, 'F1A setup failed before the intended boundary: ' + state.outerCode + ' ' + state.outerMessage);
+    assert.equal(state.inspectBefore && state.inspectBefore.state, 'HOLD');
+    assert.equal(state.inspectBefore.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+    assert.equal(state.outerCode, 'TEMP_CLEANUP_INCOMPLETE');
+    assert.equal(state.rootExists, true, 'contradictory retention must preserve the root');
+    assert.equal(state.payloadExists, true);
+    assert.equal(state.payload, 'retention evidence');
+    assert.equal(state.claimExists, true);
+    assert.equal(state.leaseExists, true);
+    assert.equal(state.leaseAfter, state.invalidLease, 'cleanup must not patch the invalid predecessor');
+    assert.equal(state.inspectAfter.state, 'HOLD');
+
+    const positive = await helper(null, positiveCode, { env: positiveEnv, timeoutMs: 60000 });
+    assert.equal(positive.code, 0, positive.stderr);
+    assert.equal(JSON.parse(positive.stdout).rootExists, false, 'valid disposable cleanup remains available');
+  } finally {
+    // Assertions above observe the contradictory bytes before this bounded test-fixture recovery.
+    if (fs.existsSync(invalidRoot)) {
+      const namespace = path.join(invalidRoot, '.ai-agent-toolkit-owned-temp-v1');
+      const claims = path.join(namespace, 'claims');
+      if (fs.existsSync(claims)) {
+        for (const name of fs.readdirSync(claims)) {
+          if (!/^[a-f0-9]{32}\.claim\.json$/.test(name)) continue;
+          const claimPath = path.join(claims, name);
+          const id = name.slice(0, 32);
+          const leasePath = path.join(claims, id + '.lease.json');
+          if (!fs.existsSync(leasePath)) continue;
+          const leaseRecord = JSON.parse(fs.readFileSync(leasePath, 'utf8'));
+          leaseRecord.status = 'TERMINAL';
+          leaseRecord.retention = null;
+          leaseRecord.lease_expires_at_ms = Date.now() - 1;
+          fs.writeFileSync(leasePath, JSON.stringify(leaseRecord));
+        }
+      }
+      await helper(null, recoveryCode(), { env: invalidEnv, timeoutMs: 60000 });
+      const inspected = await helper(null, modulePrelude() + '\nprocess.stdout.write(JSON.stringify(runtime.inspectOwnedTemps()));', { env: invalidEnv });
+      if (inspected.code === 0 && JSON.parse(inspected.stdout).records.length === 0) fs.rmSync(invalidRoot, { recursive: true, force: true });
+    }
+    if (fs.existsSync(positiveRoot)) fs.rmSync(positiveRoot, { recursive: true, force: true });
+  }
+});
+
+test('F1C complete owner PID/start tuple disagreement holds before liveness and deletion', async (t) => {
+  const modes = ['claim-pid', 'claim-start', 'marker-pid', 'root-start-pair', 'marker-null-start'];
+  for (const mode of modes) {
+    await t.test(mode, async () => {
+      const probeRoot = makeProbeRoot('owned-temp-f1c-' + mode + '-');
+      const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+      const code = modulePrelude() + [
+        "const {spawnSync}=require('node:child_process');async function main(){",
+        "const dead=spawnSync(process.execPath,['-e','process.stdout.write(String(process.pid))'],{encoding:'utf8'});const deadPid=Number(dead.stdout);",
+        "const specification={schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1c-'+" + JSON.stringify(mode) + ',budgetBytes:4096};',
+        'const state={mode:' + JSON.stringify(mode) + '};',
+        'try{await runtime.withOwnedTemp(specification,async lease=>{',
+        "await lease.writeFile('keep.txt','live owner evidence');",
+        "const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===lease.root);const base=path.dirname(path.dirname(lease.root));",
+        "state.root=lease.root;state.claimId=row.claimId;state.claimPath=path.join(base,'claims',row.claimId+'.claim.json');state.leasePath=path.join(base,'claims',row.claimId+'.lease.json');state.markerPath=path.join(base,'claims',row.claimId+'.marker.json');state.rootMarkerPath=path.join(lease.root,'.ai-agent-toolkit-owned-temp-marker.json');state.payloadPath=path.join(lease.root,'keep.txt');",
+        "state.originalClaim=fs.readFileSync(state.claimPath,'utf8');state.originalLease=fs.readFileSync(state.leasePath,'utf8');state.originalMarker=fs.readFileSync(state.markerPath,'utf8');state.originalRootMarker=fs.readFileSync(state.rootMarkerPath,'utf8');",
+        "const claim=JSON.parse(state.originalClaim);const marker=JSON.parse(state.originalMarker);const rootMarker=JSON.parse(state.originalRootMarker);",
+        "if(state.mode==='claim-pid')claim.process.pid=deadPid;",
+        "if(state.mode==='claim-start')claim.process.start_identity='different-start-identity';",
+        "if(state.mode==='marker-pid')marker.process.pid=deadPid;",
+        "if(state.mode==='root-start-pair'){marker.root_marker.process.start_identity='different-start-identity';rootMarker.process.start_identity='different-start-identity';}",
+        "if(state.mode==='marker-null-start')marker.process.start_identity=null;",
+        "if(state.mode==='claim-pid'||state.mode==='claim-start')fs.writeFileSync(state.claimPath,JSON.stringify(claim));",
+        "if(state.mode==='marker-pid'||state.mode==='root-start-pair'||state.mode==='marker-null-start')fs.writeFileSync(state.markerPath,JSON.stringify(marker));",
+        "if(state.mode==='root-start-pair')fs.writeFileSync(state.rootMarkerPath,JSON.stringify(rootMarker));",
+        "const leasePath=state.leasePath;const leaseRecord=JSON.parse(fs.readFileSync(leasePath,'utf8'));leaseRecord.status='TERMINAL';leaseRecord.lease_expires_at_ms=Date.now()-1;fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));",
+        "state.inspectBefore=runtime.inspectOwnedTemps().records.find(value=>value.claimId===state.claimId||value.claimPath===state.claimPath);state.recovery=await runtime.recoverStaleOwnedTemps();state.recovered=state.recovery.find(value=>value.claimId===state.claimId||value.claimPath===state.claimPath);state.rootExists=!!state.root&&fs.existsSync(state.root);state.payloadExists=!!state.payloadPath&&fs.existsSync(state.payloadPath);state.claimExists=!!state.claimPath&&fs.existsSync(state.claimPath);state.leaseExists=!!state.leasePath&&fs.existsSync(state.leasePath);fs.writeSync(1,JSON.stringify(state));process.exit(0);",
+        '});}catch(caught){state.outerCode=caught.code;}',
+        'process.stdout.write(JSON.stringify(state));',
+        "}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});"
+      ].join('\n');
+      try {
+        const result = await helper(null, code, { env, timeoutMs: 60000 });
+        assert.equal(result.code, 0, result.stderr);
+        const state = JSON.parse(result.stdout);
+        assert.equal(state.inspectBefore && state.inspectBefore.state, 'HOLD', 'public inspection must reject the inconsistent tuple');
+        assert.equal(state.inspectBefore.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+        assert.equal(state.recovered.status, 'HOLD');
+        assert.equal(state.recovered.code, 'TEMP_OWNERSHIP_UNCERTAIN', 'liveness cannot override cross-record identity');
+        assert.equal(state.rootExists, true);
+        assert.equal(state.payloadExists, true);
+        assert.equal(state.claimExists, true);
+        assert.equal(state.leaseExists, true);
+      } finally {
+        // The fixture is isolated and the owner process has exited before this cleanup.
+        if (fs.existsSync(probeRoot)) fs.rmSync(probeRoot, { recursive: true, force: true });
+      }
+    });
+  }
+  const positiveRoot = makeProbeRoot('owned-temp-f1c-live-positive-');
+  const positiveEnv = { ...process.env, TEMP: positiveRoot, TMP: positiveRoot, TMPDIR: positiveRoot };
+  const positiveCode = modulePrelude() + [
+    'async function main(){',
+    "const state={};try{await runtime.withOwnedTemp({schema:runtime.SPEC_SCHEMA,purpose:'foundation-test',repoRoot,episode:'f1c-consistent-live'},async lease=>{",
+    "const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===lease.root);const base=path.dirname(path.dirname(lease.root));const leasePath=path.join(base,'claims',row.claimId+'.lease.json');const originalLease=fs.readFileSync(leasePath,'utf8');const leaseRecord=JSON.parse(originalLease);leaseRecord.status='TERMINAL';leaseRecord.lease_expires_at_ms=Date.now()-1;fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));",
+    "state.root=lease.root;state.recovery=await runtime.recoverStaleOwnedTemps();state.recovered=state.recovery.find(value=>value.claimId===row.claimId);state.rootHeldDuringRecovery=fs.existsSync(lease.root);fs.writeFileSync(leasePath,originalLease);",
+    '});}catch(caught){state.outerCode=caught.code;}state.rootExists=!!state.root&&fs.existsSync(state.root);process.stdout.write(JSON.stringify(state));',
+    '}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});'
+  ].join('\n');
+  try {
+    const positive = await helper(null, positiveCode, { env: positiveEnv, timeoutMs: 60000 });
+    assert.equal(positive.code, 0, positive.stderr);
+    const state = JSON.parse(positive.stdout);
+    assert.equal(state.recovered.status, 'HOLD');
+    assert.equal(state.recovered.code, 'TEMP_PROCESS_LIVE');
+    assert.equal(state.rootHeldDuringRecovery, true, 'a consistent live owner remains protected');
+  } finally {
+    if (fs.existsSync(positiveRoot)) fs.rmSync(positiveRoot, { recursive: true, force: true });
+  }
+});
+
+test('F1D coordinated reservation under/overstatement blocks inventory and admission before callback', async (t) => {
+  for (const delta of [-1, 1]) {
+    await t.test(delta < 0 ? 'understated' : 'overstated', async () => {
+      const probeRoot = makeProbeRoot('owned-temp-f1d-' + (delta < 0 ? 'under-' : 'over-'));
+      const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
+      const code = modulePrelude() + [
+        'async function main(){',
+        'const budget=4*1024*1024;const specification={schema:runtime.SPEC_SCHEMA,purpose:\'foundation-test\',repoRoot,episode:\'f1d-existing\',budgetBytes:budget};const state={};',
+        'try{await runtime.withOwnedTemp(specification,async lease=>{',
+        "await lease.writeFile('keep.txt','reservation evidence');const row=runtime.inspectOwnedTemps().records.find(value=>value.rootPath===lease.root);const base=path.dirname(path.dirname(lease.root));",
+        "const claimPath=path.join(base,'claims',row.claimId+'.claim.json');const leasePath=path.join(base,'claims',row.claimId+'.lease.json');const originalClaim=fs.readFileSync(claimPath,'utf8');const originalLease=fs.readFileSync(leasePath,'utf8');state.claimPath=claimPath;state.leasePath=leasePath;state.root=lease.root;",
+        'const claim=JSON.parse(originalClaim);const leaseRecord=JSON.parse(originalLease);claim.reservation_bytes+=(' + String(delta) + ');leaseRecord.reservation_bytes+=(' + String(delta) + ');fs.writeFileSync(claimPath,JSON.stringify(claim));fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));',
+        'state.expectedReservation=budget+1024*1024;state.inspected=runtime.inspectOwnedTemps().records.find(value=>value.claimId===row.claimId||value.claimPath===claimPath);state.recovery=(await runtime.recoverStaleOwnedTemps()).find(value=>value.claimId===row.claimId||value.claimPath===claimPath);',
+        "let callbackReached=false;try{await runtime.withOwnedTemp({...specification,episode:'f1d-admission-'+" + JSON.stringify(String(delta)) + '},async()=>{callbackReached=true;});}catch(caught){state.admissionCode=caught.code;}',
+        'state.callbackReached=callbackReached;state.rootExists=fs.existsSync(state.root);',
+        'fs.writeFileSync(claimPath,originalClaim);fs.writeFileSync(leasePath,originalLease);',
+        "await runtime.withOwnedTemp({...specification,episode:'f1d-valid-positive-'+" + JSON.stringify(String(delta)) + '},async()=>{state.validPositiveReached=true;});',
+        '});}catch(caught){state.outerCode=caught.code;}',
+        'process.stdout.write(JSON.stringify(state));',
+        "}main().catch(caught=>{process.stderr.write(caught.stack||String(caught));process.exitCode=1;});"
+      ].join('\n');
+      try {
+        const result = await helper(null, code, { env, timeoutMs: 90000 });
+        assert.equal(result.code, 0, result.stderr);
+        const state = JSON.parse(result.stdout);
+        assert.equal(state.inspected && state.inspected.state, 'HOLD');
+        assert.equal(state.inspected.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+        assert.equal(state.recovery.status, 'HOLD');
+        assert.equal(state.recovery.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+        assert.equal(state.admissionCode, 'TEMP_CAPACITY_UNKNOWN');
+        assert.equal(state.callbackReached, false);
+        assert.equal(state.rootExists, true);
+        assert.equal(state.expectedReservation, 5 * 1024 * 1024);
+        assert.equal(state.validPositiveReached, true, 'exact B+M accounting retains the public admission control');
+      } finally {
+        if (fs.existsSync(probeRoot)) fs.rmSync(probeRoot, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 test('F2-N1..N7 preserve child-close primary across failed ledger retirement and fence recovery', async () => {
@@ -1693,7 +1942,7 @@ test('metadata cleanup retries transient locks and recovers interrupted durable 
 
 test('partial namespace initialization removes only proven state and reports preserved residue', async () => {
   for (const preserveResidue of [false, true]) {
-    const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-namespace-probe-'));
+    const probeRoot = makeProbeRoot('owned-temp-namespace-probe-');
     const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
     const result = await helper(null, partialNamespaceCode(preserveResidue), { env });
     assert.equal(result.code, 0, result.stderr);
@@ -1718,7 +1967,7 @@ test('partial namespace initialization removes only proven state and reports pre
 });
 
 test('read-only inspection and admission hold an existing partial namespace without reconstructing it', async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-existing-partial-'));
+  const probeRoot = makeProbeRoot('owned-temp-existing-partial-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   try {
     const initialized = await helper(null, emptyNamespaceCode(), { env });
@@ -1864,7 +2113,7 @@ test('terminal cleanup distinguishes unconfirmed and confirmed controlled child 
 });
 
 test('POSIX group-signal failure settles shutdown as incomplete instead of hanging', { skip: process.platform === 'win32' }, async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-group-signal-'));
+  const probeRoot = makeProbeRoot('owned-temp-group-signal-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   try {
     const result = await helper(null, groupSignalFailureCode(), { env, timeoutMs: 20000 });
@@ -1992,7 +2241,8 @@ test('stale recovery holds a root while its recorded child is live', async () =>
   const marker=JSON.parse(fs.readFileSync(markerPath,'utf8'));
   const rootMarker=JSON.parse(fs.readFileSync(rootMarkerPath,'utf8'));
   const processRecord={...claim.process};
-  const leaseRecord=JSON.parse(fs.readFileSync(leasePath,'utf8'));
+  const leaseSnapshot=fs.readFileSync(leasePath,'utf8');
+  const leaseRecord=JSON.parse(leaseSnapshot);
   assert.equal(leaseRecord.owned_children.length, 0);
   leaseRecord.owned_children = [{
     phase: 'RUNNING',
@@ -2027,13 +2277,9 @@ test('stale recovery holds a root while its recorded child is live', async () =>
   fs.writeFileSync(claimPath,JSON.stringify(claim));
   fs.writeFileSync(markerPath,JSON.stringify(marker));
   fs.writeFileSync(rootMarkerPath,JSON.stringify(rootMarker));
-  leaseRecord.status='ACTIVE';
-  leaseRecord.lease_expires_at_ms=Date.now()+LIMITS.lease;
-  fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));
+  fs.writeFileSync(leasePath,leaseSnapshot);
   child.kill('SIGKILL');
   await new Promise(resolve=>child.once('close',resolve));
-  leaseRecord.owned_children=[];
-  fs.writeFileSync(leasePath,JSON.stringify(leaseRecord));
   assert.deepEqual(JSON.parse(fs.readFileSync(leasePath,'utf8')).owned_children,[]);
  });
  assert.deepEqual(usage(),baseline);
@@ -2046,9 +2292,22 @@ test('root identity substitution is held without deleting the replacement path',
     const paths = JSON.parse(child.stdout);
     const sentinel = path.join(paths.replacement, 'sentinel');
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'replacement');
+    const swappedId = path.basename(paths.root).slice('root-'.length);
+    const firstRecovery = await helper(lease, recoveryCode());
+    assert.equal(firstRecovery.code, 0, firstRecovery.stderr);
+    const held = JSON.parse(firstRecovery.stdout).find((row) => row.claimId === swappedId);
+    assert.equal(held.status, 'HOLD', JSON.stringify(held));
+    assert.equal(held.code, 'TEMP_LEASE_ACTIVE', JSON.stringify(held));
+    assert.equal(fs.existsSync(paths.root), true);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'replacement');
+    const base = path.dirname(path.dirname(paths.root));
+    const leasePath = path.join(base, 'claims', swappedId + '.lease.json');
+    const stale = JSON.parse(fs.readFileSync(leasePath, 'utf8'));
+    stale.status = 'TERMINAL';
+    stale.lease_expires_at_ms = Date.now() - 1;
+    fs.writeFileSync(leasePath, JSON.stringify(stale));
     const recovery = await helper(lease, recoveryCode());
     assert.equal(recovery.code, 0, recovery.stderr);
-    const swappedId = path.basename(paths.root).slice('root-'.length);
     const swapped = JSON.parse(recovery.stdout).find((row) => row.claimId === swappedId);
     assert.equal(swapped.status, 'REMOVED', JSON.stringify(swapped));
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'replacement');
@@ -2649,7 +2908,7 @@ test('shutdown supersedes retention and waits for an admitted copy before cleanu
 });
 
 test('namespace failure after publication preserves shared directories and the published marker', async () => {
-  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-temp-after-publish-'));
+  const probeRoot = makeProbeRoot('owned-temp-after-publish-');
   const env = { ...process.env, TEMP: probeRoot, TMP: probeRoot, TMPDIR: probeRoot };
   try {
     const initialized = await helper(null, namespaceAfterPublishCode(), { env });

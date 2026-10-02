@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
@@ -18,6 +19,338 @@ const sourceLockRel = 'repo/source-watch/provenance/example/SOURCE-LOCK.json';
 const sourceProjectRel = 'repo/source-watch/provenance/example';
 const lockedSha = '1111111111111111111111111111111111111111';
 const latestSha = '2222222222222222222222222222222222222222';
+const lifecycleTestName = 'source-update profile failure remains primary when owned-root cleanup is incomplete';
+const lifecycleRoleEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_ROLE';
+const lifecycleRootEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_ROOT';
+const lifecycleReceiptEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_RECEIPT';
+const lifecycleClaimEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_CLAIM';
+const lifecycleOwnerEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_OWNER_PID';
+const lifecycleEvidenceDirEnv = 'AI_AGENT_TOOLKIT_W2A_G3_LIFECYCLE_EVIDENCE_DIR';
+const lifecycleSentinel = 'w2a-g3-unrelated-preservation-sentinel';
+const lifecycleNamespace = '.ai-agent-toolkit-owned-temp-v1';
+const lifecycleRootMarker = '.ai-agent-toolkit-owned-temp-marker.json';
+const lifecycleBudgetBytes = 16 * 1024 * 1024;
+const lifecycleMetadataBytes = 1024 * 1024;
+
+function lifecycleSha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function lifecycleStatIdentity(stats) {
+  return { dev: String(stats.dev), ino: String(stats.ino), mode: String(stats.mode) };
+}
+
+function lifecycleFileSnapshot(filePath) {
+  let stats;
+  try { stats = fs.lstatSync(filePath, { bigint: true }); }
+  catch (caught) {
+    if (caught.code === 'ENOENT') return { path: filePath, exists: false };
+    throw caught;
+  }
+  assert.ok(stats.isFile(), 'Lifecycle evidence path must be a regular file: ' + filePath);
+  const bytes = fs.readFileSync(filePath);
+  return {
+    path: filePath,
+    exists: true,
+    identity: lifecycleStatIdentity(stats),
+    size: Number(stats.size),
+    mtimeNs: String(stats.mtimeNs),
+    ctimeNs: String(stats.ctimeNs),
+    sha256: lifecycleSha256(bytes)
+  };
+}
+
+function lifecycleDirectorySnapshot(directoryPath) {
+  let stats;
+  try { stats = fs.lstatSync(directoryPath, { bigint: true }); }
+  catch (caught) {
+    if (caught.code === 'ENOENT') return { path: directoryPath, exists: false };
+    throw caught;
+  }
+  assert.ok(stats.isDirectory() && !stats.isSymbolicLink(), 'Lifecycle directory must be a real directory: ' + directoryPath);
+  const entries = fs.readdirSync(directoryPath).sort().map((name) => {
+    const child = path.join(directoryPath, name);
+    const childStats = fs.lstatSync(child, { bigint: true });
+    if (childStats.isDirectory()) {
+      assert.ok(!childStats.isSymbolicLink(), 'Lifecycle directory entry must not be a symlink: ' + child);
+      return { name, type: 'directory', identity: lifecycleStatIdentity(childStats), entries: fs.readdirSync(child).sort() };
+    }
+    assert.ok(childStats.isFile(), 'Lifecycle directory entry must be a regular file: ' + child);
+    const snapshot = lifecycleFileSnapshot(child);
+    return { name, type: 'file', identity: snapshot.identity, size: snapshot.size, mtimeNs: snapshot.mtimeNs, ctimeNs: snapshot.ctimeNs, sha256: snapshot.sha256 };
+  });
+  return { path: directoryPath, exists: true, identity: lifecycleStatIdentity(stats), entries };
+}
+
+function lifecyclePaths(tempRoot, claimId) {
+  const namespacePath = path.join(tempRoot, lifecycleNamespace);
+  const claimsPath = path.join(namespacePath, 'claims');
+  const rootsPath = path.join(namespacePath, 'roots');
+  const claimPath = path.join(claimsPath, claimId + '.claim.json');
+  const leasePath = path.join(claimsPath, claimId + '.lease.json');
+  const markerPath = path.join(claimsPath, claimId + '.marker.json');
+  const rootPath = path.join(rootsPath, 'root-' + claimId);
+  return {
+    tempRoot,
+    namespacePath,
+    namespaceMarkerPath: path.join(namespacePath, 'namespace.json'),
+    claimsPath,
+    rootsPath,
+    claimPath,
+    leasePath,
+    markerPath,
+    rootPath,
+    rootMarkerPath: path.join(rootPath, lifecycleRootMarker),
+    admissionLockPath: path.join(namespacePath, 'admission.lock.json'),
+    sentinelPath: path.join(tempRoot, lifecycleSentinel)
+  };
+}
+
+function captureLifecycleCustody(tempRoot, claimId) {
+  const paths = lifecyclePaths(tempRoot, claimId);
+  return {
+    namespace: lifecycleDirectorySnapshot(paths.namespacePath),
+    namespaceMarker: lifecycleFileSnapshot(paths.namespaceMarkerPath),
+    claims: lifecycleDirectorySnapshot(paths.claimsPath),
+    roots: lifecycleDirectorySnapshot(paths.rootsPath),
+    admissionLock: lifecycleFileSnapshot(paths.admissionLockPath),
+    claim: lifecycleFileSnapshot(paths.claimPath),
+    lease: lifecycleFileSnapshot(paths.leasePath),
+    outerMarker: lifecycleFileSnapshot(paths.markerPath),
+    root: lifecycleDirectorySnapshot(paths.rootPath),
+    rootMarker: lifecycleFileSnapshot(paths.rootMarkerPath),
+    sentinel: lifecycleFileSnapshot(paths.sentinelPath)
+  };
+}
+
+function readLifecycleResidue(tempRoot, claimId) {
+  const paths = lifecyclePaths(tempRoot, claimId);
+  const claimBytes = fs.readFileSync(paths.claimPath);
+  const claim = JSON.parse(claimBytes.toString('utf8'));
+  const lease = JSON.parse(fs.readFileSync(paths.leasePath, 'utf8'));
+  const marker = JSON.parse(fs.readFileSync(paths.markerPath, 'utf8'));
+  const root = fs.lstatSync(paths.rootPath, { bigint: true });
+  const rootEntries = fs.readdirSync(paths.rootPath).sort();
+  const inspection = inspectOwnedTemps();
+  const custody = captureLifecycleCustody(tempRoot, claimId);
+  assert.equal(claim.claim_id, claimId);
+  assert.equal(claim.claim_path, paths.claimPath);
+  assert.equal(claim.lease_path, paths.leasePath);
+  assert.equal(claim.marker_path, paths.markerPath);
+  assert.equal(claim.root_path, paths.rootPath);
+  assert.equal(claim.namespace_path, paths.namespacePath);
+  assert.equal(claim.process.pid, process.pid, 'The claim must name the actual owner process.');
+  assert.deepEqual({ dev: custody.claim.identity.dev, ino: custody.claim.identity.ino }, claim.claim_identity);
+  assert.deepEqual(lease.claim_identity, claim.claim_identity);
+  assert.deepEqual(marker.claim_identity, claim.claim_identity);
+  assert.deepEqual(marker.process, claim.process);
+  assert.equal(marker.claim_id, claimId);
+  assert.equal(marker.namespace_path, paths.namespacePath);
+  assert.equal(marker.claim_path, paths.claimPath);
+  assert.equal(marker.root_path, paths.rootPath);
+  assert.equal(lease.status, 'CLEANUP_INCOMPLETE');
+  assert.equal(lease.last_error_code, 'EIO');
+  assert.equal(lease.root_removed, false);
+  assert.equal(lease.root_marker_removed, true);
+  assert.equal(lease.metadata_cleanup_phase, null);
+  assert.equal(lease.retention, null);
+  assert.deepEqual({ dev: String(root.dev), ino: String(root.ino) }, { dev: lease.root_identity.dev, ino: lease.root_identity.ino });
+  assert.deepEqual({ dev: String(root.dev), ino: String(root.ino) }, { dev: marker.root_identity.dev, ino: marker.root_identity.ino });
+  assert.deepEqual({ dev: String(root.dev), ino: String(root.ino) }, { dev: marker.root_marker.root_identity.dev, ino: marker.root_marker.root_identity.ino });
+  assert.deepEqual(lease.marker_identity, {
+    dev: custody.outerMarker.identity.dev,
+    ino: custody.outerMarker.identity.ino
+  });
+  assert.deepEqual(marker.root_marker_identity, lease.root_marker_identity);
+  assert.deepEqual(lease.owned_children, [], 'All tracked descendants must leave custody before residue capture.');
+  assert.equal(claim.budget_bytes, lifecycleBudgetBytes);
+  assert.equal(claim.metadata_bytes, lifecycleMetadataBytes);
+  assert.equal(claim.reservation_bytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(lease.reservation_bytes, claim.reservation_bytes);
+  assert.ok(Number.isSafeInteger(lease.bytes_reserved) && lease.bytes_reserved >= 0 && lease.bytes_reserved <= lifecycleBudgetBytes);
+  assert.ok(Number.isSafeInteger(lease.entries) && lease.entries >= 0);
+  assert.deepEqual(rootEntries, [], 'The real EIO must occur after workspace and root marker removal.');
+  assert.ok(root.isDirectory());
+  assert.equal(fs.existsSync(paths.rootMarkerPath), false);
+  assert.equal(marker.root_marker.claim_id, claimId);
+  assert.equal(marker.root_marker.root_path, paths.rootPath);
+  assert.equal(marker.root_marker.namespace_id, claim.namespace_id);
+  assert.deepEqual(marker.root_marker.repository, claim.repository);
+  assert.equal(marker.root_marker.episode, claim.episode);
+  assert.equal(marker.root_marker.run_id, claim.run_id);
+  assert.equal(marker.root_marker.lock_id, claim.lock_id);
+  assert.deepEqual(marker.root_marker.process, claim.process);
+  const publicRecord = inspection.records.find((record) => record.claimId === claimId);
+  assert.ok(publicRecord, 'The public inspection must retain the incomplete claim.');
+  assert.equal(publicRecord.state, 'CLEANUP_INCOMPLETE');
+  assert.equal(publicRecord.budgetBytes, lifecycleBudgetBytes);
+  assert.equal(publicRecord.reservationBytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(publicRecord.bytesReserved, lease.bytes_reserved);
+  assert.equal(publicRecord.retained, false);
+  assert.equal(publicRecord.retentionExpiresAtMs, null);
+  assert.equal(inspection.outstandingReservationsBytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(inspection.retainedRoots, 0);
+  return {
+    schema: 'ai-agent-toolkit.w2a-g3-lifecycle-residue.v1',
+    ownerPid: process.pid,
+    claimId,
+    paths,
+    claim,
+    claimBytesBase64: claimBytes.toString('base64'),
+    lease,
+    outerMarker: marker,
+    custody,
+    accounting: inspection
+  };
+}
+
+function lifecycleProcessIsAbsent(pid, label) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 0, label + ' PID must be a positive safe integer.');
+  assert.throws(() => process.kill(pid, 0), (caught) => caught && caught.code === 'ESRCH', label + ' must be confirmed exited.');
+}
+
+function lifecycleProcessGroupIsAbsent(pid, label) {
+  lifecycleProcessIsAbsent(pid, label + ' process');
+  if (process.platform !== 'win32') {
+    assert.throws(() => process.kill(-pid, 0), (caught) => caught && caught.code === 'ESRCH', label + ' process group must be extinct.');
+  }
+}
+
+function writeLifecycleReceipt(receiptPath, value) {
+  const body = Buffer.from(JSON.stringify(value));
+  const digest = lifecycleSha256(body);
+  const header = Buffer.from('W2A-G3-LIFECYCLE/1\n' + body.length + '\n' + digest + '\n');
+  const trailer = Buffer.from('\nEND-W2A-G3-LIFECYCLE/1\n');
+  const fd = fs.openSync(receiptPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, Buffer.concat([header, body, trailer]));
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function readLifecycleReceipt(receiptPath) {
+  const bytes = fs.readFileSync(receiptPath);
+  const first = bytes.indexOf(0x0a);
+  const second = bytes.indexOf(0x0a, first + 1);
+  const third = bytes.indexOf(0x0a, second + 1);
+  assert.ok(first > 0 && second > first && third > second, 'Lifecycle receipt header is incomplete.');
+  assert.equal(bytes.subarray(0, first).toString('utf8'), 'W2A-G3-LIFECYCLE/1');
+  const lengthText = bytes.subarray(first + 1, second).toString('ascii');
+  assert.match(lengthText, /^\d+$/);
+  const length = Number(lengthText);
+  const digest = bytes.subarray(second + 1, third).toString('ascii');
+  const bodyStart = third + 1;
+  const bodyEnd = bodyStart + length;
+  assert.equal(bytes.length, bodyEnd + Buffer.byteLength('\nEND-W2A-G3-LIFECYCLE/1\n'));
+  assert.equal(bytes.subarray(bodyEnd).toString('utf8'), '\nEND-W2A-G3-LIFECYCLE/1\n');
+  const body = bytes.subarray(bodyStart, bodyEnd);
+  assert.equal(lifecycleSha256(body), digest, 'Lifecycle receipt digest must verify.');
+  return JSON.parse(body.toString('utf8'));
+}
+
+function lifecycleNoEffectMonitor(tempRoot, claimId) {
+  const paths = lifecyclePaths(tempRoot, claimId);
+  const files = [paths.claimPath, paths.leasePath, paths.markerPath].map((value) => path.resolve(value));
+  const root = path.resolve(paths.rootPath);
+  const isProtected = (value) => {
+    if (typeof value !== 'string' && !Buffer.isBuffer(value) && !(value instanceof URL)) return false;
+    const resolved = path.resolve(String(value));
+    const normalized = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    const fileMatch = files.some((filePath) => normalized === (process.platform === 'win32' ? filePath.toLowerCase() : filePath));
+    const rootBase = process.platform === 'win32' ? root.toLowerCase() : root;
+    return fileMatch || normalized === rootBase || normalized.startsWith(rootBase + path.sep);
+  };
+  const effects = [];
+  const originals = {};
+  const observe = (name, predicate, call) => function (...args) {
+    const target = predicate(...args);
+    const result = call.apply(this, args);
+    if (target) effects.push({ operation: name, target: String(target) });
+    return result;
+  };
+  const observeAsync = (name, predicate, call) => async function (...args) {
+    const target = predicate(...args);
+    const result = await call.apply(this, args);
+    if (target) effects.push({ operation: name, target: String(target) });
+    return result;
+  };
+  originals.openSync = fs.openSync;
+  originals.writeFileSync = fs.writeFileSync;
+  originals.truncateSync = fs.truncateSync;
+  originals.renameSync = fs.renameSync;
+  originals.unlinkSync = fs.unlinkSync;
+  originals.rmdirSync = fs.rmdirSync;
+  originals.mkdirSync = fs.mkdirSync;
+  originals.copyFileSync = fs.copyFileSync;
+  originals.promiseRename = fs.promises.rename;
+  originals.promiseUnlink = fs.promises.unlink;
+  originals.promiseMkdir = fs.promises.mkdir;
+  originals.promiseRmdir = fs.promises.rmdir;
+  originals.promiseRm = fs.promises.rm;
+  originals.promiseWriteFile = fs.promises.writeFile;
+  originals.promiseAppendFile = fs.promises.appendFile;
+  originals.promiseTruncate = fs.promises.truncate;
+  originals.promiseCopyFile = fs.promises.copyFile;
+  originals.rmSync = fs.rmSync;
+  originals.appendFileSync = fs.appendFileSync;
+  originals.chmodSync = fs.chmodSync;
+  originals.chownSync = fs.chownSync;
+  originals.utimesSync = fs.utimesSync;
+  const writeFlags = (flags) => typeof flags === 'number'
+    ? Boolean(flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_APPEND))
+    : /[wax+]/.test(String(flags));
+  fs.openSync = observe('openSync(write)', (filePath, flags) => writeFlags(flags) && isProtected(filePath) ? filePath : null, originals.openSync);
+  fs.writeFileSync = observe('writeFileSync', (filePath) => isProtected(filePath) ? filePath : null, originals.writeFileSync);
+  fs.truncateSync = observe('truncateSync', (filePath) => isProtected(filePath) ? filePath : null, originals.truncateSync);
+  fs.renameSync = observe('renameSync', (from, to) => isProtected(from) ? from : isProtected(to) ? to : null, originals.renameSync);
+  fs.unlinkSync = observe('unlinkSync', (filePath) => isProtected(filePath) ? filePath : null, originals.unlinkSync);
+  fs.rmdirSync = observe('rmdirSync', (filePath) => isProtected(filePath) ? filePath : null, originals.rmdirSync);
+  fs.mkdirSync = observe('mkdirSync', (filePath) => isProtected(filePath) ? filePath : null, originals.mkdirSync);
+  fs.copyFileSync = observe('copyFileSync', (from, to) => isProtected(from) ? from : isProtected(to) ? to : null, originals.copyFileSync);
+  fs.rmSync = observe('rmSync', (filePath) => isProtected(filePath) ? filePath : null, originals.rmSync);
+  fs.appendFileSync = observe('appendFileSync', (filePath) => isProtected(filePath) ? filePath : null, originals.appendFileSync);
+  fs.chmodSync = observe('chmodSync', (filePath) => isProtected(filePath) ? filePath : null, originals.chmodSync);
+  fs.chownSync = observe('chownSync', (filePath) => isProtected(filePath) ? filePath : null, originals.chownSync);
+  fs.utimesSync = observe('utimesSync', (filePath) => isProtected(filePath) ? filePath : null, originals.utimesSync);
+  fs.promises.rename = observeAsync('promises.rename', (from, to) => isProtected(from) ? from : isProtected(to) ? to : null, originals.promiseRename);
+  fs.promises.unlink = observeAsync('promises.unlink', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseUnlink);
+  fs.promises.mkdir = observeAsync('promises.mkdir', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseMkdir);
+  fs.promises.rmdir = observeAsync('promises.rmdir', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseRmdir);
+  fs.promises.rm = observeAsync('promises.rm', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseRm);
+  fs.promises.writeFile = observeAsync('promises.writeFile', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseWriteFile);
+  fs.promises.appendFile = observeAsync('promises.appendFile', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseAppendFile);
+  fs.promises.truncate = observeAsync('promises.truncate', (filePath) => isProtected(filePath) ? filePath : null, originals.promiseTruncate);
+  fs.promises.copyFile = observeAsync('promises.copyFile', (from, to) => isProtected(from) ? from : isProtected(to) ? to : null, originals.promiseCopyFile);
+  return {
+    effects,
+    restore() {
+      fs.openSync = originals.openSync;
+      fs.writeFileSync = originals.writeFileSync;
+      fs.truncateSync = originals.truncateSync;
+      fs.renameSync = originals.renameSync;
+      fs.unlinkSync = originals.unlinkSync;
+      fs.rmdirSync = originals.rmdirSync;
+      fs.mkdirSync = originals.mkdirSync;
+      fs.copyFileSync = originals.copyFileSync;
+      fs.promises.rename = originals.promiseRename;
+      fs.promises.unlink = originals.promiseUnlink;
+      fs.promises.mkdir = originals.promiseMkdir;
+      fs.promises.rmdir = originals.promiseRmdir;
+      fs.promises.rm = originals.promiseRm;
+      fs.promises.writeFile = originals.promiseWriteFile;
+      fs.promises.appendFile = originals.promiseAppendFile;
+      fs.promises.truncate = originals.promiseTruncate;
+      fs.promises.copyFile = originals.promiseCopyFile;
+      fs.rmSync = originals.rmSync;
+      fs.appendFileSync = originals.appendFileSync;
+      fs.chmodSync = originals.chmodSync;
+      fs.chownSync = originals.chownSync;
+      fs.utimesSync = originals.utimesSync;
+    }
+  };
+}
 
 function ownedSpec(episode, options = {}) {
   return { schema: SPEC_SCHEMA, purpose: 'source-update', repoRoot, episode, budgetBytes: 16 * 1024 * 1024, ...options };
@@ -593,8 +926,8 @@ function pausedReportStage(lease, apiBaseUrl, options = {}) {
   const isWriteMode = (flags) => typeof flags === 'number'
     ? (flags & 3) !== fs.constants.O_RDONLY
     : /[wax+]/.test(String(flags));
-  const recordEvent = (type, value) => {
-    const event = { order: ++eventSequence, type, value };
+  const recordEvent = (type, value, details = {}) => {
+    const event = { order: ++eventSequence, type, value, ...details };
     observationEvents.push(event);
     for (const waiter of [...eventWaiters]) waiter(event);
     if ((type === 'profile-failed' || type === 'child-disconnect' || type === 'child-close') && !released) {
@@ -609,8 +942,14 @@ function pausedReportStage(lease, apiBaseUrl, options = {}) {
     const forwardedArgs = profileChild && event === 'close' && options.forceZeroExit ? [0, args[1]] : args;
     const result = originalEmit.call(this, event, ...forwardedArgs);
 
-    if (profileChild && event === 'disconnect') recordEvent('child-disconnect', args);
-    if (profileChild && event === 'close') recordEvent('child-close', forwardedArgs);
+    if (profileChild && event === 'disconnect') recordEvent('child-disconnect', args, { pid: this.pid });
+    if (profileChild && event === 'close') recordEvent('child-close', forwardedArgs, {
+      pid: this.pid,
+      actualExitCode: args[0],
+      observedExitCode: forwardedArgs[0],
+      signal: forwardedArgs[1],
+      processGroup: process.platform !== 'win32'
+    });
     return result;
   };
   ChildProcess.prototype.send = function (frame, callback) {
@@ -769,7 +1108,7 @@ async function assertRejectedStageMutation(episode, mutate, cleanup = () => {}, 
   const baseline = ownedTempUsage();
   let workspaceError = null;
   let profileError = null;
-  const cleanupState = { injected: false, restore: null, claimId: null };
+  const cleanupState = { injected: false, restore: null, claimId: null, profileChild: null };
   try {
     await withOwnedWorkspace(ownedSpec(episode, options.abortController ? { signal: options.abortController.signal } : {}), async (lease) => {
     await writeJson(lease, 'workspace', sourceLockRel, activeLock());
@@ -791,6 +1130,23 @@ async function assertRejectedStageMutation(episode, mutate, cleanup = () => {}, 
         assert.equal(outcome.status, 'rejected', outcome.value && outcome.value.stderr);
         assert.equal(outcome.error.code, 'TEMP_OWNERSHIP_UNCERTAIN');
         profileError = outcome.error;
+        if (options.failCleanupOnDestination) {
+          const close = harness.events().find((event) => event.type === 'child-close');
+          assert.ok(close, 'The owner must observe terminal close for the profile child before cleanup begins.');
+          assert.ok(Number.isSafeInteger(close.pid) && close.pid > 0);
+          assert.equal(close.observedExitCode, 0, 'The profile child close callback must report the deliberately forced zero exit.');
+          assert.equal(close.signal, null);
+          lifecycleProcessGroupIsAbsent(close.pid, 'Owned source-update profile child');
+          cleanupState.profileChild = {
+            pid: close.pid,
+            actualExitCode: close.actualExitCode,
+            observedExitCode: close.observedExitCode,
+            signal: close.signal,
+            processGroup: close.processGroup,
+            processAbsent: true,
+            processGroupAbsent: process.platform !== 'win32'
+          };
+        }
         assert.equal(harness.negativeAckAttempts(), 1, 'parent identity failure should send one NACK');
         assert.equal(harness.negativeAckDelivered(), 1, 'NACK transport callback success is delivery only');
         assert.equal(harness.coherentRebindMessages(), 1, 'a later coherent report frame was attempted');
@@ -857,19 +1213,514 @@ async function assertRejectedStageMutation(episode, mutate, cleanup = () => {}, 
     assert.equal(workspaceError.cleanupStatus.code, 'EIO');
     const cleanupRecord = inspectOwnedTemps().records.find((record) => record.claimId === cleanupState.claimId);
     assert.ok(cleanupRecord && cleanupRecord.rootPath);
-    const exitedOwner = spawnSync(process.execPath, ['-p', 'process.pid'], { encoding: 'utf8', windowsHide: true });
-    assert.equal(exitedOwner.status, 0, exitedOwner.stderr);
-    const exitedPid = Number(exitedOwner.stdout.trim());
-    assert.ok(Number.isSafeInteger(exitedPid));
-    assert.throws(() => process.kill(exitedPid, 0), (caught) => caught && caught.code === 'ESRCH');
-    const claimPath = path.join(path.dirname(path.dirname(cleanupRecord.rootPath)), 'claims', cleanupState.claimId + '.claim.json');
-    const claim = JSON.parse(fs.readFileSync(claimPath, 'utf8'));
-    claim.process.pid = exitedPid;
-    fs.writeFileSync(claimPath, JSON.stringify(claim));
-    const recovered = await recoverStaleOwnedTemps();
-    assert.equal(recovered.find((record) => record.claimId === cleanupState.claimId).status, 'REMOVED');
+    assert.equal(options.deferResidue, true, 'Incomplete cleanup must be handed to an independent observer.');
+    assert.ok(cleanupState.profileChild, 'Descendant close and process-group extinction must be proven first.');
+    return {
+      strictPrimaryErrorIdentity: true,
+      primaryErrorCode: workspaceError.code,
+      cleanupStatus: workspaceError.cleanupStatus,
+      claimId: cleanupState.claimId,
+      rootPath: cleanupRecord.rootPath,
+      profileChild: cleanupState.profileChild,
+      residue: readLifecycleResidue(os.tmpdir(), cleanupState.claimId)
+    };
   }
   assert.deepEqual(ownedTempUsage(), baseline);
+}
+
+function createLifecycleTempRoot(label) {
+  const tempParent = path.resolve(os.tmpdir());
+  const parentStats = fs.lstatSync(tempParent);
+  assert.ok(parentStats.isDirectory() && !parentStats.isSymbolicLink(), 'The system temporary parent must be a real directory.');
+  const createdRoot = fs.mkdtempSync(path.join(tempParent, 'w2a-g3-' + label + '-'));
+  const tempRoot = fs.realpathSync.native(createdRoot);
+  if (process.platform !== 'win32') fs.chmodSync(tempRoot, 0o700);
+  const resolvedRoot = fs.realpathSync.native(tempRoot);
+  assert.equal(path.resolve(resolvedRoot), path.resolve(tempRoot), 'Lifecycle root must not traverse a symlink.');
+  const sentinelPath = path.join(tempRoot, lifecycleSentinel);
+  const sentinelBytes = Buffer.from('preserve-this-unrelated-lifecycle-sentinel:' + label + '\n');
+  const fd = fs.openSync(sentinelPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, sentinelBytes);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const rootStats = fs.lstatSync(tempRoot, { bigint: true });
+  const sentinel = lifecycleFileSnapshot(sentinelPath);
+  const namespacePath = path.join(tempRoot, lifecycleNamespace);
+  assert.equal(fs.existsSync(namespacePath), false, 'Each lifecycle case must start in a fresh owned namespace.');
+  return {
+    label,
+    path: tempRoot,
+    realPath: resolvedRoot,
+    identity: lifecycleStatIdentity(rootStats),
+    sentinelBytesBase64: sentinelBytes.toString('base64'),
+    sentinel
+  };
+}
+
+function assertLifecycleCustodyUnchangedExceptClaim(actual, expected, claimId) {
+  const comparable = (custody) => {
+    const copy = JSON.parse(JSON.stringify(custody));
+    delete copy.claim;
+    const claimName = claimId + '.claim.json';
+    const claimEntry = copy.claims.entries.find((entry) => entry.name === claimName);
+    assert.ok(claimEntry, 'The claim file remains present while its PID contradiction is under review.');
+    copy.claims.entries = copy.claims.entries.map((entry) => entry.name === claimName
+      ? { name: entry.name, type: entry.type, identity: entry.identity }
+      : entry);
+    return copy;
+  };
+  assert.deepEqual(comparable(actual), comparable(expected));
+  assert.deepEqual(actual.claim.identity, expected.claim.identity, 'Claim mutation must preserve the original file identity.');
+  assert.equal(actual.claim.path, expected.claim.path);
+}
+
+function rewriteLifecycleClaimInPlace(claimPath, bytes) {
+  const before = lifecycleFileSnapshot(claimPath);
+  const fd = fs.openSync(claimPath, 'r+');
+  try {
+    fs.writeSync(fd, bytes, 0, bytes.length, 0);
+    fs.ftruncateSync(fd, bytes.length);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const after = lifecycleFileSnapshot(claimPath);
+  assert.deepEqual(after.identity, before.identity, 'In-place claim rewrite must preserve the original file identity.');
+  assert.equal(after.size, bytes.length);
+  assert.equal(after.sha256, lifecycleSha256(bytes));
+  return after;
+}
+
+function exitedLifecycleHelperPid() {
+  const result = spawnSync(process.execPath, ['-p', 'process.pid'], {
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.signal, null);
+  const pid = Number(result.stdout.trim());
+  lifecycleProcessIsAbsent(pid, 'Separately confirmed exited claim-PID contradiction helper');
+  return pid;
+}
+
+function launchLifecycleRole(role, tempCase, options = {}) {
+  const receiptPath = path.join(tempCase.path, 'receipt-' + role + '.w2a');
+  assert.equal(fs.existsSync(receiptPath), false, 'Each lifecycle role receipt path must be fresh.');
+  const env = {
+    ...process.env,
+    TEMP: tempCase.path,
+    TMP: tempCase.path,
+    TMPDIR: tempCase.path,
+    [lifecycleRoleEnv]: role,
+    [lifecycleRootEnv]: tempCase.path,
+    [lifecycleReceiptEnv]: receiptPath
+  };
+  delete env.NODE_TEST_CONTEXT;
+  if (options.claimId) env[lifecycleClaimEnv] = options.claimId;
+  if (options.ownerPid !== undefined) env[lifecycleOwnerEnv] = String(options.ownerPid);
+  const pattern = '^' + lifecycleTestName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$';
+  const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', '--test-name-pattern=' + pattern, __filename], {
+    cwd: repoRoot,
+    env,
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, role + ' lifecycle role must exit normally.');
+  assert.equal(result.status, 0, role + ' lifecycle role failed.\n' + result.stdout + '\n' + result.stderr);
+  assert.match(result.stdout, /^TAP version 13$/m);
+  assert.match(result.stdout, /^# pass 1$/m);
+  assert.match(result.stdout, /^# fail 0$/m);
+  assert.ok(result.stdout.includes(lifecycleTestName), 'The role receipt must come from the selected lifecycle test.');
+  assert.equal(fs.existsSync(receiptPath), true, role + ' lifecycle role must leave one complete framed receipt.');
+  const receipt = readLifecycleReceipt(receiptPath);
+  assert.equal(receipt.role, role);
+  return {
+    role,
+    receiptPath,
+    receipt,
+    receiptSnapshot: lifecycleFileSnapshot(receiptPath),
+    stdoutSha256: lifecycleSha256(Buffer.from(result.stdout)),
+    stderrSha256: lifecycleSha256(Buffer.from(result.stderr))
+  };
+}
+
+async function runLifecycleOwnerRole(role) {
+  const tempRoot = path.resolve(os.tmpdir());
+  assert.equal(path.resolve(process.env.TEMP), tempRoot);
+  assert.equal(path.resolve(process.env.TMP), tempRoot);
+  assert.equal(path.resolve(process.env.TMPDIR), tempRoot);
+  assert.equal(tempRoot, path.resolve(process.env[lifecycleRootEnv]));
+  assert.equal(fs.existsSync(path.join(tempRoot, lifecycleNamespace)), false);
+  const baseline = ownedTempUsage();
+  assert.equal(baseline.records, 0, 'Owner namespace must begin without claims.');
+  assert.equal(baseline.outstandingReservationsBytes, 0);
+  assert.equal(baseline.retainedRoots, 0);
+  const result = await assertRejectedStageMutation(
+    'owned-report-profile-failure-cleanup-incomplete-' + role,
+    ({ stagePath, harness }) => harness.originalWriteFile(stagePath, 'foreign replacement', 'utf8'),
+    () => {},
+    { failCleanupOnDestination: true, deferResidue: true }
+  );
+  assert.ok(result);
+  assert.equal(result.strictPrimaryErrorIdentity, true);
+  assert.equal(result.primaryErrorCode, 'TEMP_OWNERSHIP_UNCERTAIN');
+  assert.equal(result.cleanupStatus.status, 'CLEANUP_INCOMPLETE');
+  assert.equal(result.cleanupStatus.code, 'EIO');
+  assert.equal(result.residue.ownerPid, process.pid);
+  assert.equal(result.profileChild.processAbsent, true);
+  assert.equal(result.profileChild.processGroupAbsent, process.platform !== 'win32');
+  const accounting = ownedTempUsage();
+  assert.equal(accounting.records, 1);
+  assert.equal(accounting.outstandingReservationsBytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(accounting.retainedRoots, 0);
+  return {
+    schema: 'ai-agent-toolkit.w2a-g3-lifecycle-role.v1',
+    role,
+    processPid: process.pid,
+    strictPrimaryErrorIdentity: true,
+    primaryErrorCode: result.primaryErrorCode,
+    cleanupStatus: result.cleanupStatus,
+    profileChild: result.profileChild,
+    residue: result.residue,
+    postOwnerAccounting: accounting
+  };
+}
+
+async function runLifecycleNegativeObserverRole() {
+  const tempRoot = path.resolve(os.tmpdir());
+  const claimId = process.env[lifecycleClaimEnv];
+  const ownerPid = Number(process.env[lifecycleOwnerEnv]);
+  assert.ok(/^[a-f0-9]{32}$/.test(claimId));
+  lifecycleProcessIsAbsent(ownerPid, 'Original lifecycle owner');
+  const paths = lifecyclePaths(tempRoot, claimId);
+  const claim = JSON.parse(fs.readFileSync(paths.claimPath, 'utf8'));
+  const marker = JSON.parse(fs.readFileSync(paths.markerPath, 'utf8'));
+  assert.notEqual(claim.process.pid, ownerPid, 'Negative fixture changes only the claim PID after owner exit.');
+  lifecycleProcessIsAbsent(claim.process.pid, 'Contradictory claim PID');
+  assert.equal(marker.process.pid, ownerPid, 'Outer marker retains the original owner tuple.');
+  assert.equal(marker.root_marker.process.pid, ownerPid, 'Embedded marker retains the original owner tuple.');
+  const before = captureLifecycleCustody(tempRoot, claimId);
+  const monitor = lifecycleNoEffectMonitor(tempRoot, claimId);
+  let inspection;
+  let recovery;
+  let admissionError = null;
+  let callbackCount = 0;
+  try {
+    inspection = inspectOwnedTemps();
+    assert.equal(inspection.records.length, 1);
+    assert.deepEqual(inspection.records[0], {
+      state: 'HOLD',
+      claimPath: paths.claimPath,
+      code: 'TEMP_OWNERSHIP_UNCERTAIN'
+    });
+    assert.equal(inspection.outstandingReservationsBytes, 0);
+    assert.equal(inspection.retainedRoots, 0);
+
+    recovery = await recoverStaleOwnedTemps();
+    assert.deepEqual(recovery, [{ status: 'HOLD', claimPath: paths.claimPath, code: 'TEMP_OWNERSHIP_UNCERTAIN' }]);
+
+    await assert.rejects(withOwnedWorkspace(
+      ownedSpec('owned-report-contradictory-claim-owner-admission-hold'),
+      async () => { callbackCount += 1; }
+    ), (caught) => {
+      admissionError = caught;
+      return caught && caught.code === 'TEMP_CAPACITY_UNKNOWN';
+    });
+  } finally {
+    monitor.restore();
+  }
+  assert.equal(admissionError.code, 'TEMP_CAPACITY_UNKNOWN');
+  assert.equal(admissionError.cause && admissionError.cause.code, 'TEMP_OWNERSHIP_UNCERTAIN');
+  assert.equal(callbackCount, 0, 'No admission callback may run while owner evidence conflicts.');
+  assert.deepEqual(monitor.effects, [], 'Inspection, recovery, and admission must have zero effects on the residue.');
+  const after = captureLifecycleCustody(tempRoot, claimId);
+  assert.deepEqual(after, before, 'All durable bytes, identities, and namespace entries remain exact across HOLD.');
+  return {
+    schema: 'ai-agent-toolkit.w2a-g3-lifecycle-role.v1',
+    role: 'negative-observer',
+    ownerPid,
+    contradictoryClaimPid: claim.process.pid,
+    inspection,
+    recovery,
+    admission: { errorCode: admissionError.code, causeCode: admissionError.cause && admissionError.cause.code, callbackCount },
+    protectedEffects: monitor.effects,
+    custodyBefore: before,
+    custodyAfter: after
+  };
+}
+
+async function runLifecycleRecoveryObserverRole(role) {
+  const tempRoot = path.resolve(os.tmpdir());
+  const claimId = process.env[lifecycleClaimEnv];
+  const ownerPid = Number(process.env[lifecycleOwnerEnv]);
+  assert.ok(/^[a-f0-9]{32}$/.test(claimId));
+  lifecycleProcessIsAbsent(ownerPid, role + ' original owner');
+  const paths = lifecyclePaths(tempRoot, claimId);
+  const before = captureLifecycleCustody(tempRoot, claimId);
+  const claim = JSON.parse(fs.readFileSync(paths.claimPath, 'utf8'));
+  const lease = JSON.parse(fs.readFileSync(paths.leasePath, 'utf8'));
+  const marker = JSON.parse(fs.readFileSync(paths.markerPath, 'utf8'));
+  assert.equal(claim.process.pid, ownerPid, 'Recovery witness must keep the original claim PID untouched.');
+  assert.deepEqual(marker.process, claim.process);
+  assert.deepEqual(marker.root_marker.process, claim.process);
+  assert.equal(lease.status, 'CLEANUP_INCOMPLETE');
+  assert.equal(lease.last_error_code, 'EIO');
+  assert.equal(lease.root_removed, false);
+  assert.equal(lease.root_marker_removed, true);
+  assert.equal(lease.retention, null);
+  assert.deepEqual(lease.owned_children, []);
+  assert.deepEqual(fs.readdirSync(paths.rootPath), [], 'The residue root is independently verified empty.');
+  assert.equal(fs.existsSync(paths.rootMarkerPath), false);
+
+  const inspection = inspectOwnedTemps();
+  const row = inspection.records.find((record) => record.claimId === claimId);
+  assert.ok(row);
+  assert.equal(row.state, 'CLEANUP_INCOMPLETE');
+  assert.equal(row.reservationBytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(row.bytesReserved, lease.bytes_reserved);
+  assert.equal(row.retained, false);
+  assert.equal(inspection.outstandingReservationsBytes, lifecycleBudgetBytes + lifecycleMetadataBytes);
+  assert.equal(inspection.retainedRoots, 0);
+
+  const recovery = await recoverStaleOwnedTemps();
+  assert.equal(recovery.length, 1);
+  assert.deepEqual(recovery[0], {
+    status: 'REMOVED',
+    claimId,
+    rootRemoved: true,
+    evidence: 'dead'
+  });
+  assert.equal(fs.existsSync(paths.claimPath), false);
+  assert.equal(fs.existsSync(paths.leasePath), false);
+  assert.equal(fs.existsSync(paths.markerPath), false);
+  assert.equal(fs.existsSync(paths.rootPath), false);
+  const afterRecovery = captureLifecycleCustody(tempRoot, claimId);
+  assert.deepEqual(afterRecovery.claims.entries, []);
+  assert.deepEqual(afterRecovery.roots.entries, []);
+  assert.equal(afterRecovery.admissionLock.exists, false);
+  const emptyInspection = inspectOwnedTemps();
+  assert.deepEqual(emptyInspection.records, []);
+  assert.equal(emptyInspection.outstandingReservationsBytes, 0);
+  assert.equal(emptyInspection.retainedRoots, 0);
+
+  let callbackCount = 0;
+  const admissionValue = await withOwnedWorkspace(
+    ownedSpec('owned-report-confirmed-dead-admission-' + role),
+    async () => { callbackCount += 1; return 'admitted-after-confirmed-dead-recovery'; }
+  );
+  assert.equal(admissionValue, 'admitted-after-confirmed-dead-recovery');
+  assert.equal(callbackCount, 1, 'A clean post-recovery admission callback runs exactly once.');
+  const afterAdmission = captureLifecycleCustody(tempRoot, claimId);
+  assert.deepEqual(afterAdmission, afterRecovery, 'The valid admission leaves no additional claim or root behind.');
+  const finalInspection = inspectOwnedTemps();
+  assert.deepEqual(finalInspection.records, []);
+  assert.equal(finalInspection.outstandingReservationsBytes, 0);
+  assert.equal(finalInspection.retainedRoots, 0);
+  assert.deepEqual(await recoverStaleOwnedTemps(), []);
+  return {
+    schema: 'ai-agent-toolkit.w2a-g3-lifecycle-role.v1',
+    role,
+    ownerPid,
+    inspection,
+    recovery,
+    custodyBefore: before,
+    custodyAfterRecovery: afterRecovery,
+    admission: { value: admissionValue, callbackCount },
+    custodyAfterAdmission: afterAdmission,
+    finalInspection
+  };
+}
+
+function removeLifecycleTempRoot(tempCase, receipts) {
+  const tempRoot = tempCase.path;
+  const namespacePath = path.join(tempRoot, lifecycleNamespace);
+  const claimsPath = path.join(namespacePath, 'claims');
+  const rootsPath = path.join(namespacePath, 'roots');
+  const sentinelPath = path.join(tempRoot, lifecycleSentinel);
+  const rootStats = fs.lstatSync(tempRoot, { bigint: true });
+  assert.deepEqual(lifecycleStatIdentity(rootStats), tempCase.identity);
+  assert.deepEqual(fs.readdirSync(claimsPath), [], 'Public recovery must leave the owned claims directory empty.');
+  assert.deepEqual(fs.readdirSync(rootsPath), [], 'Public recovery must leave the owned roots directory empty.');
+  assert.equal(fs.existsSync(path.join(namespacePath, 'admission.lock.json')), false);
+  const namespaceMarker = JSON.parse(fs.readFileSync(path.join(namespacePath, 'namespace.json'), 'utf8'));
+  assert.ok(namespaceMarker && typeof namespaceMarker === 'object');
+  const expectedEntries = [lifecycleNamespace, lifecycleSentinel, ...receipts.map((item) => path.basename(item.receiptPath))].sort();
+  assert.deepEqual(fs.readdirSync(tempRoot).sort(), expectedEntries, 'Only exact test-owned evidence and the sentinel may remain before teardown.');
+
+  fs.unlinkSync(path.join(namespacePath, 'namespace.json'));
+  fs.rmdirSync(claimsPath);
+  fs.rmdirSync(rootsPath);
+  fs.rmdirSync(namespacePath);
+  assert.deepEqual(lifecycleFileSnapshot(sentinelPath), tempCase.sentinel, 'Unrelated sentinel bytes and identity remain unchanged.');
+  for (const item of receipts) {
+    assert.deepEqual(lifecycleFileSnapshot(item.receiptPath), item.receiptSnapshot, 'Completed framed role receipt remains intact until its durable copy exists.');
+    fs.unlinkSync(item.receiptPath);
+  }
+  fs.unlinkSync(sentinelPath);
+  assert.deepEqual(fs.readdirSync(tempRoot), []);
+  assert.deepEqual(lifecycleStatIdentity(fs.lstatSync(tempRoot, { bigint: true })), tempCase.identity);
+  fs.rmdirSync(tempRoot);
+}
+
+async function runLifecycleSupervisor() {
+  const negativeCase = createLifecycleTempRoot('negative');
+  const positiveCase = createLifecycleTempRoot('positive');
+  const allReceipts = [];
+  const evidence = {
+    schema: 'ai-agent-toolkit.w2a-g3-semantic-snapshot-lifecycle-evidence.v1',
+    run: 'w2a-f154-f1-semantic-snapshot-g3-20261002-001',
+    lock: 'DL-W2A-F154-F1-SNAPSHOT-G3-001',
+    cases: {}
+  };
+
+  assert.notEqual(negativeCase.path, positiveCase.path);
+  assert.notEqual(path.join(negativeCase.path, lifecycleNamespace), path.join(positiveCase.path, lifecycleNamespace));
+
+  const negativeOwner = launchLifecycleRole('negative-owner', negativeCase);
+  allReceipts.push(negativeOwner);
+  const negativeResidue = negativeOwner.receipt.residue;
+  assert.equal(negativeOwner.receipt.processPid, negativeResidue.ownerPid);
+  assert.equal(negativeResidue.claim.process.pid, negativeResidue.ownerPid);
+  assert.equal(negativeOwner.receipt.strictPrimaryErrorIdentity, true);
+  lifecycleProcessGroupIsAbsent(negativeOwner.receipt.profileChild.pid, 'Negative-case profile child');
+  lifecycleProcessIsAbsent(negativeResidue.ownerPid, 'Negative-case actual claim owner');
+  const negativePaths = lifecyclePaths(negativeCase.path, negativeResidue.claimId);
+  const negativeOriginalBytes = Buffer.from(negativeResidue.claimBytesBase64, 'base64');
+  assert.equal(lifecycleSha256(negativeOriginalBytes), negativeResidue.custody.claim.sha256);
+  assert.deepEqual(fs.readFileSync(negativePaths.claimPath), negativeOriginalBytes, 'Owner receipt must carry the exact original claim bytes.');
+  const negativeBeforeMutation = captureLifecycleCustody(negativeCase.path, negativeResidue.claimId);
+  assert.deepEqual(negativeBeforeMutation, negativeResidue.custody, 'Residue is unchanged after the owner process exits.');
+
+  const contradictoryPid = exitedLifecycleHelperPid();
+  assert.notEqual(contradictoryPid, negativeResidue.ownerPid);
+  assert.notEqual(contradictoryPid, negativeOwner.receipt.profileChild.pid);
+  const contradictoryClaim = JSON.parse(negativeOriginalBytes.toString('utf8'));
+  contradictoryClaim.process.pid = contradictoryPid;
+  const expectedContradictoryClaim = JSON.parse(negativeOriginalBytes.toString('utf8'));
+  expectedContradictoryClaim.process.pid = contradictoryPid;
+  const contradictoryBytes = Buffer.from(JSON.stringify(contradictoryClaim));
+  rewriteLifecycleClaimInPlace(negativePaths.claimPath, contradictoryBytes);
+  const negativeMutatedCustody = captureLifecycleCustody(negativeCase.path, negativeResidue.claimId);
+  assertLifecycleCustodyUnchangedExceptClaim(negativeMutatedCustody, negativeBeforeMutation, negativeResidue.claimId);
+  const actualContradictoryClaim = JSON.parse(fs.readFileSync(negativePaths.claimPath, 'utf8'));
+  assert.deepEqual(actualContradictoryClaim, expectedContradictoryClaim, 'The sole structural contradiction is claim.process.pid.');
+  const claimWithOriginalPid = JSON.parse(JSON.stringify(actualContradictoryClaim));
+  claimWithOriginalPid.process.pid = negativeResidue.ownerPid;
+  assert.deepEqual(claimWithOriginalPid, negativeResidue.claim);
+
+  const negativeObserver = launchLifecycleRole('negative-observer', negativeCase, {
+    claimId: negativeResidue.claimId,
+    ownerPid: negativeResidue.ownerPid
+  });
+  allReceipts.push(negativeObserver);
+  assert.deepEqual(negativeObserver.receipt.custodyBefore, negativeMutatedCustody);
+  assert.deepEqual(negativeObserver.receipt.custodyAfter, negativeMutatedCustody);
+  assert.deepEqual(negativeObserver.receipt.protectedEffects, []);
+  assert.equal(negativeObserver.receipt.inspection.records[0].code, 'TEMP_OWNERSHIP_UNCERTAIN');
+  assert.equal(negativeObserver.receipt.recovery[0].code, 'TEMP_OWNERSHIP_UNCERTAIN');
+  assert.deepEqual(negativeObserver.receipt.admission, {
+    errorCode: 'TEMP_CAPACITY_UNKNOWN',
+    causeCode: 'TEMP_OWNERSHIP_UNCERTAIN',
+    callbackCount: 0
+  });
+  const negativeAfterObserver = captureLifecycleCustody(negativeCase.path, negativeResidue.claimId);
+  assert.deepEqual(negativeAfterObserver, negativeMutatedCustody);
+
+  const claimIdentityBeforeRestore = negativeAfterObserver.claim.identity;
+  rewriteLifecycleClaimInPlace(negativePaths.claimPath, negativeOriginalBytes);
+  const negativeRestoredCustody = captureLifecycleCustody(negativeCase.path, negativeResidue.claimId);
+  assertLifecycleCustodyUnchangedExceptClaim(negativeRestoredCustody, negativeBeforeMutation, negativeResidue.claimId);
+  assert.deepEqual(negativeRestoredCustody.claim.identity, claimIdentityBeforeRestore);
+  assert.equal(negativeRestoredCustody.claim.sha256, negativeBeforeMutation.claim.sha256);
+  assert.deepEqual(fs.readFileSync(negativePaths.claimPath), negativeOriginalBytes, 'Original claim bytes are restored only after all negative HOLD assertions.');
+  assert.deepEqual(JSON.parse(fs.readFileSync(negativePaths.claimPath, 'utf8')), negativeResidue.claim);
+
+  const negativeRecovery = launchLifecycleRole('negative-restored-recovery-observer', negativeCase, {
+    claimId: negativeResidue.claimId,
+    ownerPid: negativeResidue.ownerPid
+  });
+  allReceipts.push(negativeRecovery);
+  assert.deepEqual(negativeRecovery.receipt.custodyBefore, negativeRestoredCustody);
+  assert.equal(negativeRecovery.receipt.recovery[0].status, 'REMOVED');
+  assert.equal(negativeRecovery.receipt.recovery[0].evidence, 'dead');
+  assert.equal(negativeRecovery.receipt.admission.callbackCount, 1);
+
+  const positiveOwner = launchLifecycleRole('positive-owner', positiveCase);
+  allReceipts.push(positiveOwner);
+  const positiveResidue = positiveOwner.receipt.residue;
+  assert.notEqual(positiveCase.path, negativeCase.path);
+  assert.equal(positiveOwner.receipt.processPid, positiveResidue.ownerPid);
+  assert.equal(positiveResidue.claim.process.pid, positiveResidue.ownerPid);
+  assert.equal(positiveOwner.receipt.strictPrimaryErrorIdentity, true);
+  lifecycleProcessGroupIsAbsent(positiveOwner.receipt.profileChild.pid, 'Positive-case profile child');
+  lifecycleProcessIsAbsent(positiveResidue.ownerPid, 'Positive-case actual claim owner');
+  const positivePaths = lifecyclePaths(positiveCase.path, positiveResidue.claimId);
+  const positiveOriginalBytes = Buffer.from(positiveResidue.claimBytesBase64, 'base64');
+  assert.deepEqual(fs.readFileSync(positivePaths.claimPath), positiveOriginalBytes);
+  const positiveBeforeRecovery = captureLifecycleCustody(positiveCase.path, positiveResidue.claimId);
+  assert.deepEqual(positiveBeforeRecovery, positiveResidue.custody, 'The independent positive residue stays untouched after owner exit.');
+
+  const positiveRecovery = launchLifecycleRole('positive-untouched-recovery-observer', positiveCase, {
+    claimId: positiveResidue.claimId,
+    ownerPid: positiveResidue.ownerPid
+  });
+  allReceipts.push(positiveRecovery);
+  assert.deepEqual(positiveRecovery.receipt.custodyBefore, positiveBeforeRecovery);
+  assert.equal(positiveRecovery.receipt.recovery[0].status, 'REMOVED');
+  assert.equal(positiveRecovery.receipt.recovery[0].evidence, 'dead');
+  assert.equal(positiveRecovery.receipt.admission.callbackCount, 1);
+
+  evidence.cases.negative = {
+    tempRoot: negativeCase.path,
+    rootIdentity: negativeCase.identity,
+    sentinel: negativeCase.sentinel,
+    owner: negativeOwner,
+    contradictoryPid,
+    custodyBeforeMutation: negativeBeforeMutation,
+    custodyAfterMutation: negativeMutatedCustody,
+    negativeObserver,
+    custodyAfterNegativeObserver: negativeAfterObserver,
+    custodyAfterRestore: negativeRestoredCustody,
+    recoveryObserver: negativeRecovery
+  };
+  evidence.cases.positive = {
+    tempRoot: positiveCase.path,
+    rootIdentity: positiveCase.identity,
+    sentinel: positiveCase.sentinel,
+    owner: positiveOwner,
+    custodyBeforeRecovery: positiveBeforeRecovery,
+    recoveryObserver: positiveRecovery
+  };
+  evidence.roleReceipts = allReceipts.map((item) => ({
+    role: item.role,
+    path: item.receiptPath,
+    receiptSha256: item.receiptSnapshot.sha256,
+    stdoutSha256: item.stdoutSha256,
+    stderrSha256: item.stderrSha256
+  }));
+
+  let durableEvidence = null;
+  if (process.env[lifecycleEvidenceDirEnv]) {
+    const evidenceDir = path.resolve(process.env[lifecycleEvidenceDirEnv]);
+    const evidenceStats = fs.lstatSync(evidenceDir);
+    assert.ok(evidenceStats.isDirectory() && !evidenceStats.isSymbolicLink(), 'The authorized checkpoint directory must be a real directory.');
+    const evidencePath = path.join(evidenceDir, 'w2a-g3-f1-lifecycle-' + process.pid + '.w2a');
+    writeLifecycleReceipt(evidencePath, evidence);
+    durableEvidence = { path: evidencePath, snapshot: lifecycleFileSnapshot(evidencePath) };
+  }
+  evidence.durableEvidence = durableEvidence;
+
+  removeLifecycleTempRoot(negativeCase, allReceipts.filter((item) => item.receiptPath.startsWith(negativeCase.path + path.sep)));
+  removeLifecycleTempRoot(positiveCase, allReceipts.filter((item) => item.receiptPath.startsWith(positiveCase.path + path.sep)));
+  if (durableEvidence) {
+    assert.deepEqual(lifecycleFileSnapshot(durableEvidence.path), durableEvidence.snapshot);
+  }
 }
 
 test('source-update owner failure survives external abort after NACK delivery and zero child exit', async () => {
@@ -916,13 +1767,26 @@ test('source-update external abort before a profile failure remains TEMP_ABORTED
   assert.deepEqual(ownedTempUsage(), baseline);
 });
 
-test('source-update profile failure remains primary when owned-root cleanup is incomplete', async () => {
-  await assertRejectedStageMutation(
-    'owned-report-profile-failure-cleanup-incomplete',
-    ({ stagePath, harness }) => harness.originalWriteFile(stagePath, 'foreign replacement', 'utf8'),
-    () => {},
-    { failCleanupOnDestination: true }
-  );
+test(lifecycleTestName, async () => {
+  const role = process.env[lifecycleRoleEnv];
+  if (role) {
+    const receiptPath = process.env[lifecycleReceiptEnv];
+    assert.ok(receiptPath, 'Each isolated lifecycle role requires its exact receipt path.');
+    let receipt;
+    if (role === 'negative-owner' || role === 'positive-owner') {
+      receipt = await runLifecycleOwnerRole(role);
+    } else if (role === 'negative-observer') {
+      receipt = await runLifecycleNegativeObserverRole();
+      receipt.role = role;
+    } else if (role === 'negative-restored-recovery-observer' || role === 'positive-untouched-recovery-observer') {
+      receipt = await runLifecycleRecoveryObserverRole(role);
+    } else {
+      assert.fail('Unknown lifecycle role: ' + role);
+    }
+    writeLifecycleReceipt(receiptPath, receipt);
+    return;
+  }
+  await runLifecycleSupervisor();
 });
 
 test('staged identity observer surfaces a profile failure before the lstat barrier promptly', async () => {
