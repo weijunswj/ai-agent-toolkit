@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.12';
+const CONTROL_VERSION = '2.10.13';
 const RESOURCE_PROVENANCE_SCHEMA = 'toolkit.agent-control.resource-provenance.v1';
 const RESOURCE_PROVENANCE_KEY_FILE = 'resource-provenance.key';
 const SUPERVISOR_CLAIM_SCHEMA = 'toolkit.agent-control.supervisor-claim.v1';
