@@ -155,6 +155,39 @@ test('web owns CURRENT reconciliation while semantic workers receive compiled bo
   assert.match(controller, /issue body is not itself the semantic worker packet/);
 });
 
+// Source-policy assertion only; this regression does not exercise runtime enforcement.
+test('operational handoff source policy keeps packets, custody, portability and recovery bounded', () => {
+  const handoffMatch = controller.match(/^- \*\*Operational handoff completeness:\*\*[\s\S]*?This adds no gate, fallback or retry allowance\.$/m);
+  assert.ok(handoffMatch, 'complete operational handoff policy paragraph is present');
+  const handoff = handoffMatch[0];
+
+  const currentContext = controller.indexOf('**CURRENT-first bounded worker context:**');
+  const handoffHeading = controller.indexOf('**Operational handoff completeness:**');
+  const publicProjection = controller.indexOf('Human/controller GitHub bodies may project compact CURRENT', currentContext);
+  assert.ok(currentContext < handoffHeading && handoffHeading < publicProjection,
+    'operational handoff follows bounded CURRENT worker context and preserves adjacent body-projection law');
+
+  assert.match(handoff, /compile the current bounded packet for the actual consumer\/carrier/);
+  assert.match(handoff, /Completeness is relative to the next admitted action: derive a compact delta from CURRENT, carrying only current authority\/candidate, unresolved blockers, the next action and its necessary setup/);
+  assert.match(handoff, /Keep unchanged contracts and detailed evidence at exact accessible references and retrieve only decision-relevant sections; do not replay chronology, entire prior contracts or logs, or defeat CURRENT-first narrow-to-deep takeover/);
+  assert.match(handoff, /Bind the exact candidate\/checkpoint, execution-context\/runtime\/path mapping, necessary dependency\/build prerequisites and validation commands, evidence custody\/retrieval\/retention/);
+  assert.match(handoff, /already-authorised recovery paths with consumed bounds and return conditions/);
+  assert.match(handoff, /Carry forward still-applicable action-critical setup from verified current state and controlling receipts directly into the packet; do not make the receiver rediscover it in earlier comments or sessions/);
+  assert.match(handoff, /A sanitised public CURRENT\/GitHub projection is not the complete operational packet/);
+  assert.match(handoff, /Necessary nonpublic execution details use existing authorised private delivery\/custody under applicable privacy and secret-handling rules; this grants no new channel, disclosure or access permission/);
+  assert.match(handoff, /verified retrieval of exact applicable contents by the intended consumer/);
+  assert.match(handoff, /Stage completion alone is not disposal authority.*before checkout\/fixture teardown, verifying durable custody and consumer retrieval/);
+  assert.match(handoff, /public projections carry safe custody\/retention references and status, not private paths or values/);
+  assert.match(handoff, /private mapping from those references to actual retrieval instructions must itself survive the old session\/workspace and be accessible to the authorised consumer/);
+  assert.match(handoff, /Across device or workspace changes, verify authorised consumer-local materialisation and identity readback from the retained package; do not assume paths, credentials, installed tools or live process\/resource identity transfer/);
+  assert.match(handoff, /Requalify carrier-specific evidence where required; unavailable sole custody or a nonportable live-state obligation uses the existing HOLD/);
+  assert.match(handoff, /Verify required input access and execution-context applicability before dependent work, reusing valid qualification/);
+  assert.match(handoff, /Inside admitted G3, perform already-authorised bounded recovery without repeated generic continuation requests/);
+  assert.match(handoff, /Missing facts or authority, unknown consequential outcomes, exhausted recovery or equivalent no-progress repetition return the applicable existing typed HOLD with the exact blocker, evidence, responsible boundary and smallest next action/);
+  assert.match(handoff, /Preserve RUN\/Lock, candidate, scope and consumed budgets; block only dependent work/);
+  assert.match(handoff, /This adds no gate, fallback or retry allowance\./);
+});
+
 test('Toolkit controller future-owns reusable improvements instead of expanding the CURRENT delivery child', () => {
   assert.match(controller, /Toolkit-controller active-child improvement quarantine/);
   assert.match(controller, /applies only when the Web Controller repository fence is exactly `weijunswj\/ai-agent-toolkit`/);
