@@ -127,6 +127,17 @@ G0 is the non-gating evidence-acquisition/investigation stage. It consumes an ac
 
 When a known-good qualified path succeeds while the real production path fails, G_FRAME first records the material differential between them, including the known-good upper-bound positive control and the real production entry point. G0 then prefers one bounded differential experiment that starts from the known-good state and varies/minimises the material differences systematically while exercising that production entry point. Serial symptom-by-symptom probes are a fallback only when an earlier boundary genuinely prevents deeper observation in the same safe experiment. Incidental environment/check/transport failures do not become the new root model when a deterministic authorised carrier can still answer the original differential question.
 
+### Programme discovery basis
+
+`DISCOVERY_BASIS=REUSE|DELTA|FULL|ADOPTED_EQUIVALENT` records admission/applicability for the consuming child. It is a fact and receipt, not a new gate, role, task queue, or architecture authority. A new chat, day, worker, takeover, or task does not by itself justify `FULL`.
+
+- `REUSE` applies when the exact existing findings remain applicable. The child records a bounded applicability receipt bound to the exact consuming repository, programme, child revision and baseline revision, with baseline/finding identities, checked dependencies and invalidation triggers; a receipt cannot be replayed across consumers, and it does no dedicated discovery work just to restate unchanged evidence.
+- `DELTA` is the default for changed or new material facts in the consuming child. Invalidate only findings whose dependencies or triggers changed; unrelated findings remain reusable.
+- `ADOPTED_EQUIVALENT` names adequate existing investigation by exact source, revision, and evidence identity, but is admitted only by a current applicability readback bound to the consuming repository, programme, child revision, baseline revision, finding IDs and every material fact covered. Source identity or a caller-supplied adequacy label alone cannot skip DELTA mapping. Adoption imports evidence only, not source architecture or mutation authority.
+- `FULL` is programme-scope investigation: optional `G_FRAME` -> programme-scope `G0` -> `G1` -> exact Web acceptance. Discovery has no local `G2`, `G3`, or `G4` merely because investigation occurred. G0 remains read-only. An effectful probe requires current X3/Web authority bound to the exact consuming repository, programme, child, baseline revision and operation.
+
+Use the cold [Programme Discovery Baseline](docs/PROGRAMME-DISCOVERY-BASELINE.md) convention for bounded, sanitised observations. It is evidence, not a programme state store, secret store, runtime, or architecture source. `ADOPTED_EQUIVALENT` requires an authoritative current source readback binding exact repository/path/revision and recoverable evidence identity; a digest alone is not a re-verification path. `ACCEPTED` requires a current authoritative G1/Web decision readback binding the exact repository, programme, child, baseline revision, finding IDs, evidence identities, outcome, decision body and body digest; a copied ID or caller-supplied digest is not authority. When a material dependent decision relies on actual workflow behaviour, use a representative real enactment when safe authorised enactment exists; an `OBSERVED` finding requires a current authoritative observation readback bound to the exact consuming repository, programme, child revision, baseline revision, finding IDs and changed facts, plus a safe evidence/reverification reference and current terminal enactment receipt bound to the operation authority. If safe enactment or adequate evidence is unavailable, preserve `UNKNOWN` or `DOCUMENTED_NOT_DEMONSTRATED` with a disposition. `REUSE` requires a current applicability receipt bound to reused findings, checked dependencies and invalidation triggers. `DELTA` requires a complete current dependency/finding readback that maps each changed material fact before local invalidation; missing applicability or mapping is HOLD. Do not present a partial observation as a completed effect. G0 remains read-only; effectful probes require current X3/Web authority. Private material stays in authorised custody and is referenced only through an independently read-back, consumer-resolvable custody receipt. Raw private material is never admitted into a baseline. Cross-repository evidence is sanitised and bound to exact source/revision/evidence identity; it imports no source authority.
+
 ### G1 — Root convergence, architecture and authority
 
 For material uncertain work, G1 establishes:
@@ -218,6 +229,30 @@ Async validation for a changed drain/wait/flush/join/poll/quiesce/retry/completi
 Ordinary commits or internal increments do not create separate G4 lifecycles.
 
 Material scope expansion stops the affected work at a safe boundary and returns to Web for amend/split/replan authority.
+
+### Stable-root G3 convergence accounting
+
+Classify each fresh material finding exactly once as `EXISTING_ROOT`, `NEW_ROOT_DISCOVERED`, `CROSS_ROOT_INTERACTION`, `G2_CONTRACT_GAP`, `G1_ROOT_TRUST_CHANGE`, or `NON_PRODUCT_BLOCKER`; an unknown or ambiguous class is a Web HOLD. Attempt admission consumes its finding-bound classification readback for the exact root-ledger revision and complete stable-root set. The current canonical finding-classification readback binds the exact repository, programme, child, RUN/Lock, root-ledger revision, finding ID and complete stable root-family set; missing or contradictory classification and repeated-cross-root-reopening evidence is a Web HOLD. Route `G2_CONTRACT_GAP` to targeted G2 re-entry and `G1_ROOT_TRUST_CHANGE` to G1 reconvergence; `NON_PRODUCT_BLOCKER` stays outside product correction. A product root binds `ROOT_ID`, accepted G2 obligation, causal mechanism/boundary, affected surface, mutation scope, dependencies, unique attempt IDs, consumed attempts and state. Bind the stable causal-family identity and complete current ledger to an authoritative, current root-ledger readback for the exact repository, RUN/Lock and accepted G2 obligation. Caller root names, hashes or booleans cannot establish a new family, separability or prior-attribution audit. A family passes as `EXISTING_ROOT` only when its exact stable key has prior attempt IDs in `priorAttemptAttributionByFamily`; `previouslyAddressedFamilies` membership alone establishes neither prior history nor attempt debt. Without exact prior attempt attribution, it requires a current `NEW_ROOT_DISCOVERED` classification and exact whole-history untouched-attribution audit, or admission holds. Every ordinary episode attempt must be attributed to at least one stable root family in the current records or prior-attribution map, and every root-attributed attempt must be classified ordinary; any mismatch holds before event admission. A new-root prior-attribution audit remains bound after its first attempt is recorded, so moving earlier IDs under a prior family label cannot reset debt.
+
+Count unique substantive attempt IDs from the current authoritative episode ledger and attribute them to the stable causal family, not a finding label. One correction may carry one attempt ID attributed to multiple roots. Equivalent roots merge with the union of unique attempt IDs; never select the minimum count. Renaming, splitting, relabelling a family or changing a caller-supplied key cannot lower debt. A new independent root starts at zero only when the complete current authoritative attribution audit explicitly proves that exact causal family untouched. Keep total historical episode attempts separately from per-root counts and chronology. Attempts 1-3 are normal; attempts 4-5 require independently bound narrowing/progress evidence; attempt 5 is the same-root absolute ceiling, and a sixth ordinary attempt is rejected.
+
+`CROSS_ROOT_INTERACTION` creates no automatic budget. Repeated reopening across roots, root-set growth without closure, ambiguous partition/attribution, unknown classifications, or exhaustion returns to Web. Preserve `WEB_DIRECTED_CONTINUATION` and `RECONVERGED_CORRECTION` histories separately; neither resets the ordinary root budget. A non-product `HOLD` recovery, unchanged-byte reviewer supplementation, or evidence-only recheck is not a product attempt. `WEB_DIRECTED_CONTINUATION` and `RECONVERGED_CORRECTION` each require an exact current authority receipt bound to repository, RUN/Lock, stable root family, attempt identity and scope; caller strings or labels do not establish exceptional authority. Attempt-event observers reject unknown event kinds and enforce the same-root ceiling. Ordinary, WDC, reconverged and episode-history membership comes only from the complete current canonical episode-ledger readback; caller history arrays cannot reset accounting. NON_PRODUCT_HOLD_RECOVERY and UNCHANGED_BYTE_REVIEWER_SUPPLEMENTATION are excluded only when exact current candidate bytes, unchanged-byte comparison and non-product classification readbacks bind the same repository, child, RUN/Lock and root family; otherwise the event is a HOLD or a product attempt.
+
+### Increment 1 ownership fences
+
+| Owner | Boundary |
+| --- | --- |
+| A1 | Route registration/resolution, including concrete `G0.discovery`. |
+| C2 | CURRENT, packets, discovery-basis receipts, durable root ledger, post-child checkpoint runtime. |
+| H | Host/browser/computer/native qualification. |
+| X1 | Secret References and Private Custody. |
+| X2 | Sensitive-File Access Guard. |
+| X3 | External Operation Authority and effectful probes. |
+| X4 | Privacy-Safe Operational Evidence. |
+| W2 | Temporary workspace lifecycle. |
+| D1 | Semantics and deterministic policy oracles only. |
+
+The D1 deterministic post-child membership oracle treats an otherwise-applicable required merge check with stale event/trigger/head identity, or a disabled child-required or required-at-merge merge check, as HOLD; event, branch and path non-applicability is evaluated before exact identity matching.
 
 ### G4 — Child-final independent assurance
 
@@ -943,6 +978,85 @@ This Architecture-owned block is the canonical machine-readable semantic contrac
     "trigger": "FINAL_DELIVERY_CHILD_MERGE",
     "scope": "WHOLE_PROGRAMME",
     "readOnly": true,
+    "assuranceModes": ["RECONCILE_ONLY", "DUAL_MAX"],
+    "forbiddenModes": ["SINGLE_MAX"],
+    "sharedPrerequisites": [
+      "EXACT_INTEGRATED_IDENTITY",
+      "CURRENT_PARENT_STATE",
+      "CURRENT_CHILD_STATE",
+      "RECEIPT_MEMBERSHIP",
+      "CHECK_MEMBERSHIP",
+      "FINALITY_AND_DEPENDENCY_STATE"
+    ],
+    "modeSelection": {
+      "selectionRequiresSharedPrerequisites": true,
+      "treeEqualityIsSufficientByItself": false,
+      "controllerOrArchitectureTouchAloneTriggersDual": false,
+      "reconcileOnlyRequiredPredicates": [
+        "MERGE_TREE_EQUALS_ASSURED_CHILD_TREE",
+        "NO_UNASSURED_CONCURRENT_OR_MULTI_CHILD_COMPOSITION",
+        "NO_CONFLICT_RESOLUTION_SEMANTIC_DELTA",
+        "CHILD_TERMINAL_FINALITY_COHERENT",
+        "PARENT_CURRENT_FRONTIER_DEPENDENCIES_COHERENT",
+        "NO_UNRESOLVED_MATERIAL_DEPENDENT_FINDING",
+        "COMPLETE_APPLICABLE_MERGE_CHECK_MEMBERSHIP",
+        "ALL_APPLICABLE_MERGE_CHECKS_TERMINAL_GREEN",
+        "NO_EXPLICIT_DUAL_REQUIREMENT",
+        "NOT_FINAL_DELIVERY_CHILD"
+      ],
+      "dualMaxTriggers": [
+        "INTEGRATION_TREE_DELTA",
+        "CONCURRENT_OR_MULTI_CHILD_COMPOSITION",
+        "MATERIAL_ROOT_TRUST_AUTHORITY_INTEGRATION_OUTSIDE_ASSURED_TREE",
+        "UNRESOLVED_INTEGRATION_UNCERTAINTY",
+        "EXPLICIT_OWNER_WEB_G4_REQUIREMENT",
+        "FINAL_DELIVERY_CHILD"
+      ]
+    },
+    "checkMembership": {
+      "deriveBeforeResults": true,
+      "includeAllApplicableFirstPartyChecks": true,
+      "binds": [
+        "AUTHORITATIVE_CHECK_CONFIGURATION",
+        "EVENT_BRANCH_PATH_CONDITIONS",
+        "CHILD_REQUIRED_CHECKS",
+        "ALL_APPLICABLE_FIRST_PARTY_MERGE_TRIGGERED_CHECKS",
+        "EXPECTED_MERGE_CHECK_MEMBERSHIP",
+        "MEMBERSHIP_FREEZE_POINT",
+        "TERMINAL_READBACK_RULE",
+        "PREMERGE_ONLY_VS_MERGE_TRIGGERED_RULE",
+        "MISSING_EXPECTED_CHECK_RULE",
+        "NOT_APPLICABLE_RULE"
+      ],
+      "authorityReadbacks": {
+        "configuration": "CURRENT_CANONICAL_CHECK_CONFIGURATION_READBACK",
+        "terminalRuns": "CURRENT_CANONICAL_LATEST_RUN_READBACK",
+        "allIdentityFieldsRequired": true,
+        "bindExpectedMembershipTo": ["EVENT_TRIGGER_HEAD", "CANONICAL_CHILD_INVENTORY", "TERMINAL_RESULT_INVENTORY", "REVIEW_SNAPSHOT"],
+        "emptyMembershipRequiresCompleteAuthoritativeReadback": true
+      },
+      "membershipIdentityFields": ["producerId", "workflowId", "workflowRevision", "checkId", "matrixLeg", "eventIdentity", "triggerId", "headSha"],
+      "terminalReadbackFields": ["producerId", "workflowId", "workflowRevision", "runId", "checkId", "matrixLeg", "eventIdentity", "triggerId", "headSha", "terminalReadback", "terminal", "conclusion"],
+      "emptyMembershipValidWhenProven": true,
+      "falseGreenRejections": [
+        "GREENS_ONLY_MEMBERSHIP",
+        "CO_OMITTED_EXPECTED_CHECK",
+        "WRONG_PRODUCER_SAME_DISPLAY_NAME",
+        "SKIPPED_CANCELLED_FAILED_DEPENDENCY_AS_NOT_APPLICABLE",
+        "AMBIGUOUS_DYNAMIC_MATRIX_EXPANSION",
+        "STALE_SUCCESSFUL_RERUN_OR_PREDECESSOR",
+        "NEW_APPLICABLE_CONFIGURATION_AFTER_FREEZE"
+      ]
+    },
+    "dualMaxReview": {
+      "bothSlotsRequired": true,
+      "readOnly": true,
+      "sameImmutableSnapshot": true,
+      "mutuallyBlindUntil": "BOTH_REPORTS_TERMINAL",
+      "unavailableReviewerOutcome": "HOLD",
+      "singleReviewFallback": false,
+      "finalDeliveryChildRequiresDual": true
+    },
     "parentContractMode": "CURRENT_CANONICAL_AUTHORITATIVE",
     "parentContractBodyField": "body",
     "parentContractDigestField": "bodyDigest",
@@ -1345,11 +1459,19 @@ Only a properly admitted, unresolved `CURRENT_SHIP_BLOCKER` may block the findin
 
 ### Post-child integrated dual review
 
-This law applies only to explicitly Toolkit-managed repositories. Trigger it after each Delivery Child's final PR is merged and the resulting canonical commit/tree is read back with its exact Delivery Child identity and merge receipt. Read back the exact merged identity and the relevant current or terminal child state from their canonical sources; both readbacks must be authoritative, current and explicit. The CURRENT canonical parent programme contract is an authoritative input to both reviews. Read back its exact body and verify its body digest against those bytes. Before or at review launch, read back the complete required receipt IDs and applicable integration-check membership from the current canonical child state. Bind those stable IDs, the exact integrated identity, parent/child state revisions and digests, and current Owner/Web reviewer-route authority to one immutable review snapshot. Both reviews receive the same accepted inputs and the same immutable snapshot. Both reviews cover the whole programme from the same snapshot. Bind applicable integration CI to that same exact integrated identity and check membership. Do not bind terminal-status digests into that launch snapshot. Start both independent whole-programme reviews alongside merge-triggered CI; CI and reviews may finish in either order. After reports return, read back the complete terminal object-receipt inventory from its canonical ledger and the complete applicable integration-check inventory from its canonical source. Individually read back each receipt and applicable check. Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication. Supporting or incremental PRs do not trigger a child checkpoint.
+Only a current canonical merge/event and child-state readback identifying the final Delivery Child merge triggers deterministic reconciliation; a caller label cannot suppress it. Supporting or incremental PRs do not trigger a child checkpoint. The only assurance modes are `RECONCILE_ONLY` and `DUAL_MAX`; `SINGLE_MAX` does not exist. Read and validate shared prerequisites before mode selection: exact integrated commit/tree and merge receipt, current canonical parent and child state, complete terminal-receipt membership, complete applicable merge-check membership, and coherent finality/dependency state. Every trigger and reconciliation predicate must have explicit current proof; missing or contradictory proof is `HOLD`, never false. Validate the child, check and review inventory shapes before dereferencing them; a missing or malformed inventory is `HOLD`. Selecting `RECONCILE_ONLY` never bypasses a missing or stale shared prerequisite.
 
-The route for each review is supplied by current Owner/Web authority and is not an authoritative default or permanent Architecture route law. Record the exact provider/model/reasoning bindings from that current readback. Both are independent, read-only whole-programme reviews. Each reviewer receives the same accepted scope and evidence but neither sees the other's report before both reports are returned to Web. A missing route or unavailable reviewer is a typed hold/Web decision; there is no silent route substitution.
+`RECONCILE_ONLY` is valid only when the exact merge tree equals the assured/accepted child tree; no unassured concurrent or multi-child composition or conflict-resolution semantic delta exists; child terminal/finality and parent CURRENT/frontier/dependencies are coherent; no material dependent finding is unresolved; applicable merge-check membership is complete and every applicable check is terminal green; no explicit dual requirement applies; and the child is not final. Controller or Architecture edits alone are not a `DUAL_MAX` trigger.
 
-Read back required receipt IDs and complete applicable-check membership before or at review launch and bind those stable IDs to the shared snapshot. The independent reviews may launch alongside merge-triggered CI; CI and reviews may finish in either order. Both reports, terminal receipts and all applicable checks must be terminal before Web adjudication. Reviewers are mutually blind until both reports have returned. Web adjudicates both reports against the exact integrated identity and current parent/child inputs. Do not copy programme-wide parent law into every child. The checkpoint may block only a dependent next-child frontier; unrelated authorised lanes continue. The final integrated programme review occurs at the final Delivery Child checkpoint for this lifecycle. It is not per-commit G4 and does not replace pre-merge G4 or a separately required Final Audit. Web retains all merge, programme and finality authority.
+Select `DUAL_MAX` for an integration-tree delta, unassured concurrent/multi-child composition, material root/trust/authority integration outside the assured tree, unresolved integration uncertainty, explicit Owner/Web/G4 requirement, or the final Delivery Child. A tiny but unassured trust/finality interaction still requires `DUAL_MAX`. Both independent read-only review slots are required against the same immutable post-merge snapshot and remain mutually blind until both reports are terminal. If either reviewer is unavailable, HOLD; there is no one-review fallback. The final child always takes `DUAL_MAX`.
+
+Derive expected merge-check membership from a complete current authoritative configuration readback, event/branch/path conditions, child-required checks, every enabled applicable first-party merge-triggered check (including checks not separately marked `requiredAtMerge`). First-party ownership comes from the current authoritative configuration metadata, not a finite local producer allowlist. Bind the producer-authority classification and the pre-result membership freeze point. Bind the configuration and terminal-run sources, event/trigger/head, premerge-only versus merge-triggered rule, missing-check rule, latest-run rule, and not-applicable rule before examining results. Every producer, workflow, revision, check, matrix leg, event, trigger and head identity is required and must bind the exact integrated event; the selected run must be the current terminal run for that identity. Bind the same expected check identities across configuration, canonical child inventory, terminal result inventory and review snapshot. A provably empty expected membership is valid only when the complete authoritative configuration readback and those inventories agree that it is empty. Greens-only membership, co-omitted expected checks, wrong producers, missing identity fields, skipped/cancelled/failed dependencies treated as not applicable, ambiguous matrix expansion, stale successful reruns/predecessors, or newly applicable configuration after freeze do not produce a green reconciliation.
+
+This law applies only to explicitly Toolkit-managed repositories. Read back the exact merged identity and the relevant current or terminal child state from their canonical sources; both readbacks must be authoritative, current and explicit. The CURRENT canonical parent programme contract is an authoritative input to both reviews. Read back its exact body and verify its body digest against those bytes. Before mode selection, read back the complete required receipt IDs and applicable integration-check membership from the current canonical child state. Bind those stable IDs, exact integrated identity, and parent/child state revisions and digests to one immutable review snapshot. Do not bind terminal-status digests into that launch snapshot. When `DUAL_MAX` is selected, read back current Owner/Web reviewer-route authority and bind the exact route to that same immutable snapshot before starting both reviews. When `DUAL_MAX` is selected, start both independent whole-programme reviews alongside merge-triggered CI; CI and reviews may finish in either order. For `DUAL_MAX`, after both reports return, read back the complete terminal object-receipt inventory from its canonical ledger and the complete applicable integration-check inventory from its canonical source. Individually read back each receipt and applicable check. When `DUAL_MAX` is selected, both reports, terminal receipts and all applicable checks must be terminal before Web adjudication.
+
+The route for each `DUAL_MAX` review is supplied by current Owner/Web authority and is not an authoritative default or permanent Architecture route law. Record the exact provider/model/reasoning bindings from that current readback. Both reviews are independent, read-only whole-programme reviews. Each reviewer receives the same accepted scope and evidence but neither sees the other's report before both reports are returned to Web. A missing route or unavailable reviewer under `DUAL_MAX` is a typed hold/Web decision; there is no silent route substitution.
+
+Web adjudicates both reports against the exact integrated identity and current parent/child inputs. Do not copy programme-wide parent law into every child. The checkpoint may block only a dependent next-child frontier; unrelated authorised lanes continue. The final integrated programme review occurs at the final Delivery Child checkpoint for this lifecycle. It is not per-commit G4 and does not replace pre-merge G4 or a separately required Final Audit. Web retains all merge, programme and finality authority.
 
 ### Bounded non-product continuation
 
