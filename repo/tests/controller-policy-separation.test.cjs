@@ -350,7 +350,7 @@ test('shipping-first policy is singular, ordered, and retains canonical Shipping
 });
 
 test('shipping scope admission preserves minimum safety, acceptance, and blocker evidence', () => {
-  assert.match(controller, /smallest usable outcome, supported environment, applicable minimum safety floor and explicit acceptance criteria/);
+  assert.match(controller, /next explicitly agreed complete usable milestone: outcome, audience, supported environment, minimum safety floor and acceptance criteria/);
   assert.match(controller, /concrete failure evidence or a critical evidence gap, and the consequence for this shipment/);
   assert.match(controller, /Existing criteria and blockers require evidence-backed User\/Web adjudication before reclassification; exhaustion or deadline pressure is not grounds to weaken the floor/);
 });
@@ -779,6 +779,55 @@ test('candidate acceptance, child completion, and per-repository wait removal st
   assert.match(controller, /safe independently accepted increment need not wait for unrelated future-owned work, but the continuing child remains open until its required outcomes are complete/);
   assert.match(controller, /release an otherwise unsupported blanket Toolkit wait only after recording that no genuine local safety, evidence, authority or code dependency requires it/);
   assert.match(controller, /Keep named real holds, active-worker protections and all existing permissions\/budgets/);
+});
+
+// These document-contract assertions do not prove host execution or runtime enforcement.
+test('interim document notes are dated, prominent and routed to canonical sections', () => {
+  for (const source of [controller, architecture]) {
+    assert.match(source, /^# [^\r\n]+\r?\n\r?\n\*\*Interim delivery-first operation - 6 October 2026:\*\*/);
+    assert.match(source, /At the next safe controller admission\/reconciliation/);
+    assert.match(source, /Preserve all accepted safety, assurance, authority and consumed history/);
+  }
+  assert.match(controller, /\[Shipping-first scope and repair decisions\]\(#shipping-first-scope-and-repair-decisions\)/);
+  assert.match(architecture, /\[Child sizing and splitting\]\(#child-sizing-and-splitting\)/);
+  assert.match(architecture, /\[Bounded non-product continuation\]\(#bounded-non-product-continuation\)/);
+});
+
+test('interim recovery is finite, faithful and retains real return boundaries', () => {
+  const recovery = controller.split('\n').find(line => line.startsWith('- **Executor anti-bounce is not child lifecycle:**'));
+  assert.ok(recovery);
+  assert.match(recovery, /existing bounded continuation contract: finite faithful paths, exact effects, prerequisites, consumed counters\/limits and return conditions/);
+  assert.match(recovery, /Qualify the actual producer bytes and receiver\/execution context, not only regenerated approximations/);
+  assert.match(recovery, /Reconcile interrupted execution and ambiguous effects before resuming; reuse completed evidence only with valid exact applicability/);
+  assert.match(recovery, /Covered mechanics do not require a fresh continuation request per command/);
+  assert.match(recovery, /Web may optionally invoke one read-only `G1_RECONVERGENCE` synthesis when materially useful; that synthesis grants no authority, budget reset or child lifecycle change/);
+  assert.match(recovery, /changed failure may continue only when an independently accepted current state proves a remaining authorised faithful path and material progress/);
+  assert.match(recovery, /Missing authority, exhausted limits, unresolved effects, unknown\/product attribution, changed semantics or materially equivalent no-progress returns to Owner\/Web/);
+  assert.match(architecture, /Covered mechanics continue without per-command re-admission while exact applicability, material progress, effects and remaining limits are established/);
+  assert.match(architecture, /Web may optionally invoke one read-only Re-convergence synthesis; that synthesis grants no authority, lifecycle change or budget expansion/);
+  for (const source of [controller, architecture]) {
+    assert.doesNotMatch(source, /After one focused diagnosis\/recovery/);
+  }
+});
+
+test('interim adoption preserves original evidence, consumed limits and in-flight contracts', () => {
+  assert.match(controller, /current independently read-back authority identity\/revision and its bounded packet rather than superseded prompts or historical grants/);
+  assert.match(controller, /Preserve original admitted gate outcomes, candidate evidence and consumed history/);
+  assert.match(controller, /A current packet cannot manufacture authority or silently rewrite an in-flight contract/);
+  assert.match(controller, /Whole-episode budget exhaustion holds the affected objective for User\/Web rather than silently continuing/);
+  assert.match(architecture, /Attempt, product-correction and consumed-budget counts may not exceed their accepted limits; any over-limit count returns to Web/);
+});
+
+test('interim adoption is manual and keeps implementation ownership and authority fences', () => {
+  const adoption = controller.split('\n').find(line => line.startsWith('- Apply these compatible operating rules immediately'));
+  assert.ok(adoption);
+  assert.match(adoption, /exact CURRENT\/parent\/child readback; do not wait for unfinished Toolkit runtime code/);
+  assert.match(adoption, /release an otherwise unsupported blanket Toolkit wait only after recording that no genuine local safety, evidence, authority or code dependency requires it/);
+  assert.match(adoption, /C2 owns deterministic state, frontier and packet mechanisation; H owns host qualification/);
+  assert.match(adoption, /controller application is interim manual enforcement, not a claim of automated interception or supervision/);
+  assert.match(adoption, /Keep named real holds, active-worker protections and all existing permissions\/budgets/);
+  assert.match(adoption, /Preserve active-worker contracts and consumed budgets/);
+  assert.match(adoption, /This grants no new source, publication, merge, deployment, security or credential authority/);
 });
 
 test('shipping policy remains symbolic and preserves existing policy boundaries', () => {

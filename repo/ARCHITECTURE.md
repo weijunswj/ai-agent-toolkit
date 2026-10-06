@@ -1,5 +1,7 @@
 # Toolkit Architecture
 
+**Interim delivery-first operation - 6 October 2026:** At the next safe controller admission/reconciliation, apply [Child sizing and splitting](#child-sizing-and-splitting) and [Bounded non-product continuation](#bounded-non-product-continuation) to advance the agreed usable milestone through bounded continuous execution. Preserve all accepted safety, assurance, authority and consumed history. Controller application is interim manual enforcement; universal host adoption and automated runtime interception/supervision are not yet implemented.
+
 ## Purpose and authority
 
 This document defines the stable high-level architecture of Toolkit itself.
@@ -1379,6 +1381,8 @@ Its result is `CONTINUE_CURRENT_CONTRACT`, `G2_REENTRY_REQUIRED`, `G1_REENTRY_RE
 
 G3 should begin only when a fresh reviewer can understand, implement, validate and independently assure the child within its allocated context and execution budget.
 
+At programme creation or a material replan, the parent maps the complete agreed usable milestone to the required children, dependencies, continuing owners and next admissible action. Reassess existing boundaries and order: keep independently shippable/reviewable outcomes; combine or rescope only a genuinely coupled usable workflow; move safely deferrable work behind the milestone with its existing owner. Preserve every remaining mandatory obligation and accepted dependency through explicit disposition and verified transfer where needed. A continuously owned milestone may span several bounded children; it does not require a giant candidate or another gate for each internal component. A changed accepted outcome, trust boundary, dependency or lifecycle requires its existing Owner/Web and G1/G2 amendment boundary.
+
 Split during G1/G2 when:
 
 - outcomes can ship independently;
@@ -1465,7 +1469,7 @@ Normal execution events do not imply either disposition. In particular, worker f
 
 Correction-budget exhaustion remains visible and terminal for the ordinary correction allowance of that implementation lineage. It requires Owner/Web adjudication. A new implementation lineage or new flat Delivery Child is valid only when justified by a material architecture/authority or independently shippable/reversible boundary and explicitly accepted; it must never be created merely to reset correction accounting. The bounded reconverged-correction exception is the final autonomous same-scope exception. A later same-scope `WEB_DIRECTED_CONTINUATION` is possible only through a new explicit Owner/Web grant under the section above and never resets the exhausted accounting.
 
-Bounded-convergence rules govern executor persistence inside the existing child without requiring an automatic separate reconvergence referee. After one focused diagnosis/recovery, repeated same/root-related HOLD returns to Web with bounded evidence. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis cannot close/retire/supersede/replace/transfer the child or reset/expand correction or mutation budgets.
+Bounded convergence and predictable non-product recovery stay inside the continuing child and the independently accepted current episode envelope described in [Bounded non-product continuation](#bounded-non-product-continuation). Covered mechanics continue without per-command re-admission while exact applicability, material progress, effects and remaining limits are established. Exhaustion, unresolved effects, missing authority or materially equivalent no-progress returns to Web. Web may optionally invoke one read-only Re-convergence synthesis; that synthesis grants no authority, lifecycle change or budget expansion.
 
 ## Roles
 
@@ -1575,6 +1579,6 @@ Toolkit should measure, where available:
 - avoided model invocations;
 - recovery cost after interruption.
 
-Missing telemetry is `unavailable`, never inferred.
+Use existing target, CURRENT, execution and acceptance receipts to record admission-to-usable-acceptance time, controller/model invocations, repeated diagnostics, valid completed-evidence reuse and actual provider-reported usage/cost where available. Retain required-check/assurance results and escaped-defect evidence. Missing telemetry or a comparable baseline is unavailable, never inferred; do not add a tracker or benchmark programme as a shipping prerequisite.
 
-Success means lower context/invocation overhead and delivery time on comparable work without weakening accepted safety/correctness evidence.
+Success means a usable accepted milestone sooner with less measured orchestration/context overhead on comparable work, while preserving the accepted safety, correctness and independent assurance obligations.
