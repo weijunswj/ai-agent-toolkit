@@ -75,12 +75,12 @@
         },
         "G0": {
           "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh",
           "subagent": {
             "provider": "anthropic",
-            "model": "opus-5.5",
-            "reasoning": "medium"
+            "model": "haiku-5.5",
+            "reasoning": "xhigh"
           }
         },
         "G1": {
@@ -100,12 +100,12 @@
         },
         "G3": {
           "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh",
           "subagent": {
             "provider": "anthropic",
-            "model": "opus-5.5",
-            "reasoning": "medium"
+            "model": "haiku-5.5",
+            "reasoning": "xhigh"
           },
           "adversarial_subagent": {
             "provider": "anthropic",
@@ -125,8 +125,8 @@
         },
         "BROWSER": {
           "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium"
+          "model": "haiku-5.5",
+          "reasoning": "xhigh"
         }
       }
     },
@@ -139,12 +139,12 @@
         },
         "G0": {
           "provider": "anthropic",
-          "model": "opus-5.5",
-          "reasoning": "medium",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh",
           "subagent": {
             "provider": "anthropic",
-            "model": "opus-5.5",
-            "reasoning": "medium"
+            "model": "haiku-5.5",
+            "reasoning": "xhigh"
           }
         },
         "G1": {
