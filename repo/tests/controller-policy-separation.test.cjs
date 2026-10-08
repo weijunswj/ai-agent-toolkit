@@ -228,10 +228,24 @@ test('ordinary semantic executors receive bounded authority instead of being tol
 
 test('Claude and OpenAI stacks preserve the current owner-selected route classes without leaking model names into policy', () => {
   const claude = registry.stacks['owner-claude'];
-  assert.equal(new Set(Object.values(claude.routes).map((route) => route.model)).size, 1);
-  assert.equal(claude.routes['G_FRAME'].reasoning, 'high');
-  assert.equal(claude.routes['G0'].reasoning, 'medium');
-  assert.equal(claude.routes.G1.reasoning, 'high');
+  assert.deepEqual(claude.routes, {
+    G_FRAME: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' },
+    G0: {
+      provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh',
+      subagent: { provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' }
+    },
+    G1: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' },
+    G1_RECONVERGENCE: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' },
+    G2: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' },
+    G3: {
+      provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh',
+      subagent: { provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' },
+      adversarial_subagent: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' }
+    },
+    G4: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
+    FINAL_AUDIT: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'max' },
+    BROWSER: { provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' }
+  });
   const openai = registry.stacks['owner-openai-default'];
   for (const [role, route] of Object.entries(openai.routes)) {
     if (route.model === 'gpt-6.1-sol') assert.equal(route.reasoning, 'high', `OpenAI Sol route must be high: ${role}`);
@@ -239,14 +253,6 @@ test('Claude and OpenAI stacks preserve the current owner-selected route classes
   }
   assert.equal(registry.stacks['owner-openai-default'].routes.G1.reasoning, 'high');
   assert.equal(registry.stacks['owner-openai-default'].routes.G2.reasoning, 'high');
-  assert.equal(claude.routes.G2.reasoning, 'high');
-  assert.equal(claude.routes.G3.reasoning, 'medium');
-  assert.equal(claude.routes.G4.reasoning, 'xhigh');
-  assert.equal(claude.routes.G1_RECONVERGENCE.reasoning, 'high');
-  assert.equal(claude.routes.FINAL_AUDIT.reasoning, 'max');
-  assert.equal(claude.routes.BROWSER.reasoning, 'medium');
-  assert.equal(claude.routes.G0.subagent.reasoning, 'medium');
-  assert.equal(claude.routes.G3.subagent.reasoning, 'medium');
 });
 
 test('mixed Claude/GPT stack uses Claude for G0/G1/G2 and Codex for G3/G4 with Opus final audit', () => {
@@ -255,8 +261,8 @@ test('mixed Claude/GPT stack uses Claude for G0/G1/G2 and Codex for G3/G4 with O
 
   assert.deepEqual(mixed.routes.G_FRAME, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G0, {
-    provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium',
-    subagent: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'medium' }
+    provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh',
+    subagent: { provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' }
   });
   assert.deepEqual(mixed.routes.G1, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'high' });
   assert.deepEqual(mixed.routes.G1_RECONVERGENCE, mixed.routes.G1);
@@ -269,6 +275,19 @@ test('mixed Claude/GPT stack uses Claude for G0/G1/G2 and Codex for G3/G4 with O
   assert.deepEqual(mixed.routes.G4, { provider: 'openai', model: 'gpt-6-astra', reasoning: 'high' });
   assert.deepEqual(mixed.routes.FINAL_AUDIT, { provider: 'anthropic', model: 'opus-5.5', reasoning: 'max' });
   assert.deepEqual(mixed.routes.BROWSER, { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' });
+});
+
+test('v2 stack registry contains no Anthropic Opus Medium tuple', () => {
+  function visit(value, slot) {
+    if (!value || typeof value !== 'object') return;
+    assert.equal(
+      value.provider === 'anthropic' && value.model === 'opus-5.5' && value.reasoning === 'medium',
+      false,
+      `obsolete Anthropic Opus Medium tuple: ${slot}`
+    );
+    for (const [key, child] of Object.entries(value)) visit(child, `${slot}.${key}`);
+  }
+  visit(registry, 'registry');
 });
 
 test('G1_RECONVERGENCE always inherits the selected stack G1 route', () => {
