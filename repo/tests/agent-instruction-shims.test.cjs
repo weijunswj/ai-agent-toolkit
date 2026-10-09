@@ -225,7 +225,7 @@ test('manual global source templates exist and are generated from execution prom
   const prompt = readText(executionPromptPath).trimEnd();
   assert.match(prompt, /## Git Completion/);
   assert.match(prompt, /check PR CI\/status before reporting completion/i);
-  assert.match(prompt, /- Push to `main`, secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes\./);
+  assert.match(prompt, /- Push task\/product source to `main`, or push secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes\./);
   assert.match(prompt, /claim CI passed unless checked/i);
   assert.doesNotMatch(prompt, /## Pull Request Description/);
   assert.match(prompt, /opening or updating a pull request/i);
@@ -240,6 +240,73 @@ test('manual global source templates exist and are generated from execution prom
     assert.match(text, /global rules example/i, relPath);
     assertNoForbiddenDefaultPromptPhrases(text, relPath);
   }
+});
+
+const gitCompletionSurfaces = [
+  executionPromptPath,
+  `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
+  `${repoLocalPublishedRoot}/AGENTS.managed.template.md`,
+  'AGENTS.md',
+  'repo/contracts/agent-rules/AGENTS.template.md',
+  'repo/contracts/agent-rules/CLAUDE.template.md',
+  'repo/contracts/agent-rules/GEMINI.template.md'
+];
+
+// These are instruction-contract checks, not native permission or live-operation tests.
+test('Git Completion permits independently authorised private evidence custody within exact limits', () => {
+  const requiredRules = [
+    /Evaluate separately authorised evidence custody only in a distinct repository whose exact identity and private visibility are independently verified\./,
+    /Owner authority must explicitly bind the repository, effect, ref, paths, and content/,
+    /An owner-approved evidence-only ref update, including `main` in that verified private repository, is eligible only within those exact limits/,
+    /with existing evidence preserved and independent readback of the resulting ref and content/
+  ];
+  for (const relPath of gitCompletionSurfaces) {
+    const section = readText(relPath).match(/## Git Completion\n([\s\S]*?)(?=\n## )/)?.[0];
+    assert.ok(section, `${relPath}: Git Completion section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, relPath);
+    assert.doesNotMatch(section, /- Push to `main`,/, `${relPath}: no contradictory blanket gate`);
+  }
+});
+
+for (const [scenario, requiredRule] of [
+  ['task/product source main push', /Task\/product source changes require a non-main branch and PR\. Never push task\/product source to `main`\./],
+  ['wrong or public repository', /Wrong or public repositories, absent authority, and task\/product source adoption relabelled as evidence custody are prohibited\./],
+  ['absent owner authority', /Wrong or public repositories, absent authority, and task\/product source adoption relabelled as evidence custody are prohibited\./],
+  ['repository name or prefix alone', /a repository name or prefix alone grants no authority\./],
+  ['source adoption disguised as custody', /task\/product source adoption relabelled as evidence custody are prohibited\./],
+  ['secrets, credentials or private values', /never overrides explicit native denials or authorises retries of previously denied effects, secrets, credentials, private values/],
+  ['explicit native denial or previously denied effect', /never overrides explicit native denials or authorises retries of previously denied effects/],
+  ['merge, install, deployment or host permission change', /merge, install, deployment, or host permission changes\./]
+]) {
+  test(`Git Completion evidence custody excludes ${scenario}`, () => {
+    for (const relPath of gitCompletionSurfaces) assert.match(readText(relPath), requiredRule, relPath);
+  });
+}
+
+test('direct Toolkit root gate agrees with the managed source-main and custody scope', () => {
+  const rootAgents = readText('AGENTS.md');
+  const directRoot = rootAgents.slice(rootAgents.indexOf('## Hard Safety Gates'));
+  assert.match(directRoot, /- Do not push task\/product source to `main`; Toolkit source changes require a non-main branch and PR\./);
+  assert.match(directRoot, /Separately authorised evidence custody must satisfy the managed Git Completion contract above\./);
+  assert.doesNotMatch(rootAgents, /- Do not push to `main`\.|- Push to `main`,/);
+});
+
+test('installed portable Git Completion playbook preserves source scope and exact managed custody limits', () => {
+  const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
+  assert.match(playbook, /- Work on a non-main branch for task\/product source changes\./);
+  assert.match(playbook, /- Do not push task\/product source to `main`\./);
+  assert.match(playbook, /Separately authorised private evidence custody must satisfy the managed `AGENTS\.md` Git Completion contract/);
+  assert.match(playbook, /exact owner authority, independently verified private repository identity, preservation, readback/);
+  assert.match(playbook, /all safety, privacy, native denial and source-adoption limits/);
+  assert.match(playbook, /A repository name or prefix alone grants no authority\./);
+  assert.doesNotMatch(playbook, /- Work on a non-main branch\.|- Do not push to `main`\./);
+  for (const rule of [
+    /Run the smallest relevant local validation before committing/,
+    /Keep commits scoped to the requested change/,
+    /unless the user asked for local-only or no-push work/,
+    /Never claim tests, validation, or CI passed unless actually checked/,
+    /If checks are pending, failed, or inaccessible, report the exact state/
+  ]) assert.match(playbook, rule);
 });
 
 test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {

@@ -146,6 +146,10 @@ Boundedly update canonical bodies; comments hold history. Report failed/blocked 
 
 Git Completion is the scoped exception for version-control publication after requested edits. Unless asked for local-only/no-push work, validate, commit to a non-main branch, push, and open or update the PR.
 
+Task/product source changes require a non-main branch and PR. Never push task/product source to `main`.
+
+Evaluate separately authorised evidence custody only in a distinct repository whose exact identity and private visibility are independently verified. Owner authority must explicitly bind the repository, effect, ref, paths, and content; a repository name or prefix alone grants no authority. An owner-approved evidence-only ref update, including `main` in that verified private repository, is eligible only within those exact limits, with existing evidence preserved and independent readback of the resulting ref and content. Wrong or public repositories, absent authority, and task/product source adoption relabelled as evidence custody are prohibited. This rule never overrides explicit native denials or authorises retries of previously denied effects, secrets, credentials, private values, merge, install, deployment, or host permission changes.
+
 Before pushing:
 
 - Run the smallest relevant local validation.
@@ -166,7 +170,7 @@ After pushing:
 
 Never:
 
-- Push to `main`, secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+- Push task/product source to `main`, or push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
 - Claim CI passed unless checked.
 - Hide failing, pending, or inaccessible CI.
 
