@@ -14,7 +14,7 @@
 Tracker format contract: review evidence is inventory-first and disposition is
 truthful, controller-owned, and exact-head bound.
 
-Root-005 human-v2 projection note: a PR body is a deterministic phase
+Human-v2 projection contract: a PR body is a deterministic phase
 projection built from a validated immutable descriptor and validated BOUND
 authority or null. PRE_NUMBER has no PR-number authority; BOUND displays
 descriptor text only in the historical Descriptor at creation region and uses

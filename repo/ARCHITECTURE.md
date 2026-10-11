@@ -250,9 +250,9 @@ Web retains merge and child-finality authority after exact candidate, base, chec
 
 ## Shipping disposition and current blocker admission
 
-### Machine-readable S1-A policy contract
+### Machine-readable shipping-disposition policy contract
 
-This Architecture-owned block is the canonical machine-readable semantic contract for the following policy. It is policy-source structure for closed regression interpretation, not a runtime or wire schema and not a C2/D1 implementation. The accompanying prose explains the same rules for humans. A consumer must retain the detailed companion record referenced by every coarse projection.
+This Architecture-owned block is the canonical machine-readable semantic contract for the following policy. It is policy-source structure for closed regression interpretation, not a runtime or wire schema and not an implementation of deterministic reconciliation or delivery orchestration. The accompanying prose explains the same rules for humans. A consumer must retain the detailed companion record referenced by every coarse projection.
 
 ~~~s1a-policy-contract-v1
 {
