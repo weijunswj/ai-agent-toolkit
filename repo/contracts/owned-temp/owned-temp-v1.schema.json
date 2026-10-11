@@ -1,0 +1,1332 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-agent-toolkit.local/contracts/owned-temp/owned-temp-v1.schema.json",
+  "title": "AI Agent Toolkit owned temporary resource v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "purpose",
+    "repoRoot",
+    "episode"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ai-agent-toolkit.owned-temp.spec.v1"
+    },
+    "purpose": {
+      "enum": [
+        "portability",
+        "source-update",
+        "foundation-test"
+      ]
+    },
+    "repoRoot": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "episode": {
+      "$ref": "#/$defs/identity"
+    },
+    "runId": {
+      "$ref": "#/$defs/identity"
+    },
+    "lockId": {
+      "$ref": "#/$defs/identity"
+    },
+    "budgetBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 268435456,
+      "description": "Reserved maximum for filesystem growth performed through parent-accounted helpers and the two admitted cooperating-writer profiles. This does not enforce an operating-system or filesystem quota; raw same-user writes are outside accounting, and the API does not claim atomic pathname protection from a hostile same-user process."
+    },
+    "signal": {},
+    "retention": {
+      "$ref": "#/$defs/retentionSpec"
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "resourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dev",
+        "ino"
+      ],
+      "properties": {
+        "dev": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ino": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "instance_id",
+        "start_identity"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "start_identity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "identity"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "rootMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "claim_id",
+        "claim_identity",
+        "namespace_id",
+        "root_path",
+        "root_identity",
+        "repository",
+        "episode",
+        "run_id",
+        "lock_id",
+        "process",
+        "created_at_ms"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.root-marker"
+        },
+        "claim_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "claim_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "namespace_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "root_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "root_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "identity"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "episode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "lock_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pid",
+            "instance_id",
+            "start_identity"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "start_identity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "created_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "claim_id",
+        "namespace_id",
+        "namespace_path",
+        "claim_path",
+        "lease_path",
+        "marker_path",
+        "root_path",
+        "repository",
+        "episode",
+        "run_id",
+        "lock_id",
+        "process",
+        "created_at_ms",
+        "purpose",
+        "budget_bytes",
+        "metadata_bytes",
+        "reservation_bytes",
+        "retention",
+        "claim_identity"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.claim"
+        },
+        "claim_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "namespace_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "namespace_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "claim_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "lease_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "marker_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "root_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "identity"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "episode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "lock_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pid",
+            "instance_id",
+            "start_identity"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "start_identity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "created_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "purpose": {
+          "enum": [
+            "portability",
+            "source-update",
+            "foundation-test"
+          ]
+        },
+        "budget_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "metadata_bytes": {
+          "const": 1048576
+        },
+        "reservation_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 269484032
+        },
+        "retention": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/retentionClaim"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claim_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "purpose": {
+                "const": "source-update"
+              }
+            },
+            "required": [
+              "purpose"
+            ]
+          },
+          "then": {
+            "properties": {
+              "budget_bytes": {
+                "maximum": 16777216
+              }
+            }
+          }
+        }
+      ]
+    },
+    "marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "claim_id",
+        "claim_identity",
+        "namespace_id",
+        "namespace_path",
+        "claim_path",
+        "root_path",
+        "root_identity",
+        "root_marker_identity",
+        "root_marker",
+        "repository",
+        "episode",
+        "run_id",
+        "lock_id",
+        "process",
+        "created_at_ms"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.marker"
+        },
+        "claim_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "claim_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "namespace_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "namespace_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "claim_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "root_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "root_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "root_marker_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "root_marker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "claim_id",
+            "claim_identity",
+            "namespace_id",
+            "root_path",
+            "root_identity",
+            "repository",
+            "episode",
+            "run_id",
+            "lock_id",
+            "process",
+            "created_at_ms"
+          ],
+          "properties": {
+            "schema": {
+              "const": "ai-agent-toolkit.owned-temp.v1.root-marker"
+            },
+            "claim_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "claim_identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "namespace_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "root_path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "root_identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "repository": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "identity"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "identity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "dev",
+                    "ino"
+                  ],
+                  "properties": {
+                    "dev": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "ino": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            },
+            "episode": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "lock_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "process": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "pid",
+                "instance_id",
+                "start_identity"
+              ],
+              "properties": {
+                "pid": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "instance_id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "start_identity": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "created_at_ms": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "identity"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "episode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "lock_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pid",
+            "instance_id",
+            "start_identity"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "start_identity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "created_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "claim_id",
+        "claim_identity",
+        "status",
+        "lease_expires_at_ms",
+        "root_identity",
+        "root_marker_identity",
+        "marker_identity",
+        "root_marker_removed",
+        "root_removed",
+        "metadata_cleanup_phase",
+        "bytes_reserved",
+        "entries",
+        "reservation_bytes",
+        "retention",
+        "owned_children"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.lease"
+        },
+        "claim_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "claim_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dev",
+            "ino"
+          ],
+          "properties": {
+            "dev": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ino": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "CLAIMED",
+            "CREATED",
+            "MARKED",
+            "ADMITTED",
+            "ACTIVE",
+            "TERMINAL",
+            "CLEANING",
+            "REMOVED",
+            "CLEANUP_INCOMPLETE",
+            "RETAINED"
+          ]
+        },
+        "lease_expires_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "root_identity": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_marker_identity": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "marker_identity": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dev",
+                "ino"
+              ],
+              "properties": {
+                "dev": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ino": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_marker_removed": {
+          "type": "boolean"
+        },
+        "root_removed": {
+          "type": "boolean"
+        },
+        "entries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8192
+        },
+        "reservation_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 269484032
+        },
+        "retention": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/retentionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "terminal_reason": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "last_error_code": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "owned_children": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "$ref": "#/$defs/ownedChild"
+          }
+        },
+        "bytes_reserved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456,
+          "description": "Monotonic bytes reserved before parent-accounted growth; allowance is not refunded after partial failure."
+        },
+        "metadata_cleanup_phase": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "MARKER_REMOVAL_PENDING",
+            "MARKER_REMOVED",
+            "CLAIM_REMOVAL_PENDING"
+          ],
+          "description": "Durable phase used to recover interrupted metadata-only cleanup without discarding the final recovery record."
+        }
+      }
+    },
+    "admissionLock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "token",
+        "pid",
+        "start",
+        "created",
+        "expires"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.lock"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "retentionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "owner",
+        "max_bytes",
+        "expires_at_ms",
+        "bytes"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "expires_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67108864
+        }
+      }
+    },
+    "retentionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "owner",
+        "maxBytes",
+        "expiresAt"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "owner": {
+          "$ref": "#/$defs/identity"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "namespaceMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "namespace_id",
+        "path",
+        "temp_root",
+        "user_identity",
+        "base_identity",
+        "created_at_ms"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ai-agent-toolkit.owned-temp.v1.namespace"
+        },
+        "namespace_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "temp_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "user_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "base_identity": {
+          "$ref": "#/$defs/resourceIdentity"
+        },
+        "created_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "retentionClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "owner",
+        "maxBytes",
+        "expiresAtMs"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "owner": {
+          "$ref": "#/$defs/identity"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ownedChild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "pid",
+        "process_group",
+        "start_identity",
+        "token"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "STARTING",
+            "RUNNING"
+          ]
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "process_group": {
+          "type": "boolean"
+        },
+        "start_identity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "STARTING"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "then": {
+            "properties": {
+              "pid": {
+                "type": "null"
+              },
+              "start_identity": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "RUNNING"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "then": {
+            "properties": {
+              "pid": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "purpose": {
+            "const": "source-update"
+          }
+        },
+        "required": [
+          "purpose"
+        ]
+      },
+      "then": {
+        "properties": {
+          "budgetBytes": {
+            "maximum": 16777216
+          }
+        }
+      }
+    }
+  ]
+}
