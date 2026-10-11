@@ -24,7 +24,7 @@ These defaults classify no connector operation as broken and grant no GitHub, pu
 
 ## OpenAI dot
 
-For OpenAI dot only, the following mechanical-role selection and authenticated escalated `gh` transport order override conflicting generic configuration defaults. Shared workflow safeguards and all independent authority and host restrictions remain unchanged.
+For OpenAI dot only, the following mechanical-role selection, connector-first reads and authenticated escalated `gh` writes override conflicting generic configuration defaults. Shared workflow safeguards and all independent authority and host restrictions remain unchanged.
 
 ### Persisted-task references
 
@@ -44,7 +44,9 @@ This role changes no other helper profile, G1-G4 registry entry, gate assignment
 
 ### GitHub transport order
 
-For all already-authorised GitHub reads and writes, use authenticated task-scoped escalated `gh` through a supported execution mode permitted by the actual host. This includes source and state reads, independent readback, private admission records, CURRENT/status updates, issue/PR/comment bodies and branch/file writes. Use the controller's own route when it is available and qualified for the operation. When it is unavailable, delegate the bounded mechanical operation to a qualified executor using authenticated task-scoped escalated `gh`; use the mechanical-GitHub role above where its routine non-gate scope applies. Required independent roles and gate placement remain controlling. Do not use a GitHub connector as a fallback. If no supported authorised escalated `gh` route is qualified, report the exact capability gap and hold only the dependent action.
+Already-authorised GitHub reads, including source/state/private-admission reads and independent readback, use an available, capability-qualified GitHub connector first. Qualify the connector for the exact operation and intended account/repository; one successful read does not establish universal read capability. If a connector read is unavailable or fails, retain and report the exact result before considering another currently authorised route under the shared approval/denial rules.
+
+Already-authorised GitHub writes, including private admission records, CURRENT/status updates, issue/PR/comment and branch/file writes, continue through authenticated task-scoped escalated `gh` in a supported execution mode permitted by the actual host. Use the controller's own route when available and qualified for the operation; when it is unavailable, delegate the bounded mechanical write to a qualified executor using authenticated task-scoped escalated `gh`, applying the mechanical-GitHub role only where its routine non-gate scope applies. Required independent roles and gate placement remain controlling. Do not use a GitHub connector as a write fallback. If no supported, permitted, capability-qualified escalated-`gh` route is available, report the exact capability gap and hold only the dependent write.
 
 Before execution, verify the actual route's intended-account authentication, repository, supported execution mode and current permission for the exact operation; for delegation, also verify the supported launch configuration. Give the executor the exact approved bounded operation and required evidence/readback. Neither route selection, authentication nor escalation grants authority or automatic approval. Do not change credentials or security settings to make a route work. Pending approvals, explicit denials, no-retry restrictions and unresolved effects carry into the executor unchanged; delegation is not permission to reroute a denied action, and required approval must use the actual supported approval prompt. Other persistent hosts use the generic defaults above.
 
@@ -54,7 +56,7 @@ A tool/service failure is not an access/authority denial. Explicit denials, mand
 
 ### Prior connector observation - OpenAI dot
 
-Observed in OpenAI dot on 11 October 2026: two identical authorised connector `create_branch` attempts returned the generic `user cancelled MCP tool call` result, remote branch readback confirmed absence, and the owner confirmed no cancellation. The all-GitHub escalated `gh` transport preference above supersedes the former branch-only routing exception; this observation does not classify other connector operations as broken or prove another host's capability. Requalifying a connector does not by itself change the owner's selected route.
+Observed in OpenAI dot on 11 October 2026: two identical authorised connector `create_branch` attempts returned the generic `user cancelled MCP tool call` result, remote branch readback confirmed absence, and the owner confirmed no cancellation. The connector-first read and escalated `gh` write preference above supersedes the former all-GitHub escalated `gh` transport preference; this observation establishes neither that all connector reads work nor that all connector writes fail, and proves nothing about another host's capability. Requalifying a connector does not by itself change the owner's selected route.
 
 Explicit permission-denied results, including prior `create_file`, `update_file` or `create_blob` denials, remain controlling. Preserve the exact denied action and target under the [approval rules](PERSISTENT-AGENT-HELPER-PROFILE.md#approval-denial-and-generic-cancellation-handling); do not relabel them as service failures or use the selected `gh` route to bypass them.
 
