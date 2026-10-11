@@ -842,7 +842,7 @@ test('interim adoption is manual and keeps implementation ownership and authorit
   assert.ok(adoption);
   assert.match(adoption, /exact CURRENT\/parent\/child readback; do not wait for unfinished Toolkit runtime code/);
   assert.match(adoption, /release an otherwise unsupported blanket Toolkit wait only after recording that no genuine local safety, evidence, authority or code dependency requires it/);
-  assert.match(adoption, /C2 owns deterministic state, frontier and packet mechanisation; H owns host qualification/);
+  assert.match(adoption, /Deterministic state, frontier and packet reconciliation and host qualification remain separately owned implementation responsibilities/);
   assert.match(adoption, /controller application is interim manual enforcement, not a claim of automated interception or supervision/);
   assert.match(adoption, /Keep named real holds, active-worker protections and all existing permissions\/budgets/);
   assert.match(adoption, /Preserve active-worker contracts and consumed budgets/);
@@ -1254,7 +1254,7 @@ const S1A_ORACLE_BOUNDED_CONTINUATION_POLICY = Object.freeze({
     mutationEffects: Object.freeze([])
   })
 });
-const S1A_ORACLE_GOVERNED_PROSE_SHA256 = '96b6c9be1dc374a8a0682171d3f51903056d8ec30449e81160a5a9d69fc0d890';
+const S1A_ORACLE_GOVERNED_PROSE_SHA256 = 'abd963dfa3b018fb19143a4557b6595093244e5a9bb7e1f79d98dd031f6bfdfa';
 const S1A_ORACLE_DISPOSITIONS = Object.freeze([
   'CURRENT_SHIP_BLOCKER', 'IMMEDIATE_POST_SHIP', 'FUTURE_OWNED', 'OBSERVE', 'EVIDENCE_ONLY'
 ]);
