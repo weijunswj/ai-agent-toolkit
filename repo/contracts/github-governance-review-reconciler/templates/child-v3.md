@@ -15,6 +15,6 @@
 Tracker format contract: direct sibling child state uses lifecycle
 pending | current | terminal and never creates a competing queue.
 
-Root-005 human-v2 projection note: the child body is derived from a complete
+Human-v2 projection contract: the child body is derived from a complete
 source-bound parent read through `humanSurfaceV2`; it is not an independent
 canonical state or provider-write authority.

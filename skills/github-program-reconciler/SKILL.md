@@ -1,23 +1,23 @@
 ---
 name: github-program-reconciler
-description: Explicit-only GitHub programme parent/direct-child governance and truthful PR-review and Deferred Findings reconciliation. E2 renames the product only; current N5 runtime semantics remain unchanged until their separately authorised redesign.
+description: Explicit-only GitHub programme parent/direct-child governance and truthful PR-review and Deferred Findings reconciliation. Uses the shipped governance and review-reconciliation contract; runtime redesign requires separate authority.
 ---
 
 # GitHub Program Reconciler
 
 This skill is explicit-only. Its OpenAI metadata sets `allow_implicit_invocation: false`.
-Use it only when the user explicitly asks for the current-main N5 governance and
+Use it only when the user explicitly asks for the shipped governance and
 truthful PR-review reconciler contract for a repository-scoped task. Ordinary
 GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
 coding agent, and final Web/controller work remains outside this skill.
 
-## Root-005 executable-proof human surface
+## Executable-proof human surface
 
-For the Root-005 human-surface proof, use only the production `humanSurfaceV2`
+For the human-surface executable proof, use only the production `humanSurfaceV2`
 facade from
 `repo/scripts/toolkit-github-program-state-v5.cjs`. It has exactly four
 operations: `readComplete`, `render`, `extendHistory`, and `planMigration`.
-This preserves the accepted Root-004 architecture: the facade owns complete-read
+The facade owns complete-read
 validation, whole-body marker classification, canonical and relationship
 validation, source-bound authority, deterministic public serialization,
 additive history, provider-observation comparison, and legacy migration
@@ -38,7 +38,7 @@ entrypoint receipts, and no aggregate for metadata-only, selective, incomplete,
 duplicate, unknown, failed, mismatched, or tampered receipt sets.
 Do not expose or select parser, codec, marker, graph, authority, history,
 migration, or source-adapter helpers. Existing v5 helpers remain historical
-compatibility internals for frozen E3 bytes; new rendering is human-v2 only.
+compatibility internals for accepted frozen v5 bytes; new rendering is human-v2 only.
 Provider writes, PR-number binding, Web finality, Ready, merge, and Programme
 Apply remain outside the facade and require their separate authority boundaries.
 
@@ -72,55 +72,56 @@ drift, unverified body limits, and incomplete reconciliation fail closed.
 
 ## Authority and consent
 
-- A1 remains the sole mutation authority and sole opaque authority-ticket
-  authority. N5 requests only typed `github.mutation` authority; it does not
+- Control-plane authority remains the sole mutation authority and sole opaque authority-ticket
+  authority. The reconciler requests only typed `github.mutation` authority; it does not
   mint, expose, or create another ticket or finality token.
-- A2 remains repository/capability consent and state only. Require the exact
+- The repository-capability registry owns consent and state only. Require the exact
   canonical repository identity derived from the worktree, one local origin,
-  A1 remote validation, and `toolkit.repository-identity.v1`; callers cannot
-  override it. Require enabled `repository.governance` consent; A2 does not
+  control-plane remote validation, and `toolkit.repository-identity.v1`; callers cannot
+  override it. Require enabled `repository.governance` consent; repository-capability consent does not
   widen task scope, delegation, GitHub authority, provider/live access, Web
   authority, review mutation, Ready, or merge.
-- A3 remains execution/workspace/run/terminal evidence with exactly five
+- The bounded execution component owns execution/workspace/run/terminal evidence with exactly five
   durable contracts and no finality authority.
-- A4 remains independent assurance and Web-finality handoff. Reuse its six
-  materiality predicates and exclusion rules; do not add an A4 contract.
-- Preserve #295's user-authority model. Do not create a generic independent
-  web-controller authority class.
+- The independent-assurance component owns assurance and Web-finality handoff. Reuse its six
+  materiality predicates and exclusion rules; do not add an independent assurance contract.
+- The user remains the source of repository governance authority; an executor
+  acts only within the user's explicitly assigned repository and operation
+  scope. Do not create a generic independent web-controller authority class.
 
-Mutation requires exact repository identity, A2 consent, an accepted read-only
-preview, and A1 authorization. Read-only inspection and preview do not mutate.
+Mutation requires exact repository identity, repository-capability consent, an accepted read-only
+preview, and control-plane authorization. Read-only inspection and preview do not mutate.
 `remove` is bounded and requires the same authority; it is not a cleanup or
 finality action.
 
-## Run-185 three-root closure
+## Required reconciliation invariants
 
-The six-root contract is closed:
+Preserve these six reconciliation invariants:
 
-- B1 binds the exact canonical A2 `repository_id` before A1 or GitHub access;
-  it is derived from the worktree, one local origin, A1 remote validation, and
+- **Repository identity:** bind the exact canonical repository-capability `repository_id` before control-plane authority or GitHub access;
+  it is derived from the worktree, one local origin, control-plane authority remote validation, and
   `toolkit.repository-identity.v1`. Callers cannot supply a per-call
   repository override or identity substitution.
-- B2 keeps one flat queue, renumbers pending entries after lifecycle changes,
+- **Lifecycle and PR uniqueness:** keep one flat queue, renumber pending entries after lifecycle changes,
   rejects represented PR duplicates across every parent section, and requires
   explicit terminal `completed` or `disposed` status. Completed additionally
   requires stable accepted child completion evidence and its deterministic
   digest; a merged implementation PR alone is insufficient. Failed or
   non-delivery PR states never imply completion.
-- B3 requires explicit current and expected candidate identity, exact
+- **Review inventory evidence:** require explicit current and expected candidate identity, exact
   represented PR head/tree/base facts, explicit merged and inline-conversation
   booleans, complete server-authoritative review pages/cursors/counts, and
   recomputed finding/Deferred Finding digests. The first-party review evidence
   adapter supplies the arrays, pagination facts, authoritative counts, flags,
   and binding digest; caller values are equality assertions only. Fresh
-  Deferred-Finding evidence is canonically normalized through A4 and derives
+  Deferred-Finding evidence is canonically normalized through independent assurance and derives
   materiality and evidence/root digests at every revalidation ingress.
-- B4 uses one module/process owner registry for `repository+parent`; injected
+- **Transaction ownership:** use one module/process owner registry for `repository+parent`; injected
   maps cannot bypass it and every terminal path releases ownership.
-- B5 permits terminal compaction only with complete server-authoritative,
+- **Evidence-gated compaction:** permit terminal compaction only with complete server-authoritative,
   public-safe durable evidence from the first-party terminal evidence adapter
   and a deterministic retained digest; caller proof is assertion-only.
-- B6 initialises only genuinely unmanaged bodies; exact recognised legacy
+- **Initialisation and migration:** initialise only genuinely unmanaged bodies; exact recognised legacy
   bodies require the existing migrate intent, and unknown or ambiguous
   authority-like residue fails closed. Migrate remains limited to exact v3 or
   `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
@@ -165,7 +166,7 @@ Ready, merge, or claim Web finality. The current programme Web/user controller
 owns factual closure, review-thread mutation, final disposition, Web
 acceptance, Ready, merge, canonical verification, cleanup, and queue finality.
 
-Materiality uses A4 predicates. A finding is not final merely because an
+Materiality uses independent assurance predicates. A finding is not final merely because an
 executor calls it blocking. A truthful disposition needs factual closing
 evidence, exact-head/canonical identity, validation, readback, and a
 controller-owned reference.
@@ -176,7 +177,7 @@ An initial nonblocking finding goes in the parent-managed Deferred Findings
 register. It is an index/provenance/revalidation record, not a second queue,
 task checkbox, or automatic backlog issue. Keep public-safe evidence sufficient
 to revalidate the same component/boundary. Every revalidation requires fresh
-finding evidence, canonical A4 normalization, and recomputed materiality,
+finding evidence, canonical independent assurance normalization, and recomputed materiality,
 evidence, and root digests. Caller materiality and digest values are equality
 assertions only; material findings cannot be disposed as nonmaterial and retain
 promotion authority. Preserve the root digest, source PR/thread/head when
@@ -206,7 +207,7 @@ Auto-code readiness is inspection-only. It does not install, schedule, claim a
 worker, mutate governance, or grant finality.
 
 PR #310 is closed and unmerged historical evidence. The old caller-token/cache
-concern is `NO_LONGER_APPLICABLE` to this current-main N5 runtime only when the
+concern is `NO_LONGER_APPLICABLE` to this shipped reconciler runtime only when the
 exact evidence says current-main search is complete, the workflow-inventory
 surface and caller-token/cache surface are absent, and no historical symbols
 are in scope. Do not copy or revive PR #310 or #318 implementation machinery.
@@ -214,14 +215,16 @@ are in scope. Do not copy or revive PR #310 or #318 implementation machinery.
 ## Safety and output
 
 Do not access providers or live systems, create workflows or MCP tools, mutate
-review state, publish, mark Ready, merge, change A1-A4, propagate #342, touch
-#348, or perform N6-N14 work from this skill. Reject raw secrets, private paths,
+review state, publish, mark Ready, merge, change the control-plane, repository-capability,
+execution or assurance contracts, propagate repository instruction changes,
+modify repository memory/governance policy, or perform work outside this
+skill's supported reconciliation intents. Reject raw secrets, private paths,
 private connector data, raw code blobs, credentials, and unredacted runtime
 evidence. Secret values must never appear in output.
 
 Return a compact evidence packet with the exact repository binding, intent,
 managed-block parse/projection, lifecycle/queue result, transaction/revision
 result, review inventory status, finding/DF status, authority boundary,
-failures, and exactly one supported next action. A successful N5 result points
+failures, and exactly one supported next action. A successful reconciler result points
 only to `READY_FOR_WEB_EXACT_HEAD_VALIDATION`; it does not authorise that next
 stage.
