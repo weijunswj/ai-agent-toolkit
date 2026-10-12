@@ -85,7 +85,7 @@ Use one canonical current packet and one current parent projection. Historical c
 
 G0 is a strong reasoning lead. It inspects the real repository, running/target application, installed instructions, environments, dependencies, credentials **by reference**, existing work and decisive external integration behaviour. A repo-only guess is not adequate when the outcome depends on a deployed app, VPS, browser session or native harness.
 
-Optional helpers gather bounded facts, inspect files, run safe probes or catalogue evidence. G0 checks decisive observations and contradictions itself. The controller owns the assignment and records/enforces the owner's scope decisions, while making delegated implementation decisions within them; neither controller memory nor a helper's confident summary substitutes for primary evidence.
+G0 MUST delegate suitable separable evidence gathering by default. Helpers gather bounded facts, inspect files, run safe probes or catalogue evidence. The strong lead owns reasoning, architecture, decisions, contradiction resolution and decisive verification. The controller owns the assignment and records/enforces the owner's scope decisions, while making delegated implementation decisions within them; neither controller memory nor a helper's confident summary substitutes for primary evidence.
 
 G0 produces one current release brief: intended working outcome; included and excluded commitments; coherent milestone order; actual environment and target host matrix; acceptance/UAT path; material unknowns; private custody location; authorised actions/effects; selected stack; and the exact next builder action. It updates the parent and relevant children. It asks the user only about an unresolved material choice, missing access or scope change. It must not ask the owner to re-approve decisions already made in this V3 discussion.
 
@@ -93,7 +93,7 @@ For this launch the owner has already approved V3's direction. Discovery therefo
 
 ## 6. G1 Builder, integration and UAT
 
-G1 receives the whole approved Core. It plans its implementation locally, reuses existing work where helpful, builds the complete version, runs meaningful tests, integrates contributors, demonstrates the result and resolves ordinary user UAT feedback. Multiple commits, bounded helper tasks and multiple executor sessions are normal parts of the same assignment.
+G1 receives the whole approved Core. It MUST delegate suitable independent implementation or validation by default. The strong lead owns reasoning, architecture, decisive proof, integration, UAT readiness and final quality. It plans its implementation locally, reuses existing work where helpful, builds the complete version, runs meaningful tests, integrates contributors, demonstrates the result and resolves ordinary user UAT feedback. Multiple commits, bounded helper tasks and multiple executor sessions are normal parts of the same assignment.
 
 The builder may investigate and repair ordinary defects without another controller admission. It may not silently change product scope, trust boundaries, paid services, destructive effects or the agreed acceptance. A missing capability must be investigated and named; an unsupported shortcut cannot be relabelled success.
 
@@ -166,7 +166,9 @@ Rename roles by meaning, not by reusing the old numeric keys blindly. Old G2 was
 | Owner Claude | Opus 5.5 High | Haiku 5.5 XHigh |
 | Owner mixed Claude/GPT | Opus 5.5 High | Haiku 5.5 XHigh, preserving that stack's previous G0 helper binding |
 
-G0 and G1 use the same strong binding, not necessarily the same chat. Both helper roles preserve the selected stack's **previous G0** binding; do not alias them dynamically to the newly promoted G0 lead. G0 helpers collect evidence. G1 helpers may perform bounded independent implementation or testing; the builder integrates and validates. Helpers are leaves: no recursive delegation, scope approval, gate dispatch or final acceptance. A helper is optional, never a ceremonial requirement.
+G0 and G1 use the same strong binding, not necessarily the same chat. Both helper roles preserve the selected stack's **previous G0** binding; do not alias them dynamically to the newly promoted G0 lead. G0 helpers collect evidence. G1 helpers perform suitable bounded independent implementation or validation by default; the builder integrates and validates. Helpers are leaves: no recursive delegation, scope approval, gate dispatch or final acceptance. Exceptions are trivial or inseparable work, overhead exceeding benefit, tightly coupled reasoning or integration, a genuinely unavailable exact helper route, or a real authority or safety boundary. Briefly record the reason when substantial work proceeds directly. No helper quota, ceremonial or nested delegation, or extra owner permission is required for already-authorised direct work.
+
+For the owner OpenAI route, G0/G1 use Sol 6.1 High and both leaf roles preserve Luna Max. Owner-authorised non-Astra Toolkit V3 models use Priority; Astra uses Standard. Verify the actual model, effort and tier through trusted launch receipts. If a supported launcher cannot select and receipt the exact route, report the useful leaf assignment and precise gap to the controller, then continue independent authorised work without silent substitution.
 
 G2 peers have no subagents. Opus 5 is retired in favour of 5.5 wherever the selected profile uses Opus. Resolve actual availability and reasoning support through the existing registry/resolver family and trusted harness configuration; names in a packet do not prove the realised route. If a chosen route is unavailable, expose the supported alternative and any materially changed assurance, rather than falsely reporting that the requested model ran.
 
@@ -174,7 +176,7 @@ G2 peers have no subagents. Opus 5 is retired in favour of 5.5 wherever the sele
 
 | Controller owns | Executor owns |
 |---|---|
-| User relationship, obtaining/recording material scope decisions, applying approved release ordering, assignment and independent review routing | Investigation and implementation inside the assignment, optional helper coordination and integration |
+| User relationship, obtaining/recording material scope decisions, applying approved release ordering, assignment and independent review routing | Investigation and implementation inside the assignment, default suitable leaf delegation and integration |
 | Conflicting authority, competing writers and consequential cross-work boundaries | Meaningful tests, real validation, UAT-ready delivery and ordinary corrections |
 | Resolving a genuine finding dispute and recording final accepted disposition | Direct publication of concise progress/checkpoints and authorised private evidence |
 | Confirming completion and taking the next already-authorised programme action | Verifying custody, eligible temporary cleanup and an immediately usable return packet |
