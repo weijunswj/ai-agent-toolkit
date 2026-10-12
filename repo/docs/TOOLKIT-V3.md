@@ -195,6 +195,8 @@ Routine in-scope operations should execute without a new owner prompt. If a plat
 
 Acceptance must include harmless real controller-to-executor operations: issue/progress publication where authorised, private transport upload/readback and eligible cleanup. Run them on the actual intended local/cloud route. Record whether the original standing grant was recognised and whether an unexpected prompt occurred. A safe denial is a valid negative test, but it does not satisfy a required operation that remains impossible. A successful Web connector write alone does not prove executor or cross-harness approval propagation. Demonstrate a harmless operation, a repeat on another task artifact and a repeat in a fresh session on each applicable route. Test an outside-scope negative without broadening authority. Include authorised GitHub progress, private upload/readback and eligible cleanup. One supported native setup approval is acceptable; session-only approval is not persistent standing authority. Unexpected repeated prompts or a host that cannot persist the exact bounded grant remain a precise platform limitation, not an unattended PASS. Changed identity, revoked authority, a new destination or expanded consequential effects can legitimately require approval.
 
+Recovery reuses retained evidence only while its exact identity and applicability remain valid. Resolve and refresh the specific missing ownership, active-use, mapping or authority fact instead of restarting completed discovery or approval cycles. Hold only operations that depend on the unresolved gap. Carry the exact existing owner approval through the supported native mechanism, and reconcile uncertain effects before any permitted retry. Missing facts never constitute a safety pass; real overlap, target drift, active consumers and native denials remain controlling.
+
 ## 13. Private transport, evidence and cleanup
 
 The default operation is straightforward:
@@ -220,6 +222,8 @@ Remote temporary bulk becomes eligible 30 days after all identified required con
 The producer performs eligible local cleanup and existing bounded remote housekeeping using the current manifest; do not invent another ledger. Use controlled fixture/time tests for retention instead of changing production timestamps or waiting 30 days. Existing legal requirements and explicit owner holds remain applicable.
 
 Deleting a tracked file removes it from the current tree, **not from Git history**. Avoid large binary churn and recursive payloads in the first place. If bulk requirements exceed a practical Git store, propose an agreed object/blob store with the TRANSPORT repo retaining the small index. Repository deletion, force-pushed history rewriting and deletion of user-owned or still-required data are not implied by routine cleanup. No claim of physical erasure without evidence through the actual storage system.
+
+For eligible cleanup, retain required evidence, verify the exact disposable target identity and ownership and the absence of remaining consumers, refresh the facts material to each consequential operation, and independently read back the actual outcome. Valid retained direct-use and mapping evidence may be reused without another global census; semantically reordered mapping members or verified observer descriptors must not manufacture dependencies. Unknown backend or alias facts hold affected targets until verified disjointness resolves them. A denied irreversible operation remains held until its actual supported approval path accepts; no duplicate retry or expanded disposal scope is implied.
 
 ## 14. Installation and supported surfaces
 
@@ -306,6 +310,8 @@ The release brief binds these criteria to exact sources, environments and eviden
 | Finish and recovery | Authorised integration/install is read back, rollback is usable, current packet and programme position are accurate, later commitments remain owned. |
 
 G2 passes source/behaviour applicable to the final candidate. After authorised activation, perform a narrow installed verification of that same candidate. If activation exposes a material defect or different payload, correct and review that difference. Do not call a source-only or test-only candidate the accepted installed product.
+
+Required implementation and validation coverage includes focused synthetic positive and negative regressions for continuation at a resolved evidence gap without replay or consumption reset; reordered equivalent mappings and verified observers; unknown backend facts and finite alias uncertainty; and retained holds for overlap, target drift, active consumers, unsupported approval or unresolved effects. Success requires exact-target receipts and independent outcome readback. This is required coverage, not a completed or universal runtime claim.
 
 ## 19. Dot's execution handoff
 
