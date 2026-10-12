@@ -1,5 +1,7 @@
 # Toolkit Architecture
 
+> **Toolkit programme #421 V3 transition:** [Toolkit V3 directive](docs/TOOLKIT-V3.md) records the owner's scoped amendments to this programme's delivery architecture and the safe adoption boundary. Those identified amendments replace conflicting legacy procedure; the remaining product constraints continue. This is an implementation contract, not proof of completed or installed V3 behaviour.
+
 **Interim delivery-first operation - 6 October 2026:** At the next safe controller admission/reconciliation, apply [Child sizing and splitting](#child-sizing-and-splitting) and [Bounded non-product continuation](#bounded-non-product-continuation) to advance the agreed usable milestone through bounded continuous execution. Preserve all accepted safety, assurance, authority and consumed history. Controller application is interim manual enforcement; universal host adoption and automated runtime interception/supervision are not yet implemented.
 
 ## Purpose and authority
