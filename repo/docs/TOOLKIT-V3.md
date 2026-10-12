@@ -36,7 +36,7 @@ The following are replaced for new V3 work:
 |---|---|
 | G0–G4 with separate framing, contract, implementation and closing admissions | Three roles: strong G0 discovery, continuous G1 build/UAT, fresh G2 assurance. Logical work remains; most handoff ceremonies do not. |
 | Mandatory mini-child execution and repeated controller re-dispatch | One builder assignment for the complete approved Core, with internal checkpoints and fresh sessions as needed. |
-| Weak G0 making product or architecture decisions | G0 uses the G1 lead binding; the old G0 model is an optional evidence/implementation helper. |
+| Weak G0 making product or architecture decisions | G0 uses the G1 strong lead binding; both leaf roles preserve the old G0 binding and suitable separable evidence gathering or independent implementation/validation is delegated by default, with the exceptions in section 10. |
 | Default duplicated closing panels, DUAL_MAX or an automatic extra final-child review | Explicit G2 coverage of both scope and execution. No duplicate review merely because a child is last. |
 | Ordinary fixes forcing architecture re-entry or new tiny correction admissions | Builder fixes within the agreed outcome and effects. Re-plan only when a material scope, product, trust or feasibility decision changes. |
 | Arbitrary retry/chat counters as a substitute for progress judgment | Continue while there is a defensible new hypothesis or measurable progress within authority. Stop repetition, reconcile effects and expose the concrete blocker. A new chat does not erase denials or history. |
@@ -280,7 +280,7 @@ The release brief binds these criteria to exact sources, environments and eviden
 |---|---|
 | Complete scoped outcome | One actual usable V3 workflow, including its approved host coverage, not isolated foundation completion. |
 | Real discovery | Decisive repository, application, environment and installed-state observations used by strong G0; no phantom integration assumptions. |
-| Strong roles | G0=G1 lead, preserved weaker leaf helper bindings, actual registered route and G2 with no subagents. |
+| Strong roles | G0=G1 strong lead, preserved prior-G0 leaf bindings, default suitable G0/G1 delegation with substantial exceptions briefly recorded, actual launcher model/effort configuration, controller-only tier selection and G2 with no subagents. |
 | Continuous delivery | G1 completes integration, meaningful validation and user UAT without mandatory mini-child gate dispatch. |
 | Portable recovery | Fresh authorised consumers recover a completed prompt's source, state, evidence, authority and next action without prior chat history; include controller and harness switches through declared supported routes. |
 | Programme truth | Existing children and approved obligations survive; category/release changes produce correctly sorted parent state without duplicating or dropping work. |
