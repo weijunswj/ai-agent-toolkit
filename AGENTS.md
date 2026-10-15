@@ -199,6 +199,10 @@ Toolkit-specific root rules live directly after the managed execution blocks and
 
 This repo is the canonical reusable AI Agent Toolkit.
 
+## Toolkit V3 programme routing
+
+For this repository's [programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421), consult [Toolkit V3 directive](repo/docs/TOOLKIT-V3.md) when adopting V3, then load the applicable role and changed instructions when continuing. Apply its explicit scoped supersession and recoverable transition procedure. This is Toolkit repository guidance; other repositories retain their existing bindings. Preparation does not establish runtime implementation, installed qualification or native permission.
+
 ## Toolkit Root Optimization Mandate
 
 Keep this root file slim, useful, and fast to load. Optimize for low token burn, efficient agent orientation, predictable setup/update behavior, quiet validation, and no performance drift.

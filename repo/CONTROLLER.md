@@ -2,6 +2,8 @@
 
 **Interim delivery-first operation - 6 October 2026:** At the next safe controller admission/reconciliation, apply [Shipping-first scope and repair decisions](#shipping-first-scope-and-repair-decisions) to advance the agreed usable milestone through bounded continuous execution. Preserve all accepted safety, assurance, authority and consumed history. Controller application is interim manual enforcement; universal host adoption and automated runtime interception/supervision are not yet implemented.
 
+> **Toolkit programme #421 — V3 transition.** For the owner's V3 work on `weijunswj/ai-agent-toolkit` [programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421), consult [Toolkit V3 directive](docs/TOOLKIT-V3.md) when adopting the transition; subsequently load its applicable sections and changed instructions. Apply its explicit scoped supersession at a verified recoverable boundary. Preserve source, evidence, unresolved effects and genuine product obligations. This notice does not adopt V3 in other repositories, change native permissions or explicit denials, or establish implemented or installed V3 behaviour.
+
 ## Scope and authority
 
 - This file defines Toolkit-specific Web Controller governance for coding repositories explicitly operated under Toolkit governance.
