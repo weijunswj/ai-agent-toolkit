@@ -203,6 +203,15 @@ test('persistent GitHub transport is controller-selected without widening author
   assert.match(history, /Explicit permission-denied results.*remain controlling/s);
   assert.match(stack, /Configuration grants no task, publication, merge, deployment, spending, access, security or credential authority/);
   assert.match(stack, /complete bounded handoff, payload\/custody, concurrency and readback requirements/);
+
+  for (const sourcePath of ['AGENTS.md', 'repo/docs/agent-playbooks/pr-review-and-ci.md']) {
+    const source = fs.readFileSync(path.join(repoRoot, sourcePath), 'utf8');
+    assert.match(source, /For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the \[persistent-agent stack\]/);
+    assert.match(source, /Verify the intended authenticated account and repository scope through supported evidence exposed by that route/);
+    assert.match(source, /Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action/);
+    assert.match(source, /This exception changes transport only and preserves task authority, exact-diff\/concurrency\/readback safeguards, publication limits, denials and mandatory confirmations/);
+    assert.match(source, /(?:For other agents, before creating or updating PRs or issues, use|Other agents use) local `gh` from the shell/);
+  }
 });
 
 test('web owns CURRENT reconciliation while semantic workers receive compiled bounded context', () => {
