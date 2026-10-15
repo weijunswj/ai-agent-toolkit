@@ -204,13 +204,21 @@ test('persistent GitHub transport is controller-selected without widening author
   assert.match(stack, /Configuration grants no task, publication, merge, deployment, spending, access, security or credential authority/);
   assert.match(stack, /complete bounded handoff, payload\/custody, concurrency and readback requirements/);
 
+  assert.match(stack, /precedence is this persistent-agent policy, then \[Controller\]\(\.\.\/CONTROLLER\.md\), then base \[AGENTS\.md\]\(\.\.\/\.\.\/AGENTS\.md\) and its lower playbooks/);
+  assert.match(stack, /Lower guidance remains self-contained and does not import this higher policy/);
+  assert.match(stack, /only within the explicitly applicable role, current task authority and verified capability/);
+  assert.match(stack, /does not override system\/safety requirements, user authority, native permissions, actual denials, mandatory confirmations, public\/private boundaries or independent assurance and publication limits/);
+
   for (const sourcePath of ['AGENTS.md', 'repo/docs/agent-playbooks/pr-review-and-ci.md']) {
     const source = fs.readFileSync(path.join(repoRoot, sourcePath), 'utf8');
-    assert.match(source, /For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the \[persistent-agent stack\]/);
-    assert.match(source, /Verify the intended authenticated account and repository scope through supported evidence exposed by that route/);
-    assert.match(source, /Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action/);
-    assert.match(source, /This exception changes transport only and preserves task authority, exact-diff\/concurrency\/readback safeguards, publication limits, denials and mandatory confirmations/);
-    assert.match(source, /(?:For other agents, before creating or updating PRs or issues, use|Other agents use) local `gh` from the shell/);
+    assert.doesNotMatch(source, /PERSISTENT-AGENT-(?:STACK|HELPER-PROFILE)\.md|persistent-agent stack|explicitly identified persistent agents/);
+    assert.match(source, /For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host/);
+    assert.match(source, /Verify the intended authenticated account, repository and exact operation scope before execution/);
+    assert.match(source, /verify the active account with/);
+    assert.match(source, /gh auth status\s+gh api user --jq \.login/);
+    assert.match(source, /If that route is unavailable or not permitted, hold the affected operation/);
+    assert.match(source, /Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations/);
+    assert.doesNotMatch(source, /For already-authorised GitHub reads and writes, (?:select|use) (?:an available|a qualified).*connector/i);
   }
 });
 
