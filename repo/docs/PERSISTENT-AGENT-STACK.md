@@ -30,6 +30,20 @@ For OpenAI dot only, the following mechanical-role selection, connector-first re
 
 When no verified user-facing task URL is available, use `cloud_threads.attach` for the exact verified persisted task when that operation is supported. Verify the target identity and successful attachment result/readback before relying on it. Do not invent a URL or substitute only a title or ID while the supported attachment capability is available; if it is unavailable, report the capability gap and hold the dependent reference action. When approval is needed, include the precise action and target in the approval text. Attachment provides context only; it grants no approval, bypasses no denial and expands no authority.
 
+### Coding-agent launcher and supervisor
+
+For this owner's authorised laptop-based Claude coding jobs, map the helper workflow's lightweight launcher/supervisor role as follows:
+
+- Model family: Luna
+- Reasoning: High
+- Service tier: Standard
+- Coding-agent interface: Claude Code, with the exact controller-selected coding model/effort and task packet
+- Execution surface: a visible PowerShell window on the user's selected connected, authorised laptop
+
+Explicitly configure and verify the accepted launcher route and supported coding-agent launch settings before execution. This is a host mapping, not permission to substitute Claude for a different registered coding route, select an unapproved computer, widen permissions or change an admitted worker. Use the shared workflow for focused handoffs, minimal sufficient monitoring, permission boundaries and verified results. Do not require the launcher or coding worker to attest its own runtime identity.
+
+Verify the visible session and exact task/process binding through supported host evidence; opening a window alone proves neither launch nor progress. If the required visible PowerShell/Claude route cannot be established, report that exact capability gap without silently switching to a hidden, cloud or different-agent execution path. Do not diagnose PowerShell or Claude as broken merely because a task-creation or shell transport failed. This replaceable OpenAI dot mapping grants no new install, access, security, credential, publication, merge or deployment authority.
+
 ### Mechanical GitHub role
 
 For routine already-authorised non-gate mechanical GitHub work with an exact approved diff/payload only:
