@@ -18,14 +18,14 @@ If the available GitHub client or connector cannot reliably perform or verify Dr
 
 ## GitHub CLI
 
-Use local `gh` from the shell for PR and issue actions. Before creating or updating PRs, run:
+For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host. Verify the intended authenticated account, repository and exact operation scope before execution. Before creating or updating PRs, verify the active account with:
 
 ```powershell
 gh auth status
 gh api user --jq .login
 ```
 
-If the active account is not the intended user, stop and report it.
+If the active account is not the intended user, stop and report it. If that route is unavailable or not permitted, hold the affected operation. Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations.
 
 ## CI Honesty
 
