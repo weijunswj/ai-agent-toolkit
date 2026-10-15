@@ -8,6 +8,8 @@ Configuration grants no task, publication, merge, deployment, spending, access, 
 
 The helper workflow owns shared operational safeguards. This stack owns configuration only: generic defaults apply first, and an explicitly matching host section overrides conflicting defaults only for the named model role, transport order or operation exception. An override does not weaken shared workflow requirements, Controller governance, task authority, host permissions, denials, confirmation requirements or consumed limits. Unspecified settings retain the generic defaults. Reconcile missing or conflicting authority/capability before the dependent action; do not infer permission from configuration.
 
+For GitHub transport configuration within an owner-approved persistent-agent workflow, precedence is this persistent-agent policy, then [Controller](../CONTROLLER.md), then base [AGENTS.md](../../AGENTS.md) and its lower playbooks. Lower guidance remains self-contained and does not import this higher policy. Apply this precedence only within the explicitly applicable role, current task authority and verified capability; it does not override system/safety requirements, user authority, native permissions, actual denials, mandatory confirmations, public/private boundaries or independent assurance and publication limits.
+
 ## Generic persistent-agent defaults
 
 ### Mechanical role
