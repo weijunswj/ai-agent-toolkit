@@ -310,12 +310,13 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - Never run local `npm run validate:all` in this toolkit repo. CI owns the full validation gate; use targeted local checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
-- For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the [persistent-agent stack](repo/docs/PERSISTENT-AGENT-STACK.md). Verify the intended authenticated account and repository scope through supported evidence exposed by that route. Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action. This exception changes transport only and preserves task authority, exact-diff/concurrency/readback safeguards, publication limits, denials and mandatory confirmations.
-- For other agents, before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
+- For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host. Verify the intended authenticated account, repository and exact operation scope before execution. Before creating or updating PRs or issues, verify the active account with:
 
 ```powershell
 gh auth status
 gh api user --jq .login
 ```
+
+- If that route is unavailable or not permitted, hold the affected operation. Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations.
 
 - Before final reporting after a push, update the existing PR body when the cumulative diff, safety notes, validation, generated-output status, or user-facing behaviour changed.
