@@ -310,7 +310,8 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - Never run local `npm run validate:all` in this toolkit repo. CI owns the full validation gate; use targeted local checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
-- Before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
+- For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the [persistent-agent stack](repo/docs/PERSISTENT-AGENT-STACK.md). Verify the intended authenticated account and repository scope through supported evidence exposed by that route. Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action. This exception changes transport only and preserves task authority, exact-diff/concurrency/readback safeguards, publication limits, denials and mandatory confirmations.
+- For other agents, before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
 
 ```powershell
 gh auth status
