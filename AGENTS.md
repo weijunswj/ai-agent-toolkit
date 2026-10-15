@@ -160,6 +160,9 @@ When opening or updating a pull request:
 After pushing:
 
 - Check PR CI/status before reporting completion. If green, report completion; if pending, say it is unverified or wait when practical.
+- For GitHub CI, bind the intended repository, PR, and exact head. Prefer one tracked `gh run watch RUN_ID --repo OWNER/REPO --interval 60 --exit-status --compact` for a verified run, or `gh pr checks PR --repo OWNER/REPO --watch --interval 60` for the full PR check set.
+- Let `gh` handle polling. Suppress repetitive output, retain the watcher's terminal result, and avoid AI keepalive/status loops or duplicate watchers. Use verified completion events when supported; otherwise use the longest supported blocking wait with minimal re-entry. Respect deadlines, cancellation, disconnects, and permissions. Automatic wake and zero total Codex/OpenCode usage are not guaranteed; launch, interpretation, and timeout re-entry can consume usage.
+- Before claiming CI passed, verify the current PR head and every required check; one run may not cover them all.
 - If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
 - After two failed fix attempts, stop and report the blocker.
 - If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
@@ -314,7 +317,6 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - Never run local `npm run validate:all` in this toolkit repo. CI owns the full validation gate; use targeted local checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
-- After pushing, bind CI watching to the intended repository, PR, and exact head. Prefer one tracked `gh run watch RUN_ID --repo OWNER/REPO --interval 60 --exit-status --compact` for a verified run, or `gh pr checks PR --repo OWNER/REPO --watch --interval 60` for the full PR check set. Let `gh` poll without AI keepalive or status loops; suppress repetitive output and retain the process's final result. Use verified completion events when supported; otherwise use the longest supported blocking wait with minimal re-entry. Respect deadlines, cancellation, disconnects, and permissions; do not start a duplicate watcher. Shell tools do not guarantee automatic wake, and launch, interpretation, or timeout re-entry can still consume Codex/OpenCode usage. Before claiming pass, verify the current PR head and every required check; one run may not cover them all.
 - For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host. Verify the intended authenticated account, repository and exact operation scope before execution. Before creating or updating PRs or issues, verify the active account with:
 
 ```powershell

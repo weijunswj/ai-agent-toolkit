@@ -252,6 +252,23 @@ const gitCompletionSurfaces = [
   'repo/contracts/agent-rules/GEMINI.template.md'
 ];
 
+test('GitHub CI watch guidance reaches every managed agent-rule surface once', () => {
+  const requiredRules = [
+    /gh run watch RUN_ID --repo OWNER\/REPO --interval 60 --exit-status --compact/,
+    /gh pr checks PR --repo OWNER\/REPO --watch --interval 60/,
+    /avoid AI keepalive\/status loops or duplicate watchers/,
+    /Use verified completion events when supported; otherwise use the longest supported blocking wait/,
+    /Automatic wake and zero total Codex\/OpenCode usage are not guaranteed/,
+    /verify the current PR head and every required check; one run may not cover them all/
+  ];
+  for (const relPath of gitCompletionSurfaces) {
+    const section = readText(relPath).match(/## Git Completion\n([\s\S]*?)(?=\n## )/)?.[0];
+    assert.ok(section, `${relPath}: Git Completion section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, relPath);
+    assert.equal(readText(relPath).split('gh run watch RUN_ID').length - 1, 1, `${relPath}: one watcher rule`);
+  }
+});
+
 // These are instruction-contract checks, not native permission or live-operation tests.
 test('Git Completion permits independently authorised private evidence custody within exact limits', () => {
   const requiredRules = [
