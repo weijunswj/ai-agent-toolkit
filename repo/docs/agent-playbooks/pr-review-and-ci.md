@@ -18,7 +18,9 @@ If the available GitHub client or connector cannot reliably perform or verify Dr
 
 ## GitHub CLI
 
-Use local `gh` from the shell for PR and issue actions. Before creating or updating PRs, run:
+For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the [persistent-agent stack](../PERSISTENT-AGENT-STACK.md). Verify the intended authenticated account and repository scope through supported evidence exposed by that route. Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action. This exception changes transport only and preserves task authority, exact-diff/concurrency/readback safeguards, publication limits, denials and mandatory confirmations.
+
+Other agents use local `gh` from the shell for PR and issue actions. Before creating or updating PRs, run:
 
 ```powershell
 gh auth status
