@@ -21,10 +21,10 @@ function discussionContract(text) {
   const discovery = section(text, 5);
   assert.match(discovery, /mandatory consideration, conditional discussion/);
   assert.match(discovery, /Before discovery, the same G0 main agent considers the proposed goal and approach/);
-  assert.match(discovery, /better idea, disagreement or material question.*returns it to the accountable controller for discussion and agreement before proceeding/s);
+  assert.match(discovery, /material alternative, disagreement or question.*returns it to the accountable controller for discussion and agreement before proceeding/s);
   assert.match(discovery, /agrees and the scope is clear, it proceeds directly with discovery without a forced extra turn/);
   assert.match(discovery, /must not choose an unresolved direction autonomously or manufacture a debate/);
-  assert.match(discovery, /After discovery, G0 returns the evidence and recommended direction to the accountable controller/);
+  assert.match(discovery, /After discovery, G0 records the evidence and recommended direction in the current delivery packet/);
   assert.match(discovery, /Resolve material deviations.*before G1/s);
   assert.match(discovery, /Genuine owner boundaries.*remain owner decisions/);
 }
@@ -41,6 +41,91 @@ test('G0 considers every proposed goal but discusses only a material issue', () 
   ]) {
     assert.ok(directive.includes(before), `mutation target exists: ${before}`);
     assert.throws(() => discussionContract(directive.replace(before, after)), `reject contract regression: ${before}`);
+  }
+});
+
+function authorisedContinuationContract(text) {
+  const discovery = section(text, 5);
+  assert.match(discovery, /Routine technical decisions remain with the strong lead/);
+  assert.match(discovery, /records the evidence and recommended direction in the current delivery packet/);
+  assert.match(discovery, /within approved scope and current authority, continue already-authorised G1 without renewed semantic approval/);
+  assert.match(discovery, /Preserve the actual G0-to-G1 role\/context handoff/);
+  assert.match(discovery, /material scope, trust, security, risk, spend, consent or acceptance changes, remain owner decisions/);
+  const acceptance = section(text, 18);
+  assert.match(acceptance, /Record discovery evidence and recommended direction in the current delivery packet; within approved scope and current authority, continue already-authorised G1 without renewed semantic approval/);
+  assert.match(acceptance, /Preserve owner boundaries, routine technical decisions with the strong lead, the actual G0-to-G1 role\/context handoff, same-G0 context reuse and independent final review/);
+}
+
+test('approved G0 direction is recorded and continues into G1 without another semantic approval', () => {
+  authorisedContinuationContract(directive);
+  for (const [before, after] of [
+    ['Routine technical decisions remain with the strong lead', 'Routine technical decisions require owner approval'],
+    ['records the evidence and recommended direction in the current delivery packet', 'keeps the evidence and recommended direction only in chat'],
+    ['within approved scope and current authority, continue already-authorised G1 without renewed semantic approval', 'within approved scope and current authority, wait for renewed semantic approval before G1'],
+    ['Preserve the actual G0-to-G1 role/context handoff', 'Omit the G0-to-G1 role/context handoff'],
+    ['material scope, trust, security, risk, spend, consent or acceptance changes, remain owner decisions', 'material scope, trust, security, risk, spend, consent or acceptance changes, become executor decisions'],
+    ['Record discovery evidence and recommended direction in the current delivery packet; within approved scope and current authority, continue already-authorised G1 without renewed semantic approval', 'After discovery, always request another semantic approval before G1']
+  ]) {
+    assert.ok(directive.includes(before), `mutation target exists: ${before}`);
+    assert.throws(() => authorisedContinuationContract(directive.replace(before, after)), `reject continuation regression: ${before}`);
+  }
+});
+
+function checkpointContinuationContract(text) {
+  const context = section(text, 7);
+  assert.match(context, /An execution segment is a bounded working slice within the assignment/);
+  assert.match(context, /For the approved whole-phase Core assignment, planned G1 segment completion alone requires a recoverable checkpoint and continuation in the same working session, not fresh-context renewal/);
+  assert.doesNotMatch(context, /after each planned G1 segment before the next/);
+  assert.match(context, /Fresh executor contexts are mandatory between G0 and G1, for initial G2/);
+  assert.match(context, /required model\/effort\/harness switch, runtime\/environment replacement, changed active instruction\/profile configuration or executor replacement/);
+  assert.match(context, /genuine session loss or actual context-capacity limits, including forced compaction/);
+  assert.match(context, /ordinary commit, test, helper return, tool call, internal milestone or evidence upload does not require renewal/);
+  assert.match(section(text, 18), /Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding/);
+}
+
+test('whole-phase G1 checkpoints and continues while genuine renewal boundaries remain', () => {
+  checkpointContinuationContract(directive);
+  for (const [before, after] of [
+    ['An execution segment is a bounded working slice within the assignment', 'An execution segment is a bounded working slice between renewal boundaries'],
+    ['planned G1 segment completion alone requires a recoverable checkpoint and continuation in the same working session, not fresh-context renewal', 'planned G1 segment completion always requires a fresh executor'],
+    ['for initial G2', 'without fresh initial G2'],
+    ['required model/effort/harness switch, runtime/environment replacement, changed active instruction/profile configuration or executor replacement', 'optional model or runtime changes'],
+    ['genuine session loss or actual context-capacity limits, including forced compaction', 'ordinary status observations'],
+    ['Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding', 'Every planned segment launches a fresh executor']
+  ]) {
+    assert.ok(directive.includes(before), `mutation target exists: ${before}`);
+    assert.throws(() => checkpointContinuationContract(directive.replace(before, after)), `reject renewal regression: ${before}`);
+  }
+  assert.throws(() => checkpointContinuationContract(directive.replace(
+    'Fresh executor contexts are mandatory between G0 and G1, for initial G2',
+    'Fresh executor contexts are mandatory between G0 and G1, after each planned G1 segment before the next, for initial G2'
+  )), 'reject contradictory segment-only mandatory renewal');
+});
+
+function conditionalSuccessorContract(text) {
+  const context = section(text, 7);
+  assert.match(context, /When renewal is actually required, bind the next segment to its checkpoint and durable successor identity/);
+  assert.match(context, /Launch exactly one successor only for that required renewal when the next work is authorised and its dependencies are satisfied/);
+  assert.match(context, /checkpoint-only save persists changed recoverable state and the current executor continues its safe authorised work/);
+  assert.match(context, /checkpoint save\/verification failure is a recovery boundary.*not an automatic successor-launch trigger/s);
+  const acceptance = section(text, 18);
+  assert.match(acceptance, /Test the actual supported controller\/launcher continuation path when section 7 requires renewal/);
+  assert.match(acceptance, /\| 1\. Required renewal at a completed segment \| An actual section 7 renewal trigger, verified checkpoint, stopped old writer, satisfied dependencies and an already-authorised next segment cause exactly one successor/);
+  assert.match(acceptance, /Renew only when section 7 requires it, into authorised repair\/validation when safe/);
+}
+
+test('successor launch and its acceptance cases require an actual renewal trigger', () => {
+  conditionalSuccessorContract(directive);
+  for (const [before, after] of [
+    ['When renewal is actually required, bind the next segment', 'Always bind the next segment'],
+    ['Launch exactly one successor only for that required renewal', 'Launch exactly one successor after every segment'],
+    ['not an automatic successor-launch trigger', 'an automatic successor-launch trigger'],
+    ['continuation path when section 7 requires renewal', 'continuation path after every planned segment'],
+    ['An actual section 7 renewal trigger, verified checkpoint', 'A verified checkpoint'],
+    ['Renew only when section 7 requires it, into authorised repair/validation when safe', 'Always renew into authorised repair/validation']
+  ]) {
+    assert.ok(directive.includes(before), `mutation target exists: ${before}`);
+    assert.throws(() => conditionalSuccessorContract(directive.replace(before, after)), `reject successor regression: ${before}`);
   }
 });
 
