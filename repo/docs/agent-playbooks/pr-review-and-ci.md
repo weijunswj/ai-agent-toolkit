@@ -18,16 +18,14 @@ If the available GitHub client or connector cannot reliably perform or verify Dr
 
 ## GitHub CLI
 
-For already-authorised GitHub work by explicitly identified persistent agents using an owner-approved workflow, resolve the selected route through the [persistent-agent stack](../PERSISTENT-AGENT-STACK.md). Verify the intended authenticated account and repository scope through supported evidence exposed by that route. Do not require an unexposed identity API; if the account or operation scope cannot be qualified, hold only the affected action. This exception changes transport only and preserves task authority, exact-diff/concurrency/readback safeguards, publication limits, denials and mandatory confirmations.
-
-Other agents use local `gh` from the shell for PR and issue actions. Before creating or updating PRs, run:
+For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host. Verify the intended authenticated account, repository and exact operation scope before execution. Before creating or updating PRs, verify the active account with:
 
 ```powershell
 gh auth status
 gh api user --jq .login
 ```
 
-If the active account is not the intended user, stop and report it.
+If the active account is not the intended user, stop and report it. If that route is unavailable or not permitted, hold the affected operation. Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations.
 
 ## CI Honesty
 
