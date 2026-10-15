@@ -138,6 +138,47 @@ test('root workers never self-verify model identity while G0/G3 parents configur
   assert.match(architecture, /spawned children never self-attest after launch/i);
 });
 
+// Source-policy assertion only; this regression does not exercise runtime enforcement.
+test('new jobs use fresh chats and context-dependent continuations retain existing safeguards', () => {
+  assert.match(controller, /Start each new job in a fresh qualified execution chat/);
+  assert.match(controller, /reuse an existing chat only when follow-on work depends on its prior context or necessary session-bound state/);
+  assert.match(controller, /An available completed chat or the same repository alone is not a reuse reason/);
+  assert.match(controller, /Keep handoffs focused on the current task under CURRENT-first context and operational handoff completeness/);
+  assert.match(controller, /unrelated or completed-job context does not accumulate/);
+  assert.match(controller, /Preserve required fresh gate\/review contexts and recovery safeguards for active or ambiguously launched work/);
+  assert.match(controller, /a fresh chat resets no RUN\/Lock, candidate, authority or consumed history/);
+  assert.match(controller, /Workers\/subagents receive the minimum bounded packet and no inherited chat\/scratchpad/);
+});
+
+// Source-policy assertions only; these do not exercise a launcher or host runtime.
+test('persistent launcher workflow separates shared safeguards from host configuration', () => {
+  const profile = fs.readFileSync(path.join(repoRoot, 'repo/docs/PERSISTENT-AGENT-HELPER-PROFILE.md'), 'utf8');
+  const stack = fs.readFileSync(path.join(repoRoot, 'repo/docs/PERSISTENT-AGENT-STACK.md'), 'utf8');
+  const workflow = profile.split('## Coding-agent launch and supervision\n')[1].split('\n## GitHub')[0];
+  const dotMapping = stack.split('### Coding-agent launcher and supervisor\n')[1].split('\n### Mechanical GitHub role')[0];
+
+  assert.match(workflow, /one capability-qualified lightweight executor to launch and supervise the selected coding agent/);
+  assert.match(workflow, /controller supplies the bounded task, exact selected route, permitted effects, evidence return and stop conditions/i);
+  assert.match(workflow, /Configure the coding agent's supported launch and permission settings explicitly/);
+  assert.match(workflow, /Preserve mandatory confirmations, denials and unresolved outcomes/);
+  assert.match(workflow, /supported completion notifications and the smallest sufficient status checks or bounded log excerpts/);
+  assert.match(workflow, /avoid busy polling and repeated full-log reads/);
+  assert.match(workflow, /Independently read back the required result before claiming completion/);
+  assert.match(workflow, /not an additional semantic gate or independent controller/);
+  assert.match(workflow, /Preserve Controller's semantic parent\/leaf topology and delegation limits/);
+  assert.match(workflow, /adds no framework, scheduler or runtime-enforcement claim/);
+  assert.doesNotMatch(workflow, /Luna|PowerShell|Claude Code/);
+
+  assert.match(dotMapping, /Model family: Luna/);
+  assert.match(dotMapping, /Reasoning: High/);
+  assert.match(dotMapping, /Service tier: Standard/);
+  assert.match(dotMapping, /Claude Code, with the exact controller-selected coding model\/effort and task packet/);
+  assert.match(dotMapping, /visible PowerShell window on the user's selected connected, authorised laptop/);
+  assert.match(dotMapping, /not permission to substitute Claude for a different registered coding route/);
+  assert.match(dotMapping, /without silently switching to a hidden, cloud or different-agent execution path/);
+  assert.match(dotMapping, /grants no new install, access, security, credential, publication, merge or deployment authority/);
+});
+
 test('web owns CURRENT reconciliation while semantic workers receive compiled bounded context', () => {
   assert.match(controller, /Web\/controller CURRENT ownership/);
   assert.match(controller, /Update and read back CURRENT after every material transition that changes a projected current fact/);

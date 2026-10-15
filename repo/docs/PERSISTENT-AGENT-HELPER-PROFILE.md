@@ -8,6 +8,17 @@ This is owner-specific manual guidance, not generic Toolkit model policy, runtim
 
 This file owns the shared persistent-agent workflow and its safety, authority, custody and readback requirements. The [persistent-agent stack](PERSISTENT-AGENT-STACK.md) owns generic configuration defaults and explicitly scoped host overrides. Apply the generic defaults first, then only the matching host override for conflicting configuration choices. Neither defaults nor overrides can weaken this workflow's safeguards, Controller governance, current task authority or host restrictions.
 
+## Coding-agent launch and supervision
+
+For already-authorised controller-directed coding work, use one capability-qualified lightweight executor to launch and supervise the selected coding agent. The controller supplies the bounded task, exact selected route, permitted effects, evidence return and stop conditions; the controller/host resolves the launcher role and matching host mapping from the persistent-agent stack before dispatch. Prefer the fewest reliable handoffs without inferring cost savings or changing required roles.
+
+- Apply Controller's fresh-job context and operational-handoff rules. Use a fresh qualified chat for a new job; retain an existing chat only for a context-dependent continuation. Keep launch packets and status reads focused on the current job rather than accumulating completed-job history.
+- Configure the coding agent's supported launch and permission settings explicitly within the exact task authority and current host permissions. A launcher, visible terminal, installed CLI, model label or owner task approval does not itself establish capability or clear a permission boundary. Preserve mandatory confirmations, denials and unresolved outcomes; do not select bypass settings or change routes to evade them.
+- Verify the admitted task/process/session and distinguish prepared, accepted, running and terminal states. Use supported completion notifications and the smallest sufficient status checks or bounded log excerpts; avoid busy polling and repeated full-log reads. Monitor enough to detect completion, a genuine stall or an uncertain outcome, then reconcile before any permitted recovery or retry.
+- Retrieve the complete decision-relevant return, exact candidate and validation evidence through approved custody. Independently read back the required result before claiming completion; an exit code, visible window or worker summary alone is insufficient. Return the verified outcome or exact blocker and next action promptly, preserving consumed limits and required evidence.
+
+The supervisor performs mechanical launch, observation and authorised recovery only. It is not an additional semantic gate or independent controller, does not implement or review the candidate itself, and cannot widen task scope, change the selected coding route or relax required assurance. Preserve Controller's semantic parent/leaf topology and delegation limits, fresh gate contexts, active-worker protections and publication boundaries. If the required route or observation/return capability is unavailable, hold only the dependent action and report the exact gap. This workflow adds no framework, scheduler or runtime-enforcement claim.
+
 ## GitHub
 
 ### Transport selection and role binding
