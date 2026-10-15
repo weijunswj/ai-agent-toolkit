@@ -179,6 +179,32 @@ test('persistent launcher workflow separates shared safeguards from host configu
   assert.match(dotMapping, /grants no new install, access, security, credential, publication, merge or deployment authority/);
 });
 
+// Source-policy assertions only; these do not exercise connector or CLI permissions.
+test('persistent GitHub transport is controller-selected without widening authority', () => {
+  const stack = fs.readFileSync(path.join(repoRoot, 'repo/docs/PERSISTENT-AGENT-STACK.md'), 'utf8');
+  const dot = stack.split('## OpenAI dot\n')[1];
+  const transport = dot.split('### GitHub transport order\n')[1].split('\n### Prior connector observation')[0];
+  const history = dot.split('### Prior connector observation - OpenAI dot\n')[1];
+
+  assert.match(transport, /For already-authorised GitHub reads and writes, the controller selects an available, capability-qualified GitHub connector or executor CLI route/);
+  assert.match(transport, /based on current reliability and capability for the exact operation and intended account\/repository/);
+  assert.match(transport, /Either route may perform reads or writes/);
+  assert.match(transport, /One successful operation does not establish universal capability/);
+  assert.match(transport, /A controller without supported CLI access delegates only the already-authorised bounded mechanical operation/);
+  assert.match(transport, /CLI authentication and any required task-scoped escalation follow the actual host's permission boundary/);
+  assert.match(transport, /Neither route selection, authentication nor escalation grants authority or automatic approval/);
+  assert.match(transport, /Do not change credentials or security settings to make a route work/);
+  assert.match(transport, /Pending approvals, explicit denials, no-retry restrictions and unresolved effects carry into the executor unchanged/);
+  assert.match(transport, /Required independent roles and gate placement remain controlling/);
+  assert.match(transport, /Never launch an executor, change transport or narrow a payload to evade a denied effect/);
+  assert.doesNotMatch(transport, /Do not use a GitHub connector as a write fallback|writes.*continue through authenticated task-scoped escalated `gh`/s);
+  assert.match(history, /Observed in OpenAI dot on 11 October 2026/);
+  assert.match(history, /Those historical route choices are superseded by the controller-selected transport policy above/);
+  assert.match(history, /Explicit permission-denied results.*remain controlling/s);
+  assert.match(stack, /Configuration grants no task, publication, merge, deployment, spending, access, security or credential authority/);
+  assert.match(stack, /complete bounded handoff, payload\/custody, concurrency and readback requirements/);
+});
+
 test('web owns CURRENT reconciliation while semantic workers receive compiled bounded context', () => {
   assert.match(controller, /Web\/controller CURRENT ownership/);
   assert.match(controller, /Update and read back CURRENT after every material transition that changes a projected current fact/);
