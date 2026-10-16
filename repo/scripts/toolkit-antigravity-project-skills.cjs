@@ -147,29 +147,25 @@ function ensureDirectory(directory) {
   }
 }
 
+// One portable-skill copy into a project. The plan is a read-only inspection taken
+// at construction; apply() creates only missing directories and files, exclusively,
+// and never overwrites existing content.
 class PortableSkillCopyOperation {
-  #projectRoot; #sourceSkillsRoot; #write;
-  #plan; #copied;
-  constructor({ projectRoot, sourceSkillsRoot, write = false }) {this.#projectRoot=projectRoot;this.#sourceSkillsRoot=sourceSkillsRoot;this.#write=write;}
-  run() {
-    const projectRoot=this.#projectRoot,sourceSkillsRoot=this.#sourceSkillsRoot,write=this.#write;
-
-  const plan = this.#plan = collectCopyPlan(projectRoot, sourceSkillsRoot);
-  const base = PORTABLE_SKILLS_RELATIVE_PATH.split(path.sep).join('/');
-  if (!write) {
-    return {
-      status: 'dry-run',
-      target: base,
-      skills: plan.skills.length,
-      files: plan.sourceFileCount,
-      files_to_copy: plan.missingFiles.length,
-      wrote: false
-    };
+  #plan; #write;
+  constructor({ projectRoot, sourceSkillsRoot, write = false }) {
+    this.#plan = collectCopyPlan(projectRoot, sourceSkillsRoot);
+    this.#write = write;
+    Object.freeze(this);
   }
 
-  for (const directory of plan.missingDirectories) ensureDirectory(directory);
-  const copied = this.#copied = [];
-  for (const file of plan.missingFiles) {
+  get target() { return PORTABLE_SKILLS_RELATIVE_PATH.split(path.sep).join('/'); }
+
+  summary() {
+    return { status: 'dry-run', target: this.target, skills: this.#plan.skills.length, files: this.#plan.sourceFileCount,
+      files_to_copy: this.#plan.missingFiles.length, wrote: false };
+  }
+
+  #createFile(file) {
     let descriptor;
     try {
       descriptor = fs.openSync(file.fullPath, 'wx', 0o644);
@@ -182,18 +178,17 @@ class PortableSkillCopyOperation {
       throw error;
     }
     fs.closeSync(descriptor);
-    copied.push(file.relativePath.split(path.sep).join('/'));
+    return file.relativePath.split(path.sep).join('/');
   }
-  return {
-    status: copied.length ? 'copied' : 'already-current',
-    target: base,
-    skills: plan.skills.length,
-    files: plan.sourceFileCount,
-    files_copied: copied.length,
-    wrote: copied.length > 0
-  };
 
+  apply() {
+    for (const directory of this.#plan.missingDirectories) ensureDirectory(directory);
+    const copied = this.#plan.missingFiles.map(file => this.#createFile(file));
+    return { status: copied.length ? 'copied' : 'already-current', target: this.target, skills: this.#plan.skills.length,
+      files: this.#plan.sourceFileCount, files_copied: copied.length, wrote: copied.length > 0 };
   }
+
+  run() { return this.#write ? this.apply() : this.summary(); }
 }
 function copyPortableSkills({ projectRoot, sourceSkillsRoot, write = false }) {return new PortableSkillCopyOperation({projectRoot,sourceSkillsRoot,write}).run();}
 

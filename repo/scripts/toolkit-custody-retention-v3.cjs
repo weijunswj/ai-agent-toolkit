@@ -1545,40 +1545,51 @@ function cleanupManifestRecord(value) {
   return value;
 }
 
-function createLifecycleCleanupController(options) {
-  const optionKeys = ['store', 'admission', ...CLEANUP_CONTEXT_FIELDS, 'filesystem_backend', 'git_backend', 'clock', 'limits'];
-  if (!exactKeys(options, optionKeys) || !options.store || !options.admission
-    || typeof options.store.readV3RetentionPlan !== 'function'
-    || CLEANUP_CONTEXT_FIELDS.some(name => typeof options[name] !== 'function')
-    || typeof options.clock !== 'function' || !isRecord(options.limits)
-    || !exactKeys(options.limits, ['max_artifacts', 'max_paths', 'max_bytes'])
-    || !Number.isInteger(options.limits.max_artifacts) || options.limits.max_artifacts < 1 || options.limits.max_artifacts > 4
-    || !Number.isInteger(options.limits.max_paths) || options.limits.max_paths < 1 || options.limits.max_paths > 64
-    || !Number.isSafeInteger(options.limits.max_bytes) || options.limits.max_bytes < 1 || options.limits.max_bytes > MAX_GIT_DISPOSAL_BYTES) {
-    fail('CLEANUP_CONTEXT_UNAVAILABLE');
+// Owns one admitted cleanup-on-use batch over the authoritative manifest revision:
+// verified planning, pending-operation reconciliation without replay, and one-shot
+// eligible effects with terminal compare-and-swap and independent readback.
+class LifecycleCleanupController {
+  #captured;
+
+  constructor(options) {
+    const optionKeys = ['store', 'admission', ...CLEANUP_CONTEXT_FIELDS, 'filesystem_backend', 'git_backend', 'clock', 'limits'];
+    if (!exactKeys(options, optionKeys) || !options.store || !options.admission
+      || typeof options.store.readV3RetentionPlan !== 'function'
+      || CLEANUP_CONTEXT_FIELDS.some(name => typeof options[name] !== 'function')
+      || typeof options.clock !== 'function' || !isRecord(options.limits)
+      || !exactKeys(options.limits, ['max_artifacts', 'max_paths', 'max_bytes'])
+      || !Number.isInteger(options.limits.max_artifacts) || options.limits.max_artifacts < 1 || options.limits.max_artifacts > 4
+      || !Number.isInteger(options.limits.max_paths) || options.limits.max_paths < 1 || options.limits.max_paths > 64
+      || !Number.isSafeInteger(options.limits.max_bytes) || options.limits.max_bytes < 1 || options.limits.max_bytes > MAX_GIT_DISPOSAL_BYTES) {
+      fail('CLEANUP_CONTEXT_UNAVAILABLE');
+    }
+    assertAuthenticAuthorityPacketStore(options.store);
+    assertAuthenticSemanticGateAdmission(options.store, options.admission);
+    if (typeof options.store.createV3CleanupExecutionContext !== 'function') fail('CLEANUP_CONTEXT_UNAVAILABLE');
+    const trustedContext = options.store.createV3CleanupExecutionContext(options.admission);
+    if (!trustedContext || CLEANUP_CONTEXT_FIELDS.some(name => options[name] !== trustedContext[name])) fail('CLEANUP_CONTEXT_UNAVAILABLE');
+    this.#captured = Object.freeze({ ...options });
+    Object.freeze(this);
   }
-  assertAuthenticAuthorityPacketStore(options.store);
-  assertAuthenticSemanticGateAdmission(options.store, options.admission);
-  if (typeof options.store.createV3CleanupExecutionContext !== 'function') fail('CLEANUP_CONTEXT_UNAVAILABLE');
-  const trustedContext = options.store.createV3CleanupExecutionContext(options.admission);
-  if (!trustedContext || CLEANUP_CONTEXT_FIELDS.some(name => options[name] !== trustedContext[name])) fail('CLEANUP_CONTEXT_UNAVAILABLE');
-  const captured = Object.freeze({ ...options });
-  const readCurrent = () => cleanupManifestRecord(captured.read_current_manifest());
-  const currentTime = () => {
-    const raw = captured.clock();
+
+  #readCurrent() { return cleanupManifestRecord(this.#captured.read_current_manifest()); }
+
+  #currentTime() {
+    const raw = this.#captured.clock();
     const ms = canonicalUtc(raw);
     if (ms === null) fail('CLEANUP_TRUSTED_CLOCK_INVALID');
     return { raw, ms };
-  };
-  function readVerifiedPlan(ownOperationId = null, expectedPendingState = null, ownArtifactId = null) {
-    const retained = captured.store.readV3RetentionPlan(captured.admission);
+  }
+
+  #readVerifiedPlan(ownOperationId = null, expectedPendingState = null, ownArtifactId = null) {
+    const retained = this.#captured.store.readV3RetentionPlan(this.#captured.admission);
     if (!isRecord(retained) || retained.mutation_authority !== false || !digest(retained.plan_digest)) fail('CLEANUP_STORE_ADMISSION_UNVERIFIED');
-    const current = readCurrent();
+    const current = this.#readCurrent();
     if (!digest(retained.current_manifest_revision) || !digest(retained.current_manifest_bytes_digest)
       || retained.current_manifest_revision !== current.revision || retained.current_manifest_bytes_digest !== current.bytes_digest) {
       fail('CLEANUP_MANIFEST_SNAPSHOT_DRIFT');
     }
-    const time = currentTime();
+    const time = this.#currentTime();
     let manifestForPlan = current.manifest;
     if (ownOperationId !== null) {
       if (!safeId(ownOperationId) || !safeId(ownArtifactId) || !['PREPARED', 'IN_FLIGHT', 'UNKNOWN', 'PARTIAL'].includes(expectedPendingState)) {
@@ -1595,14 +1606,14 @@ function createLifecycleCleanupController(options) {
     if (ids.size !== current.manifest.artifacts.length) fail('CLEANUP_CURRENT_MANIFEST_INVALID');
     return { retained, current, plan, time };
   }
-  function planOnUse(request) {
+  planOnUse(request) {
     if (!exactKeys(request, ['artifact_ids', 'max_artifacts']) || !Array.isArray(request.artifact_ids)
-      || request.artifact_ids.length > captured.limits.max_artifacts || !Number.isInteger(request.max_artifacts)
-      || request.max_artifacts < 1 || request.max_artifacts > captured.limits.max_artifacts
+      || request.artifact_ids.length > this.#captured.limits.max_artifacts || !Number.isInteger(request.max_artifacts)
+      || request.max_artifacts < 1 || request.max_artifacts > this.#captured.limits.max_artifacts
       || request.artifact_ids.length > request.max_artifacts || new Set(request.artifact_ids).size !== request.artifact_ids.length
       || request.artifact_ids.some(id => !safeId(id))) return cleanupHold('CLEANUP_BATCH_LIMIT');
     let snapshot;
-    try { snapshot = readVerifiedPlan(); } catch (error) { return cleanupHold(error.code || 'CLEANUP_PLAN_UNAVAILABLE'); }
+    try { snapshot = this.#readVerifiedPlan(); } catch (error) { return cleanupHold(error.code || 'CLEANUP_PLAN_UNAVAILABLE'); }
     if (snapshot.current.manifest.schema !== RETENTION_VIEW_SCHEMA) {
       return deepFreeze({ state: 'PLANNED', plan: snapshot.plan, decisions: request.artifact_ids.map(artifact_id => ({
         artifact_id, disposition: 'HOLD', reason_codes: [HOLD.LEGACY_EFFECT_BLOCKED]
@@ -1616,7 +1627,7 @@ function createLifecycleCleanupController(options) {
       if (!artifact || !planned) { decisions.push({ artifact_id: artifactId, disposition: 'HOLD', reason_codes: ['CLEANUP_ARTIFACT_UNKNOWN'] }); continue; }
       if (artifact.retention_class !== 'DURABLE_EVIDENCE') {
         let restored = false;
-        try { restored = validateCleanupRestore(captured.read_independent_transfer_restore({ artifact, current_manifest: snapshot.current, revision: snapshot.current.revision }), artifact, snapshot.time.ms); }
+        try { restored = validateCleanupRestore(this.#captured.read_independent_transfer_restore({ artifact, current_manifest: snapshot.current, revision: snapshot.current.revision }), artifact, snapshot.time.ms); }
         catch (_) { restored = false; }
         if (!restored) { decisions.push({ artifact_id: artifactId, disposition: 'HOLD', reason_codes: ['TRANSFER_RESTORE_UNVERIFIED'] }); continue; }
       }
@@ -1625,374 +1636,384 @@ function createLifecycleCleanupController(options) {
     return deepFreeze({ state: 'PLANNED', plan: snapshot.plan, decisions, manifest_revision: snapshot.current.revision,
       mutation_authority: false });
   }
-  function executeOnUse(request) {
+  executeOnUse(request) {
     if (!exactKeys(request, ['artifact_ids', 'operation_ids']) || !Array.isArray(request.artifact_ids)
-      || !Array.isArray(request.operation_ids) || request.artifact_ids.length > captured.limits.max_artifacts
+      || !Array.isArray(request.operation_ids) || request.artifact_ids.length > this.#captured.limits.max_artifacts
       || request.artifact_ids.length !== request.operation_ids.length) return cleanupHold('CLEANUP_BATCH_LIMIT');
     const results = [];
     for (let i = 0; i < request.artifact_ids.length; i++) {
-      const artifactId = request.artifact_ids[i], operationId = request.operation_ids[i];
-      if (!safeId(operationId)) { results.push(cleanupHold('CLEANUP_OPERATION_ID_INVALID', { artifact_id: artifactId })); continue; }
-      let snapshot;
-      try { snapshot = readVerifiedPlan(); } catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_PLAN_UNAVAILABLE', { artifact_id: artifactId })); continue; }
-      const artifact = snapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
-      const decision = snapshot.plan.decisions.find(item => item.artifact_id === artifactId);
-      if (artifact?.pending_cleanup && artifact.pending_cleanup.state !== 'READBACK_VERIFIED') {
-        const pending = artifact.pending_cleanup;
-        const isGitPending = pending.operation_kind === 'GIT_CURRENT_TREE_REMOVE'
-          && artifact.disposal_target?.kind === 'GIT_CURRENT_TREE';
-        const isDirectoryPending = pending.operation_kind === 'DISPOSAL_DELETE'
-          && artifact.disposal_target?.kind === 'DIRECTORY_DISPOSAL';
-        const backend = isGitPending ? captured.git_backend : isDirectoryPending ? captured.filesystem_backend : null;
-        const recover = isGitPending ? backend?.recover : isDirectoryPending ? backend?.recoverDirectoryDisposal : null;
-        let recovery = null, history = null, independent = null;
-        try {
-          if (!backend || typeof recover !== 'function' || !safeId(pending.operation_id)) throw new Error('CLEANUP_PENDING_TARGET_UNRESOLVED');
-          const pendingSnapshot = readVerifiedPlan(pending.operation_id, pending.state, artifactId);
-          const currentArtifact = pendingSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
-          if (!currentArtifact || currentArtifact.disposal_target?.kind !== artifact.disposal_target?.kind
-            || !sameCleanupPending(currentArtifact.pending_cleanup, pending)) throw new Error('CLEANUP_PENDING_OPERATION_DRIFT');
-          history = captured.read_operation_history({ artifact_id: artifactId, operation_id: pending.operation_id,
-            current_manifest: pendingSnapshot.current, revision: pendingSnapshot.current.revision,
-            pending_operation: pending, disposal_target: currentArtifact.disposal_target });
-          if (!Array.isArray(history)) throw new Error('CLEANUP_OPERATION_HISTORY_UNAVAILABLE');
-          recovery = recover.call(backend, { artifact: currentArtifact, pending_operation: pending,
-            disposal_target: currentArtifact.disposal_target, operation_history: history });
-          independent = captured.read_independent_effect({ artifact_id: artifactId, operation_id: pending.operation_id,
-            operation_kind: pending.operation_kind, pending_operation: pending, disposal_target: currentArtifact.disposal_target,
-            operation_history: history, recovery, revision: pendingSnapshot.current.revision });
-        } catch (error) {
-          recovery = recovery || { state: 'UNKNOWN', code: error.code || 'CLEANUP_PENDING_RECONCILIATION_UNKNOWN', operation_attempted: false };
-        }
-        if (isGitPending && recovery?.state === 'ATTRIBUTABLE_COMPLETION') {
-          try {
-            const original = recovery.original_receipt;
-            const expected = { candidate_digest: recovery.candidate_digest, module_digest: recovery.module_digest,
-              operation_id: pending.operation_id, repository_identity: recovery.repository_identity, ref: recovery.ref,
-              before_head: original?.before_head, before_tree: original?.before_tree, removed_entries: original?.removed_entries,
-              manifest_before_blob: original?.manifest_before_blob, unchanged_tree_digest: original?.unchanged_tree_digest };
-            const raw = validateGitExpiryReceipt(original, expected, []);
-            if (!isRecord(independent) || independent.classification !== 'READBACK_VERIFIED'
-              || independent.operation_attempted !== false || independent.operation_id !== pending.operation_id
-              || independent.operation_kind !== pending.operation_kind || independent.target_digest !== pending.target_digest
-              || independent.inventory_digest !== pending.inventory_digest || independent.after_commit !== raw.after_commit
-              || independent.after_parent !== raw.after_parent || independent.after_tree !== raw.after_tree
-              || independent.historical_bytes_verified !== true || independent.removed_entries_absent !== true
-              || !digest(independent.readback_reference_digest)
-              || independent.evidence_digest !== digestValue(unsigned(independent, 'evidence_digest'))) {
-              fail('CLEANUP_PENDING_ATTRIBUTION_UNVERIFIED');
-            }
-            const current = readVerifiedPlan(pending.operation_id, 'IN_FLIGHT', artifactId);
-            const revision = digestValue({ repository_identity: raw.repository_identity, ref: raw.ref, head: raw.after_commit });
-            const currentArtifact = current.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
-            if (current.current.revision !== revision || current.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW'
-              || !sameCleanupPending(currentArtifact?.pending_cleanup, pending)) fail('CLEANUP_PENDING_RECONCILIATION_DRIFT');
-            const terminal = structuredClone(current.current.manifest);
-            const targetArtifact = terminal.artifacts.find(item => item.artifact_id === artifactId);
-            targetArtifact.pending_cleanup = { ...targetArtifact.pending_cleanup, state: 'READBACK_VERIFIED',
-              approval_evidence_reference: raw.approval_reference_digest,
-              outcome_evidence_reference: raw.receipt_digest, readback_evidence_reference: independent.readback_reference_digest };
-            const targetIdentity = normalizeTargetIdentity(targetArtifact.expected_target_identity);
-            const targetHash = targetDigest(targetIdentity);
-            const operationCore = { operation_id: pending.operation_id, operation_kind: pending.operation_kind,
-              target_identity: targetIdentity, target_digest: targetHash, scope_target_digests: [targetHash],
-              source_digest: pending.source_digest, safety_class: 'RECOVERABLE_GIT_TREE_CHANGE',
-              classification: 'APPLIED', attempt_number: 1, retry_of_operation_id: null,
-              native_approval_evidence_digest: raw.approval_reference_digest, outcome_evidence_digest: raw.receipt_digest,
-              no_effect_observation_digest: null, executor_id: 'toolkit-git-current-tree-expiry-adapter' };
-            const operationReceipt = { ...operationCore, receipt_digest: digestValue(operationCore) };
-            const operationEvent = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'OPERATION', operation_receipt: operationReceipt };
-            const readbackCore = { readback_id: pending.operation_id + '-readback', reader_id: 'toolkit-git-current-tree-independent-reader',
-              target_identity: targetIdentity, target_digest: targetHash, state: 'ABSENT', observed_at: current.time.raw,
-              operation_receipt_digest: operationReceipt.receipt_digest };
-            const readback = { ...readbackCore, evidence_digest: digestValue(readbackCore) };
-            const readbackEvent = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'READBACK', operation_id: pending.operation_id, readback };
-            const priorEvents = targetArtifact.disposal_observations || [];
-            if (priorEvents.length > 510) fail('CLEANUP_DISPOSAL_HISTORY_LIMIT');
-            targetArtifact.disposal_observations = [...priorEvents,
-              { ...operationEvent, event_digest: digestValue(operationEvent) },
-              { ...readbackEvent, event_digest: digestValue(readbackEvent) }];
-            const persisted = captured.persist_manifest_compare_and_swap(current.current.revision, terminal);
-            const reread = readCurrent();
-            const rereadPending = reread.manifest.artifacts.find(item => item.artifact_id === artifactId)?.pending_cleanup;
-            if (persisted?.state !== 'APPLIED' || reread.revision !== persisted.revision
-              || reread.bytes_digest !== persisted.bytes_digest || rereadPending?.state !== 'READBACK_VERIFIED'
-              || rereadPending.operation_id !== pending.operation_id || rereadPending.outcome_evidence_reference !== raw.receipt_digest) {
-              fail('CLEANUP_PENDING_TERMINAL_READBACK_UNVERIFIED');
-            }
-            results.push(deepFreeze({ state: 'READBACK_VERIFIED', artifact_id: artifactId, operation_id: pending.operation_id,
-              operation_kind: pending.operation_kind, reconciled: true, operation_attempted: false, mutation_authority: false,
-              receipt: { state: 'READBACK_VERIFIED', receipt: raw }, independent_observation: independent,
-              terminal_revision: reread.revision }));
-            continue;
-          } catch (error) {
-            results.push(cleanupHold(error.code || 'CLEANUP_PENDING_RECONCILIATION_UNKNOWN', { artifact_id: artifactId,
-              operation_id: pending.operation_id, recovery, independent_observation: independent || null }));
-            continue;
-          }
-        }
-        results.push(cleanupHold('CLEANUP_PENDING_RECONCILIATION_NO_REPLAY', { artifact_id: artifactId,
-          operation_id: pending.operation_id, recovery, independent_observation: independent || null }));
-        continue;
-      }
-      if (!artifact || !decision || decision.disposition !== 'ELIGIBLE_NOW' || !artifact.disposal_target) {
-        results.push(cleanupHold('CLEANUP_NOT_ELIGIBLE', { artifact_id: artifactId, reason_codes: decision?.reason_codes || [] })); continue;
-      }
-      if (snapshot.current.manifest.schema !== RETENTION_VIEW_SCHEMA) { results.push(cleanupHold(HOLD.LEGACY_EFFECT_BLOCKED, { artifact_id: artifactId })); continue; }
-      const history = captured.read_operation_history({ artifact_id: artifactId, current_manifest: snapshot.current, revision: snapshot.current.revision });
-      if (!Array.isArray(history) || history.some(item => item?.operation_id === operationId)) {
-        results.push(cleanupHold('CLEANUP_OPERATION_DUPLICATE', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      let restored;
-      try { restored = captured.read_independent_transfer_restore({ artifact_id: artifactId, artifact,
-        anchor: artifact.transfer_anchor, revision: snapshot.current.revision }); }
-      catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_TRANSFER_RESTORE_UNAVAILABLE', { artifact_id: artifactId })); continue; }
-      if (!validateCleanupRestore(restored, artifact, snapshot.time.ms)) {
-        results.push(cleanupHold('CLEANUP_TRANSFER_RESTORE_UNVERIFIED', { artifact_id: artifactId })); continue;
-      }
-      const isGit = artifact.disposal_target.kind === 'GIT_CURRENT_TREE';
-      const isDirectory = artifact.disposal_target.kind === 'DIRECTORY_DISPOSAL';
-      const backend = isGit ? captured.git_backend : captured.filesystem_backend;
-      const operationKind = isGit ? 'GIT_CURRENT_TREE_REMOVE' : 'DISPOSAL_DELETE';
-      const safetyClass = isGit ? 'RECOVERABLE_GIT_TREE_CHANGE' : 'IRREVERSIBLE_DIRECTORY_DISPOSAL';
-      const executeEffect = isDirectory ? backend?.executeDirectoryDisposal : backend?.execute;
-      const recoverEffect = isDirectory ? backend?.recoverDirectoryDisposal : backend?.recover;
-      if ((!isGit && !isDirectory) || !backend || typeof backend.prepare !== 'function'
-        || typeof executeEffect !== 'function' || typeof recoverEffect !== 'function') {
-        results.push(cleanupHold('CLEANUP_BACKEND_UNAVAILABLE', { artifact_id: artifactId })); continue;
-      }
-      let proposal;
-      try { proposal = backend.prepare({ artifact, current_manifest: snapshot.current.manifest, revision: snapshot.current.revision,
-        plan: snapshot.plan, limits: captured.limits, operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass }); }
-      catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_PREPARE_FAILED', { artifact_id: artifactId })); continue; }
-      if (!isRecord(proposal) || proposal.operation_id !== operationId || proposal.operation_kind !== operationKind
-        || !digest(proposal.effect_digest) || !digest(proposal.target_digest) || !digest(proposal.inventory_digest)
-        || !safeId(proposal.backend_revision)) { results.push(cleanupHold('CLEANUP_PROPOSAL_INVALID', { artifact_id: artifactId })); continue; }
-      const prepared = { operation_id: operationId, operation_kind: operationKind, target_digest: proposal.target_digest,
-        source_digest: artifact.transfer_anchor.payload_digest, manifest_revision: snapshot.current.revision,
-        inventory_digest: proposal.inventory_digest, expected_backend_revision: proposal.backend_revision,
-        state: 'PREPARED', approval_evidence_reference: null, outcome_evidence_reference: null, readback_evidence_reference: null };
-      const preparedProposal = cleanupProposalIdentity(proposal);
-      const preparedManifest = { ...snapshot.current.manifest, artifacts: snapshot.current.manifest.artifacts.map(item =>
-        item.artifact_id === artifactId ? { ...item, pending_cleanup: prepared } : item) };
-      let persisted;
-      try { persisted = captured.persist_manifest_compare_and_swap(snapshot.current.revision, preparedManifest); }
-      catch (_) { persisted = null; }
-      if (!isRecord(persisted) || persisted.state !== 'APPLIED' || !safeId(persisted.revision) || !digest(persisted.bytes_digest)) {
-        results.push(cleanupHold('CLEANUP_PREPARED_CAS_FAILED', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      let actionSnapshot, approval, preparedArtifact;
-      try {
-        actionSnapshot = readVerifiedPlan(operationId, 'PREPARED', artifactId);
-        if (actionSnapshot.current.revision !== persisted.revision) fail('CLEANUP_PREPARED_READBACK_MISMATCH');
-        preparedArtifact = actionSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
-        if (!preparedArtifact || !sameCleanupPending(preparedArtifact.pending_cleanup, prepared)) fail('CLEANUP_PREPARED_READBACK_MISMATCH');
-        proposal = backend.prepare({ artifact: preparedArtifact,
-          current_manifest: actionSnapshot.current.manifest, revision: actionSnapshot.current.revision, plan: actionSnapshot.plan,
-          limits: captured.limits, operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass });
-        approval = captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
-          operation_kind: operationKind, proposal, current_manifest: actionSnapshot.current, revision: actionSnapshot.current.revision });
-      } catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_APPROVAL_UNAVAILABLE', { artifact_id: artifactId, operation_id: operationId })); continue; }
-      if (actionSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW'
-        || preparedArtifact.pending_cleanup.state !== 'PREPARED'
-        || !validateCleanupApproval(approval, proposal, actionSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId),
-          actionSnapshot.current, currentTime().raw)) {
-        results.push(cleanupHold('CLEANUP_CURRENT_APPROVAL_INVALID', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      if (!sameCleanupProposalIdentity(proposal, preparedProposal)) {
-        results.push(cleanupHold('CLEANUP_PROPOSAL_DRIFT', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      let executionSnapshot = actionSnapshot.current;
-      if (isDirectory) {
-        const inflightManifest = { ...actionSnapshot.current.manifest, artifacts: actionSnapshot.current.manifest.artifacts.map(item =>
-          item.artifact_id === artifactId ? { ...item, pending_cleanup: { ...prepared, manifest_revision: actionSnapshot.current.revision,
-            state: 'IN_FLIGHT', approval_evidence_reference: approval.evidence_reference_digest } } : item) };
-        let inflight;
-        try { inflight = captured.persist_manifest_compare_and_swap(actionSnapshot.current.revision, inflightManifest); } catch (_) { inflight = null; }
-        if (!isRecord(inflight) || inflight.state !== 'APPLIED' || !safeId(inflight.revision)) {
-          results.push(cleanupHold('CLEANUP_IN_FLIGHT_CAS_FAILED', { artifact_id: artifactId, operation_id: operationId })); continue;
-        }
-        try {
-          const inflightSnapshot = readVerifiedPlan(operationId, 'IN_FLIGHT', artifactId);
-          executionSnapshot = inflightSnapshot.current;
-          if (executionSnapshot.revision !== inflight.revision) fail('CLEANUP_IN_FLIGHT_READBACK_MISMATCH');
-          const currentArtifact = executionSnapshot.manifest.artifacts.find(item => item.artifact_id === artifactId);
-          if (!currentArtifact || currentArtifact.pending_cleanup?.state !== 'IN_FLIGHT' || !sameCleanupPending(currentArtifact.pending_cleanup,
-            { ...prepared, state: 'IN_FLIGHT', approval_evidence_reference: approval.evidence_reference_digest })) {
-            fail('CLEANUP_IN_FLIGHT_READBACK_MISMATCH');
-          }
-          if (inflightSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW') {
-            fail('CLEANUP_NOT_ELIGIBLE');
-          }
-          proposal = backend.prepare({ artifact: currentArtifact, current_manifest: executionSnapshot.manifest,
-            revision: executionSnapshot.revision, plan: inflightSnapshot.plan, limits: captured.limits, operation_id: operationId,
-            operation_kind: operationKind, safety_class: safetyClass });
-          approval = captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
-            operation_kind: operationKind, proposal, current_manifest: executionSnapshot, revision: executionSnapshot.revision });
-        } catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_APPROVAL_UNAVAILABLE', { artifact_id: artifactId, operation_id: operationId })); continue; }
-        if (!validateCleanupApproval(approval, proposal, executionSnapshot.manifest.artifacts.find(item => item.artifact_id === artifactId),
-          executionSnapshot, currentTime().raw)) {
-          results.push(cleanupHold('CLEANUP_CURRENT_APPROVAL_INVALID', { artifact_id: artifactId, operation_id: operationId })); continue;
-        }
-      }
-      let finalSnapshot;
-      try {
-        finalSnapshot = readVerifiedPlan(operationId, isDirectory ? 'IN_FLIGHT' : 'PREPARED', artifactId);
-        if (finalSnapshot.current.revision !== executionSnapshot.revision
-          || finalSnapshot.current.bytes_digest !== executionSnapshot.bytes_digest
-          || finalSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW') {
-          fail('CLEANUP_ACTION_SNAPSHOT_DRIFT');
-        }
-        const finalArtifact = finalSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
-        const expectedPhaseState = isDirectory ? 'IN_FLIGHT' : 'PREPARED';
-        if (!finalArtifact || finalArtifact.pending_cleanup?.state !== expectedPhaseState
-          || finalArtifact.pending_cleanup.operation_id !== operationId
-          || !sameCleanupPending(finalArtifact.pending_cleanup, prepared)) fail('CLEANUP_ACTION_SNAPSHOT_DRIFT');
-        const finalProposal = backend.prepare({ artifact: finalArtifact, current_manifest: finalSnapshot.current.manifest,
-          revision: finalSnapshot.current.revision, plan: finalSnapshot.plan, limits: captured.limits,
-          operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass });
-        const finalApproval = captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
-          operation_kind: operationKind, proposal: finalProposal, current_manifest: finalSnapshot.current, revision: finalSnapshot.current.revision });
-        if (canonicalSerialize(finalProposal) !== canonicalSerialize(proposal)
-          || !validateCleanupApproval(finalApproval, finalProposal, finalArtifact, finalSnapshot.current, currentTime().raw)) {
-          fail('CLEANUP_ACTION_APPROVAL_STALE');
-        }
-        proposal = finalProposal;
-        approval = finalApproval;
-      } catch (error) { results.push(cleanupHold(error.code || 'CLEANUP_ACTION_REVALIDATION_FAILED', { artifact_id: artifactId, operation_id: operationId })); continue; }
-      let receipt, observed;
-      try {
-        receipt = executeEffect.call(backend, { proposal, accepted_action: approval });
-        observed = captured.read_independent_effect({ artifact_id: artifactId, operation_id: operationId,
-          operation_kind: operationKind, proposal, receipt, revision: executionSnapshot.revision });
-      } catch (error) {
-        results.push(cleanupHold(error.code || 'CLEANUP_EFFECT_UNKNOWN', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      let verifiedGitReceipt = null;
-      if (isGit && isRecord(receipt?.receipt)) {
-        const expectedGit = { candidate_digest: proposal.candidate_digest, module_digest: proposal.module_digest,
-          operation_id: operationId, repository_identity: proposal.repository_identity, ref: proposal.ref,
-          before_head: proposal.before_head, before_tree: proposal.before_tree, removed_entries: proposal.removed_entries,
-          manifest_before_blob: proposal.manifest_before_blob, unchanged_tree_digest: proposal.unchanged_tree_digest };
-        try { verifiedGitReceipt = validateGitExpiryReceipt(receipt.receipt, expectedGit, history); } catch (_) { verifiedGitReceipt = null; }
-      }
-      const commonObservationValid = isRecord(observed) && observed.operation_id === operationId && observed.operation_kind === operationKind
-        && observed.effect_digest === proposal.effect_digest && canonicalUtc(observed.observed_at_utc) !== null
-        && digest(observed.readback_reference_digest) && digest(observed.evidence_digest)
-        && observed.evidence_digest === digestValue(unsigned(observed, 'evidence_digest'));
-      const verified = commonObservationValid && (isGit
-        ? receipt?.state === 'READBACK_VERIFIED' && verifiedGitReceipt && observed.classification === 'READBACK_VERIFIED'
-          && observed.after_commit === verifiedGitReceipt.after_commit && observed.after_parent === proposal.before_head
-          && observed.after_tree === verifiedGitReceipt.after_tree && observed.removed_entries_absent === true
-          && observed.unrelated_tree_digest === proposal.unchanged_tree_digest
-          && observed.manifest_after_blob === verifiedGitReceipt.manifest_after_blob && observed.historical_bytes_verified === true
-        : observed.classification === 'READBACK_VERIFIED');
-      const deniedNotApplied = commonObservationValid && isGit && receipt?.state === 'DENIED_NOT_APPLIED'
-        && receipt.operation_attempted === false && observed.classification === 'DENIED_NOT_APPLIED'
-        && observed.operation_attempted === false && observed.current_head === proposal.before_head
-        && observed.before_tree === proposal.before_tree && observed.target_inventory_present === true
-        && observed.no_effect_observation?.operation_id === operationId
-        && observed.no_effect_observation?.operation_kind === operationKind
-        && observed.no_effect_observation?.before_head === proposal.before_head
-        && observed.no_effect_observation?.before_tree === proposal.before_tree
-        && observed.no_effect_observation?.target_digest === proposal.target_digest
-        && observed.no_effect_observation?.effect_digest === proposal.effect_digest
-        && observed.no_effect_observation?.operation_attempted === false
-        && observed.no_effect_observation?.target_inventory_present === true
-        && digest(observed.no_effect_observation_digest)
-        && observed.no_effect_observation_digest === digestValue(unsigned(observed.no_effect_observation, 'evidence_digest'))
-        && digest(observed.no_effect_observation.evidence_digest);
-      const terminalState = verified ? 'READBACK_VERIFIED' : deniedNotApplied ? 'DENIED_NOT_APPLIED' : 'UNKNOWN';
-      const terminalSnapshot = readCurrent();
-      if (terminalState === 'UNKNOWN') {
-        let unknownPersisted = null;
-        const expectedPriorState = isDirectory ? 'IN_FLIGHT' : 'PREPARED';
-        const unknownManifest = structuredClone(terminalSnapshot.manifest);
-        const unknownArtifact = unknownManifest.artifacts.find(item => item.artifact_id === artifactId);
-        const pendingEvidenceRef = digest(receipt?.evidence_reference_digest) ? receipt.evidence_reference_digest
-          : digest(receipt?.attempt_evidence_digest) ? receipt.attempt_evidence_digest : null;
-        if (unknownArtifact?.pending_cleanup?.operation_id === operationId
-          && unknownArtifact.pending_cleanup.state === expectedPriorState
-          && sameCleanupPending(unknownArtifact.pending_cleanup, prepared)) {
-          unknownArtifact.pending_cleanup = { ...unknownArtifact.pending_cleanup, state: 'UNKNOWN',
-            ...(pendingEvidenceRef ? { outcome_evidence_reference: pendingEvidenceRef } : {}),
-            ...(commonObservationValid ? { readback_evidence_reference: observed.readback_reference_digest } : {}) };
-          try { unknownPersisted = captured.persist_manifest_compare_and_swap(terminalSnapshot.revision, unknownManifest); }
-          catch (_) { unknownPersisted = null; }
-        }
-        results.push(cleanupHold('CLEANUP_OUTCOME_UNKNOWN', { artifact_id: artifactId, operation_id: operationId,
-          operation_attempted: receipt?.operation_attempted === true, receipt: receipt || null,
-          independent_observation: observed || null, observed_revision: terminalSnapshot.revision,
-          pending_state_persisted: unknownPersisted?.state === 'APPLIED', pending_revision: unknownPersisted?.revision || null })); continue;
-      }
-      const expectedTerminalRevision = verified && isGit ? digestValue({ repository_identity: proposal.repository_identity,
-        ref: proposal.ref, head: verifiedGitReceipt.after_commit }) : executionSnapshot.revision;
-      if (terminalSnapshot.revision !== expectedTerminalRevision) {
-        results.push(cleanupHold('CLEANUP_TERMINAL_SNAPSHOT_DRIFT', { artifact_id: artifactId, operation_id: operationId,
-          expected_revision: expectedTerminalRevision, observed_revision: terminalSnapshot.revision,
-          receipt: receipt || null, independent_observation: observed || null })); continue;
-      }
-      let terminalManifest = structuredClone(terminalSnapshot.manifest);
-      const terminalArtifact = terminalManifest.artifacts.find(item => item.artifact_id === artifactId);
-      const allowedPriorState = verified ? 'IN_FLIGHT' : isDirectory ? 'IN_FLIGHT' : 'PREPARED';
-      if (!terminalArtifact?.pending_cleanup || terminalArtifact.pending_cleanup.operation_id !== operationId
-        || terminalArtifact.pending_cleanup.state !== allowedPriorState
-        || !sameCleanupPending(terminalArtifact.pending_cleanup, prepared)) {
-        results.push(cleanupHold('CLEANUP_PENDING_OPERATION_DRIFT', { artifact_id: artifactId, operation_id: operationId })); continue;
-      }
-      terminalArtifact.pending_cleanup = { ...prepared, manifest_revision: executionSnapshot.revision, state: terminalState,
-        approval_evidence_reference: approval.evidence_reference_digest,
-        outcome_evidence_reference: verifiedGitReceipt?.receipt_digest || (isRecord(receipt) && digest(receipt.evidence_reference_digest)
-          ? receipt.evidence_reference_digest : digestValue(receipt)),
-        readback_evidence_reference: commonObservationValid ? observed.readback_reference_digest : null };
-      if (isGit) {
-        const targetIdentity = normalizeTargetIdentity(artifact.expected_target_identity), targetHash = targetDigest(targetIdentity);
-        const operationCore = { operation_id: operationId, operation_kind: 'GIT_CURRENT_TREE_REMOVE',
-          target_identity: targetIdentity, target_digest: targetHash, scope_target_digests: [targetHash],
-          source_digest: artifact.transfer_anchor.payload_digest, safety_class: safetyClass,
-          classification: verified ? 'APPLIED' : 'DENIED_NOT_APPLIED', attempt_number: 1, retry_of_operation_id: null,
-          native_approval_evidence_digest: approval.evidence_reference_digest,
-          outcome_evidence_digest: verifiedGitReceipt?.receipt_digest || observed.evidence_digest,
-          no_effect_observation_digest: deniedNotApplied ? observed.no_effect_observation_digest : null,
-          executor_id: 'toolkit-git-current-tree-expiry-adapter' };
-        const operationReceipt = { ...operationCore, receipt_digest: digestValue(operationCore) };
-        const operationEventCore = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'OPERATION', operation_receipt: operationReceipt };
-        const operationEvent = { ...operationEventCore, event_digest: digestValue(operationEventCore) };
-        const appendedEvents = [operationEvent];
-        if (commonObservationValid && (verified || deniedNotApplied)) {
-          const readbackCore = { readback_id: `${operationId}-readback`, reader_id: 'toolkit-git-current-tree-independent-reader',
-            target_identity: targetIdentity, target_digest: targetHash, state: verified ? 'ABSENT' : 'PRESENT', observed_at: observed.observed_at_utc,
-            operation_receipt_digest: operationReceipt.receipt_digest };
-          const readback = { ...readbackCore, evidence_digest: digestValue(readbackCore) };
-          const readbackEventCore = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'READBACK', operation_id: operationId, readback };
-          appendedEvents.push({ ...readbackEventCore, event_digest: digestValue(readbackEventCore) });
-        }
-        const existing = Array.isArray(terminalArtifact.disposal_observations) ? terminalArtifact.disposal_observations : [];
-        if (existing.length > 512 - appendedEvents.length) { results.push(cleanupHold('CLEANUP_DISPOSAL_HISTORY_LIMIT', { artifact_id: artifactId })); continue; }
-        terminalArtifact.disposal_observations = [...existing, ...appendedEvents];
-      }
-      let finalWrite;
-      try { finalWrite = captured.persist_manifest_compare_and_swap(terminalSnapshot.revision, terminalManifest); } catch (_) { finalWrite = null; }
-      let terminalReadbackVerified = false;
-      try {
-        const reread = readCurrent();
-        const pendingReadback = reread.manifest.artifacts.find(item => item.artifact_id === artifactId)?.pending_cleanup;
-        terminalReadbackVerified = isRecord(finalWrite) && finalWrite.state === 'APPLIED'
-          && reread.revision === finalWrite.revision && reread.bytes_digest === finalWrite.bytes_digest
-          && pendingReadback?.state === terminalState && pendingReadback.operation_id === operationId
-          && sameCleanupPending(pendingReadback, prepared);
-      } catch (_) { terminalReadbackVerified = false; }
-      results.push(verified && terminalReadbackVerified
-        ? deepFreeze({ state: 'READBACK_VERIFIED', artifact_id: artifactId, operation_id: operationId,
-          operation_kind: operationKind, receipt, independent_observation: observed, mutation_authority: false })
-        : deniedNotApplied && terminalReadbackVerified
-          ? cleanupHold('CLEANUP_EFFECT_NOT_APPLIED', { artifact_id: artifactId, operation_id: operationId, operation_attempted: false })
-          : cleanupHold('CLEANUP_OUTCOME_UNVERIFIED', { artifact_id: artifactId, operation_id: operationId, receipt: receipt || null }));
+      results.push(this.#processArtifact(request.artifact_ids[i], request.operation_ids[i]));
     }
     return deepFreeze({ state: 'COMPLETED_WITH_HOLDS', results, mutation_authority: false });
   }
-  return Object.freeze({ planOnUse, executeOnUse });
+
+  // One artifact of the batch: reconcile a pending operation, or run one eligible effect.
+  #processArtifact(artifactId, operationId) {
+    if (!safeId(operationId)) { return cleanupHold('CLEANUP_OPERATION_ID_INVALID', { artifact_id: artifactId }); }
+    let snapshot;
+    try { snapshot = this.#readVerifiedPlan(); } catch (error) { return cleanupHold(error.code || 'CLEANUP_PLAN_UNAVAILABLE', { artifact_id: artifactId }); }
+    const artifact = snapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
+    const decision = snapshot.plan.decisions.find(item => item.artifact_id === artifactId);
+    if (artifact?.pending_cleanup && artifact.pending_cleanup.state !== 'READBACK_VERIFIED') return this.#recoverPending(artifactId, artifact);
+    return this.#executeEligible(artifactId, operationId, artifact, decision, snapshot);
+  }
+
+  // Reconciles an existing pending operation from independent evidence; never replays it.
+  #recoverPending(artifactId, artifact) {
+    const pending = artifact.pending_cleanup;
+    const isGitPending = pending.operation_kind === 'GIT_CURRENT_TREE_REMOVE'
+      && artifact.disposal_target?.kind === 'GIT_CURRENT_TREE';
+    const isDirectoryPending = pending.operation_kind === 'DISPOSAL_DELETE'
+      && artifact.disposal_target?.kind === 'DIRECTORY_DISPOSAL';
+    const backend = isGitPending ? this.#captured.git_backend : isDirectoryPending ? this.#captured.filesystem_backend : null;
+    const recover = isGitPending ? backend?.recover : isDirectoryPending ? backend?.recoverDirectoryDisposal : null;
+    let recovery = null, history = null, independent = null;
+    try {
+      if (!backend || typeof recover !== 'function' || !safeId(pending.operation_id)) throw new Error('CLEANUP_PENDING_TARGET_UNRESOLVED');
+      const pendingSnapshot = this.#readVerifiedPlan(pending.operation_id, pending.state, artifactId);
+      const currentArtifact = pendingSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
+      if (!currentArtifact || currentArtifact.disposal_target?.kind !== artifact.disposal_target?.kind
+        || !sameCleanupPending(currentArtifact.pending_cleanup, pending)) throw new Error('CLEANUP_PENDING_OPERATION_DRIFT');
+      history = this.#captured.read_operation_history({ artifact_id: artifactId, operation_id: pending.operation_id,
+        current_manifest: pendingSnapshot.current, revision: pendingSnapshot.current.revision,
+        pending_operation: pending, disposal_target: currentArtifact.disposal_target });
+      if (!Array.isArray(history)) throw new Error('CLEANUP_OPERATION_HISTORY_UNAVAILABLE');
+      recovery = recover.call(backend, { artifact: currentArtifact, pending_operation: pending,
+        disposal_target: currentArtifact.disposal_target, operation_history: history });
+      independent = this.#captured.read_independent_effect({ artifact_id: artifactId, operation_id: pending.operation_id,
+        operation_kind: pending.operation_kind, pending_operation: pending, disposal_target: currentArtifact.disposal_target,
+        operation_history: history, recovery, revision: pendingSnapshot.current.revision });
+    } catch (error) {
+      recovery = recovery || { state: 'UNKNOWN', code: error.code || 'CLEANUP_PENDING_RECONCILIATION_UNKNOWN', operation_attempted: false };
+    }
+    if (isGitPending && recovery?.state === 'ATTRIBUTABLE_COMPLETION') {
+      try {
+        const original = recovery.original_receipt;
+        const expected = { candidate_digest: recovery.candidate_digest, module_digest: recovery.module_digest,
+          operation_id: pending.operation_id, repository_identity: recovery.repository_identity, ref: recovery.ref,
+          before_head: original?.before_head, before_tree: original?.before_tree, removed_entries: original?.removed_entries,
+          manifest_before_blob: original?.manifest_before_blob, unchanged_tree_digest: original?.unchanged_tree_digest };
+        const raw = validateGitExpiryReceipt(original, expected, []);
+        if (!isRecord(independent) || independent.classification !== 'READBACK_VERIFIED'
+          || independent.operation_attempted !== false || independent.operation_id !== pending.operation_id
+          || independent.operation_kind !== pending.operation_kind || independent.target_digest !== pending.target_digest
+          || independent.inventory_digest !== pending.inventory_digest || independent.after_commit !== raw.after_commit
+          || independent.after_parent !== raw.after_parent || independent.after_tree !== raw.after_tree
+          || independent.historical_bytes_verified !== true || independent.removed_entries_absent !== true
+          || !digest(independent.readback_reference_digest)
+          || independent.evidence_digest !== digestValue(unsigned(independent, 'evidence_digest'))) {
+          fail('CLEANUP_PENDING_ATTRIBUTION_UNVERIFIED');
+        }
+        const current = this.#readVerifiedPlan(pending.operation_id, 'IN_FLIGHT', artifactId);
+        const revision = digestValue({ repository_identity: raw.repository_identity, ref: raw.ref, head: raw.after_commit });
+        const currentArtifact = current.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
+        if (current.current.revision !== revision || current.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW'
+          || !sameCleanupPending(currentArtifact?.pending_cleanup, pending)) fail('CLEANUP_PENDING_RECONCILIATION_DRIFT');
+        const terminal = structuredClone(current.current.manifest);
+        const targetArtifact = terminal.artifacts.find(item => item.artifact_id === artifactId);
+        targetArtifact.pending_cleanup = { ...targetArtifact.pending_cleanup, state: 'READBACK_VERIFIED',
+          approval_evidence_reference: raw.approval_reference_digest,
+          outcome_evidence_reference: raw.receipt_digest, readback_evidence_reference: independent.readback_reference_digest };
+        const targetIdentity = normalizeTargetIdentity(targetArtifact.expected_target_identity);
+        const targetHash = targetDigest(targetIdentity);
+        const operationCore = { operation_id: pending.operation_id, operation_kind: pending.operation_kind,
+          target_identity: targetIdentity, target_digest: targetHash, scope_target_digests: [targetHash],
+          source_digest: pending.source_digest, safety_class: 'RECOVERABLE_GIT_TREE_CHANGE',
+          classification: 'APPLIED', attempt_number: 1, retry_of_operation_id: null,
+          native_approval_evidence_digest: raw.approval_reference_digest, outcome_evidence_digest: raw.receipt_digest,
+          no_effect_observation_digest: null, executor_id: 'toolkit-git-current-tree-expiry-adapter' };
+        const operationReceipt = { ...operationCore, receipt_digest: digestValue(operationCore) };
+        const operationEvent = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'OPERATION', operation_receipt: operationReceipt };
+        const readbackCore = { readback_id: pending.operation_id + '-readback', reader_id: 'toolkit-git-current-tree-independent-reader',
+          target_identity: targetIdentity, target_digest: targetHash, state: 'ABSENT', observed_at: current.time.raw,
+          operation_receipt_digest: operationReceipt.receipt_digest };
+        const readback = { ...readbackCore, evidence_digest: digestValue(readbackCore) };
+        const readbackEvent = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'READBACK', operation_id: pending.operation_id, readback };
+        const priorEvents = targetArtifact.disposal_observations || [];
+        if (priorEvents.length > 510) fail('CLEANUP_DISPOSAL_HISTORY_LIMIT');
+        targetArtifact.disposal_observations = [...priorEvents,
+          { ...operationEvent, event_digest: digestValue(operationEvent) },
+          { ...readbackEvent, event_digest: digestValue(readbackEvent) }];
+        const persisted = this.#captured.persist_manifest_compare_and_swap(current.current.revision, terminal);
+        const reread = this.#readCurrent();
+        const rereadPending = reread.manifest.artifacts.find(item => item.artifact_id === artifactId)?.pending_cleanup;
+        if (persisted?.state !== 'APPLIED' || reread.revision !== persisted.revision
+          || reread.bytes_digest !== persisted.bytes_digest || rereadPending?.state !== 'READBACK_VERIFIED'
+          || rereadPending.operation_id !== pending.operation_id || rereadPending.outcome_evidence_reference !== raw.receipt_digest) {
+          fail('CLEANUP_PENDING_TERMINAL_READBACK_UNVERIFIED');
+        }
+        return deepFreeze({ state: 'READBACK_VERIFIED', artifact_id: artifactId, operation_id: pending.operation_id,
+          operation_kind: pending.operation_kind, reconciled: true, operation_attempted: false, mutation_authority: false,
+          receipt: { state: 'READBACK_VERIFIED', receipt: raw }, independent_observation: independent,
+          terminal_revision: reread.revision });
+      } catch (error) {
+        return cleanupHold(error.code || 'CLEANUP_PENDING_RECONCILIATION_UNKNOWN', { artifact_id: artifactId,
+          operation_id: pending.operation_id, recovery, independent_observation: independent || null });
+      }
+    }
+    return cleanupHold('CLEANUP_PENDING_RECONCILIATION_NO_REPLAY', { artifact_id: artifactId,
+      operation_id: pending.operation_id, recovery, independent_observation: independent || null });
+  }
+
+  // Runs one eligible, approved effect and records its terminal state with readback.
+  #executeEligible(artifactId, operationId, artifact, decision, snapshot) {
+    if (!artifact || !decision || decision.disposition !== 'ELIGIBLE_NOW' || !artifact.disposal_target) {
+      return cleanupHold('CLEANUP_NOT_ELIGIBLE', { artifact_id: artifactId, reason_codes: decision?.reason_codes || [] });
+    }
+    if (snapshot.current.manifest.schema !== RETENTION_VIEW_SCHEMA) { return cleanupHold(HOLD.LEGACY_EFFECT_BLOCKED, { artifact_id: artifactId }); }
+    const history = this.#captured.read_operation_history({ artifact_id: artifactId, current_manifest: snapshot.current, revision: snapshot.current.revision });
+    if (!Array.isArray(history) || history.some(item => item?.operation_id === operationId)) {
+      return cleanupHold('CLEANUP_OPERATION_DUPLICATE', { artifact_id: artifactId, operation_id: operationId });
+    }
+    let restored;
+    try { restored = this.#captured.read_independent_transfer_restore({ artifact_id: artifactId, artifact,
+      anchor: artifact.transfer_anchor, revision: snapshot.current.revision }); }
+    catch (error) { return cleanupHold(error.code || 'CLEANUP_TRANSFER_RESTORE_UNAVAILABLE', { artifact_id: artifactId }); }
+    if (!validateCleanupRestore(restored, artifact, snapshot.time.ms)) {
+      return cleanupHold('CLEANUP_TRANSFER_RESTORE_UNVERIFIED', { artifact_id: artifactId });
+    }
+    const isGit = artifact.disposal_target.kind === 'GIT_CURRENT_TREE';
+    const isDirectory = artifact.disposal_target.kind === 'DIRECTORY_DISPOSAL';
+    const backend = isGit ? this.#captured.git_backend : this.#captured.filesystem_backend;
+    const operationKind = isGit ? 'GIT_CURRENT_TREE_REMOVE' : 'DISPOSAL_DELETE';
+    const safetyClass = isGit ? 'RECOVERABLE_GIT_TREE_CHANGE' : 'IRREVERSIBLE_DIRECTORY_DISPOSAL';
+    const executeEffect = isDirectory ? backend?.executeDirectoryDisposal : backend?.execute;
+    const recoverEffect = isDirectory ? backend?.recoverDirectoryDisposal : backend?.recover;
+    if ((!isGit && !isDirectory) || !backend || typeof backend.prepare !== 'function'
+      || typeof executeEffect !== 'function' || typeof recoverEffect !== 'function') {
+      return cleanupHold('CLEANUP_BACKEND_UNAVAILABLE', { artifact_id: artifactId });
+    }
+    let proposal;
+    try { proposal = backend.prepare({ artifact, current_manifest: snapshot.current.manifest, revision: snapshot.current.revision,
+      plan: snapshot.plan, limits: this.#captured.limits, operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass }); }
+    catch (error) { return cleanupHold(error.code || 'CLEANUP_PREPARE_FAILED', { artifact_id: artifactId }); }
+    if (!isRecord(proposal) || proposal.operation_id !== operationId || proposal.operation_kind !== operationKind
+      || !digest(proposal.effect_digest) || !digest(proposal.target_digest) || !digest(proposal.inventory_digest)
+      || !safeId(proposal.backend_revision)) { return cleanupHold('CLEANUP_PROPOSAL_INVALID', { artifact_id: artifactId }); }
+    const prepared = { operation_id: operationId, operation_kind: operationKind, target_digest: proposal.target_digest,
+      source_digest: artifact.transfer_anchor.payload_digest, manifest_revision: snapshot.current.revision,
+      inventory_digest: proposal.inventory_digest, expected_backend_revision: proposal.backend_revision,
+      state: 'PREPARED', approval_evidence_reference: null, outcome_evidence_reference: null, readback_evidence_reference: null };
+    const preparedProposal = cleanupProposalIdentity(proposal);
+    const preparedManifest = { ...snapshot.current.manifest, artifacts: snapshot.current.manifest.artifacts.map(item =>
+      item.artifact_id === artifactId ? { ...item, pending_cleanup: prepared } : item) };
+    let persisted;
+    try { persisted = this.#captured.persist_manifest_compare_and_swap(snapshot.current.revision, preparedManifest); }
+    catch (_) { persisted = null; }
+    if (!isRecord(persisted) || persisted.state !== 'APPLIED' || !safeId(persisted.revision) || !digest(persisted.bytes_digest)) {
+      return cleanupHold('CLEANUP_PREPARED_CAS_FAILED', { artifact_id: artifactId, operation_id: operationId });
+    }
+    let actionSnapshot, approval, preparedArtifact;
+    try {
+      actionSnapshot = this.#readVerifiedPlan(operationId, 'PREPARED', artifactId);
+      if (actionSnapshot.current.revision !== persisted.revision) fail('CLEANUP_PREPARED_READBACK_MISMATCH');
+      preparedArtifact = actionSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
+      if (!preparedArtifact || !sameCleanupPending(preparedArtifact.pending_cleanup, prepared)) fail('CLEANUP_PREPARED_READBACK_MISMATCH');
+      proposal = backend.prepare({ artifact: preparedArtifact,
+        current_manifest: actionSnapshot.current.manifest, revision: actionSnapshot.current.revision, plan: actionSnapshot.plan,
+        limits: this.#captured.limits, operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass });
+      approval = this.#captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
+        operation_kind: operationKind, proposal, current_manifest: actionSnapshot.current, revision: actionSnapshot.current.revision });
+    } catch (error) { return cleanupHold(error.code || 'CLEANUP_APPROVAL_UNAVAILABLE', { artifact_id: artifactId, operation_id: operationId }); }
+    if (actionSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW'
+      || preparedArtifact.pending_cleanup.state !== 'PREPARED'
+      || !validateCleanupApproval(approval, proposal, actionSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId),
+        actionSnapshot.current, this.#currentTime().raw)) {
+      return cleanupHold('CLEANUP_CURRENT_APPROVAL_INVALID', { artifact_id: artifactId, operation_id: operationId });
+    }
+    if (!sameCleanupProposalIdentity(proposal, preparedProposal)) {
+      return cleanupHold('CLEANUP_PROPOSAL_DRIFT', { artifact_id: artifactId, operation_id: operationId });
+    }
+    let executionSnapshot = actionSnapshot.current;
+    if (isDirectory) {
+      const inflightManifest = { ...actionSnapshot.current.manifest, artifacts: actionSnapshot.current.manifest.artifacts.map(item =>
+        item.artifact_id === artifactId ? { ...item, pending_cleanup: { ...prepared, manifest_revision: actionSnapshot.current.revision,
+          state: 'IN_FLIGHT', approval_evidence_reference: approval.evidence_reference_digest } } : item) };
+      let inflight;
+      try { inflight = this.#captured.persist_manifest_compare_and_swap(actionSnapshot.current.revision, inflightManifest); } catch (_) { inflight = null; }
+      if (!isRecord(inflight) || inflight.state !== 'APPLIED' || !safeId(inflight.revision)) {
+        return cleanupHold('CLEANUP_IN_FLIGHT_CAS_FAILED', { artifact_id: artifactId, operation_id: operationId });
+      }
+      try {
+        const inflightSnapshot = this.#readVerifiedPlan(operationId, 'IN_FLIGHT', artifactId);
+        executionSnapshot = inflightSnapshot.current;
+        if (executionSnapshot.revision !== inflight.revision) fail('CLEANUP_IN_FLIGHT_READBACK_MISMATCH');
+        const currentArtifact = executionSnapshot.manifest.artifacts.find(item => item.artifact_id === artifactId);
+        if (!currentArtifact || currentArtifact.pending_cleanup?.state !== 'IN_FLIGHT' || !sameCleanupPending(currentArtifact.pending_cleanup,
+          { ...prepared, state: 'IN_FLIGHT', approval_evidence_reference: approval.evidence_reference_digest })) {
+          fail('CLEANUP_IN_FLIGHT_READBACK_MISMATCH');
+        }
+        if (inflightSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW') {
+          fail('CLEANUP_NOT_ELIGIBLE');
+        }
+        proposal = backend.prepare({ artifact: currentArtifact, current_manifest: executionSnapshot.manifest,
+          revision: executionSnapshot.revision, plan: inflightSnapshot.plan, limits: this.#captured.limits, operation_id: operationId,
+          operation_kind: operationKind, safety_class: safetyClass });
+        approval = this.#captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
+          operation_kind: operationKind, proposal, current_manifest: executionSnapshot, revision: executionSnapshot.revision });
+      } catch (error) { return cleanupHold(error.code || 'CLEANUP_APPROVAL_UNAVAILABLE', { artifact_id: artifactId, operation_id: operationId }); }
+      if (!validateCleanupApproval(approval, proposal, executionSnapshot.manifest.artifacts.find(item => item.artifact_id === artifactId),
+        executionSnapshot, this.#currentTime().raw)) {
+        return cleanupHold('CLEANUP_CURRENT_APPROVAL_INVALID', { artifact_id: artifactId, operation_id: operationId });
+      }
+    }
+    let finalSnapshot;
+    try {
+      finalSnapshot = this.#readVerifiedPlan(operationId, isDirectory ? 'IN_FLIGHT' : 'PREPARED', artifactId);
+      if (finalSnapshot.current.revision !== executionSnapshot.revision
+        || finalSnapshot.current.bytes_digest !== executionSnapshot.bytes_digest
+        || finalSnapshot.plan.decisions.find(item => item.artifact_id === artifactId)?.disposition !== 'ELIGIBLE_NOW') {
+        fail('CLEANUP_ACTION_SNAPSHOT_DRIFT');
+      }
+      const finalArtifact = finalSnapshot.current.manifest.artifacts.find(item => item.artifact_id === artifactId);
+      const expectedPhaseState = isDirectory ? 'IN_FLIGHT' : 'PREPARED';
+      if (!finalArtifact || finalArtifact.pending_cleanup?.state !== expectedPhaseState
+        || finalArtifact.pending_cleanup.operation_id !== operationId
+        || !sameCleanupPending(finalArtifact.pending_cleanup, prepared)) fail('CLEANUP_ACTION_SNAPSHOT_DRIFT');
+      const finalProposal = backend.prepare({ artifact: finalArtifact, current_manifest: finalSnapshot.current.manifest,
+        revision: finalSnapshot.current.revision, plan: finalSnapshot.plan, limits: this.#captured.limits,
+        operation_id: operationId, operation_kind: operationKind, safety_class: safetyClass });
+      const finalApproval = this.#captured.read_current_approval({ artifact_id: artifactId, operation_id: operationId,
+        operation_kind: operationKind, proposal: finalProposal, current_manifest: finalSnapshot.current, revision: finalSnapshot.current.revision });
+      if (canonicalSerialize(finalProposal) !== canonicalSerialize(proposal)
+        || !validateCleanupApproval(finalApproval, finalProposal, finalArtifact, finalSnapshot.current, this.#currentTime().raw)) {
+        fail('CLEANUP_ACTION_APPROVAL_STALE');
+      }
+      proposal = finalProposal;
+      approval = finalApproval;
+    } catch (error) { return cleanupHold(error.code || 'CLEANUP_ACTION_REVALIDATION_FAILED', { artifact_id: artifactId, operation_id: operationId }); }
+    let receipt, observed;
+    try {
+      receipt = executeEffect.call(backend, { proposal, accepted_action: approval });
+      observed = this.#captured.read_independent_effect({ artifact_id: artifactId, operation_id: operationId,
+        operation_kind: operationKind, proposal, receipt, revision: executionSnapshot.revision });
+    } catch (error) {
+      return cleanupHold(error.code || 'CLEANUP_EFFECT_UNKNOWN', { artifact_id: artifactId, operation_id: operationId });
+    }
+    let verifiedGitReceipt = null;
+    if (isGit && isRecord(receipt?.receipt)) {
+      const expectedGit = { candidate_digest: proposal.candidate_digest, module_digest: proposal.module_digest,
+        operation_id: operationId, repository_identity: proposal.repository_identity, ref: proposal.ref,
+        before_head: proposal.before_head, before_tree: proposal.before_tree, removed_entries: proposal.removed_entries,
+        manifest_before_blob: proposal.manifest_before_blob, unchanged_tree_digest: proposal.unchanged_tree_digest };
+      try { verifiedGitReceipt = validateGitExpiryReceipt(receipt.receipt, expectedGit, history); } catch (_) { verifiedGitReceipt = null; }
+    }
+    const commonObservationValid = isRecord(observed) && observed.operation_id === operationId && observed.operation_kind === operationKind
+      && observed.effect_digest === proposal.effect_digest && canonicalUtc(observed.observed_at_utc) !== null
+      && digest(observed.readback_reference_digest) && digest(observed.evidence_digest)
+      && observed.evidence_digest === digestValue(unsigned(observed, 'evidence_digest'));
+    const verified = commonObservationValid && (isGit
+      ? receipt?.state === 'READBACK_VERIFIED' && verifiedGitReceipt && observed.classification === 'READBACK_VERIFIED'
+        && observed.after_commit === verifiedGitReceipt.after_commit && observed.after_parent === proposal.before_head
+        && observed.after_tree === verifiedGitReceipt.after_tree && observed.removed_entries_absent === true
+        && observed.unrelated_tree_digest === proposal.unchanged_tree_digest
+        && observed.manifest_after_blob === verifiedGitReceipt.manifest_after_blob && observed.historical_bytes_verified === true
+      : observed.classification === 'READBACK_VERIFIED');
+    const deniedNotApplied = commonObservationValid && isGit && receipt?.state === 'DENIED_NOT_APPLIED'
+      && receipt.operation_attempted === false && observed.classification === 'DENIED_NOT_APPLIED'
+      && observed.operation_attempted === false && observed.current_head === proposal.before_head
+      && observed.before_tree === proposal.before_tree && observed.target_inventory_present === true
+      && observed.no_effect_observation?.operation_id === operationId
+      && observed.no_effect_observation?.operation_kind === operationKind
+      && observed.no_effect_observation?.before_head === proposal.before_head
+      && observed.no_effect_observation?.before_tree === proposal.before_tree
+      && observed.no_effect_observation?.target_digest === proposal.target_digest
+      && observed.no_effect_observation?.effect_digest === proposal.effect_digest
+      && observed.no_effect_observation?.operation_attempted === false
+      && observed.no_effect_observation?.target_inventory_present === true
+      && digest(observed.no_effect_observation_digest)
+      && observed.no_effect_observation_digest === digestValue(unsigned(observed.no_effect_observation, 'evidence_digest'))
+      && digest(observed.no_effect_observation.evidence_digest);
+    const terminalState = verified ? 'READBACK_VERIFIED' : deniedNotApplied ? 'DENIED_NOT_APPLIED' : 'UNKNOWN';
+    const terminalSnapshot = this.#readCurrent();
+    if (terminalState === 'UNKNOWN') {
+      let unknownPersisted = null;
+      const expectedPriorState = isDirectory ? 'IN_FLIGHT' : 'PREPARED';
+      const unknownManifest = structuredClone(terminalSnapshot.manifest);
+      const unknownArtifact = unknownManifest.artifacts.find(item => item.artifact_id === artifactId);
+      const pendingEvidenceRef = digest(receipt?.evidence_reference_digest) ? receipt.evidence_reference_digest
+        : digest(receipt?.attempt_evidence_digest) ? receipt.attempt_evidence_digest : null;
+      if (unknownArtifact?.pending_cleanup?.operation_id === operationId
+        && unknownArtifact.pending_cleanup.state === expectedPriorState
+        && sameCleanupPending(unknownArtifact.pending_cleanup, prepared)) {
+        unknownArtifact.pending_cleanup = { ...unknownArtifact.pending_cleanup, state: 'UNKNOWN',
+          ...(pendingEvidenceRef ? { outcome_evidence_reference: pendingEvidenceRef } : {}),
+          ...(commonObservationValid ? { readback_evidence_reference: observed.readback_reference_digest } : {}) };
+        try { unknownPersisted = this.#captured.persist_manifest_compare_and_swap(terminalSnapshot.revision, unknownManifest); }
+        catch (_) { unknownPersisted = null; }
+      }
+      return cleanupHold('CLEANUP_OUTCOME_UNKNOWN', { artifact_id: artifactId, operation_id: operationId,
+        operation_attempted: receipt?.operation_attempted === true, receipt: receipt || null,
+        independent_observation: observed || null, observed_revision: terminalSnapshot.revision,
+        pending_state_persisted: unknownPersisted?.state === 'APPLIED', pending_revision: unknownPersisted?.revision || null });
+    }
+    const expectedTerminalRevision = verified && isGit ? digestValue({ repository_identity: proposal.repository_identity,
+      ref: proposal.ref, head: verifiedGitReceipt.after_commit }) : executionSnapshot.revision;
+    if (terminalSnapshot.revision !== expectedTerminalRevision) {
+      return cleanupHold('CLEANUP_TERMINAL_SNAPSHOT_DRIFT', { artifact_id: artifactId, operation_id: operationId,
+        expected_revision: expectedTerminalRevision, observed_revision: terminalSnapshot.revision,
+        receipt: receipt || null, independent_observation: observed || null });
+    }
+    let terminalManifest = structuredClone(terminalSnapshot.manifest);
+    const terminalArtifact = terminalManifest.artifacts.find(item => item.artifact_id === artifactId);
+    const allowedPriorState = verified ? 'IN_FLIGHT' : isDirectory ? 'IN_FLIGHT' : 'PREPARED';
+    if (!terminalArtifact?.pending_cleanup || terminalArtifact.pending_cleanup.operation_id !== operationId
+      || terminalArtifact.pending_cleanup.state !== allowedPriorState
+      || !sameCleanupPending(terminalArtifact.pending_cleanup, prepared)) {
+      return cleanupHold('CLEANUP_PENDING_OPERATION_DRIFT', { artifact_id: artifactId, operation_id: operationId });
+    }
+    terminalArtifact.pending_cleanup = { ...prepared, manifest_revision: executionSnapshot.revision, state: terminalState,
+      approval_evidence_reference: approval.evidence_reference_digest,
+      outcome_evidence_reference: verifiedGitReceipt?.receipt_digest || (isRecord(receipt) && digest(receipt.evidence_reference_digest)
+        ? receipt.evidence_reference_digest : digestValue(receipt)),
+      readback_evidence_reference: commonObservationValid ? observed.readback_reference_digest : null };
+    if (isGit) {
+      const targetIdentity = normalizeTargetIdentity(artifact.expected_target_identity), targetHash = targetDigest(targetIdentity);
+      const operationCore = { operation_id: operationId, operation_kind: 'GIT_CURRENT_TREE_REMOVE',
+        target_identity: targetIdentity, target_digest: targetHash, scope_target_digests: [targetHash],
+        source_digest: artifact.transfer_anchor.payload_digest, safety_class: safetyClass,
+        classification: verified ? 'APPLIED' : 'DENIED_NOT_APPLIED', attempt_number: 1, retry_of_operation_id: null,
+        native_approval_evidence_digest: approval.evidence_reference_digest,
+        outcome_evidence_digest: verifiedGitReceipt?.receipt_digest || observed.evidence_digest,
+        no_effect_observation_digest: deniedNotApplied ? observed.no_effect_observation_digest : null,
+        executor_id: 'toolkit-git-current-tree-expiry-adapter' };
+      const operationReceipt = { ...operationCore, receipt_digest: digestValue(operationCore) };
+      const operationEventCore = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'OPERATION', operation_receipt: operationReceipt };
+      const operationEvent = { ...operationEventCore, event_digest: digestValue(operationEventCore) };
+      const appendedEvents = [operationEvent];
+      if (commonObservationValid && (verified || deniedNotApplied)) {
+        const readbackCore = { readback_id: `${operationId}-readback`, reader_id: 'toolkit-git-current-tree-independent-reader',
+          target_identity: targetIdentity, target_digest: targetHash, state: verified ? 'ABSENT' : 'PRESENT', observed_at: observed.observed_at_utc,
+          operation_receipt_digest: operationReceipt.receipt_digest };
+        const readback = { ...readbackCore, evidence_digest: digestValue(readbackCore) };
+        const readbackEventCore = { schema: DISPOSAL_OBSERVATION_SCHEMA, kind: 'READBACK', operation_id: operationId, readback };
+        appendedEvents.push({ ...readbackEventCore, event_digest: digestValue(readbackEventCore) });
+      }
+      const existing = Array.isArray(terminalArtifact.disposal_observations) ? terminalArtifact.disposal_observations : [];
+      if (existing.length > 512 - appendedEvents.length) { return cleanupHold('CLEANUP_DISPOSAL_HISTORY_LIMIT', { artifact_id: artifactId }); }
+      terminalArtifact.disposal_observations = [...existing, ...appendedEvents];
+    }
+    let finalWrite;
+    try { finalWrite = this.#captured.persist_manifest_compare_and_swap(terminalSnapshot.revision, terminalManifest); } catch (_) { finalWrite = null; }
+    let terminalReadbackVerified = false;
+    try {
+      const reread = this.#readCurrent();
+      const pendingReadback = reread.manifest.artifacts.find(item => item.artifact_id === artifactId)?.pending_cleanup;
+      terminalReadbackVerified = isRecord(finalWrite) && finalWrite.state === 'APPLIED'
+        && reread.revision === finalWrite.revision && reread.bytes_digest === finalWrite.bytes_digest
+        && pendingReadback?.state === terminalState && pendingReadback.operation_id === operationId
+        && sameCleanupPending(pendingReadback, prepared);
+    } catch (_) { terminalReadbackVerified = false; }
+    return verified && terminalReadbackVerified
+      ? deepFreeze({ state: 'READBACK_VERIFIED', artifact_id: artifactId, operation_id: operationId,
+        operation_kind: operationKind, receipt, independent_observation: observed, mutation_authority: false })
+      : deniedNotApplied && terminalReadbackVerified
+        ? cleanupHold('CLEANUP_EFFECT_NOT_APPLIED', { artifact_id: artifactId, operation_id: operationId, operation_attempted: false })
+        : cleanupHold('CLEANUP_OUTCOME_UNVERIFIED', { artifact_id: artifactId, operation_id: operationId, receipt: receipt || null });
+  }
 }
+
+function createLifecycleCleanupController(options) { return new LifecycleCleanupController(options); }
 
 // Retained resources (processes, worktrees, directories, branches, issues and remote
 // artifacts) kept beyond a task step. Each is registered when it is created with its

@@ -89,99 +89,95 @@ function renderPluginPayload(generation = 'V1') {
       .replace('__TOOLKIT_API_GENERATION_JSON__', JSON.stringify(generation)), 'utf8');
 }
 
-function inspectDestination(projectRoot, payload) {
-  const destination = path.join(projectRoot, PLUGIN_RELATIVE_PATH);
-  const directories = [
-    path.join(projectRoot, '.opencode'),
-    path.join(projectRoot, '.opencode', 'plugins')
-  ];
-  const missingDirectories = [];
-  let priorDirectoryMissing = false;
-
-  for (const directory of directories) {
-    const info = priorDirectoryMissing ? null : lstatIfExists(directory);
-    if (!info) {
-      priorDirectoryMissing = true;
-      missingDirectories.push(directory);
-      continue;
-    }
-    if (info.isSymbolicLink()) throw new Error('OpenCode plugin directory cannot be a symbolic link or junction');
-    if (!info.isDirectory()) throw new Error('OpenCode plugin directory path is not a directory');
-  }
-
-  const targetInfo = priorDirectoryMissing ? null : lstatIfExists(destination);
-  if (!targetInfo) return { destination, missingDirectories, state: 'missing' };
-  if (targetInfo.isSymbolicLink()) throw new Error('OpenCode plugin target cannot be a symbolic link or junction');
-  if (!targetInfo.isFile()) throw new Error('OpenCode plugin target exists and is not a regular file');
-
-  const existing = fs.readFileSync(destination);
-  if (!existing.equals(payload)) throw new Error('OpenCode plugin target already exists with different content; refusing to overwrite');
-  return { destination, missingDirectories, state: 'already-installed' };
+// The rendered plugin bytes for one API generation, with their digest.
+class OpenCodePluginPayload {
+  #bytes;
+  constructor(generation = 'V1') { this.#bytes = renderPluginPayload(generation); Object.freeze(this); }
+  get bytes() { return this.#bytes; }
+  get sha256() { return crypto.createHash('sha256').update(this.#bytes).digest('hex'); }
+  matches(buffer) { return Buffer.isBuffer(buffer) && buffer.equals(this.#bytes); }
 }
 
-function makeDirectoriesSafely(directories) {
-  for (const directory of directories) {
+// The plugin location inside one project: inspection, safe directory creation and an
+// exclusive create-only write. It never follows links and never overwrites content.
+class OpenCodePluginDestination {
+  #root; #path; #directories;
+  constructor(projectRoot) {
+    this.#root = inspectProjectRoot(projectRoot);
+    this.#path = path.join(this.#root, PLUGIN_RELATIVE_PATH);
+    this.#directories = [path.join(this.#root, '.opencode'), path.join(this.#root, '.opencode', 'plugins')];
+    Object.freeze(this);
+  }
+  get root() { return this.#root; }
+  get relativePath() { return PLUGIN_RELATIVE_PATH.split(path.sep).join('/'); }
+
+  inspect(payload) {
+    const missingDirectories = [];
+    let priorDirectoryMissing = false;
+    for (const directory of this.#directories) {
+      const info = priorDirectoryMissing ? null : lstatIfExists(directory);
+      if (!info) { priorDirectoryMissing = true; missingDirectories.push(directory); continue; }
+      if (info.isSymbolicLink()) throw new Error('OpenCode plugin directory cannot be a symbolic link or junction');
+      if (!info.isDirectory()) throw new Error('OpenCode plugin directory path is not a directory');
+    }
+    const targetInfo = priorDirectoryMissing ? null : lstatIfExists(this.#path);
+    if (!targetInfo) return { missingDirectories, state: 'missing' };
+    if (targetInfo.isSymbolicLink()) throw new Error('OpenCode plugin target cannot be a symbolic link or junction');
+    if (!targetInfo.isFile()) throw new Error('OpenCode plugin target exists and is not a regular file');
+    if (!payload.matches(fs.readFileSync(this.#path))) throw new Error('OpenCode plugin target already exists with different content; refusing to overwrite');
+    return { missingDirectories, state: 'already-installed' };
+  }
+
+  #makeDirectories(directories) {
+    for (const directory of directories) {
+      try { fs.mkdirSync(directory); } catch (error) { if (!error || error.code !== 'EEXIST') throw error; }
+      const info = lstatIfExists(directory);
+      if (!info || info.isSymbolicLink() || !info.isDirectory()) throw new Error('OpenCode plugin directory changed during installation; refusing to continue');
+    }
+  }
+
+  // Returns 'installed' or 'already-installed' (when an identical file won a race).
+  writeExclusive(payload, missingDirectories) {
+    this.#makeDirectories(missingDirectories);
+    let descriptor;
     try {
-      fs.mkdirSync(directory);
+      descriptor = fs.openSync(this.#path, 'wx', 0o644);
+      fs.writeFileSync(descriptor, payload.bytes);
     } catch (error) {
-      if (!error || error.code !== 'EEXIST') throw error;
+      if (descriptor !== undefined) { try { fs.closeSync(descriptor); } catch { /* keep the original error */ } }
+      if (error && error.code === 'EEXIST') {
+        if (this.inspect(payload).state === 'already-installed') return 'already-installed';
+        throw new Error('OpenCode plugin target appeared during installation; refusing to overwrite');
+      }
+      throw error;
     }
-    const info = lstatIfExists(directory);
-    if (!info || info.isSymbolicLink() || !info.isDirectory()) {
-      throw new Error('OpenCode plugin directory changed during installation; refusing to continue');
-    }
+    fs.closeSync(descriptor);
+    if (!payload.matches(fs.readFileSync(this.#path))) throw new Error('OpenCode plugin installed readback mismatch');
+    return 'installed';
   }
 }
 
+// Plans or performs one project-plugin installation from a payload and a destination.
 class OpenCodeProjectPluginInstallation {
-  #projectRoot; #write; #generation;
-  #root; #payload; #inspected;
-  constructor({ projectRoot, write = false, generation = 'V1' }) {this.#projectRoot=projectRoot;this.#write=write;this.#generation=generation;}
+  #destination; #payload; #write;
+  constructor({ projectRoot, write = false, generation = 'V1' }) {
+    if (!projectRoot || !path.isAbsolute(projectRoot)) throw new Error('--project-root must be an absolute path');
+    this.#destination = new OpenCodePluginDestination(projectRoot);
+    this.#payload = new OpenCodePluginPayload(generation);
+    this.#write = write;
+    Object.freeze(this);
+  }
   run() {
-    const projectRoot=this.#projectRoot,write=this.#write,generation=this.#generation;
-
-  if (!projectRoot || !path.isAbsolute(projectRoot)) throw new Error('--project-root must be an absolute path');
-  const root = this.#root = inspectProjectRoot(projectRoot);
-  const payload = this.#payload = renderPluginPayload(generation);
-  const inspected = this.#inspected = inspectDestination(root, payload);
-  const relativePath = PLUGIN_RELATIVE_PATH.split(path.sep).join('/');
-  const payloadSha256 = crypto.createHash('sha256').update(payload).digest('hex');
-
-  if (inspected.state === 'already-installed') {
-    return { status: 'already-installed', relativePath, payloadSha256, wrote: false };
-  }
-  if (!write) {
-    return {
-      status: 'dry-run',
-      relativePath,
-      payloadSha256,
-      directoriesToCreate: inspected.missingDirectories.map((item) => path.relative(root, item).split(path.sep).join('/')),
-      wrote: false
-    };
-  }
-
-  makeDirectoriesSafely(inspected.missingDirectories);
-  let descriptor;
-  try {
-    descriptor = fs.openSync(inspected.destination, 'wx', 0o644);
-    fs.writeFileSync(descriptor, payload);
-  } catch (error) {
-    if (descriptor !== undefined) {
-      try { fs.closeSync(descriptor); } catch { /* keep the original error */ }
+    const destination = this.#destination, payload = this.#payload;
+    const summary = { relativePath: destination.relativePath, payloadSha256: payload.sha256 };
+    const inspected = destination.inspect(payload);
+    if (inspected.state === 'already-installed') return { status: 'already-installed', ...summary, wrote: false };
+    if (!this.#write) {
+      return { status: 'dry-run', ...summary,
+        directoriesToCreate: inspected.missingDirectories.map(item => path.relative(destination.root, item).split(path.sep).join('/')), wrote: false };
     }
-    if (error && error.code === 'EEXIST') {
-      const afterRace = inspectDestination(root, payload);
-      if (afterRace.state === 'already-installed') {
-        return { status: 'already-installed', relativePath, payloadSha256, wrote: false };
-      }
-      throw new Error('OpenCode plugin target appeared during installation; refusing to overwrite');
-    }
-    throw error;
-  }
-  fs.closeSync(descriptor);
-  if (!fs.readFileSync(inspected.destination).equals(payload)) throw new Error('OpenCode plugin installed readback mismatch');
-  return { status: 'installed', relativePath, payloadSha256, wrote: true };
-
+    const outcome = destination.writeExclusive(payload, inspected.missingDirectories);
+    return { status: outcome, ...summary, wrote: outcome === 'installed' };
   }
 }
 function installProjectPlugin({ projectRoot, write = false, generation = 'V1' }) {return new OpenCodeProjectPluginInstallation({projectRoot,write,generation}).run();}

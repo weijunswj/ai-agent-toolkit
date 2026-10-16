@@ -63,3 +63,26 @@ The Core owners include StackRegistrySnapshot, CapturedStackBinding, CurrentStac
 Pure schema validators, canonical serialization, immutable DTO builders, deterministic reducers and renderers remain functions. Synchronous read-only inspections and single stateless command facades may remain functions when they retain no operation/session identity or mutation/recovery phase; classify each concrete path and boundary. Shell process facades keep their explicit argument and host permission checks. A subsystem name, old implementation, or third-party attribution is not an exemption for Toolkit-created stateful orchestration.
 
 Retained third-party files keep their existing source-lock mode and attribution. Adapted files must be assessed on their actual Toolkit behavior; their upstream blob is not proof that the local adapted bytes are exact. Keep generated instruction projections synchronized through the existing canonical tools. Source-level ownership and controlled test results do not promote installed packages or establish native qualification, owner UAT, independent G2 or release.
+
+## V3 refactor inventory
+
+This inventory records the actual state of the Toolkit V3 refactor. A class name alone is not evidence: an `Operation`/`Run` class whose `run()` holds a former `main()` body is a wrapper, not a refactor.
+
+| Module | Responsibility | State | Evidence |
+|---|---|---|---|
+| `toolkit-stack-selection.cjs` | Registry snapshot, selection admission, captured bindings | Cohesive owners | `toolkit-stack-selection`, `toolkit-current-controller-selection` tests |
+| `toolkit-v3-helper-guard.cjs` | Pre-dispatch route guard | Cohesive owner | helper-guard tests, Claude live matrix |
+| `toolkit-v3-native-helper-adapter.cjs` | Host dialects, pinned binding, native adapter, hook decision | Refactored in V3 G1 (`HostDialect` family, `PinnedNativeBinding`, `NativeHelperAdapter`, `NativeHookDecision`; functions kept as facades) | adapter, task-session, Codex/Claude hook tests; Claude live hook matrix |
+| `toolkit-opencode-helper-adapter.cjs` | OpenCode V1 pre-dispatch and final-parameter boundary | Cohesive owner | adapter tests |
+| `toolkit-v3-lifecycle.cjs` | Gate sessions, review set, renewal and UAT impact | `GateAssignment` and `ReviewSetEvaluator` owners; renewal/UAT classifiers stay pure functions (stateless reducers) | gate-lifecycle and lifecycle tests; live lifecycle slice |
+| `toolkit-gate-session-launcher.cjs` | Gate-bound native start/resume | Cohesive owner | launcher tests; live lifecycle slice |
+| `toolkit-programme-publication.cjs` | Conditional state and projection publication | Cohesive owners (`GhTransport`, `CanonicalStateStore`, `IssueProjectionPublisher`, `ProgrammeProjectionReconciler`) | publication tests; live private-store episode |
+| `toolkit-custody-retention-v3.cjs` | Retention planning, cleanup control, retained resources | `planRetention` stays a pure planner; `LifecycleCleanupController` and `RetainedResourceRegister` are owners | retention, register and lifecycle tests |
+| `toolkit-git-current-tree-expiry-adapter.cjs`, `toolkit-filesystem-cleanup-adapter.cjs` | Effect backends | Cohesive owners | adapter tests, Windows native cases |
+| `toolkit-claude-task-session.cjs` | Claude qualification profiles | Profile rendering stays data; `QualificationOverrideCatalogue` owns the override contract | task-session and Haiku-context tests |
+| `toolkit-claude-helper-agents.cjs` | Registry-rendered helper subagents | Cohesive owners | helper-agents tests |
+| `toolkit-github-program-receipt.cjs` (8.8k lines) | Receipt/authority store | Partially owned (`AuthorityPacketRepository`, `ProgrammeReceiptRepository`, `ControllerEffectChannel`); about 275 free functions remain | Outstanding |
+| `toolkit-local-bridge.cjs`, `setup-toolkit-core.cjs`, `setup-codex-toolkit-plugin.cjs`, `setup-claude-toolkit-plugin.cjs`, `toolkit-agent-control.cjs`, `repair-codex-plugin-windows-hooks.cjs`, `sync-agent-instruction-shims.cjs`, `toolkit-opencode-project-plugin.cjs`, `toolkit-antigravity-project-skills.cjs` | Setup, bridge, installers and launch control | Wrapper classes only (`LocalBridgeRun`, `ToolkitSetupExecution`, `WorkerSupervisor`, and the `*Operation` classes) | Outstanding |
+| `toolkit-github-program-state-v5.cjs` (6.4k lines), `toolkit-github-governance-review-reconciler.cjs`, `toolkit-assurance-web-finality.cjs`, `toolkit-evidence-plan-compiler.cjs` | Historical run-specific programme machinery and reconcilers | Function-only; programme-state v5 still hard-codes historical run identities | Outstanding; replace with the parameterised publication path rather than wrap |
+
+Outstanding rows are unfinished V3 Core refactor work, not Hardening. Behaviour must stay covered by the existing regression suites when each is converted.
