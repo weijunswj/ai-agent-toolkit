@@ -432,7 +432,12 @@ test('Run-094 Linux native resource positive uses production proc-meminfo collec
   const capability = control.inspectResourceCapability();
   assert.equal(capability.supported, true);
   assert.equal(capability.source, 'proc-meminfo');
-  assert.deepEqual(capability.resources, state);
+  // The capability takes its own live sample: available counters move between reads,
+  // so only the source, the field set and the static totals are compared.
+  assert.equal(capability.resources.source, state.source);
+  assert.deepEqual(Object.keys(capability.resources).sort(), Object.keys(state).sort());
+  assert.equal(capability.resources.physical_total, state.physical_total);
+  assert.equal(capability.resources.commit_total, state.commit_total);
 });
 
 test('M01 signed Linux parser accepts exact subtraction and rejects malformed or unstable observations', () => {
