@@ -48,13 +48,13 @@ function startWith(events) {
   return launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.' });
 }
 
-test('UAT-F1: with several result events the terminal one supplies text, error state and cost', () => {
+test('with several result events the terminal one supplies text, error state and cost', () => {
   const run = startWith(['INIT', { subtype: 'success', is_error: false, result: 'Waiting for the helper.', total_cost_usd: 0.4 },
     'INIT', { subtype: 'success', is_error: false, result: 'W3-DONE', total_cost_usd: 0.5 }]);
   assert.deepEqual({ text: run.result_text, error: run.is_error, cost: run.cost_usd }, { text: 'W3-DONE', error: false, cost: 0.5 });
 });
 
-test('UAT-F1 controls: a single result is unchanged and a terminal error after an interim success is reported', () => {
+test('terminal result controls: a single result is unchanged and a terminal error after an interim success is reported', () => {
   const single = startWith(['INIT', { subtype: 'success', is_error: false, result: 'done', total_cost_usd: 0.25 }]);
   assert.deepEqual({ text: single.result_text, error: single.is_error, cost: single.cost_usd }, { text: 'done', error: false, cost: 0.25 });
   const failed = startWith(['INIT', { subtype: 'success', is_error: false, result: 'interim', total_cost_usd: 0.1 },
