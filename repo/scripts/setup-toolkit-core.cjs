@@ -10,7 +10,9 @@ const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
-const { installProjectPlugin: installOpenCodeProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs');
+// Loaded only on the OpenCode project-install path, so setup's protocol probe and
+// older managed checkouts do not depend on the OpenCode payload module.
+function installOpenCodeProjectPlugin(options) { return require('./toolkit-opencode-project-plugin.cjs').installProjectPlugin(options); }
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';

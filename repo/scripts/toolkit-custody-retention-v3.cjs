@@ -1220,7 +1220,8 @@ function createTaskOwnedFixtureCleanupBackend(options) {
         }
         const currentManifest = state.manifest;
         const currentArtifact = fixtureArtifact(currentManifest, state.artifact_id);
-        const currentPlan = planRetention(currentManifest, { now: args.now });
+        // The branded fixture backend runs only on its injected, fixture-labelled clock.
+        const currentPlan = planRetention(currentManifest, { now: args.now, fixture_clock: true });
         const decision = currentPlan.decisions.find((item) => item.artifact_id === state.artifact_id);
         if (!decision || decision.disposition !== 'ELIGIBLE_NOW' || decision.target_digest !== state.target_digest) {
           fail('RETENTION_FIXTURE_BOUNDARY_NOT_ELIGIBLE');
@@ -1357,7 +1358,7 @@ function executeFixtureDisposal(request) {
       operation_attempted: false, reason_codes: ['RETENTION_DISPOSAL_RETRY_NOT_PERMITTED'],
       operation_id: previous.operation_id, operation_classification: previous.classification });
   }
-  const plan = planRetention(boundary.manifest, { now });
+  const plan = planRetention(boundary.manifest, { now, fixture_clock: true });
   const decision = plan.decisions.find((item) => item.artifact_id === expected.artifact_id);
   if (!decision || decision.disposition !== 'ELIGIBLE_NOW' || decision.target_digest !== targetDigest(target)) {
     return deepFreeze({ status: 'HOLD', fixture_only: true, mutation_authority: false,

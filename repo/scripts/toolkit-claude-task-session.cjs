@@ -76,7 +76,7 @@ function qualificationAuthority({ root, cwd, session_id, task_id, binding, role 
   const { phase_limits_ms: expectedPhases, ...expectedLimits } = expectedDisposition;
   if (!keys(owner, ['schema','state','task_id','session_id','cwd','control_root','parent','owner_model_sentinel','record_reference','helper_inference_permitted'])
     || !keys(owner.record_reference || {}, ['repository','path','key','blob','decision_sha256'])
-    || !keys(disposition, ['schema','state','task_id','session_id','cwd','control_root','parent','owner_reference_sha256', ...Object.keys(expectedDisposition)])
+    || !keys(disposition, [...new Set(['schema','state','task_id','session_id','cwd','control_root','parent','owner_reference_sha256', ...Object.keys(expectedDisposition)])])
     || !keys(disposition.phase_limits_ms || {}, Object.keys(expectedPhases))
     || !task_id || typeof task_id !== 'string' || !exact(owner) || !exact(disposition)
     || owner.schema !== expectedOwner.schema || owner.state !== expectedOwner.state

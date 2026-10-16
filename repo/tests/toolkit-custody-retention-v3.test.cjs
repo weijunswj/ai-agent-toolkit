@@ -272,7 +272,7 @@ function fixtureDisposalExpected(artifactId = 'fixture-copy') {
 }
 
 function fixtureTargetAuthorization(sourceManifest, expected, now = NOW) {
-  const plan = retention.planRetention(sourceManifest, { now });
+  const plan = retention.planRetention(sourceManifest, { now, fixture_clock: true });
   const sourceArtifact = sourceManifest.artifacts.find((item) => item.artifact_id === expected.artifact_id);
   const targetIdentity = retention.normalizeTargetIdentity(expected.target_identity);
   const targetDigest = retention.targetDigest(targetIdentity);
@@ -292,8 +292,10 @@ function fixtureTargetAuthorization(sourceManifest, expected, now = NOW) {
   return { ...core, evidence_digest: digestValue(core) };
 }
 
+// Cleanup operates only on current (v2) records; legacy v1 views are read-only.
 function fixtureCleanupSource(expected, options = {}) {
-  const fixture = artifact(expected.artifact_id, {
+  const fixture = v2Artifact(expected.artifact_id, {
+    transferAt: new Date(Date.parse(NOW) - 2 * retention.TRANSFER_RETENTION_MS).toISOString(),
     expected: expected.target_identity,
     observed: options.observed || expected.target_identity,
     ...(options.targetAliasResolution ? { targetAliasResolution: options.targetAliasResolution } : {}),
@@ -304,7 +306,7 @@ function fixtureCleanupSource(expected, options = {}) {
   for (const identity of [options.observed, ...(options.targetAliasResolution?.candidates || [])]) {
     if (identity && !facts.some((fact) => fact.backend_id === identity.backend_id)) facts.push(backendFact(identity.backend_id));
   }
-  return manifest([fixture], facts);
+  return { schema: retention.RETENTION_VIEW_SCHEMA, backend_facts: facts, artifacts: [fixture] };
 }
 
 function fixtureCleanupHarness(options = {}) {
@@ -387,7 +389,7 @@ try {
   if (!artifact) process.exit(81);
   const targetIdentity = retention.normalizeTargetIdentity(expected.target_identity);
   const targetHash = retention.targetDigest(targetIdentity);
-  const plan = retention.planRetention(state.manifest, { now });
+  const plan = retention.planRetention(state.manifest, { now, fixture_clock: true });
   const authorizationCore = {
     artifact_id: expected.artifact_id,
     target_identity: targetIdentity,
@@ -815,7 +817,7 @@ test('fixture execution binds exact alias equivalence and appends operation/read
   const harness = fixtureCleanupHarness({ artifactId, observed, targetAliasResolution: resolution,
     observerDescriptors: [observerDescriptor('canonical-observer', expected.target_identity),
       observerDescriptor('alias-observer', observed)] });
-  assert.equal(decisionFor(retention.planRetention(harness.source, { now: NOW }), artifactId).disposition, 'ELIGIBLE_NOW');
+  assert.equal(decisionFor(retention.planRetention(harness.source, { now: NOW, fixture_clock: true }), artifactId).disposition, 'ELIGIBLE_NOW');
   const wrongAcceptance = fixtureExecutionRequest(harness);
   wrongAcceptance.trusted_bindings.current_native_acceptance = nativeAcceptance(expected, 'f'.repeat(64), {
     scope_target_digests: [retention.targetDigest(expected.target_identity), 'a'.repeat(64)]
@@ -1002,7 +1004,7 @@ test('a same-target retry preserves the denied operation and appends attempt two
 test('in-memory successor rechecks consumers, owner, and retained references before resuming', () => {
   const consumerHarness = fixtureCleanupHarness({ artifactId: 'crash-active-consumer' });
   const beforeCrash = consumerHarness.controls.snapshot();
-  assert.equal(decisionFor(retention.planRetention(beforeCrash.manifest, { now: NOW }), 'crash-active-consumer').disposition,
+  assert.equal(decisionFor(retention.planRetention(beforeCrash.manifest, { now: NOW, fixture_clock: true }), 'crash-active-consumer').disposition,
     'ELIGIBLE_NOW', 'private custody and consumer readback are already retained before the producer crash');
   consumerHarness.controls.applyChange({ kind: 'ACTIVATE_CONSUMER', consumer_id: 'restarted-consumer' }, NOW);
   const consumerSuccessor = consumerHarness.controls.newSession().backend;
@@ -1131,7 +1133,7 @@ test('separate producer and successor processes recover only from exact persiste
   const initialExpected = fixtureDisposalExpected('separate-process-copy');
   const initialManifest = fixtureCleanupSource(initialExpected);
   const initialState = makeState(initialExpected, initialManifest, true);
-  assert.equal(decisionFor(retention.planRetention(initialManifest, { now: NOW }), initialExpected.artifact_id).disposition,
+  assert.equal(decisionFor(retention.planRetention(initialManifest, { now: NOW, fixture_clock: true }), initialExpected.artifact_id).disposition,
     'ELIGIBLE_NOW', 'private custody and consumer readback were retained before producer exit');
   const initialJson = Buffer.from(JSON.stringify(initialState));
   const producer = persistProducerCrash('producer-state.json', initialJson);
