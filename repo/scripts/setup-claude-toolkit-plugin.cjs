@@ -261,6 +261,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-claude-dispatch-observer.cjs', false],
     ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
     ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
+    ['repo/scripts/toolkit-gate-session-launcher.cjs', false],
+    ['repo/scripts/toolkit-programme-publication.cjs', false],
     ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
     ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
     ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
