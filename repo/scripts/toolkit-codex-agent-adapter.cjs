@@ -57,6 +57,9 @@ function sourceObservations(refs, observations) {
     if (!ref || seen.has(ref.id) || !same(ref,item.reference) || typeof item.content_base64 !== 'string') hold('HOST_SURFACE_UNQUALIFIED');
     const bytes = Buffer.from(item.content_base64,'base64');
     if (!bytes.length || bytes.toString('base64') !== item.content_base64 || sha(bytes) !== ref.content_sha256) hold('HOST_SURFACE_UNQUALIFIED');
+    // SHA-1 is required for Git blob object-ID compatibility;
+    // SHA-256 independently verifies content integrity.
+    // codeql[js/weak-cryptographic-algorithm]
     if (ref.blob_sha1 !== null && crypto.createHash('sha1').update(Buffer.concat([Buffer.from('blob '+bytes.length+'\0'),bytes])).digest('hex') !== ref.blob_sha1) hold('HOST_SURFACE_UNQUALIFIED');
     seen.add(ref.id);
   }

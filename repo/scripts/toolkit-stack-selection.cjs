@@ -27,6 +27,9 @@ class StackRegistrySnapshot {
     const bytes = Buffer.from(content_base64, 'base64');
     if (!bytes.length || bytes.length > 256 * 1024 || bytes.toString('base64') !== content_base64
       || digest(bytes) !== ref.content_sha256) reject('STACK_REGISTRY_SOURCE_DRIFT');
+    // SHA-1 is required for Git blob object-ID compatibility;
+    // SHA-256 independently verifies content integrity.
+    // codeql[js/weak-cryptographic-algorithm]
     const blob = crypto.createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
     if (ref.blob_sha1 !== null && blob !== ref.blob_sha1) reject('STACK_REGISTRY_BLOB_DRIFT');
     let registry;

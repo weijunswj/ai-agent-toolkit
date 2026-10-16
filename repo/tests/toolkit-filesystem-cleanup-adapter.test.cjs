@@ -9,6 +9,8 @@ const NOW='2026-10-12T00:00:00Z',sha=b=>crypto.createHash('sha256').update(b).di
 const shared=require('./toolkit-lifecycle-cleanup-integration.test.cjs');
 // Fresh task-owned fixture root per run; no retained historical fixture is reused.
 const FIXTURE_ROOT=()=>shared.FIXTURE_ROOT();
+// The native helper needs an absolute Windows PowerShell; a launcher may supply another.
+const WINDOWS_POWERSHELL=process.env.TOOLKIT_TEST_POWERSHELL||path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
 function fixture(t,accept=()=>true){
   if(fs.lstatSync(FIXTURE_ROOT()).isSymbolicLink())throw new Error('LIFECYCLE_FIXTURE_ROOT_ALIAS');
   const root=fs.mkdtempSync(path.join(FIXTURE_ROOT(),'quarantine-'));
@@ -29,7 +31,7 @@ function fixture(t,accept=()=>true){
     consumer_readback:{...readback,readback_digest:digestValue(readback)},required_consumers:[{...released,release_evidence_digest:digestValue(released)}],dependencies:[],pins:[]
   }]};
   const file=path.join(root,'manifest.json');fs.writeFileSync(file,JSON.stringify(manifest));
-  const adapter=createFilesystemCleanupAdapter({task_root:root,powershell:process.env.TOOLKIT_TEST_POWERSHELL,read_manifest:()=>JSON.parse(fs.readFileSync(file)),accept_native_operation:()=>accept({root,file,manifest,target})});
+  const adapter=createFilesystemCleanupAdapter({task_root:root,powershell:WINDOWS_POWERSHELL,read_manifest:()=>JSON.parse(fs.readFileSync(file)),accept_native_operation:()=>accept({root,file,manifest,target})});
   const request={artifact_id:'copy',target_relative:'local-copy',quarantine_relative:'quarantine/copy',manifest_relative:'manifest.json',content_sha256:sha(bytes),now:NOW};
   return {root,file,target,manifest,adapter,request,bytes};
 }
@@ -96,7 +98,7 @@ test('post-trial native preparation: D02 B01 B02 E01 E02 authentic custody resto
   const restored = gitProof.independentRestore(positive.remote, positive.transfer_head, rows, 'directory',
     path.join(PROOF_ROOT, 'independent-restore'));
   const built = shared.custodyManifest('directory-core-correction-01', target, rows, restored);
-  const manifestPath = path.join(PROOF_ROOT, 'manifest.json'), manifestBytes = Buffer.from(JSON.stringify(built.manifest));
+  const manifestPath = path.join(PROOF_ROOT, 'manifest.json'), manifestBytes = Buffer.from(require('../scripts/toolkit-github-program-receipt.cjs').canonicalSerialize(built.manifest));
   fs.writeFileSync(manifestPath, manifestBytes, { flag: 'wx' });
   const revision = sha(manifestBytes), view = { reference: support.evidenceReference('native-directory-retention', manifestBytes), bytes: manifestBytes };
   let corruptRestore = false, nativeCalls = 0, manifestWrites = 0;

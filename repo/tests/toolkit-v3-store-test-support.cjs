@@ -26,6 +26,9 @@ const CANDIDATE = Object.freeze({
 });
 
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+// SHA-1 is required for Git blob object-ID compatibility;
+// SHA-256 independently verifies content integrity.
+// codeql[js/weak-cryptographic-algorithm]
 const gitBlob = (bytes) => crypto.createHash('sha1')
   .update(Buffer.from(`blob ${bytes.length}\0`, 'utf8')).update(bytes).digest('hex');
 const clone = (value) => structuredClone(value);

@@ -1040,6 +1040,9 @@ function packetVerifyGovernanceSources(readers, bindingInput, packet, code = 'GP
       || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) packetFail(code);
     const bytes = Buffer.from(encoded, 'base64');
     if (bytes.length === 0 || bytes.toString('base64') !== encoded) packetFail(code);
+    // SHA-1 is required for Git blob object-ID compatibility;
+    // SHA-256 independently verifies content integrity.
+    // codeql[js/weak-cryptographic-algorithm]
     const gitBlob = crypto.createHash('sha1')
       .update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`, 'ascii'), bytes]))
       .digest('hex');
@@ -6058,6 +6061,9 @@ function validateRecoveryCheckpointEvidence(packet, readers, options = {}) {
     const bytes = Buffer.from(observed.content_base64, 'base64');
     if (reference.kind === 'GIT_BLOB') {
       const contentDigest = crypto.createHash('sha256').update(bytes).digest('hex');
+      // SHA-1 is required for Git blob object-ID compatibility;
+      // SHA-256 independently verifies content integrity.
+      // codeql[js/weak-cryptographic-algorithm]
       const blob = crypto.createHash('sha1')
         .update(Buffer.from(`blob ${bytes.length}\0`, 'utf8')).update(bytes).digest('hex');
       if (contentDigest !== reference.content_digest || blob !== reference.blob) {

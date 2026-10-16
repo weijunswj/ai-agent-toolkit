@@ -1034,6 +1034,9 @@ function compileControllerDecision(input, observations) {
     const bytes = Buffer.from(item.content_base64, 'base64');
     if (!bytes.length || bytes.toString('base64') !== item.content_base64
       || crypto.createHash('sha256').update(bytes).digest('hex') !== expected.content_sha256) fail('source byte digest mismatch');
+    // SHA-1 is required for Git blob object-ID compatibility;
+    // SHA-256 independently verifies content integrity.
+    // codeql[js/weak-cryptographic-algorithm]
     if (expected.blob_sha1 !== null && crypto.createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + bytes.length + '\0'), bytes])).digest('hex') !== expected.blob_sha1) fail('source blob mismatch');
     seen.add(expected.id);
   }
