@@ -612,7 +612,9 @@ function validateDisposalTarget(value, reasons) {
       || value.kind === 'GIT_CURRENT_TREE'
       || !exactKeys(item.identity, ['volume_serial', 'file_id', 'links'])
       || !safeId(String(item.identity.volume_serial)) || !safeId(String(item.identity.file_id))
-      || item.identity.links !== 1) { reasons.add(HOLD.DISPOSAL_TARGET_UNKNOWN); return false; }
+      // A POSIX directory's link count is 2 plus its subdirectories (Windows reports 1);
+      // execution still binds the exact observed identity, so only files require 1.
+      || !Number.isSafeInteger(item.identity.links) || item.identity.links < 1) { reasons.add(HOLD.DISPOSAL_TARGET_UNKNOWN); return false; }
     entries.push(item);
   }
   const ordered = [...entries].sort((a, b) => a.relative_path.localeCompare(b.relative_path));

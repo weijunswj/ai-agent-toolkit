@@ -8,6 +8,10 @@ const { spawnSync } = require('node:child_process');
 const { digestValue, canonicalSerialize } = require('./toolkit-github-program-receipt.cjs');
 
 const HEX40_OR_64 = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const COMMIT_IDENTITY = Object.freeze({
+  GIT_AUTHOR_NAME: 'AI Agent Toolkit', GIT_AUTHOR_EMAIL: 'toolkit-cleanup@localhost.invalid',
+  GIT_COMMITTER_NAME: 'AI Agent Toolkit', GIT_COMMITTER_EMAIL: 'toolkit-cleanup@localhost.invalid'
+});
 const safeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:+/@#-]{0,511}$/.test(value);
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const freeze = value => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
@@ -51,8 +55,10 @@ class GitCurrentTreeExpiryAdapter {
     Object.freeze(this);
   }
   #run(args, input) {
+    // The expiry commit carries a fixed Toolkit identity so it never depends on, or
+    // fails for lack of, the host's ambient Git user configuration.
     const result = spawnSync(this.#gitExe, args, { input, encoding: null, shell: false, windowsHide: true,
-      timeout: this.#timeout, maxBuffer: this.#maxOutput, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+      timeout: this.#timeout, maxBuffer: this.#maxOutput, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...COMMIT_IDENTITY } });
     if (result.error) fail(result.error.code === 'ETIMEDOUT' ? 'GIT_CURRENT_TREE_OUTCOME_UNKNOWN' : 'GIT_CURRENT_TREE_COMMAND_FAILED');
     if (result.stdout.length > this.#maxOutput || result.stderr.length > this.#maxOutput) fail('GIT_CURRENT_TREE_OUTPUT_LIMIT');
     if (result.status !== 0) return { ok: false, code: result.status, stdout: result.stdout, stderr: result.stderr };

@@ -208,6 +208,22 @@ function pureCases() {
       assert.equal(planFixture(future).disposition, 'HOLD');
     }
   });
+  test('post-trial lifecycle pure: D03 directory link counts follow the host; files still require exactly one link', () => {
+    const withLinks = (type, links) => {
+      const m = pureManifest(), target = m.artifacts[0].disposal_target;
+      target.inventory.find(item => item.type === type).identity.links = links;
+      target.inventory_digest = receipt.digestValue(target.inventory);
+      return planFixture(m);
+    };
+    // POSIX reports 2 plus the subdirectory count for a directory; Windows reports 1.
+    assert.equal(withLinks('DIRECTORY', 2).disposition, 'ELIGIBLE_NOW');
+    assert.equal(withLinks('DIRECTORY', 3).disposition, 'ELIGIBLE_NOW');
+    for (const [type, links] of [['DIRECTORY', 0], ['DIRECTORY', 1.5], ['FILE', 2]]) {
+      const decision = withLinks(type, links);
+      assert.equal(decision.disposition, 'HOLD');
+      assert.ok(decision.reason_codes.includes(retention.HOLD.DISPOSAL_TARGET_UNKNOWN));
+    }
+  });
   test('post-trial lifecycle pure: D02 B02 partial custody remains held without any effect authority', () => {
     const m = pureManifest(), snapshot = receipt.canonicalSerialize(m);
     const partial = structuredClone(m); partial.artifacts[0].consumer_readback.content_digest = sha(Buffer.from('wrong-restore'));
