@@ -15,14 +15,14 @@
     "skills",
     "toolkit",
     "opencode",
-    "ag2"
+    "antigravity"
   ],
   "skills": "./skills",
   "hooks": "./.claude-plugin/hooks/hooks.json",
   "interface": {
     "displayName": "AI Agent Toolkit",
     "shortDescription": "Source-first reusable agent skills with opt-in local bridge adapters",
-    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, and local OpenCode or Antigravity 2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
+    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, local OpenCode bridge adapters, and portable Antigravity skills copying. Claude Code updates this package natively and never installs or updates Codex.",
     "developerName": "weijunswj",
     "category": "Developer Tools",
     "capabilities": [

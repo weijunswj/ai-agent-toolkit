@@ -7,6 +7,8 @@ const { digestValue, canonicalSerialize } = require('./toolkit-github-program-re
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const safeRelative = value => typeof value === 'string' && !!value && !path.isAbsolute(value)
   && value.split(/[\\/]/).every(part => part && part !== '..' && part !== '.' && part.toLowerCase() !== '.git');
+// Same operation-identity predicate as the custody manager and the Git expiry adapter.
+const safeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:+/@#-]{0,511}$/.test(value);
 const freeze = value => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 const sensitive = /^(?:\.env(?:\..*)?|secrets?|credentials?|id_rsa|id_ed25519|.*\.pem|.*\.key)$/i;
 class FilesystemCleanupAdapter {

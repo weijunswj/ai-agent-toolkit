@@ -1,7 +1,7 @@
 
 # Toolkit Setup Skill
 
-Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise AI Agent Toolkit plugin setup, local bridge setup, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, sync, disable, stale bridge state, or bridge troubleshooting requests.
+Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise AI Agent Toolkit plugin setup, local bridge setup, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity portable skills copying, bridge audit, sync, disable, stale bridge state, or bridge troubleshooting requests.
 
 This README is only an install/identity note. Runtime guidance lives in `SKILL.md`, `repo/scripts/setup-toolkit.cjs`, `repo/scripts/toolkit-local-bridge.cjs`, and `repo/docs/TOOLKIT-LOCAL-BRIDGE.md`.
 

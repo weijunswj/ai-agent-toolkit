@@ -83,3 +83,47 @@ test('resume is refused for waiting, submitted, interrupted and retired sessions
   assert.throws(() => launcher.resume(interrupted, { session_id: 's1', prompt: 'x', cwd: '.' }), e => e.code === 'V3_INTERRUPTED_SESSION_REQUIRES_SUCCESSOR');
   assert.equal(calls.length, 1, 'no native process was started for a refused session');
 });
+
+test('caller arguments cannot override the pinned route; other supported flags still pass', () => {
+  for (const base_args of [['--model', 'claude-haiku-5-5'], ['--effort=low'], ['--fallback-model', 'claude-haiku-5-5'], ['--agent', 'other'], ['--model'], [7]]) {
+    assert.throws(() => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn([]), base_args }),
+      e => ['LAUNCHER_ROUTE_OVERRIDE_REFUSED', 'LAUNCHER_ARGS_INVALID'].includes(e.code));
+  }
+  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls),
+    base_args: ['--setting-sources', 'project,local', '--strict-mcp-config', '--plugin-dir', 'candidate', '--permission-mode', 'default'] });
+  for (const extra_args of [['--model', 'claude-haiku-5-5'], ['--effort', 'low'], ['--fallback-model=claude-haiku-5-5'], ['--agent', 'other'], 'not-a-list']) {
+    assert.throws(() => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.', extra_args }),
+      e => ['LAUNCHER_ROUTE_OVERRIDE_REFUSED', 'LAUNCHER_ARGS_INVALID'].includes(e.code));
+  }
+  assert.equal(calls.length, 0, 'a refused override starts no native process');
+  // Positive control: the flags the accepted owner-UAT journey passed are unchanged.
+  const run = launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.',
+    extra_args: ['--agents', 'agents.json', '--tools', 'Read,Agent', '--allowedTools', 'Read', '--include-hook-events'] });
+  assert.equal(run.route_observed, true); assert.equal(run.is_error, false);
+  const args = calls[0].args;
+  assert.equal(args.filter(a => a === '--model').length, 1); assert.equal(args.filter(a => a === '--effort').length, 1);
+  assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', 'high']);
+  assert.ok(args.includes('--agents'));
+});
+
+test('a native run whose observed model differs from the pinned route is not success', () => {
+  const observed = model => (cmd, args) => ({ status: 0, stdout: [{ type: 'system', subtype: 'init', session_id: args[args.indexOf('--session-id') + 1], model },
+    { type: 'result', subtype: 'success', is_error: false, result: 'done', total_cost_usd: 0.1 }].map(l => JSON.stringify(l)).join('\n') + '\n' });
+  const start = model => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: observed(model) })
+    .start(gate(), { session_id: 's1', prompt: 'work', cwd: '.' });
+  const wrong = start('claude-haiku-5-5');
+  assert.deepEqual({ model: wrong.model, route: wrong.route_observed, error: wrong.is_error, terminal: wrong.terminal_result },
+    { model: 'claude-haiku-5-5', route: false, error: true, terminal: true });
+  const missing = start(undefined);
+  assert.deepEqual({ route: missing.route_observed, error: missing.is_error }, { route: false, error: true });
+  const right = start('claude-opus-5-5');
+  assert.deepEqual({ route: right.route_observed, error: right.is_error }, { route: true, error: false });
+});
+
+test('resume refuses a gate of another role before any native process', () => {
+  const calls = [], g0 = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G0', claude: 'claude', spawn: fakeSpawn(calls) });
+  const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+  assert.throws(() => g0.resume(replied, { session_id: 's1', prompt: 'x', cwd: '.' }), e => e.code === 'LAUNCHER_GATE_ROLE_MISMATCH');
+  assert.throws(() => g0.resume(replied.value, { session_id: 's1', prompt: 'x', cwd: '.' }), e => e.code === 'LAUNCHER_GATE_ROLE_MISMATCH');
+  assert.equal(calls.length, 0);
+});

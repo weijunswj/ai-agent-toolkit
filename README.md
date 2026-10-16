@@ -36,7 +36,7 @@ For normal human setup, keep the journey short:
 7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+10. Add OpenCode bridge targets only when you ask for that setup and approve the writes. Antigravity receives portable skills only, copied into a workspace by an explicit approved command; there is no native Antigravity plugin or sync.
 
 More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 
@@ -68,7 +68,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 |---|---|
 | [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
 | [Controller Bootstrap](skills/controller-bootstrap/) | Explicitly re-enter an already-assigned Toolkit repository controller from trusted CURRENT and exact governance-source evidence; grants no role, authority, or host permission. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity portable skills copying, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, official Skills, and instance-level MCP references. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
@@ -99,7 +99,7 @@ Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location
 | Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | `AGENTS.md` | [Codex](repo/docs/HOW-TO-USE.md#codex). |
 | Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code](repo/docs/HOW-TO-USE.md#claude-code). |
 | OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | `AGENTS.md` | [OpenCode](repo/docs/HOW-TO-USE.md#opencode). |
-| Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\` | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
+| Antigravity 2 | `<workspace>/.agents/skills/<skill-name>/` (portable copy only; no native plugin) | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
 
 Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No intermediate publication step is required.
 
@@ -171,5 +171,5 @@ git diff --check
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
-- Fresh coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2. The canonical fresh profiles are owner-gpt, owner-claude and owner-mixed-claude-gpt; their independent full-scope reviewer sets contain two, one and three members. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Historical controller-decision v1, IR v1/v2, adapter v1, CURRENT v1 and registry aliases retain their pinned meanings. Existing receipt/CURRENT and programme-state-v5 remain canonical. Source progress does not establish native or installed qualification.
+- Fresh coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2. The canonical fresh profiles are owner-gpt, owner-claude and owner-mixed-claude-gpt; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one, one and two members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Historical controller-decision v1, IR v1/v2, adapter v1, CURRENT v1 and registry aliases retain their pinned meanings. Existing receipt/CURRENT and programme-state-v5 remain canonical. Source progress does not establish native or installed qualification.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

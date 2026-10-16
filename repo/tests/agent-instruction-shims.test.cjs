@@ -684,7 +684,8 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /\| Claude Code \|[^\n]*`<repo>\/\.claude\/skills\/<skill-name>\/`[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
   assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
   assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
-  assert.match(section, /\| Antigravity 2 \|[^\n]*`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity 2 bootstrap \|/);
+  assert.match(section, /\| Antigravity 2 \|[^\n]*`<workspace>\/\.agents\/skills\/<skill-name>\/` \(portable copy only; no native plugin\)[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity 2 bootstrap \|/);
+  assert.doesNotMatch(section, /\.gemini\\config\\plugins/);
   assert.doesNotMatch(section, /Native plugin package via/);
   assert.doesNotMatch(section, /Opt-in bridge target/);
   assert.doesNotMatch(section, /\[Official n8n Skills\]/);

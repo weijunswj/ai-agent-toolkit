@@ -16,6 +16,14 @@ const { claudeNativeModel } = require('./toolkit-v3-native-helper-adapter.cjs');
 
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 const ROLE_ROUTE = Object.freeze({ G0: 'DISCOVERY', G1: 'BUILDER' });
+// Route-affecting native flags come only from the pinned registry binding. A caller may add
+// other supported flags, but never a conflicting model, effort, fallback model or main agent.
+const ROUTE_FLAGS = Object.freeze(['--model', '--effort', '--fallback-model', '--agent']);
+function confinedArgs(args) {
+  if (!Array.isArray(args) || args.some(a => typeof a !== 'string')) fail('LAUNCHER_ARGS_INVALID');
+  if (args.some(a => ROUTE_FLAGS.some(flag => a === flag || a.startsWith(`${flag}=`)))) fail('LAUNCHER_ROUTE_OVERRIDE_REFUSED');
+  return [...args];
+}
 
 function defaultClaude() {
   const exe = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
@@ -28,8 +36,7 @@ class GateSessionLauncher {
     if (!ROLE_ROUTE[role]) fail('LAUNCHER_ROLE_UNSUPPORTED');
     this.#binding = new CapturedStackBinding(captured);
     this.#role = role; this.#claude = claude; this.#spawn = spawn;
-    if (!Array.isArray(base_args) || base_args.some(a => typeof a !== 'string')) fail('LAUNCHER_ARGS_INVALID');
-    this.#baseArgs = [...base_args];
+    this.#baseArgs = confinedArgs(base_args);
   }
 
   // The concrete native model and effort for this role, from the pinned registry only.
@@ -38,7 +45,7 @@ class GateSessionLauncher {
     return { model: claudeNativeModel(route), effort: route.reasoning, registry_digest: this.#binding.sourceDigest };
   }
 
-  #run(args, cwd, env) {
+  #run(args, cwd, env, expectedModel) {
     const started = Date.now();
     const r = this.#spawn(this.#claude, args, { cwd, env, encoding: 'utf8', timeout: 300000, maxBuffer: 32 * 1024 * 1024 });
     const lines = String(r.stdout || '').split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -48,9 +55,12 @@ class GateSessionLauncher {
     // no terminal result has not shown completion and is reported as an error.
     const terminal = lines.findLast(l => l.type === 'result');
     const result = terminal || {};
+    // The native init event reports the model that actually ran; a different or missing
+    // model is not success even when the process exits cleanly.
+    const routeObserved = init.model === expectedModel;
     return { exit: r.status, elapsed_ms: Date.now() - started, native_session_id: init.session_id || null, model: init.model || null,
-      terminal_result: Boolean(terminal), result_text: typeof result.result === 'string' ? result.result : null,
-      is_error: !terminal || result.is_error === true,
+      route_observed: routeObserved, terminal_result: Boolean(terminal), result_text: typeof result.result === 'string' ? result.result : null,
+      is_error: !terminal || result.is_error === true || !routeObserved,
       cost_usd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null, raw: r.stdout || '' };
   }
 
@@ -59,20 +69,21 @@ class GateSessionLauncher {
     if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     const session = gate.assertExecutable(session_id);
     if (session.history.length !== 1 || session.history[0].event !== 'LAUNCH') fail('LAUNCHER_SESSION_NOT_FRESH');
-    const { model, effort } = this.route;
+    const extra = confinedArgs(extra_args), { model, effort } = this.route;
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--session-id', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra_args, '--output-format', 'stream-json', '--verbose'], cwd, env) };
+      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, env, model) };
   }
 
   // Resumes the same native session only while the gate keeps it executable,
   // for example after an owner reply returns it from WAITING_OWNER to ACTIVE.
   resume(gate, { session_id, prompt, cwd, env = process.env, extra_args = [] }) {
+    if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     gate.assertExecutable(session_id);
-    const { model, effort } = this.route;
+    const extra = confinedArgs(extra_args), { model, effort } = this.route;
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--resume', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra_args, '--output-format', 'stream-json', '--verbose'], cwd, env) };
+      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, env, model) };
   }
 
   // Native session identity is derived from the gate assignment and gate session,

@@ -170,3 +170,105 @@ test('post-trial native preparation: D02 B01 B02 E01 E02 authentic custody resto
     fixture_bounds: { max_files: 16, max_entries: 64, max_depth: 8, max_content_bytes: 1048576 } });
   assert.equal(shared.readPacket('directory-proposal').packet_digest, packet.packet_digest);
 });
+
+// Builds an owned directory target whose retained inventory is computed independently by
+// the shared custody fixture, plus the pending directory-disposal record a successor holds.
+function pendingDirectory(name) {
+  const root = fs.mkdtempSync(path.join(FIXTURE_ROOT(), name + '-'));
+  const target = path.join(root, 'disposal-target');
+  fs.mkdirSync(target); fs.mkdirSync(path.join(target, 'nested'));
+  const rows = [{ relative_path: 'root.bin', bytes: Buffer.from('directory payload A') },
+    { relative_path: 'nested/owned.bin', bytes: Buffer.from('directory payload B, longer') }];
+  for (const row of rows) fs.writeFileSync(path.join(target, ...row.relative_path.split('/')), row.bytes, { flag: 'wx' });
+  const built = shared.custodyManifest(name, target, rows);
+  const artifact = built.manifest.artifacts[0];
+  const pending = { operation_id: name + '-operation', operation_kind: 'DISPOSAL_DELETE',
+    target_digest: retention.targetDigest(artifact.expected_target_identity), source_digest: artifact.transfer_anchor.payload_digest,
+    manifest_revision: 'pending-revision', inventory_digest: artifact.disposal_target.inventory_digest,
+    expected_backend_revision: 'pending-revision', state: 'IN_FLIGHT', approval_evidence_reference: sha('owner-native-approval'),
+    outcome_evidence_reference: null, readback_evidence_reference: null };
+  const snapshot = () => rows.map(row => {
+    const file = path.join(target, ...row.relative_path.split('/'));
+    return fs.existsSync(file) ? sha(fs.readFileSync(file)) : null;
+  });
+  return { root, target, rows, built, artifact, pending, snapshot };
+}
+
+test('directory disposal recovery classifies the real target read-only and never replays', () => {
+  const f = pendingDirectory('directory-recovery');
+  let nativeCalls = 0;
+  const adapter = createFilesystemCleanupAdapter({ task_root: fs.realpathSync(f.root), read_manifest: () => f.built.manifest,
+    accept_native_operation() { nativeCalls++; throw Error('RECOVERY_MUST_NOT_REQUEST_NATIVE_EFFECT'); } });
+  const recover = (pending = f.pending, operation_history = []) => adapter.recoverDirectoryDisposal({ artifact: f.artifact,
+    disposal_target: f.artifact.disposal_target, pending_operation: pending, operation_history });
+  const before = f.snapshot();
+
+  const present = recover();
+  assert.equal(present.state, 'TARGET_PRESENT', JSON.stringify(present));
+  assert.equal(present.operation_attempted, false); assert.equal(present.mutation_authority, false);
+  assert.equal(present.inventory_digest, f.artifact.disposal_target.inventory_digest);
+  assert.equal(present.requires_independent_attribution, true);
+
+  assert.equal(recover(f.pending, [{ operation_id: f.pending.operation_id }, { operation_id: f.pending.operation_id }]).code,
+    'CLEANUP_DIRECTORY_PENDING_HISTORY_AMBIGUOUS');
+  for (const operation_id of ['', ' padded', '../escape', 'has space', 'x'.repeat(513), 42, null]) {
+    const held = recover({ ...f.pending, operation_id });
+    assert.equal(held.state, 'HOLD'); assert.equal(held.code, 'CLEANUP_DIRECTORY_PENDING_INVALID');
+    assert.equal(held.operation_attempted, false);
+  }
+  assert.equal(recover({ ...f.pending, inventory_digest: sha('other inventory') }).code, 'CLEANUP_DIRECTORY_PENDING_INVALID');
+  assert.deepEqual(f.snapshot(), before, 'classification and refusals leave every byte unchanged');
+
+  fs.writeFileSync(path.join(f.target, 'nested', 'owned.bin'), 'partially replaced');
+  const drift = recover();
+  assert.equal(drift.state, 'PARTIAL_OR_DRIFT'); assert.notEqual(drift.inventory_digest, f.pending.inventory_digest);
+  assert.equal(drift.operation_attempted, false); assert.equal(drift.mutation_authority, false);
+
+  fs.renameSync(f.target, path.join(f.root, 'moved-away'));
+  const absent = recover();
+  assert.equal(absent.state, 'UNKNOWN_ABSENCE_OBSERVED');
+  assert.equal(absent.attribution, 'REQUIRES_RETAINED_NATIVE_OPERATION_AND_INDEPENDENT_RESTORE');
+  assert.equal(absent.operation_attempted, false); assert.equal(absent.mutation_authority, false);
+  assert.equal(nativeCalls, 0);
+});
+
+test('controller pending directory recovery reports the authentic adapter observation without replay', () => {
+  const support = require('./toolkit-v3-store-test-support.cjs');
+  const receipt = require('../scripts/toolkit-github-program-receipt.cjs');
+  for (const variant of ['present', 'absent']) {
+    const f = pendingDirectory('controller-directory-' + variant);
+    const manifest = structuredClone(f.built.manifest);
+    manifest.artifacts[0].pending_cleanup = f.pending;
+    const bytes = Buffer.from(receipt.canonicalSerialize(manifest)), revision = sha(bytes);
+    const view = { reference: support.evidenceReference('pending-directory-retention-' + variant, bytes), bytes };
+    let nativeCalls = 0, manifestWrites = 0, restores = 0;
+    const readers = {
+      readV3RetentionObservation({ reference_digest }) { return { reference_digest, as_of: shared.NOW, manifest: structuredClone(manifest),
+        revision, bytes_digest: digestValue(manifest) }; },
+      readV3CleanupManifest() { return { manifest: structuredClone(manifest), revision, bytes_digest: digestValue(manifest) }; },
+      persistV3CleanupManifestCompareAndSwap() { manifestWrites++; throw Error('RECOVERY_MANIFEST_WRITE_FORBIDDEN'); },
+      readV3CleanupOperationHistory() { return []; },
+      readV3CleanupCurrentApproval() { return null; },
+      readV3CleanupIndependentEffect() { return null; },
+      readV3IndependentTransferRestore() { restores++; throw Error('RECOVERY_RESTORE_FORBIDDEN'); }
+    };
+    const source = shared.candidateBinding();
+    const candidate = { ...support.CANDIDATE, head_sha: source.candidate_head, tree_sha: source.candidate_tree };
+    const stored = support.createV3StoreFixture({ controllerConsumer: true, candidate, extraEvidence: [view],
+      retention_view_evidence_id: view.reference.id, additionalTrustedReaders: readers });
+    const adapter = createFilesystemCleanupAdapter({ task_root: fs.realpathSync(f.root), read_manifest: () => manifest,
+      accept_native_operation() { nativeCalls++; throw Error('RECOVERY_MUST_NOT_REQUEST_NATIVE_EFFECT'); } });
+    const context = stored.store.createV3CleanupExecutionContext(stored.admission);
+    const controller = retention.createLifecycleCleanupController({ store: stored.store, admission: stored.admission, ...context,
+      filesystem_backend: adapter, git_backend: null, clock: () => shared.NOW, limits: { max_artifacts: 1, max_paths: 64, max_bytes: 1048576 } });
+    const before = f.snapshot();
+    if (variant === 'absent') fs.renameSync(f.target, path.join(f.root, 'moved-away'));
+    const result = controller.executeOnUse({ artifact_ids: [f.artifact.artifact_id], operation_ids: [f.pending.operation_id] }).results[0];
+    assert.equal(result.state, 'HOLD', JSON.stringify(result));
+    assert.equal(result.code, 'CLEANUP_PENDING_RECONCILIATION_NO_REPLAY');
+    assert.equal(result.recovery.state, variant === 'present' ? 'TARGET_PRESENT' : 'UNKNOWN_ABSENCE_OBSERVED', JSON.stringify(result.recovery));
+    assert.equal(result.recovery.operation_attempted, false);
+    assert.equal(nativeCalls, 0); assert.equal(manifestWrites, 0); assert.equal(restores, 0);
+    if (variant === 'present') assert.deepEqual(f.snapshot(), before);
+  }
+});

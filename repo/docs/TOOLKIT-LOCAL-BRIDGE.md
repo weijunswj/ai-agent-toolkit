@@ -108,10 +108,10 @@ Post-merge native Windows UAT for issue #247 must:
 10. Leave the real 17 historical unmarked staging directories unchanged.
 
 1. Write a staging directory.
-2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
+2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and the Antigravity portable skills payload, which must carry no native plugin metadata.
 3. Rename staging into `current`.
 4. For OpenCode target sync, write into the OpenCode `skills/` root and atomically replace only Toolkit-managed skill folders.
-5. For Antigravity 2 target sync, write into the local `ai-agent-toolkit` plugin root and atomically replace only Toolkit-managed skill folders under that plugin's `skills/` directory.
+5. Antigravity has no sync target. Portable skills reach a workspace only through the explicit `--copy-antigravity-skills` project write.
 6. Remove only skill folders listed in the previous Toolkit-managed target manifest when they are no longer part of the current Toolkit skill set. Preserve unrelated user-created skills and unrelated files.
 
 Locks are owner-aware. Each lock records the PID of the process that created it, and acquisition classifies that owner with a signal-0 existence probe before deciding anything:
@@ -468,7 +468,7 @@ Meaningful work means at least one of:
 
 - The configured Toolkit repo fast-forwarded.
 - The configured Toolkit repo was already advanced before the hook run compared with the last recorded bridge update state. This is reported as an inference, likely from a manual pull or another local Git update, not as proof of a manual action.
-- An enabled OpenCode or Antigravity 2 target was synced.
+- An enabled OpenCode target was synced.
 - A stale Toolkit-managed skill folder was removed from a managed target.
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
@@ -550,45 +550,12 @@ OpenCode loads one folder per skill under that root, for example `~/.config/open
 
 The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
 
-Antigravity 2 detection signals:
-
-- Antigravity user config exists, such as `%USERPROFILE%\.antigravity`.
-- Gemini/Antigravity plugin config exists, such as `%USERPROFILE%\.gemini\config` or `%USERPROFILE%\.gemini\config\plugins`.
-- The managed Toolkit AG2 adapter exists under the Toolkit Local Bridge Hub.
-- The managed Antigravity 2 plugin-scoped target exists under `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit`.
-- The user explicitly enabled the target.
-- Persisted bridge target state exists, such as `target_path`, `synced_version`, `synced_checksum`, or `last_sync`.
-- Saved AG2 Python command, when configured.
-- Explicit `--python-command`, for one run.
-- `python`, `python3`, and `py`.
-- Safe read-only user-local candidates such as Windows user Python locations, `UV_PYTHON`, `VIRTUAL_ENV`, and `CONDA_PREFIX`.
-- Optional package signal: a candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
-
-Antigravity 2 target path:
-
-- POSIX: `~/.gemini/config/plugins/ai-agent-toolkit/`.
-- Windows: `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit\`.
-- Required app-facing skills: every current Toolkit skill under `skills/<skill-name>/SKILL.md`, plus the `skills/ai-agent-toolkit/SKILL.md` adapter skill inside that plugin root.
-
-Persist a known non-PATH Antigravity 2/AG2 Python command with:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
-```
-
-Future audit and hook runs reuse the saved command. If the Python `ag2` package is not detected, audit output must list the exact Python commands tried and keep `python_command` empty unless a command actually has the package. Detection must never install Python, AG2, Antigravity 2, OpenCode, npm packages, or pip packages.
-
-Audit separates Antigravity 2 app/bridge relevance from the optional Python package signal:
-
-- `detected` means the Antigravity 2 bridge target is present or relevant.
-- `ag2_package_detected` means the Python package `ag2` was found.
-- `python_command` is set only when `ag2_package_detected` is true.
-- `signals.tried_python_commands` records package misses such as `Package(s) not found: ag2`.
+Antigravity has no bridge discovery or sync target. Audit reports retained legacy `ag2` state with `native_plugin_target_supported: false` and never probes Python or AG2 packages. Portable skills reach a workspace only through `--copy-antigravity-skills --antigravity-project-root <absolute-path>`, which previews by default and, with an explicit approved `--write`, writes only `<workspace>/.agents/skills/`. Retained `ag2` state supports legacy read, `--disable-target ag2` and rollback only.
 
 Audit also separates internal hub metadata from app-facing target sync:
 
 - `internal_adapter_path` points under the Toolkit Local Bridge Hub.
-- `target_path` points at the app-facing OpenCode skills root or Antigravity 2 plugin root.
+- `target_path` points at the app-facing OpenCode skills root.
 - `target_exists` reports whether the app-facing managed output files exist.
 - `synced` is true only when the enabled target state and the real app-facing output match the current full Toolkit skill payload and no previously managed Toolkit skill folder is stale. Hub metadata alone is not enough.
 
@@ -625,16 +592,16 @@ Apply OpenCode setup:
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 ```
 
-Dry-run Antigravity 2 setup:
+Preview a portable Antigravity skills copy into one workspace:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>
 ```
 
-Apply Antigravity 2 setup:
+Apply that exact approved copy:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
 Sync enabled targets:

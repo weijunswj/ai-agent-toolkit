@@ -1,6 +1,6 @@
 # Persistent-agent stack
 
-For adopted V3 work, apply the final execution clarification in the canonical Toolkit V3 contract at a safe renewal boundary. Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor; preserve valid work and stop the old writer after verified checkpoint custody. Use the approved native host matrix, UAT impact disposition, reviewer reuse and separate local/remote retention rules. Missing exact routes and unqualified pre-inference guards remain explicit obligations.
+For adopted V3 work, apply the final execution clarification in the canonical Toolkit V3 contract at a safe renewal boundary. Planned G1 segment completion checkpoints and continues in the same session; a fresh executor is required only at the contract's mandated triggers, such as a newly activated instruction/profile version, and then only after verified checkpoint custody stops the old writer. Use the approved native host matrix, UAT impact disposition, fresh-context correction rechecks for the same selected reviewers and the separate local/remote retention rules. Missing exact routes and unqualified pre-inference guards remain explicit obligations.
 
 
 ## Current V3 binding
