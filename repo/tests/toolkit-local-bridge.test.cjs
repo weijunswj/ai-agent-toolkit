@@ -5018,7 +5018,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
-  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
+  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
+  // The Codex helper guard is the only PreToolUse entry and guards spawn_agent and its Agent alias.
+  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['spawn_agent|Agent']);
+  assert.match(codexHooks.hooks.PreToolUse[0].hooks[0].command, /toolkit-codex-helper-hook.cjs/);
   assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');

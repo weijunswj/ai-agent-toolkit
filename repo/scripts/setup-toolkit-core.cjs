@@ -3990,24 +3990,37 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   printValidationSummary(validationResults);
 }
 
+// One approved setup execution: collects current state and answers, verifies the
+// managed checkout and native plugin, refreshes direct-agent capability, then runs
+// validation, bridge sync/audit and delegation control in that order.
 class ToolkitSetupExecution {
-  #args; #current; #questionBank; #plan; #validationResults;
-  constructor(args){this.#args=args;}
-  async execute(){const args=this.#args;
-  const current = this.#current=await collectCurrentState(args);
-  args.codexRuntime = current.runtime.runtime;
-  const questionBank = this.#questionBank=await answerSetupQuestionBank(args, current);
-  await confirmSelectedDelegationProposal(args, current, questionBank);
-  const plan = this.#plan=setupPlan(args);
-  printSetupChecklist(plan);
-  const warning = activeToolkitWarning(args);
-  if (warning) console.warn(`WARNING: ${warning}`);
-  const validationResults = this.#validationResults=[];
-  const managed = verifyAndUpdateTrustedRepo(args, validationResults);
-  const nativeCache = args.host === 'claude-code'
-    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args))
-    : runCodexNativePluginSetup(args);
-  if (args.host === 'claude-code' && args.setupChoices.claudeTopology === 'toolkit-direct') {
+  #args; #current = null; #questionBank = null; #validationResults = [];
+  constructor(args) { this.#args = args; }
+
+  async #collectAndAnswer() {
+    const args = this.#args;
+    this.#current = await collectCurrentState(args);
+    args.codexRuntime = this.#current.runtime.runtime;
+    this.#questionBank = await answerSetupQuestionBank(args, this.#current);
+    await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
+  }
+
+  #announcePlan() {
+    printSetupChecklist(setupPlan(this.#args));
+    const warning = activeToolkitWarning(this.#args);
+    if (warning) console.warn(`WARNING: ${warning}`);
+  }
+
+  #nativePluginSetup() {
+    const args = this.#args;
+    if (args.host !== 'claude-code') return runCodexNativePluginSetup(args);
+    return args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args);
+  }
+
+  // The direct Claude topology may only probe launch capability on a verified, active plugin.
+  #refreshDirectAgentCapability(nativeCache) {
+    const args = this.#args, current = this.#current;
+    if (args.host !== 'claude-code' || args.setupChoices.claudeTopology !== 'toolkit-direct') return;
     const activeCurrent = nativeCache.restart_required !== true
       && nativeCache.current === true
       && nativeCache.installed_current === true
@@ -4022,14 +4035,23 @@ class ToolkitSetupExecution {
       ? probeClaudeAgentCapability({ ...args, persistedClaudeCli: current.agentProfile?.claude_cli })
       : { ...current.agentCapability, launch_supported: false, supported: false, launch_probe_status: nativeCache.restart_required === true ? 'restart-pending' : 'current-active-plugin-unverified' };
   }
-  runLiteValidation(args, validationResults);
-  writeBridgePreferences(args);
-  runApprovedTargetSync(args);
-  const audit = runBridgeAudit(args);
-  const delegation = await applyHostDelegationControl(args, current, nativeCache);
-  printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
-  return 0;
-}
+
+  async execute() {
+    const args = this.#args;
+    await this.#collectAndAnswer();
+    this.#announcePlan();
+    const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const nativeCache = this.#nativePluginSetup();
+    this.#refreshDirectAgentCapability(nativeCache);
+    runLiteValidation(args, this.#validationResults);
+    writeBridgePreferences(args);
+    runApprovedTargetSync(args);
+    const audit = runBridgeAudit(args);
+    const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
+    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, audit,
+      questionBank: this.#questionBank, validationResults: this.#validationResults });
+    return 0;
+  }
 }
 
 function inspectContinuousCore(input) {

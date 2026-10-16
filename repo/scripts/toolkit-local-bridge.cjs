@@ -3965,213 +3965,179 @@ function persistActiveNoTargetWrite({
   }
 }
 
+// One bridge invocation: isolated project commands, hook no-ops, audit, the
+// repository auto-update path, active no-target bookkeeping and the locked target sync.
 class LocalBridgeRun {
-  #argv; #testHooks; #nextState; #lock;
-  constructor(argv,testHooks={}){this.#argv=argv;this.#testHooks=testHooks;}
-  execute(){const argv=this.#argv,testHooks=this.#testHooks;
-  if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1' && argv.includes('--hook')) {
-    return { status: 0, audit: null, capability_probe_noop: true };
+  #argv; #testHooks; #args = null; #hubPath = null;
+  constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
+
+  // Nested capability-probe and checker sessions never sync.
+  #environmentNoop() {
+    if (!this.#argv.includes('--hook')) return null;
+    if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1') return { status: 0, audit: null, capability_probe_noop: true };
+    if (process.env.AI_AGENT_TOOLKIT_CHECKER === '1') return { status: 0, audit: null, checker_session_noop: true };
+    return null;
   }
-  if (process.env.AI_AGENT_TOOLKIT_CHECKER === '1' && argv.includes('--hook')) {
-    return { status: 0, audit: null, checker_session_noop: true };
-  }
-  const args = parseArgs(argv);
-  if (args.installOpenCodeProjectPlugin) {
-    assertIsolatedProjectCommandArgs(args, '--install-opencode-project-plugin', '--opencode-project-root');
-    const result = installProjectPlugin({ projectRoot: args.opencodeProjectRoot, write: args.write });
+
+  // Project-local install/copy commands that never touch hub state.
+  #isolatedProjectCommand(args) {
+    let result = null;
+    if (args.installOpenCodeProjectPlugin) {
+      assertIsolatedProjectCommandArgs(args, '--install-opencode-project-plugin', '--opencode-project-root');
+      result = installProjectPlugin({ projectRoot: args.opencodeProjectRoot, write: args.write });
+    } else if (args.copyAntigravitySkills) {
+      assertIsolatedProjectCommandArgs(args, '--copy-antigravity-skills', '--antigravity-project-root');
+      result = copyPortableSkills({ projectRoot: args.antigravityProjectRoot,
+        sourceSkillsRoot: path.resolve(__dirname, '..', '..', 'skills'), write: args.write });
+    } else return null;
     console.log(JSON.stringify(result, null, 2));
     return { status: 0, result };
   }
-  if (args.copyAntigravitySkills) {
-    assertIsolatedProjectCommandArgs(args, '--copy-antigravity-skills', '--antigravity-project-root');
-    const result = copyPortableSkills({
-      projectRoot: args.antigravityProjectRoot,
-      sourceSkillsRoot: path.resolve(__dirname, '..', '..', 'skills'),
-      write: args.write
-    });
-    console.log(JSON.stringify(result, null, 2));
-    return { status: 0, result };
-  }
-  assertReconciliationCommandArgs(args);
-  const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
-  const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-  if (args.reconcileStaging) {
-    assertSourceDowngradeAllowed(existingState, args);
-    return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
-  }
-  maybePrintAgentRulesPreflight(args, existingState);
 
-  assertSourceDowngradeAllowed(existingState, args);
+  #reportContext(state, snapshot, targetSyncs) {
+    const args = this.#args;
+    return {
+      repo: repoReportContextFromState(state, args),
+      targetSyncs,
+      skippedTargets: snapshot.skippedTargets,
+      nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
+      thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
+      targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
+    };
+  }
 
-  if (isHookNoop(args, existingState)) {
-    if (existingState?.hub_version && !existingState.auto_sync_enabled) {
-      console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
+  // Prunes old update reports on write; otherwise reports the last recorded cleanup.
+  #cleanupReports(state) {
+    const args = this.#args;
+    const cleanupResult = args.write
+      ? cleanupUpdateReports({ retentionDays: state.update_report_retention_days })
+      : (state.last_update_report_cleanup || {
+          retention_days: state.update_report_retention_days,
+          report_log_directory: updateReportDir(),
+          max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
+          deleted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+          errors: []
+        });
+    state.last_update_report_cleanup = cleanupResult;
+    if (args.write && cleanupResult.error_count && !args.hook) {
+      console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
     }
-    return { status: 0, audit: null };
+    return cleanupResult;
   }
 
-  this.#nextState = applyRequestedState(existingState, args);
-  const cleanupResult = args.write
-    ? cleanupUpdateReports({ retentionDays: this.#nextState.update_report_retention_days })
-    : (this.#nextState.last_update_report_cleanup || {
-        retention_days: this.#nextState.update_report_retention_days,
-        report_log_directory: updateReportDir(),
-        max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
-        deleted_count: 0,
-        skipped_count: 0,
-        error_count: 0,
-        errors: []
-      });
-  this.#nextState.last_update_report_cleanup = cleanupResult;
-  if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
-  }
-  if (args.enableRepoAutoUpdate && !this.#nextState.repo_path) {
-    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
-  }
-  const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: this.#nextState });
-  this.#nextState = initialSnapshot.state;
-  let { discoveries, payloads, checksum } = initialSnapshot;
-  if (testHooks.afterInitialSnapshotDerivation) testHooks.afterInitialSnapshotDerivation(initialSnapshot);
-
-  const audit = buildAudit({ args, hubPath, state: this.#nextState, discoveries, checksum, payloads });
-  if (args.audit || !args.write) {
-    console.log(JSON.stringify(audit, null, 2));
-  }
-  if (!args.write) return { status: 0, audit };
-  if (shouldRunRepoAutoUpdate(args, this.#nextState)) {
-    return runRepoAutoUpdate({ args, hubPath, state: this.#nextState, discoveries, checksum, payloads, testHooks });
-  }
-  const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, this.#nextState, checksum, discoveries[target], payloads));
-  if (
-    args.syncEnabled &&
-    !args.enableTargets.length &&
-    !args.disableTargets.length &&
-    !args.enableAutoSync &&
-    !args.disableAutoSync &&
-    !args.enableRepoAutoUpdate &&
-    !args.disableRepoAutoUpdate &&
-    !hasTargetSync
-  ) {
-    const hasConfiguredState = Boolean(
-      existingState.hub_version ||
-      Object.keys(existingState.bridge_versions_by_source || {}).length ||
-      existingState.auto_sync_enabled ||
-      existingState.repo_auto_update_enabled ||
-      SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled)
-    );
-    if (!hasConfiguredState) {
-      if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
-      return { status: 0, audit };
-    }
-    const report = persistActiveNoTargetWrite({
-      args,
-      hubPath,
-      cleanupResult,
-      testHooks,
-      buildReportContext: (state, snapshot, targetSyncs) => ({
-        repo: repoReportContextFromState(state, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
-          repoPath: state.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      })
-    });
-    this.#nextState = report.state;
-    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
-    const finalAudit = buildAudit({ args, hubPath, state: this.#nextState, discoveries, checksum, payloads });
+  // An active run with no target to write still records its report and state.
+  #persistNoTargetWrite(cleanupResult, snapshot) {
+    const args = this.#args, hubPath = this.#hubPath;
+    const report = persistActiveNoTargetWrite({ args, hubPath, cleanupResult, testHooks: this.#testHooks,
+      buildReportContext: (state, current, targetSyncs) => this.#reportContext(state, current, targetSyncs) });
+    const { discoveries, payloads, checksum } = report.snapshot || snapshot;
+    const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
     return { status: 0, audit: finalAudit };
   }
-  if (args.hook && !hasTargetSync) {
-    const report = persistActiveNoTargetWrite({
-      args,
-      hubPath,
-      cleanupResult,
-      testHooks,
-      buildReportContext: (state, snapshot, targetSyncs) => ({
-        repo: repoReportContextFromState(state, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
-          repoPath: state.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      })
-    });
-    this.#nextState = report.state;
-    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
-    const finalAudit = buildAudit({ args, hubPath, state: this.#nextState, discoveries, checksum, payloads });
-    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    return { status: 0, audit: finalAudit };
+
+  #hasConfiguredState(existingState) {
+    return Boolean(existingState.hub_version || Object.keys(existingState.bridge_versions_by_source || {}).length
+      || existingState.auto_sync_enabled || existingState.repo_auto_update_enabled
+      || SUPPORTED_TARGETS.some(target => existingState.targets[target]?.enabled));
   }
 
-  const lock = this.#lock=acquireLock(path.dirname(hubPath), args);
-  if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
-    return { status: 0, audit };
-  }
-
-  try {
-    const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-    assertSourceDowngradeAllowed(lockedState, args);
-    this.#nextState = applyRequestedState(lockedState, args);
-    this.#nextState.last_update_report_cleanup = cleanupResult;
-    let snapshot = deriveSnapshotGeneration({ args, hubPath, state: this.#nextState, prepareForWrite: true });
-    this.#nextState = snapshot.state;
-    ({ discoveries, payloads, checksum } = snapshot);
-    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-
-    const targetSyncs = [];
-    for (const plan of snapshot.plannedTargetSyncs) {
-      const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
-      updateTargetState(this.#nextState, plan.target, discoveries[plan.target], checksum, true, '');
+  // Writes the hub snapshot and every planned target under the hub lock.
+  #lockedSync(cleanupResult, audit) {
+    const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
+    const lock = acquireLock(path.dirname(hubPath), args);
+    if (!lock.acquired) {
+      console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
+      return { status: 0, audit };
     }
-
-    this.#nextState.updated_at = timestamp();
-    snapshot = { ...snapshot, state: this.#nextState };
-    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-
-    const report = maybeWriteUpdateReport({
-      args,
-      hubPath,
-      state: this.#nextState,
-      checksum,
-      context: {
-        repo: repoReportContextFromState(this.#nextState, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, this.#nextState, {
-          repoPath: this.#nextState.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, this.#nextState),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      }
-    });
-    this.#nextState = report.state;
-    if (report.reportPath) {
-      snapshot = { ...snapshot, state: this.#nextState };
+    try {
+      const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+      assertSourceDowngradeAllowed(lockedState, args);
+      let state = applyRequestedState(lockedState, args);
+      state.last_update_report_cleanup = cleanupResult;
+      let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
+      state = snapshot.state;
+      const { discoveries, payloads, checksum } = snapshot;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      const targetSyncs = [];
+      for (const plan of snapshot.plannedTargetSyncs) {
+        const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
+        targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
+        updateTargetState(state, plan.target, discoveries[plan.target], checksum, true, '');
+      }
+      state.updated_at = timestamp();
+      snapshot = { ...snapshot, state };
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      const report = maybeWriteUpdateReport({ args, hubPath, state, checksum, context: this.#reportContext(state, snapshot, targetSyncs) });
+      state = report.state;
+      if (report.reportPath) {
+        snapshot = { ...snapshot, state };
+        writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      }
+      const finalAudit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+      if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+      else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+      else if (!args.hook) console.log('Toolkit local bridge sync complete.');
+      return { status: 0, audit: finalAudit };
+    } finally {
+      releaseLock(lock);
+    }
+  }
+
+  execute() {
+    const noop = this.#environmentNoop();
+    if (noop) return noop;
+    const args = this.#args = parseArgs(this.#argv);
+    const isolated = this.#isolatedProjectCommand(args);
+    if (isolated) return isolated;
+    assertReconciliationCommandArgs(args);
+    const hubPath = this.#hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
+    const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+    if (args.reconcileStaging) {
+      assertSourceDowngradeAllowed(existingState, args);
+      return runStagingReconciliation({ args, hubPath, state: existingState, testHooks: this.#testHooks });
+    }
+    maybePrintAgentRulesPreflight(args, existingState);
+    assertSourceDowngradeAllowed(existingState, args);
+    if (isHookNoop(args, existingState)) {
+      if (existingState?.hub_version && !existingState.auto_sync_enabled) {
+        console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
+      }
+      return { status: 0, audit: null };
     }
 
-    const finalAudit = buildAudit({ args, hubPath, state: this.#nextState, discoveries, checksum, payloads });
-    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-    else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    else if (!args.hook) console.log('Toolkit local bridge sync complete.');
-    return { status: 0, audit: finalAudit };
-  } finally {
-    releaseLock(lock);
+    const requested = applyRequestedState(existingState, args);
+    const cleanupResult = this.#cleanupReports(requested);
+    if (args.enableRepoAutoUpdate && !requested.repo_path) {
+      throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
+    }
+    const snapshot = deriveSnapshotGeneration({ args, hubPath, state: requested });
+    const state = snapshot.state;
+    const { discoveries, payloads, checksum } = snapshot;
+    if (this.#testHooks.afterInitialSnapshotDerivation) this.#testHooks.afterInitialSnapshotDerivation(snapshot);
+
+    const audit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+    if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
+    if (!args.write) return { status: 0, audit };
+    if (shouldRunRepoAutoUpdate(args, state)) {
+      return runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks: this.#testHooks });
+    }
+    const hasTargetSync = SUPPORTED_TARGETS.some(target => targetWouldSync(target, state, checksum, discoveries[target], payloads));
+    const plainSync = args.syncEnabled && !args.enableTargets.length && !args.disableTargets.length && !args.enableAutoSync
+      && !args.disableAutoSync && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate && !hasTargetSync;
+    if (plainSync) {
+      if (!this.#hasConfiguredState(existingState)) {
+        if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+        return { status: 0, audit };
+      }
+      return this.#persistNoTargetWrite(cleanupResult, snapshot);
+    }
+    if (args.hook && !hasTargetSync) return this.#persistNoTargetWrite(cleanupResult, snapshot);
+    return this.#lockedSync(cleanupResult, audit);
   }
-}
 }
 function run(argv=process.argv.slice(2),testHooks={}){return new LocalBridgeRun(argv,testHooks).execute();}
 

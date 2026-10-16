@@ -15,7 +15,14 @@ const PROGRAMME = 461;
 const CHILD = 421;
 const OWNER = 'owner-example';
 const LANE = 'toolkit-v3-core-synthetic';
-const FIXTURE_COMMIT = '70a775ae49f96e90da4a8f53f16522ce1d49b9bd';
+// Synthetic fixtures read their source bytes from the checked-out commit, so they work in
+// any clone (including CI merge commits) without depending on unpublished history.
+const FIXTURE_COMMIT = (() => {
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', windowsHide: true });
+  const value = String(head.stdout || '').trim();
+  if (head.status !== 0 || !/^[0-9a-f]{40}$/.test(value)) throw new Error('synthetic V3 fixture requires a git checkout');
+  return value;
+})();
 const CANDIDATE = Object.freeze({
   pr_number: 461,
   branch: 'synthetic/toolkit-v3-core',
@@ -58,7 +65,9 @@ function createSourceBank(repositoryRoot, currentStack = false, registryBytes = 
   const bytesByName = new Map([...files].map(([name, sourcePath]) => [name,
     currentStack && ['registry','decision-schema'].includes(name)
       ? name === 'registry' && registryBytes !== undefined ? Buffer.from(registryBytes) : fs.readFileSync(path.join(repositoryRoot,name==='decision-schema'?'repo/contracts/controller-kernel/controller-decision-v2.schema.json':sourcePath))
-      : gitFile(repositoryRoot, sourcePath)]));
+      // Historical fixtures bind the retained pre-adoption registry, not the current one.
+      : name === 'registry' ? fs.readFileSync(path.join(__dirname, 'fixtures', 'stack-registry-v3-historical.json'))
+        : gitFile(repositoryRoot, sourcePath)]));
   if (currentStack) files.set('decision-schema','repo/contracts/controller-kernel/controller-decision-v2.schema.json');
   const references = new Map();
   const reference = (name, suffix = '') => {
