@@ -22,10 +22,11 @@ class TaskOwnedFixtureRoot {
   #prefix;
   #repositoryRoot;
   #guard;
+  #privateParent;
   #root = null;
   #provisioned = false;
 
-  constructor({ envKey, parent, prefix, repositoryRoot, guard = () => {} }) {
+  constructor({ envKey, parent, prefix, repositoryRoot, guard = () => {}, privateParent = false }) {
     if (!/^TOOLKIT_[A-Z0-9_]+$/.test(envKey || '')) throw new Error('TASK_OWNED_ROOT_ENV_KEY_REQUIRED');
     if (!path.isAbsolute(parent || '')) throw new Error('TASK_OWNED_ROOT_PARENT_REQUIRED');
     if (!path.isAbsolute(repositoryRoot || '')) throw new Error('TASK_OWNED_ROOT_REPOSITORY_ROOT_REQUIRED');
@@ -35,6 +36,8 @@ class TaskOwnedFixtureRoot {
     this.#prefix = prefix;
     this.#repositoryRoot = path.resolve(repositoryRoot);
     this.#guard = guard;
+    // Only a Toolkit-owned parent is tightened; a shared OS temp root is never chmodded.
+    this.#privateParent = privateParent === true;
   }
 
   get provisioned() { return this.#provisioned; }
@@ -92,7 +95,7 @@ class TaskOwnedFixtureRoot {
     const { invocation, ownerPid } = TaskOwnedFixtureRoot.#invocation();
     if (ownerPid !== process.pid) throw new Error('TASK_OWNED_ROOT_FOREIGN_INVOCATION');
     fs.mkdirSync(this.#parent, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') fs.chmodSync(this.#parent, 0o700);
+    if (this.#privateParent && process.platform !== 'win32') fs.chmodSync(this.#parent, 0o700);
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(this.#parent, this.#prefix)));
     if (process.platform === 'win32') TaskOwnedFixtureRoot.restrictWindowsAcl(root);
     else fs.chmodSync(root, 0o700);
@@ -132,7 +135,7 @@ class OwnedReceiptCarrier {
   constructor({ repositoryRoot, guard }) {
     if (typeof guard !== 'function') throw new Error('OWNED_RECEIPT_CARRIER_GUARD_REQUIRED');
     this.#root = new TaskOwnedFixtureRoot({
-      envKey: 'TOOLKIT_RECEIPT_TEST_CARRIER', prefix: 'carrier-', repositoryRoot, guard,
+      envKey: 'TOOLKIT_RECEIPT_TEST_CARRIER', prefix: 'carrier-', repositoryRoot, guard, privateParent: true,
       parent: path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'github-program-receipt', 'tests'),
     });
   }
