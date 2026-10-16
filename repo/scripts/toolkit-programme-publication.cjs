@@ -7,15 +7,21 @@
 // must still match, otherwise GitHub rejects the write). Parent and child issue
 // bodies are projections rendered from one verified canonical revision.
 //
-// GitHub offers no conditional issue-body update, so projections use an enforced
-// alternative rather than read-write-readback alone: the managed block is rewritten
-// only when the live body still matches the base the renderer saw, and after the
-// write GitHub's own edit history must show that the edit immediately preceding
-// ours is exactly that base. If anything intervened, the foreign edit is still
-// retrievable from that history, and the target is held for reconciliation instead
-// of being overwritten again. Concurrency is therefore constrained to one writer
-// per target with detected, recoverable conflicts; this module claims no
-// multi-writer atomicity it cannot prove.
+// GitHub offers no conditional issue-body update: the REST PATCH and the GraphQL
+// mutation both overwrite unconditionally. Projections therefore assume one writer
+// per issue and detect, rather than prevent, a conflicting edit:
+// - before the write, the live body must equal the base the caller rendered
+//   against; otherwise nothing is written (FOREIGN_EDIT_BEFORE_WRITE);
+// - an edit landing between that read and the write is overwritten. After the
+//   write, the live body must equal the target, and the edit history must show
+//   exactly the entries our write adds above the newest entry seen before it. Any
+//   extra entry is reported as INTERVENING_EDIT_OVERWRITTEN with its identity.
+// The history is matched by entry identity only. `UserContentEdit.diff` is
+// documented as a summary of changes, not a body, so it is never read; this module
+// therefore cannot retrieve or restore overwritten foreign text. Restoring it from
+// GitHub's edit history is an owner action, and the held target must not be
+// republished until that is done. The history is bounded (100 entries observed), so
+// that restoration cannot wait indefinitely.
 
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -27,6 +33,7 @@ const ISSUE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // Thin adapter over the authenticated `gh` CLI. Every call names the exact
 // repository; nothing here chooses an account, token or alternate transport.
 class GhTransport {
+  static HISTORY_WINDOW = 10;
   #run;
   constructor({ run = GhTransport.spawn } = {}) { this.#run = run; }
 
@@ -61,14 +68,15 @@ class GhTransport {
     return { state: 'APPLIED', sha: r.value.content.sha, commit: r.value.commit.sha };
   }
 
+  // Edit entries are returned newest first, as identities only (see the header).
   readIssue(repository, number) {
     const [owner, name] = repository.split('/');
-    const r = this.#api(['graphql', '-f', `query=query($o:String!,$n:String!,$i:Int!){repository(owner:$o,name:$n){issue(number:$i){id body updatedAt userContentEdits(first:2){nodes{diff editedAt}}}}}`,
-      '-F', `o=${owner}`, '-F', `n=${name}`, '-F', `i=${number}`]);
+    const r = this.#api(['graphql', '-f', `query=query($o:String!,$n:String!,$i:Int!,$h:Int!){repository(owner:$o,name:$n){issue(number:$i){body userContentEdits(first:$h){nodes{id editedAt editor{login}}}}}}`,
+      '-F', `o=${owner}`, '-F', `n=${name}`, '-F', `i=${number}`, '-F', `h=${GhTransport.HISTORY_WINDOW}`]);
     if (!r.ok) fail('PUBLICATION_READ_FAILED', { stderr: r.stderr });
     const issue = r.value.data.repository.issue;
     if (!issue) fail('PUBLICATION_TARGET_MISSING');
-    return { body: issue.body, updated_at: issue.updatedAt, edits: issue.userContentEdits.nodes.map(n => ({ body: n.diff, edited_at: n.editedAt })) };
+    return { body: issue.body, edits: issue.userContentEdits.nodes.map(n => ({ id: n.id, edited_at: n.editedAt, editor: n.editor ? n.editor.login : null })) };
   }
 
   writeIssueBody(repository, number, body) {
@@ -135,26 +143,29 @@ class IssueProjectionPublisher {
   // caller rendered against (`base_digest`). Returns NOOP when already published.
   publish({ repository, issue, marker, block, base_digest, replace_once }) {
     if (!ISSUE.test(repository || '') || !Number.isSafeInteger(issue) || issue < 1) fail('PUBLICATION_TARGET_INVALID');
+    if (!/^[0-9a-f]{64}$/.test(base_digest || '')) fail('PUBLICATION_BASE_REQUIRED');
     const live = this.#transport.readIssue(repository, issue);
     const target = IssueProjectionPublisher.splice(live.body, marker, block, { replace_once });
     if (live.body === target) return { state: 'NOOP', body_digest: sha256(target) };
     if (base_digest !== sha256(live.body)) {
       return { state: 'HOLD', reason: 'FOREIGN_EDIT_BEFORE_WRITE', observed_digest: sha256(live.body), expected_digest: base_digest };
     }
+    const anchor = live.edits.length ? live.edits[0].id : null;
     const written = this.#transport.writeIssueBody(repository, issue, target);
     if (written.state !== 'APPLIED') return { state: 'UNKNOWN', reason: 'WRITE_OUTCOME_UNKNOWN', target_digest: sha256(target) };
     const after = this.#transport.readIssue(repository, issue);
-    const [ours, previous] = after.edits;
-    if (after.body !== target || !ours || ours.body !== target) {
-      return { state: 'HOLD', reason: 'POST_WRITE_BODY_DIVERGED', observed_digest: sha256(after.body), target_digest: sha256(target) };
+    const at = anchor === null ? after.edits.length : after.edits.findIndex(e => e.id === anchor);
+    const added = at === -1 ? null : after.edits.slice(0, at);
+    const evidence = { base_digest, target_digest: sha256(target), anchor_edit: anchor, added_edits: added };
+    if (after.body !== target) return { state: 'HOLD', reason: 'POST_WRITE_BODY_DIVERGED', observed_digest: sha256(after.body), ...evidence };
+    // A write adds one entry; the first edit of an issue also adds one for its original body.
+    const expected = anchor === null ? 2 : 1;
+    if (added === null || added.length < expected) return { state: 'HOLD', reason: 'HISTORY_UNVERIFIABLE', ...evidence };
+    if (added.length > expected) {
+      return { state: 'HOLD', reason: 'INTERVENING_EDIT_OVERWRITTEN', overwritten_edits: added.slice(1, added.length - expected + 1),
+        foreign_text: 'NOT_RETRIEVED', ...evidence };
     }
-    // GitHub records an edit entry for the prior body only once a body has been edited;
-    // the first edit of an original body has no predecessor entry to compare.
-    if (previous && previous.body !== live.body) {
-      return { state: 'HOLD', reason: 'INTERVENING_EDIT_PRESERVED_IN_HISTORY', intervening_digest: sha256(previous.body),
-        target_digest: sha256(target) };
-    }
-    return { state: 'APPLIED', body_digest: sha256(target), base_digest };
+    return { state: 'APPLIED', body_digest: sha256(target), base_digest, edit: added[0].id };
   }
 
   bodyDigest(repository, issue) { return sha256(this.#transport.readIssue(repository, issue).body); }
@@ -163,7 +174,8 @@ class IssueProjectionPublisher {
 // Publishes the parent and every child projection from one canonical revision and
 // resumes partial publication: applied targets become NOOP on retry, held or
 // unknown targets stay pending with their reason, and nothing is reported current
-// until every target is applied or already equal.
+// until every target is applied or already equal. Every target needs the digest of
+// the body its block was rendered against; a base read here would protect nothing.
 class ProgrammeProjectionReconciler {
   #publisher; #render;
   constructor({ publisher, render }) {
@@ -177,9 +189,8 @@ class ProgrammeProjectionReconciler {
     for (const target of targets) {
       const block = this.#render(canonical.state, target);
       if (typeof block !== 'string' || !block.includes(canonical.revision)) fail('PUBLICATION_RENDER_UNBOUND');
-      const base = bases[target.issue] ?? this.#publisher.bodyDigest(repository, target.issue);
       results.push({ issue: target.issue, role: target.role,
-        ...this.#publisher.publish({ repository, issue: target.issue, marker: target.marker, block, base_digest: base,
+        ...this.#publisher.publish({ repository, issue: target.issue, marker: target.marker, block, base_digest: bases[target.issue],
           replace_once: target.replace_once }) });
     }
     const pending = results.filter(r => !['APPLIED', 'NOOP'].includes(r.state));
