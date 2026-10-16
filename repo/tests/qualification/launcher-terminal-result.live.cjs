@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// UAT-F1 native verification (outside the CI glob). Replays retained native Claude Code
+// Launcher terminal-result native verification (outside the CI glob). Replays retained native Claude Code
 // stream-json captures through the candidate and corrected GateSessionLauncher and
 // compares the reported text, error state and cost with the stream's terminal result
 // event. Optionally runs one fresh isolated native session through the corrected
@@ -60,8 +60,8 @@ const digestText = v => ({ ...v, result_text: v.result_text === null ? null : { 
 function gateFor() {
   const { GateAssignment } = require(path.join(SCRIPTS, 'toolkit-v3-lifecycle.cjs'));
   const h = s => sha(s);
-  return GateAssignment.admit({ assignment_id: 'uat-f1-native-verification', programme: 421, child: 461, role: 'G1',
-    acceptance: { mode: 'OBJECTIVE', objective_reference: h('uat-f1'), owner: 'owner' } })
+  return GateAssignment.admit({ assignment_id: 'launcher-terminal-result-verification', programme: 421, child: 461, role: 'G1',
+    acceptance: { mode: 'OBJECTIVE', objective_reference: h('launcher-terminal-result'), owner: 'owner' } })
     .launch({ session_id: 's1', launch_request_id: 'L1', requested_by: 'CONTROLLER' }).gate;
 }
 function captured() { return require(path.join(ROOT, 'repo', 'tests', 'support', 'captured-stack-fixture.cjs')).capturedStack('owner-claude'); }
@@ -92,13 +92,13 @@ function main() {
     const launcher = new corrected.GateSessionLauncher({ captured: captured(), role: 'G1',
       base_args: ['--setting-sources', 'project,local', '--max-turns', '2'],
       spawn: (cmd, a, o) => { const r = spawnSync(cmd, a, o); raw = String(r.stdout || ''); return r; } });
-    const run = launcher.start(gateFor(), { session_id: 's1', prompt: 'Reply with exactly: UAT-F1-LIVE-OK', cwd: opt.live });
+    const run = launcher.start(gateFor(), { session_id: 's1', prompt: 'Reply with exactly: LAUNCHER-LIVE-OK', cwd: opt.live });
     const t = terminal(raw);
     live = { exit: run.exit, model: run.model, result_events: t.result_events, stream_sha256: sha(raw),
       terminal: digestText(t.terminal), corrected: digestText(pick(run)), corrected_matches_terminal: same(pick(run), t.terminal),
-      text_is_expected: run.result_text === 'UAT-F1-LIVE-OK', cost_usd: run.cost_usd };
+      text_is_expected: run.result_text === 'LAUNCHER-LIVE-OK', cost_usd: run.cost_usd };
   }
-  const record = { schema: 'toolkit.v3.uat-f1-native-verification.v1', at_utc: new Date().toISOString(), head,
+  const record = { schema: 'toolkit.v3.launcher-terminal-result-verification.v1', at_utc: new Date().toISOString(), head,
     candidate_ref: opt.candidateRef, candidate_launcher_sha256: candidate.source_sha256,
     corrected_launcher_sha256: corrected.source_sha256, replays, live,
     // A stream without a terminal result is missing evidence, never a pass.
