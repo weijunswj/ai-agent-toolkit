@@ -629,109 +629,106 @@ function mutationLingerWarning(args) {
 // signal. A non-zero exit or a timeout is never treated as success unless the
 // final supported state verification passes.
 class ClaudePluginMutationOperation {
-  #command; #mutationArgs; #options;
-  #deadlineMs; #pollMs; #startedAt; #child; #childExit=null; #childError=null; #lastState=null; #lastListError=null;
-  constructor(command, mutationArgs, options = {}) {this.#command=command;this.#mutationArgs=mutationArgs;this.#options=options;this.#deadlineMs=options.deadlineMs||mutationDeadlineMs();this.#pollMs=options.pollMs||mutationPollMs();}
-  async run() {
-    const command=this.#command,mutationArgs=this.#mutationArgs,options=this.#options;
+  #command; #mutationArgs; #options; #expectedSourceCommit = '';
+  #deadlineMs; #pollMs; #startedAt; #child; #childExit = null; #childError = null; #lastState = null; #lastListError = null;
 
-  const expectedSourceCommit = options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()));
-  this.#startedAt=Date.now();
-
-  try {
-    this.#child = spawnClaudeProcess(command, mutationArgs);
-    this.#child.on('exit', (code, signal) => {
-      this.#childExit = { code, signal };
-    });
-    this.#child.on('error', (error) => {
-      this.#childError = error;
-    });
-    this.#child.unref();
-  } catch (error) {
-    return {
-      ok: false,
-      state: null,
-      warning: '',
-      childFailed: true,
-      failure: `claude ${mutationArgs.join(' ')} failed to start: ${error.message}`
-    };
+  constructor(command, mutationArgs, options = {}) {
+    this.#command = command; this.#mutationArgs = mutationArgs; this.#options = options;
+    this.#deadlineMs = options.deadlineMs || mutationDeadlineMs();
+    this.#pollMs = options.pollMs || mutationPollMs();
   }
 
-  for (;;) {
+  get #label() { return `claude ${this.#mutationArgs.join(' ')}`; }
+  get #verificationErrors() { return formatStateErrors(this.#lastState, this.#lastListError); }
+
+  #failed(failure, childFailed, state = this.#lastState) {
+    return { ok: false, state, warning: '', childFailed, failure };
+  }
+
+  // Returns a failure result when the command cannot start, otherwise null.
+  #start() {
     try {
-      const pluginList = runClaudeJson(command, ['plugin', 'list', '--json']);
+      this.#child = spawnClaudeProcess(this.#command, this.#mutationArgs);
+      this.#child.on('exit', (code, signal) => { this.#childExit = { code, signal }; });
+      this.#child.on('error', (error) => { this.#childError = error; });
+      this.#child.unref();
+      return null;
+    } catch (error) {
+      return this.#failed(`${this.#label} failed to start: ${error.message}`, true, null);
+    }
+  }
+
+  // One verification pass; returns the verified result or null to keep polling.
+  async #pollOnce() {
+    const options = this.#options;
+    try {
+      const pluginList = runClaudeJson(this.#command, ['plugin', 'list', '--json']);
       this.#lastListError = null;
       this.#lastState = evaluateClaudeToolkitPluginState(pluginList, {
         repoRoot: options.repoRoot,
         expectedVersion: options.expectedVersion,
-        repoCommit: expectedSourceCommit
+        repoCommit: this.#expectedSourceCommit
       });
-      if (this.#lastState.ok) {
-        // The synchronous state poll starves the event loop, so a this.#child that
-        // already exited cleanly may not have had its exit event processed
-        // yet. Give it a short bounded settle window before deciding whether
-        // to report it as lingering.
-        const settleDeadline = Date.now() + 250;
-        while (!this.#childExit && !this.#childError && Date.now() < settleDeadline) {
-          await sleep(10);
-        }
-        const lingered = !this.#childExit || this.#childExit.code !== 0;
-        terminateChild(this.#child);
-        return {
-          ok: true,
-          state: this.#lastState,
-          warning: lingered ? mutationLingerWarning(mutationArgs) : '',
-          childFailed: false,
-          failure: ''
-        };
+      if (!this.#lastState.ok) return null;
+      // The synchronous state poll starves the event loop, so a child that
+      // already exited cleanly may not have had its exit event processed
+      // yet. Give it a short bounded settle window before deciding whether
+      // to report it as lingering.
+      const settleDeadline = Date.now() + 250;
+      while (!this.#childExit && !this.#childError && Date.now() < settleDeadline) {
+        await sleep(10);
       }
+      const lingered = !this.#childExit || this.#childExit.code !== 0;
+      terminateChild(this.#child);
+      return {
+        ok: true,
+        state: this.#lastState,
+        warning: lingered ? mutationLingerWarning(this.#mutationArgs) : '',
+        childFailed: false,
+        failure: ''
+      };
     } catch (error) {
       // Transient plugin list failures are tolerated until the deadline; the
       // last one is preserved for the final failure report.
       this.#lastListError = error;
+      return null;
     }
-
-    if (this.#childError) {
-      terminateChild(this.#child);
-      return {
-        ok: false,
-        state: this.#lastState,
-        warning: '',
-        childFailed: true,
-        failure: `claude ${mutationArgs.join(' ')} failed: ${this.#childError.message}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
-      };
-    }
-
-    if (this.#childExit && this.#childExit.code !== 0) {
-      terminateChild(this.#child);
-      return {
-        ok: false,
-        state: this.#lastState,
-        warning: '',
-        childFailed: true,
-        failure: `claude ${mutationArgs.join(' ')} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
-      };
-    }
-
-    const remainingMs = this.#deadlineMs - (Date.now() - this.#startedAt);
-    if (remainingMs <= 0) break;
-    // Every wait is capped to the remaining deadline so an oversized poll
-    // interval can never keep this helper asleep past its advertised
-    // deadline; after the last partial wait the loop performs one final
-    // verification poll at the deadline before giving up.
-    await sleep(Math.min(this.#pollMs, remainingMs));
   }
 
-  terminateChild(this.#child);
-  return {
-    ok: false,
-    state: this.#lastState,
-    warning: '',
-    childFailed: false,
-    failure: `claude ${mutationArgs.join(' ')} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
-  };
-}
+  #childFailure() {
+    if (this.#childError) {
+      terminateChild(this.#child);
+      return this.#failed(`${this.#label} failed: ${this.#childError.message}; installed-state verification failed: ${this.#verificationErrors}`, true);
+    }
+    if (this.#childExit && this.#childExit.code !== 0) {
+      terminateChild(this.#child);
+      return this.#failed(`${this.#label} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${this.#verificationErrors}`, true);
+    }
+    return null;
+  }
 
+  async run() {
+    const options = this.#options;
+    this.#expectedSourceCommit = options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()));
+    this.#startedAt = Date.now();
+    const startFailure = this.#start();
+    if (startFailure) return startFailure;
+    for (;;) {
+      const verified = await this.#pollOnce();
+      if (verified) return verified;
+      const childFailure = this.#childFailure();
+      if (childFailure) return childFailure;
+      const remainingMs = this.#deadlineMs - (Date.now() - this.#startedAt);
+      if (remainingMs <= 0) break;
+      // Every wait is capped to the remaining deadline so an oversized poll
+      // interval can never keep this helper asleep past its advertised
+      // deadline; after the last partial wait the loop performs one final
+      // verification poll at the deadline before giving up.
+      await sleep(Math.min(this.#pollMs, remainingMs));
+    }
+    terminateChild(this.#child);
+    return this.#failed(`${this.#label} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${this.#verificationErrors}`, false);
+  }
 }
 async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
   return new ClaudePluginMutationOperation(command,mutationArgs,options).run();

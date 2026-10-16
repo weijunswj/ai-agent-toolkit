@@ -941,96 +941,123 @@ function verifyCurrentClaudeEnforcement(profile, options = {}) {
       .every((key) => current.activation_proof[key] === profile.activation_proof?.[key]));
 }
 
-function readProfile(host = 'claude-code', options = {}) {
-  const raw = readJson(profilePath(host, options));
-  if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
-  const validEnums = Object.values(TOPOLOGIES).includes(raw.topology) && Object.values(CAPACITY_MODES).includes(raw.capacity_mode);
-  const validNumbers = Number.isSafeInteger(raw.manual_maximum) && raw.manual_maximum >= 0 && raw.manual_maximum <= MAX_MANUAL_WORKERS
-    && Number.isSafeInteger(raw.worker_estimate_bytes) && raw.worker_estimate_bytes >= MIN_WORKER_COST && raw.worker_estimate_bytes <= MAX_WORKER_COST
-    && raw.queue_limit === MAX_QUEUE && raw.reservation_limit === EMERGENCY_WORKER_CEILING;
-  const compatible = (raw.topology === TOPOLOGIES.ROOT_ONLY && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0)
-    || (raw.topology === TOPOLOGIES.CLAUDE_DIRECT && [CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(raw.capacity_mode)
-      && (raw.capacity_mode !== CAPACITY_MODES.MANUAL || raw.manual_maximum >= 1))
-    || (raw.topology === TOPOLOGIES.BROADER_NATIVE && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0);
-  const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(raw.topology);
-  const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
-    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof)
-    && typeof raw.claude_cli === 'string' && raw.claude_cli.length > 0 && (() => { try { processLaunch.validateExecutable(raw.claude_cli); return true; } catch { return false; } })());
-  const testContext = RESOURCE_TEST_CONTEXT.getStore();
-  const currentResources = raw.topology === TOPOLOGIES.CLAUDE_DIRECT && !testContext
-    ? inspectResources() : null;
-  const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
-    || (raw.resource_counter_verified === true
-      && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source)
-      && (testContext || NATIVE_RESOURCE_STATES.has(currentResources) && validResourceState(currentResources)
-        && currentResources.source === raw.resource_counter_source));
-  if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
-    return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
+// The stored launch profile for one host. Reads fail closed to a root-only profile;
+// configuration validates the selection, verified activation and native resource
+// counters before writing; invalidation records a root-only policy with its reason.
+class HostProfileStore {
+  #host; #options;
+
+  constructor(host = 'claude-code', options = {}) { this.#host = host; this.#options = options; }
+
+  static #supportedHost(host) {
+    if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
   }
-  return { ...raw, status: 'configured', supported: true,
-    ...(testContext ? { resource_evidence_context: 'repository-test-fixture', production_supported: false } : { production_supported: true }) };
+
+  static #compatible(topology, capacityMode) {
+    return (topology === TOPOLOGIES.ROOT_ONLY && capacityMode === CAPACITY_MODES.ROOT_ONLY)
+      || (topology === TOPOLOGIES.CLAUDE_DIRECT && [CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(capacityMode))
+      || (topology === TOPOLOGIES.BROADER_NATIVE && capacityMode === CAPACITY_MODES.ROOT_ONLY);
+  }
+
+  static #strict(topology) { return [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(topology); }
+
+  get path() { return profilePath(this.#host, this.#options); }
+
+  read() {
+    const host = this.#host;
+    const raw = readJson(this.path);
+    if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
+    const validEnums = Object.values(TOPOLOGIES).includes(raw.topology) && Object.values(CAPACITY_MODES).includes(raw.capacity_mode);
+    const validNumbers = Number.isSafeInteger(raw.manual_maximum) && raw.manual_maximum >= 0 && raw.manual_maximum <= MAX_MANUAL_WORKERS
+      && Number.isSafeInteger(raw.worker_estimate_bytes) && raw.worker_estimate_bytes >= MIN_WORKER_COST && raw.worker_estimate_bytes <= MAX_WORKER_COST
+      && raw.queue_limit === MAX_QUEUE && raw.reservation_limit === EMERGENCY_WORKER_CEILING;
+    const compatible = HostProfileStore.#compatible(raw.topology, raw.capacity_mode)
+      && (raw.topology === TOPOLOGIES.CLAUDE_DIRECT
+        ? (raw.capacity_mode !== CAPACITY_MODES.MANUAL || raw.manual_maximum >= 1)
+        : raw.manual_maximum === 0);
+    const strictValid = !HostProfileStore.#strict(raw.topology) || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
+      && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof)
+      && typeof raw.claude_cli === 'string' && raw.claude_cli.length > 0 && (() => { try { processLaunch.validateExecutable(raw.claude_cli); return true; } catch { return false; } })());
+    const testContext = RESOURCE_TEST_CONTEXT.getStore();
+    const currentResources = raw.topology === TOPOLOGIES.CLAUDE_DIRECT && !testContext
+      ? inspectResources() : null;
+    const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
+      || (raw.resource_counter_verified === true
+        && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source)
+        && (testContext || NATIVE_RESOURCE_STATES.has(currentResources) && validResourceState(currentResources)
+          && currentResources.source === raw.resource_counter_source));
+    if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
+      return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
+    }
+    return { ...raw, status: 'configured', supported: true,
+      ...(testContext ? { resource_evidence_context: 'repository-test-fixture', production_supported: false } : { production_supported: true }) };
+  }
+
+  configure(selectedInput) {
+    const host = this.#host;
+    HostProfileStore.#supportedHost(host);
+    if (RESOURCE_TEST_CONTEXT.getStore()) throw new Error('Repository-test resource context cannot configure a production profile.');
+    let selected;
+    try { selected = resourceDataCopy(selectedInput); this.#options = resourceOptionShell(this.#options); }
+    catch (_) { throw new Error('The selected Toolkit profile is malformed.'); }
+    const topology = selected.topology;
+    const capacityMode = selected.capacity_mode;
+    if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
+    if (!Object.values(CAPACITY_MODES).includes(capacityMode)) throw new Error(`Unsupported capacity mode: ${capacityMode}`);
+    if (!HostProfileStore.#compatible(topology, capacityMode)) throw new Error('Topology and capacity mode are incompatible.');
+    let manualMaximum = 0;
+    if (capacityMode === CAPACITY_MODES.MANUAL) {
+      manualMaximum = Number(selected.manual_maximum);
+      if (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > MAX_MANUAL_WORKERS) throw new Error('Manual maximum is outside the supported bounds.');
+    }
+    const workerEstimate = Number(selected.worker_estimate_bytes || DEFAULT_WORKER_COST);
+    if (!Number.isSafeInteger(workerEstimate) || workerEstimate < MIN_WORKER_COST || workerEstimate > MAX_WORKER_COST) throw new Error('Worker estimate is outside the supported bounds.');
+    const strict = HostProfileStore.#strict(topology);
+    if (strict && (selected.enforcement_verified !== true || !validActivationProof(selected.activation_proof))) {
+      throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
+    }
+    const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
+    if (Object.hasOwn(selected, 'resource_state') || Object.hasOwn(selected, 'resourceState')) {
+      throw new Error('Caller-provided resource evidence cannot configure a production profile.');
+    }
+    const direct = topology === TOPOLOGIES.CLAUDE_DIRECT;
+    const resourceCapability = direct ? inspectResourceCapability() : { supported: false, source: 'not-applicable' };
+    const resourceSource = resourceCapability.source;
+    if (direct && (!resourceCapability.supported || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
+      throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
+    }
+    const profile = {
+      schema: SCHEMA, host, topology, capacity_mode: capacityMode, manual_maximum: manualMaximum,
+      worker_estimate_bytes: workerEstimate, queue_limit: MAX_QUEUE, reservation_limit: EMERGENCY_WORKER_CEILING,
+      controller_version: CONTROL_VERSION, enforcement_verified: strict, activation_proof: strict ? selected.activation_proof : null,
+      claude_cli: claudeCli,
+      resource_counter_verified: direct,
+      resource_counter_source: direct ? resourceSource : 'not-applicable',
+      updated_at: new Date().toISOString(),
+      enforcement: direct ? 'toolkit-launch-boundary' : (topology === TOPOLOGIES.ROOT_ONLY ? 'native-agent-hook-deny' : 'outside-toolkit-control'),
+    };
+    atomicWriteJson(this.path, profile);
+    return { ...profile, status: 'configured', supported: true };
+  }
+
+  invalidate(reason) {
+    const host = this.#host;
+    HostProfileStore.#supportedHost(host);
+    const profile = {
+      schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY,
+      manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST, queue_limit: MAX_QUEUE,
+      reservation_limit: EMERGENCY_WORKER_CEILING, controller_version: CONTROL_VERSION,
+      enforcement_verified: false, enforcement: 'unverified-root-only-policy', updated_at: new Date().toISOString(),
+      invalidation_reason: String(reason || 'Current enforcement capability could not be verified.'),
+    };
+    atomicWriteJson(this.path, profile);
+    return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
+  }
 }
 
-function configureProfile(host, selected, options = {}) {
-  if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
-  if (RESOURCE_TEST_CONTEXT.getStore()) throw new Error('Repository-test resource context cannot configure a production profile.');
-  try { selected = resourceDataCopy(selected); options = resourceOptionShell(options); }
-  catch (_) { throw new Error('The selected Toolkit profile is malformed.'); }
-  const topology = selected.topology;
-  const capacityMode = selected.capacity_mode;
-  if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
-  if (!Object.values(CAPACITY_MODES).includes(capacityMode)) throw new Error(`Unsupported capacity mode: ${capacityMode}`);
-  const compatible = (topology === TOPOLOGIES.ROOT_ONLY && capacityMode === CAPACITY_MODES.ROOT_ONLY)
-    || (topology === TOPOLOGIES.CLAUDE_DIRECT && [CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(capacityMode))
-    || (topology === TOPOLOGIES.BROADER_NATIVE && capacityMode === CAPACITY_MODES.ROOT_ONLY);
-  if (!compatible) throw new Error('Topology and capacity mode are incompatible.');
-  let manualMaximum = 0;
-  if (capacityMode === CAPACITY_MODES.MANUAL) {
-    manualMaximum = Number(selected.manual_maximum);
-    if (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > MAX_MANUAL_WORKERS) throw new Error('Manual maximum is outside the supported bounds.');
-  }
-  const workerEstimate = Number(selected.worker_estimate_bytes || DEFAULT_WORKER_COST);
-  if (!Number.isSafeInteger(workerEstimate) || workerEstimate < MIN_WORKER_COST || workerEstimate > MAX_WORKER_COST) throw new Error('Worker estimate is outside the supported bounds.');
-  const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
-  if (strict && (selected.enforcement_verified !== true || !validActivationProof(selected.activation_proof))) {
-    throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
-  }
-  const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
-  if (Object.hasOwn(selected, 'resource_state') || Object.hasOwn(selected, 'resourceState')) {
-    throw new Error('Caller-provided resource evidence cannot configure a production profile.');
-  }
-  const resourceCapability = topology === TOPOLOGIES.CLAUDE_DIRECT ? inspectResourceCapability() : { supported: false, source: 'not-applicable' };
-  const resourceSource = resourceCapability.source;
-  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (!resourceCapability.supported
-    || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
-    throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
-  }
-  const profile = {
-    schema: SCHEMA, host, topology, capacity_mode: capacityMode, manual_maximum: manualMaximum,
-    worker_estimate_bytes: workerEstimate, queue_limit: MAX_QUEUE, reservation_limit: EMERGENCY_WORKER_CEILING,
-    controller_version: CONTROL_VERSION, enforcement_verified: strict, activation_proof: strict ? selected.activation_proof : null,
-    claude_cli: claudeCli,
-    resource_counter_verified: topology === TOPOLOGIES.CLAUDE_DIRECT,
-    resource_counter_source: topology === TOPOLOGIES.CLAUDE_DIRECT ? resourceSource : 'not-applicable',
-    updated_at: new Date().toISOString(),
-    enforcement: topology === TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-launch-boundary' : (topology === TOPOLOGIES.ROOT_ONLY ? 'native-agent-hook-deny' : 'outside-toolkit-control'),
-  };
-  atomicWriteJson(profilePath(host, options), profile);
-  return { ...profile, status: 'configured', supported: true };
-}
-
-function invalidateProfile(host, reason, options = {}) {
-  if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
-  const profile = {
-    schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY,
-    manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST, queue_limit: MAX_QUEUE,
-    reservation_limit: EMERGENCY_WORKER_CEILING, controller_version: CONTROL_VERSION,
-    enforcement_verified: false, enforcement: 'unverified-root-only-policy', updated_at: new Date().toISOString(),
-    invalidation_reason: String(reason || 'Current enforcement capability could not be verified.'),
-  };
-  atomicWriteJson(profilePath(host, options), profile);
-  return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
-}
+function readProfile(host = 'claude-code', options = {}) { return new HostProfileStore(host, options).read(); }
+function configureProfile(host, selected, options = {}) { return new HostProfileStore(host, options).configure(selected); }
+function invalidateProfile(host, reason, options = {}) { return new HostProfileStore(host, options).invalidate(reason); }
 function nativeResourceState(value, source, metadata = null) {
   const state = Object.freeze({
     physical_total: value.physical_total,
@@ -2426,54 +2453,75 @@ async function launchWithResourceEnvelope(specInput, effectChannel, options = {}
   }
 }
 
+// One supervised worker run: load and verify the stored job specification, claim the
+// reservation, execute the worker (mode-0 lifecycle or a validated Claude child) and
+// settle checker review and reservation state. Settlement always runs; a mode-0
+// reservation whose outcome is unresolved is retained, never released.
 class WorkerSupervisor {
-  #args; #options; #code=1; #checkerOutcome=null; #claimed=false; #mode0=false; #mode0Settled=false; #spec; #specPath;
-  constructor(args){this.#args=args;this.#options={root:args.root};}
-  async run(){const args=this.#args,options=this.#options;
-  try {
+  #args; #options; #code = 1; #checkerOutcome = null; #claimed = false; #mode0 = false; #mode0Settled = false;
+  #spec; #specPath; #workerExecutable = ''; #promptBytes = null; #jobIdentityDigest = '';
+
+  constructor(args) { this.#args = args; this.#options = { root: args.root }; }
+
+  // Verify the stored specification is the private job file for this reservation.
+  #loadSpec() {
+    const args = this.#args;
     if (!/^[a-f0-9-]{36}$/.test(String(args.reservation || ''))) throw new Error('Toolkit reservation identity is invalid.');
     this.#specPath = path.resolve(String(args.spec || ''));
-    const expectedSpecPath = path.join(controlRoot(options), 'jobs', `${args.reservation}.json`);
+    const expectedSpecPath = path.join(controlRoot(this.#options), 'jobs', `${args.reservation}.json`);
     if (this.#specPath !== expectedSpecPath) throw new Error('Stored worker specification identity is invalid.');
     verifyPrivateRegularFile(this.#specPath);
     const stored = readJson(this.#specPath);
     const encoded = String(stored?.child_prompt_base64 || '');
-    const workerExecutable = String(stored?.worker_executable || '');
-    if (!workerExecutable || workerExecutable !== args.claudeCli) throw new Error('Stored worker executable identity is invalid.');
-    const promptBytes = Buffer.from(encoded, 'base64');
-    if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
+    this.#workerExecutable = String(stored?.worker_executable || '');
+    if (!this.#workerExecutable || this.#workerExecutable !== args.claudeCli) throw new Error('Stored worker executable identity is invalid.');
+    this.#promptBytes = Buffer.from(encoded, 'base64');
+    if (!encoded || this.#promptBytes.toString('base64') !== encoded || this.#promptBytes.length > MAX_PROMPT_BYTES) {
+      throw new Error('Stored child prompt transport is malformed.');
+    }
     const jobSpec = { ...stored };
     delete jobSpec.child_prompt_base64;
     delete jobSpec.worker_executable;
-    jobSpec.child_prompt = promptBytes.toString('utf8');
+    jobSpec.child_prompt = this.#promptBytes.toString('utf8');
     this.#spec = validateLaunchSpec(jobSpec);
-    const jobIdentityDigest = resourceJobIdentityDigest(this.#spec, workerExecutable);
-    const mode0Candidate = mode0ReservationSnapshot(args.reservation, options);
+    this.#jobIdentityDigest = resourceJobIdentityDigest(this.#spec, this.#workerExecutable);
+  }
+
+  async #claim() {
+    const args = this.#args;
+    const mode0Candidate = mode0ReservationSnapshot(args.reservation, this.#options);
     if (mode0Candidate.mode0 && (mode0Candidate.invalid || !mode0Candidate.envelope)) {
       throw new Error('The sealed mode-0 reservation could not be verified before worker execution.');
     }
     this.#mode0 = mode0Candidate.mode0 === true;
-    if (!await claimSupervisorReservation(args.reservation, this.#spec, jobIdentityDigest, workerExecutable, options)) {
+    if (!await claimSupervisorReservation(args.reservation, this.#spec, this.#jobIdentityDigest, this.#workerExecutable, this.#options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
     this.#claimed = true;
+  }
+
+  async #execute() {
     if (this.#mode0) {
-      this.#code = await executeMode0Lifecycle(args.reservation, this.#spec, workerExecutable, jobIdentityDigest, options);
+      this.#code = await executeMode0Lifecycle(this.#args.reservation, this.#spec, this.#workerExecutable, this.#jobIdentityDigest, this.#options);
       this.#mode0Settled = true;
-    } else {
-      const invocation = claudeInvocation(this.#spec, { claudeCli: workerExecutable, promptBytes });
-      const childResult = runValidatedClaude(invocation, this.#spec.role === ROLES.CHECKER);
-      if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
-      if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
-      this.#code = childResult.code;
-      if (this.#spec.role === ROLES.CHECKER && this.#code === 0) {
-        try { this.#checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
-        catch (error) { console.error(error.message); this.#code = 1; }
-      } else if (this.#spec.role === ROLES.CHECKER && childResult.outputExceeded) {
-        console.error('Checker output exceeds the bounded result limit.');
-      }
+      return;
     }
-  } finally {
+    const checker = this.#spec.role === ROLES.CHECKER;
+    const invocation = claudeInvocation(this.#spec, { claudeCli: this.#workerExecutable, promptBytes: this.#promptBytes });
+    const childResult = runValidatedClaude(invocation, checker);
+    if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
+    if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
+    this.#code = childResult.code;
+    if (checker && this.#code === 0) {
+      try { this.#checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
+      catch (error) { console.error(error.message); this.#code = 1; }
+    } else if (checker && childResult.outputExceeded) {
+      console.error('Checker output exceeds the bounded result limit.');
+    }
+  }
+
+  #settle() {
+    const args = this.#args, options = this.#options;
     if (this.#claimed && !this.#mode0 && this.#spec?.role === ROLES.CHECKER) {
       if (this.#code === 0 && !updateCheckerReview(this.#spec.review_id, 'completed', { ...options, checker_result: this.#checkerOutcome })) this.#code = 1;
       if (this.#code !== 0) clearPendingCheckerReview(this.#spec.review_id, options);
@@ -2484,9 +2532,17 @@ class WorkerSupervisor {
     }
     if (this.#mode0 && !this.#mode0Settled) console.error('Mode-0 worker outcome remains unresolved; the reservation is retained.');
   }
-  return this.#code;
-}
 
+  async run() {
+    try {
+      this.#loadSpec();
+      await this.#claim();
+      await this.#execute();
+    } finally {
+      this.#settle();
+    }
+    return this.#code;
+  }
 }
 async function supervise(args){return new WorkerSupervisor(args).run();}
 

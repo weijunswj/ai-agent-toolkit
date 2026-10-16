@@ -939,30 +939,35 @@ function nextStepsForState(state) {
   ];
 }
 
+// One `codex plugin add` run: start the add command detached, then poll the installed
+// plugin list until the Toolkit install verifies, the add command fails, or the deadline
+// passes. Verified installed state is the source of truth, not the child's exit.
 class CodexPluginInstallOperation {
   #command; #addArgs; #options;
-  #deadlineMs=pluginAddDeadlineMs(); #pollMs=pluginAddPollMs(); #startedAt=Date.now(); #child; #childExit=null; #childError=null; #lastState=null; #lastListError=null; #hookChanged=false;
-  constructor(command, addArgs, options) {this.#command=command;this.#addArgs=addArgs;this.#options=options;}
-  async run() {
-    const command=this.#command,addArgs=this.#addArgs,options=this.#options;
+  #deadlineMs = pluginAddDeadlineMs(); #pollMs = pluginAddPollMs(); #startedAt = Date.now();
+  #child; #childExit = null; #childError = null; #lastState = null; #lastListError = null; #hookChanged = false;
 
+  constructor(command, addArgs, options) { this.#command = command; this.#addArgs = addArgs; this.#options = options; }
 
-  try {
-    this.#child = spawnCodexProcess(command, addArgs, { env: process.env });
-    this.#child.on('exit', (code, signal) => {
-      this.#childExit = { code, signal };
-    });
-    this.#child.on('error', (error) => {
-      this.#childError = error;
-    });
-    this.#child.unref();
-  } catch (error) {
-    throw new Error(`codex ${addArgs.join(' ')} failed to start: ${error.message}`);
+  get #label() { return `codex ${this.#addArgs.join(' ')}`; }
+  get #verificationErrors() { return formatStateErrors(this.#lastState, this.#lastListError); }
+
+  #start() {
+    try {
+      this.#child = spawnCodexProcess(this.#command, this.#addArgs, { env: process.env });
+      this.#child.on('exit', (code, signal) => { this.#childExit = { code, signal }; });
+      this.#child.on('error', (error) => { this.#childError = error; });
+      this.#child.unref();
+    } catch (error) {
+      throw new Error(`${this.#label} failed to start: ${error.message}`);
+    }
   }
 
-  while (Date.now() - this.#startedAt <= this.#deadlineMs) {
+  // One verification pass; returns the verified result or null to keep polling.
+  #pollOnce() {
+    const options = this.#options;
     try {
-      const pluginList = runCodexJson(command, ['plugin', 'list', '--json', '--available']);
+      const pluginList = runCodexJson(this.#command, ['plugin', 'list', '--json', '--available']);
       this.#lastListError = null;
       try {
         const prepared = prepareInstalledSessionStartIfPresent(options);
@@ -975,35 +980,41 @@ class CodexPluginInstallOperation {
         repoRoot: options.repoRoot,
         allowConfigCacheFallback: true
       });
-      if (this.#lastState.ok) {
-        const addDidNotExitCleanly = !this.#childExit || this.#childExit.code !== 0;
-        terminateChild(this.#child);
-        return {
-          state: this.#lastState,
-          hookChanged: this.#hookChanged,
-          warning: addDidNotExitCleanly ? codexAddTimeoutWarning(addArgs) : ''
-        };
-      }
+      if (!this.#lastState.ok) return null;
+      const addDidNotExitCleanly = !this.#childExit || this.#childExit.code !== 0;
+      terminateChild(this.#child);
+      return {
+        state: this.#lastState,
+        hookChanged: this.#hookChanged,
+        warning: addDidNotExitCleanly ? codexAddTimeoutWarning(this.#addArgs) : ''
+      };
     } catch (error) {
       this.#lastListError = error;
+      return null;
     }
-
-    if (this.#childError) {
-      terminateChild(this.#child);
-      throw new Error(`codex ${addArgs.join(' ')} failed: ${this.#childError.message}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
-    }
-
-    if (this.#childExit && this.#childExit.code !== 0) {
-      terminateChild(this.#child);
-      throw new Error(`codex ${addArgs.join(' ')} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
-    }
-
-    await sleep(this.#pollMs);
   }
 
-  terminateChild(this.#child);
-  throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
+  #failIfChildFailed() {
+    if (this.#childError) {
+      terminateChild(this.#child);
+      throw new Error(`${this.#label} failed: ${this.#childError.message}; installed-state verification failed: ${this.#verificationErrors}`);
+    }
+    if (this.#childExit && this.#childExit.code !== 0) {
+      terminateChild(this.#child);
+      throw new Error(`${this.#label} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${this.#verificationErrors}`);
+    }
+  }
 
+  async run() {
+    this.#start();
+    while (Date.now() - this.#startedAt <= this.#deadlineMs) {
+      const verified = this.#pollOnce();
+      if (verified) return verified;
+      this.#failIfChildFailed();
+      await sleep(this.#pollMs);
+    }
+    terminateChild(this.#child);
+    throw new Error(`${this.#label} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${this.#verificationErrors}`);
   }
 }
 async function runCodexAddAndVerify(command, addArgs, options) {
