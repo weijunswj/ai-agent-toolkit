@@ -43,7 +43,9 @@ class GateSessionLauncher {
     const r = this.#spawn(this.#claude, args, { cwd, env, encoding: 'utf8', timeout: 300000, maxBuffer: 32 * 1024 * 1024 });
     const lines = String(r.stdout || '').split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     const init = lines.find(l => l.type === 'system' && l.subtype === 'init') || {};
-    const result = lines.find(l => l.type === 'result') || {};
+    // A run that waits on a background helper emits one result per resumed turn;
+    // only the last one is terminal, so earlier ones are never reported.
+    const result = lines.findLast(l => l.type === 'result') || {};
     return { exit: r.status, elapsed_ms: Date.now() - started, native_session_id: init.session_id || null, model: init.model || null,
       result_text: typeof result.result === 'string' ? result.result : null, is_error: result.is_error === true,
       cost_usd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null, raw: r.stdout || '' };

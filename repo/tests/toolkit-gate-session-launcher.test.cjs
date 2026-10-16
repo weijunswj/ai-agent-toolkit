@@ -33,6 +33,37 @@ test('a fresh start binds a derived native session identity; a second start of t
   assert.throws(() => launcher.start(checkpointed, { session_id: 's1', prompt: 'again', cwd: '.' }), e => e.code === 'LAUNCHER_SESSION_NOT_FRESH');
 });
 
+// Stream shaped like a native Claude Code run whose lead waited on a background
+// helper: a second init and result follow the first turn's interim result.
+function streamSpawn(events) {
+  return (cmd, args) => {
+    const id = args[args.indexOf('--session-id') + 1];
+    const init = { type: 'system', subtype: 'init', session_id: id, model: 'claude-opus-5-5' };
+    const lines = events.map(e => e === 'INIT' ? init : { type: 'result', session_id: id, ...e });
+    return { status: 0, stdout: `${lines.map(l => JSON.stringify(l)).join('\n')}\n` };
+  };
+}
+function startWith(events) {
+  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: streamSpawn(events) });
+  return launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.' });
+}
+
+test('UAT-F1: with several result events the terminal one supplies text, error state and cost', () => {
+  const run = startWith(['INIT', { subtype: 'success', is_error: false, result: 'Waiting for the helper.', total_cost_usd: 0.4 },
+    'INIT', { subtype: 'success', is_error: false, result: 'W3-DONE', total_cost_usd: 0.5 }]);
+  assert.deepEqual({ text: run.result_text, error: run.is_error, cost: run.cost_usd }, { text: 'W3-DONE', error: false, cost: 0.5 });
+});
+
+test('UAT-F1 controls: a single result is unchanged and a terminal error after an interim success is reported', () => {
+  const single = startWith(['INIT', { subtype: 'success', is_error: false, result: 'done', total_cost_usd: 0.25 }]);
+  assert.deepEqual({ text: single.result_text, error: single.is_error, cost: single.cost_usd }, { text: 'done', error: false, cost: 0.25 });
+  const failed = startWith(['INIT', { subtype: 'success', is_error: false, result: 'interim', total_cost_usd: 0.1 },
+    'INIT', { subtype: 'error_during_execution', is_error: true, result: 'helper failed', total_cost_usd: 0.3 }]);
+  assert.deepEqual({ text: failed.result_text, error: failed.is_error, cost: failed.cost_usd }, { text: 'helper failed', error: true, cost: 0.3 });
+  const none = startWith(['INIT']);
+  assert.deepEqual({ text: none.result_text, error: none.is_error, cost: none.cost_usd }, { text: null, error: false, cost: null });
+});
+
 test('resume is refused for waiting, submitted, interrupted and retired sessions before any native process', () => {
   const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls) });
   const waiting = gate().transition('s1', 'ASK_OWNER', h('q'));
