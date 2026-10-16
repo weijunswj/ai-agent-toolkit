@@ -236,14 +236,111 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
   if (!installPath) return ['installed plugin state does not expose an exact cache path'];
   const pairs = [
+    ["repo/scripts/toolkit-stack-selection.cjs",false],
+    ["repo/scripts/toolkit-v3-lifecycle.cjs",false],
+    ["repo/scripts/toolkit-github-program-receipt.cjs",false],
+    ["repo/scripts/toolkit-execution-loop.cjs",false],
+    ["repo/scripts/toolkit-github-program-state-v5.cjs",false],
+    ["repo/scripts/toolkit-github-governance-review-reconciler.cjs",false],
+    ["repo/scripts/toolkit-assurance-web-finality.cjs",false],
+    ["repo/scripts/toolkit-capability-registry.cjs",false],
+    ["repo/scripts/toolkit-programme-surface-v1.cjs",false],
+    ["repo/scripts/toolkit-codex-agent-adapter.cjs",false],
+    ["repo/contracts/controller-kernel/controller-decision-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/controller-decision-v2.schema.json",true],
+    ["repo/contracts/controller-kernel/gate-contract-ir-v2.schema.json",true],
+    ["repo/contracts/controller-kernel/gate-contract-ir-v3.schema.json",true],
+    ["repo/contracts/controller-kernel/codex-host-adapter-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/codex-host-adapter-v2.schema.json",true],
     ['.claude-plugin/plugin.json', true],
     ['.claude-plugin/hooks/hooks.json', true],
     ['repo/scripts/toolkit-agent-control.cjs', false],
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+    ['repo/scripts/toolkit-claude-task-session.cjs', false],
+    ['repo/scripts/toolkit-claude-dispatch-observer.cjs', false],
+    ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
+    ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
+    ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
+    ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
+    ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
+    ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
+    ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
+    ["repo/scripts/toolkit-custody-retention-v3.cjs",false],
+    ["repo/scripts/toolkit-evidence-plan-compiler.cjs",false],
+    ["repo/scripts/toolkit-filesystem-cleanup-adapter.cjs",false],
+    ["repo/scripts/toolkit-git-current-tree-expiry-adapter.cjs",false],
+    ["repo/scripts/toolkit-recoverable-cleanup-windows.ps1",false],
+    ["repo/scripts/toolkit-opencode-helper-adapter.cjs",false],
+    ["repo/scripts/toolkit-opencode-project-plugin.cjs",false],
+    ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
+    ["repo/scripts/toolkit-staging-generations.cjs",false],
+    ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
+    ["repo/scripts/repair-codex-plugin-windows-hooks.cjs",false],
+    ["repo/scripts/audit-n8n-skills-plugin-hooks.cjs",false],
+    ["repo/scripts/setup-toolkit-core.cjs",false],
+    ["repo/scripts/setup-toolkit.cjs",false],
+    ["repo/scripts/codex-delegation-backup.cjs",false],
+    ["repo/scripts/codex-delegation-common.cjs",false],
+    ["repo/scripts/codex-delegation-config.cjs",false],
+    ["repo/scripts/codex-delegation-layout.cjs",false],
+    ["repo/scripts/codex-delegation-state.cjs",false],
+    ["repo/scripts/toolkit-codex-helper-hook.cjs",false],
+    ["repo/scripts/toolkit-codex-session-start.cjs",false],
+    ["repo/scripts/toolkit-codex-session-start.ps1",false],
+    ["repo/contracts/bounded-local-execution-loop/execution-loop-contract.schema.json",true],
+    ["repo/contracts/bounded-local-execution-loop/execution-loop-policy.json",true],
+    ["repo/contracts/control-plane-kernel/control-plane-contract.schema.json",true],
+    ["repo/contracts/control-plane-kernel/control-plane-policy.json",true],
+    ["repo/contracts/control-plane-kernel/fixture-manifest.json",true],
+    ["repo/contracts/controller-kernel/evidence-manifest-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/gate-contract-ir-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/programme-surface-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/resource-evidence-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/stack-registry-v1.json",true],
+    ["repo/contracts/controller-kernel/stack-registry-v1.schema.json",true],
+    ["repo/contracts/controller-kernel/stack-registry-v2.json",true],
+    ["repo/contracts/controller-kernel/stack-registry-v2.schema.json",true],
+    ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-contract.schema.json",true],
+    ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-policy.json",true],
+    ["repo/contracts/github-governance-review-reconciler/templates/child-v3.md",false],
+    ["repo/contracts/github-governance-review-reconciler/templates/parent-v3.md",false],
+    ["repo/contracts/github-governance-review-reconciler/templates/pr-v3.md",false],
+    ["repo/contracts/github-governance-review-reconciler/tracker-v3-grammar.json",true],
+    ["repo/contracts/github-program-receipt/authority-packet-v1.schema.json",true],
+    ["repo/contracts/github-program-receipt/authority-packet-v3.schema.json",true],
+    ["repo/contracts/github-program-receipt/github-program-receipt-policy.json",true],
+    ["repo/contracts/github-program-receipt/holder-attestation-v1.schema.json",true],
+    ["repo/contracts/github-program-receipt/pre-recovery-evidence-v1.schema.json",true],
+    ["repo/contracts/github-program-receipt/recovery-record-v1.schema.json",true],
+    ["repo/contracts/github-program-receipt/run-receipt-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/controller-bootstrap-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/human-surface-v2.schema.json",true],
+    ["repo/contracts/github-program-reconciler/post-merge-finalisation-decision-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/post-merge-finalisation-evidence-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/programme-state-v5.schema.json",true],
+    ["repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",true],
+    ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-decision-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-evidence-v1.schema.json",true],
+    ["repo/contracts/github-program-reconciler/v3-release-plan-projection-v1.schema.json",true],
+    ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-contract.schema.json",true],
+    ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-policy.json",true],
+    ["repo/contracts/repository-capability-registry/repository-capability-contract.schema.json",true],
+    ["repo/contracts/repository-capability-registry/repository-capability-policy.json",true],
+    ["repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json",true],
+    ["repo/contracts/toolkit-local-bridge/claude-plugin/marketplace.json",true],
+    ["repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json",true],
+    ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/composer-icon.png",false],
+    ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/logo.png",false],
+    ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
+    ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
+    ["repo/contracts/toolkit-local-bridge/opencode-plugin/ai-agent-toolkit.mjs",false],
+    ["repo/contracts/toolkit-local-bridge/version.json",true],
+    ["repo/CONTROLLER.md",false],
+    ["repo/ARCHITECTURE.md",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));
@@ -259,13 +356,13 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     const sourceBytes = fs.readFileSync(source);
     const installedBytes = fs.readFileSync(installedFile);
     if (!sourceBytes.equals(installedBytes)) errors.push(`installed plugin cache is stale for ${relPath}`);
-    if (json && relPath.endsWith('plugin.json')) {
+    if (json && relPath === '.claude-plugin/plugin.json') {
       try {
         const manifest = JSON.parse(installedBytes.toString('utf8'));
         if (manifest.name !== TOOLKIT_PLUGIN_NAME || manifest.version !== expectedVersion) errors.push('installed plugin identity or version is not current');
       } catch { errors.push('installed plugin manifest is invalid'); }
     }
-    if (json && relPath.endsWith('hooks.json')) {
+    if (json && relPath === '.claude-plugin/hooks/hooks.json') {
       try {
         const hooks = JSON.parse(installedBytes.toString('utf8'));
         const groups = hooks?.hooks?.PreToolUse;
@@ -529,26 +626,25 @@ function mutationLingerWarning(args) {
 // its real work -- while the plugin list state is the authoritative success
 // signal. A non-zero exit or a timeout is never treated as success unless the
 // final supported state verification passes.
-async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
-  const deadlineMs = options.deadlineMs || mutationDeadlineMs();
-  const pollMs = options.pollMs || mutationPollMs();
+class ClaudePluginMutationOperation {
+  #command; #mutationArgs; #options;
+  #deadlineMs; #pollMs; #startedAt; #child; #childExit=null; #childError=null; #lastState=null; #lastListError=null;
+  constructor(command, mutationArgs, options = {}) {this.#command=command;this.#mutationArgs=mutationArgs;this.#options=options;this.#deadlineMs=options.deadlineMs||mutationDeadlineMs();this.#pollMs=options.pollMs||mutationPollMs();}
+  async run() {
+    const command=this.#command,mutationArgs=this.#mutationArgs,options=this.#options;
+
   const expectedSourceCommit = options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()));
-  const startedAt = Date.now();
-  let child;
-  let childExit = null;
-  let childError = null;
-  let lastState = null;
-  let lastListError = null;
+  this.#startedAt=Date.now();
 
   try {
-    child = spawnClaudeProcess(command, mutationArgs);
-    child.on('exit', (code, signal) => {
-      childExit = { code, signal };
+    this.#child = spawnClaudeProcess(command, mutationArgs);
+    this.#child.on('exit', (code, signal) => {
+      this.#childExit = { code, signal };
     });
-    child.on('error', (error) => {
-      childError = error;
+    this.#child.on('error', (error) => {
+      this.#childError = error;
     });
-    child.unref();
+    this.#child.unref();
   } catch (error) {
     return {
       ok: false,
@@ -562,26 +658,26 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
   for (;;) {
     try {
       const pluginList = runClaudeJson(command, ['plugin', 'list', '--json']);
-      lastListError = null;
-      lastState = evaluateClaudeToolkitPluginState(pluginList, {
+      this.#lastListError = null;
+      this.#lastState = evaluateClaudeToolkitPluginState(pluginList, {
         repoRoot: options.repoRoot,
         expectedVersion: options.expectedVersion,
         repoCommit: expectedSourceCommit
       });
-      if (lastState.ok) {
-        // The synchronous state poll starves the event loop, so a child that
+      if (this.#lastState.ok) {
+        // The synchronous state poll starves the event loop, so a this.#child that
         // already exited cleanly may not have had its exit event processed
         // yet. Give it a short bounded settle window before deciding whether
         // to report it as lingering.
         const settleDeadline = Date.now() + 250;
-        while (!childExit && !childError && Date.now() < settleDeadline) {
+        while (!this.#childExit && !this.#childError && Date.now() < settleDeadline) {
           await sleep(10);
         }
-        const lingered = !childExit || childExit.code !== 0;
-        terminateChild(child);
+        const lingered = !this.#childExit || this.#childExit.code !== 0;
+        terminateChild(this.#child);
         return {
           ok: true,
-          state: lastState,
+          state: this.#lastState,
           warning: lingered ? mutationLingerWarning(mutationArgs) : '',
           childFailed: false,
           failure: ''
@@ -590,48 +686,53 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
     } catch (error) {
       // Transient plugin list failures are tolerated until the deadline; the
       // last one is preserved for the final failure report.
-      lastListError = error;
+      this.#lastListError = error;
     }
 
-    if (childError) {
-      terminateChild(child);
+    if (this.#childError) {
+      terminateChild(this.#child);
       return {
         ok: false,
-        state: lastState,
+        state: this.#lastState,
         warning: '',
         childFailed: true,
-        failure: `claude ${mutationArgs.join(' ')} failed: ${childError.message}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+        failure: `claude ${mutationArgs.join(' ')} failed: ${this.#childError.message}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
       };
     }
 
-    if (childExit && childExit.code !== 0) {
-      terminateChild(child);
+    if (this.#childExit && this.#childExit.code !== 0) {
+      terminateChild(this.#child);
       return {
         ok: false,
-        state: lastState,
+        state: this.#lastState,
         warning: '',
         childFailed: true,
-        failure: `claude ${mutationArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+        failure: `claude ${mutationArgs.join(' ')} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
       };
     }
 
-    const remainingMs = deadlineMs - (Date.now() - startedAt);
+    const remainingMs = this.#deadlineMs - (Date.now() - this.#startedAt);
     if (remainingMs <= 0) break;
     // Every wait is capped to the remaining deadline so an oversized poll
     // interval can never keep this helper asleep past its advertised
     // deadline; after the last partial wait the loop performs one final
     // verification poll at the deadline before giving up.
-    await sleep(Math.min(pollMs, remainingMs));
+    await sleep(Math.min(this.#pollMs, remainingMs));
   }
 
-  terminateChild(child);
+  terminateChild(this.#child);
   return {
     ok: false,
-    state: lastState,
+    state: this.#lastState,
     warning: '',
     childFailed: false,
-    failure: `claude ${mutationArgs.join(' ')} did not produce a verified install within ${deadlineMs}ms; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+    failure: `claude ${mutationArgs.join(' ')} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`
   };
+}
+
+}
+async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
+  return new ClaudePluginMutationOperation(command,mutationArgs,options).run();
 }
 
 // Claude plugin-list output is not a documented/versioned schema. Older

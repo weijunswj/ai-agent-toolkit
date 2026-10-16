@@ -509,9 +509,15 @@ function writeOrCheck(relPath, expected, errors, runMode, label = 'managed agent
   }
 }
 
-function validateAndSync(options = {}) {
+class InstructionProjectionOperation {
+  #options;
+  #errors; #sourceTemplates; #source;
+  constructor(options = {}) {this.#options=options;}
+  run() {
+    let options=this.#options;
+
   const runMode = options.mode || mode;
-  const errors = [];
+  const errors = this.#errors = [];
   const executionPrompt = readRequired(executionPromptPath, errors);
   const n8nAdapter = readRequired(n8nAdapterPath, errors);
   const n8nRules = readRequired(n8nRulesPath, errors);
@@ -521,7 +527,7 @@ function validateAndSync(options = {}) {
     writeOrCheck(relPath, expected, errors, runMode, 'n8n safety derivative');
   }
 
-  const sourceTemplates = expectedSourceTemplates(executionPrompt);
+  const sourceTemplates = this.#sourceTemplates = expectedSourceTemplates(executionPrompt);
   for (const [relPath, expected] of Object.entries(sourceTemplates)) {
     writeOrCheck(relPath, expected, errors, runMode, 'agent instruction source template');
   }
@@ -532,7 +538,7 @@ function validateAndSync(options = {}) {
   const antigravityTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, errors);
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
-  const source = {
+  const source = this.#source = {
     root: managedPayload(executionPrompt, n8nAdapter),
     toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
     n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
@@ -544,6 +550,18 @@ function validateAndSync(options = {}) {
   if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
     errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
     return { errors };
+  }
+
+  // Portable instruction payloads consume the same reviewed canonical inputs.
+  // Keep this bounded to the four owned templates; no generic skill sync.
+  for (const [sourcePath, sourceText] of [
+    [repoLocalTemplatePaths.managedAgents, managedAgentsTemplate],
+    [repoLocalTemplatePaths.claude, claudeTemplate],
+    [repoLocalTemplatePaths.gemini, geminiTemplate],
+    [repoLocalTemplatePaths.antigravity, antigravityTemplate]
+  ]) {
+    const publishedPath = sourcePath.replace('repo/contracts/agent-rules/repo-local/', 'skills/repository-agent-rules/repo-local/');
+    writeOrCheck(publishedPath, readRequired(sourcePath, errors) + '\n', errors, runMode, 'portable instruction template');
   }
 
   writeOrCheck('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors), errors, runMode);
@@ -566,7 +584,10 @@ function validateAndSync(options = {}) {
   ), errors, runMode);
 
   return { errors };
+
+  }
 }
+function validateAndSync(options = {}) {return new InstructionProjectionOperation(options).run();}
 
 if (require.main === module) {
   const { errors } = validateAndSync();

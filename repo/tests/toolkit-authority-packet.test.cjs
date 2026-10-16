@@ -414,6 +414,92 @@ test('authority packet event identities are append-only and duplicate-safe', () 
   } finally { db.close(); }
 });
 
+test('historical governance packets remain structurally readable while prospective Toolkit admission stays bound', () => {
+  const packetValue = packetFixture('historical-foreign-governance');
+  const foreignGovernanceRepository = 'octocat/controller-bootstrap-governance-fixture';
+  packetValue.bindings.governance.repository = foreignGovernanceRepository;
+  for (const evidence of packetValue.body.evidence_refs.filter((item) => item.kind === 'GIT_BLOB')) {
+    evidence.repository = foreignGovernanceRepository;
+  }
+
+  const historical = runtime.validateAuthorityPacket(packetValue);
+  assert.equal(historical.bindings.governance.repository, foreignGovernanceRepository);
+  const readers = support.readers(historical);
+  const store = runtime.initialiseAuthorityPacketStore(
+    support.options(support.stateRoot('historical-foreign-governance-')),
+    readers
+  );
+  const before = support.receiptEffectSnapshot(store);
+  assertCode(
+    () => store.persistAuthorityPacket(historical, support.producerAdmission(historical)),
+    'GPR_PACKET_AUTHORITY_UNVERIFIED'
+  );
+  assert.deepEqual(support.receiptEffectSnapshot(store), before);
+  assert.equal(support.receiptEffectSnapshot(store).tables.authority_packets.count, 0);
+});
+
+test('acceptance revalidates current authority after Web decision for new and duplicate binds', () => {
+  function makeStore(seed, mutationCall) {
+    const packetValue = packetFixture(seed);
+    const state = {
+      authority: structuredClone(packetValue.bindings.authority),
+      decisionCalls: 0,
+      mutationCall
+    };
+    const readers = support.readers(packetValue, {
+      readAuthority: () => ({
+        authority: structuredClone(state.authority),
+        required_consumers: structuredClone(packetValue.bindings.applicability.required_consumers),
+        later_controlling_comments: []
+      }),
+      readWebDecision: () => {
+        state.decisionCalls += 1;
+        const decision = support.webDecision(packetValue);
+        if (state.decisionCalls === state.mutationCall) state.authority.body_digest = 'e'.repeat(64);
+        return decision;
+      }
+    });
+    const store = runtime.initialiseAuthorityPacketStore(
+      support.options(support.stateRoot(`late-acceptance-${seed}-`)), readers
+    );
+    const persisted = store.persistAuthorityPacket(packetValue, support.producerAdmission(packetValue));
+    return { packetValue, readers, state, store, persisted };
+  }
+  function eventTypes(store, packetId) {
+    const db = new DatabaseSync(store.databasePath, { readOnly: true });
+    try {
+      return db.prepare('SELECT event_type FROM authority_packet_events WHERE packet_id = ? ORDER BY sequence')
+        .all(packetId).map((row) => row.event_type);
+    } finally { db.close(); }
+  }
+
+  const positive = makeStore('late-acceptance-positive', null);
+  const accepted = positive.store.bindWebPacketAcceptance(positive.persisted.packet_id, positive.readers);
+  assert.equal(accepted.duplicate, false);
+  assert.deepEqual(eventTypes(positive.store, positive.persisted.packet_id), ['READBACK_VERIFIED', 'WEB_ACCEPTANCE_BOUND']);
+
+  const beforeDuplicate = support.receiptEffectSnapshot(positive.store);
+  positive.state.mutationCall = 2;
+  assertCode(
+    () => positive.store.bindWebPacketAcceptance(positive.persisted.packet_id, positive.readers),
+    'GPR_PACKET_AUTHORITY_UNVERIFIED'
+  );
+  assert.deepEqual(support.receiptEffectSnapshot(positive.store), beforeDuplicate);
+  assert.deepEqual(eventTypes(positive.store, positive.persisted.packet_id), ['READBACK_VERIFIED', 'WEB_ACCEPTANCE_BOUND']);
+
+  const negative = makeStore('late-acceptance-new-negative', 1);
+  const beforeNew = support.receiptEffectSnapshot(negative.store);
+  assertCode(
+    () => negative.store.bindWebPacketAcceptance(negative.persisted.packet_id, negative.readers),
+    'GPR_PACKET_AUTHORITY_UNVERIFIED'
+  );
+  const afterNew = support.receiptEffectSnapshot(negative.store);
+  assert.deepEqual(afterNew.tables.authority_packets, beforeNew.tables.authority_packets);
+  assert.equal(afterNew.tables.authority_packet_events.count, beforeNew.tables.authority_packet_events.count + 1);
+  assert.deepEqual(eventTypes(negative.store, negative.persisted.packet_id), ['READBACK_VERIFIED']);
+  assert.equal(afterNew.tables.authority_packet_events.event_proofs.some((item) => item.event_type === 'WEB_ACCEPTANCE_BOUND'), false);
+});
+
 test('migration is explicit, quiescent, preserves v2 receipt rows, and rejects v3 input', () => {
   const root = support.stateRoot('authority-packet-migration-');
   const storeOptions = support.options(root);
@@ -517,6 +603,57 @@ test('migration refuses an unexpired unreleased legacy allocation', async () => 
   }, inputs.readers);
   assertCode(() => runtime.planAuthorityPacketMigration(storeOptions), 'GPR_PACKET_MIGRATION_NOT_QUIESCENT');
 });
+
+test('backfill rechecks source after pre-write screening with zero rejected effects and exact allowed effects', () => {
+  const packetValue = packetFixture('backfill-screen-source-race');
+  const identities = runtime.authorityPacketIdentities(packetValue);
+  const state = { sourceMode: 'exact', screenCalls: 0 };
+  const readers = support.readers(packetValue, {
+    readBackfillSource: () => ({
+      source_ref: support.sourceReference('backfill-screen-source-race'),
+      source_packet: state.sourceMode === 'changed'
+        ? { ...packetValue, body: { ...packetValue.body, decision: `${packetValue.body.decision} changed` } }
+        : structuredClone(packetValue),
+      source_packet_digest: identities.packet_digest,
+      source_binding_digest: identities.binding_digest,
+      producer_key: identities.producer_key,
+      screening: support.screening(packetValue)
+    }),
+    screenPacket: () => {
+      state.screenCalls += 1;
+      if (state.screenCalls === 2) state.sourceMode = 'changed';
+      return support.screening(packetValue);
+    }
+  });
+  const store = runtime.initialiseAuthorityPacketStore(
+    support.options(support.stateRoot('backfill-screen-source-race-')),
+    readers
+  );
+  const before = support.receiptEffectSnapshot(store);
+
+  assertCode(() => store.backfillAuthorityPacket(packetValue), 'GPR_PACKET_LEGACY_RERUN_REQUIRED');
+  assert.deepEqual(support.receiptEffectSnapshot(store), before);
+  assert.deepEqual(eventTypesForPacket(store, identities.packet_id), []);
+  assert.equal(support.receiptEffectSnapshot(store).tables.authority_packets.count, 0);
+
+  state.sourceMode = 'exact';
+  const result = store.backfillAuthorityPacket(packetValue);
+  assert.equal(result.packet_digest, identities.packet_digest);
+  assert.deepEqual(eventTypesForPacket(store, identities.packet_id), ['READBACK_VERIFIED', 'BACKFILL_AUTHORISED']);
+  const after = support.receiptEffectSnapshot(store);
+  assert.equal(after.tables.authority_packets.count, before.tables.authority_packets.count + 1);
+  assert.equal(after.tables.authority_packet_events.count, before.tables.authority_packet_events.count + 2);
+  assert.equal(after.tables.authority_packet_events.event_proofs.filter((item) => item.event_type === 'READBACK_VERIFIED').length, 1);
+  assert.equal(after.tables.authority_packet_events.event_proofs.filter((item) => item.event_type === 'BACKFILL_AUTHORISED').length, 1);
+});
+
+function eventTypesForPacket(store, packetId) {
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  try {
+    return db.prepare('SELECT event_type FROM authority_packet_events WHERE packet_id = ? ORDER BY sequence')
+      .all(packetId).map((row) => row.event_type);
+  } finally { db.close(); }
+}
 
 test('backfill requires a complete trusted source and records the original producer unchanged', () => {
   const packetValue = packetFixture('backfill');

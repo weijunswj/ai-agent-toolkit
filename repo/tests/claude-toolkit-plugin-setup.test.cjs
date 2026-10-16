@@ -957,20 +957,12 @@ test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
 
 test('installed enforcement byte verification rejects missing and stale cache files', () => {
   const cache = tmpRoot();
-  for (const relPath of [
-    '.claude-plugin/plugin.json',
-    '.claude-plugin/hooks/hooks.json',
-    'repo/scripts/toolkit-agent-control.cjs',
-    'repo/scripts/claude-process-launch.cjs',
-    'repo/scripts/toolkit-claude-agent-hook.cjs',
-    'repo/scripts/repo-ignore-hygiene.cjs',
-    'repo/scripts/repo-local-backup.cjs',
-    'repo/scripts/toolkit-local-bridge.cjs',
-  ]) {
-    const target = path.join(cache, ...relPath.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  // A package fixture contains the actual canonical runtime and contracts.
+  // Negative checks below independently remove/drift protected cache files.
+  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin']) {
+    fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
+  for(const file of ['repo/CONTROLLER.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
   assert.equal(setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot }).ok, true);
   fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' ');
   let state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
@@ -998,8 +990,7 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
     '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
-    'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',
-  ]) {
+    'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',"repo/scripts/toolkit-claude-task-session.cjs","repo/scripts/toolkit-claude-dispatch-observer.cjs","repo/scripts/toolkit-v3-native-helper-adapter.cjs","repo/scripts/toolkit-v3-helper-guard.cjs","repo/scripts/toolkit-gate-contract-compiler.cjs","repo/contracts/controller-kernel/stack-registry-v3.json","repo/contracts/controller-kernel/stack-registry-v3.schema.json"]) {
     const target = path.join(cache, ...relPath.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);

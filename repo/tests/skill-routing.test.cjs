@@ -220,6 +220,7 @@ test('canonical behavioural routing corpus admits implicit discovery without pre
   const caseIds = corpus.cases.map((entry) => entry.id);
   const explicitProducts = [
     'codex-ssh-hostinger-coolify-setup-maintainer',
+    'controller-bootstrap',
     'github-program-reconciler',
     'release-readiness-audit'
   ];
@@ -229,7 +230,7 @@ test('canonical behavioural routing corpus admits implicit discovery without pre
   assert.deepEqual(corpus.portfolio, current);
   assert.deepEqual(Object.keys(corpus.invocation_modes).sort(), current);
   assert.deepEqual(duplicates(caseIds), [], 'routing case ids must be unique');
-  assert.equal(corpus.cases.length, 105, 'routing corpus must contain seven cases for each product');
+  assert.equal(corpus.cases.length, current.length * 7, 'routing corpus must contain seven cases for each product');
 
   for (const entry of corpus.cases) {
     assert.match(entry.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);

@@ -1164,36 +1164,43 @@ function assertWorktreeScope(status, authorizedPaths, failureCode = 'GIT_COMMIT_
     if (status.worktree_paths[field].some((item) => !allowed.has(item))) fail(failureCode);
   }
 }
-function executeTypedGitCommit(options = {}) {
-  const consent = readExecutionLoopConsent(options);
+class TypedGitCommitTransaction {
+  #options;
+
+  #consent; #evidence; #operation; #initial; #semanticContext; #afterStage; #finalStatus;
+  constructor(options = {}) {this.#options=options;}
+  run() {
+    const options=this.#options;
+
+  const consent = this.#consent = readExecutionLoopConsent(options);
   if (!consent.enabled) fail(consent.state === 'disabled' ? 'CONSENT_DISABLED' : consent.state === 'interrupted' ? 'CONSENT_INTERRUPTED' : 'CONSENT_UNRESOLVED');
   if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail('GIT_COMMIT_BINDING_INVALID');
-  const evidence = validateRunEvidence(options, 'running', 'GIT_COMMIT');
+  const evidence = this.#evidence = validateRunEvidence(options, 'running', 'GIT_COMMIT');
   if (!options.liveRefProvider) fail('LIVE_REF_REQUIRED');
   verifyOwnedMutationLease(options);
   const git = options.git;
   if (!git || typeof git.status !== 'function' || typeof git.stageExact !== 'function' || typeof git.commit !== 'function') fail('GIT_ADAPTER_UNAVAILABLE');
-  const operation = buildGitCommitOperation(options, null);
+  const operation = this.#operation = buildGitCommitOperation(options, null);
   if (digestValue(operation.expected_head) !== evidence.workspaceReceipt.snapshot_commit_digest || digestValue(operation.expected_tree) !== evidence.workspaceReceipt.snapshot_tree_digest) fail('GIT_COMMIT_WORKSPACE_SNAPSHOT_MISMATCH');
-  const initial = normalizeGitStatus(invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
+  const initial = this.#initial = normalizeGitStatus(invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   if (initial.head !== operation.expected_head) fail('GIT_COMMIT_HEAD_MISMATCH');
   if (initial.tree !== operation.expected_tree) fail('GIT_COMMIT_TREE_MISMATCH');
   if (initial.index_digest !== operation.expected_index_digest) fail('GIT_COMMIT_INDEX_BASELINE_MISMATCH');
   if (initial.staged_paths.length !== 0) fail('GIT_COMMIT_PREEXISTING_STAGE');
   assertWorktreeScope(initial, operation.authorized_paths);
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
-  const semanticContext = revalidateRunSemanticContext(evidence.run, options);
+  const semanticContext = this.#semanticContext = revalidateRunSemanticContext(evidence.run, options);
   const authority = authorizeA1Operation({ ...options, operation });
   verifyOwnedMutationLease(options);
   const staged = invokeSync(git.stageExact, git, { paths: operation.authorized_paths }, 'GIT_STAGE_FAILED');
-  const afterStage = normalizeGitStatus(isRecord(staged) ? staged : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
+  const afterStage = this.#afterStage = normalizeGitStatus(isRecord(staged) ? staged : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   if (!exactPathSet(afterStage.staged_paths, operation.authorized_paths)) fail('GIT_COMMIT_STAGED_SET_MISMATCH');
   assertWorktreeScope(afterStage, operation.authorized_paths);
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   verifyOwnedMutationLease(options);
   revalidateSemanticContext(semanticContext);
   const committed = invokeSync(git.commit, git, { message: operation.commit_message, amend: false, allow_empty: false, options: [], paths: operation.authorized_paths }, 'GIT_COMMIT_EXECUTION_FAILED');
-  const finalStatus = normalizeGitStatus(committed && isRecord(committed.status) ? committed.status : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
+  const finalStatus = this.#finalStatus = normalizeGitStatus(committed && isRecord(committed.status) ? committed.status : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   const resultingTree = committed && committed.tree ? committed.tree : finalStatus.tree;
   const resultingChangeDigest = committed && committed.change_digest ? committed.change_digest : finalStatus.change_digest;
   if (finalStatus.staged_paths.length !== 0) fail('GIT_COMMIT_HOOK_BROADENED');
@@ -1202,7 +1209,10 @@ function executeTypedGitCommit(options = {}) {
   if (!isDigest(resultingChangeDigest) || resultingChangeDigest !== operation.intended_change_digest) fail('GIT_COMMIT_RESULT_CHANGE_MISMATCH');
   if (committed && (committed.amend === true || committed.allow_empty === true || committed.author_mutation === true || committed.committer_mutation === true || committed.config_mutation === true)) fail('GIT_COMMIT_MUTATION_FLAG_UNSUPPORTED');
   return { status: 'committed', operation_digest: authority.operation_digest, target_digest: authority.target_digest, authority_binding_digest: authority.authority_binding_digest, consent_status_digest: consent.status_digest, result_tree_digest: digestValue(resultingTree), result_change_digest: resultingChangeDigest };
+
+  }
 }
+function executeTypedGitCommit(options = {}) {return new TypedGitCommitTransaction(options).run();}
 
 function createTerminalPacket(options = {}) {
   options = trustedCallbackShell(options, 'TERMINAL_PACKET_INVALID');

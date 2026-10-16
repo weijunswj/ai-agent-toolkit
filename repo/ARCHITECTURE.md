@@ -1,5 +1,62 @@
 # Toolkit Architecture
 
+## Current V3 operating procedure
+
+Shipping Law is the default coding governance: **G0 Discovery -> G1 Builder, including UAT -> G2 Review**. The complete direction is [Toolkit V3](docs/TOOLKIT-V3.md). A repository becomes governed only through its applicable owner direction; this source does not grant native permissions or adopt V3 in unrelated repositories. Historical numeric roles retain their recorded meaning and cannot masquerade as new G2 assurance.
+
+### Scope and ownership
+
+Bind one canonical repository, programme, release and existing outcome child. The controller owns material owner decisions, conflicting authority/writers, review routing and finality. One strong builder owns the complete agreed Core through integration, meaningful validation, UAT readiness and ordinary in-scope corrections. No mandatory mini-child dispatch, extra architecture admission for an ordinary fix, duplicated closing panel, or automatic extra review applies.
+
+Preserve existing Core, Hardening and Later commitments and their owners. The parent is the current index, ordered CORE -> HARDENING -> LATER and then milestone order. Child checkpoints carry detailed acceptance, current candidate, evidence, blockers and the literal next action. Classification alone does not complete or waive work. Parent completion is separate from Core acceptance.
+
+### Roles and delegation
+
+Resolve G0's DISCOVERY and DISCOVERY_HELPER roles and G1's BUILDER and BUILDER_HELPER roles from the canonical [V3 stack registry](contracts/controller-kernel/stack-registry-v3.json), using the exact captured registry revision and pinned CURRENT selection. This registry is the sole source of concrete model, effort and required reviewer choices; do not copy another authoritative model table, infer a helper from its lead, or use a default/fallback selection. G0 MUST delegate suitable separable evidence gathering by default; G1 MUST delegate suitable independent implementation or validation by default. The selected lead owns reasoning, architecture, contradiction resolution, decisive proof, integration, UAT readiness and final quality. Preserve the selected stack's independently specified lead/helper bindings.
+
+Helpers are leaves. No nested delegation, scope approval, final acceptance or reviewer dispatch. Exceptions are trivial/inseparable work, overhead exceeding benefit, tightly coupled reasoning/integration, genuinely unavailable exact model/effort route, or a real authority/safety boundary. Briefly record substantial-work exceptions; no quota or ceremonial helper launches. No additional owner permission is needed for already-authorised direct work.
+
+Trusted launcher configuration establishes actual model and effort. Service tier is a controller/launcher concern: the later owner instruction stops Priority across all repositories and future launches use Standard. Do not claim it changes this active inference session. Workers/helpers need no tier awareness, introspection or receipt. Missing helper tier controls must not block suitable delegation. Preserve real model availability, topology, resource and native permission limits.
+
+G2 begins after builder readiness and actual owner UAT acceptance. Resolve the entire required reviewers set from the same pinned CURRENT selection and canonical V3 registry. Every selected required reviewer gets the identical complete candidate, scope and evidence and independently reviews the complete agreed acceptance surface, including scope, implementation correctness, execution evidence, authority, privacy and recovery. Do not split scope-only and execution-only assignments, enforce a fixed reviewer count, omit a required member, or copy another Claude review as independent evidence. Each required reviewer uses its own fresh independent context; G2 has no helpers. A conditional design challenge resolves the separate DESIGN_CHALLENGE role from that same selected registry only when a real unresolved consequential design risk warrants it; it neither replaces a required reviewer nor becomes a routine extra role.
+
+### Current packet and refresh
+
+Initial adoption understands the full direction once. Continuation consumes one current packet and applicable changed instructions. Bind exact contract/registry/source revisions; check lightweight identities and refresh affected sections on actual change. No full bootstrap/history reread for unchanged routine work. A fresh chat, controller or harness continues the same scope and consumed history.
+
+Every substantive return includes programme/release/child/role; exact branch/commit/tree or recoverable delta; applicable scope and authority; what works/failed/remains and owner acceptance; evidence and verified private custody; host/profile/version; writer and pending/unknown effect state; genuine denials; and one next action. Keep large source/logs in their proper stores, not recursively embedded in packets. Missing capabilities hold their dependent effects while independent authorised work continues.
+
+### Authority and consequential effects
+
+Standing authority records owner/provenance, repository/destination, purpose, permitted operations/effects, privacy boundaries, expiry/revocation and cleanup. Compose it through the host's supported native controls. Prose, model self-report, packet syntax, custody or a working API cannot grant native permission. Preserve system requirements, secrets, real denials and unknown outcomes across fresh sessions. Never replay an uncertain effect before independent reconciliation or switch routes to evade a denial.
+
+Construct and test source in isolation. Before loading permission-controlling candidate instructions into an isolated native profile, check exact source, effects, authority and rollback at that boundary. Root retains owner UAT acceptance, fresh G2 routing, merge and installed promotion where assigned. Source tests, fixture replay, CI, copied files and silence cannot establish native qualification, user acceptance or installed readiness.
+
+### Evidence, progress and finish
+
+Executors publish concise authorised progress and screened private evidence directly. Use fresh expected-head/conditional writes, minimal intended edits, unrelated-content preservation and independent readback. Keep conflict or unknown publication outcome in the packet. Transport failure is not an implementation defect and does not reset history or consume a correction merely to republish unchanged bytes.
+
+Reuse the agreed private TRANSPORT store, independently verify its exact repository identity/private visibility, and verify a consumer can retrieve the immutable artifacts. Keep referenced acceptance and unresolved evidence pinned. Local disposable copies are eligible immediately after verified custody/consumer retrieval and ownership/dependency checks. Remote temporary owned bulk is eligible 30 days after the latest required consumer finishes or transfers, subject to explicit pins/holds; cleanup never deletes the sole copy, user data or unresolved evidence and never implies history erasure.
+
+Native coverage is Codex, Claude Code and OpenCode with real selected paths. Antigravity is portable skills-copy only. Qualify actual entry, exact route/effort, permission composition, harmless routine operations, private transfer/recovery, fresh consumer, cancellation/EOF/stdout/stderr/exit/privacy and Windows behaviour. Keep source/cache/profile/version aligned and preserve rollback. Unavailable exact host routes remain outstanding; no silent substitution or synthetic host pass.
+
+G2 classifies concrete findings against agreed acceptance: current ship blocker, Hardening, Later/optional, or unsupported/duplicate. Return the coherent blocker set to the builder. Recheck affected integration and user behaviour; do not restart all gates merely because a line changed. After authorised integration/activation, read back the same reviewed payload in a fresh installed session. Only complete verified outcomes close; later commitments retain their owners.
+
+### Final execution clarification
+
+For adopted Toolkit V3 work, mandatory fresh executor contexts follow G0, each planned G1 segment, initial G2, model/effort/harness or runtime/environment replacement, activated instruction/profile revision, executor replacement and session loss/forced compaction at a safe boundary. Verify custody and stop the old writer before supported controller relaunch; continue the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Reuse independent G2 reviewers for corrections unless a specific reviewer must be replaced. Correct helper routing and pre-inference wrong-route prevention require separate trusted proofs. Local disposable copies can be eligible immediately after verified custody, consumer retrieval and ownership/dependency checks; remote temporary bulk uses 30 days after the latest required consumer finishes or transfers, with explicit pins/holds. Keep functional/UAT/review/custody/integration/publication/Core/parent states distinct. The canonical Toolkit V3 contract supplies the detailed native host matrix and acceptance cases; these instructions do not claim those cases are implemented or qualified.
+
+Resolve native model/effort routes from the same captured registry revision and pinned CURRENT selection, then verify the supported actual route and exact effective configuration before consequential effects. No unavailable route authorises a model/effort/provider fallback. Effective native configuration plus acknowledgement can prove launch configuration when backend identity is not exposed; record that limit honestly. Admitted historical qualification overrides retain their exact scoped authority and immutable inputs; this current procedure does not silently rebind them. G2 reviews the complete selected required set on identical complete candidate/scope/evidence, preserving independence and rechecking actual changed coverage.
+
+## Historical compatibility reference
+
+The following retained text describes pre-V3 admissions and machine-contract provenance. It is not a second current operating procedure. Use it only when decoding historical evidence or an explicitly retained compatibility contract. Its old gate choreography, counters, role meanings and repetitive read requirements do not govern new V3 work. Current identity, privacy, effect integrity and native permission controls remain required.
+
+<details>
+<summary>Pre-V3 compatibility text (load only for an exact historical dependency)</summary>
+
+# Toolkit Architecture
+
 **Interim delivery-first operation - 6 October 2026:** At the next safe controller admission/reconciliation, apply [Child sizing and splitting](#child-sizing-and-splitting) and [Bounded non-product continuation](#bounded-non-product-continuation) to advance the agreed usable milestone through bounded continuous execution. Preserve all accepted safety, assurance, authority and consumed history. Controller application is interim manual enforcement; universal host adoption and automated runtime interception/supervision are not yet implemented.
 
 > **Toolkit programme #421 V3 transition:** [Toolkit V3 directive](docs/TOOLKIT-V3.md) records the owner's scoped amendments to this programme's delivery architecture and the safe adoption boundary. Those identified amendments replace conflicting legacy procedure; the remaining product constraints continue. This is an implementation contract, not proof of completed or installed V3 behaviour.
@@ -1584,3 +1641,17 @@ Toolkit should measure, where available:
 Use existing target, CURRENT, execution and acceptance receipts to record admission-to-usable-acceptance time, controller/model invocations, repeated diagnostics, valid completed-evidence reuse and actual provider-reported usage/cost where available. Retain required-check/assurance results and escaped-defect evidence. Missing telemetry or a comparable baseline is unavailable, never inferred; do not add a tracker or benchmark programme as a shipping prerequisite.
 
 Success means a usable accepted milestone sooner with less measured orchestration/context overhead on comparable work, while preserving the accepted safety, correctness and independent assurance obligations.
+
+## Coordinated decision and bounded Codex core
+
+The core is a closed data decision, versioned route resolver, gate-contract compiler, canonical authority/CURRENT consumer, assurance consumer and bounded Codex adapter. Canonical source lives in repo/contracts/controller-kernel, repo/scripts and the existing programme/receipt contracts. The installed Codex fingerprint covers their actual runtime dependencies and selected agent-control entrypoint.
+
+IR v2 nests the decision in the unchanged ap1 authority envelope. The canonical C2 receipt, programme-state-v5 and review-reconciler foundation remains the integration point. The decision reference is optional closed metadata; it is consumed only after independently reading full packet bytes, acceptance and CURRENT. There is no second database, scheduler, approval ledger, CT writer or DDL migration.
+
+Productive effects use existing fenced mutation intent/outcome records. A native launch is one append-create effect; its independent turn-start readback settles before a nested patch CAS or finite validation invocation is admitted. Unknown outcomes block replay. Resume/recovery observes the known transport and retained effect records and cannot start an automatic replacement or infer not-started from a disappeared process.
+
+The private Codex app-server client pins the executable, schema/protocol, host, route, instructions, policy, decision/source observations and thread/turn. Dynamic Toolkit tools expose exact-path reads/search, expected-preimage patching, listed validation case IDs and qualified bounded helpers. Native shell, patch, connectors, network and delegation bypass require fresh installed confinement proof; missing primitives remain typed holds. Source-only tests do not provide that proof.
+
+The first usable milestone still requires the full selected-path K proof, inherited #501 I/T and strong review, W2/C2 handback obligations, fresh exact-candidate G4, installed bootstrap invocation, fresh-consumer recovery and qualified retirement/rollback. Packaging/version allocation remains a controller boundary; unaccepted W2 version claims are not imported.
+
+</details>

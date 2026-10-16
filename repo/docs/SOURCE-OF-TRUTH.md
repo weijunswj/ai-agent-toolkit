@@ -5,6 +5,7 @@ This repo owns reusable AI-agent toolkit assets. Direct canonical content lives 
 ## Toolkit-Owned
 
 - Reusable skills under `skills/**`.
+- `skills/controller-bootstrap/` is explicit-only and depends on the trusted, independently accepted Toolkit Controller, Architecture, and stack-registry sources; it does not carry an embedded policy copy or grant controller, worker, or host authority.
 - Skill-local guides, references, templates, and helper assets.
 - Machine contracts, fixtures, and reviewed templates under `repo/contracts/**`.
 - Runtime and maintenance scripts under `repo/scripts/**`.
@@ -42,3 +43,7 @@ Repo-wide MCP is intentionally not shipped or maintained as a generated surface.
 ## Documentation Links
 
 Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code.
+
+## Continuous core source boundary
+
+The controller decision v1, registry v3, nested IR v2 and Codex host adapter v1 are canonical repo/contracts/controller-kernel inputs. Their compiler and bounded native consumer live in repo/scripts. Existing ap1 receipt/CURRENT stores and programme-state-v5 consumers remain canonical; references, source checkpoints and inspection results are not authority or native qualification. Historical v1/v2 inputs remain intact.

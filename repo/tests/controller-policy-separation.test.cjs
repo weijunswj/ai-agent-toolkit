@@ -886,7 +886,15 @@ test('candidate acceptance, child completion, and per-repository wait removal st
 
 // These document-contract assertions do not prove host execution or runtime enforcement.
 test('interim document notes are dated, prominent and routed to canonical sections', () => {
-  for (const source of [controller, architecture]) {
+  assert.match(controller, /^# Toolkit Controller\r?\n\r?\n## Current V3 operating procedure/);
+  const historicalBoundary = controller.indexOf('## Historical compatibility reference');
+  const historicalHeading = controller.indexOf('# Toolkit Web Controller Governance', historicalBoundary);
+  assert.ok(historicalBoundary > controller.indexOf('## Current V3 operating procedure'));
+  assert.ok(historicalHeading > controller.indexOf('<details>', historicalBoundary));
+  const architectureBoundary = architecture.indexOf('## Historical compatibility reference');
+  const architectureHeading = architecture.indexOf('\n# ', architectureBoundary) + 1;
+  assert.ok(architectureHeading > architecture.indexOf('<details>', architectureBoundary));
+  for (const source of [controller.slice(historicalHeading), architecture.slice(architectureHeading)]) {
     assert.match(source, /^# [^\r\n]+\r?\n\r?\n\*\*Interim delivery-first operation - 6 October 2026:\*\*/);
     assert.match(source, /At the next safe controller admission\/reconciliation/);
     assert.match(source, /Preserve all accepted safety, assurance, authority and consumed history/);

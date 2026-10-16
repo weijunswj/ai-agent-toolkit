@@ -25,6 +25,8 @@ Every concrete `skills/<skill-name>/SKILL.md` must have:
 - A routing entry or an intentional omission with a concrete reason.
 - A row in `repo/docs/SKILL-SAFETY-MATRIX.md`.
 
+Skills that consume live governance must identify their accepted source bindings and fail closed when a required source is unavailable or differs. Do not bundle a local policy copy as a fallback or imply that skill presence assigns a role, capability, or native host permission. Routing and safety-matrix closure remain required for every concrete skill.
+
 If a skill uses third-party material, run `skill-product-review` before copying, importing, executing, or adapting it. Preserve attribution and keep the active source lock under `repo/source-watch/provenance/`.
 
 ## Agent Rules
@@ -47,3 +49,17 @@ git diff --check
 ```
 
 The read-only CI workflow owns the full validation gate. Do not run project scripts, live n8n actions, network downloads, or package installation as part of surface validation.
+
+## Continuous core module closure
+
+The coordinated core uses the existing contracts, runtime, tests and docs homes. New native adapter capabilities must bind to existing authentic receipt/CURRENT admission, retained counters and qualified host primitives. Do not introduce a parallel product tree, store, scheduler or projection writer. Installer fingerprints must include the complete reached runtime and policy/schema dependency closure.
+
+## Runtime ownership
+
+Toolkit operations with retained identity, mutable session state, asynchronous process settlement, or several mutation/recovery phases use an object that captures its dependencies at construction and implements the operation directly. Existing public factory functions remain compatibility entrypoints into those owners. Constructors do not grant host authority; authentic receipt, CURRENT, qualification and effect admission remain independent checks.
+
+The Core owners include StackRegistrySnapshot, CapturedStackBinding, CurrentStackSelectionSession, CoreCommandSession, HelperRouteGuard, ClaudeParentDispatchGate, OpenCodeHelperBoundary, NativeCodexAdapter, CodexProtocolClient, ControllerEffectChannel, the authority/receipt repositories, ReviewSetEvaluator and TrustedAuthorityContext. Cleanup, capability publication, typed Git commits, backups, staging, plugin mutation/settlement, source-watch requests and portable menu/export transactions have corresponding operation owners.
+
+Pure schema validators, canonical serialization, immutable DTO builders, deterministic reducers and renderers remain functions. Synchronous read-only inspections and single stateless command facades may remain functions when they retain no operation/session identity or mutation/recovery phase; classify each concrete path and boundary. Shell process facades keep their explicit argument and host permission checks. A subsystem name, old implementation, or third-party attribution is not an exemption for Toolkit-created stateful orchestration.
+
+Retained third-party files keep their existing source-lock mode and attribution. Adapted files must be assessed on their actual Toolkit behavior; their upstream blob is not proof that the local adapted bytes are exact. Keep generated instruction projections synchronized through the existing canonical tools. Source-level ownership and controlled test results do not promote installed packages or establish native qualification, owner UAT, independent G2 or release.

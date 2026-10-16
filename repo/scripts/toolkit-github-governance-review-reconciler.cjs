@@ -328,6 +328,8 @@ function validateParent(state) {
     childIds.add(entry.child_id);
     issueNumbers.add(entry.issue_number);
     if (entry.queue !== undefined || entry.subqueue !== undefined || entry.queues !== undefined) return failure('N5_GOVERNANCE_UNREADY');
+    if (hasOwn(entry, 'controller_decision_reference')
+      && (entry.lifecycle !== 'current' || !programmeV5.validateControllerDecisionReference(entry.controller_decision_reference, entry.authority_packet_current || {predecessors:[]}))) return failure('N5_GOVERNANCE_UNREADY');
     if (hasOwn(entry, 'authority_packet_current')
       && (entry.lifecycle !== 'current' || !validateAuthorityPacketCurrent(entry.authority_packet_current, { repository: state.repository, parent_issue: state.parent_issue, child_issue: entry.issue_number }))) return failure('N5_GOVERNANCE_UNREADY');
     if (entry.lifecycle === 'terminal' && !terminalObjectiveValid(entry)) return failure('N5_GOVERNANCE_UNREADY');
@@ -348,6 +350,8 @@ function validateChild(state) {
   if (state.tracker_version !== TRACKER_VERSION) return failure('N5_TRACKER_VERSION_UNSUPPORTED');
   if (!isSafeLabel(state.repository) || !isIssue(state.issue_number) || !LIFECYCLES.includes(state.lifecycle) || !publicSafeText(state.objective || '')) return failure('N5_GOVERNANCE_UNREADY');
   if (!Array.isArray(state.progress_checklist) || !isRecord(state.scope) || !Array.isArray(state.blockers) || typeof state.next_gate !== 'string') return failure('N5_GOVERNANCE_UNREADY');
+  if (hasOwn(state, 'controller_decision_reference')
+    && (state.lifecycle !== 'current' || !programmeV5.validateControllerDecisionReference(state.controller_decision_reference, state.authority_packet_current || {predecessors:[]}))) return failure('N5_GOVERNANCE_UNREADY');
   if (hasOwn(state, 'authority_packet_current')
     && (state.lifecycle !== 'current' || !validateAuthorityPacketCurrent(state.authority_packet_current, { repository: state.repository, parent_issue: state.parent_issue, child_issue: state.issue_number }))) return failure('N5_GOVERNANCE_UNREADY');
   if (state.lifecycle === 'terminal' && !terminalObjectiveValid(state)) return failure('N5_GOVERNANCE_UNREADY');
@@ -1824,6 +1828,7 @@ function createRuntime(options = {}) {
 }
 
 module.exports = Object.freeze({
+  consumeControllerDecisionReference: (...args) => programmeV5.consumeControllerDecisionReference(...args),
   CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, REVIEW_EVIDENCE_VERSION, TRACKER_VERSION, LEGACY_V0_VERSION, DESIGN_LOCK, INTENTS, RESOURCE_KINDS, LIFECYCLES,
   AUTHORITY_PACKET_CURRENT_SCHEMA, AUTHORITY_PACKET_STAGES,
   OBJECTIVE_STATUSES, MUTATION_TARGET_KINDS,

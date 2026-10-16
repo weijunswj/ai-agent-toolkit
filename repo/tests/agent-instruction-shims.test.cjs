@@ -337,8 +337,7 @@ test('execution prompt requires full-bold user-action questions and generated su
     /## Documentation Closure/,
     /Use context-preserving compression, not blind deletion\./,
     /Keep repo maps pointer-based and current;/,
-    /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
-    /Instruction sources used/
+    /Words like `continue`, `next`, `apply`, or `do it` (?:only apply to the already-scoped safe task|stay within the approved scope)/
   ];
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
@@ -362,9 +361,12 @@ test('portable rules require the compact host-neutral depth-1 topology contract'
   const requiredRules = [
     /## Agent Topology And Delegation/,
     /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
-    /Optional depth-1 subagents may be used only when work is genuinely separable/,
-    /materially accelerates the critical path/,
-    /true isolated context and a minimal self-contained task packet/,
+    /G0 MUST delegate suitable separable evidence gathering by default/,
+    /G1 MUST delegate suitable independent implementation or validation by default/,
+    /Give each helper isolated context and one minimal self-contained task packet/,
+    /Briefly record a substantial-work exception/,
+    /G2 reviewers have no helpers/,
+    /a launcher without a helper tier field must not block suitable delegation/,
     /must not spawn or delegate to other subagents/,
     /Mutating sibling subagents require disjoint mutation ownership and scope/,
     /Read-only siblings may investigate genuinely separable questions in parallel/,
@@ -778,4 +780,35 @@ test('skill instructions add only target platform shims by default', () => {
     assert.doesNotMatch(text, /The repo has no `GEMINI\.md`/i, relPath);
     assert.doesNotMatch(text, /The repo has no `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`/i, relPath);
   }
+});
+
+test('canonical and generated instruction surfaces carry no user-facing instruction-sources footer requirement', () => {
+  for (const relPath of [
+    executionPromptPath,
+    'AGENTS.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
+    'repo/docs/agent-playbooks/baseline-workflow.md'
+  ]) {
+    assert.doesNotMatch(readText(relPath), /Instruction sources used/i, relPath);
+  }
+});
+
+test('an authorised in-gate refresh continues with the exact one-time notice instead of a restart question', () => {
+  const notice = '**Toolkit instructions refreshed. Continuing in this session. Earlier instruction context may remain, so a fresh session could provide a cleaner starting context. No action is required.**';
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const controller = readText('repo/CONTROLLER.md');
+  for (const text of [skill, controller]) assert.ok(text.includes(notice), 'exact refresh notice');
+  assert.match(skill, /Inside an unfinished, already-authorised task or gate[\s\S]*continue the task in this session without asking whether to restart/);
+  assert.match(skill, /only after the refresh actually succeeded/);
+  assert.match(skill, /Reading files does not reload native hooks, tools or permissions/);
+  assert.match(skill, /Never make an empty commit, stage unrelated or dirty files/);
+  // The restart question survives only for standalone requests with no task in flight.
+  const standalone = skill.indexOf('For a standalone install, repair, refresh, or bootstrap request with no task in flight');
+  assert.ok(standalone > skill.indexOf(notice));
+  assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > standalone);
+  assert.match(controller, /continues without a restart-choice question/);
 });

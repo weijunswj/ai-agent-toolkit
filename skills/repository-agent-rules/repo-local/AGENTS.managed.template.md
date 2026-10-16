@@ -27,17 +27,17 @@ If instructions conflict, follow the higher-priority source and report material 
 - Answer mode: answer advice, explanation, review, comparison, or planning requests without editing files.
 - Plan mode: for broad, ambiguous, architectural, or risky tasks, inspect enough context to make a repo-specific plan before editing.
 - Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
-- Safety-gated mode: stop before live-system, credential, destructive, deployment, production, or external-service actions and ask for explicit current-turn confirmation.
+- Safety-gated mode: before a gated action, verify that an applicable approval covers the exact action and that required host-native permission is available. Preserve an unchanged, unexpired, unrevoked approval only for the same still-pending action; seek fresh approval or host confirmation for a changed action, revoked or expired approval, uncovered additional work, or a native control that requires it.
 
 ## Agent Topology And Delegation
 
 The root or parent executor owns integration, validation, conflict resolution, and final judgment.
 
-Optional depth-1 subagents may be used only when work is genuinely separable and their use materially accelerates the critical path. Give each subagent true isolated context and a minimal self-contained task packet.
+G0 MUST delegate suitable separable evidence gathering by default. G1 MUST delegate suitable independent implementation or validation by default. The strong lead owns reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Give each helper isolated context and one minimal self-contained task packet. Exceptions are trivial or inseparable work, overhead exceeding benefit, tightly coupled reasoning or integration, a genuinely unavailable exact model/effort route, or a real authority or safety boundary. Briefly record a substantial-work exception; no helper quota, ceremonial launch or extra owner permission applies to already-authorised direct work.
 
 Subagents must not spawn or delegate to other subagents. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
 
-The root or parent remains responsible for integrating and validating every returned result. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
+The root or parent remains responsible for integrating and validating every returned result. Bind model and effort through the actual trusted launcher. Preserve each selected stack's previous G0 helper binding independently from its strong lead. G2 reviewers have no helpers. Service tier is a controller/launcher concern; apply the latest owner tier selection (Standard for future launches under the 12 October no-Priority instruction). Workers and helpers need no tier introspection or receipt, and a launcher without a helper tier field must not block suitable delegation. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
 
 ## Deployment Branch Naming
 
@@ -67,7 +67,7 @@ Use any repo docs index, architecture/source-of-truth guide, or contributor guid
 
 ## Safety Gates
 
-Explicit current-turn approval is required before actions that may:
+Explicit approval bound to the exact action is required before actions that may:
 
 - Mutate a live or external system.
 - Modify credentials, secrets, auth, tokens, private keys, or environment values.
@@ -78,7 +78,7 @@ Explicit current-turn approval is required before actions that may:
 - Remove validation, tests, safety checks, or guardrails.
 - Rewrite git history.
 
-Prior approval does not authorize a new risky action. Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task unless the risky target and operation are named.
+Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
@@ -92,17 +92,31 @@ Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fa
 
 ## Shipping Law
 
+Default coding governance is `G0 Discovery -> G1 Builder, including UAT -> G2 Review`, unless the user chooses another workflow. G0 and G1 have the same strong lead binding. One builder owns the whole approved outcome across ordinary corrections, useful checkpoints and fresh sessions; do not require mini-child admissions or new permission for ordinary in-scope fixes. G2 starts after the builder's working result and actual owner UAT acceptance, using fresh independent contexts. Broad changes may require two complementary peers; do not add duplicate closing panels automatically.
+
 Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
 
 Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
 
 Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
 
-Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. Keep a recoverable packet with exact source/delta, applicable scope and authority, current results/evidence, environment, unresolved effects and denials, verified private custody and one next action. An unchanged continuation loads the current packet and changed relevant instructions, not the full history. Source-only checks, fixtures, silence and CI do not establish owner UAT or installed acceptance. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+
+For adopted Toolkit V3 work, mandatory fresh executor contexts follow G0, each planned G1 segment, initial G2, model/effort/harness or runtime/environment replacement, activated instruction/profile revision, executor replacement and session loss/forced compaction at a safe boundary. Verify custody and stop the old writer before supported controller relaunch; continue the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Reuse independent G2 reviewers for corrections unless a specific reviewer must be replaced. Correct helper routing and pre-inference wrong-route prevention require separate trusted proofs. Local disposable copies can be eligible immediately after verified custody, consumer retrieval and ownership/dependency checks; remote temporary bulk uses 30 days after the latest required consumer finishes or transfers, with explicit pins/holds. Keep functional/UAT/review/custody/integration/publication/Core/parent states distinct. The canonical Toolkit V3 contract supplies the detailed native host matrix and acceptance cases; these instructions do not claim those cases are implemented or qualified.
 
 ## User Action Questions
 
 When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
+
+## Object Ownership And Stack Selection
+
+Use object-oriented ownership by default when implementing stateful application, runtime, controller, resource, persistence, or effectful workflow behavior. Give each owner a cohesive responsibility, explicit constructor dependencies, and methods that enforce its invariants and effect ordering. Compose owners through narrow interfaces; do not hide mutable state in unrelated module globals or add classes that merely forward to the old implementation. Preserve public behavior, approvals, independent readback, concurrency controls, and recovery semantics during refactoring.
+
+Pure transformations, immutable data definitions, predicates, and stateless protocol adapters may remain functions when an object would provide no ownership benefit. Record the specific boundary and reason when reviewing a consequential exception. Preserve generated-source relationships and third-party licenses and provenance; do not refactor generated or third-party outputs as though they were canonical Toolkit source. Planning, builder validation, and independent review must check the actual state/effect owners and their dependency contracts, not class counts.
+
+For adopted Toolkit V3 execution, choose models and effort only through an explicitly selected central stack registry revision whose actual source bytes are pinned in the repository's controller decision and CURRENT admission. Never infer a stack from the host, provider, event, alias, or bundled latest registry. Keep bounded task qualification overrides separate from production selection. A newer registry is available for explicit adoption; it does not change an active run's captured routes.
+
+A missing stack selection creates one pending owner question and holds dependent execution. Recover that same question after startup, resume, compaction, or prompt recovery. Hook presentation failure does not release the independent launcher hold. Independent already-authorised work may continue. Resolve every reviewer by REVIEW and its reviewer identity from the pinned complete roster; every member independently reviews the full accepted scope. Acceptance requires the whole selected roster, qualified routes, independent fresh contexts, exact candidate and coverage, verified evidence, and no unresolved blocking finding. Do not split scope/execution, duplicate a member, or substitute a majority verdict.
 
 ## Scope Control
 
@@ -189,7 +203,7 @@ If validation is skipped, state why.
 
 For long tasks, update briefly at meaningful checkpoints; do not narrate commands.
 
-Report files/changes, Instruction sources used, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
+Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
 <!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->

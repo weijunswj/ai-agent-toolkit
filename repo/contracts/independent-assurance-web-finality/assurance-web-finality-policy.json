@@ -15,7 +15,14 @@
     "a3_contract_count_added": 0
   },
   "required_evidence": {
-    "predicate": ["present", "current", "complete", "internally_consistent", "server_authoritative", "verifiable"],
+    "predicate": [
+      "present",
+      "current",
+      "complete",
+      "internally_consistent",
+      "server_authoritative",
+      "verifiable"
+    ],
     "fail_closed_code": "FAIL_CLOSED_REQUIRED_EVIDENCE",
     "required_bindings": [
       "candidate_head_tree_base",
@@ -66,7 +73,13 @@
     "isolated": true,
     "read_only": true,
     "complete_candidate": true,
-    "exact_binding": ["candidate_head", "candidate_tree", "candidate_base", "lock_id", "scope_digest"],
+    "exact_binding": [
+      "candidate_head",
+      "candidate_tree",
+      "candidate_base",
+      "lock_id",
+      "scope_digest"
+    ],
     "root_only": true,
     "mutation_authority": false,
     "ready_authority": false,
@@ -75,21 +88,85 @@
     "finality_authority": false
   },
   "invalidation_matrix": [
-    { "event": "CANDIDATE_MOVEMENT", "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT", "fresh_complete_candidate_g4": true },
-    { "event": "CANDIDATE_TREE_MOVEMENT", "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT", "fresh_complete_candidate_g4": true },
-    { "event": "LOCK_MOVEMENT", "result": "G4_INVALIDATED_LOCK_MOVEMENT", "fresh_authority_admission": true },
-    { "event": "SCOPE_MOVEMENT", "result": "G4_INVALIDATED_SCOPE_MOVEMENT", "fresh_scope_admission": true },
-    { "event": "BASE_MOVEMENT_MATERIAL", "result": "G4_INVALIDATED_BASE_MOVEMENT", "fresh_base_admission": true, "fresh_complete_candidate_g4": true },
-    { "event": "BASE_MOVEMENT_NEUTRAL", "result": "BASE_REVALIDATION_NEUTRAL", "fresh_web_readback": true, "fresh_g4": false },
-    { "event": "BASE_MOVEMENT_UNKNOWN", "result": "FAIL_CLOSED_REQUIRED_EVIDENCE", "fresh_g4": true },
-    { "event": "NEW_MATERIAL_REVIEW_FINDING", "result": "FINALITY_STOP_MATERIAL_REVIEW_FINDING", "web_adjudication": true },
-    { "event": "REQUIRED_CHECK_COMPLETED_SUCCESS", "result": "REQUIRED_CHECK_REFRESH_ONLY", "fresh_g4": false },
-    { "event": "REQUIRED_CHECK_FAILURE_OR_AMBIGUITY", "result": "FAIL_CLOSED_REQUIRED_EVIDENCE", "fresh_g4": false },
-    { "event": "BENIGN_REVIEW_METADATA_MOVEMENT", "result": "REVIEW_REFRESH_ONLY", "fresh_g4": false },
-    { "event": "READY_AT_SAME_CANDIDATE", "result": "READY_REFRESH_ONLY", "fresh_g4": false },
-    { "event": "SUCCESSFUL_EXPECTED_HEAD_MERGE", "result": "CANONICAL_READBACK_REQUIRED", "fresh_g4": false },
-    { "event": "UNCERTAIN_MERGE_RESULT", "result": "CANONICAL_READBACK_REQUIRED", "blind_retry": false, "fresh_g4": false },
-    { "event": "CANONICAL_RESULT_UNBOUND", "result": "FAIL_CLOSED_CANONICAL_BINDING", "controller_reconciliation": true, "fresh_g4": false }
+    {
+      "event": "CANDIDATE_MOVEMENT",
+      "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT",
+      "fresh_complete_candidate_g4": true
+    },
+    {
+      "event": "CANDIDATE_TREE_MOVEMENT",
+      "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT",
+      "fresh_complete_candidate_g4": true
+    },
+    {
+      "event": "LOCK_MOVEMENT",
+      "result": "G4_INVALIDATED_LOCK_MOVEMENT",
+      "fresh_authority_admission": true
+    },
+    {
+      "event": "SCOPE_MOVEMENT",
+      "result": "G4_INVALIDATED_SCOPE_MOVEMENT",
+      "fresh_scope_admission": true
+    },
+    {
+      "event": "BASE_MOVEMENT_MATERIAL",
+      "result": "G4_INVALIDATED_BASE_MOVEMENT",
+      "fresh_base_admission": true,
+      "fresh_complete_candidate_g4": true
+    },
+    {
+      "event": "BASE_MOVEMENT_NEUTRAL",
+      "result": "BASE_REVALIDATION_NEUTRAL",
+      "fresh_web_readback": true,
+      "fresh_g4": false
+    },
+    {
+      "event": "BASE_MOVEMENT_UNKNOWN",
+      "result": "FAIL_CLOSED_REQUIRED_EVIDENCE",
+      "fresh_g4": true
+    },
+    {
+      "event": "NEW_MATERIAL_REVIEW_FINDING",
+      "result": "FINALITY_STOP_MATERIAL_REVIEW_FINDING",
+      "web_adjudication": true
+    },
+    {
+      "event": "REQUIRED_CHECK_COMPLETED_SUCCESS",
+      "result": "REQUIRED_CHECK_REFRESH_ONLY",
+      "fresh_g4": false
+    },
+    {
+      "event": "REQUIRED_CHECK_FAILURE_OR_AMBIGUITY",
+      "result": "FAIL_CLOSED_REQUIRED_EVIDENCE",
+      "fresh_g4": false
+    },
+    {
+      "event": "BENIGN_REVIEW_METADATA_MOVEMENT",
+      "result": "REVIEW_REFRESH_ONLY",
+      "fresh_g4": false
+    },
+    {
+      "event": "READY_AT_SAME_CANDIDATE",
+      "result": "READY_REFRESH_ONLY",
+      "fresh_g4": false
+    },
+    {
+      "event": "SUCCESSFUL_EXPECTED_HEAD_MERGE",
+      "result": "CANONICAL_READBACK_REQUIRED",
+      "fresh_g4": false
+    },
+    {
+      "event": "UNCERTAIN_MERGE_RESULT",
+      "result": "CANONICAL_READBACK_REQUIRED",
+      "blind_retry": false,
+      "fresh_g4": false
+    },
+    {
+      "event": "CANONICAL_RESULT_UNBOUND",
+      "result": "FAIL_CLOSED_CANONICAL_BINDING",
+      "controller_reconciliation": true,
+      "fresh_g4": false
+    }
   ],
   "same_lock_repair": {
     "material_blocker": "Web records and root-deduplicates the finding",
@@ -113,24 +190,92 @@
     "isolated": true,
     "read_only": true,
     "helpers": false,
-    "forbidden_purposes": ["confidence", "routine_duplicate", "second_opinion", "missing_evidence"],
+    "forbidden_purposes": [
+      "confidence",
+      "routine_duplicate",
+      "second_opinion",
+      "missing_evidence"
+    ],
     "unresolved": "CONTROLLER_REQUIRED",
     "loop_bound": "no open-ended G4/G4A loop"
   },
   "web_finality": {
-    "acceptance_requires": ["current_required_evidence", "current_review_inventory", "actual_required_checks"],
+    "acceptance_requires": [
+      "current_required_evidence",
+      "current_review_inventory",
+      "actual_required_checks"
+    ],
     "ready": "Web-owned final merge-state transition only after final acceptance",
     "merge": "expected-head squash merge default, exact PR/head/base binding",
-    "accepted_candidate_tuple": ["pr_number", "head", "tree", "base"],
-    "merge_evidence": ["intended_pr_number", "observed_pr_number", "expected_head", "observed_head", "expected_base", "observed_base", "squash", "merged", "merge_result_sha", "server_authoritative", "verifiable"],
+    "accepted_candidate_tuple": [
+      "pr_number",
+      "head",
+      "tree",
+      "base"
+    ],
+    "merge_evidence": [
+      "intended_pr_number",
+      "observed_pr_number",
+      "expected_head",
+      "observed_head",
+      "expected_base",
+      "observed_base",
+      "squash",
+      "merged",
+      "merge_result_sha",
+      "server_authoritative",
+      "verifiable"
+    ],
     "uncertain_merge": "canonical readback, no blind retry, no G4 rerun",
-    "canonical_proof": ["intended_merge_binding", "main_sha_equals_merge_result_sha", "accepted_tree_equality", "accepted_base_sole_parent", "signature_verified_true_reason_valid", "merged_closed_pr", "cleanup_observed_after_verified_merge"]
+    "canonical_proof": [
+      "intended_merge_binding",
+      "main_sha_equals_merge_result_sha",
+      "accepted_tree_equality",
+      "accepted_base_sole_parent",
+      "signature_verified_true_reason_valid",
+      "merged_closed_pr",
+      "cleanup_observed_after_verified_merge"
+    ]
   },
   "privacy": {
-    "allowed": ["safe_semantic_ids", "shas", "digests", "bounded_status_codes", "timestamps", "canonical_model_class", "counts", "public_review_refs", "public_check_refs", "bounded_relative_scope_ids"],
-    "forbidden": ["raw_prompts", "model_output", "provider_payloads", "a1_tickets", "secrets", "credentials", "environment_values", "cookies", "auth_headers", "private_absolute_paths", "customer_data", "raw_diagnostic_payloads"],
-    "report_truthfulness": ["material_blocker_explicit_boolean", "verified_result_required_when_no_blocker", "non_empty_unchanged_scope"],
-    "human_companion": ["verdict", "material_blocker_or_verified_result", "mutation_attempted_and_performed", "unchanged_scope", "exactly_one_next_action"]
+    "allowed": [
+      "safe_semantic_ids",
+      "shas",
+      "digests",
+      "bounded_status_codes",
+      "timestamps",
+      "canonical_model_class",
+      "counts",
+      "public_review_refs",
+      "public_check_refs",
+      "bounded_relative_scope_ids"
+    ],
+    "forbidden": [
+      "raw_prompts",
+      "model_output",
+      "provider_payloads",
+      "a1_tickets",
+      "secrets",
+      "credentials",
+      "environment_values",
+      "cookies",
+      "auth_headers",
+      "private_absolute_paths",
+      "customer_data",
+      "raw_diagnostic_payloads"
+    ],
+    "report_truthfulness": [
+      "material_blocker_explicit_boolean",
+      "verified_result_required_when_no_blocker",
+      "non_empty_unchanged_scope"
+    ],
+    "human_companion": [
+      "verdict",
+      "material_blocker_or_verified_result",
+      "mutation_attempted_and_performed",
+      "unchanged_scope",
+      "exactly_one_next_action"
+    ]
   },
   "exclusions": [
     "a1_redesign",
@@ -146,5 +291,15 @@
     "workflow_edits",
     "full_242",
     "broad_252_observability_retention_telemetry"
-  ]
+  ],
+  "continuous_policy": {
+    "policy": "continuous-builder-v1",
+    "default_g3": "BUILDER_VALIDATION",
+    "explicit_stronger_leaf_preserved": true,
+    "paired_only_risk_qualified": true,
+    "candidate": "FRESH_INDEPENDENT_EXACT_CANDIDATE",
+    "final": "SEPARATE_PROGRAMME_FINAL_AUDIT",
+    "route_source": "registry-v3 through authentic controller decision",
+    "data_or_model_class_not_authority": true
+  }
 }

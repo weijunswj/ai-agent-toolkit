@@ -1,5 +1,17 @@
 # Persistent-agent stack
 
+For adopted V3 work, apply the final execution clarification in the canonical Toolkit V3 contract at a safe renewal boundary. Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor; preserve valid work and stop the old writer after verified checkpoint custody. Use the approved native host matrix, UAT impact disposition, reviewer reuse and separate local/remote retention rules. Missing exact routes and unqualified pre-inference guards remain explicit obligations.
+
+
+## Current V3 binding
+
+For adopted V3 work use the [current controller procedure](../CONTROLLER.md#current-v3-operating-procedure) and [V3 contract](TOOLKIT-V3.md). G0 and G1 use the same strong lead and default-delegate suitable separable evidence gathering or independent implementation/validation. Both leaves preserve the selected stack previous-G0 model/effort. G2 peers have no helpers. Service tier belongs to controller/launcher configuration; the latest owner choice is Standard for future launches; missing worker tier controls or receipts do not block delegation. Record substantial-work exceptions and preserve real model/effort, native permissions, denied/unknown effects and consumed history. One approved builder assignment continues through ordinary corrections and recovery; no compulsory mechanical helper ceremony or new mini-admission. Existing operation-local transport, privacy and independent readback requirements remain.
+
+## Retained compatibility guidance
+
+Apply the following only where consistent with the current V3 binding; historical gate/role instructions do not override it.
+
+
 This is replaceable configuration for explicitly identified persistent agents using the [helper workflow](PERSISTENT-AGENT-HELPER-PROFILE.md). Apply the generic defaults, then any override explicitly matching the actual agent/host. An unknown or non-persistent agent mode skips this file. A persistent agent without a matching override uses the generic defaults and does not inherit OpenAI dot's observations or route choices.
 
 Configuration grants no task, publication, merge, deployment, spending, access, security or credential authority. Current system/safety requirements, task authority, host permissions and explicit denials remain controlling. This is documentation, not a framework, scheduler or runtime enforcement mechanism.

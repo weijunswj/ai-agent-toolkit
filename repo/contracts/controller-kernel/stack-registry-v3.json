@@ -1,0 +1,124 @@
+{
+  "schema": "toolkit.controller.stack-registry.v3",
+  "version": 3,
+  "profiles": {
+    "owner-gpt": {
+      "routes": {
+        "DISCOVERY": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
+        },
+        "DISCOVERY_HELPER": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "BUILDER": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
+        },
+        "BUILDER_HELPER": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "DESIGN_CHALLENGE": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "xhigh"
+        }
+      },
+      "reviewers": [
+        {
+          "reviewer_id": "sol",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "xhigh"
+        }
+      ]
+    },
+    "owner-claude": {
+      "routes": {
+        "DISCOVERY": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "DISCOVERY_HELPER": {
+          "provider": "anthropic",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh"
+        },
+        "BUILDER": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "BUILDER_HELPER": {
+          "provider": "anthropic",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh"
+        },
+        "DESIGN_CHALLENGE": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
+        }
+      },
+      "reviewers": [
+        {
+          "reviewer_id": "opus",
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
+        }
+      ]
+    },
+    "owner-mixed-claude-gpt": {
+      "routes": {
+        "DISCOVERY": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "DISCOVERY_HELPER": {
+          "provider": "anthropic",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh"
+        },
+        "BUILDER": {
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "high"
+        },
+        "BUILDER_HELPER": {
+          "provider": "anthropic",
+          "model": "haiku-5.5",
+          "reasoning": "xhigh"
+        },
+        "DESIGN_CHALLENGE": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "xhigh"
+        }
+      },
+      "reviewers": [
+        {
+          "reviewer_id": "sol",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "xhigh"
+        },
+        {
+          "reviewer_id": "opus",
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
+        }
+      ]
+    }
+  },
+  "aliases": {}
+}

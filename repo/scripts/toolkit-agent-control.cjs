@@ -8,11 +8,13 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const { types: utilTypes } = require('node:util');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
+const net = require('node:net');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.15';
+const CONTROL_VERSION = '3.0.6';
 const RESOURCE_PROVENANCE_SCHEMA = 'toolkit.agent-control.resource-provenance.v1';
+const RESOURCE_PROVENANCE_SCHEMA_V2 = 'toolkit.agent-control.resource-provenance.v2';
 const RESOURCE_PROVENANCE_KEY_FILE = 'resource-provenance.key';
 const SUPERVISOR_CLAIM_SCHEMA = 'toolkit.agent-control.supervisor-claim.v1';
 const SUPERVISOR_CLAIM_DIRECTORY = 'supervisor-claims';
@@ -22,6 +24,8 @@ const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
 const ROLES = Object.freeze({ WORKER: 'worker', CHECKER: 'checker' });
+// Immutable historical run093 wire meaning only. Current Core launch choices are
+// resolved from admitted controller evidence by the native adapter, never here.
 const MODEL_CONTRACT = Object.freeze({
   codex: Object.freeze({ worker: 'gpt-5.6-sol', checker: 'gpt-5.6-sol', effort: 'medium' }),
   'claude-code': Object.freeze({ worker: 'fable-5', checker: 'opus-4.8', effort: 'medium' }),
@@ -48,6 +52,25 @@ const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
 const REPOSITORY_TEST_RESOURCE_INVOCATION = 'toolkit.repository-test.resource.v1';
 const RESOURCE_TEST_CONTEXT = new AsyncLocalStorage();
 const NATIVE_RESOURCE_STATES = new WeakSet();
+const NATIVE_RESOURCE_METADATA = new WeakMap();
+const MODE0_RESOURCE_ENVELOPES = new WeakMap();
+const MODE0_RESOURCE_SCHEMA = 'toolkit.agent-control.resource-envelope.v1';
+const MODE0_PARENT_BYTES = 1280 * 1024 * 1024;
+const MODE0_MANAGEMENT_BYTES = 256 * 1024 * 1024;
+const MODE0_WORKER_BYTES = 1024 * 1024 * 1024;
+const MODE0_HOST_RESERVE_BYTES = 1792 * 1024 * 1024;
+const MODE0_CASE_ID = 'R093-F5-NATIVE-COLLECTOR-POS';
+const MODE0_FIXTURE_SOURCE_SHA256 = 'd8c400c946f2c6a4b29e99bc7b9895216856d135e39a550aaca38fa1af98c97d';
+const MODE0_REPOSITORY = 'weijunswj/ai-agent-toolkit';
+const MODE0_RUN = 'toolkit-core-construction-g3-20261007-001';
+const MODE0_LOCK = 'DL-TK-CORE-CONSTRUCTION-G3-20261007-001';
+const MODE0_TRANSPORT_RESULT_SCHEMA = 'toolkit.agent-control.resource-operation-result.v1';
+const MODE0_TRANSPORT_FRAME_BYTES = 64 * 1024;
+const MODE0_WORKER_OUTPUT_BYTES = 8 * 1024 * 1024;
+const MODE0_LIFECYCLE_BYTES = 64 * 1024 * 1024;
+const MODE0_START_RESULT_SCHEMA = 'toolkit.agent-control.resource-start.v1';
+const MODE0_SETTLEMENT_RESULT_SCHEMA = 'toolkit.agent-control.resource-settlement.v1';
+const MODE0_SETTLEMENT_PROOFS = new WeakMap();
 const TEST_RESOURCE_STATES = new WeakSet();
 const REPOSITORY_TEST_RESOURCE_FIXTURE = Object.freeze({
   source: 'repository-test-fixture',
@@ -136,17 +159,295 @@ function resourceProvenanceMac(kind, entry, key) {
   return crypto.createHmac('sha256', key).update(payload, 'utf8').digest('hex');
 }
 
-function sealResourceProvenance(kind, entry, origin, resourceSource, jobIdentityDigest, options = {}, suppliedKey = undefined) {
+function exactResourceKeys(value, keys) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join('\u0000') === [...keys].sort().join('\u0000'));
+}
+
+function validMode0ResourceEnvelope(input, expected = {}) {
+  let e;
+  try { e = resourceDataCopy(input); } catch (_) { return false; }
+  const top = ['schema','repository','run','lock','decision_digest','case_id','workload_digest','job_identity_digest',
+    'host_id','boot_id','overcommit_mode','observed_at_ms','expires_at_ms','dispatch_id','parent','management',
+    'worker','transport','resources'];
+  const parentKeys = ['path','device','inode','cgroup_id','memory_max','memory_current','memory_swap_max','cpu_quota','cpu_period','pids_max'];
+  const leafKeys = ['container_id','path','cgroup_id','memory_max','memory_current','memory_swap_max','cpu_quota','cpu_period','pids_max'];
+  const transportKeys = ['socket_path','owner_uid','device','inode','mount_id','server_generation'];
+  const resourceKeys = ['source','physical_total','physical_available','commit_total','commit_available','host_responsive'];
+  const digest = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+  const identity = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256 && !/[\u0000-\u001f]/.test(v);
+  const canonicalCgroupPath = (v) => identity(v) && path.posix.isAbsolute(v) && path.posix.normalize(v) === v && v !== '/';
+  const nestedCgroupPath = (parent, child) => {
+    if (!canonicalCgroupPath(parent) || !canonicalCgroupPath(child)) return false;
+    const relative = path.posix.relative(parent, child);
+    return relative.length > 0 && relative !== '..' && !relative.startsWith(`..${path.posix.sep}`) && !path.posix.isAbsolute(relative);
+  };
+  const quota = (v, p) => Number.isSafeInteger(v) && v > 0 && Number.isSafeInteger(p) && p > 0 && v <= p;
+  if (!exactResourceKeys(e, top) || e.schema !== MODE0_RESOURCE_SCHEMA || e.case_id !== MODE0_CASE_ID
+    || e.overcommit_mode !== 0 || e.repository !== MODE0_REPOSITORY || e.run !== MODE0_RUN || e.lock !== MODE0_LOCK
+    || !digest(e.decision_digest) || !digest(e.workload_digest) || !digest(e.job_identity_digest)
+    || !identity(e.host_id) || !identity(e.boot_id) || !identity(e.dispatch_id)
+    || !Number.isSafeInteger(e.observed_at_ms) || e.observed_at_ms <= 0
+    || !Number.isSafeInteger(e.expires_at_ms) || e.expires_at_ms <= e.observed_at_ms
+    || e.expires_at_ms - e.observed_at_ms > 455000
+    || !exactResourceKeys(e.parent, parentKeys) || !exactResourceKeys(e.management, leafKeys)
+    || !exactResourceKeys(e.worker, [...leafKeys,'executable_path','executable_sha256'])
+    || !exactResourceKeys(e.transport, transportKeys) || !exactResourceKeys(e.resources, resourceKeys)) return false;
+  for (const group of [e.parent, e.management, e.worker]) {
+    if (!identity(group.path) || !identity(group.cgroup_id) || !Number.isSafeInteger(group.memory_current)
+      || group.memory_current < 0 || !Number.isSafeInteger(group.memory_swap_max) || group.memory_swap_max !== 0
+      || !quota(group.cpu_quota, group.cpu_period) || !Number.isSafeInteger(group.pids_max)
+      || group.pids_max < 1 || group.pids_max > 128) return false;
+  }
+  if (!Number.isSafeInteger(e.parent.device) || e.parent.device < 0 || !Number.isSafeInteger(e.parent.inode) || e.parent.inode < 1
+    || e.parent.memory_max !== MODE0_PARENT_BYTES || e.parent.memory_current > e.parent.memory_max - MODE0_WORKER_BYTES
+    || !canonicalCgroupPath(e.parent.path) || !nestedCgroupPath(e.parent.path, e.management.path)
+    || !nestedCgroupPath(e.parent.path, e.worker.path) || e.management.path === e.worker.path
+    || new Set([e.parent.cgroup_id, e.management.cgroup_id, e.worker.cgroup_id]).size !== 3
+    || e.management.container_id === e.worker.container_id
+    || e.parent.pids_max > 128 || e.management.memory_max !== MODE0_MANAGEMENT_BYTES
+    || e.management.memory_current > MODE0_MANAGEMENT_BYTES || e.worker.memory_max !== MODE0_WORKER_BYTES
+    || e.worker.memory_current >= MODE0_WORKER_BYTES
+    || !/^[a-f0-9]{64}$/.test(e.management.container_id || '') || !/^[a-f0-9]{64}$/.test(e.worker.container_id || '')
+    || !identity(e.worker.executable_path) || !digest(e.worker.executable_sha256)
+    || !identity(e.transport.socket_path) || !path.posix.isAbsolute(e.transport.socket_path)
+    || e.transport.socket_path.length >= 108 || !Number.isSafeInteger(e.transport.owner_uid) || e.transport.owner_uid < 0
+    || !Number.isSafeInteger(e.transport.device) || e.transport.device < 0 || !Number.isSafeInteger(e.transport.inode) || e.transport.inode < 1
+    || !identity(e.transport.mount_id) || !digest(e.transport.server_generation)) return false;
+  if (!exactResourceKeys(e.resources, resourceKeys) || e.resources.source !== 'proc-meminfo'
+    || !Number.isSafeInteger(e.resources.physical_total) || e.resources.physical_total < 1
+    || !Number.isSafeInteger(e.resources.physical_available) || e.resources.physical_available < MODE0_HOST_RESERVE_BYTES
+    || !Number.isSafeInteger(e.resources.commit_total) || e.resources.commit_total < 0
+    || !Number.isSafeInteger(e.resources.commit_available) || e.resources.commit_available < -Number.MAX_SAFE_INTEGER
+    || e.resources.commit_available > e.resources.commit_total || e.resources.host_responsive !== true) return false;
+  const now = Number.isSafeInteger(expected.now) ? expected.now : Date.now();
+  if (e.observed_at_ms > now + 1000 || !expected.allowExpired && e.expires_at_ms <= now) return false;
+  for (const key of ['repository','run','lock','decision_digest','workload_digest','job_identity_digest']) {
+    if (expected[key] !== undefined && e[key] !== expected[key]) return false;
+  }
+  if (expected.workerExecutable !== undefined && e.worker.executable_path !== expected.workerExecutable) return false;
+  if (expected.workerExecutableSha256 !== undefined && e.worker.executable_sha256 !== expected.workerExecutableSha256) return false;
+  return true;
+}
+
+function mode0TransportMountId(targetPath) {
+  const absolute = path.resolve(targetPath);
+  const unescape = (value) => value.replace(/\\040/g, ' ').replace(/\\011/g, '\t').replace(/\\134/g, '\\');
+  let selected = null;
+  for (const line of fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n')) {
+    const fields = line.split(' ');
+    if (fields.length < 6) continue;
+    const mountPoint = unescape(fields[4]);
+    if ((absolute === mountPoint || absolute.startsWith(`${mountPoint}${path.sep}`))
+      && (!selected || mountPoint.length > selected.mountPoint.length)) selected = { id: fields[0], mountPoint };
+  }
+  if (!selected || !/^\d+$/.test(selected.id)) throw new Error('Mode-0 transport mount identity is unavailable.');
+  return selected.id;
+}
+
+function assertPinnedMode0Transport(envelope) {
+  if (process.platform !== 'linux' || !validMode0ResourceEnvelope(envelope, { allowExpired: false })) {
+    throw new Error('Mode-0 transport envelope is invalid or expired.');
+  }
+  const expected = envelope.transport;
+  const stat = fs.lstatSync(expected.socket_path);
+  if (!stat.isSocket() || stat.isSymbolicLink() || stat.uid !== expected.owner_uid
+    || stat.dev !== expected.device || stat.ino !== expected.inode
+    || mode0TransportMountId(expected.socket_path) !== expected.mount_id) {
+    throw new Error('Pinned mode-0 transport endpoint identity changed.');
+  }
+}
+
+function mode0TransportRequest(envelope, action, reservationId) {
+  if (!['OBSERVE', 'START', 'SETTLE'].includes(action) || !/^[a-f0-9-]{36}$/.test(reservationId || '')) {
+    return Promise.reject(new Error('Mode-0 resource operation identity is invalid.'));
+  }
+  try { assertPinnedMode0Transport(envelope); }
+  catch (error) { return Promise.reject(error); }
+  const request = {
+    action,
+    case_id: envelope.case_id,
+    decision_digest: envelope.decision_digest,
+    job_identity_digest: envelope.job_identity_digest,
+    lock: envelope.lock,
+    repository: envelope.repository,
+    run: envelope.run,
+    dispatch_id: envelope.dispatch_id,
+    reservation_id: reservationId,
+    transport_generation: envelope.transport.server_generation,
+  };
+  const requestBytes = Buffer.from(`${JSON.stringify(request)}\n`, 'utf8');
+  if (requestBytes.length > MODE0_TRANSPORT_FRAME_BYTES) return Promise.reject(new Error('Mode-0 resource request exceeds its bound.'));
+  const timeoutMs = action === 'START' ? 180000 : action === 'SETTLE' ? 110000 : 10000;
+  return new Promise((resolve, reject) => {
+    let response = Buffer.alloc(0);
+    let done = false;
+    const socket = net.createConnection({ path: envelope.transport.socket_path });
+    const fail = (error) => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      reject(error instanceof Error ? error : new Error('Mode-0 resource transport failed.'));
+    };
+    socket.setTimeout(timeoutMs, () => fail(new Error('Mode-0 resource operation timed out; effects remain unresolved.')));
+    socket.once('connect', () => socket.write(requestBytes));
+    socket.on('data', (chunk) => {
+      if (done) return;
+      response = Buffer.concat([response, chunk]);
+      if (response.length > MODE0_TRANSPORT_FRAME_BYTES) return fail(new Error('Mode-0 resource response exceeds its bound.'));
+      const newline = response.indexOf(0x0a);
+      if (newline >= 0 && newline !== response.length - 1) return fail(new Error('Mode-0 resource response framing is invalid.'));
+    });
+    socket.once('error', fail);
+    socket.once('end', () => {
+      if (done) return;
+      const newline = response.indexOf(0x0a);
+      if (newline < 0 || newline !== response.length - 1) return fail(new Error('Mode-0 resource response is incomplete.'));
+      let value;
+      try { value = resourceDataCopy(JSON.parse(response.subarray(0, newline).toString('utf8'))); }
+      catch { return fail(new Error('Mode-0 resource response could not be verified.')); }
+      if (action === 'OBSERVE') {
+        if (!validMode0ResourceEnvelope(value, {
+          repository: envelope.repository, run: envelope.run, lock: envelope.lock,
+          decision_digest: envelope.decision_digest, workload_digest: envelope.workload_digest,
+          job_identity_digest: envelope.job_identity_digest,
+          workerExecutable: envelope.worker.executable_path,
+          workerExecutableSha256: envelope.worker.executable_sha256,
+        }) || value.dispatch_id !== envelope.dispatch_id || value.transport.server_generation !== envelope.transport.server_generation) {
+          return fail(new Error('Fresh mode-0 observation does not match the sealed dispatch.'));
+        }
+      } else if (!exactResourceKeys(value, ['schema','action','decision_digest','job_identity_digest','dispatch_id','reservation_id','transport_generation','result'])
+        || value.schema !== MODE0_TRANSPORT_RESULT_SCHEMA || value.action !== action
+        || value.decision_digest !== envelope.decision_digest || value.job_identity_digest !== envelope.job_identity_digest
+        || value.dispatch_id !== envelope.dispatch_id || value.reservation_id !== reservationId
+        || value.transport_generation !== envelope.transport.server_generation || !value.result || typeof value.result !== 'object') {
+        return fail(new Error('Mode-0 resource operation reply is not bound to the sealed dispatch.'));
+      }
+      done = true;
+      socket.destroy();
+      resolve(value);
+    });
+  });
+}
+
+function sameMode0EnvelopeIdentity(leftInput, rightInput) {
+  let left, right;
+  try { left = resourceDataCopy(leftInput); right = resourceDataCopy(rightInput); } catch (_) { return false; }
+  for (const value of [left, right]) {
+    delete value.observed_at_ms;
+    for (const group of [value.parent, value.management, value.worker]) delete group.memory_current;
+    delete value.resources.physical_available;
+    delete value.resources.commit_available;
+  }
+  return JSON.stringify(sortResourceValue(left)) === JSON.stringify(sortResourceValue(right));
+}
+
+function mode0NativeObservationMatches(envelope, resources) {
+  const metadata = resources && NATIVE_RESOURCE_METADATA.get(resources);
+  return process.platform === 'linux' && validResourceState(resources) && NATIVE_RESOURCE_STATES.has(resources)
+    && resources.source === 'proc-meminfo' && metadata?.overcommit_mode === 0
+    && envelope.resources.physical_total === resources.physical_total
+    && envelope.resources.commit_total === resources.commit_total
+    && envelope.resources.host_responsive === resources.host_responsive
+    // Availability is sampled twice at different boundaries. Bind both native samples to
+    // the same host totals and independently require enough headroom; do not require an
+    // instantaneous counter to remain byte-for-byte constant between observations.
+    && Number.isSafeInteger(envelope.resources.physical_available)
+    && envelope.resources.physical_available >= MODE0_HOST_RESERVE_BYTES
+    && resources.physical_available >= MODE0_HOST_RESERVE_BYTES
+    && Number.isSafeInteger(envelope.resources.commit_available)
+    && envelope.resources.commit_available >= 0
+    && Number.isSafeInteger(resources.commit_available)
+    && resources.commit_available >= 0;
+}
+
+function validMode0OperationEnvelope(previous, fresh, spec, workerExecutable, jobIdentityDigest, resources) {
+  return validMode0ResourceEnvelope(fresh, {
+    repository: previous.repository, run: previous.run, lock: previous.lock,
+    decision_digest: previous.decision_digest, workload_digest: jobIdentityDigest,
+    job_identity_digest: jobIdentityDigest, workerExecutable,
+    workerExecutableSha256: previous.worker.executable_sha256,
+  }) && sameMode0EnvelopeIdentity(previous, fresh)
+    && fresh.observed_at_ms > previous.observed_at_ms
+    && fresh.resources.physical_available >= MODE0_HOST_RESERVE_BYTES
+    && fresh.parent.memory_current <= fresh.parent.memory_max - MODE0_WORKER_BYTES
+    && fresh.management.memory_current <= MODE0_MANAGEMENT_BYTES
+    && fresh.worker.memory_current < MODE0_WORKER_BYTES
+    && Number(spec.estimated_memory_bytes || 0) === MODE0_WORKER_BYTES
+    && mode0NativeObservationMatches(fresh, resources);
+}
+
+function mode0ResultDigest(value, excludedKey) {
+  const body = { ...value };
+  delete body[excludedKey];
+  return crypto.createHash('sha256').update(JSON.stringify(sortResourceValue(body)), 'utf8').digest('hex');
+}
+
+function readMode0Output(filePath, expectedBytes, expectedSha256) {
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0 || expectedBytes > MODE0_WORKER_OUTPUT_BYTES
+    || !/^[a-f0-9]{64}$/.test(String(expectedSha256 || ''))) throw new Error('Settled worker output evidence is invalid.');
+  const stat = verifyPrivateRegularFile(filePath);
+  if (stat.size !== expectedBytes) throw new Error('Settled worker output length does not match its receipt.');
+  const bytes = fs.readFileSync(filePath);
+  if (bytes.length !== expectedBytes || crypto.createHash('sha256').update(bytes).digest('hex') !== expectedSha256) {
+    throw new Error('Settled worker output bytes do not match its receipt.');
+  }
+  return bytes;
+}
+
+function validateMode0StartResult(result, envelope, reservationId, workerExecutable) {
+  const keys = ['schema','outcome','reservation_id','dispatch_id','job_identity_digest','worker_container_id',
+    'worker_cgroup_id','worker_executable_sha256','started_at_ms','start_receipt_digest'];
+  if (!exactResourceKeys(result, keys) || result.schema !== MODE0_START_RESULT_SCHEMA || result.outcome !== 'STARTED'
+    || result.reservation_id !== reservationId || result.dispatch_id !== envelope.dispatch_id
+    || result.job_identity_digest !== envelope.job_identity_digest
+    || result.worker_container_id !== envelope.worker.container_id || result.worker_cgroup_id !== envelope.worker.cgroup_id
+    || result.worker_executable_sha256 !== envelope.worker.executable_sha256
+    || !Number.isSafeInteger(result.started_at_ms) || result.started_at_ms <= envelope.observed_at_ms
+    || result.started_at_ms >= envelope.expires_at_ms || !/^[a-f0-9]{64}$/.test(result.start_receipt_digest || '')
+    || executableDigest(workerExecutable) !== envelope.worker.executable_sha256
+    || mode0ResultDigest(result, 'start_receipt_digest') !== result.start_receipt_digest) throw new Error('Externally placed worker START receipt did not verify.');
+  return result;
+}
+
+function validateMode0SettlementResult(result, start, envelope, reservationId) {
+  const keys = ['schema','outcome','exit_code','reservation_id','dispatch_id','job_identity_digest','parent_cgroup_id',
+    'management_cgroup_id','worker_cgroup_id','management_container_id','worker_container_id','domain_empty',
+    'settled_at_ms','start_receipt_digest','stdout_bytes','stdout_sha256','stderr_bytes','stderr_sha256','outcome_digest'];
+  if (!exactResourceKeys(result, keys) || result.schema !== MODE0_SETTLEMENT_RESULT_SCHEMA
+    || !['SUCCEEDED','FAILED'].includes(result.outcome) || !Number.isSafeInteger(result.exit_code)
+    || result.outcome === 'SUCCEEDED' && result.exit_code !== 0 || result.outcome === 'FAILED' && result.exit_code === 0
+    || result.reservation_id !== reservationId || result.dispatch_id !== envelope.dispatch_id
+    || result.job_identity_digest !== envelope.job_identity_digest
+    || result.parent_cgroup_id !== envelope.parent.cgroup_id
+    || result.management_cgroup_id !== envelope.management.cgroup_id
+    || result.worker_cgroup_id !== envelope.worker.cgroup_id
+    || result.management_container_id !== envelope.management.container_id
+    || result.worker_container_id !== envelope.worker.container_id || result.domain_empty !== true
+    || !Number.isSafeInteger(result.settled_at_ms) || result.settled_at_ms <= start.started_at_ms
+    || result.settled_at_ms >= envelope.expires_at_ms
+    || result.start_receipt_digest !== start.start_receipt_digest
+    || !Number.isSafeInteger(result.stdout_bytes) || result.stdout_bytes < 0 || result.stdout_bytes > MODE0_WORKER_OUTPUT_BYTES
+    || !Number.isSafeInteger(result.stderr_bytes) || result.stderr_bytes < 0 || result.stderr_bytes > MODE0_WORKER_OUTPUT_BYTES
+    || !/^[a-f0-9]{64}$/.test(result.stdout_sha256 || '') || !/^[a-f0-9]{64}$/.test(result.stderr_sha256 || '')
+    || !/^[a-f0-9]{64}$/.test(result.outcome_digest || '') || mode0ResultDigest(result, 'outcome_digest') !== result.outcome_digest) {
+    throw new Error('External worker settlement did not prove a known terminal outcome and empty domain.');
+  }
+  return result;
+}
+
+function sealResourceProvenance(kind, entry, origin, resourceSource, jobIdentityDigest, options = {}, suppliedKey = undefined, mode0Envelope = null) {
   const key = suppliedKey || resourceProvenanceKey(options, true);
   if (!key) throw new Error('Resource provenance could not be persisted safely.');
-  const existingAdmissionId = entry.producer_provenance?.schema === RESOURCE_PROVENANCE_SCHEMA
+  const existingAdmissionId = [RESOURCE_PROVENANCE_SCHEMA, RESOURCE_PROVENANCE_SCHEMA_V2].includes(entry.producer_provenance?.schema)
     ? entry.producer_provenance.admission_id : null;
   entry.producer_provenance = {
-    schema: RESOURCE_PROVENANCE_SCHEMA,
+    schema: mode0Envelope ? RESOURCE_PROVENANCE_SCHEMA_V2 : RESOURCE_PROVENANCE_SCHEMA,
     origin,
     resource_source: resourceSource,
     admission_id: existingAdmissionId || crypto.randomUUID(),
     job_identity_digest: jobIdentityDigest,
+    ...(mode0Envelope ? { mode0_envelope: mode0Envelope } : {}),
     mac: '',
   };
   entry.producer_provenance.mac = resourceProvenanceMac(kind, entry, key);
@@ -155,12 +456,18 @@ function sealResourceProvenance(kind, entry, origin, resourceSource, jobIdentity
 
 function validResourceProvenance(kind, entry, key) {
   const provenance = entry && entry.producer_provenance;
+  const v2 = provenance?.schema === RESOURCE_PROVENANCE_SCHEMA_V2;
   if (!provenance || typeof provenance !== 'object'
-    || Object.keys(provenance).sort().join('\u0000') !== ['admission_id', 'job_identity_digest', 'mac', 'origin', 'resource_source', 'schema'].sort().join('\u0000')
-    || provenance.schema !== RESOURCE_PROVENANCE_SCHEMA
+    || !exactResourceKeys(provenance, v2
+      ? ['admission_id','job_identity_digest','mac','mode0_envelope','origin','resource_source','schema']
+      : ['admission_id','job_identity_digest','mac','origin','resource_source','schema'])
+    || ![RESOURCE_PROVENANCE_SCHEMA, RESOURCE_PROVENANCE_SCHEMA_V2].includes(provenance.schema)
     || !['native', 'repository-test'].includes(provenance.origin)
     || (provenance.origin === 'native' && !['proc-meminfo', 'win32-operating-system'].includes(provenance.resource_source))
     || (provenance.origin === 'repository-test' && provenance.resource_source !== REPOSITORY_TEST_RESOURCE_FIXTURE.source)
+    || (v2 && (kind !== 'reservation' || provenance.origin !== 'native' || provenance.resource_source !== 'proc-meminfo'
+      || !validMode0ResourceEnvelope(provenance.mode0_envelope, { job_identity_digest: provenance.job_identity_digest, allowExpired: true })))
+    || (!v2 && Object.hasOwn(provenance, 'mode0_envelope'))
     || typeof entry.worker_executable !== 'string'
     || !/^[a-f0-9-]{36}$/.test(provenance.admission_id || '')
     || !/^[a-f0-9]{64}$/.test(provenance.job_identity_digest || '')
@@ -574,6 +881,7 @@ function readMutableControlState(options = {}) {
 
 function recoverState(state, now = Date.now()) {
   state.reservations = state.reservations.filter((entry) => {
+    if (entry.producer_provenance?.schema === RESOURCE_PROVENANCE_SCHEMA_V2) return true;
     const expired = Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms <= now;
     return !(expired && (entry.status === 'reserved' || !pidAlive(entry.owner_pid)));
   });
@@ -723,7 +1031,7 @@ function invalidateProfile(host, reason, options = {}) {
   atomicWriteJson(profilePath(host, options), profile);
   return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
 }
-function nativeResourceState(value, source) {
+function nativeResourceState(value, source, metadata = null) {
   const state = Object.freeze({
     physical_total: value.physical_total,
     physical_available: value.physical_available,
@@ -734,19 +1042,63 @@ function nativeResourceState(value, source) {
   });
   if (!validResourceState(state) || !['proc-meminfo', 'win32-operating-system'].includes(state.source)) return null;
   NATIVE_RESOURCE_STATES.add(state);
+  if (metadata) NATIVE_RESOURCE_METADATA.set(state, Object.freeze({ ...metadata }));
   return state;
 }
 
+function parseLinuxMeminfoCounters(before, text, after) {
+  if (![0, 1, 2].includes(before) || ![0, 1, 2].includes(after) || before !== after) {
+    throw new Error('Linux overcommit mode is unavailable, unsupported, or changed during observation.');
+  }
+  if (typeof text !== 'string') throw new Error('Linux memory counters are unavailable.');
+  const required = new Set(['MemTotal', 'MemAvailable', 'CommitLimit', 'Committed_AS']);
+  const raw = Object.create(null);
+  for (const line of text.split('\n')) {
+    const header = /^(\w+):/.exec(line);
+    if (!header || !required.has(header[1])) continue;
+    if (Object.hasOwn(raw, header[1])) throw new Error('Linux memory counters are duplicate or malformed.');
+    const match = /^(\w+):\s+([0-9]+)\s+(\S+)\s*$/.exec(line);
+    if (!match || match[1] !== header[1] || match[3] !== 'kB') throw new Error('Linux memory counters are duplicate or malformed.');
+    raw[header[1]] = match[2];
+  }
+  if ([...required].some((key) => !Object.hasOwn(raw, key))) throw new Error('Linux memory counters are incomplete.');
+  const bytes = (name) => {
+    const value = BigInt(raw[name]) * 1024n;
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Linux memory counter exceeds exact integer range.');
+    return value;
+  };
+  const total = bytes('MemTotal');
+  const available = bytes('MemAvailable');
+  const commitTotal = bytes('CommitLimit');
+  const committed = bytes('Committed_AS');
+  const commitAvailable = commitTotal - committed;
+  if (total < 1n || available < 0n || available > total
+    || commitAvailable < -BigInt(Number.MAX_SAFE_INTEGER) || commitAvailable > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('Linux memory counter relationships are invalid.');
+  }
+  return {
+    physical_total: Number(total), physical_available: Number(available), commit_total: Number(commitTotal),
+    commit_available: Number(commitAvailable), overcommit_mode: before, raw_counters: { ...raw },
+  };
+}
+
 function linuxResources() {
+  const readMode = () => {
+    const raw = fs.readFileSync('/proc/sys/vm/overcommit_memory', 'utf8');
+    if (!/^[012](?:\n)?$/.test(raw)) throw new Error('Linux overcommit mode is malformed.');
+    return Number(raw.trim());
+  };
+  const before = readMode();
   const text = fs.readFileSync('/proc/meminfo', 'utf8');
-  const values = Object.fromEntries([...text.matchAll(/^(\w+):\s+(\d+)\s+kB$/gm)].map((m) => [m[1], Number(m[2]) * 1024]));
+  const after = readMode();
+  const counters = parseLinuxMeminfoCounters(before, text, after);
   return nativeResourceState({
-    physical_total: values.MemTotal,
-    physical_available: values.MemAvailable,
-    commit_total: values.CommitLimit,
-    commit_available: values.CommitLimit - values.Committed_AS,
+    physical_total: counters.physical_total,
+    physical_available: counters.physical_available,
+    commit_total: counters.commit_total,
+    commit_available: counters.commit_available,
     host_responsive: true,
-  }, 'proc-meminfo');
+  }, 'proc-meminfo', { overcommit_mode: counters.overcommit_mode, raw_counters: counters.raw_counters });
 }
 
 function windowsResources() {
@@ -827,11 +1179,14 @@ function inspectResources(options = {}) {
 
 function validResourceState(resources) {
   try { resources = resourceDataCopy(resources); } catch (_) { return false; }
-  return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
-    .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
-    && resources.physical_available <= resources.physical_total
-    && resources.commit_available <= resources.commit_total
-    && resources.host_responsive === true;
+  if (!resources || !['physical_total', 'physical_available', 'commit_total', 'commit_available']
+    .every((key) => Number.isSafeInteger(resources[key])) || resources.physical_total < 1
+    || resources.physical_available < 0 || resources.physical_available > resources.physical_total
+    || resources.commit_total < 0 || resources.commit_available < -Number.MAX_SAFE_INTEGER
+    || resources.commit_available > resources.commit_total || resources.host_responsive !== true) return false;
+  if (resources.source === 'win32-operating-system') return resources.physical_available > 0
+    && resources.commit_total > 0 && resources.commit_available > 0;
+  return true;
 }
 
 function inspectResourceCapability(options = {}) {
@@ -840,6 +1195,116 @@ function inspectResourceCapability(options = {}) {
     && (NATIVE_RESOURCE_STATES.has(resources) || TEST_RESOURCE_STATES.has(resources)
       && RESOURCE_TEST_CONTEXT.getStore()));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
+}
+
+function executableDigest(filePath) {
+  const absolute = path.resolve(String(filePath || ''));
+  const stat = fs.lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(absolute) !== absolute) throw new Error('Worker executable identity is not a private regular file.');
+  return crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');
+}
+
+function mode0ControlledFixtureWorker(rootInput) {
+  if (process.platform !== 'linux' || typeof process.getuid !== 'function') throw new Error('The controlled fixture worker is unavailable.');
+  const root = path.resolve(String(rootInput || ''));
+  const rootStat = fs.lstatSync(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.uid !== process.getuid()
+    || (rootStat.mode & 0o077) !== 0 || fs.realpathSync(root) !== root) throw new Error('The controlled fixture root is not task-owned.');
+  const sourcePath = path.resolve(__dirname, '../tests/toolkit-c1-run093-reclosure.test.cjs');
+  const sourceStat = fs.lstatSync(sourcePath);
+  if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || fs.realpathSync(sourcePath) !== sourcePath
+    || sourceStat.size !== 116672) throw new Error('The accepted fixture source identity is unavailable.');
+  const sourceBytes = fs.readFileSync(sourcePath);
+  const sourceDigest = crypto.createHash('sha256').update(sourceBytes).digest('hex');
+  if (sourceBytes.length !== 116672 || sourceDigest !== MODE0_FIXTURE_SOURCE_SHA256) throw new Error('The accepted fixture source bytes changed.');
+  const source = sourceBytes.toString('utf8');
+  const startMarker = '  fs.writeFileSync(cli, [';
+  const endMarker = "  ].join('\\n'), 'utf8');";
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0 || source.indexOf(startMarker, start + 1) >= 0
+    || source.indexOf(endMarker, end + 1) >= 0) throw new Error('The accepted fixture executable template is ambiguous.');
+  const delayMatches = [...source.matchAll(/const worker = createSupervisorFixture\(root, ([0-9]+)\);/g)];
+  if (delayMatches.length !== 1 || Number(delayMatches[0][1]) !== 1000) throw new Error('The accepted fixture lifecycle bound changed.');
+  const setup = require('./setup-claude-toolkit-plugin.cjs');
+  const executable = path.join(root, 'fake-claude.cjs');
+  const witness = path.join(root, 'worker-witness.log');
+  const entry = {
+    id: setup.pluginId(), version: CONTROL_VERSION, enabled: true, trusted: true,
+    hooksActive: true, installPath: path.join(root, 'cache'),
+  };
+  const template = source.slice(start + startMarker.length, end);
+  const scriptLines = [];
+  for (const rawLine of template.split(/\r?\n/)) {
+    let expression = rawLine.trim();
+    if (!expression) continue;
+    if (expression.endsWith(',')) expression = expression.slice(0, -1).trim();
+    if (expression.startsWith('"')) {
+      scriptLines.push(JSON.parse(expression));
+    } else if (/^'[^'\\]*'$/.test(expression)) {
+      scriptLines.push(expression.slice(1, -1));
+    } else if (expression === '`const entry=${JSON.stringify(entry)};`') {
+      scriptLines.push(`const entry=${JSON.stringify(entry)};`);
+    } else if (expression === '`const witness=${JSON.stringify(witness)};`') {
+      scriptLines.push(`const witness=${JSON.stringify(witness)};`);
+    } else if (expression === '...(workerDelayMs > 0 ? [`Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,${workerDelayMs});`] : [])') {
+      scriptLines.push('Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1000);');
+    } else {
+      throw new Error('The accepted fixture executable template contains an unsupported expression.');
+    }
+  }
+  const expectedBytes = Buffer.from(scriptLines.join('\n'), 'utf8');
+  const stat = fs.lstatSync(executable);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.uid !== process.getuid()
+    || (stat.mode & 0o022) !== 0 || fs.realpathSync(executable) !== executable) throw new Error('The controlled fixture executable path is not owned and regular.');
+  const executableBytes = fs.readFileSync(executable);
+  if (!executableBytes.equals(expectedBytes)) throw new Error('The controlled fixture executable bytes do not match the accepted source.');
+  // This immutable test worker supplies the bounded child process only; host admission always uses readProfile.
+  return Object.freeze({
+    executable, executable_sha256: crypto.createHash('sha256').update(executableBytes).digest('hex'),
+    source_sha256: sourceDigest,
+  });
+}
+
+async function captureMode0ResourceEnvelope(spec, profile, options, effectChannel) {
+  let receipt;
+  try { receipt = require('./toolkit-github-program-receipt.cjs'); receipt.assertAuthenticControllerEffectChannel(effectChannel); }
+  catch (_) { return null; }
+  if (typeof effectChannel.resourceOperation !== 'function') return null;
+  let snapshot;
+  try { snapshot = effectChannel.snapshot(); } catch (_) { return null; }
+  const identity = snapshot?.decision?.identity;
+  if (!identity || snapshot.consumer?.stage !== 'G3' || identity.repository !== MODE0_REPOSITORY
+    || identity.run !== MODE0_RUN || identity.lock !== MODE0_LOCK
+    || !/^[a-f0-9]{64}$/.test(snapshot.decision_digest || '')) return null;
+  const resources = inspectResources();
+  const metadata = resources && NATIVE_RESOURCE_METADATA.get(resources);
+  if (process.platform !== 'linux' || !validResourceState(resources) || !NATIVE_RESOURCE_STATES.has(resources)
+    || resources.source !== 'proc-meminfo' || metadata?.overcommit_mode !== 0) return null;
+  let workerExecutable;
+  let workerExecutableSha256;
+  try {
+    workerExecutable = processLaunch.assertExecutableAvailable(effectiveClaudeCommand(profile, options), { env: effectiveEnvironment(options) });
+    workerExecutableSha256 = executableDigest(workerExecutable);
+  } catch (_) { return null; }
+  const jobIdentityDigest = resourceJobIdentityDigest(spec, workerExecutable);
+  let envelope;
+  try {
+    envelope = resourceDataCopy(await effectChannel.resourceOperation({
+      action: 'OBSERVE', case_id: MODE0_CASE_ID, decision_digest: snapshot.decision_digest,
+      job_identity_digest: jobIdentityDigest, lock: identity.lock, repository: identity.repository, run: identity.run,
+    }));
+  } catch (_) { return null; }
+  if (!validMode0ResourceEnvelope(envelope, {
+    repository: identity.repository, run: identity.run, lock: identity.lock,
+    decision_digest: snapshot.decision_digest, workload_digest: jobIdentityDigest,
+    job_identity_digest: jobIdentityDigest, workerExecutable, workerExecutableSha256,
+  })) return null;
+  if (envelope.resources.physical_total !== resources.physical_total
+    || envelope.resources.commit_total !== resources.commit_total
+    || resources.physical_available < MODE0_HOST_RESERVE_BYTES) return null;
+  MODE0_RESOURCE_ENVELOPES.set(envelope, Object.freeze({ decision_digest: snapshot.decision_digest, job_identity_digest: jobIdentityDigest }));
+  return { envelope, resources, workerExecutable, jobIdentityDigest };
 }
 
 
@@ -1106,6 +1571,32 @@ function admissionDecision(specInput, options = {}) {
   return resourceAdmissionDecisionValidated(spec, profile, resources, options, RESOURCE_PRODUCTION_ADMISSION, selectedResources.context);
 }
 
+async function admissionDecisionWithResourceEnvelope(specInput, effectChannel, options = {}) {
+  try { specInput = resourceDataCopy(specInput); options = resourceOptionShell(options); }
+  catch (_) { return refusal('Resource state could not be verified safely.'); }
+  if (['resourceState','resource_state','resource','resources','resource_origin','resourceOrigin','resource_provenance',
+    'resourceProvenance','producer_provenance','repository_test_invocation','repositoryTestInvocation','effectChannel']
+    .some((key) => Object.hasOwn(options, key))) return refusal('Mode-0 resource authority cannot be supplied through options or fixtures.');
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
+  let spec;
+  try { spec = validateLaunchSpec(specInput); } catch (error) { return refusal(error.message); }
+  if (spec.host !== HOSTS.CLAUDE || spec.role !== ROLES.WORKER || spec.depth !== 1 || spec.queue_id
+    || Number(spec.estimated_memory_bytes || 0) !== MODE0_WORKER_BYTES) return refusal('The mode-0 envelope is limited to its exact worker request.');
+  let profile = options.profile || readProfile(HOSTS.CLAUDE, options);
+  if (options.profile) {
+    try { profile = resourceDataCopy(profile); } catch (_) { return refusal('The selected host admission profile could not be verified safely.'); }
+  }
+  if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY || !validAdmissionProfile(profile)
+    || profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
+    || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
+    || !verifyCurrentClaudeEnforcement(profile, { ...options, claudeCli: profile.claude_cli })) return refusal('The selected host profile is not the current verified Claude enforcement boundary.');
+  const captured = await captureMode0ResourceEnvelope(spec, profile, options, effectChannel);
+  if (!captured) return refusal('The authentic current mode-0 host envelope could not be verified.');
+  return resourceAdmissionDecisionValidated(spec, profile, captured.resources, options,
+    RESOURCE_PRODUCTION_ADMISSION, null, captured.envelope);
+}
+
 function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
   const positionalProvided = arguments.length >= 3;
   try {
@@ -1130,13 +1621,22 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   return resourceAdmissionDecisionValidated(spec, profile, resources, options, null, selectedResources.context);
 }
 
-function resourceAdmissionDecisionValidated(spec, profile, resources, options, producerAuthority = null, testContext = null) {
+function resourceAdmissionDecisionValidated(spec, profile, resources, options, producerAuthority = null, testContext = null, mode0Envelope = null) {
   const host = spec.host;
   const origin = resourceOrigin(resources, testContext);
   if (!origin || origin === 'native' && producerAuthority !== RESOURCE_PRODUCTION_ADMISSION
     || origin === 'repository-test' && !testContext) return refusal('Resource provenance could not be established safely.');
   const workerExecutable = host === HOSTS.CLAUDE ? effectiveClaudeCommand(profile, options) : '';
   const jobIdentityDigest = resourceJobIdentityDigest(spec, workerExecutable);
+  const mode0Metadata = NATIVE_RESOURCE_METADATA.get(resources);
+  const mode0Binding = mode0Envelope && MODE0_RESOURCE_ENVELOPES.get(mode0Envelope);
+  if (mode0Envelope && (!mode0Binding || process.platform !== 'linux' || mode0Metadata?.overcommit_mode !== 0
+    || host !== HOSTS.CLAUDE || spec.role !== ROLES.WORKER || spec.depth !== 1
+    || Number(spec.estimated_memory_bytes || 0) !== MODE0_WORKER_BYTES
+    || mode0Binding.job_identity_digest !== jobIdentityDigest
+    || !validMode0ResourceEnvelope(mode0Envelope, { job_identity_digest: jobIdentityDigest, workload_digest: jobIdentityDigest }))) {
+    return refusal('The captured mode-0 resource envelope does not bind this exact worker.');
+  }
   return withLock(options, () => {
     const now = options.now || Date.now();
     const stateFile = statePath(options);
@@ -1170,15 +1670,22 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options, p
     if (spec.role === ROLES.CHECKER && state.reservations.some((entry) => entry.role === ROLES.CHECKER)) return refusal('Exactly one independent checker may be active.');
     if (spec.role === ROLES.CHECKER && state.checker_reviews.some((entry) => entry.review_id === spec.review_id)) return refusal('This pre-PR review already admitted its one independent checker.');
     const maximum = profile.capacity_mode === CAPACITY_MODES.MANUAL ? profile.manual_maximum : EMERGENCY_WORKER_CEILING;
-    const physicalReserve = Math.max(4 * GIB, resources.physical_total * 0.25);
-    const commitReserve = Math.max(6 * GIB, resources.commit_total * 0.20);
+    const physicalReserve = mode0Envelope ? MODE0_HOST_RESERVE_BYTES : Math.max(4 * GIB, resources.physical_total * 0.25);
+    const commitReserve = mode0Envelope ? 0 : Math.max(6 * GIB, resources.commit_total * 0.20);
     const requested = Number(spec.estimated_memory_bytes || profile.worker_estimate_bytes);
     if (!Number.isSafeInteger(requested) || requested < MIN_WORKER_COST || requested > MAX_WORKER_COST) return refusal('The requested worker cost is unknown or outside the supported range.');
+    if (mode0Envelope && (requested !== MODE0_WORKER_BYTES || active !== 0 || state.queue.length !== 0
+      || state.checker_reviews.some((entry) => entry.status === 'pending')
+      || resources.physical_available < MODE0_HOST_RESERVE_BYTES
+      || mode0Envelope.resources.physical_available < MODE0_HOST_RESERVE_BYTES)) {
+      return refusal('The fixed mode-0 envelope requires an otherwise empty reservation state and the fresh host reserve.');
+    }
     const effectivePhysical = Math.max(0, resources.physical_available - reservedBytes);
     const effectiveCommit = Math.max(0, resources.commit_available - reservedBytes);
     const physicalAfter = effectivePhysical - requested;
     const commitAfter = effectiveCommit - requested;
-    const critical = resources.physical_available / resources.physical_total < 0.08 || resources.commit_available / resources.commit_total < 0.08;
+    const critical = !mode0Envelope && (resources.physical_available / resources.physical_total < 0.08
+      || resources.commit_available / resources.commit_total < 0.08);
     if (critical) return refusal('Current memory pressure is unsafe for another worker.');
     const queuedReservation = spec.queue_id ? state.queue.find((entry) => entry.id === spec.queue_id) : null;
     if (spec.queue_id && !queuedReservation) return refusal('The queue entry is missing or expired.');
@@ -1204,8 +1711,11 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options, p
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Earlier Toolkit-controlled work is queued.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
     }
-    const temporarilyFull = active >= maximum || active >= EMERGENCY_WORKER_CEILING || physicalAfter < physicalReserve || commitAfter < commitReserve;
+    const temporarilyFull = mode0Envelope
+      ? active !== 0 || resources.physical_available < MODE0_HOST_RESERVE_BYTES
+      : active >= maximum || active >= EMERGENCY_WORKER_CEILING || physicalAfter < physicalReserve || commitAfter < commitReserve;
     if (temporarilyFull) {
+      if (mode0Envelope) return refusal('The exact mode-0 envelope is not capacity-positive and cannot be queued.');
       if (spec.role === ROLES.CHECKER) return refusal('Verified memory capacity is unavailable for the required checker.');
       if (queuedReservation) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -1230,7 +1740,7 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options, p
       estimated_memory_bytes: requested, effort: spec.effort, worker_executable: workerExecutable,
       job_identity_digest: jobIdentityDigest, status: 'reserved',
     };
-    try { sealResourceProvenance('reservation', reservation, origin, resources.source, jobIdentityDigest, options, provenanceKey); }
+    try { sealResourceProvenance('reservation', reservation, origin, resources.source, jobIdentityDigest, options, provenanceKey, mode0Envelope); }
     catch (_) { return refusal('Toolkit reservation provenance could not be persisted safely.'); }
     state.reservations.push(reservation);
     if (spec.role === ROLES.CHECKER) {
@@ -1267,7 +1777,7 @@ function releaseReservation(id, options = {}) {
     const current = readMutableControlState(options);
     if (!current.exists || !current.state) return false;
     const target = current.state.reservations.find((entry) => entry.id === id);
-    if (!target || target.owner_pid !== process.pid) return false;
+    if (!target || target.owner_pid !== process.pid || target.producer_provenance?.schema === RESOURCE_PROVENANCE_SCHEMA_V2) return false;
     const state = recoverState(current.state);
     const before = state.reservations.length;
     state.reservations = state.reservations.filter((entry) => entry.id !== id);
@@ -1276,6 +1786,36 @@ function releaseReservation(id, options = {}) {
     atomicWriteJson(statePath(options), state);
     return true;
   });
+}
+
+function releaseSettledMode0Reservation(id, proof, options = {}) {
+  const binding = proof && MODE0_SETTLEMENT_PROOFS.get(proof);
+  if (!binding || binding.reservation_id !== id || binding.owner_pid !== process.pid) return false;
+  const released = withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state || !validControlState(current.state)) return false;
+    const now = Date.now();
+    const state = recoverState(current.state, now);
+    const key = resourceProvenanceKey(options, false);
+    if (!key || !validControlState(state) || !validStateResourceProvenance(state, options, key)) return false;
+    const entry = state.reservations.find((item) => item.id === id);
+    if (!entry || entry.status !== 'running' || entry.owner_pid !== process.pid
+      || entry.producer_provenance?.schema !== RESOURCE_PROVENANCE_SCHEMA_V2
+      || !validResourceProvenance('reservation', entry, key)
+      || entry.producer_provenance.admission_id !== binding.admission_id
+      || entry.producer_provenance.job_identity_digest !== binding.job_identity_digest
+      || !sameMode0EnvelopeIdentity(entry.producer_provenance.mode0_envelope, binding.envelope)
+      || binding.settled_at_ms <= binding.started_at_ms || binding.domain_empty !== true
+      || state.reservations.length !== 1 || state.queue.length !== 0
+      || state.checker_reviews.some((review) => review.status === 'pending')) return false;
+    const before = state.reservations.length;
+    state.reservations = state.reservations.filter((item) => item.id !== id);
+    if (state.reservations.length !== before - 1 || !validControlState(state)) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+  if (released) MODE0_SETTLEMENT_PROOFS.delete(proof);
+  return released;
 }
 
 function updateCheckerReview(reviewId, status, options = {}) {
@@ -1452,7 +1992,7 @@ function readCheckerWorkflowInput(inputPath, options = {}) {
   catch { throw new Error('Checker workflow input is not valid JSON.'); }
 }
 
-function claimSupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options = {}) {
+function claimLegacySupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options = {}) {
   if (RESOURCE_TEST_CONTEXT.getStore() || spec.host !== HOSTS.CLAUDE) return false;
   return withLock(options, () => {
     const current = readMutableControlState(options);
@@ -1508,6 +2048,156 @@ function claimSupervisorReservation(reservationId, spec, jobIdentityDigest, work
     atomicWriteJson(statePath(options), state);
     return true;
   });
+}
+
+function mode0ReservationSnapshot(reservationId, options = {}) {
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state || !validControlState(current.state)) return { mode0: false, invalid: true };
+    const entry = current.state.reservations.find((item) => item.id === reservationId);
+    if (entry?.producer_provenance?.schema !== RESOURCE_PROVENANCE_SCHEMA_V2) return { mode0: false };
+    const key = resourceProvenanceKey(options, false);
+    const state = recoverState(current.state, Date.now());
+    if (!key || !validControlState(state) || !validStateResourceProvenance(state, options, key)
+      || !validResourceProvenance('reservation', entry, key)) return { mode0: true, invalid: true };
+    return {
+      mode0: true,
+      envelope: resourceDataCopy(entry.producer_provenance.mode0_envelope),
+      admission_id: entry.producer_provenance.admission_id,
+      job_identity_digest: entry.producer_provenance.job_identity_digest,
+    };
+  });
+}
+
+async function claimMode0SupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options, initialEnvelope) {
+  const snapshot = withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state || !validControlState(current.state)) return null;
+    const now = Date.now();
+    const state = recoverState(current.state, now);
+    const key = resourceProvenanceKey(options, false);
+    if (!key || !validControlState(state) || !validStateResourceProvenance(state, options, key)) return null;
+    const entry = state.reservations.find((item) => item.id === reservationId);
+    if (!entry || entry.status !== 'reserved' || entry.expires_at_ms <= now
+      || entry.producer_provenance?.schema !== RESOURCE_PROVENANCE_SCHEMA_V2
+      || !validResourceProvenance('reservation', entry, key)
+      || entry.producer_provenance.origin !== 'native'
+      || entry.producer_provenance.job_identity_digest !== jobIdentityDigest
+      || entry.job_identity_digest !== jobIdentityDigest || entry.worker_executable !== workerExecutable
+      || entry.host !== HOSTS.CLAUDE || entry.role !== ROLES.WORKER || entry.depth !== 1
+      || entry.topology !== 'toolkit-controlled-direct' || entry.estimated_memory_bytes !== MODE0_WORKER_BYTES
+      || state.reservations.length !== 1 || state.queue.length !== 0
+      || state.checker_reviews.some((review) => review.status === 'pending')) return null;
+    const priorClaims = inspectSupervisorClaimMarkers(options, entry.id, entry.producer_provenance.admission_id, key, now);
+    if (!priorClaims.ok || priorClaims.claimed || priorClaims.count >= MAX_ACTIVE_SUPERVISOR_CLAIMS
+      || !sameMode0EnvelopeIdentity(initialEnvelope, entry.producer_provenance.mode0_envelope)) return null;
+    return { envelope: resourceDataCopy(entry.producer_provenance.mode0_envelope), admission_id: entry.producer_provenance.admission_id };
+  });
+  if (!snapshot) return false;
+  let fresh;
+  try { fresh = await mode0TransportRequest(snapshot.envelope, 'OBSERVE', reservationId); }
+  catch (_) { return false; }
+  const observed = inspectResources();
+  if (!validMode0OperationEnvelope(snapshot.envelope, fresh, spec, workerExecutable, jobIdentityDigest, observed)) return false;
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state || !validControlState(current.state)) return false;
+    const now = Date.now();
+    const state = recoverState(current.state, now);
+    const key = resourceProvenanceKey(options, false);
+    if (!key || !validControlState(state) || !validStateResourceProvenance(state, options, key)) return false;
+    const entry = state.reservations.find((item) => item.id === reservationId);
+    if (!entry || entry.status !== 'reserved' || entry.expires_at_ms <= now
+      || entry.producer_provenance?.schema !== RESOURCE_PROVENANCE_SCHEMA_V2
+      || !validResourceProvenance('reservation', entry, key)
+      || entry.producer_provenance.admission_id !== snapshot.admission_id
+      || entry.producer_provenance.job_identity_digest !== jobIdentityDigest
+      || entry.job_identity_digest !== jobIdentityDigest || entry.worker_executable !== workerExecutable
+      || entry.host !== HOSTS.CLAUDE || entry.role !== ROLES.WORKER || entry.depth !== 1
+      || entry.topology !== 'toolkit-controlled-direct' || entry.estimated_memory_bytes !== MODE0_WORKER_BYTES
+      || state.reservations.length !== 1 || state.queue.length !== 0
+      || state.checker_reviews.some((review) => review.status === 'pending')
+      || !sameMode0EnvelopeIdentity(snapshot.envelope, entry.producer_provenance.mode0_envelope)
+      || !mode0NativeObservationMatches(fresh, inspectResources())
+      || fresh.observed_at_ms > now + 1000 || fresh.expires_at_ms <= now
+      || fresh.resources.physical_available < MODE0_HOST_RESERVE_BYTES) return false;
+    if (!persistSupervisorClaimMarker(entry, options, key, now)) return false;
+    entry.owner_pid = process.pid;
+    entry.status = 'running';
+    try {
+      sealResourceProvenance('reservation', entry, 'native', 'proc-meminfo', jobIdentityDigest, options, key, snapshot.envelope);
+    } catch (_) { return false; }
+    if (!validControlState(state)) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
+
+async function claimSupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options = {}) {
+  if (RESOURCE_TEST_CONTEXT.getStore() || spec.host !== HOSTS.CLAUDE) return false;
+  const candidate = mode0ReservationSnapshot(reservationId, options);
+  if (candidate.mode0) {
+    if (candidate.invalid || !candidate.envelope) return false;
+    return claimMode0SupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options, candidate.envelope);
+  }
+  return claimLegacySupervisorReservation(reservationId, spec, jobIdentityDigest, workerExecutable, options);
+}
+
+function mode0LifecycleByteCount(root, reservationId) {
+  const jobs = path.join(root, 'jobs');
+  const jobNames = [`${reservationId}.json`, `${reservationId}.stdout.json`, `${reservationId}.stderr.log`,
+    `${reservationId}.mode0.stdout`, `${reservationId}.mode0.stderr`];
+  let total = 0;
+  const seen = new Set();
+  for (const target of [...jobNames.map((name) => path.join(jobs, name)), statePath({ root })]) {
+    if (seen.has(target)) continue;
+    seen.add(target);
+    const stat = verifyPrivateRegularFile(target);
+    if (total > MODE0_LIFECYCLE_BYTES - stat.size) throw new Error('Mode-0 lifecycle evidence exceeds its total bound.');
+    total += stat.size;
+  }
+  return total;
+}
+
+async function executeMode0Lifecycle(reservationId, spec, workerExecutable, jobIdentityDigest, options = {}) {
+  const snapshot = mode0ReservationSnapshot(reservationId, options);
+  if (!snapshot.mode0 || snapshot.invalid || !snapshot.envelope) throw new Error('The sealed mode-0 reservation could not be recovered.');
+  const envelope = snapshot.envelope;
+  if (envelope.job_identity_digest !== jobIdentityDigest || envelope.worker.executable_path !== workerExecutable
+    || executableDigest(workerExecutable) !== envelope.worker.executable_sha256) throw new Error('The sealed mode-0 job identity changed.');
+  const preStart = await mode0TransportRequest(envelope, 'OBSERVE', reservationId);
+  const native = inspectResources();
+  if (!validMode0OperationEnvelope(envelope, preStart, spec, workerExecutable, jobIdentityDigest, native)) {
+    throw new Error('The fresh pre-start mode-0 observation no longer meets the admitted envelope.');
+  }
+  const startReply = await mode0TransportRequest(envelope, 'START', reservationId);
+  const start = validateMode0StartResult(startReply.result, preStart, reservationId, workerExecutable);
+  const settleReply = await mode0TransportRequest(envelope, 'SETTLE', reservationId);
+  const settlement = validateMode0SettlementResult(settleReply.result, start, preStart, reservationId);
+  const jobs = path.join(controlRoot(options), 'jobs');
+  const stdout = readMode0Output(path.join(jobs, `${reservationId}.mode0.stdout`), settlement.stdout_bytes, settlement.stdout_sha256);
+  const stderr = readMode0Output(path.join(jobs, `${reservationId}.mode0.stderr`), settlement.stderr_bytes, settlement.stderr_sha256);
+  mode0LifecycleByteCount(controlRoot(options), reservationId);
+  const proof = Object.freeze({ schema: MODE0_SETTLEMENT_RESULT_SCHEMA, settlement_digest: settlement.outcome_digest });
+  const current = mode0ReservationSnapshot(reservationId, options);
+  if (!current.mode0 || current.invalid || !current.envelope) throw new Error('The mode-0 reservation changed before settled release.');
+  MODE0_SETTLEMENT_PROOFS.set(proof, {
+    reservation_id: reservationId,
+    owner_pid: process.pid,
+    admission_id: current.admission_id,
+    job_identity_digest: jobIdentityDigest,
+    envelope: current.envelope,
+    started_at_ms: start.started_at_ms,
+    settled_at_ms: settlement.settled_at_ms,
+    domain_empty: settlement.domain_empty,
+  });
+  if (!releaseSettledMode0Reservation(reservationId, proof, options)) {
+    MODE0_SETTLEMENT_PROOFS.delete(proof);
+    throw new Error('The exact externally settled reservation could not be released once.');
+  }
+  if (stdout.length) process.stdout.write(stdout);
+  if (stderr.length) process.stderr.write(stderr);
+  return settlement.exit_code;
 }
 
 function launch(specInput, options = {}) {
@@ -1569,20 +2259,184 @@ function launch(specInput, options = {}) {
   }
 }
 
-async function supervise(args) {
-  const options = { root: args.root };
-  let code = 1;
-  let checkerOutcome = null;
-  let claimed = false;
+async function launchWithResourceEnvelope(specInput, effectChannel, options = {}) {
+  try {
+    specInput = resourceDataCopy(specInput);
+    options = resourceOptionShell(options);
+  } catch (_) { return refusal('Resource state could not be verified safely.'); }
+  if (RESOURCE_TEST_CONTEXT.getStore()) return refusal('Repository-test resource context cannot launch production workers.');
+  const optionKeys = Object.keys(options);
+  if (optionKeys.length !== 1 || optionKeys[0] !== 'root' || typeof options.root !== 'string'
+    || !path.isAbsolute(options.root) || path.resolve(options.root) !== options.root) {
+    return refusal('Mode-0 launch requires its exact owned resource root.');
+  }
+  if (['resourceState','resource_state','resource','resources','resource_origin','resourceOrigin','resource_provenance',
+    'resourceProvenance','producer_provenance','repository_test_invocation','repositoryTestInvocation','effectChannel']
+    .some((key) => Object.hasOwn(options, key))) return refusal('Mode-0 resource authority cannot be supplied through options or fixtures.');
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
   let spec;
-  let specPath;
+  let promptBytes;
+  let profile;
+  let claudeCli;
+  try {
+    const fixtureWorker = mode0ControlledFixtureWorker(options.root);
+    profile = readProfile(HOSTS.CLAUDE, options);
+    claudeCli = fixtureWorker.executable;
+    spec = validateLaunchSpec(specInput);
+    if (spec.host !== HOSTS.CLAUDE || spec.role !== ROLES.WORKER || spec.depth !== 1 || spec.queue_id
+      || Number(spec.estimated_memory_bytes || 0) !== MODE0_WORKER_BYTES) {
+      return refusal('The mode-0 envelope is limited to its exact worker request.');
+    }
+    promptBytes = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8');
+    if (promptBytes.length > MAX_PROMPT_BYTES) return refusal('Child prompt exceeds the bounded private transport limit.');
+    claudeCli = processLaunch.assertExecutableAvailable(claudeCli, { env: effectiveEnvironment(options) });
+  } catch (error) { return refusal(error.message); }
+  const admitted = await admissionDecisionWithResourceEnvelope(spec, effectChannel, { ...options, profile, claudeCli });
+  if (admitted.result !== RESULTS.START) return admitted;
+  const root = controlRoot(options);
+  const jobs = path.join(root, 'jobs');
+  const specPath = path.join(jobs, `${admitted.reservation_id}.json`);
+  const outputPath = path.join(jobs, `${admitted.reservation_id}.stdout.json`);
+  const errorPath = path.join(jobs, `${admitted.reservation_id}.stderr.log`);
+  const mode0StdoutPath = path.join(jobs, `${admitted.reservation_id}.mode0.stdout`);
+  const mode0StderrPath = path.join(jobs, `${admitted.reservation_id}.mode0.stderr`);
+  let out;
+  let err;
+  try {
+    const serialized = {
+      ...spec,
+      child_prompt: undefined,
+      child_prompt_base64: promptBytes.toString('base64'),
+      worker_executable: claudeCli,
+    };
+    createPrivateFile(specPath, `${JSON.stringify(serialized, null, 2)}\n`);
+    createPrivateFile(outputPath);
+    createPrivateFile(errorPath);
+    createPrivateFile(mode0StdoutPath);
+    createPrivateFile(mode0StderrPath);
+    mode0LifecycleByteCount(root, admitted.reservation_id);
+    const expectedJobIdentityDigest = resourceJobIdentityDigest(spec, claudeCli);
+    const preclaimSnapshot = withLock({ root }, () => {
+      const stateFile = statePath({ root });
+      const stateStat = verifyPrivateRegularFile(stateFile);
+      const stateBytes = fs.readFileSync(stateFile);
+      const specStat = verifyPrivateRegularFile(specPath);
+      const specBytes = fs.readFileSync(specPath);
+      if (stateBytes.length !== stateStat.size || specBytes.length !== specStat.size
+        || stateBytes.length > MODE0_LIFECYCLE_BYTES || specBytes.length > MODE0_LIFECYCLE_BYTES) {
+        throw new Error('Mode-0 pre-claim evidence changed or exceeded its bound.');
+      }
+      const stateAfter = verifyPrivateRegularFile(stateFile);
+      const specAfter = verifyPrivateRegularFile(specPath);
+      const stateBytesAfter = fs.readFileSync(stateFile);
+      const specBytesAfter = fs.readFileSync(specPath);
+      if (stateAfter.dev !== stateStat.dev || stateAfter.ino !== stateStat.ino || stateAfter.size !== stateStat.size
+        || stateAfter.mtimeMs !== stateStat.mtimeMs || stateAfter.ctimeMs !== stateStat.ctimeMs
+        || specAfter.dev !== specStat.dev || specAfter.ino !== specStat.ino || specAfter.size !== specStat.size
+        || specAfter.mtimeMs !== specStat.mtimeMs || specAfter.ctimeMs !== specStat.ctimeMs
+        || !stateBytes.equals(stateBytesAfter) || !specBytes.equals(specBytesAfter)) {
+        throw new Error('Mode-0 pre-claim files changed while their bytes were captured.');
+      }
+      const state = JSON.parse(stateBytes.toString('utf8'));
+      const storedSpec = JSON.parse(specBytes.toString('utf8'));
+      const key = resourceProvenanceKey({ root }, false);
+      const entry = Array.isArray(state?.reservations)
+        ? state.reservations.find((item) => item.id === admitted.reservation_id) : null;
+      if (!validControlState(state) || !key || !validStateResourceProvenance(state, { root }, key)
+        || state.reservations.length !== 1 || state.queue.length !== 0
+        || state.checker_reviews.some((review) => review.status === 'pending')
+        || !entry || entry.status !== 'reserved' || entry.expires_at_ms <= Date.now()
+        || entry.producer_provenance?.schema !== RESOURCE_PROVENANCE_SCHEMA_V2
+        || !validResourceProvenance('reservation', entry, key)
+        || entry.producer_provenance.job_identity_digest !== expectedJobIdentityDigest
+        || entry.job_identity_digest !== expectedJobIdentityDigest
+        || entry.worker_executable !== claudeCli
+        || storedSpec.worker_executable !== claudeCli || storedSpec.host !== HOSTS.CLAUDE
+        || storedSpec.role !== ROLES.WORKER || storedSpec.depth !== 1
+        || Number(storedSpec.estimated_memory_bytes || 0) !== MODE0_WORKER_BYTES) {
+        throw new Error('The exact sealed mode-0 pre-claim state or spec could not be verified.');
+      }
+      const envelope = resourceDataCopy(entry.producer_provenance.mode0_envelope);
+      const capture = (filePath, bytes) => Object.freeze({
+        path: filePath,
+        bytes: bytes.length,
+        sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+        base64: bytes.toString('base64'),
+      });
+      return Object.freeze({
+        schema: 'toolkit.agent-control.mode0-preclaim-snapshot.v1',
+        reservation_id: admitted.reservation_id,
+        job_identity_digest: expectedJobIdentityDigest,
+        dispatch_id: envelope.dispatch_id,
+        decision_digest: envelope.decision_digest,
+        captured_at_ms: Date.now(),
+        expires_at_ms: envelope.expires_at_ms,
+        state: capture(stateFile, stateBytes),
+        spec: capture(specPath, specBytes),
+      });
+    });
+    out = fs.openSync(outputPath, 'w');
+    err = fs.openSync(errorPath, 'w');
+    const supervisorArgs = [__filename, 'supervise', '--root', root, '--reservation', admitted.reservation_id,
+      '--spec', specPath, '--claude-cli', claudeCli];
+    const supervisor = spawn(process.execPath, supervisorArgs, {
+      detached: false, windowsHide: true, stdio: ['ignore', out, err],
+      env: effectiveEnvironment(options),
+    });
+    const supervisorCompletion = new Promise((resolve) => {
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(completionTimer);
+        resolve(Object.freeze(result));
+      };
+      const completionTimer = setTimeout(() => finish({
+        state: 'UNRESOLVED',
+        reason: 'MODE0_SUPERVISOR_COMPLETION_TIMEOUT',
+        observed_at_ms: Date.now(),
+      }), Math.max(1, Math.min(455000, preclaimSnapshot.expires_at_ms - Date.now())));
+      if (typeof completionTimer.unref === 'function') completionTimer.unref();
+      supervisor.once('error', () => finish({ state: 'SPAWN_ERROR', exit_code: null, signal: null, observed_at_ms: Date.now() }));
+      supervisor.once('close', (exitCode, signal) => finish({
+        state: 'CLOSED',
+        exit_code: Number.isSafeInteger(exitCode) ? exitCode : null,
+        signal: signal || null,
+        observed_at_ms: Date.now(),
+      }));
+    });
+    return {
+      ...admitted,
+      supervisor_pid: supervisor.pid,
+      spec_path: specPath,
+      output_path: outputPath,
+      error_path: errorPath,
+      settlement_stdout_path: mode0StdoutPath,
+      settlement_stderr_path: mode0StderrPath,
+      preclaim_snapshot: preclaimSnapshot,
+      supervisor_completion: supervisorCompletion,
+      status: 'launched',
+    };
+  } catch {
+    return refusal('Worker launch could not be started safely; the mode-0 reservation remains held for recovery.');
+  } finally {
+    if (out !== undefined) fs.closeSync(out);
+    if (err !== undefined) fs.closeSync(err);
+  }
+}
+
+class WorkerSupervisor {
+  #args; #options; #code=1; #checkerOutcome=null; #claimed=false; #mode0=false; #mode0Settled=false; #spec; #specPath;
+  constructor(args){this.#args=args;this.#options={root:args.root};}
+  async run(){const args=this.#args,options=this.#options;
   try {
     if (!/^[a-f0-9-]{36}$/.test(String(args.reservation || ''))) throw new Error('Toolkit reservation identity is invalid.');
-    specPath = path.resolve(String(args.spec || ''));
+    this.#specPath = path.resolve(String(args.spec || ''));
     const expectedSpecPath = path.join(controlRoot(options), 'jobs', `${args.reservation}.json`);
-    if (specPath !== expectedSpecPath) throw new Error('Stored worker specification identity is invalid.');
-    verifyPrivateRegularFile(specPath);
-    const stored = readJson(specPath);
+    if (this.#specPath !== expectedSpecPath) throw new Error('Stored worker specification identity is invalid.');
+    verifyPrivateRegularFile(this.#specPath);
+    const stored = readJson(this.#specPath);
     const encoded = String(stored?.child_prompt_base64 || '');
     const workerExecutable = String(stored?.worker_executable || '');
     if (!workerExecutable || workerExecutable !== args.claudeCli) throw new Error('Stored worker executable identity is invalid.');
@@ -1592,37 +2446,52 @@ async function supervise(args) {
     delete jobSpec.child_prompt_base64;
     delete jobSpec.worker_executable;
     jobSpec.child_prompt = promptBytes.toString('utf8');
-    spec = validateLaunchSpec(jobSpec);
-    const jobIdentityDigest = resourceJobIdentityDigest(spec, workerExecutable);
-    if (!claimSupervisorReservation(args.reservation, spec, jobIdentityDigest, workerExecutable, options)) {
+    this.#spec = validateLaunchSpec(jobSpec);
+    const jobIdentityDigest = resourceJobIdentityDigest(this.#spec, workerExecutable);
+    const mode0Candidate = mode0ReservationSnapshot(args.reservation, options);
+    if (mode0Candidate.mode0 && (mode0Candidate.invalid || !mode0Candidate.envelope)) {
+      throw new Error('The sealed mode-0 reservation could not be verified before worker execution.');
+    }
+    this.#mode0 = mode0Candidate.mode0 === true;
+    if (!await claimSupervisorReservation(args.reservation, this.#spec, jobIdentityDigest, workerExecutable, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
-    claimed = true;
-    const invocation = claudeInvocation(spec, { claudeCli: workerExecutable, promptBytes });
-    const childResult = runValidatedClaude(invocation, spec.role === ROLES.CHECKER);
-    if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
-    if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
-    code = childResult.code;
-    if (spec.role === ROLES.CHECKER && code === 0) {
-      try { checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
-      catch (error) { console.error(error.message); code = 1; }
-    } else if (spec.role === ROLES.CHECKER && childResult.outputExceeded) {
-      console.error('Checker output exceeds the bounded result limit.');
+    this.#claimed = true;
+    if (this.#mode0) {
+      this.#code = await executeMode0Lifecycle(args.reservation, this.#spec, workerExecutable, jobIdentityDigest, options);
+      this.#mode0Settled = true;
+    } else {
+      const invocation = claudeInvocation(this.#spec, { claudeCli: workerExecutable, promptBytes });
+      const childResult = runValidatedClaude(invocation, this.#spec.role === ROLES.CHECKER);
+      if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
+      if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
+      this.#code = childResult.code;
+      if (this.#spec.role === ROLES.CHECKER && this.#code === 0) {
+        try { this.#checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
+        catch (error) { console.error(error.message); this.#code = 1; }
+      } else if (this.#spec.role === ROLES.CHECKER && childResult.outputExceeded) {
+        console.error('Checker output exceeds the bounded result limit.');
+      }
     }
   } finally {
-    if (claimed && spec?.role === ROLES.CHECKER) {
-      if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', { ...options, checker_result: checkerOutcome })) code = 1;
-      if (code !== 0) clearPendingCheckerReview(spec.review_id, options);
+    if (this.#claimed && !this.#mode0 && this.#spec?.role === ROLES.CHECKER) {
+      if (this.#code === 0 && !updateCheckerReview(this.#spec.review_id, 'completed', { ...options, checker_result: this.#checkerOutcome })) this.#code = 1;
+      if (this.#code !== 0) clearPendingCheckerReview(this.#spec.review_id, options);
     }
-    if (claimed) {
+    if (this.#claimed && !this.#mode0) {
       releaseReservation(args.reservation, options);
-      try { if (verifyPrivateRegularFile(specPath)) fs.unlinkSync(specPath); } catch {}
+      try { if (verifyPrivateRegularFile(this.#specPath)) fs.unlinkSync(this.#specPath); } catch {}
     }
+    if (this.#mode0 && !this.#mode0Settled) console.error('Mode-0 worker outcome remains unresolved; the reservation is retained.');
   }
-  return code;
+  return this.#code;
 }
 
+}
+async function supervise(args){return new WorkerSupervisor(args).run();}
+
 function parseCli(argv) {
+  if(argv[0]==='core'&&['inspect','compile','delegation-plan','run','recover','qualify'].includes(argv[1]))argv=['core-'+argv[1],...argv.slice(2)];
   const parsed = { command: argv[0] || '', root: '', spec: '', input: '', reviewId: '', reservation: '', claudeCli: '' };
   for (let i = 1; i < argv.length; i += 1) {
     const value = argv[i + 1];
@@ -1636,8 +2505,112 @@ function parseCli(argv) {
   return parsed;
 }
 
-async function main(argv = process.argv.slice(2)) {
+
+async function coreRuntimeCommand(command, adapter, request = {}) {
+  const runtime = require('./toolkit-codex-agent-adapter.cjs');
+  runtime.assertAuthenticCodexAdapter(adapter);
+  const compiler = require('./toolkit-gate-contract-compiler.cjs');
+  request = compiler.trustedJsonCopy(request);
+  if (command === 'core-inspect' && Object.keys(request).length === 0) return adapter.inspect();
+  if (command === 'core-recover' && Object.keys(request).length === 0) return adapter.recover();
+  if (command === 'core-qualify' && ['role','reviewer_id|role'].includes(Object.keys(request).sort().join('|'))) return adapter.qualify(request.role,request.reviewer_id ?? null);
+  if (command === 'core-run' && ['instruction|role','instruction|reviewer_id|role'].includes(Object.keys(request).sort().join('|'))) return adapter.run(request.role,request.instruction,request.reviewer_id ?? null);
+  throw Object.assign(new Error('Toolkit core request held. Reference: CORE_REQUEST_INVALID'),{code:'CORE_REQUEST_INVALID'});
+}
+// The installed launcher constructs this session from already authenticated
+// in-process handles. JSON, environment variables and CLI flags cannot grant
+// a runtime context or replace the captured CURRENT receiver.
+const CORE_COMMAND_SESSIONS = new WeakSet();
+class CoreCommandSession {
+  #adapter; #selection;
+  constructor({ adapter, stack_session }) {
+    require('./toolkit-codex-agent-adapter.cjs').assertAuthenticCodexAdapter(adapter);
+    require('./toolkit-stack-selection.cjs').assertCurrentStackSelectionSession(stack_session);
+    this.#adapter = adapter; this.#selection = stack_session;
+    CORE_COMMAND_SESSIONS.add(this);
+    Object.defineProperty(this, 'execute', {value:(command,request)=>this.#execute(command,request),enumerable:true});
+    Object.freeze(this);
+  }
+  async #execute(command, request = {}) {
+    const value = require('./toolkit-gate-contract-compiler.cjs').trustedJsonCopy(request);
+    const admission = this.#selection.evaluate({event:'admission'});
+    if (admission.state !== 'ADMITTED_SELECTION') return admission;
+    if (admission.selection.profile_id !== this.#adapter.inspect().profile_id
+      || value.role !== undefined && value.role !== admission.binding.role
+      || (value.reviewer_id ?? null) !== admission.binding.reviewer_id) {
+      throw Object.assign(new Error('CORE_STACK_SESSION_BINDING_DRIFT'), {code:'CORE_STACK_SESSION_BINDING_DRIFT'});
+    }
+    return coreRuntimeCommand(command, this.#adapter, value);
+  }
+}
+// Production assembly reuses the existing authority, CURRENT and receipt stores.
+// The caller supplies the already authorised host readers; this function neither
+// discovers credentials nor creates a new permission or configuration channel.
+async function createCoreCommandSession(input) {
+  const keys=['authority_store_options','check_capability','consumer_intent','present_question',
+    'receipt_lease_ms','receipt_store_options','repository_root','source_capture','trusted_authority_readers'];
+  if(!input || typeof input!=='object' || require('node:util').types.isProxy(input)
+    || Object.keys(input).sort().join('|')!==keys.sort().join('|'))throw new Error('CORE_CONTEXT_INPUT_INVALID');
+  const receipt=require('./toolkit-github-program-receipt.cjs'),selection=require('./toolkit-stack-selection.cjs');
+  const intent=require('./toolkit-gate-contract-compiler.cjs').trustedJsonCopy(input.consumer_intent);
+  const store=receipt.createAuthorityPacketStore(input.authority_store_options,input.trusted_authority_readers);
+  const stackSession=new selection.CurrentStackSelectionSession({store,consumer_intent:intent,
+    source_capture:input.source_capture,role:intent.consumer.role,reviewer_id:intent.consumer.reviewer_id??null,
+    present_question:input.present_question,check_capability:input.check_capability});
+  const selected=stackSession.evaluate({event:'admission'});
+  if(selected.state!=='ADMITTED_SELECTION')return selected;
+  const admitted=store.admitSemanticGate(intent,input.trusted_authority_readers);
+  const compiled=store.readControllerDecision(admitted.admission);
+  const receiptStore=receipt.createProgrammeReceiptStore(input.receipt_store_options);
+  const observed=input.trusted_authority_readers;
+  if(typeof observed.readAuthority!=='function'||typeof observed.readStart!=='function')throw new Error('CORE_CONTEXT_READERS_REQUIRED');
+  const authority=await observed.readAuthority({}),start=await observed.readStart({});
+  const session=await receiptStore.startRun({lock:compiled.decision.identity.lock,authority:authority.authority,
+    start,candidate:null,lease_ms:input.receipt_lease_ms,semantic_gate:{store,admission:admitted.admission}},observed);
+  const channel=receipt.createControllerEffectChannel(receiptStore,session,store,admitted.admission);
+  const adapter=require('./toolkit-codex-agent-adapter.cjs').createCodexAdapter(channel,input.repository_root);
+  return new CoreCommandSession({adapter,stack_session:stackSession});
+}
+function coreDataCommand(command, input) {
+  const runtime = require('./toolkit-codex-agent-adapter.cjs');
+  if(command === 'core-delegation-plan') {
+    const compiler = require('./toolkit-gate-contract-compiler.cjs');
+    const value = compiler.trustedJsonCopy(input);
+    if(Object.keys(value).sort().join('|') !== 'decision|delegation') throw new Error('CORE_REQUEST_INVALID');
+    return compiler.planV3Delegation(value.delegation,value.decision);
+  }
+  if(command === 'core-inspect') return runtime.inspect(input);
+  if(command === 'core-compile') {
+    const compiler = require('./toolkit-gate-contract-compiler.cjs');
+    const value = compiler.trustedJsonCopy(input);
+    if(Object.keys(value).sort().join('|') !== 'decision|observations') throw new Error('CORE_REQUEST_INVALID');
+    return compiler.compileControllerDecision(value.decision,value.observations);
+  }
+  throw new Error('CORE_REQUEST_INVALID');
+}
+
+async function main(argv = process.argv.slice(2), dependencies = {}) {
   const args = parseCli(argv);
+  if (['core-inspect','core-compile','core-delegation-plan'].includes(args.command)) {
+    if(!args.input)throw new Error('CORE_INPUT_REQUIRED');
+    const file=path.resolve(args.input),stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)throw new Error('CORE_INPUT_UNSAFE');
+    console.log(JSON.stringify(coreDataCommand(args.command,JSON.parse(fs.readFileSync(file,'utf8'))),null,2));return 0;
+  }
+  if (['core-run','core-recover','core-qualify'].includes(args.command)) {
+    if (dependencies.core_session && CORE_COMMAND_SESSIONS.has(dependencies.core_session)) {
+      let request = {};
+      if (args.input) {
+        const file=path.resolve(args.input),stat=fs.lstatSync(file);
+        if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)throw new Error('CORE_INPUT_UNSAFE');
+        request=JSON.parse(fs.readFileSync(file,'utf8'));
+      }
+      const result=await dependencies.core_session.execute(args.command,request);
+      console.log(JSON.stringify(result,null,2));
+      return ['HOLD','ASK_AND_HOLD'].includes(result?.state)||result?.status==='HOLD'?2:0;
+    }
+    console.log(JSON.stringify({status:'HOLD',code:'CORE_AUTHENTIC_INSTALLED_CONTEXT_REQUIRED',command:args.command}));return 2;
+  }
   if (args.command === 'launch') {
     const result = launch(readJson(path.resolve(args.spec)), { root: args.root, claudeCli: args.claudeCli });
     console.log(JSON.stringify(result, null, 2));
@@ -1664,7 +2637,8 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
+  createCoreCommandSession, CoreCommandSession, main, coreRuntimeCommand, coreDataCommand,
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
-  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker, withRepositoryTestResourceInvocation,
-  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
+  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, parseLinuxMeminfoCounters, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker, withRepositoryTestResourceInvocation,
+  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, admissionDecisionWithResourceEnvelope, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, launchWithResourceEnvelope, recoverState, pidAlive,
 };

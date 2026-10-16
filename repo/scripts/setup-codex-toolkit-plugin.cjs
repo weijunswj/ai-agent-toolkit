@@ -9,13 +9,41 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.10.15';
+const EXPECTED_TOOLKIT_VERSION = '3.0.6';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
 const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
 const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
+const CORE_ENTRYPOINT_REL_PATH = 'repo/scripts/toolkit-agent-control.cjs';
 const CACHE_FINGERPRINT_PATHS = [
+  "repo/contracts/toolkit-local-bridge/version.json",
+  "repo/scripts/toolkit-evidence-plan-compiler.cjs",
+  "repo/scripts/toolkit-opencode-project-plugin.cjs",
+  "repo/scripts/toolkit-antigravity-project-skills.cjs",
+  "repo/scripts/toolkit-stack-selection.cjs",
+  "repo/scripts/toolkit-claude-task-session.cjs",
+  "repo/scripts/toolkit-claude-dispatch-observer.cjs",
+  "repo/scripts/toolkit-v3-native-helper-adapter.cjs",
+  "repo/scripts/toolkit-v3-helper-guard.cjs",
+  "repo/scripts/toolkit-codex-helper-hook.cjs",
+  "repo/scripts/toolkit-claude-agent-hook.cjs",
+  "repo/scripts/toolkit-opencode-helper-adapter.cjs",
+  "repo/scripts/toolkit-filesystem-cleanup-adapter.cjs",
+  "repo/scripts/toolkit-recoverable-cleanup-windows.ps1",
+  "repo/scripts/toolkit-custody-retention-v3.cjs",
+  "repo/scripts/toolkit-git-current-tree-expiry-adapter.cjs",
+  "repo/scripts/toolkit-codex-agent-adapter.cjs",
+  "repo/scripts/toolkit-gate-contract-compiler.cjs",
+  "repo/scripts/toolkit-github-program-receipt.cjs",
+  "repo/scripts/toolkit-execution-loop.cjs",
+  "repo/scripts/toolkit-github-program-state-v5.cjs",
+  "repo/scripts/toolkit-github-governance-review-reconciler.cjs",
+  "repo/scripts/toolkit-assurance-web-finality.cjs",
+  "repo/scripts/toolkit-capability-registry.cjs",
+  "repo/scripts/toolkit-programme-surface-v1.cjs",
+  "repo/CONTROLLER.md",
+  "repo/ARCHITECTURE.md",
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
   'repo/scripts/codex-delegation-backup.cjs',
@@ -39,6 +67,15 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
 ];
 const CACHE_FINGERPRINT_DIRS = [
+  "repo/contracts/control-plane-kernel",
+  "repo/contracts/bounded-local-execution-loop",
+  "repo/contracts/repository-capability-registry",
+  "repo/scripts/toolkit-control-plane",
+  "repo/contracts/controller-kernel",
+  "repo/contracts/github-program-receipt",
+  "repo/contracts/github-program-reconciler",
+  "repo/contracts/github-governance-review-reconciler",
+  "repo/contracts/independent-assurance-web-finality",
   '.codex-plugin/assets',
   'skills'
 ];
@@ -899,73 +936,75 @@ function nextStepsForState(state) {
   ];
 }
 
-async function runCodexAddAndVerify(command, addArgs, options) {
-  const deadlineMs = pluginAddDeadlineMs();
-  const pollMs = pluginAddPollMs();
-  const startedAt = Date.now();
-  let child;
-  let childExit = null;
-  let childError = null;
-  let lastState = null;
-  let lastListError = null;
-  let hookChanged = false;
+class CodexPluginInstallOperation {
+  #command; #addArgs; #options;
+  #deadlineMs=pluginAddDeadlineMs(); #pollMs=pluginAddPollMs(); #startedAt=Date.now(); #child; #childExit=null; #childError=null; #lastState=null; #lastListError=null; #hookChanged=false;
+  constructor(command, addArgs, options) {this.#command=command;this.#addArgs=addArgs;this.#options=options;}
+  async run() {
+    const command=this.#command,addArgs=this.#addArgs,options=this.#options;
+
 
   try {
-    child = spawnCodexProcess(command, addArgs, { env: process.env });
-    child.on('exit', (code, signal) => {
-      childExit = { code, signal };
+    this.#child = spawnCodexProcess(command, addArgs, { env: process.env });
+    this.#child.on('exit', (code, signal) => {
+      this.#childExit = { code, signal };
     });
-    child.on('error', (error) => {
-      childError = error;
+    this.#child.on('error', (error) => {
+      this.#childError = error;
     });
-    child.unref();
+    this.#child.unref();
   } catch (error) {
     throw new Error(`codex ${addArgs.join(' ')} failed to start: ${error.message}`);
   }
 
-  while (Date.now() - startedAt <= deadlineMs) {
+  while (Date.now() - this.#startedAt <= this.#deadlineMs) {
     try {
       const pluginList = runCodexJson(command, ['plugin', 'list', '--json', '--available']);
-      lastListError = null;
+      this.#lastListError = null;
       try {
         const prepared = prepareInstalledSessionStartIfPresent(options);
-        hookChanged = hookChanged || prepared.hooksChanged;
+        this.#hookChanged = this.#hookChanged || prepared.hooksChanged;
       } catch {
         // Installed-state verification below reports an unsafe or incomplete cache.
       }
-      lastState = evaluateCodexToolkitPluginState(pluginList, {
+      this.#lastState = evaluateCodexToolkitPluginState(pluginList, {
         codexHome: options.codexHome,
         repoRoot: options.repoRoot,
         allowConfigCacheFallback: true
       });
-      if (lastState.ok) {
-        const addDidNotExitCleanly = !childExit || childExit.code !== 0;
-        terminateChild(child);
+      if (this.#lastState.ok) {
+        const addDidNotExitCleanly = !this.#childExit || this.#childExit.code !== 0;
+        terminateChild(this.#child);
         return {
-          state: lastState,
-          hookChanged,
+          state: this.#lastState,
+          hookChanged: this.#hookChanged,
           warning: addDidNotExitCleanly ? codexAddTimeoutWarning(addArgs) : ''
         };
       }
     } catch (error) {
-      lastListError = error;
+      this.#lastListError = error;
     }
 
-    if (childError) {
-      terminateChild(child);
-      throw new Error(`codex ${addArgs.join(' ')} failed: ${childError.message}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+    if (this.#childError) {
+      terminateChild(this.#child);
+      throw new Error(`codex ${addArgs.join(' ')} failed: ${this.#childError.message}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
     }
 
-    if (childExit && childExit.code !== 0) {
-      terminateChild(child);
-      throw new Error(`codex ${addArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+    if (this.#childExit && this.#childExit.code !== 0) {
+      terminateChild(this.#child);
+      throw new Error(`codex ${addArgs.join(' ')} exited with ${this.#childExit.code}${this.#childExit.signal ? ` signal ${this.#childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
     }
 
-    await sleep(pollMs);
+    await sleep(this.#pollMs);
   }
 
-  terminateChild(child);
-  throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install within ${deadlineMs}ms; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+  terminateChild(this.#child);
+  throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install within ${this.#deadlineMs}ms; installed-state verification failed: ${formatStateErrors(this.#lastState, this.#lastListError)}`);
+
+  }
+}
+async function runCodexAddAndVerify(command, addArgs, options) {
+  return new CodexPluginInstallOperation(command,addArgs,options).run();
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -1154,7 +1193,18 @@ if (require.main === module) {
   });
 }
 
+
+function coreEntrypointMetadata(sourceRoot) {
+  const absolute=path.resolve(sourceRoot,CORE_ENTRYPOINT_REL_PATH);
+  const stat=fs.lstatSync(absolute);
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('CORE_ENTRYPOINT_UNVERIFIED');
+  return Object.freeze({relative_path:CORE_ENTRYPOINT_REL_PATH,sha256:crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex'),
+    commands:['core-inspect','core-compile','core-run','core-recover','core-qualify'],
+    runtime_context:'AUTHENTIC_EXISTING_RECEIPT_AND_CURRENT_REQUIRED',qualification:'SEPARATE_NATIVE_BOUNDARY'});
+}
+
 module.exports = {
+  CORE_ENTRYPOINT_REL_PATH, coreEntrypointMetadata,
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,

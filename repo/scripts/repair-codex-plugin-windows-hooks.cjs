@@ -727,14 +727,21 @@ function patchN8nHookInternals(pluginRoot, actions, options) {
   patchFile(pluginRoot, 'hooks/post-tool-use/validate-workflow.sh', patchPostValidateText, actions, options);
 }
 
-function repairPluginRoot(pluginRoot, options = {}) {
-  const effectiveOptions = {
+class PluginHookRepairOperation {
+  #pluginRoot; #options;
+  #effectiveOptions; #actions; #errors; #hooksJson; #entries;
+  constructor(pluginRoot, options = {}) {this.#pluginRoot=pluginRoot;this.#options=options;}
+  run() {
+    let pluginRoot=this.#pluginRoot;
+    let options=this.#options;
+
+  const effectiveOptions = this.#effectiveOptions = {
     windows: options.windows ?? process.platform === 'win32',
     write: Boolean(options.write),
     n8n: Boolean(options.n8n)
   };
-  const actions = [];
-  const errors = [];
+  const actions = this.#actions = [];
+  const errors = this.#errors = [];
   const hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
 
   if (!fs.existsSync(pluginRoot)) throw new Error(`Plugin root does not exist: ${pluginRoot}`);
@@ -743,8 +750,8 @@ function repairPluginRoot(pluginRoot, options = {}) {
     throw new Error(`Refusing to repair temporary marketplace checkout for n8n-skills@n8n-io. Use the installed plugin cache under .codex/plugins/cache/n8n-io/n8n-skills/<version>: ${pluginRoot}`);
   }
 
-  const hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
-  const entries = collectHookCommandEntries(hooksJson);
+  const hooksJson = this.#hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
+  const entries = this.#entries = collectHookCommandEntries(hooksJson);
   const n8nPlugin = isN8nSkillsPlugin(pluginRoot, effectiveOptions);
   if (n8nPlugin && !options.skipN8nCompatibilityCheck) {
     const compatibility = classifyN8nSkillsCompatibility(pluginRoot);
@@ -821,7 +828,10 @@ function repairPluginRoot(pluginRoot, options = {}) {
     repaired: actions.length > 0,
     actions
   };
+
+  }
 }
+function repairPluginRoot(pluginRoot, options = {}) {return new PluginHookRepairOperation(pluginRoot,options).run();}
 
 function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
   const windows = options.windows ?? process.platform === 'win32';

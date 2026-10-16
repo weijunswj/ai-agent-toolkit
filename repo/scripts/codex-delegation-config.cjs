@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.10.15';
+const TOOLKIT_CLIENT_VERSION = '3.0.6';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -416,84 +416,66 @@ function terminateChildTree(child) {
   }
 }
 
-function runAppServerRequest(command, codexHome, request, options = {}) {
-  return new Promise((resolve, reject) => {
-    const parts = codexCommandParts(command, ['app-server', '--listen', 'stdio://']);
-    const child = spawn(parts.command, parts.args, {
-      env: { ...process.env, CODEX_HOME: codexHome },
-      cwd: options.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
+// One bounded process and its protocol/shutdown state belong to one request.
+// The constructor captures the existing command/config; it starts no process.
+class AppServerRequest {
+  #command; #codexHome; #request; #options;
+  #child; #reader; #stderr=''; #response; #settled=false;
+  #requestTimer=null; #shutdownTimer=null; #forceTimer=null; #pendingError=null;
+  #resolve; #reject;
+  constructor(command,codexHome,request,options={}) {
+    this.#command=command;this.#codexHome=codexHome;this.#request=request;this.#options=options;
+  }
+  run() {
+    return new Promise((resolve,reject)=>{
+      this.#resolve=resolve;this.#reject=reject;
+      const parts=codexCommandParts(this.#command,['app-server','--listen','stdio://']);
+      this.#child=spawn(parts.command,parts.args,{
+        env:{...process.env,CODEX_HOME:this.#codexHome},cwd:this.#options.cwd,
+        stdio:['pipe','pipe','pipe'],windowsHide:true});
+      this.#reader=readline.createInterface({input:this.#child.stdout});
+      this.#requestTimer=setTimeout(()=>this.#shutdown(new Error(`${this.#command} app-server ${this.#request.method} timed out`)),this.#options.timeoutMs||15000);
+      this.#child.stderr.on('data',chunk=>{this.#stderr+=chunk;});
+      this.#child.on('error',error=>this.#settle(error));
+      this.#child.on('close',code=>{
+        if(this.#pendingError)this.#settle(this.#pendingError);
+        else if(this.#response!==undefined)this.#settle();
+        else this.#settle(new Error(`${this.#command} app-server exited ${code}: ${this.#stderr.trim()}`));
+      });
+      this.#reader.on('line',line=>this.#receive(line));
+      this.#child.stdin.write(JSON.stringify({method:'initialize',id:1,params:{
+        clientInfo:{name:'ai_agent_toolkit',title:'AI Agent Toolkit',version:TOOLKIT_CLIENT_VERSION},
+        capabilities:{experimentalApi:true}}})+'\n');
     });
-    let stderr = '';
-    let response;
-    let settled = false;
-    let shutdownTimer = null;
-    let forceTimer = null;
-    let pendingError = null;
-    const rl = readline.createInterface({ input: child.stdout });
-
-    const settle = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(requestTimer);
-      if (shutdownTimer) clearTimeout(shutdownTimer);
-      if (forceTimer) clearTimeout(forceTimer);
-      rl.close();
-      if (error) reject(error);
-      else resolve(response);
-    };
-    const beginShutdown = (error = null) => {
-      if (shutdownTimer || forceTimer || settled) return;
-      pendingError = error;
-      try { child.stdin.end(); } catch {}
-      shutdownTimer = setTimeout(() => {
-        terminateChildTree(child);
-        forceTimer = setTimeout(
-          () => settle(pendingError || new Error(`${command} app-server did not exit after bounded process-tree termination`)),
-          options.forceExitTimeoutMs || 2000
-        );
-      }, options.closeTimeoutMs || 2000);
-    };
-    const requestTimer = setTimeout(() => {
-      beginShutdown(new Error(`${command} app-server ${request.method} timed out`));
-    }, options.timeoutMs || 15000);
-
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', (error) => settle(error));
-    child.on('close', (code) => {
-      if (pendingError) settle(pendingError);
-      else if (response !== undefined) settle();
-      else settle(new Error(`${command} app-server exited ${code}: ${stderr.trim()}`));
-    });
-    rl.on('line', (line) => {
-      let message;
-      try { message = JSON.parse(line); } catch { return; }
-      if (message.id === 1) {
-        if (message.error) {
-          beginShutdown(new Error(`app-server initialize failed: ${message.error.message || JSON.stringify(message.error)}`));
-          return;
-        }
-        child.stdin.write(`${JSON.stringify({ method: 'initialized', params: {} })}\n`);
-        child.stdin.write(`${JSON.stringify({ ...request, id: 2 })}\n`);
-      } else if (message.id === 2) {
-        if (message.error) {
-          beginShutdown(new Error(`${request.method} failed: ${message.error.message || JSON.stringify(message.error)}`));
-          return;
-        }
-        response = message.result;
-        beginShutdown();
-      }
-    });
-    child.stdin.write(`${JSON.stringify({
-      method: 'initialize',
-      id: 1,
-      params: {
-        clientInfo: { name: 'ai_agent_toolkit', title: 'AI Agent Toolkit', version: TOOLKIT_CLIENT_VERSION },
-        capabilities: { experimentalApi: true },
-      },
-    })}\n`);
-  });
+  }
+  #settle(error) {
+    if(this.#settled)return;this.#settled=true;
+    clearTimeout(this.#requestTimer);if(this.#shutdownTimer)clearTimeout(this.#shutdownTimer);
+    if(this.#forceTimer)clearTimeout(this.#forceTimer);this.#reader.close();
+    if(error)this.#reject(error);else this.#resolve(this.#response);
+  }
+  #shutdown(error=null) {
+    if(this.#shutdownTimer||this.#forceTimer||this.#settled)return;
+    this.#pendingError=error;try{this.#child.stdin.end();}catch{}
+    this.#shutdownTimer=setTimeout(()=>{
+      terminateChildTree(this.#child);
+      this.#forceTimer=setTimeout(()=>this.#settle(this.#pendingError||new Error(`${this.#command} app-server did not exit after bounded process-tree termination`)),this.#options.forceExitTimeoutMs||2000);
+    },this.#options.closeTimeoutMs||2000);
+  }
+  #receive(line) {
+    let message;try{message=JSON.parse(line);}catch{return;}
+    if(message.id===1){
+      if(message.error){this.#shutdown(new Error(`app-server initialize failed: ${message.error.message||JSON.stringify(message.error)}`));return;}
+      this.#child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');
+      this.#child.stdin.write(JSON.stringify({...this.#request,id:2})+'\n');
+    }else if(message.id===2){
+      if(message.error){this.#shutdown(new Error(`${this.#request.method} failed: ${message.error.message||JSON.stringify(message.error)}`));return;}
+      this.#response=message.result;this.#shutdown();
+    }
+  }
+}
+function runAppServerRequest(command,codexHome,request,options={}) {
+  return new AppServerRequest(command,codexHome,request,options).run();
 }
 
 async function inspectCodexMultiAgentRuntime(options = {}) {
@@ -828,19 +810,28 @@ function restoreCommands(metadataPath, setupScriptPath) {
   };
 }
 
-function commitProposal(configPath, initialSnapshot, initial, proposedBytes, verify, options = {}) {
+class CodexConfigCommit {
+  #configPath; #initialSnapshot; #initial; #proposedBytes; #verify; #options;
+  #backup=null; #wrote=false;
+  constructor(configPath,initialSnapshot,initial,proposedBytes,verify,options={}) {
+    this.#configPath=configPath;this.#initialSnapshot=initialSnapshot;this.#initial=initial;
+    this.#proposedBytes=proposedBytes;this.#verify=verify;this.#options=options;
+  }
+  run() {
+    const configPath=this.#configPath,initialSnapshot=this.#initialSnapshot,initial=this.#initial,
+      proposedBytes=this.#proposedBytes,verify=this.#verify,options=this.#options;
+
   if (typeof options.beforeBackup === 'function') options.beforeBackup({ configPath, initialSnapshot, proposedBytes });
   try {
     assertSnapshotCurrent(configPath, initialSnapshot);
   } catch (error) {
     return concurrentEditResult(initial, error);
   }
-  const backup = createCodexConfigBackup(configPath, { snapshot: initialSnapshot, replacementBytes: proposedBytes, backupRoot: options.backupRoot, generationId: options.backupGenerationId });
-  let wrote = false;
+  const backup = this.#backup = createCodexConfigBackup(configPath, { snapshot: initialSnapshot, replacementBytes: proposedBytes, backupRoot: options.backupRoot, generationId: options.backupGenerationId });
   try {
     if (typeof options.beforeCommit === 'function') options.beforeCommit({ configPath, initialSnapshot, backup, proposedBytes });
     const writeResult = writeRegularFileAtomically(configPath, proposedBytes, backup.existed ? backup.original_mode : 0o600, { expectedSnapshot: initialSnapshot, afterReplace: options.afterReplace });
-    wrote = writeResult.committed;
+    this.#wrote = writeResult.committed;
     const verified = verify();
     if (typeof options.afterWrite === 'function') options.afterWrite({ configPath, backup, verified });
     return {
@@ -850,7 +841,7 @@ function commitProposal(configPath, initialSnapshot, initial, proposedBytes, ver
       restore_commands: restoreCommands(backup.metadata_path, options.setupScriptPath),
     };
   } catch (error) {
-    const replacementCommitted = wrote || error.atomicReplacementCommitted === true;
+    const replacementCommitted = this.#wrote || error.atomicReplacementCommitted === true;
     if (!replacementCommitted && /changed while the isolated proposal|changed concurrently/.test(cleanError(error))) return concurrentEditResult(initial, error);
     if (replacementCommitted) {
       try { restoreCodexDelegationBackup(backup.metadata_path, { configPath, backupRoot: options.backupRoot }); }
@@ -862,6 +853,11 @@ function commitProposal(configPath, initialSnapshot, initial, proposedBytes, ver
     }
     throw error;
   }
+
+  }
+}
+function commitProposal(configPath,initialSnapshot,initial,proposedBytes,verify,options={}) {
+  return new CodexConfigCommit(configPath,initialSnapshot,initial,proposedBytes,verify,options).run();
 }
 
 async function configureCodexDelegation(configPath = codexConfigPath(), options = {}) {

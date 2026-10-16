@@ -18,7 +18,8 @@ const {
 const bridgeVersion = '2.6.0';
 
 function fixtureRoot(label = '') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `toolkit owned staging ${label}-`));
+  const created = fs.mkdtempSync(path.join(os.tmpdir(), `toolkit owned staging ${label}-`));
+  return fs.realpathSync.native(created);
 }
 
 function createGeneration(parent, targetName = 'current', overrides = {}) {

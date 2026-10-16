@@ -1,5 +1,17 @@
 # Persistent-agent helper workflow
 
+For adopted V3 work, apply the final execution clarification in the canonical Toolkit V3 contract at a safe renewal boundary. Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor; preserve valid work and stop the old writer after verified checkpoint custody. Use the approved native host matrix, UAT impact disposition, reviewer reuse and separate local/remote retention rules. Missing exact routes and unqualified pre-inference guards remain explicit obligations.
+
+
+## Current V3 binding
+
+For adopted V3 work use the [current controller procedure](../CONTROLLER.md#current-v3-operating-procedure) and [V3 contract](TOOLKIT-V3.md). G0 and G1 use the same strong lead and default-delegate suitable separable evidence gathering or independent implementation/validation. Both leaves preserve the selected stack previous-G0 model/effort. G2 peers have no helpers. Service tier belongs to controller/launcher configuration; the latest owner choice is Standard for future launches; missing worker tier controls or receipts do not block delegation. Record substantial-work exceptions and preserve real model/effort, native permissions, denied/unknown effects and consumed history. One approved builder assignment continues through ordinary corrections and recovery; no compulsory mechanical helper ceremony or new mini-admission. Existing operation-local transport, privacy and independent readback requirements remain.
+
+## Retained compatibility guidance
+
+Apply the following only where consistent with the current V3 binding; historical gate/role instructions do not override it.
+
+
 ## Applicability and authority
 
 Load this file only for an explicitly identified persistent agent (for example, ChatGPT dot) using an owner-approved workflow. Non-persistent or unknown agent modes skip this file and retain their existing routing. A bootstrap invocation or this file's existence does not establish persistent-agent mode or task authority.

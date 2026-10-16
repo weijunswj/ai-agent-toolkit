@@ -1,6 +1,7 @@
 ## Source-of-Truth Contract
 
 `skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
+- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md`, `repo/ARCHITECTURE.md`, and the version-bound current registry: `repo/contracts/controller-kernel/stack-registry-v3.json` for V3, or immutable v2 for historical admissions. The skill is not a policy copy, role assignment, capability, or host permission.
 - `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
 - `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
@@ -15,3 +16,4 @@
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
+- Fresh coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2. The canonical fresh profiles are owner-gpt, owner-claude and owner-mixed-claude-gpt; their independent full-scope reviewer sets contain two, one and three members. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Historical controller-decision v1, IR v1/v2, adapter v1, CURRENT v1 and registry aliases retain their pinned meanings. Existing receipt/CURRENT and programme-state-v5 remain canonical. Source progress does not establish native or installed qualification.
