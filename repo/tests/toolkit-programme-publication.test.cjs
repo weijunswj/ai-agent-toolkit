@@ -106,6 +106,34 @@ test('a corrupted managed block is refused rather than guessed', () => {
     e => e.code === 'PUBLICATION_MARKER_CORRUPT');
 });
 
+test('first placement replaces exactly one stale span; later publications replace only the marked block', () => {
+  const stale = '**STALE CURRENT** paragraph.';
+  const gh = new FakeGitHub(); gh.addIssue(9, `# Title\n\n## CURRENT\n\n${stale}\n\nKept text.\n`);
+  const publisher = new IssueProjectionPublisher({ transport: gh });
+  const first = publisher.publish({ repository: repo, issue: 9, marker: 'CURRENT', block: 'rev-1 now\n\nHistory: ' + stale,
+    base_digest: publisher.bodyDigest(repo, 9), replace_once: stale });
+  assert.equal(first.state, 'APPLIED');
+  const body = gh.issues.get(9).body;
+  assert.ok(body.startsWith('# Title\n\n## CURRENT\n\n<!-- TOOLKIT-PROJECTION:CURRENT:BEGIN -->\nrev-1 now'));
+  assert.ok(body.endsWith('<!-- TOOLKIT-PROJECTION:CURRENT:END -->\n\nKept text.\n'));
+  assert.equal(body.split(stale).length, 2, 'the stale text survives once, inside the managed block');
+  const second = publisher.publish({ repository: repo, issue: 9, marker: 'CURRENT', block: 'rev-2 now',
+    base_digest: publisher.bodyDigest(repo, 9), replace_once: 'ignored once markers exist' });
+  assert.equal(second.state, 'APPLIED');
+  assert.ok(gh.issues.get(9).body.includes('BEGIN -->\nrev-2 now\n<!--') && gh.issues.get(9).body.endsWith('\n\nKept text.\n'));
+});
+
+test('first placement refuses a missing or repeated span before any write', () => {
+  const gh = new FakeGitHub(); gh.addIssue(10, 'a SAME b SAME c');
+  const publisher = new IssueProjectionPublisher({ transport: gh });
+  const base = publisher.bodyDigest(repo, 10);
+  for (const [span, code] of [['SAME', 'PUBLICATION_PLACEMENT_NOT_UNIQUE'], ['absent', 'PUBLICATION_PLACEMENT_NOT_UNIQUE'], ['  ', 'PUBLICATION_PLACEMENT_INVALID']]) {
+    assert.throws(() => publisher.publish({ repository: repo, issue: 10, marker: 'CURRENT', block: 'x', base_digest: base, replace_once: span }),
+      e => e.code === code);
+  }
+  assert.equal(gh.writes, 0);
+});
+
 test('observed PR status renders as an observation, not acceptance', () => {
   const line = renderObservedPullRequest({ number: 9, head: 'a'.repeat(40), checks: 'passing' });
   assert.match(line, /observation, not product acceptance/);

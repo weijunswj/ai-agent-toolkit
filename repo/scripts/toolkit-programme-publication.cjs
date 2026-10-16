@@ -112,22 +112,31 @@ class IssueProjectionPublisher {
     return { begin: `<!-- TOOLKIT-PROJECTION:${marker}:BEGIN -->`, end: `<!-- TOOLKIT-PROJECTION:${marker}:END -->` };
   }
 
-  static splice(body, marker, block) {
+  // `replace_once` places a block that has no markers yet: it must match exactly one
+  // span of the body, which the managed block replaces. Without it the block is
+  // prepended. Once markers exist, only the marked span is ever replaced.
+  static splice(body, marker, block, { replace_once } = {}) {
     const { begin, end } = IssueProjectionPublisher.markers(marker);
     const text = String(body || '');
     const start = text.indexOf(begin), stop = text.indexOf(end);
     const managed = `${begin}\n${block.trim()}\n${end}`;
-    if (start === -1 && stop === -1) return `${managed}\n\n${text}`.trimEnd() + '\n';
+    if (start === -1 && stop === -1) {
+      if (replace_once === undefined) return `${managed}\n\n${text}`.trimEnd() + '\n';
+      if (typeof replace_once !== 'string' || !replace_once.trim()) fail('PUBLICATION_PLACEMENT_INVALID');
+      const at = text.indexOf(replace_once);
+      if (at === -1 || text.indexOf(replace_once, at + 1) !== -1) fail('PUBLICATION_PLACEMENT_NOT_UNIQUE');
+      return text.slice(0, at) + managed + text.slice(at + replace_once.length);
+    }
     if (start === -1 || stop < start || text.indexOf(begin, start + 1) !== -1) fail('PUBLICATION_MARKER_CORRUPT');
     return text.slice(0, start) + managed + text.slice(stop + end.length);
   }
 
   // Publishes `block` into `marker` when the live body still equals the body the
   // caller rendered against (`base_digest`). Returns NOOP when already published.
-  publish({ repository, issue, marker, block, base_digest }) {
+  publish({ repository, issue, marker, block, base_digest, replace_once }) {
     if (!ISSUE.test(repository || '') || !Number.isSafeInteger(issue) || issue < 1) fail('PUBLICATION_TARGET_INVALID');
     const live = this.#transport.readIssue(repository, issue);
-    const target = IssueProjectionPublisher.splice(live.body, marker, block);
+    const target = IssueProjectionPublisher.splice(live.body, marker, block, { replace_once });
     if (live.body === target) return { state: 'NOOP', body_digest: sha256(target) };
     if (base_digest !== sha256(live.body)) {
       return { state: 'HOLD', reason: 'FOREIGN_EDIT_BEFORE_WRITE', observed_digest: sha256(live.body), expected_digest: base_digest };
@@ -170,7 +179,8 @@ class ProgrammeProjectionReconciler {
       if (typeof block !== 'string' || !block.includes(canonical.revision)) fail('PUBLICATION_RENDER_UNBOUND');
       const base = bases[target.issue] ?? this.#publisher.bodyDigest(repository, target.issue);
       results.push({ issue: target.issue, role: target.role,
-        ...this.#publisher.publish({ repository, issue: target.issue, marker: target.marker, block, base_digest: base }) });
+        ...this.#publisher.publish({ repository, issue: target.issue, marker: target.marker, block, base_digest: base,
+          replace_once: target.replace_once }) });
     }
     const pending = results.filter(r => !['APPLIED', 'NOOP'].includes(r.state));
     return { schema: 'toolkit.programme-publication.v1', canonical_revision: canonical.revision,
