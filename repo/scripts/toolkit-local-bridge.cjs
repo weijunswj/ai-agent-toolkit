@@ -3692,220 +3692,216 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
   return { status: 0 };
 }
 
+// One repository auto-update run: a locked fast-forward update of the managed checkout,
+// a snapshot refresh, delegated target sync from the updated checkout, and the final
+// update report. Each phase records failures in hub state and its own report; hook
+// runs degrade to a warning instead of failing the host.
 class RepositoryAutoUpdateOperation {
   #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks;
-  #lock;
-  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {this.#args=args;this.#hubPath=hubPath;this.#state=state;this.#discoveries=discoveries;this.#checksum=checksum;this.#payloads=payloads;this.#testHooks=testHooks;}
-  run() {
-    let args=this.#args;
-    let hubPath=this.#hubPath;
-    let state=this.#state;
-    let discoveries=this.#discoveries;
-    let checksum=this.#checksum;
-    let payloads=this.#payloads;
-    let testHooks=this.#testHooks;
+  #statusState = null; #snapshot = null; #updateResult = null; #plannedTargetSyncs = [];
+  #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = '';
 
-  const lock = this.#lock = acquireLock(path.dirname(hubPath), args);
-  if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
-    return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
+  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
+    this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#discoveries = discoveries;
+    this.#checksum = checksum; this.#payloads = payloads; this.#testHooks = testHooks;
   }
 
-  state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
-  assertSourceDowngradeAllowed(state, args);
+  #hubState(fallback) { return normalizedState(readJsonIfExists(path.join(this.#hubPath, 'state.json')) || fallback); }
+  #snapshotFor(state) { return deriveSnapshotGeneration({ args: this.#args, hubPath: this.#hubPath, state, prepareForWrite: true }); }
+  #write(snapshot) { writeHubSnapshot({ hubPath: this.#hubPath, args: this.#args, ...snapshot }, this.#testHooks); }
+  #audit(snapshot, state) { return buildAudit({ args: this.#args, hubPath: this.#hubPath, ...snapshot, state }); }
 
-  let statusState = state;
-  let updateResult = null;
-  let snapshot = null;
-  let plannedTargetSyncs = [];
-  let nativePluginCache = { status: '' };
-  let thirdPartyHookRepair = { status: '' };
-  const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
-  try {
-    try {
-      updateResult = validateAndUpdateRepo(state, args);
-      statusState = applyRepoUpdateStatus(state, updateResult.status, {
-        fromCommit: updateResult.fromCommit,
-        toCommit: updateResult.toCommit
-      });
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    } catch (error) {
-      const details = error.repoUpdateDetails || {};
-      statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
-        fromCommit: details.fromCommit || '',
-        toCommit: details.toCommit || '',
-        error: details.error || error.message
-      });
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      const report = maybeWriteUpdateReport({
-        args,
-        hubPath,
-        state: statusState,
-        checksum: snapshot.checksum,
-        context: {
-          repo: {
-            status: error.repoUpdateStatus || 'skipped',
-            repoPath: state.repo_path ? path.resolve(state.repo_path) : '',
-            fromCommit: details.fromCommit || '',
-            toCommit: details.toCommit || '',
-            changedFiles: details.changedFiles || [],
-            validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
-            branchSwitchedFrom: details.branchSwitchedFrom || '',
-            error: details.error || error.message
-          },
-          skippedTargets: snapshot.skippedTargets,
-          nativePluginCache: nativePluginCacheStatus(args, statusState),
-          targetSyncStatus: 'skipped'
-        }
-      });
-      statusState = report.state;
-      if (report.reportPath) {
-        snapshot = { ...snapshot, state: statusState };
-        writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      }
-      printUpdateReportLine(args, report.reportPath);
-      if (args.hook) {
-        hookSafeWarning(args, error.message);
-        return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: statusState }) };
-      }
-      throw error;
+  // A hook run reports the failure and keeps the host session usable; a direct run fails.
+  #hookSafe(error, snapshot, state) {
+    if (!this.#args.hook) throw error;
+    hookSafeWarning(this.#args, error.message);
+    return { status: 0, audit: this.#audit(snapshot, state) };
+  }
+
+  // Phase 1: validate and fast-forward the managed checkout under the hub lock.
+  #updateRepository() {
+    const args = this.#args, hubPath = this.#hubPath;
+    const lock = acquireLock(path.dirname(hubPath), args);
+    if (!lock.acquired) {
+      console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
+      return { status: 0, audit: buildAudit({ args, hubPath, state: this.#state, discoveries: this.#discoveries, checksum: this.#checksum, payloads: this.#payloads }) };
     }
-  } finally {
-    releaseLock(lock);
-  }
-
-  const refreshLock = acquireLock(path.dirname(hubPath), args);
-  try {
-    if (refreshLock.acquired) {
-      statusState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-      assertSourceDowngradeAllowed(statusState, args);
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      plannedTargetSyncs = snapshot.plannedTargetSyncs;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    }
-  } finally {
-    releaseLock(refreshLock);
-  }
-
-  nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
-    repoPath: updateResult.repoPath
-  });
-  thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
-
-  try {
-    runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
-  } catch (error) {
-    const relock = acquireLock(path.dirname(hubPath), args);
-    let failedState = statusState;
-    let report = { state: failedState, reportPath: '' };
     try {
-      if (relock.acquired) {
-        const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-        assertSourceDowngradeAllowed(latestState, args);
-        failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
-          fromCommit: updateResult.fromCommit,
-          toCommit: updateResult.toCommit,
-          error: error.message
-        });
-        let failedSnapshot = deriveSnapshotGeneration({ args, hubPath, state: failedState, prepareForWrite: true });
-        failedState = failedSnapshot.state;
-        writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
-        report = maybeWriteUpdateReport({
-          args,
-          hubPath,
-          state: failedState,
-          checksum: failedSnapshot.checksum,
-          context: {
-            repo: {
-              status: 'sync-delegation-failed',
-              repoPath: updateResult.repoPath || state.repo_path || '',
-              fromCommit: updateResult.fromCommit,
-              toCommit: updateResult.toCommit,
-              changedFiles: updateResult.changedFiles || [],
-              validationStatus: updateResult.validation?.status || 'passed',
-              error: error.message
-            },
-            skippedTargets: failedSnapshot.skippedTargets,
-            nativePluginCache,
-            thirdPartyHookRepair,
-            targetSyncStatus: 'failed'
-          }
-        });
-        failedState = report.state;
-        if (report.reportPath) {
-          failedSnapshot = { ...failedSnapshot, state: failedState };
-          writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
-        }
-        snapshot = failedSnapshot;
+      const state = this.#state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
+      assertSourceDowngradeAllowed(state, args);
+      this.#statusState = state;
+      this.#previousObservedRepoCommit = state.last_repo_update_to_commit || '';
+      try {
+        this.#updateResult = validateAndUpdateRepo(state, args);
+        this.#statusState = applyRepoUpdateStatus(state, this.#updateResult.status, {
+          fromCommit: this.#updateResult.fromCommit, toCommit: this.#updateResult.toCommit });
+        this.#snapshot = this.#snapshotFor(this.#statusState);
+        this.#statusState = this.#snapshot.state;
+        this.#write(this.#snapshot);
+        return null;
+      } catch (error) {
+        return this.#recordUpdateFailure(error, state);
       }
     } finally {
-      releaseLock(relock);
+      releaseLock(lock);
+    }
+  }
+
+  #recordUpdateFailure(error, state) {
+    const args = this.#args, details = error.repoUpdateDetails || {};
+    let statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      fromCommit: details.fromCommit || '', toCommit: details.toCommit || '', error: details.error || error.message });
+    let snapshot = this.#snapshotFor(statusState);
+    statusState = snapshot.state;
+    this.#write(snapshot);
+    const report = maybeWriteUpdateReport({ args, hubPath: this.#hubPath, state: statusState, checksum: snapshot.checksum,
+      context: {
+        repo: {
+          status: error.repoUpdateStatus || 'skipped',
+          repoPath: state.repo_path ? path.resolve(state.repo_path) : '',
+          fromCommit: details.fromCommit || '',
+          toCommit: details.toCommit || '',
+          changedFiles: details.changedFiles || [],
+          validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
+          branchSwitchedFrom: details.branchSwitchedFrom || '',
+          error: details.error || error.message
+        },
+        skippedTargets: snapshot.skippedTargets,
+        nativePluginCache: nativePluginCacheStatus(args, statusState),
+        targetSyncStatus: 'skipped'
+      } });
+    statusState = report.state;
+    if (report.reportPath) {
+      snapshot = { ...snapshot, state: statusState };
+      this.#write(snapshot);
     }
     printUpdateReportLine(args, report.reportPath);
-    if (args.hook) {
-      hookSafeWarning(args, error.message);
-      return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: report.state }) };
-    }
-    throw error;
+    return this.#hookSafe(error, snapshot, statusState);
   }
 
-  const finalState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-  const plannedChecksum = snapshot.checksum;
-  if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot });
-  const reportLock = acquireLock(path.dirname(hubPath), args);
-  let report = { state: finalState, reportPath: '' };
-  try {
-    if (reportLock.acquired) {
-      const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || finalState);
-      assertSourceDowngradeAllowed(latestState, args);
-      let reportSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
-      const reportState = reportSnapshot.state;
-      const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
-        reportSnapshot.checksum === plannedChecksum &&
-        targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
-      ));
-      const reportContext = {
-        repo: repoReportContextFromUpdate(reportState, updateResult, previousObservedRepoCommit),
-        targetSyncs: completedTargetSyncs,
-        skippedTargets: reportSnapshot.skippedTargets,
-        nativePluginCache,
-        thirdPartyHookRepair,
-        targetSyncStatus: plannedTargetSyncs.length
-          ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
-          : 'not needed'
-      };
-      report = maybeWriteUpdateReport({
-        args,
-        hubPath,
-        state: reportState,
-        checksum: reportSnapshot.checksum,
-        context: reportContext
-      });
-      if (testHooks.afterFinalReportBuild) {
-        testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
-      }
-      if (report.reportPath) {
-        reportSnapshot = { ...reportSnapshot, state: report.state };
-        writeHubSnapshot({ hubPath, args, ...reportSnapshot }, testHooks);
-      }
-      snapshot = reportSnapshot;
+  // Phase 2: re-derive the snapshot from the latest hub state and plan target syncs.
+  #refreshSnapshot() {
+    const refreshLock = acquireLock(path.dirname(this.#hubPath), this.#args);
+    try {
+      if (!refreshLock.acquired) return;
+      this.#statusState = this.#hubState(this.#statusState);
+      assertSourceDowngradeAllowed(this.#statusState, this.#args);
+      this.#snapshot = this.#snapshotFor(this.#statusState);
+      this.#statusState = this.#snapshot.state;
+      this.#plannedTargetSyncs = this.#snapshot.plannedTargetSyncs;
+      this.#write(this.#snapshot);
+    } finally {
+      releaseLock(refreshLock);
     }
-  } finally {
-    releaseLock(reportLock);
   }
-  printUpdateReportLine(args, report.reportPath);
-  if (!report.reportPath && !args.hook && updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
-    console.log('Toolkit already up to date.');
-  }
-  const finalAudit = buildAudit({ args, hubPath, ...snapshot, state: report.state });
-  if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-  return { status: 0, audit: finalAudit };
 
+  // Phase 3: delegate target sync to the updated checkout; record a failure if it breaks.
+  #delegateSync() {
+    const args = this.#args, hubPath = this.#hubPath, updateResult = this.#updateResult;
+    this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath });
+    this.#thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, this.#statusState);
+    try {
+      runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
+      return null;
+    } catch (error) {
+      const relock = acquireLock(path.dirname(hubPath), args);
+      let report = { state: this.#statusState, reportPath: '' };
+      try {
+        if (relock.acquired) {
+          const latestState = this.#hubState(this.#statusState);
+          assertSourceDowngradeAllowed(latestState, args);
+          let failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+            fromCommit: updateResult.fromCommit, toCommit: updateResult.toCommit, error: error.message });
+          let failedSnapshot = this.#snapshotFor(failedState);
+          failedState = failedSnapshot.state;
+          this.#write(failedSnapshot);
+          report = maybeWriteUpdateReport({ args, hubPath, state: failedState, checksum: failedSnapshot.checksum,
+            context: {
+              repo: {
+                status: 'sync-delegation-failed',
+                repoPath: updateResult.repoPath || this.#state.repo_path || '',
+                fromCommit: updateResult.fromCommit,
+                toCommit: updateResult.toCommit,
+                changedFiles: updateResult.changedFiles || [],
+                validationStatus: updateResult.validation?.status || 'passed',
+                error: error.message
+              },
+              skippedTargets: failedSnapshot.skippedTargets,
+              nativePluginCache: this.#nativePluginCache,
+              thirdPartyHookRepair: this.#thirdPartyHookRepair,
+              targetSyncStatus: 'failed'
+            } });
+          failedState = report.state;
+          if (report.reportPath) {
+            failedSnapshot = { ...failedSnapshot, state: failedState };
+            this.#write(failedSnapshot);
+          }
+          this.#snapshot = failedSnapshot;
+        }
+      } finally {
+        releaseLock(relock);
+      }
+      printUpdateReportLine(args, report.reportPath);
+      return this.#hookSafe(error, this.#snapshot, report.state);
+    }
+  }
+
+  // Phase 4: report only target syncs confirmed against the planned checksum.
+  #finalReport() {
+    const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
+    const plannedTargetSyncs = this.#plannedTargetSyncs, statusState = this.#statusState;
+    const finalState = this.#hubState(statusState);
+    const plannedChecksum = this.#snapshot.checksum;
+    if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot: this.#snapshot });
+    const reportLock = acquireLock(path.dirname(hubPath), args);
+    let report = { state: finalState, reportPath: '' };
+    try {
+      if (reportLock.acquired) {
+        const latestState = this.#hubState(finalState);
+        assertSourceDowngradeAllowed(latestState, args);
+        let reportSnapshot = this.#snapshotFor(latestState);
+        const reportState = reportSnapshot.state;
+        const completedTargetSyncs = plannedTargetSyncs.filter(sync => (
+          reportSnapshot.checksum === plannedChecksum &&
+          targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
+        ));
+        const reportContext = {
+          repo: repoReportContextFromUpdate(reportState, this.#updateResult, this.#previousObservedRepoCommit),
+          targetSyncs: completedTargetSyncs,
+          skippedTargets: reportSnapshot.skippedTargets,
+          nativePluginCache: this.#nativePluginCache,
+          thirdPartyHookRepair: this.#thirdPartyHookRepair,
+          targetSyncStatus: plannedTargetSyncs.length
+            ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
+            : 'not needed'
+        };
+        report = maybeWriteUpdateReport({ args, hubPath, state: reportState, checksum: reportSnapshot.checksum, context: reportContext });
+        if (testHooks.afterFinalReportBuild) testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
+        if (report.reportPath) {
+          reportSnapshot = { ...reportSnapshot, state: report.state };
+          this.#write(reportSnapshot);
+        }
+        this.#snapshot = reportSnapshot;
+      }
+    } finally {
+      releaseLock(reportLock);
+    }
+    printUpdateReportLine(args, report.reportPath);
+    if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
+      console.log('Toolkit already up to date.');
+    }
+    const finalAudit = this.#audit(this.#snapshot, report.state);
+    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+    return { status: 0, audit: finalAudit };
+  }
+
+  run() {
+    const early = this.#updateRepository();
+    if (early) return early;
+    this.#refreshSnapshot();
+    const failed = this.#delegateSync();
+    if (failed) return failed;
+    return this.#finalReport();
   }
 }
 function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,discoveries,checksum,payloads,testHooks}).run();}
