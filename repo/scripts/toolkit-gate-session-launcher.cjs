@@ -44,10 +44,13 @@ class GateSessionLauncher {
     const lines = String(r.stdout || '').split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     const init = lines.find(l => l.type === 'system' && l.subtype === 'init') || {};
     // A run that waits on a background helper emits one result per resumed turn;
-    // only the last one is terminal, so earlier ones are never reported.
-    const result = lines.findLast(l => l.type === 'result') || {};
+    // only the last one is terminal, so earlier ones are never reported. A run with
+    // no terminal result has not shown completion and is reported as an error.
+    const terminal = lines.findLast(l => l.type === 'result');
+    const result = terminal || {};
     return { exit: r.status, elapsed_ms: Date.now() - started, native_session_id: init.session_id || null, model: init.model || null,
-      result_text: typeof result.result === 'string' ? result.result : null, is_error: result.is_error === true,
+      terminal_result: Boolean(terminal), result_text: typeof result.result === 'string' ? result.result : null,
+      is_error: !terminal || result.is_error === true,
       cost_usd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null, raw: r.stdout || '' };
   }
 

@@ -101,7 +101,9 @@ function main() {
   const record = { schema: 'toolkit.v3.uat-f1-native-verification.v1', at_utc: new Date().toISOString(), head,
     candidate_ref: opt.candidateRef, candidate_launcher_sha256: candidate.source_sha256,
     corrected_launcher_sha256: corrected.source_sha256, replays, live,
-    pass: replays.length > 0 && replays.every(r => r.corrected_matches_terminal) && (!live || (live.corrected_matches_terminal && live.exit === 0)) };
+    // A stream without a terminal result is missing evidence, never a pass.
+    pass: replays.length > 0 && replays.every(r => r.result_events > 0 && r.corrected_matches_terminal)
+      && (!live || (live.result_events > 0 && live.corrected_matches_terminal && live.exit === 0)) };
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
   process.exitCode = record.pass ? 0 : 1;
 }

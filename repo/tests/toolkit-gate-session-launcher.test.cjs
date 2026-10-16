@@ -60,8 +60,12 @@ test('UAT-F1 controls: a single result is unchanged and a terminal error after a
   const failed = startWith(['INIT', { subtype: 'success', is_error: false, result: 'interim', total_cost_usd: 0.1 },
     'INIT', { subtype: 'error_during_execution', is_error: true, result: 'helper failed', total_cost_usd: 0.3 }]);
   assert.deepEqual({ text: failed.result_text, error: failed.is_error, cost: failed.cost_usd }, { text: 'helper failed', error: true, cost: 0.3 });
+  assert.equal(single.terminal_result, true);
+  // A clean process exit without a terminal result is not a completed run.
   const none = startWith(['INIT']);
-  assert.deepEqual({ text: none.result_text, error: none.is_error, cost: none.cost_usd }, { text: null, error: false, cost: null });
+  assert.equal(none.exit, 0);
+  assert.deepEqual({ terminal: none.terminal_result, text: none.result_text, error: none.is_error, cost: none.cost_usd },
+    { terminal: false, text: null, error: true, cost: null });
 });
 
 test('resume is refused for waiting, submitted, interrupted and retired sessions before any native process', () => {
