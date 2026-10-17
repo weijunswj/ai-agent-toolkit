@@ -29,6 +29,9 @@ const { spawnSync } = require('node:child_process');
 const sha256 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 function fail(code, details) { throw Object.assign(new Error(code), { code, details }); }
 const ISSUE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// Historical programme-state v5 and human-v2 surfaces carry fixed historical identities.
+// They stay readable for compatibility, but a new V3 live projection never carries them.
+const LEGACY_V5_SURFACE = /AI-AGENT-TOOLKIT:GITHUB-PROGRAM-(?:PARENT|CHILD):BEGIN v5|MANAGED-PROGRAM-[A-Z-]+(?::BEGIN|:END|-CARRIER) human-v2|toolkit\.github-program\.(?:state|surface)\.v5/;
 
 // Thin adapter over the authenticated `gh` CLI. Every call names the exact
 // repository; nothing here chooses an account, token or alternate transport.
@@ -144,6 +147,7 @@ class IssueProjectionPublisher {
   publish({ repository, issue, marker, block, base_digest, replace_once }) {
     if (!ISSUE.test(repository || '') || !Number.isSafeInteger(issue) || issue < 1) fail('PUBLICATION_TARGET_INVALID');
     if (!/^[0-9a-f]{64}$/.test(base_digest || '')) fail('PUBLICATION_BASE_REQUIRED');
+    if (typeof block !== 'string' || LEGACY_V5_SURFACE.test(block)) fail('PUBLICATION_LEGACY_V5_SURFACE_REFUSED');
     const live = this.#transport.readIssue(repository, issue);
     const target = IssueProjectionPublisher.splice(live.body, marker, block, { replace_once });
     if (live.body === target) return { state: 'NOOP', body_digest: sha256(target) };

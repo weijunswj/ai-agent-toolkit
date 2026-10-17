@@ -7,6 +7,8 @@ const { GateAssignment } = require('../scripts/toolkit-v3-lifecycle.cjs');
 const { GateSessionLauncher } = require('../scripts/toolkit-gate-session-launcher.cjs');
 
 const h = s => crypto.createHash('sha256').update(s).digest('hex');
+// Launchers never read this machine's real Claude settings in these tests.
+const noFiles = () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); };
 function fakeSpawn(calls) {
   return (cmd, args) => { calls.push({ cmd, args });
     return { status: 0, stdout: `${JSON.stringify({ type: 'system', subtype: 'init', session_id: args[args.indexOf('--session-id') + 1] || args[args.indexOf('--resume') + 1], model: 'claude-opus-5-5' })}\n${JSON.stringify({ type: 'result', result: 'done', total_cost_usd: 0 })}\n` }; };
@@ -18,13 +20,13 @@ function gate() {
 }
 
 test('model and effort come only from the pinned registry binding for the role', () => {
-  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn([]) });
+  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: fakeSpawn([]) });
   assert.deepEqual({ model: launcher.route.model, effort: launcher.route.effort }, { model: 'claude-opus-5-5', effort: 'high' });
   assert.throws(() => new GateSessionLauncher({ captured: capturedStack('owner-gpt'), role: 'G1', spawn: fakeSpawn([]) }).route, e => e.code === 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED');
 });
 
 test('a fresh start binds a derived native session identity; a second start of the same session is refused', () => {
-  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls) });
+  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: fakeSpawn(calls) });
   const g = gate();
   const run = launcher.start(g, { session_id: 's1', prompt: 'work', cwd: '.' });
   assert.equal(run.native_session_id, GateSessionLauncher.nativeSessionId(g, 's1'));
@@ -44,7 +46,7 @@ function streamSpawn(events) {
   };
 }
 function startWith(events) {
-  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: streamSpawn(events) });
+  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: streamSpawn(events) });
   return launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.' });
 }
 
@@ -69,7 +71,7 @@ test('terminal result controls: a single result is unchanged and a terminal erro
 });
 
 test('resume is refused for waiting, submitted, interrupted and retired sessions before any native process', () => {
-  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls) });
+  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: fakeSpawn(calls) });
   const waiting = gate().transition('s1', 'ASK_OWNER', h('q'));
   assert.equal(waiting.session('s1').state, 'WAITING_OWNER');
   const replied = waiting.transition('s1', 'OWNER_REPLY', h('a'));
@@ -86,10 +88,10 @@ test('resume is refused for waiting, submitted, interrupted and retired sessions
 
 test('caller arguments cannot override the pinned route; other supported flags still pass', () => {
   for (const base_args of [['--model', 'claude-haiku-5-5'], ['--effort=low'], ['--fallback-model', 'claude-haiku-5-5'], ['--agent', 'other'], ['--model'], [7]]) {
-    assert.throws(() => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn([]), base_args }),
+    assert.throws(() => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: fakeSpawn([]), base_args }),
       e => ['LAUNCHER_ROUTE_OVERRIDE_REFUSED', 'LAUNCHER_ARGS_INVALID'].includes(e.code));
   }
-  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls),
+  const calls = [], launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: fakeSpawn(calls),
     base_args: ['--setting-sources', 'project,local', '--strict-mcp-config', '--plugin-dir', 'candidate', '--permission-mode', 'default'] });
   for (const extra_args of [['--model', 'claude-haiku-5-5'], ['--effort', 'low'], ['--fallback-model=claude-haiku-5-5'], ['--agent', 'other'], 'not-a-list']) {
     assert.throws(() => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: '.', extra_args }),
@@ -109,7 +111,7 @@ test('caller arguments cannot override the pinned route; other supported flags s
 test('a native run whose observed model differs from the pinned route is not success', () => {
   const observed = model => (cmd, args) => ({ status: 0, stdout: [{ type: 'system', subtype: 'init', session_id: args[args.indexOf('--session-id') + 1], model },
     { type: 'result', subtype: 'success', is_error: false, result: 'done', total_cost_usd: 0.1 }].map(l => JSON.stringify(l)).join('\n') + '\n' });
-  const start = model => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: observed(model) })
+  const start = model => new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles, spawn: observed(model) })
     .start(gate(), { session_id: 's1', prompt: 'work', cwd: '.' });
   const wrong = start('claude-haiku-5-5');
   assert.deepEqual({ model: wrong.model, route: wrong.route_observed, error: wrong.is_error, terminal: wrong.terminal_result },
@@ -121,9 +123,113 @@ test('a native run whose observed model differs from the pinned route is not suc
 });
 
 test('resume refuses a gate of another role before any native process', () => {
-  const calls = [], g0 = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G0', claude: 'claude', spawn: fakeSpawn(calls) });
+  const calls = [], g0 = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G0', claude: 'claude', read_file: noFiles, spawn: fakeSpawn(calls) });
   const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
   assert.throws(() => g0.resume(replied, { session_id: 's1', prompt: 'x', cwd: '.' }), e => e.code === 'LAUNCHER_GATE_ROLE_MISMATCH');
   assert.throws(() => g0.resume(replied.value, { session_id: 's1', prompt: 'x', cwd: '.' }), e => e.code === 'LAUNCHER_GATE_ROLE_MISMATCH');
   assert.equal(calls.length, 0);
+});
+
+// Effort-route controls. Settings files are supplied through the injected reader so the
+// tests never read this machine's real Claude configuration.
+const pathModule = require('node:path');
+const CWD = pathModule.resolve('uat-project'), CONFIG = pathModule.resolve('claude-config');
+const FILES = { user: pathModule.join(CONFIG, 'settings.json'), project: pathModule.join(CWD, '.claude', 'settings.json'),
+  local: pathModule.join(CWD, '.claude', 'settings.local.json') };
+function effortLauncher({ files = {}, base_args = [], calls = [], readError = null } = {}) {
+  const read_file = file => {
+    if (readError) throw Object.assign(new Error('denied'), { code: readError });
+    const hit = Object.entries(files).find(([key]) => (FILES[key] || pathModule.resolve(CWD, key)) === file);
+    if (!hit) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
+    return typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]);
+  };
+  return new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls), base_args, read_file });
+}
+const baseEnv = extra => ({ CLAUDE_CONFIG_DIR: CONFIG, ...extra });
+const startEffort = (launcher, env, extra_args = []) => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env, extra_args });
+const refusedWith = code => e => e.code === code;
+
+test('an inherited effort that differs from the pinned route is refused before any native process', () => {
+  const calls = [], launcher = effortLauncher({ calls });
+  for (const value of ['low', 'medium', 'xhigh', 'max', 'HIGH']) {
+    assert.throws(() => startEffort(launcher, baseEnv({ CLAUDE_CODE_EFFORT_LEVEL: value })), refusedWith('LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED'), value);
+  }
+  const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+  assert.throws(() => launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: baseEnv({ CLAUDE_CODE_EFFORT_LEVEL: 'low' }) }),
+    refusedWith('LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED'));
+  assert.equal(calls.length, 0, 'no native process for a refused inherited effort');
+  for (const [env, inherited] of [[baseEnv({ CLAUDE_CODE_EFFORT_LEVEL: 'high' }), 'EQUAL'], [baseEnv({}), 'ABSENT'], [baseEnv({ CLAUDE_CODE_EFFORT_LEVEL: '' }), 'ABSENT']]) {
+    const run = startEffort(launcher, env);
+    assert.equal(run.effort_assurance.inherited_effort, inherited);
+    assert.equal(run.effort_assurance.exact_effort, 'NOT_EXPOSED');
+    assert.equal(run.effort_assurance.unobserved_sources.length, 3);
+  }
+  assert.equal(calls.length, 3);
+});
+
+test('an effort carried in CLAUDE_CODE_EXTRA_BODY is refused; an unrelated extra body is allowed', () => {
+  const calls = [], launcher = effortLauncher({ calls });
+  for (const body of ['{"output_config":{"effort":"low"}}', '{"thinking":{"type":"enabled","budget_tokens":1024}}', '{"reasoning_effort":"low"}']) {
+    assert.throws(() => startEffort(launcher, baseEnv({ CLAUDE_CODE_EXTRA_BODY: body })), refusedWith('LAUNCHER_ENV_EXTRA_BODY_EFFORT_REFUSED'), body);
+  }
+  assert.throws(() => startEffort(launcher, baseEnv({ CLAUDE_CODE_EXTRA_BODY: 'not json' })), refusedWith('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'));
+  assert.equal(calls.length, 0);
+  startEffort(launcher, baseEnv({ CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"user_id":"controlled"}}' }));
+  assert.equal(calls.length, 1);
+});
+
+test('a lower maxEffortLevel in a selected settings source is refused; unselected or higher clamps are not', () => {
+  const lower = { maxEffortLevel: 'medium' };
+  const cases = [
+    { files: { project: lower }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { local: lower }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { user: lower }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { user: lower }, base_args: ['--setting-sources', 'project,local'], clamp: null },
+    { files: { project: { maxEffortLevel: 'max', modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'medium' } } } }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { project: { maxEffortLevel: 'low', modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max' } } } }, clamp: null },
+    { files: { project: { modelSettings: { 'claude-opus-5-5-20261001': { maxEffortLevel: 'low' } } } }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { project: { modelSettings: { 'claude-haiku-5-5': { maxEffortLevel: 'low' } } } }, clamp: null },
+    { files: { project: { maxEffortLevel: 'high' }, local: { maxEffortLevel: 'xhigh' } }, clamp: 'high' },
+    { files: { project: { maxEffortLevel: 'xhigh' }, local: { maxEffortLevel: 'medium' } }, code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { base_args: ['--settings', '{"maxEffortLevel":"low"}'], code: 'LAUNCHER_EFFORT_CLAMPED' },
+    { files: { 'policy.json': { maxEffortLevel: 'low' } }, base_args: ['--settings', 'policy.json'], code: 'LAUNCHER_EFFORT_CLAMPED' }
+  ];
+  for (const c of cases) {
+    const calls = [], launcher = effortLauncher({ files: c.files, base_args: c.base_args || [], calls });
+    if (c.code) {
+      assert.throws(() => startEffort(launcher, baseEnv({})), refusedWith(c.code), JSON.stringify(c));
+      assert.equal(calls.length, 0);
+    } else {
+      assert.equal(startEffort(launcher, baseEnv({})).effort_assurance.client_clamp, c.clamp, JSON.stringify(c));
+      assert.equal(calls.length, 1);
+    }
+  }
+});
+
+test('effort settings that cannot be read or verified hold the launch', () => {
+  for (const c of [
+    { files: { project: '{not json' } },
+    { files: { project: { maxEffortLevel: 'ultra' } } },
+    { files: { project: [] } },
+    { base_args: ['--setting-sources', 'user,enterprise'] },
+    { base_args: ['--settings', 'missing.json'] },
+    { base_args: ['--settings'] },
+    { readError: 'EACCES' }
+  ]) {
+    const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: c.base_args || [], calls, readError: c.readError || null });
+    assert.throws(() => startEffort(launcher, baseEnv({})), refusedWith('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'), JSON.stringify(c));
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('the accepted owner-UAT invocation is unchanged by the effort-route check', () => {
+  const calls = [], base_args = ['--setting-sources', 'project,local', '--strict-mcp-config', '--plugin-dir', 'candidate', '--permission-mode', 'default'];
+  const extra_args = ['--agents', 'agents.json', '--tools', 'Read,Edit,Write,Glob,Grep,Bash,Agent', '--allowedTools', 'Read', 'Agent', '--include-hook-events'];
+  const launcher = effortLauncher({ calls, base_args, files: { project: { hooks: {} }, user: { maxEffortLevel: 'low' } } });
+  const g = gate(), run = launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args });
+  assert.equal(run.is_error, false);
+  assert.deepEqual(calls[0].args, ['-p', 'work', '--session-id', GateSessionLauncher.nativeSessionId(g, 's1'), '--model', 'claude-opus-5-5',
+    '--effort', 'high', ...base_args, ...extra_args, '--output-format', 'stream-json', '--verbose']);
+  assert.deepEqual(run.effort_assurance.setting_sources, ['project', 'local']);
+  assert.equal(run.effort_assurance.client_clamp, null, 'the excluded user source does not clamp');
 });
