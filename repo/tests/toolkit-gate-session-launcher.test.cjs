@@ -143,7 +143,7 @@ const FILES = { user: pathModule.join(CONFIG, 'settings.json'), project: pathMod
   local: pathModule.join(CWD, '.claude', 'settings.local.json'), legacy: pathModule.join(CONFIG, '.claude.json'),
   homeLegacy: pathModule.join(HOME, '.claude.json'), dotConfig: pathModule.join(CONFIG, '.config.json'),
   homeDotConfig: pathModule.join(HOME, '.claude', '.config.json') };
-function effortLauncher({ files = {}, base_args = [], calls = [], readError = null, fileErrors = {}, platform = 'win32' } = {}) {
+function effortLauncher({ files = {}, base_args = [], calls = [], readError = null, fileErrors = {}, platform = 'win32', parent_env } = {}) {
   const read_file = file => {
     if (readError) throw Object.assign(new Error('denied'), { code: readError });
     const failing = Object.entries(fileErrors).find(([key]) => FILES[key] === file);
@@ -152,7 +152,8 @@ function effortLauncher({ files = {}, base_args = [], calls = [], readError = nu
     if (!hit) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
     return typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]);
   };
-  return new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls), base_args, read_file, platform });
+  return new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls), base_args, read_file, platform,
+    ...(parent_env ? { parent_env } : {}) });
 }
 const baseEnv = extra => ({ CLAUDE_CONFIG_DIR: CONFIG, ...extra });
 const startEffort = (launcher, env, extra_args = []) => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env, extra_args });
@@ -414,13 +415,14 @@ test('an omitted or absolute CLAUDE_CONFIG_DIR or home directory still launches 
     { name: 'UNC config dir', env: { CLAUDE_CONFIG_DIR: '\\\\server\\share\\claude-config' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
     { name: 'absolute config dir outside Windows', platform: 'linux', env: { CLAUDE_CONFIG_DIR: '/home/owner/claude-config' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
     { name: 'an absolute config dir makes the home variable irrelevant', env: { CLAUDE_CONFIG_DIR: CONFIG, USERPROFILE: 'rel' }, files: { dotConfig: high }, global: ['.config.json', true, 'EQUAL'] },
-    { name: 'no home variable uses this process home', env: {}, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    // On Windows libuv gives a child without USERPROFILE this process's USERPROFILE; modelled so any test host agrees.
+    { name: 'no home variable uses this process home', env: {}, parent_env: { USERPROFILE: HOME }, files: { homeLegacy: high }, global: ['.claude.json', true, 'EQUAL'] },
     { name: 'absolute HOME outside Windows', platform: 'linux', env: { HOME: '/home/owner' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
     // R1c-N1: with no .claude.json Claude Code may select the zero-length .config.json; the file is not named.
     { name: 'empty .config.json without .claude.json', env: baseEnv({}), files: { dotConfig: '' }, global: ['UNVERIFIED', false, 'ABSENT'] }
   ];
   for (const c of allowed) {
-    const calls = [], launcher = effortLauncher({ files: c.files, base_args: ['--setting-sources', 'project,local'], calls, platform: c.platform || 'win32' });
+    const calls = [], launcher = effortLauncher({ files: c.files, base_args: ['--setting-sources', 'project,local'], calls, platform: c.platform || 'win32', parent_env: c.parent_env });
     const run = startEffort(launcher, c.env);
     const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
     const resumed = launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: c.env });
