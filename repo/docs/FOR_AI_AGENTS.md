@@ -40,6 +40,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | Skill | Use when the task involves |
 | --- | --- |
 | `repository-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
+| `controller-bootstrap` | Explicitly re-enter an already-assigned Toolkit repository controller after context loss or handover, using trusted CURRENT and exact Controller/Architecture/registry source evidence; ordinary coding, setup, and GitHub programme reconciliation remain separate. |
 | `toolkit-setup` | AI Agent Toolkit plugin setup or refresh, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
 | `n8n-safety-router` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-environment-setup` | Safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n Hostinger Coolify VPS notes, stack templates, [official n8n Skills](https://github.com/n8n-io/skills) setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
@@ -147,3 +148,7 @@ Report:
 - Validation commands and pass/fail results.
 - Remaining risks or warnings.
 - Confirmation that no commits, pushes, PRs, live n8n actions, credentials, product code, or generated package artifacts were added.
+
+## Continuous core inspection
+
+The agent-control entrypoint exposes core-inspect and core-compile as effect-free data operations. core-run, core-recover and core-qualify require an authentic installed context tied to the existing receipt store and accepted CURRENT; JSON and a profile name do not supply it. The explicit continuous admission selects registry v3 and preserves inherited reviews. Source construction and local tests do not qualify a native host or authorize installation, retirement or freeze.

@@ -145,10 +145,15 @@ function validateTarget(rawTarget) {
   return { ...rawTarget, id, kind, state, ...validateReviewCadence(rawTarget, id) };
 }
 
-function requestJson(url, headers = {}) {
+class SourceWatchHttpRequest {
+  #url; #headers; #request; #chunks=[];
+  constructor(url,headers={}) {this.#url=url;this.#headers=headers;}
+  run() {
+    const url=this.#url,headers=this.#headers;
+
   const client = url.protocol === 'http:' ? http : https;
   return new Promise((resolve, reject) => {
-    const request = client.request(url, {
+    const request = this.#request = client.request(url, {
       method: 'GET',
       headers: {
         accept: 'application/vnd.github+json',
@@ -156,7 +161,7 @@ function requestJson(url, headers = {}) {
         ...headers
       }
     }, (response) => {
-      const chunks = [];
+      const chunks = this.#chunks;
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf8');
@@ -174,7 +179,10 @@ function requestJson(url, headers = {}) {
     request.on('error', reject);
     request.end();
   });
+
+  }
 }
+function requestJson(url,headers={}) {return new SourceWatchHttpRequest(url,headers).run();}
 
 function parseGitHubRepo(sourceRepo) {
   if (typeof sourceRepo !== 'string' || !sourceRepo.trim()) {
@@ -266,14 +274,20 @@ async function latestCommitForGitHubPathTarget(target, env = process.env) {
   return sha;
 }
 
-async function advisoryFindings({
+class SourceWatchAdvisoryCheck {
+  #workspace; #advisoryDocPath; #reviewStatePath; #env;
+  #reviewState; #findings;
+  constructor({
   workspace,
   advisoryDocPath = defaultAdvisoryDocPath,
   reviewStatePath = defaultReviewStatePath
-}, env = process.env) {
+}, env = process.env) {this.#workspace=workspace;this.#advisoryDocPath=advisoryDocPath;this.#reviewStatePath=reviewStatePath;this.#env=env;}
+  async run() {
+    const workspace=this.#workspace,advisoryDocPath=this.#advisoryDocPath,reviewStatePath=this.#reviewStatePath,env=this.#env;
+
   const { document } = readAdvisoryDocument(workspace, advisoryDocPath);
-  const reviewState = readReviewState(workspace, reviewStatePath);
-  const findings = [];
+  const reviewState = this.#reviewState = readReviewState(workspace, reviewStatePath);
+  const findings = this.#findings = [];
   for (const rawTarget of document.targets) {
     const target = validateTarget(rawTarget);
     if (target.enabled === false) continue;
@@ -317,7 +331,14 @@ async function advisoryFindings({
     target_count: document.targets.filter((target) => target && target.enabled !== false).length,
     relPath: advisoryDocPath
   };
+
+  }
 }
+async function advisoryFindings({
+  workspace,
+  advisoryDocPath = defaultAdvisoryDocPath,
+  reviewStatePath = defaultReviewStatePath
+}, env = process.env) {return new SourceWatchAdvisoryCheck({workspace,advisoryDocPath,reviewStatePath},env).run();}
 
 function renderAdvisoryFinding(finding) {
   const target = finding.target;

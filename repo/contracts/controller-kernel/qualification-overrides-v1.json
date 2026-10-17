@@ -1,0 +1,36 @@
+{
+  "schema": "toolkit.controller.qualification-overrides.v1",
+  "purpose": "Closed list of explicitly owner-authorised, bounded, task-specific qualification overrides. An entry never changes a central stack, never supplies a default and never becomes a general fallback; it applies only to the exact task, session, cwd and control root bound by its pinned owner reference and root disposition.",
+  "overrides": [
+    {
+      "override_id": "task63-claude-parent-only-haiku-context-20261013",
+      "host": "claude-code",
+      "caller_role": "G1",
+      "owner_reference": {
+        "schema": "toolkit.v3.claude-parent-owner-reference.v1",
+        "state": "OWNER_APPROVED_PARENT_ONLY_TEST",
+        "owner_model_sentinel": "Sentinel_76a8603159108191b3e48ae646300b8d",
+        "record_reference": {
+          "repository": "weijunswj/TRANSPORT-ai-agent-toolkit",
+          "path": "archives/TK-A7F2/admissions/legacy-history-disposition-owner-approval-20261007-0841.json",
+          "key": "task63_haiku_context_condition_correction_20261013_0044"
+        },
+        "helper_inference_permitted": 0
+      },
+      "parent_route": { "model": "claude-haiku-5-5", "effort": "high" },
+      "root_disposition": {
+        "schema": "toolkit.v3.claude-parent-root-disposition.v1",
+        "state": "ROOT_ADMITTED_PARENT_ONLY_TEST",
+        "max_parent_sessions": 1,
+        "max_user_inputs": 1,
+        "helper_dispatches_permitted": 0,
+        "helper_inference_permitted": 0,
+        "task_effects_permitted": 0,
+        "max_inflight_helpers": 1,
+        "absolute_watchdog_ms": 90000,
+        "hook_watchdog_ms": 10000,
+        "phase_limits_ms": { "initialization": 30000, "parent": 45000, "settlement": 5000 }
+      }
+    }
+  ]
+}

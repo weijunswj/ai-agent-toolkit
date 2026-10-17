@@ -727,101 +727,85 @@ function patchN8nHookInternals(pluginRoot, actions, options) {
   patchFile(pluginRoot, 'hooks/post-tool-use/validate-workflow.sh', patchPostValidateText, actions, options);
 }
 
-function repairPluginRoot(pluginRoot, options = {}) {
-  const effectiveOptions = {
-    windows: options.windows ?? process.platform === 'win32',
-    write: Boolean(options.write),
-    n8n: Boolean(options.n8n)
-  };
-  const actions = [];
-  const errors = [];
-  const hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
-
-  if (!fs.existsSync(pluginRoot)) throw new Error(`Plugin root does not exist: ${pluginRoot}`);
-  if (!fs.existsSync(hooksJsonPath)) throw new Error(`hooks/hooks.json is missing under plugin root: ${pluginRoot}`);
-  if (effectiveOptions.n8n && isTemporaryMarketplacePluginRoot(pluginRoot)) {
-    throw new Error(`Refusing to repair temporary marketplace checkout for n8n-skills@n8n-io. Use the installed plugin cache under .codex/plugins/cache/n8n-io/n8n-skills/<version>: ${pluginRoot}`);
+// Repairs one plugin root's hook commands for Windows and audits the result. Dry-run
+// (write=false) reports the planned actions without changing any file.
+class PluginHookRepairOperation {
+  #pluginRoot; #options; #settings; #hooksJsonPath; #actions = [];
+  constructor(pluginRoot, options = {}) {
+    this.#pluginRoot = pluginRoot;
+    this.#options = options;
+    this.#settings = { windows: options.windows ?? process.platform === 'win32', write: Boolean(options.write), n8n: Boolean(options.n8n) };
+    this.#hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
   }
 
-  const hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
-  const entries = collectHookCommandEntries(hooksJson);
-  const n8nPlugin = isN8nSkillsPlugin(pluginRoot, effectiveOptions);
-  if (n8nPlugin && !options.skipN8nCompatibilityCheck) {
-    const compatibility = classifyN8nSkillsCompatibility(pluginRoot);
-    if (compatibility.status === 'healthy') {
-      return {
-        plugin_root: pluginRoot,
-        windows: effectiveOptions.windows,
-        write: effectiveOptions.write,
-        repaired: false,
-        actions: [],
-        compatibility
-      };
-    }
-    if (compatibility.status !== 'repair-required') {
-      throw new Error(compatibility.reason || `n8n Skills compatibility state is ${compatibility.status}`);
+  #result(extra = {}) {
+    return { plugin_root: this.#pluginRoot, windows: this.#settings.windows, write: this.#settings.write, ...extra };
+  }
+
+  #validateRoot() {
+    const pluginRoot = this.#pluginRoot;
+    if (!fs.existsSync(pluginRoot)) throw new Error(`Plugin root does not exist: ${pluginRoot}`);
+    if (!fs.existsSync(this.#hooksJsonPath)) throw new Error(`hooks/hooks.json is missing under plugin root: ${pluginRoot}`);
+    if (this.#settings.n8n && isTemporaryMarketplacePluginRoot(pluginRoot)) {
+      throw new Error(`Refusing to repair temporary marketplace checkout for n8n-skills@n8n-io. Use the installed plugin cache under .codex/plugins/cache/n8n-io/n8n-skills/<version>: ${pluginRoot}`);
     }
   }
-  let needsWrapper = false;
-  let changedHooksJson = false;
 
-  if (effectiveOptions.windows) {
-    for (const entry of entries) {
-      const decision = classifyHookCommand(entry, pluginRoot);
-      if (decision.error) {
-        errors.push(decision.error);
-        continue;
-      }
-      if (decision.usesWrapper) needsWrapper = true;
-      if (decision.repairTo && decision.repairTo !== entry.command) {
-        entry.node.command = decision.repairTo;
-        changedHooksJson = true;
-        needsWrapper = true;
-        actions.push(`rewrite ${entry.path}`);
+  // A healthy n8n Skills install needs no repair; anything else but repair-required stops.
+  #n8nCompatibility() {
+    const compatibility = classifyN8nSkillsCompatibility(this.#pluginRoot);
+    if (compatibility.status === 'healthy') return compatibility;
+    if (compatibility.status !== 'repair-required') throw new Error(compatibility.reason || `n8n Skills compatibility state is ${compatibility.status}`);
+    return null;
+  }
+
+  // Rewrites unsafe hook commands in memory; returns whether the wrapper is needed.
+  #rewriteCommands(entries) {
+    let needsWrapper = false, changed = false;
+    const errors = [];
+    if (this.#settings.windows) {
+      for (const entry of entries) {
+        const decision = classifyHookCommand(entry, this.#pluginRoot);
+        if (decision.error) { errors.push(decision.error); continue; }
+        if (decision.usesWrapper) needsWrapper = true;
+        if (decision.repairTo && decision.repairTo !== entry.command) {
+          entry.node.command = decision.repairTo;
+          changed = true;
+          needsWrapper = true;
+          this.#actions.push(`rewrite ${entry.path}`);
+        }
       }
     }
+    if (errors.length > 0) throw new Error(errors.join('\n'));
+    return { needsWrapper, changed };
   }
 
-  if (errors.length > 0) {
-    throw new Error(errors.join('\n'));
+  #audit(n8nPlugin) {
+    const auditErrors = auditPluginRoot(this.#pluginRoot, { windows: this.#settings.windows, requireNodeFallbacks: n8nPlugin });
+    if (auditErrors.length > 0) {
+      throw new Error(['Plugin hook repair did not produce a Windows-safe install:', ...auditErrors.map(error => `- ${error}`)].join('\n'));
+    }
   }
 
-  if (needsWrapper) ensureWrapper(pluginRoot, actions, effectiveOptions);
-  if (n8nPlugin) {
-    patchN8nHookInternals(pluginRoot, actions, effectiveOptions);
+  run() {
+    this.#validateRoot();
+    const hooksJson = readJsonFile(this.#hooksJsonPath, 'hooks/hooks.json');
+    const entries = collectHookCommandEntries(hooksJson);
+    const n8nPlugin = isN8nSkillsPlugin(this.#pluginRoot, this.#settings);
+    if (n8nPlugin && !this.#options.skipN8nCompatibilityCheck) {
+      const healthy = this.#n8nCompatibility();
+      if (healthy) return this.#result({ repaired: false, actions: [], compatibility: healthy });
+    }
+    const { needsWrapper, changed } = this.#rewriteCommands(entries);
+    if (needsWrapper) ensureWrapper(this.#pluginRoot, this.#actions, this.#settings);
+    if (n8nPlugin) patchN8nHookInternals(this.#pluginRoot, this.#actions, this.#settings);
+    if (changed && this.#settings.write) writeJsonFile(this.#hooksJsonPath, hooksJson);
+    if (!this.#settings.write && this.#actions.length > 0) return this.#result({ repaired: true, actions: this.#actions });
+    this.#audit(n8nPlugin);
+    return this.#result({ repaired: this.#actions.length > 0, actions: this.#actions });
   }
-
-  if (changedHooksJson && effectiveOptions.write) writeJsonFile(hooksJsonPath, hooksJson);
-
-  if (!effectiveOptions.write && actions.length > 0) {
-    return {
-      plugin_root: pluginRoot,
-      windows: effectiveOptions.windows,
-      write: effectiveOptions.write,
-      repaired: true,
-      actions
-    };
-  }
-
-  const auditErrors = auditPluginRoot(pluginRoot, {
-    windows: effectiveOptions.windows,
-    requireNodeFallbacks: n8nPlugin
-  });
-  if (auditErrors.length > 0) {
-    throw new Error([
-      'Plugin hook repair did not produce a Windows-safe install:',
-      ...auditErrors.map((error) => `- ${error}`)
-    ].join('\n'));
-  }
-
-  return {
-    plugin_root: pluginRoot,
-    windows: effectiveOptions.windows,
-    write: effectiveOptions.write,
-    repaired: actions.length > 0,
-    actions
-  };
 }
+function repairPluginRoot(pluginRoot, options = {}) {return new PluginHookRepairOperation(pluginRoot,options).run();}
 
 function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
   const windows = options.windows ?? process.platform === 'win32';

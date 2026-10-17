@@ -1,5 +1,17 @@
 # Persistent-agent stack
 
+For adopted V3 work, apply the final execution clarification in the canonical Toolkit V3 contract at a safe renewal boundary. Planned G1 segment completion checkpoints and continues in the same session; a fresh executor is required only at the contract's mandated triggers, such as a newly activated instruction/profile version, and then only after verified checkpoint custody stops the old writer. Use the approved native host matrix, UAT impact disposition, fresh-context correction rechecks for the same selected reviewers and the separate local/remote retention rules. Missing exact routes and unqualified pre-inference guards remain explicit obligations.
+
+
+## Current V3 binding
+
+For adopted V3 work use the [current controller procedure](../CONTROLLER.md#current-v3-operating-procedure) and [V3 contract](TOOLKIT-V3.md). G0 and G1 use the same strong lead and default-delegate suitable separable evidence gathering or independent implementation/validation. Both leaves preserve the selected stack previous-G0 model/effort. G2 peers have no helpers. Service tier belongs to controller/launcher configuration; the latest owner choice is Standard for future launches; missing worker tier controls or receipts do not block delegation. Record substantial-work exceptions and preserve real model/effort, native permissions, denied/unknown effects and consumed history. One approved builder assignment continues through ordinary corrections and recovery; no compulsory mechanical helper ceremony or new mini-admission. Existing operation-local transport, privacy and independent readback requirements remain. Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
+
+## Retained compatibility guidance
+
+Apply the following only where consistent with the current V3 binding; historical gate/role instructions do not override it.
+
+
 This is replaceable configuration for explicitly identified persistent agents using the [helper workflow](PERSISTENT-AGENT-HELPER-PROFILE.md). Apply the generic defaults, then any override explicitly matching the actual agent/host. An unknown or non-persistent agent mode skips this file. A persistent agent without a matching override uses the generic defaults and does not inherit OpenAI dot's observations or route choices.
 
 Configuration grants no task, publication, merge, deployment, spending, access, security or credential authority. Current system/safety requirements, task authority, host permissions and explicit denials remain controlling. This is documentation, not a framework, scheduler or runtime enforcement mechanism.
@@ -39,7 +51,7 @@ For this owner's authorised laptop-based Claude coding jobs, map the helper work
 - Model family: Luna
 - Reasoning: High
 - Service tier: Standard
-- Coding-agent interface: Claude Code, with the exact controller-selected coding model/effort and task packet
+- Coding-agent interface: Claude Code, with the exact pinned-stack coding model/effort for the dispatched role and member, and the task packet
 - Execution surface: a visible PowerShell window on the user's selected connected, authorised laptop
 
 Explicitly configure and verify the accepted launcher route and supported coding-agent launch settings before execution. This is a host mapping, not permission to substitute Claude for a different registered coding route, select an unapproved computer, widen permissions or change an admitted worker. Use the shared workflow for focused handoffs, minimal sufficient monitoring, permission boundaries and verified results. Do not require the launcher or coding worker to attest its own runtime identity.

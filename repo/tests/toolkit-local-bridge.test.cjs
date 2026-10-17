@@ -44,20 +44,12 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.10.15';
+const expectedBridgeVersion = '3.0.6';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
-function tmpBaseDir() {
-  if (process.platform === 'win32' && process.env.USERPROFILE) {
-    const userTemp = path.join(process.env.USERPROFILE, 'AppData', 'Local', 'Temp');
-    fs.mkdirSync(userTemp, { recursive: true });
-    return userTemp;
-  }
-  return os.tmpdir();
-}
-
 function tmpRoot() {
-  return fs.mkdtempSync(path.join(tmpBaseDir(), 'toolkit-bridge-'));
+  const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
+  return fs.realpathSync.native(created);
 }
 
 function run(args, options = {}) {
@@ -189,6 +181,67 @@ function writeDisabledHookHub(hub) {
   });
 }
 
+const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
+  'repo/contracts/toolkit-local-bridge/version.json',
+  'repo/scripts/toolkit-codex-agent-adapter.cjs',
+  'repo/scripts/toolkit-gate-contract-compiler.cjs',
+  'repo/scripts/toolkit-github-program-receipt.cjs',
+  'repo/scripts/toolkit-execution-loop.cjs',
+  'repo/scripts/toolkit-github-program-state-v5.cjs',
+  'repo/scripts/toolkit-github-governance-review-reconciler.cjs',
+  'repo/scripts/toolkit-assurance-web-finality.cjs',
+  'repo/scripts/toolkit-capability-registry.cjs',
+  'repo/scripts/toolkit-programme-surface-v1.cjs',
+  'repo/CONTROLLER.md',
+  'repo/ARCHITECTURE.md',
+]);
+const CORE_CACHE_FIXTURE_DIRS = Object.freeze([
+  'repo/contracts/control-plane-kernel',
+  'repo/contracts/bounded-local-execution-loop',
+  'repo/contracts/repository-capability-registry',
+  'repo/scripts/toolkit-control-plane',
+  'repo/contracts/controller-kernel',
+  'repo/contracts/github-program-receipt',
+  'repo/contracts/github-program-reconciler',
+  'repo/contracts/github-governance-review-reconciler',
+  'repo/contracts/independent-assurance-web-finality',
+]);
+
+function completeCoreCacheFixture(repoPath, includeFiles = true) {
+  if (includeFiles) fs.cpSync(path.join(repoRoot,'repo/scripts'),path.join(repoPath,'repo/scripts'),{recursive:true,force:false});
+  for (const relPath of includeFiles ? CORE_CACHE_FIXTURE_PATHS : []) {
+    const target = path.join(repoPath, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
+  for (const relPath of CORE_CACHE_FIXTURE_DIRS) {
+    fs.cpSync(path.join(repoRoot, ...relPath.split('/')),
+      path.join(repoPath, ...relPath.split('/')), { recursive: true });
+  }
+}
+
+function createMinimalToolkitSource(root, skills = { alpha: 'alpha v1\n', beta: 'beta v1\n' }) {
+  const repo = path.join(root, 'source-repo');
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, ['init']);
+  git(repo, ['checkout', '-B', 'main']);
+  configureGitUser(repo);
+  for (const [name, body] of Object.entries(skills)) {
+    writeFile(path.join(repo, 'skills', name, 'SKILL.md'), [
+      '---',
+      `name: ${name}`,
+      `description: ${name} fixture skill for Toolkit bridge tests`,
+      '---',
+      '',
+      body.trimEnd(),
+      ''
+    ].join('\n'));
+    writeFile(path.join(repo, 'skills', name, 'README.md'), `${name} readme\n`);
+  }
+  commitAll(repo, 'minimal toolkit skills');
+  return repo;
+}
+
 function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -199,6 +252,7 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
     fs.copyFileSync(sourcePath, fixturePath);
   }
+  completeCoreCacheFixture(sourceRepo, false);
   fs.cpSync(
     path.join(repoRoot, '.codex-plugin', 'assets'),
     path.join(sourceRepo, '.codex-plugin', 'assets'),
@@ -222,7 +276,6 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     '--hub', hub,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
     '--repo-path', sourceRepo,
     '--sync-source', initialSource
   ], { env });
@@ -255,97 +308,51 @@ function quoteCommandPart(value) {
   return `"${value}"`;
 }
 
-function writeFakePython(root) {
-  const logPath = path.join(root, 'fake-python.log');
-  const scriptPath = path.join(root, 'fake-python.cjs');
-  writeFile(scriptPath, [
-    "'use strict';",
-    "const fs = require('node:fs');",
-    `const logPath = ${JSON.stringify(logPath)};`,
-    'const args = process.argv.slice(2);',
-    "fs.appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
-    "if (args[0] === '--version') {",
-    "  console.log('Python 3.11.0');",
-    '  process.exit(0);',
-    '}',
-    "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
-    "  console.log('Name: ag2');",
-    '  process.exit(0);',
-    '}',
-    'process.exit(4);',
-    ''
-  ].join('\n'), 'utf8');
-  const command = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(scriptPath)}`;
-  return { command, logPath };
+function readLatestReport(hub) {
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.ok(state.last_update_report_path, 'state should record latest update report path');
+  assert.equal(fs.existsSync(state.last_update_report_path), true, 'latest update report should exist');
+  return {
+    state,
+    reportPath: state.last_update_report_path,
+    text: fs.readFileSync(state.last_update_report_path, 'utf8')
+  };
 }
 
-function writeFakePythonWithoutAg2(root) {
-  const logPath = path.join(root, 'fake-python-without-ag2.log');
-  const scriptPath = path.join(root, 'fake-python-without-ag2.cjs');
-  writeFile(scriptPath, [
-    "'use strict';",
-    "const fs = require('node:fs');",
-    `const logPath = ${JSON.stringify(logPath)};`,
-    'const args = process.argv.slice(2);',
-    "fs.appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
-    "if (args[0] === '--version') {",
-    "  console.log('Python 3.11.0');",
-    '  process.exit(0);',
-    '}',
-    "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
-    "  console.error('Package(s) not found: ag2');",
-    '  process.exit(1);',
-    '}',
-    'process.exit(4);',
-    ''
-  ].join('\n'), 'utf8');
-  const command = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(scriptPath)}`;
-  return { command, logPath };
-}
-
-function powershellSingleQuote(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function csharpString(value) {
-  return `@"${String(value).replace(/"/g, '""')}"`;
-}
-
-function writeFakePythonExecutable(exePath, logPath) {
-  fs.mkdirSync(path.dirname(exePath), { recursive: true });
-  const sourcePath = path.join(path.dirname(exePath), 'fake-python.cs');
-  writeFile(sourcePath, [
-    'using System;',
-    'using System.IO;',
+function createLegacyDelegatedSyncFixture() {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha legacy v1\n' });
+  const fromCommit = currentCommit(sourceRepo);
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), [
+    '---',
+    'name: alpha',
+    'description: alpha fixture skill for Toolkit bridge tests',
+    '---',
     '',
-    'public static class FakePython {',
-    '  public static int Main(string[] args) {',
-    `    File.AppendAllText(${csharpString(logPath)}, string.Join(" ", args) + Environment.NewLine);`,
-    '    if (args.Length == 1 && args[0] == "--version") {',
-    '      Console.WriteLine("Python 3.14.0");',
-    '      return 0;',
-    '    }',
-    '    if (args.Length == 4 && args[0] == "-m" && args[1] == "pip" && args[2] == "show" && args[3] == "ag2") {',
-    '      Console.WriteLine("Name: ag2");',
-    '      return 0;',
-    '    }',
-    '    return 4;',
-    '  }',
-    '}',
+    'alpha legacy v2',
     ''
   ].join('\n'));
-  const result = spawnSync('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    `$ErrorActionPreference = 'Stop'; Add-Type -Path ${powershellSingleQuote(sourcePath)} -OutputAssembly ${powershellSingleQuote(exePath)} -OutputType ConsoleApplication`
-  ], {
-    encoding: 'utf8',
-    timeout: 30000,
-    windowsHide: true
+  const toCommit = commitAll(sourceRepo, 'legacy delegated update');
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    last_repo_update_status: 'updated',
+    last_repo_update_from_commit: fromCommit,
+    last_repo_update_to_commit: toCommit,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
   });
-  assert.equal(result.status, 0, `failed to compile fake Python executable\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return { root, sourceRepo, hub, fromCommit, toCommit };
 }
 
 function configureGitUser(repoPath) {
@@ -454,6 +461,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
   }
+  completeCoreCacheFixture(repoPath);
   writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -529,132 +537,6 @@ function createRepoAutoUpdateFixture() {
   git(root, ['clone', origin, upstream]);
   configureGitUser(upstream);
   return { root, origin, repo, upstream, initialCommit };
-}
-
-function createMinimalToolkitSource(root, skills = { alpha: 'alpha v1\n', beta: 'beta v1\n' }) {
-  const repo = path.join(root, 'source-repo');
-  fs.mkdirSync(repo, { recursive: true });
-  git(repo, ['init']);
-  git(repo, ['checkout', '-B', 'main']);
-  configureGitUser(repo);
-  for (const [name, body] of Object.entries(skills)) {
-    writeFile(path.join(repo, 'skills', name, 'SKILL.md'), [
-      '---',
-      `name: ${name}`,
-      `description: ${name} fixture skill for Toolkit bridge tests`,
-      '---',
-      '',
-      body.trimEnd(),
-      ''
-    ].join('\n'));
-    writeFile(path.join(repo, 'skills', name, 'README.md'), `${name} readme\n`);
-  }
-  commitAll(repo, 'minimal toolkit skills');
-  return repo;
-}
-
-function writeN8nPluginHookFixture(pluginRoot) {
-  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
-    name: 'n8n-skills',
-    version: '0.0.0-test',
-    repository: 'https://github.com/n8n-io/skills'
-  });
-  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
-    hooks: {
-      SessionStart: [
-        {
-          matcher: 'startup',
-          hooks: [
-            {
-              type: 'command',
-              command: 'hooks/session-start.sh'
-            }
-          ]
-        }
-      ],
-      PreToolUse: [
-        {
-          matcher: 'mcp__n8n__get_node',
-          hooks: [
-            {
-              type: 'command',
-              command: 'bash hooks/pre-tool-use/_emit.sh'
-            }
-          ]
-        }
-      ],
-      PostToolUse: [
-        {
-          matcher: 'mcp__n8n__validate_workflow',
-          hooks: [
-            {
-              type: 'command',
-              command: 'hooks/post-tool-use/validate-workflow.sh'
-            }
-          ]
-        }
-      ]
-    }
-  });
-
-  writeFile(path.join(pluginRoot, 'hooks', 'session-start.sh'), [
-    '#!/usr/bin/env bash',
-    'INPUT="$(cat)"',
-    'ADDITIONAL_CONTEXT="Load using-n8n-skills before n8n work."',
-    'if command -v jq >/dev/null 2>&1; then',
-    '  jq -n --arg ctx "${ADDITIONAL_CONTEXT}" \'{ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: $ctx } }\'',
-    'fi',
-    ''
-  ].join('\n'));
-  writeFile(path.join(pluginRoot, 'hooks', 'pre-tool-use', '_emit.sh'), [
-    '#!/usr/bin/env bash',
-    'INPUT="$(cat)"',
-    'REMINDER="Load using-n8n-skills before n8n tool use."',
-    'if command -v jq >/dev/null 2>&1; then',
-    '  SESSION_ID="$(echo "${INPUT}" | jq -r \'.session_id // empty\' 2>/dev/null)"',
-    'elif command -v python3 >/dev/null 2>&1; then',
-    '  SESSION_ID="$(echo "${INPUT}" | python3 -c \'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""))\' 2>/dev/null)"',
-    'else',
-    '  exit 0',
-    'fi',
-    'if command -v jq >/dev/null 2>&1; then',
-    '  jq -n --arg ctx "${REMINDER}" \'{ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: $ctx } }\'',
-    'fi',
-    ''
-  ].join('\n'));
-  writeFile(path.join(pluginRoot, 'hooks', 'post-tool-use', 'validate-workflow.sh'), [
-    '#!/usr/bin/env bash',
-    'if ! command -v jq >/dev/null 2>&1; then',
-    '  exit 0',
-    'fi',
-    '',
-    'INPUT="$(cat)"',
-    'CODE="$(echo "$INPUT" | jq -r \'.tool_input.code // empty\' 2>/dev/null)"',
-    'if [ -z "$CODE" ]; then',
-    '  echo "No workflow code returned" >/dev/null',
-    '  exit 0',
-    'fi',
-    'WARNINGS="Load using-n8n-skills before publishing workflows."',
-    'jq -n --arg ctx "$WARNINGS" \'{',
-    '  hookSpecificOutput: {',
-    '    hookEventName: "PostToolUse",',
-    '    additionalContext: $ctx',
-    '  }',
-    '}\'',
-    ''
-  ].join('\n'));
-
-  for (const rel of [
-    'hooks/session-start.sh',
-    'hooks/pre-tool-use/_emit.sh',
-    'hooks/post-tool-use/validate-workflow.sh'
-  ]) {
-    try {
-      fs.chmodSync(path.join(pluginRoot, ...rel.split('/')), 0o755);
-    } catch {
-      // Windows Git Bash can usually run these, and chmod can be unavailable in restricted filesystems.
-    }
-  }
 }
 
 function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-start.sh') {
@@ -767,53 +649,6 @@ function reportPathFromOutput(stdout, hub) {
   return reportPath;
 }
 
-function readLatestReport(hub) {
-  const state = readJson(path.join(hub, 'state.json'));
-  assert.ok(state.last_update_report_path, 'state should record latest update report path');
-  assert.equal(fs.existsSync(state.last_update_report_path), true, 'latest update report should exist');
-  return {
-    state,
-    reportPath: state.last_update_report_path,
-    text: fs.readFileSync(state.last_update_report_path, 'utf8')
-  };
-}
-
-function createLegacyDelegatedSyncFixture() {
-  const root = tmpRoot();
-  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha legacy v1\n' });
-  const fromCommit = currentCommit(sourceRepo);
-  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), [
-    '---',
-    'name: alpha',
-    'description: alpha fixture skill for Toolkit bridge tests',
-    '---',
-    '',
-    'alpha legacy v2',
-    ''
-  ].join('\n'));
-  const toCommit = commitAll(sourceRepo, 'legacy delegated update');
-  const hub = path.join(root, 'hub', 'current');
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: expectedBridgeVersion,
-    auto_sync_enabled: true,
-    repo_path: sourceRepo,
-    last_repo_update_status: 'updated',
-    last_repo_update_from_commit: fromCommit,
-    last_repo_update_to_commit: toCommit,
-    targets: {
-      ag2: {
-        enabled: true,
-        explicitly_disabled: false,
-        synced_version: '1.0.0',
-        synced_checksum: 'old'
-      }
-    }
-  });
-  return { root, sourceRepo, hub, fromCommit, toCommit };
-}
-
 test('dry-run audit performs no writes and reports planned targets', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -879,36 +714,34 @@ test('explicit OpenCode setup infers the user OpenCode skill location', () => {
   assert.equal(audit.targets.opencode.synced, true);
 });
 
-test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini config without package installs', () => {
+test('Antigravity portable skills preview and copy only into an explicit workspace skills folder', () => {
   const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(root)
-  });
+  const projectRoot = path.join(root, 'workspace');
+  fs.mkdirSync(projectRoot, { recursive: true });
+  const args = ['--copy-antigravity-skills', '--antigravity-project-root', projectRoot];
+
+  let result = run(args);
   assert.equal(result.status, 0, result.stderr);
+  const preview = parseLastJson(result.stdout);
+  assert.equal(preview.status, 'dry-run');
+  assert.equal(preview.target, '.agents/skills');
+  assert.equal(preview.wrote, false);
+  assert.ok(preview.files_to_copy > 0);
+  assert.equal(fs.existsSync(path.join(projectRoot, '.agents')), false, 'preview must not create workspace files');
+  assert.equal(fs.existsSync(path.join(root, '.gemini')), false, 'portable preview must not inspect or create Gemini plugin config');
 
-  const state = readJson(path.join(hub, 'state.json'));
-  const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  const pluginJson = readJson(path.join(pluginRoot, 'plugin.json'));
-  const versionMarker = readJson(path.join(pluginRoot, 'installed_version.json'));
-  const targetSkill = path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md');
-  const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
-
-  assert.equal(state.targets.ag2.enabled, true);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
-  assert.equal(pluginJson.name, 'ai-agent-toolkit');
-  assert.equal(versionMarker.version, expectedBridgeVersion);
-  assert.ok(fs.existsSync(targetSkill), 'Antigravity target skill should be installed into the plugin-scoped skills folder');
-  assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.deepEqual(targetSkillDirs(path.join(pluginRoot, 'skills')), expectedManagedSkillNames());
-  assert.deepEqual(
-    readJson(path.join(pluginRoot, '.ai-agent-toolkit-managed.json')).managed_skill_names,
-    expectedManagedSkillNames()
-  );
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(pluginRoot));
-  assert.equal(audit.targets.ag2.target_exists, true);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.ok(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), 'hub should keep internal AG2 adapter metadata');
+  result = run([...args, '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  const copied = parseLastJson(result.stdout);
+  assert.equal(copied.status, 'copied');
+  assert.equal(copied.target, '.agents/skills');
+  assert.equal(copied.wrote, true);
+  const skillsRoot = path.join(projectRoot, '.agents', 'skills');
+  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames());
+  assert.ok(fs.existsSync(path.join(skillsRoot, 'toolkit-setup', 'SKILL.md')));
+  assert.equal(fs.existsSync(path.join(projectRoot, '.gemini')), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, '.opencode')), false);
+  assert.equal(fs.existsSync(path.join(root, 'hub')), false, 'portable copying must not mutate bridge state');
 });
 
 test('detected but not enabled OpenCode target receives no writes', () => {
@@ -957,217 +790,100 @@ test('OpenCode audit detects persisted bridge target state without enabling writ
   assert.equal(audit.targets.opencode.signals.migrated_target_path, true);
 });
 
-test('AG2 Python command can be persisted and reused without installing packages', () => {
+test('AG2 native target enable rejects before bridge state or target writes', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  const fakePython = writeFakePython(root);
-
-  let result = run([
-    '--hub', hub,
-    '--write',
-    '--set-ag2-python-command', fakePython.command,
-    '--enable-target', 'ag2'
-  ], { env: isolatedHomeEnv(root) });
-  assert.equal(result.status, 0, result.stderr);
-
-  let state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.targets.ag2.enabled, true);
-  assert.equal(state.targets.ag2.detected, true);
-  assert.equal(state.targets.ag2.python_command, fakePython.command);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
-
-  let invocations = fs.readFileSync(fakePython.logPath, 'utf8');
-  assert.match(invocations, /--version/);
-  assert.match(invocations, /-m pip show ag2/);
-  assert.doesNotMatch(invocations, /\binstall\b/i);
-
-  result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
-  assert.equal(result.status, 0, result.stderr);
-  const audit = parseLastJson(result.stdout);
-  assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'enabled');
-  assert.equal(audit.targets.ag2.python_command, fakePython.command);
-  assert.equal(audit.targets.ag2.ag2_package_detected, true);
-  assert.equal(audit.targets.ag2.signals.selected_python_command, fakePython.command);
-
-  state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.targets.ag2.python_command, fakePython.command);
-});
-
-test('AG2 audit detects Antigravity config without requiring the Python ag2 package', () => {
-  const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  const antigravityConfig = path.join(root, '.antigravity');
-  const fakePython = writeFakePythonWithoutAg2(root);
-  fs.mkdirSync(antigravityConfig, { recursive: true });
-
-  const result = run(['--hub', hub, '--audit', '--python-command', fakePython.command], {
-    env: {
-      PATH: '',
-      USERPROFILE: root,
-      HOME: root,
-      LOCALAPPDATA: path.join(root, 'local-app-data'),
-      VIRTUAL_ENV: '',
-      CONDA_PREFIX: '',
-      UV_PYTHON: ''
-    }
+  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
   });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(hub), false, 'dry-run audit must not create the hub');
 
-  const audit = parseLastJson(result.stdout);
-  assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
-  assert.equal(audit.targets.ag2.ag2_package_detected, false);
-  assert.equal(audit.targets.ag2.python_command, '');
-  assert.equal(audit.targets.ag2.would_write, false);
-  assert.equal(path.resolve(audit.targets.ag2.signals.antigravity_config_dir), path.resolve(antigravityConfig));
-  assert.equal(audit.targets.ag2.signals.antigravity_config_exists, true);
-  assert.equal(audit.targets.ag2.signals.selected_python_command, '');
-  assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /AG2 native\/plugin target is unsupported/);
+  assert.match(result.stderr, /--copy-antigravity-skills/);
+  assert.equal(fs.existsSync(hub), false, 'unsupported native enable must not create bridge state');
+  assert.equal(fs.existsSync(path.join(root, '.gemini')), false, 'unsupported native enable must not create Gemini config');
 });
 
-test('AG2 audit detects Gemini plugin config without requiring the Python ag2 package', () => {
+test('Antigravity and Gemini config folders do not qualify AG2 native support or trigger Python discovery', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  const geminiConfig = path.join(root, '.gemini', 'config');
-  const geminiPlugins = path.join(geminiConfig, 'plugins');
-  const fakePython = writeFakePythonWithoutAg2(root);
-  fs.mkdirSync(geminiPlugins, { recursive: true });
+  fs.mkdirSync(path.join(root, '.antigravity'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.gemini', 'config', 'plugins'), { recursive: true });
 
-  const result = run(['--hub', hub, '--audit', '--python-command', fakePython.command], {
-    env: {
-      PATH: '',
-      USERPROFILE: root,
-      HOME: root,
-      LOCALAPPDATA: path.join(root, 'local-app-data'),
-      VIRTUAL_ENV: '',
-      CONDA_PREFIX: '',
-      UV_PYTHON: ''
-    }
-  });
+  const result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(hub), false, 'dry-run audit must not create the hub');
+  assert.equal(fs.existsSync(hub), false, 'audit must remain read-only');
 
   const audit = parseLastJson(result.stdout);
-  assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(audit.targets.ag2.status, 'detected');
-  assert.equal(audit.targets.ag2.ag2_package_detected, false);
-  assert.equal(audit.targets.ag2.python_command, '');
-  assert.equal(audit.targets.ag2.would_write, false);
-  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_config_dir), path.resolve(geminiConfig));
-  assert.equal(audit.targets.ag2.signals.gemini_config_exists, true);
-  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_plugins_dir), path.resolve(geminiPlugins));
-  assert.equal(audit.targets.ag2.signals.gemini_plugins_dir_exists, true);
-  assert.equal(audit.targets.ag2.signals.selected_python_command, '');
-  assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
+  assert.equal(Object.hasOwn(audit.targets, 'ag2'), false);
 });
 
-test('AG2 audit records exactly which Python commands were tried when not detected', () => {
+test('saved legacy AG2 command data is read without invoking it or writing during audit', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
+  const commandLog = path.join(root, 'legacy-command-invoked.txt');
+  const legacyCommand = path.join(root, 'legacy-python-command.cjs');
+  const oldPluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  fs.mkdirSync(oldPluginRoot, { recursive: true });
+  writeFile(legacyCommand, [
+    "'use strict';",
+    "require('node:fs').writeFileSync(" + JSON.stringify(commandLog) + ", 'called');",
+    ''
+  ].join('\n'));
   writeJson(path.join(hub, 'state.json'), {
     schema_version: 1,
     architecture_version: 2,
     hub_version: expectedBridgeVersion,
     targets: {
       ag2: {
-        enabled: false,
-        python_command: 'missing-saved-python'
+        enabled: true,
+        python_command: `${quoteCommandPart(process.execPath)} ${quoteCommandPart(legacyCommand)}`,
+        target_path: oldPluginRoot
       }
     }
   });
+  const statePath = path.join(hub, 'state.json');
+  const before = fs.readFileSync(statePath);
 
-  const result = run(['--hub', hub, '--audit', '--python-command', 'missing-explicit-python'], {
-    env: {
-      PATH: '',
-      USERPROFILE: root,
-      HOME: root,
-      LOCALAPPDATA: path.join(root, 'local-app-data'),
-      VIRTUAL_ENV: '',
-      CONDA_PREFIX: '',
-      UV_PYTHON: ''
-    }
-  });
+  const result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
-  assert.equal(audit.targets.ag2.detected, false);
-  assert.equal(audit.targets.ag2.status, 'not detected');
-  assert.equal(audit.targets.ag2.python_command, '');
-  const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => entry.command);
-  assert.deepEqual(tried.slice(0, 2), ['missing-saved-python', 'missing-explicit-python']);
-  assert.ok(tried.includes('python'), tried.join('\n'));
-  assert.ok(tried.includes('python3'), tried.join('\n'));
-  assert.ok(tried.includes('py'), tried.join('\n'));
+  assert.equal(Object.hasOwn(audit.targets, 'ag2'), false);
+  assert.equal(fs.readFileSync(statePath).equals(before), true, 'readback must not normalize or rewrite legacy state');
+  assert.equal(fs.existsSync(commandLog), false, 'legacy command data must never be executed');
 });
 
-test('AG2 Python discovery rejects command shims instead of invoking a shell', () => {
+test('removed Python command options reject instead of invoking a command shim', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  const shim = path.join(root, 'fake-python.cmd');
+  const shim = path.join(root, 'python.cmd');
   const marker = path.join(root, 'shim-ran.txt');
-  writeFile(shim, `echo shim ran > "${marker}"\n`);
+  writeFile(shim, 'echo shim ran > "' + marker + '"\\n');
 
   const result = run(['--hub', hub, '--audit', '--python-command', shim], {
-    env: {
-      PATH: '',
-      USERPROFILE: root,
-      HOME: root,
-      LOCALAPPDATA: path.join(root, 'local-app-data'),
-      VIRTUAL_ENV: '',
-      CONDA_PREFIX: '',
-      UV_PYTHON: ''
-    }
+    env: isolatedHomeEnv(root)
   });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(marker), false, 'command shim must not be invoked');
-  const audit = parseLastJson(result.stdout);
-  const first = audit.targets.ag2.signals.tried_python_commands[0];
-  assert.equal(first.command, shim);
-  assert.equal(first.python_ok, false);
-  assert.match(first.python_error, /command shims/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unknown argument: --python-command/);
+  assert.equal(fs.existsSync(marker), false, 'unsupported command shims must never be invoked');
+  assert.equal(fs.existsSync(hub), false, 'unsupported discovery flags must fail before writes');
 });
 
-test('AG2 audit selects Windows user-local python versioned executables', {
-  skip: process.platform !== 'win32' ? 'Windows user-local Python discovery is Windows-only' : false
-}, (t) => {
+test('AG2 audit does not search Windows user-local Python executables', {
+  skip: process.platform !== 'win32' ? 'Windows user-local path assertion is Windows-only' : false
+}, () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const pythonExe = path.join(root, '.local', 'bin', 'python3.14.exe');
-  const logPath = path.join(root, 'python3.14.log');
-  writeFakePythonExecutable(pythonExe, logPath);
-  const probe = spawnSync(pythonExe, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-  if (probe.error && /\bUNKNOWN\b/.test(probe.error.message || '')) {
-    t.skip(`freshly compiled fake Python executable cannot be spawned in this environment: ${probe.error.message}`);
-    return;
-  }
-  assert.equal(probe.status, 0, `fake Python executable must run before discovery\nstdout:\n${probe.stdout}\nstderr:\n${probe.stderr}\nerror:\n${probe.error?.message || ''}`);
+  fs.mkdirSync(path.dirname(pythonExe), { recursive: true });
+  fs.writeFileSync(pythonExe, 'not an executable; discovery must not inspect or invoke it\\n');
 
-  const result = run(['--hub', hub, '--audit'], {
-    env: {
-      PATH: '',
-      USERPROFILE: root,
-      HOME: root,
-      LOCALAPPDATA: path.join(root, 'local-app-data'),
-      VIRTUAL_ENV: '',
-      CONDA_PREFIX: '',
-      UV_PYTHON: ''
-    }
-  });
+  const result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
-  assert.equal(audit.targets.ag2.detected, true);
-  assert.equal(path.resolve(audit.targets.ag2.python_command), path.resolve(pythonExe));
-  assert.equal(path.resolve(audit.targets.ag2.signals.selected_python_command), path.resolve(pythonExe));
-  const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => path.resolve(entry.command));
-  assert.ok(tried.includes(path.resolve(pythonExe)), tried.join('\n'));
-
-  const invocations = fs.readFileSync(logPath, 'utf8');
-  assert.match(invocations, /--version/);
-  assert.match(invocations, /-m pip show ag2/);
-  assert.doesNotMatch(invocations, /\binstall\b/i);
+  assert.equal(Object.hasOwn(audit.targets, 'ag2'), false);
+  assert.doesNotMatch(result.stdout, /python3\\.14/);
 });
-
 test('sync-enabled command does not create bridge state before setup', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1177,40 +893,32 @@ test('sync-enabled command does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
-test('sync-enabled updates enabled OpenCode and Antigravity app outputs after Toolkit changes', () => {
+test('sync-enabled refreshes enabled OpenCode skill content after Toolkit changes', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeSkill = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md');
-  const ag2Skill = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'ai-agent-toolkit', 'SKILL.md');
-  writeFile(opencodeSkill, 'stale opencode skill\n');
-  writeFile(ag2Skill, 'stale ag2 skill\n');
-
+  const openCodeSkill = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  writeFile(openCodeSkill, 'stale OpenCode skill\n');
   const statePath = path.join(hub, 'state.json');
   const state = readJson(statePath);
   state.targets.opencode.synced_version = '1.0.0';
   state.targets.opencode.synced_checksum = 'old';
-  state.targets.ag2.synced_version = '1.0.0';
-  state.targets.ag2.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(fs.readFileSync(opencodeSkill, 'utf8'), /AI Agent Toolkit Bridge/);
-  assert.match(fs.readFileSync(ag2Skill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.match(fs.readFileSync(openCodeSkill, 'utf8'), /AI Agent Toolkit Bridge/);
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
   assert.equal(audit.targets.opencode.synced, true);
-  assert.equal(audit.targets.ag2.synced, true);
   assert.equal(audit.targets.opencode.would_write, false);
-  assert.equal(audit.targets.ag2.would_write, false);
 });
 
-test('skill payload checksum includes Toolkit repo skill files and marks enabled targets stale', () => {
+test('skill payload checksum includes Toolkit repo skill files and marks enabled OpenCode stale', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root);
   const hub = path.join(root, 'hub', 'current');
@@ -1218,15 +926,15 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   let audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
   const beforeChecksum = audit.checksum;
 
   writeFile(path.join(sourceRepo, 'skills', 'alpha', 'README.md'), 'alpha changed\n');
@@ -1234,8 +942,8 @@ test('skill payload checksum includes Toolkit repo skill files and marks enabled
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
   assert.notEqual(audit.checksum, beforeChecksum);
-  assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(audit.targets.opencode.synced, false);
+  assert.equal(audit.targets.opencode.would_write, true);
 });
 
 test('sync-enabled updates changed Toolkit skill contents from the configured repo source', () => {
@@ -1246,8 +954,7 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
@@ -1270,13 +977,9 @@ test('sync-enabled updates changed Toolkit skill contents from the configured re
     fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
     /alpha v2 from source repo/
   );
-  assert.match(
-    fs.readFileSync(path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
-    /alpha v2 from source repo/
-  );
 });
 
-test('removed managed Toolkit skills are cleaned up without deleting unrelated user skills or files', () => {
+test('removed managed OpenCode skills are cleaned up without deleting unrelated user skills or files', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -1284,16 +987,13 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
     '--hub', hub,
     '--repo-path', sourceRepo,
     '--write',
-    '--enable-target', 'opencode',
-    '--enable-target', 'ag2'
+    '--enable-target', 'opencode'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeSkillsRoot = path.join(root, '.config', 'opencode', 'skills');
-  const ag2PluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  writeFile(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md'), 'user opencode skill\n');
-  writeFile(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md'), 'user ag2 skill\n');
-  writeFile(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'keep this note\n');
+  const skillsRoot = path.join(root, '.config', 'opencode', 'skills');
+  writeFile(path.join(skillsRoot, 'user-skill', 'SKILL.md'), 'user OpenCode skill\n');
+  writeFile(path.join(skillsRoot, 'USER-NOTES.txt'), 'keep this note\n');
 
   fs.rmSync(path.join(sourceRepo, 'skills', 'beta'), { recursive: true, force: true });
   git(sourceRepo, ['add', '.']);
@@ -1304,19 +1004,17 @@ test('removed managed Toolkit skills are cleaned up without deleting unrelated u
   });
   assert.equal(result.status, 0, result.stderr);
 
-  assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'beta')), false);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'beta')), false);
-  assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md')), true);
-  assert.equal(fs.readFileSync(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'utf8'), 'keep this note\n');
+  assert.equal(fs.existsSync(path.join(skillsRoot, 'beta')), false);
+  assert.equal(fs.existsSync(path.join(skillsRoot, 'user-skill', 'SKILL.md')), true);
+  assert.equal(fs.readFileSync(path.join(skillsRoot, 'USER-NOTES.txt'), 'utf8'), 'keep this note\n');
 });
 
-test('old single-adapter AG2 target migrates to the full managed Toolkit skill set', () => {
+test('old single-skill OpenCode payload migrates to the complete managed Toolkit skill set', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n' });
   const hub = path.join(root, 'hub', 'current');
-  const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  writeFile(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'old adapter only\n');
+  const skillsRoot = path.join(root, '.config', 'opencode', 'skills');
+  writeFile(path.join(skillsRoot, 'ai-agent-toolkit', 'SKILL.md'), 'old adapter only\n');
   writeJson(path.join(hub, 'state.json'), {
     schema_version: 1,
     architecture_version: 2,
@@ -1324,9 +1022,9 @@ test('old single-adapter AG2 target migrates to the full managed Toolkit skill s
     auto_sync_enabled: true,
     repo_path: sourceRepo,
     targets: {
-      ag2: {
+      opencode: {
         enabled: true,
-        target_path: pluginRoot,
+        target_path: skillsRoot,
         synced_version: '2.1.0',
         synced_checksum: 'old'
       }
@@ -1337,28 +1035,26 @@ test('old single-adapter AG2 target migrates to the full managed Toolkit skill s
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), /AI Agent Toolkit AG2 Adapter/);
-  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md'), 'utf8'), /alpha v1/);
+  assert.match(fs.readFileSync(path.join(skillsRoot, 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), /AI Agent Toolkit Bridge/);
+  assert.match(fs.readFileSync(path.join(skillsRoot, 'alpha', 'SKILL.md'), 'utf8'), /alpha v1/);
 
   const audit = parseLastJson(run(['--hub', hub, '--audit'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   }).stdout);
-  assert.equal(audit.targets.ag2.synced, true);
-  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
 });
 
-test('audit separates hub adapter metadata from app-facing target sync', () => {
+test('audit separates the managed hub adapter from OpenCode target sync and reports AG2 unsupported', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeTarget = path.join(root, '.config', 'opencode', 'skills');
-  const ag2Target = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  fs.rmSync(opencodeTarget, { recursive: true, force: true });
-  fs.rmSync(ag2Target, { recursive: true, force: true });
+  const openCodeTarget = path.join(root, '.config', 'opencode', 'skills');
+  fs.rmSync(openCodeTarget, { recursive: true, force: true });
 
   result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
@@ -1368,44 +1064,55 @@ test('audit separates hub adapter metadata from app-facing target sync', () => {
   assert.equal(audit.targets.opencode.synced, false);
   assert.equal(audit.targets.opencode.would_write, true);
   assert.equal(path.resolve(audit.targets.opencode.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'opencode')));
-  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(opencodeTarget));
-
-  assert.equal(audit.targets.ag2.internal_adapter_exists, true);
-  assert.equal(audit.targets.ag2.target_exists, false);
-  assert.equal(audit.targets.ag2.synced, false);
-  assert.equal(audit.targets.ag2.would_write, true);
-  assert.equal(path.resolve(audit.targets.ag2.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'ag2')));
-  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(ag2Target));
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(openCodeTarget));
+  assert.equal(Object.hasOwn(audit.targets, 'ag2'), false);
 });
 
-test('disabled target is not overwritten during later sync', () => {
+test('disabled OpenCode and legacy AG2 target remain untouched during later sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills');
-  const ag2TargetDir = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
-  const opencodeMarker = path.join(opencodeTargetDir, 'USER-MARKER.txt');
-  const ag2Marker = path.join(ag2TargetDir, 'USER-MARKER.txt');
-  fs.writeFileSync(opencodeMarker, 'keep opencode\n', 'utf8');
-  fs.writeFileSync(ag2Marker, 'keep ag2\n', 'utf8');
+  const openCodeSkills = path.join(root, '.config', 'opencode', 'skills');
+  const openCodeMarker = path.join(openCodeSkills, 'USER-MARKER.txt');
+  const legacyPluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  const legacyMarker = path.join(legacyPluginRoot, 'USER-MARKER.txt');
+  writeFile(openCodeMarker, 'keep OpenCode\n');
+  writeFile(legacyMarker, 'keep legacy AG2\n');
+
+  const statePath = path.join(hub, 'state.json');
+  const state = readJson(statePath);
+  state.targets.ag2 = {
+    enabled: true,
+    explicitly_disabled: false,
+    target_path: legacyPluginRoot,
+    synced_version: '2.1.0',
+    synced_checksum: 'legacy'
+  };
+  writeJson(statePath, state);
+  const legacyBefore = snapshotTree(legacyPluginRoot);
 
   result = run(['--hub', hub, '--write', '--disable-target', 'opencode', '--disable-target', 'ag2'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n');
+  assert.equal(fs.readFileSync(openCodeMarker, 'utf8'), 'keep OpenCode\n');
+  assert.deepEqual(snapshotTree(legacyPluginRoot), legacyBefore, 'disable-only must retain legacy native files exactly');
 
   result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n', 'disabled OpenCode target must not be overwritten');
-  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n', 'disabled Antigravity target must not be overwritten');
-});
+  assert.equal(fs.readFileSync(openCodeMarker, 'utf8'), 'keep OpenCode\n', 'disabled OpenCode target must not be overwritten');
+  assert.deepEqual(snapshotTree(legacyPluginRoot), legacyBefore, 'later sync must not touch the disabled legacy target');
 
+  const finalState = readJson(statePath);
+  assert.equal(finalState.targets.opencode.enabled, false);
+  assert.equal(finalState.targets.opencode.explicitly_disabled, true);
+  assert.equal(finalState.targets.ag2.enabled, false);
+  assert.equal(finalState.targets.ag2.explicitly_disabled, true);
+});
 test('cross-source versions do not block native hosts or repo target sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1421,7 +1128,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -1431,7 +1138,7 @@ test('cross-source versions do not block native hosts or repo target sync', () =
     'codex-plugin': '9.8.0',
     'claude-plugin': expectedBridgeVersion
   });
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(state.hub_version, '9.9.9');
 
   state.bridge_versions_by_source['claude-plugin'] = '9.7.0';
@@ -1464,7 +1171,7 @@ test('same-source downgrade refuses unless forced and forced write changes only 
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'codex-plugin'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--sync-source', 'codex-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.notEqual(result.status, 0);
@@ -1473,7 +1180,7 @@ test('same-source downgrade refuses unless forced and forced write changes only 
   assert.match(result.stderr, /setup toolkit.*Codex/i);
   assert.match(result.stderr, /--force-downgrade.*explicit manual same-source recovery/);
 
-  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2', '--sync-source', 'codex-plugin'], {
+  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'opencode', '--sync-source', 'codex-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
@@ -2099,6 +1806,7 @@ test('isolated reconciliation bypasses reports, state, targets, repo update, and
         synced_version: '0.0.1',
         synced_checksum: 'stale'
       },
+      // Legacy AG2 state remains disable-only; it is not a native staging target.
       ag2: { enabled: false, explicitly_disabled: true }
     }
   });
@@ -2159,7 +1867,11 @@ test('isolated reconciliation bypasses reports, state, targets, repo update, and
   assert.equal(rerun.status, 0, rerun.stderr);
   const rerunOutput = parseLastJson(rerun.stdout);
   assert.equal(rerunOutput.staging_reconciliation.status, 'already-absent');
-  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 3);
+  assert.equal(
+    rerunOutput.staging_reconciliation.checked_parent_count,
+    2,
+    'reconciliation checks the hub and OpenCode parents; legacy AG2 state is not a native staging target'
+  );
   assert.deepEqual(snapshotTree(reportDir), reportBefore);
 });
 
@@ -2205,13 +1917,17 @@ test('reconciliation rejects every unrelated command flag before mutation', () =
     ['--disable-target', 'opencode'],
     ['--opencode-command', 'unused-opencode'],
     ['--python-command', 'unused-python'],
-    ['--set-ag2-python-command', 'unused-python']
+    ['--disable-target', 'ag2']
   ];
   const env = isolatedHomeEnv(root, { PATH: '' });
   for (const extraArgs of incompatible) {
     const result = run(['--hub', hub, '--reconcile-staging', generationId, '--write', ...extraArgs], { env });
     assert.notEqual(result.status, 0, `${extraArgs[0]} must fail`);
-    assert.match(result.stderr, /--reconcile-staging cannot be combined with:/);
+    if (extraArgs[0] === '--python-command') {
+      assert.match(result.stderr, /Unknown argument: --python-command/);
+    } else {
+      assert.match(result.stderr, /--reconcile-staging cannot be combined with:/);
+    }
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
     assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), stateBefore);
     assert.equal(fs.existsSync(path.join(path.dirname(hub), 'update.lock')), false);
@@ -2259,7 +1975,7 @@ test('fresh lock owned by a live process blocks manual writes and is not deleted
   // This test process is alive for the whole bridge child run.
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
 
-  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  const result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /held by live process/);
   assert.equal(fs.existsSync(lockPath), true, 'a live-owner lock must never be deleted');
@@ -2273,7 +1989,7 @@ test('fresh lock owned by a dead process is recovered immediately without waitin
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: deadTestPid() });
   fs.writeFileSync(unrelatedPath, 'keep me\n', 'utf8');
 
-  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+  const result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root),
     timeout: 480000
   });
@@ -2289,19 +2005,19 @@ test('fresh lock without a usable owner PID keeps the age-based fallback and sta
 
   // Missing PID, fresh created_at: age fallback blocks the write.
   writeJson(lockPath, { created_at: new Date().toISOString() });
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
 
   // Malformed PID, fresh created_at: same safe age fallback.
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: 'not-a-pid' });
-  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
 
   // Legacy stale lock without a live owner is still recovered by age.
   writeJson(lockPath, { created_at: '2000-01-01T00:00:00.000Z', pid: 'not-a-pid' });
-  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+  result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root),
     timeout: 480000
   });
@@ -2318,7 +2034,7 @@ test('malformed lock JSON falls back to file mtime: fresh is respected, old is r
   // Freshly written malformed lock (for example a partial write from another
   // process) must not be recklessly removed.
   fs.writeFileSync(lockPath, '{ this is not json', 'utf8');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
   assert.equal(fs.existsSync(lockPath), true, 'fresh unverifiable lock is not removed');
@@ -2326,7 +2042,7 @@ test('malformed lock JSON falls back to file mtime: fresh is respected, old is r
   // The same malformed lock with an old mtime is recoverable.
   const oldTime = new Date(Date.now() - 60 * 60 * 1000);
   fs.utimesSync(lockPath, oldTime, oldTime);
-  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+  result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
     env: isolatedHomeEnv(root),
     timeout: 480000
   });
@@ -2347,7 +2063,7 @@ test('hook mode skips instead of failing when the lock owner is alive', () => {
     hub_version: '1.0.0',
     auto_sync_enabled: true,
     targets: {
-      ag2: {
+      opencode: {
         enabled: true,
         explicitly_disabled: false,
         synced_version: '1.0.0',
@@ -3431,7 +3147,7 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
     hub_version: '1.0.0',
     auto_sync_enabled: true,
     targets: {
-      ag2: {
+      opencode: {
         enabled: true,
         explicitly_disabled: false,
         synced_version: '1.0.0',
@@ -3446,7 +3162,7 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.hub_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(state.last_sync_source, 'claude-plugin');
 });
 
@@ -3539,6 +3255,48 @@ test('agent-rules preflight accepts current managed blocks and ignores literal m
   assert.equal(result.status, 'ok');
   assert.equal(result.targetRoot, root);
   assert.deepEqual(result.findings, []);
+});
+
+test('agent-rules preflight judges a Toolkit source checkout by its own canonical templates, not an older plugin copy', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const canonical = fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
+  writeFile(path.join(root, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), canonical);
+  writeFile(path.join(root, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
+  writeFile(path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '99.0.0' }));
+  writeFile(path.join(root, 'AGENTS.md'), canonical);
+  // The installed plugin copy carries an older managed block.
+  const pluginRoot = tmpRoot();
+  writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    canonical.replace('Default to the shortest safe path', 'Default to an older wording of the shortest safe path'));
+  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.reference, 'source-checkout');
+  assert.deepEqual(result.findings, []);
+  const message = formatAgentRulesPreflight(result);
+  assert.doesNotMatch(message, /STOP/);
+  assert.match(message, /older than this source checkout \(99\.0\.0\)/);
+  // A genuinely stale block in the checkout is still reported against its own canonical template.
+  writeFile(path.join(root, 'AGENTS.md'), canonical.replace('Default to the shortest safe path', 'Default to a drifted path'));
+  const stale = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot });
+  assert.equal(stale.status, 'needs-attention');
+  assert.match(formatAgentRulesPreflight(stale), /STOP/);
+});
+
+test('agent-rules preflight refuses to judge a repository with installed templates older than the recorded Toolkit', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  writeFile(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v1 -->\nnewer text\n<!-- AI-AGENT-TOOLKIT:x:END Y -->\n');
+  const before = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+  const state = { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } };
+  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, state });
+  assert.equal(result.status, 'stale-installed-templates');
+  assert.deepEqual(result.findings, []);
+  const message = formatAgentRulesPreflight(result);
+  assert.doesNotMatch(message, /STOP/);
+  assert.match(message, /must not be regenerated from this installed copy/);
+  assert.match(message, /No files were changed by this hook/);
+  assert.equal(fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), before);
 });
 
 test('agent-rules preflight stops loudly when a git repo is missing root AGENTS without writing files', () => {
@@ -3778,7 +3536,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
-test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets and does not reuse stale repo status', () => {
+test('startup hook mode syncs the stale enabled OpenCode target and does not reuse stale repo status', () => {
   const root = tmpRoot();
   createMinimalToolkitSource(root, { alpha: 'alpha startup source\n' });
   const hub = path.join(root, 'hub', 'current');
@@ -3797,12 +3555,6 @@ test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets a
         explicitly_disabled: false,
         synced_version: '1.0.0',
         synced_checksum: 'legacy'
-      },
-      ag2: {
-        enabled: true,
-        explicitly_disabled: false,
-        synced_version: '1.0.0',
-        synced_checksum: 'legacy'
       }
     }
   });
@@ -3813,13 +3565,12 @@ test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets a
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
   assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.doesNotMatch(report.text, /Antigravity 2|AG2/);
   assert.match(report.text, /repo update status: `not run`/);
   assert.match(report.text, /hook-light validation: `not run`/);
   assert.match(report.text, /target sync status: `synced`/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
-  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
@@ -3833,7 +3584,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -3939,7 +3690,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   assert.match(report.text, /target sync status: `not needed`/);
 });
 
-test('hook report includes both external repo advance and Antigravity 2 target sync', () => {
+test('hook report includes external repo advance and OpenCode target sync', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   writeRealBridgeDelegator(fixture.repo);
@@ -3956,7 +3707,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -3967,7 +3718,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
 
-  pushRepoToolkitUpdate(fixture, 'already-advanced-ag2-sync');
+  pushRepoToolkitUpdate(fixture, 'already-advanced-opencode-sync');
   writeRealBridgeDelegator(fixture.upstream);
   const updatedCommit = commitAll(fixture.upstream, 'delegate updated bridge target sync');
   git(fixture.upstream, ['push', 'origin', 'main']);
@@ -3981,7 +3732,7 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `up-to-date`/);
   assert.match(report.text, /target sync status: `synced`/);
@@ -3999,6 +3750,8 @@ test('final report relock uses final target enablement for skipped targets and s
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
+    '--enable-target', 'opencode',
+    '--opencode-target', opencodeTarget,
     '--write'
   ], { env });
   assert.equal(setup.status, 0, setup.stderr);
@@ -4018,7 +3771,7 @@ test('final report relock uses final target enablement for skipped targets and s
         '--hub', hub,
         '--sync-enabled',
         '--write',
-        '--enable-target', 'opencode',
+        '--disable-target', 'opencode',
         '--opencode-target', opencodeTarget,
         '--repo-path', fixture.repo,
         '--sync-source', 'codex-plugin',
@@ -4034,13 +3787,11 @@ test('final report relock uses final target enablement for skipped targets and s
   assert.ok(competingWriter, 'competing writer must change target enablement before the final report lock');
   assert.equal(result.status, 0);
   assert.ok(capturedReport, 'final report context must be observable after the relock');
-  assert.deepEqual(capturedReport.reportContext.skippedTargets, ['ag2']);
-  assert.equal(capturedReport.reportSnapshot.state.targets.opencode.enabled, true);
-  assert.equal(capturedReport.reportSnapshot.state.targets.ag2.enabled, false);
+  assert.deepEqual(capturedReport.reportContext.skippedTargets, ['opencode']);
+  assert.equal(capturedReport.reportSnapshot.state.targets.opencode.enabled, false);
 
   const report = readLatestReport(hub);
-  assert.doesNotMatch(report.text, /Skipped OpenCode because target is disabled/);
-  assert.match(report.text, /Skipped Antigravity 2 because target is disabled/);
+  assert.match(report.text, /Skipped OpenCode because target is disabled/);
   const persisted = readJson(path.join(hub, 'state.json'));
   const signatureContext = {
     cleanup: capturedReport.reportSnapshot.state.last_update_report_cleanup || {},
@@ -4054,7 +3805,7 @@ test('final report relock uses final target enablement for skipped targets and s
   const staleSignature = updateReportSignature({
     args: capturedReport.args,
     checksum: capturedReport.reportSnapshot.checksum,
-    context: { ...signatureContext, skippedTargets: ['opencode', 'ag2'] }
+    context: { ...signatureContext, skippedTargets: [] }
   });
   assert.equal(persisted.last_update_report_signature, expectedSignature);
   assert.notEqual(persisted.last_update_report_signature, staleSignature);
@@ -4107,7 +3858,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4126,7 +3877,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.text, /Action needed: enable Codex plugin auto-refresh in setup, or run `setup toolkit`\./);
   assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
-  assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(report.state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
@@ -4157,7 +3908,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'codex-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4190,13 +3941,13 @@ test('Claude hook reports host-local manual native cache action and never runs C
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--sync-source', 'claude-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   const statePath = path.join(hub, 'state.json');
   const state = readJson(statePath);
-  state.targets.ag2.synced_checksum = 'old';
+  state.targets.opencode.synced_checksum = 'old';
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
@@ -4550,10 +4301,8 @@ test('legacy delegated repo sync writes an update report using stored repo updat
 
   const targetSkill = path.join(
     fixture.root,
-    '.gemini',
-    'config',
-    'plugins',
-    'ai-agent-toolkit',
+    '.config',
+    'opencode',
     'skills',
     'alpha',
     'SKILL.md'
@@ -4569,10 +4318,10 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /Time \(SGT\): `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} SGT`/);
   assert.doesNotMatch(report.text, /Timestamp: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`/);
   assert.match(report.text, /Repo: updated from [0-9a-f]{8} to [0-9a-f]{8}\./);
-  assert.match(report.text, /Targets: synced Antigravity 2 \(2 skills\)\./);
+  assert.match(report.text, /Targets: synced OpenCode \(2 skills\)\./);
   assert.match(report.text, /Action needed: none\./);
   assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
-  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /target sync status: `synced`/);
@@ -4598,10 +4347,8 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
   assert.match(
     fs.readFileSync(path.join(
       fixture.root,
-      '.gemini',
-      'config',
-      'plugins',
-      'ai-agent-toolkit',
+      '.config',
+      'opencode',
       'skills',
       'alpha',
       'SKILL.md'
@@ -4666,7 +4413,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4706,7 +4453,7 @@ test('hook mode auto-switches a clean repo back to main before update and sync',
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4744,7 +4491,7 @@ test('hook mode rejects a repo whose origin remote does not match configured rem
     '--repo-path', fixture.repo,
     '--repo-remote', `${fixture.origin}-other`,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4773,7 +4520,7 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4823,7 +4570,7 @@ test('repo update failure does not sync targets', () => {
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -4857,7 +4604,7 @@ test('validation failure after update does not sync targets', () => {
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -5271,7 +5018,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
-  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
+  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
+  // The Codex helper guard is the only PreToolUse entry and guards spawn_agent and its Agent alias.
+  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['spawn_agent|Agent']);
+  assert.match(codexHooks.hooks.PreToolUse[0].hooks[0].command, /toolkit-codex-helper-hook.cjs/);
   assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
@@ -5325,12 +5075,14 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /fail with the repair error/i, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2/i, relPath);
+    assert.match(text, /OpenCode (?:native )?project plugin/i, relPath);
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
     assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
     assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
-    assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
+    assert.match(text, /OpenCode portable sync and project-plugin writes are opt-in only/i, relPath);
+    assert.match(text, /Antigravity receives explicit portable skills copies; native AG2 install\/update\/sync is unsupported/i, relPath);
+    assert.match(text, /--copy-antigravity-skills/, relPath);
     assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
@@ -5419,7 +5171,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
   const removedBridgeSkills = [
     'setup-local-toolkit-bridge',
     'setup-opencode-bridge',
-    'setup-ag2-bridge',
+    'setup-opencode-bridge',
     'setup-all-non-native-bridges',
     'sync-enabled-bridges',
     'audit-local-toolkit-bridge',
@@ -5439,7 +5191,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
     const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity portable skills|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
 
@@ -5738,7 +5490,7 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
     '--repo-path', sourceRepo,
     '--write',
     '--enable-auto-sync',
-    '--enable-target', 'ag2',
+    '--enable-target', 'opencode',
     '--enable-codex-plugin-auto-refresh',
     '--sync-source', 'codex-plugin'
   ], {

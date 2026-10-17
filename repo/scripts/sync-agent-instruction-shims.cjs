@@ -509,64 +509,85 @@ function writeOrCheck(relPath, expected, errors, runMode, label = 'managed agent
   }
 }
 
-function validateAndSync(options = {}) {
-  const runMode = options.mode || mode;
-  const errors = [];
-  const executionPrompt = readRequired(executionPromptPath, errors);
-  const n8nAdapter = readRequired(n8nAdapterPath, errors);
-  const n8nRules = readRequired(n8nRulesPath, errors);
-  if (executionPrompt === null || n8nAdapter === null || n8nRules === null) return { errors };
+// Projects the canonical execution rules and n8n adapter into every owned instruction
+// surface, either writing them or checking them, and collects all errors in one run.
+class InstructionProjectionOperation {
+  #mode; #errors = [];
+  constructor(options = {}) { this.#mode = options.mode || mode; }
 
-  for (const [relPath, expected] of Object.entries(expectedN8nDerivatives(n8nRules))) {
-    writeOrCheck(relPath, expected, errors, runMode, 'n8n safety derivative');
+  #project(relPath, expected, label) { writeOrCheck(relPath, expected, this.#errors, this.#mode, label); }
+
+  #readCanonicalInputs() {
+    const executionPrompt = readRequired(executionPromptPath, this.#errors);
+    const n8nAdapter = readRequired(n8nAdapterPath, this.#errors);
+    const n8nRules = readRequired(n8nRulesPath, this.#errors);
+    return executionPrompt === null || n8nAdapter === null || n8nRules === null ? null : { executionPrompt, n8nAdapter, n8nRules };
   }
 
-  const sourceTemplates = expectedSourceTemplates(executionPrompt);
-  for (const [relPath, expected] of Object.entries(sourceTemplates)) {
-    writeOrCheck(relPath, expected, errors, runMode, 'agent instruction source template');
+  #readRepoLocalTemplates() {
+    const templates = {
+      managedAgents: readBareRepoLocalTemplate(repoLocalTemplatePaths.managedAgents, this.#errors),
+      claude: readBareRepoLocalTemplate(repoLocalTemplatePaths.claude, this.#errors),
+      gemini: readBareRepoLocalTemplate(repoLocalTemplatePaths.gemini, this.#errors),
+      antigravity: readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, this.#errors),
+    };
+    return Object.values(templates).some(value => value === null) ? null : templates;
   }
 
-  const managedAgentsTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.managedAgents, errors);
-  const claudeTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.claude, errors);
-  const geminiTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.gemini, errors);
-  const antigravityTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, errors);
-  if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
-
-  const source = {
-    root: managedPayload(executionPrompt, n8nAdapter),
-    toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
-    n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
-    claude: claudeTemplate,
-    gemini: geminiTemplate,
-    antigravity: antigravityTemplate
-  };
-  if (Object.values(source).some((value) => value === null)) return { errors };
-  if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
-    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
-    return { errors };
+  #managedSource({ executionPrompt, n8nAdapter }, templates) {
+    const errors = this.#errors;
+    const source = {
+      root: managedPayload(executionPrompt, n8nAdapter),
+      toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, templates.managedAgents, toolkitBegin, toolkitEnd, errors),
+      n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, templates.managedAgents, n8nBegin, n8nEnd, errors),
+      claude: templates.claude,
+      gemini: templates.gemini,
+      antigravity: templates.antigravity
+    };
+    if (Object.values(source).some(value => value === null)) return null;
+    if (templates.managedAgents.trimEnd() !== source.root.trimEnd()) {
+      errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
+      return null;
+    }
+    return source;
   }
 
-  writeOrCheck('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors), errors, runMode);
-  writeOrCheck('CLAUDE.md', shimExpected('CLAUDE.md', readOptional('CLAUDE.md'), source.claude, {
-    heading: '# Claude Code Instructions',
-    importLine: '@AGENTS.md',
-    markerPairs: claudeShimMarkerPairs
-  }, errors), errors, runMode);
-  writeOrCheck('GEMINI.md', shimExpected('GEMINI.md', readOptional('GEMINI.md'), source.gemini, {
-    heading: '# Gemini Instructions',
-    importLine: '@./AGENTS.md',
-    markerPairs: geminiShimMarkerPairs
-  }, errors), errors, runMode);
-  writeOrCheck('.agents/rules/00-agent-toolkit-bootstrap.md', shimExpected(
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
-    readOptional('.agents/rules/00-agent-toolkit-bootstrap.md'),
-    source.antigravity,
-    { heading: '# Agent Toolkit Antigravity Bootstrap', markerPairs: antigravityBootstrapMarkerPairs },
-    errors
-  ), errors, runMode);
+  // Portable instruction payloads consume the same reviewed canonical inputs.
+  // Keep this bounded to the four owned templates; no generic skill sync.
+  #publishPortableTemplates() {
+    for (const sourcePath of [repoLocalTemplatePaths.managedAgents, repoLocalTemplatePaths.claude, repoLocalTemplatePaths.gemini, repoLocalTemplatePaths.antigravity]) {
+      const publishedPath = sourcePath.replace('repo/contracts/agent-rules/repo-local/', 'skills/repository-agent-rules/repo-local/');
+      this.#project(publishedPath, readRequired(sourcePath, this.#errors) + '\n', 'portable instruction template');
+    }
+  }
 
-  return { errors };
+  #projectRootShims(source) {
+    const errors = this.#errors;
+    this.#project('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors));
+    this.#project('CLAUDE.md', shimExpected('CLAUDE.md', readOptional('CLAUDE.md'), source.claude, {
+      heading: '# Claude Code Instructions', importLine: '@AGENTS.md', markerPairs: claudeShimMarkerPairs }, errors));
+    this.#project('GEMINI.md', shimExpected('GEMINI.md', readOptional('GEMINI.md'), source.gemini, {
+      heading: '# Gemini Instructions', importLine: '@./AGENTS.md', markerPairs: geminiShimMarkerPairs }, errors));
+    this.#project('.agents/rules/00-agent-toolkit-bootstrap.md', shimExpected('.agents/rules/00-agent-toolkit-bootstrap.md',
+      readOptional('.agents/rules/00-agent-toolkit-bootstrap.md'), source.antigravity,
+      { heading: '# Agent Toolkit Antigravity Bootstrap', markerPairs: antigravityBootstrapMarkerPairs }, errors));
+  }
+
+  run() {
+    const inputs = this.#readCanonicalInputs();
+    if (!inputs) return { errors: this.#errors };
+    for (const [relPath, expected] of Object.entries(expectedN8nDerivatives(inputs.n8nRules))) this.#project(relPath, expected, 'n8n safety derivative');
+    for (const [relPath, expected] of Object.entries(expectedSourceTemplates(inputs.executionPrompt))) this.#project(relPath, expected, 'agent instruction source template');
+    const templates = this.#readRepoLocalTemplates();
+    if (!templates) return { errors: this.#errors };
+    const source = this.#managedSource(inputs, templates);
+    if (!source) return { errors: this.#errors };
+    this.#publishPortableTemplates();
+    this.#projectRootShims(source);
+    return { errors: this.#errors };
+  }
 }
+function validateAndSync(options = {}) {return new InstructionProjectionOperation(options).run();}
 
 if (require.main === module) {
   const { errors } = validateAndSync();

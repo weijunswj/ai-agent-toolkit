@@ -1495,7 +1495,26 @@ function fsyncDirectory(directory, options = {}, failurePoint = 'post-rename-dur
   }
 }
 
-function atomicCommit(registryPath, registry, options, transaction) {
+// Owns one existing registry lock/marker/staged replacement/readback lifecycle.
+// Registry wire values and the durable marker remain the existing source of truth.
+class RegistryCommitTransaction {
+  #registryPath; #options; #lock; #expectedHash; #transaction=null; #lockReleased=false;
+  constructor(registryPath,options,lock,expectedHashOverride=null) {
+    this.#registryPath=registryPath;this.#options=options;this.#lock=lock;this.#expectedHash=expectedHashOverride;
+  }
+  commit(registry) {
+    try {
+      this.#transaction=createTransaction(this.#registryPath,this.#lock,registry,this.#expectedHash);
+      const committed=this.#stageRegistry(registry);
+      releaseLock(this.#lock,this.#options);this.#lockReleased=true;
+      finalizeTransaction(this.#transaction,this.#options);return committed;
+    }catch(error){
+      if(!this.#lockReleased){try{releaseLock(this.#lock,this.#options);}catch(_ignored){}}
+      throw error;
+    }
+  }
+  #stageRegistry(registry) {
+  const registryPath=this.#registryPath,options=this.#options,transaction=this.#transaction;
   const directory = path.dirname(registryPath);
   const tempPath = registryPath + '.tmp-' + crypto.randomUUID().replaceAll('-', '');
   const bytes = Buffer.from(serializeRegistry(registry), 'utf8');
@@ -1533,22 +1552,9 @@ function atomicCommit(registryPath, registry, options, transaction) {
   return committed;
 }
 
-function commitRegistryWithFinality(registryPath, registry, options, lock, expectedHashOverride = null) {
-  let transaction = null;
-  let lockReleased = false;
-  try {
-    transaction = createTransaction(registryPath, lock, registry, expectedHashOverride);
-    const committed = atomicCommit(registryPath, registry, options, transaction);
-    releaseLock(lock, options);
-    lockReleased = true;
-    finalizeTransaction(transaction, options);
-    return committed;
-  } catch (error) {
-    if (!lockReleased) {
-      try { releaseLock(lock, options); } catch (_ignored) {}
-    }
-    throw error;
-  }
+}
+function commitRegistryWithFinality(registryPath,registry,options,lock,expectedHashOverride=null) {
+  return new RegistryCommitTransaction(registryPath,options,lock,expectedHashOverride).commit(registry);
 }
 
 function migrationMetadata(source, sourceSnapshotHash, legacyReceipts) {

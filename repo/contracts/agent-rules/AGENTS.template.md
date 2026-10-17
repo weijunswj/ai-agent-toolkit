@@ -70,17 +70,17 @@ If instructions conflict, follow the higher-priority source and report material 
 - Answer mode: answer advice, explanation, review, comparison, or planning requests without editing files.
 - Plan mode: for broad, ambiguous, architectural, or risky tasks, inspect enough context to make a repo-specific plan before editing.
 - Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
-- Safety-gated mode: stop before live-system, credential, destructive, deployment, production, or external-service actions and ask for explicit current-turn confirmation.
+- Safety-gated mode: before a gated action, verify that an applicable approval covers the exact action and that required host-native permission is available. Preserve an unchanged, unexpired, unrevoked approval only for the same still-pending action; seek fresh approval or host confirmation for a changed action, revoked or expired approval, uncovered additional work, or a native control that requires it.
 
 ## Agent Topology And Delegation
 
 The root or parent executor owns integration, validation, conflict resolution, and final judgment.
 
-Optional depth-1 subagents may be used only when work is genuinely separable and their use materially accelerates the critical path. Give each subagent true isolated context and a minimal self-contained task packet.
+G0 MUST delegate suitable separable evidence gathering by default. G1 MUST delegate suitable independent implementation or validation by default. The strong lead owns reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Give each helper isolated context and one minimal self-contained task packet. Exceptions are trivial or inseparable work, overhead exceeding benefit, tightly coupled reasoning or integration, a genuinely unavailable exact model/effort route, or a real authority or safety boundary. Briefly record a substantial-work exception; no helper quota, ceremonial launch or extra owner permission applies to already-authorised direct work.
 
 Subagents must not spawn or delegate to other subagents. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
 
-The root or parent remains responsible for integrating and validating every returned result. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
+The root or parent remains responsible for integrating and validating every returned result. Bind model and effort through the actual trusted launcher. Preserve each selected stack's previous G0 helper binding independently from its strong lead. G2 reviewers have no helpers. Service tier is a controller/launcher concern; apply the latest owner tier selection (Standard for future launches under the 12 October no-Priority instruction). Workers and helpers need no tier introspection or receipt, and a launcher without a helper tier field must not block suitable delegation. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
 
 ## Deployment Branch Naming
 
@@ -110,7 +110,7 @@ Use any repo docs index, architecture/source-of-truth guide, or contributor guid
 
 ## Safety Gates
 
-Explicit current-turn approval is required before actions that may:
+Explicit approval bound to the exact action is required before actions that may:
 
 - Mutate a live or external system.
 - Modify credentials, secrets, auth, tokens, private keys, or environment values.
@@ -121,7 +121,7 @@ Explicit current-turn approval is required before actions that may:
 - Remove validation, tests, safety checks, or guardrails.
 - Rewrite git history.
 
-Prior approval does not authorize a new risky action. Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task unless the risky target and operation are named.
+Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
@@ -135,17 +135,33 @@ Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fa
 
 ## Shipping Law
 
+Default coding governance is `G0 Discovery -> G1 Builder, including UAT -> G2 Review`, unless the user chooses another workflow. G0 and G1 have the same strong lead binding. One builder owns the whole approved outcome across ordinary corrections, useful checkpoints and fresh sessions; do not require mini-child admissions or new permission for ordinary in-scope fixes. G2 starts after the builder's working result and actual owner UAT acceptance, using fresh independent contexts. The selected registry stack fixes the complete reviewer set; do not add a peer, duplicate a member or add a closing panel automatically. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants, and rechecks target corrected boundary families rather than restarting discovery.
+
 Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
 
 Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
 
 Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
 
-Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. Keep a recoverable packet with exact source/delta, applicable scope and authority, current results/evidence, environment, unresolved effects and denials, verified private custody and one next action. An unchanged continuation loads the current packet and changed relevant instructions, not the full history. Source-only checks, fixtures, silence and CI do not establish owner UAT or installed acceptance. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+
+**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises bypassing a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.
+
+For adopted Toolkit V3 work, fresh executor contexts are mandatory between G0 and G1, for initial G2, for a required model/effort/harness switch, runtime/environment replacement, activated instruction/profile revision or executor replacement, and after genuine session loss or forced compaction at a safe boundary. Planned G1 segment completion alone checkpoints and continues in the same session. Verify custody and stop the old writer before supported controller relaunch; continue the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family correction recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first. Correct helper routing and pre-inference wrong-route prevention require separate trusted proofs. Local disposable copies can be eligible immediately after verified custody, consumer retrieval and ownership/dependency checks; current v2 stored temporary bulk expires 21 days after verified transfer, with explicit pins/holds, while historical v1 records keep their 30-day legacy clock. Keep functional/UAT/review/custody/integration/publication/Core/parent states distinct. The canonical Toolkit V3 contract supplies the detailed native host matrix and acceptance cases; these instructions do not claim those cases are implemented or qualified.
 
 ## User Action Questions
 
 When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
+
+## Object Ownership And Stack Selection
+
+Use object-oriented ownership by default when implementing stateful application, runtime, controller, resource, persistence, or effectful workflow behavior. Give each owner a cohesive responsibility, explicit constructor dependencies, and methods that enforce its invariants and effect ordering. Compose owners through narrow interfaces; do not hide mutable state in unrelated module globals or add classes that merely forward to the old implementation. Preserve public behavior, approvals, independent readback, concurrency controls, and recovery semantics during refactoring.
+
+Pure transformations, immutable data definitions, predicates, and stateless protocol adapters may remain functions when an object would provide no ownership benefit. Record the specific boundary and reason when reviewing a consequential exception. Preserve generated-source relationships and third-party licenses and provenance; do not refactor generated or third-party outputs as though they were canonical Toolkit source. Planning, builder validation, and independent review must check the actual state/effect owners and their dependency contracts, not class counts.
+
+For adopted Toolkit V3 execution, automation-launched agents take models and effort only through an explicitly selected central stack registry revision whose actual source bytes are pinned in the repository's controller decision and CURRENT admission. Never infer a stack from the host, provider, event, alias, or bundled latest registry. Keep bounded task qualification overrides separate from production selection. A newer registry is available for explicit adoption; it does not change an active run's captured routes. Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
+
+A missing stack selection creates one pending owner question and holds dependent execution. Recover that same question after startup, resume, compaction, or prompt recovery. Hook presentation failure does not release the independent launcher hold. Independent already-authorised work may continue. Resolve every reviewer by REVIEW and its reviewer identity from the pinned complete roster; every member independently reviews the full accepted scope. Acceptance requires the whole selected roster, qualified routes, independent fresh contexts, exact candidate and coverage, verified evidence, and no unresolved blocking finding. Do not split scope/execution, duplicate a member, or substitute a majority verdict.
 
 ## Scope Control
 
@@ -232,5 +248,5 @@ If validation is skipped, state why.
 
 For long tasks, update briefly at meaningful checkpoints; do not narrate commands.
 
-Report files/changes, Instruction sources used, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
+Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 ````````

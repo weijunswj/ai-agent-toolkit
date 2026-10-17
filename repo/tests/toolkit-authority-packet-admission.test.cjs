@@ -386,6 +386,7 @@ test('G2 A01-I06 and X01-X10 oracle fixture compiles with complete coverage', ()
 test('F14 executes every compiled oracle case through production-backed boundaries', async () => {
   const ir = JSON.parse(fs.readFileSync(ORACLE_FIXTURE, 'utf8'));
   const packet = compiler.compileGateContract(ir);
+  try {
   const result = await support.runAuthorityPacketOracleMatrix(packet.generated_cases);
   assert.equal(result.requirement_count, 66);
   assert.equal(result.case_count, 337);
@@ -395,6 +396,12 @@ test('F14 executes every compiled oracle case through production-backed boundari
   assert.ok(result.evidence.every((item) => item.passed === true));
   assert.ok(result.evidence.every((item) => item.assertions_executed > 0));
   assert.ok(result.evidence.every((item) => item.production_surface));
+  support.recordOracleEvidence('f14-assertions-complete', { requirement_count: result.requirement_count,
+    case_count: result.case_count, skipped_count: result.skipped_count, unexecuted_count: result.unexecuted_count, failed_count: result.failed_count, assertions_passed: true });
+  } catch (error) {
+    support.recordOracleEvidence('f14-incomplete', { assertions_passed: false, error: { name: error.name, message: error.message } });
+    throw error;
+  }
 });
 
 test('F14 corrupted-store rejection cases exercise the verified v4 initializer', async () => {

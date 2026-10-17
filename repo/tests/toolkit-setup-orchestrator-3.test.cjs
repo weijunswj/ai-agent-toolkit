@@ -67,24 +67,30 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
   assert.equal(fs.existsSync(codexConfig(rejectedRoot)), false);
 });
 
-test('target keep, skip, enable-sync, and disable remain distinct', () => {
+// V3 section 14: Antigravity is portable skills-copy only, so it is no longer a
+// native sync target; the OpenCode target keeps distinct skip and disable actions.
+test('target skip and disable remain distinct and native Antigravity sync is refused', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const first = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
-    '--skip-codex-plugin-auto-refresh', '--skip-target', 'opencode', '--enable-target', 'ag2'
+    '--skip-codex-plugin-auto-refresh', '--skip-target', 'opencode'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(first.status, 0, first.stderr || first.stdout);
   assert.match(first.stdout, /OpenCode action this run: skipped/);
-  assert.match(first.stdout, /AG2 action this run: enabled\/synced/);
   fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
   const second = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
-    '--skip-codex-plugin-auto-refresh', '--disable-target', 'opencode', '--keep-target', 'ag2'
+    '--skip-codex-plugin-auto-refresh', '--disable-target', 'opencode'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(second.status, 0, second.stderr || second.stdout);
   assert.match(second.stdout, /OpenCode action this run: disabled/);
-  assert.match(second.stdout, /AG2 action this run: kept/);
+  const ag2 = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh', '--enable-target', 'ag2'
+  ], { env: isolatedHomeEnv(root) });
+  assert.notEqual(ag2.status, 0);
+  assert.match(ag2.stderr + ag2.stdout, /Unsupported target: ag2/);
 });
 
 test('setup docs explain automatic resource admission and honest enforcement disclosure', () => {
@@ -96,10 +102,16 @@ test('setup docs explain automatic resource admission and honest enforcement dis
   for (const relPath of docs) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
-    assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
+    if (relPath === 'skills/toolkit-setup/SKILL.md') {
+      // V3 section 10: the lead owns setup decisions and default-delegates suitable separable work.
+      assert.match(text, /lead owns the interactive setup decisions and integration/i, relPath);
+      assert.match(text, /default-delegate suitable separable evidence gathering/i, relPath);
+    } else {
+      assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
+      assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
+    }
     assert.match(text, /automatically limit|automatic memory|available memory|memory admission/i, relPath);
-    assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
+    if (relPath !== 'skills/toolkit-setup/SKILL.md') assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
     assert.match(text, /does not ask|no ordinary .*capacity|no longer asks/i, relPath);
     assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
@@ -115,9 +127,9 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
     /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
-    /Optional depth-1 subagents may be used only when work is genuinely separable/,
-    /materially accelerates the critical path/,
-    /true isolated context and a minimal self-contained task packet/,
+    /G0 MUST delegate suitable separable evidence gathering by default/,
+    /G1 MUST delegate suitable independent implementation or validation by default/,
+    /isolated context and one minimal self-contained task packet/,
     /must not spawn or delegate to other subagents/,
     /Mutating sibling subagents require disjoint mutation ownership and scope/,
     /Read-only siblings may investigate genuinely separable questions in parallel/,

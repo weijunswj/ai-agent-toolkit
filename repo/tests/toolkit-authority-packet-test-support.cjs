@@ -13,6 +13,64 @@ const controlPlane = require('../scripts/toolkit-control-plane/control-plane-ker
 const assuranceRuntime = require('../scripts/toolkit-assurance-web-finality.cjs');
 const gateContractCompiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
 const repositoryRoot = path.resolve(__dirname, '../..');
+const GOVERNANCE_COMMIT = '051479504b16e694d84ab66d2f091383a74a9ed9';
+const GOVERNANCE_REPOSITORY = 'weijunswj/ai-agent-toolkit';
+const GOVERNANCE_SOURCE_SPECS = Object.freeze([
+  Object.freeze({ id: 'controller', path: 'repo/CONTROLLER.md' }),
+  Object.freeze({ id: 'architecture', path: 'repo/ARCHITECTURE.md' }),
+  Object.freeze({ id: 'stack-registry', path: 'repo/contracts/controller-kernel/stack-registry-v2.json' }),
+]);
+let oracleEvidenceSequence = 0;
+let oracleEvidenceSink;
+function recordOracleEvidence(kind, value) {
+  const requested = process.env.TOOLKIT_ORACLE_EVIDENCE_SINK;
+  if (!requested) return;
+  try {
+    if (!oracleEvidenceSink) {
+      if (!path.isAbsolute(requested)) throw new Error('absolute sink required');
+      const root = path.resolve(requested);
+      for (let current = root; ; current = path.dirname(current)) {
+        if (fs.lstatSync(current).isSymbolicLink()) throw new Error('sink ancestor link');
+        if (path.dirname(current) === current) break;
+      }
+      const markerPath = path.join(root, 'oracle-evidence-owner.json');
+      if (!fs.lstatSync(markerPath).isFile()) throw new Error('sink marker required');
+      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+      if (marker.schema !== 'toolkit.oracle-evidence-sink.v1'
+          || marker.invocation_id !== process.env.TOOLKIT_TEST_INVOCATION_ID
+          || String(marker.owner_pid) !== process.env.TOOLKIT_TEST_OWNER_PID
+          || path.resolve(marker.repository_root) !== repositoryRoot
+          || path.resolve(marker.sink) !== root
+          || marker.limit_bytes !== 256 * 1024 * 1024) throw new Error('sink binding mismatch');
+      const within = (parent) => {
+        const rel = path.relative(path.resolve(parent), root);
+        return !rel || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+      };
+      if (within(repositoryRoot) || within(os.tmpdir())
+          || (process.env.TOOLKIT_RECEIPT_TEST_CARRIER && within(process.env.TOOLKIT_RECEIPT_TEST_CARRIER))) {
+        throw new Error('sink overlaps source or intrinsic fixture cleanup');
+      }
+      oracleEvidenceSink = { root, limit_bytes: marker.limit_bytes };
+    }
+    let used = 0;
+    const entries = fs.readdirSync(oracleEvidenceSink.root);
+    if (entries.length >= 4096) throw new Error('sink file bound');
+    for (const entry of entries) {
+      const stat = fs.lstatSync(path.join(oracleEvidenceSink.root, entry));
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('sink nonregular entry');
+      used += stat.size;
+    }
+    const bytes = Buffer.from(JSON.stringify({ schema: 'toolkit.oracle-evidence.v1',
+      kind, recorded_at: new Date().toISOString(), invocation_id: process.env.TOOLKIT_TEST_INVOCATION_ID,
+      writer_pid: process.pid, value }, null, 2) + '\n');
+    if (used + bytes.length > oracleEvidenceSink.limit_bytes) throw new Error('sink byte bound');
+    const name = String(process.pid) + '-' + String(++oracleEvidenceSequence).padStart(4, '0') + '-' + kind + '.json';
+    fs.writeFileSync(path.join(oracleEvidenceSink.root, name), bytes, { flag: 'wx' });
+  } catch (error) {
+    throw new Error('ORACLE_EVIDENCE_CAPTURE_INCOMPLETE', { cause: error });
+  }
+}
+
 const cleanupRoots = new Set();
 const ORACLE_FIXTURE_PATH = path.join(__dirname, 'fixtures', 'authority-packet-durability-g2-v1.json');
 const oracleContractIr = JSON.parse(fs.readFileSync(ORACLE_FIXTURE_PATH, 'utf8'));
@@ -448,29 +506,22 @@ function oracleCaseContractBinding(item) {
 }
 
 function secureWindowsDirectory(root) {
-  if (process.platform !== 'win32') return;
-  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const script = [
-    '$ErrorActionPreference="Stop"',
-    '$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    '$icacls=Join-Path $env:SystemRoot "System32\\icacls.exe"',
-    '& $icacls $env:GPR_TEST_ROOT "/inheritance:r" "/grant:r" ("*${sid}:(OI)(CI)F") "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null',
-    'if ($LASTEXITCODE -ne 0) { throw "icacls-failed" }'
-  ].join(';');
-  const result = require('node:child_process').spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
-    encoding: 'utf8',
-    windowsHide: true,
-    env: { ...process.env, GPR_TEST_ROOT: root }
+  // Qualify inherited permissions through the actual production guard; never repair ACLs.
+  require('../scripts/toolkit-github-program-receipt.cjs').resolveDatabasePath({
+    repository: 'weijunswj/ai-agent-toolkit', parent_issue: 421, child_issue: 461,
+    repositoryRoot, stateRoot: root
   });
-  if (result.status !== 0) throw new Error(`Unable to secure test state root: ${result.stderr}`);
+}
+
+let ownedCarrier;
+function ownedFixtureCarrier() {
+  ownedCarrier ||= new (require('./support/owned-receipt-carrier.cjs').OwnedReceiptCarrier)({ repositoryRoot, guard: secureWindowsDirectory });
+  return ownedCarrier.carrier();
 }
 
 function stateRoot(prefix = 'authority-packet-') {
-  const parent = path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'github-program-receipt', 'tests');
-  fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') fs.chmodSync(parent, 0o700);
+  const parent = ownedFixtureCarrier();
   const root = fs.mkdtempSync(path.join(parent, prefix));
-  if (process.platform !== 'win32') fs.chmodSync(root, 0o700);
   secureWindowsDirectory(root);
   cleanupRoots.add(root);
   return root;
@@ -479,7 +530,7 @@ function stateRoot(prefix = 'authority-packet-') {
 function oracleStateRoot(prefix = 'oracle-') {
   if (!oracleStateParent) oracleStateParent = stateRoot('oracle-matrix-');
   const root = fs.mkdtempSync(path.join(oracleStateParent, `${runtime.digestValue(prefix).slice(0, 10)}-`));
-  if (process.platform !== 'win32') fs.chmodSync(root, 0o700);
+  secureWindowsDirectory(root);
   cleanupRoots.add(root);
   return root;
 }
@@ -491,6 +542,78 @@ function options(root = stateRoot()) {
     child_issue: 435,
     stateRoot: root,
     repositoryRoot
+  };
+}
+
+function governanceSourceRecords() {
+  return GOVERNANCE_SOURCE_SPECS.map(({ id, path: sourcePath }) => {
+    const expression = `${GOVERNANCE_COMMIT}:${sourcePath}`;
+    const blob = spawnSync('git', ['rev-parse', expression], {
+      cwd: repositoryRoot, encoding: 'utf8', windowsHide: true,
+    });
+    if (blob.status !== 0 || !/^[a-f0-9]{40}\r?\n?$/.test(blob.stdout || '')) {
+      throw new Error(`test governance fixture cannot resolve ${id}`);
+    }
+    const content = spawnSync('git', ['cat-file', 'blob', expression], {
+      cwd: repositoryRoot, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
+    });
+    if (content.status !== 0 || !Buffer.isBuffer(content.stdout) || content.stdout.length === 0) {
+      throw new Error(`test governance fixture cannot read ${id}`);
+    }
+    return {
+      id,
+      repository: GOVERNANCE_REPOSITORY,
+      revision: GOVERNANCE_COMMIT,
+      path: sourcePath,
+      blob_sha1: blob.stdout.trim(),
+      content_sha256: crypto.createHash('sha256').update(content.stdout).digest('hex'),
+      content: content.stdout,
+    };
+  });
+}
+
+const GOVERNANCE_SOURCE_RECORDS = Object.freeze(governanceSourceRecords().map((source) => Object.freeze(source)));
+const ACCEPTED_GOVERNANCE = Object.freeze({
+  repository: GOVERNANCE_REPOSITORY,
+  main_commit: GOVERNANCE_COMMIT,
+  controller_blob: GOVERNANCE_SOURCE_RECORDS.find((source) => source.id === 'controller').blob_sha1,
+  stack_registry_blob: GOVERNANCE_SOURCE_RECORDS.find((source) => source.id === 'stack-registry').blob_sha1,
+});
+
+function governanceBinding(authority, taskRepository) {
+  return {
+    authority: structuredClone(authority),
+    task_repository: taskRepository,
+    governance: structuredClone(ACCEPTED_GOVERNANCE),
+    sources: GOVERNANCE_SOURCE_RECORDS.map(({ content: _content, ...source }) => structuredClone(source)),
+  };
+}
+
+function governanceEvidenceReferences() {
+  return GOVERNANCE_SOURCE_RECORDS.map((source) => ({
+    id: source.id,
+    kind: 'GIT_BLOB',
+    repository: source.repository,
+    commit: source.revision,
+    path: source.path,
+    blob: source.blob_sha1,
+    content_digest: source.content_sha256,
+  }));
+}
+
+function readGovernanceSources(binding) {
+  const expected = governanceBinding(binding.authority, binding.task_repository);
+  if (runtime.canonicalSerialize(binding) !== runtime.canonicalSerialize(expected)) {
+    throw Object.assign(new Error('test governance source request was not the independently accepted fixture binding'), {
+      code: 'GPR_PACKET_AUTHORITY_UNVERIFIED', packet_boundary: true,
+    });
+  }
+  return {
+    binding: structuredClone(expected),
+    source_contents: GOVERNANCE_SOURCE_RECORDS.map((source) => ({
+      source_id: source.id,
+      content_base64: source.content.toString('base64'),
+    })),
   };
 }
 
@@ -521,12 +644,7 @@ function bindings(seed = 'packet') {
       role: 'G2'
     },
     authority,
-    governance: {
-      repository: 'weijunswj/ai-agent-toolkit',
-      main_commit: '1'.repeat(40),
-      controller_blob: '2'.repeat(40),
-      stack_registry_blob: '3'.repeat(40)
-    },
+    governance: structuredClone(ACCEPTED_GOVERNANCE),
     candidate: null,
     applicability: {
       scope_digest: runtime.digestValue({ seed, scope: 'c1' }),
@@ -561,7 +679,10 @@ function packet(overrides = {}) {
     qualifications: ['This fixture exercises custody only, not downstream admission.'],
     next_state: 'A parent integration must bind the packet to its semantic consumer.',
     sections: sectionNames.map((name) => ({ name, text: `Disposable authority packet fixture for ${name}.` })),
-    evidence_refs: [{ id: 'authority-source', kind: 'GITHUB_COMMENT', source: packetBindings.authority }],
+    evidence_refs: [
+      { id: 'authority-source', kind: 'GITHUB_COMMENT', source: packetBindings.authority },
+      ...governanceEvidenceReferences(),
+    ],
     gate_contract_ir: null
   };
   return { schema: runtime.AUTHORITY_PACKET_SCHEMA_ID, bindings: packetBindings, body, ...overrides.packet };
@@ -618,14 +739,19 @@ function readers(packetValue, overrides = {}) {
     readAuthority: (argument) => {
       const observed = baseReadAuthority(argument);
       if (!observed || typeof observed !== 'object' || Array.isArray(observed)) return observed;
+      const observedAuthority = observed.authority || observed.source || packetBindings.authority;
       return {
         ...observed,
+        governance_binding: Object.hasOwn(observed, 'governance_binding')
+          ? observed.governance_binding
+          : governanceBinding(observedAuthority, packetBindings.repository),
         producer_authority: Object.hasOwn(observed, 'producer_authority')
           ? observed.producer_authority : structuredClone(producerAuthority),
         ...(Object.hasOwn(observed, 'completion_applicability') || completionApplicability === null
           ? {} : { completion_applicability: structuredClone(completionApplicability) }),
       };
     },
+    readGovernance: overrides.readGovernance || readGovernanceSources,
     screenPacket: overrides.screenPacket || (() => screening(packetValue)),
     readWebDecision: overrides.readWebDecision || (() => webDecision(packetValue)),
   };
@@ -3069,6 +3195,7 @@ function semanticGate(seed = 'loop', readerOverrides = {}, fixtureOptions = {}) 
   const { producer_authority: _producerAuthority, completion_applicability: _completionApplicability, ...gateReaderFunctions } = readerOverrides;
   const readAuthority = gateReaderFunctions.readAuthority || (() => ({
     authority: structuredClone(authoritySource),
+    governance_binding: governanceBinding(authoritySource, packetBindings.repository),
     required_consumers: structuredClone(required),
     ...(fixtureOptions.noPredecessor === true ? { no_predecessor_classification: true } : {}),
     later_controlling_comments: [],
@@ -3559,16 +3686,29 @@ function oracleEvidenceReceipt(caseValue, method, targetType, actual, flags, evi
 function oracleRunNodeTests(testPaths, options = []) {
   const childEnvironment = { ...process.env };
   delete childEnvironment.NODE_TEST_CONTEXT;
+  const argv = ['--no-warnings', '--test', '--test-reporter=tap', ...options, ...testPaths];
+  const startedAt = new Date().toISOString();
   const child = require('node:child_process').spawnSync(process.execPath,
-    ['--no-warnings', '--test', '--test-reporter=tap', ...options, ...testPaths], {
+    argv, {
       cwd: repositoryRoot,
       env: childEnvironment,
-      encoding: 'utf8',
+      encoding: 'buffer',
       windowsHide: true,
       timeout: 120000,
       maxBuffer: 8 * 1024 * 1024,
     });
-  const stdout = child && typeof child.stdout === 'string' ? child.stdout : '';
+  const stdoutBytes = child && child.stdout ? Buffer.from(child.stdout) : Buffer.alloc(0);
+  const stderrBytes = child && child.stderr ? Buffer.from(child.stderr) : Buffer.alloc(0);
+  const stdout = stdoutBytes.toString('utf8');
+  const stderr = stderrBytes.toString('utf8');
+  recordOracleEvidence('x08-child', { executable: process.execPath, argv, cwd: repositoryRoot,
+    started_at: startedAt, finished_at: new Date().toISOString(), pid: child && child.pid,
+    case_identity: activeOracleHarness && activeOracleHarness.case_identity,
+    exit_status: child ? child.status : null, signal: child && child.signal,
+    error: child && child.error ? { code: child.error.code, message: child.error.message } : null,
+    timeout_ms: 120000, max_buffer_bytes: 8 * 1024 * 1024,
+    stdout: { bytes: stdoutBytes.length, sha256: crypto.createHash('sha256').update(stdoutBytes).digest('hex'), base64: stdoutBytes.toString('base64') },
+    stderr: { bytes: stderrBytes.length, sha256: crypto.createHash('sha256').update(stderrBytes).digest('hex'), base64: stderrBytes.toString('base64') } });
   const summary = (name) => {
     const match = stdout.match(new RegExp(`# ${name} (\\d+)`));
     return match ? Number(match[1]) : null;
@@ -3588,7 +3728,7 @@ function oracleRunNodeTests(testPaths, options = []) {
     passed,
     failed,
     stdout_digest: crypto.createHash('sha256').update(stdout, 'utf8').digest('hex'),
-    stderr_digest: crypto.createHash('sha256').update(child && typeof child.stderr === 'string' ? child.stderr : '', 'utf8').digest('hex'),
+    stderr_digest: crypto.createHash('sha256').update(stderr, 'utf8').digest('hex'),
   };
 }
 
@@ -3726,12 +3866,13 @@ function oracleCrashDuringPacketWrite(caseValue, context) {
     'const options=JSON.parse(process.argv[2]);',
     'const packet=JSON.parse(process.argv[3]);',
     'const producerAdmission=JSON.parse(process.argv[4]);',
-    'const readers={readAuthority:()=>({authority:packet.bindings.authority,producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("crash-policy"),retention_policy_digest:runtime.digestValue("crash-retention")}}};',
+    'const support=require(process.argv[5]);',
+    'const readers={readAuthority:()=>({authority:packet.bindings.authority,governance_binding:support.governanceBinding(packet.bindings.authority,packet.bindings.repository),producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),readGovernance:support.readGovernanceSources,screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("crash-policy"),retention_policy_digest:runtime.digestValue("crash-retention")}}};',
     'const store=runtime.initialiseAuthorityPacketStore(options,readers);',
     'store.persistAuthorityPacket(packet,producerAdmission);',
   ].join('');
   const result = spawnSync(process.execPath, ['--no-warnings', '-e', script,
-    runtimePath, JSON.stringify(writerOptions), JSON.stringify(writerPacket), JSON.stringify(producerAdmission(writerPacket))], {
+    runtimePath, JSON.stringify(writerOptions), JSON.stringify(writerPacket), JSON.stringify(producerAdmission(writerPacket)), __filename], {
     cwd: repositoryRoot, encoding: 'utf8', windowsHide: true, timeout: 30000,
   });
   const crashed = !!result && (result.signal !== null || result.status !== 0);
@@ -3769,13 +3910,14 @@ function oracleAcceptanceProcessFailure(caseValue, context, fault) {
     'const runtime=require(process.argv[1]);',
     'const options=JSON.parse(process.argv[2]);',
     'const packet=JSON.parse(process.argv[3]);',
-    'const readers={readAuthority:()=>({authority:packet.bindings.authority,producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("acceptance-policy"),retention_policy_digest:runtime.digestValue("acceptance-retention")}},readWebDecision:()=>{const ids=runtime.authorityPacketIdentities(packet);return {packet_id:ids.packet_id,packet_digest:ids.packet_digest,binding_digest:ids.binding_digest,web_source:packet.bindings.authority,disposition:"ACCEPTED_FOR_CONSUMPTION",permitted_consumers:packet.bindings.applicability.required_consumers,applicability:packet.bindings.applicability,successor_applicability:[]}}};',
+    'const support=require(process.argv[4]);',
+    'const readers={readAuthority:()=>({authority:packet.bindings.authority,governance_binding:support.governanceBinding(packet.bindings.authority,packet.bindings.repository),producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),readGovernance:support.readGovernanceSources,screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("acceptance-policy"),retention_policy_digest:runtime.digestValue("acceptance-retention")}},readWebDecision:()=>{const ids=runtime.authorityPacketIdentities(packet);return {packet_id:ids.packet_id,packet_digest:ids.packet_digest,binding_digest:ids.binding_digest,web_source:packet.bindings.authority,disposition:"ACCEPTED_FOR_CONSUMPTION",permitted_consumers:packet.bindings.applicability.required_consumers,applicability:packet.bindings.applicability,successor_applicability:[]}}};',
     'const store=runtime.createAuthorityPacketStore(options,readers);',
     'try{store.bindWebPacketAcceptance(runtime.authorityPacketIdentities(packet).packet_id)}catch(error){process.stdout.write(JSON.stringify({outcome:"REJECT",code:error.code||"ERROR"})+"\\n");process.exit(0)}',
     'process.stdout.write(JSON.stringify({outcome:"ACCEPT",code:"ACCEPT"})+"\\n");'
   );
   const child = spawnSync(process.execPath, ['--no-warnings', '-e', setup.join(''),
-    runtimePath, JSON.stringify(context.storeOptions), JSON.stringify(context.packetValue)], {
+    runtimePath, JSON.stringify(context.storeOptions), JSON.stringify(context.packetValue), __filename], {
     cwd: repositoryRoot, encoding: 'utf8', windowsHide: true, timeout: 60000,
   });
   const crashed = !!child && (child.signal !== null || child.status !== 0 || child.error != null);
@@ -3834,14 +3976,15 @@ function launchOracleConcurrentWriter(optionsValue, packetValue, gatePath) {
     'const packet=JSON.parse(process.argv[3]);',
     'const gatePath=process.argv[4];',
     'const producerAdmission=JSON.parse(process.argv[5]);',
-    'const readers={readAuthority:()=>({authority:packet.bindings.authority,producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("race-policy"),retention_policy_digest:runtime.digestValue("race-retention")}}};',
+    'const support=require(process.argv[6]);',
+    'const readers={readAuthority:()=>({authority:packet.bindings.authority,governance_binding:support.governanceBinding(packet.bindings.authority,packet.bindings.repository),producer_authority:{lane_id:packet.bindings.lane_id,human_owner:packet.bindings.human_owner,producer:packet.bindings.producer},required_consumers:packet.bindings.applicability.required_consumers,later_controlling_comments:[]}),readGovernance:support.readGovernanceSources,screenPacket:({packet:value})=>{const ids=runtime.authorityPacketIdentities(value);return {packet_digest:ids.packet_digest,decision:"ALLOW",policy_digest:runtime.digestValue("race-policy"),retention_policy_digest:runtime.digestValue("race-retention")}}};',
     'const store=runtime.initialiseAuthorityPacketStore(options,readers);',
     'process.stdout.write("READY\\n");',
     'const timer=setInterval(()=>{if(!fs.existsSync(gatePath))return;clearInterval(timer);try{const result=store.persistAuthorityPacket(packet,producerAdmission);process.stdout.write(JSON.stringify({outcome:"ACCEPT",duplicate:result.duplicate,packet_id:result.packet_id,packet_digest:result.packet_digest,content_digest:result.content_digest,binding_digest:result.binding_digest,producer_key:result.producer_key})+"\\n")}catch(error){process.stdout.write(JSON.stringify({outcome:"REJECT",code:error.code||"ERROR"})+"\\n")} },5);',
   ].join('');
   const child = spawn(process.execPath, ['--no-warnings', '-e', script,
     runtimePath, JSON.stringify(optionsValue), JSON.stringify(packetValue), gatePath,
-    JSON.stringify(producerAdmission(packetValue))], {
+    JSON.stringify(producerAdmission(packetValue)), __filename], {
     cwd: repositoryRoot, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -4917,6 +5060,7 @@ async function oraclePositiveBySurface(caseValue, context) {
         if (call.error) throw call.error;
         const expectedAuthority = {
           authority: context.packetValue.bindings.authority,
+          governance_binding: governanceBinding(context.packetValue.bindings.authority, context.packetValue.bindings.repository),
           producer_authority: {
             lane_id: context.packetValue.bindings.lane_id,
             human_owner: context.packetValue.bindings.human_owner,
@@ -7133,15 +7277,24 @@ function assertOracleHandlerCompleteness(cases, handlers = oracleHandlers()) {
 }
 
 async function runAuthorityPacketOracleMatrix(cases, handlers = oracleHandlers()) {
-  assertOracleHandlerCompleteness(cases, handlers);
   const evidence = [];
+  let currentCase = null;
+  recordOracleEvidence('matrix-admission', { expected_case_identities: cases.map(oracleCaseIdentity),
+    mandatory_case_identities: ORACLE_MANDATORY_CASES.map(oracleCaseIdentity), requirement_ids: ORACLE_REQUIREMENT_IDS });
+  try {
+  assertOracleHandlerCompleteness(cases, handlers);
   for (const item of cases) {
+    currentCase = oracleCaseIdentity(item);
+    recordOracleEvidence('matrix-case-start', { case_identity: currentCase, completed_count: evidence.length });
     const result = await executeAuthorityPacketOracleCase(item, handlers);
+    recordOracleEvidence('matrix-case-result', { case_identity: currentCase, result });
     if (result.positive_control_case_id !== oraclePositiveControlCaseId(item)) {
       throw new Error(`ORACLE_POSITIVE_CONTROL_MISMATCH:${item.id}`);
     }
     if (result.passed !== true) throw new Error(`ORACLE_CASE_FAILED:${item.id}`);
     evidence.push(result);
+    recordOracleEvidence('matrix-progress', { completed_count: evidence.length, expected_count: cases.length,
+      failed_count: evidence.filter((entry) => entry.passed !== true).length, current_case_identity: currentCase });
   }
   const mandatoryIds = new Set(ORACLE_MANDATORY_CASES.map(oracleCaseIdentity));
   const executedIds = new Set(evidence.map((item) => [item.requirement_id, item.case_id, item.variant, item.production_surface].join('\u0000')));
@@ -7151,6 +7304,8 @@ async function runAuthorityPacketOracleMatrix(cases, handlers = oracleHandlers()
   if (skipped_count !== 0 || unexecuted_count !== 0 || failed_count !== 0) {
     throw new Error(`ORACLE_MATRIX_INCOMPLETE:skipped=${skipped_count}:unexecuted=${unexecuted_count}:failed=${failed_count}`);
   }
+  recordOracleEvidence('matrix-complete', { requirement_count: new Set(evidence.map((item) => item.requirement_id)).size,
+    case_count: evidence.length, skipped_count, unexecuted_count, failed_count });
   return {
     evidence,
     requirement_count: new Set(evidence.map((item) => item.requirement_id)).size,
@@ -7159,23 +7314,39 @@ async function runAuthorityPacketOracleMatrix(cases, handlers = oracleHandlers()
     unexecuted_count,
     failed_count,
   };
+  } catch (error) {
+    recordOracleEvidence('matrix-incomplete', { completed_case_identities: evidence.map((item) => [item.requirement_id, item.case_id, item.variant, item.production_surface].join('\u0000')),
+      completed_count: evidence.length, expected_count: cases.length,
+      unexecuted_count: cases.length - evidence.length, current_case_identity: currentCase,
+      error: { name: error.name, message: error.message, cause: error.cause && String(error.cause) } });
+    throw error;
+  }
 }
 
 function cleanup() {
-  for (const root of cleanupRoots) fs.rmSync(root, { recursive: true, force: true });
-  cleanupRoots.clear();
-  oracleStateParent = null;
-  oracleSharedContext = null;
-  oracleSharedTemplate = null;
-  oracleSharedGateContext = null;
-  oracleSharedGateTemplate = null;
-  oracleSharedAssuranceContext = null;
-  oracleSharedAssuranceTemplate = null;
+  const roots = [...cleanupRoots].sort((left, right) => right.length - left.length);
+  try {
+    for (const root of roots) {
+      // Retain exclusively owned synthetic fixtures for invocation evidence; no disposal.
+    }
+  } finally {
+    cleanupRoots.clear();
+    oracleStateParent = null;
+    oracleSharedContext = null;
+    oracleSharedTemplate = null;
+    oracleSharedGateContext = null;
+    oracleSharedGateTemplate = null;
+    oracleSharedAssuranceContext = null;
+    oracleSharedAssuranceTemplate = null;
+  }
 }
 
 process.once('exit', cleanup);
 
+
+
 module.exports = {
+  recordOracleEvidence,
   ORACLE_MANIFEST_COVERAGE,
   ORACLE_REQUIREMENT_IDS,
   ORACLE_MANDATORY_CASES,
@@ -7186,6 +7357,8 @@ module.exports = {
   receiptEffectSnapshot,
   bindings,
   cleanup,
+  governanceBinding,
+  readGovernanceSources,
   assertOracleHandlerCompleteness,
   executeAuthorityPacketOracleCase,
   invokeOracleSurface,

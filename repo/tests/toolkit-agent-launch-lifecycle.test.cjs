@@ -105,7 +105,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-'));
   const cache = path.join(root, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',"repo/scripts/toolkit-claude-task-session.cjs","repo/scripts/toolkit-claude-dispatch-observer.cjs","repo/scripts/toolkit-v3-native-helper-adapter.cjs","repo/scripts/toolkit-v3-helper-guard.cjs","repo/scripts/toolkit-gate-contract-compiler.cjs","repo/contracts/controller-kernel/stack-registry-v3.json","repo/contracts/controller-kernel/stack-registry-v3.schema.json"]) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
@@ -217,7 +217,7 @@ test('checker execution clears failures and completes only validated structured 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-missing-env-'));
   const cache = path.join(root, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',"repo/scripts/toolkit-claude-task-session.cjs","repo/scripts/toolkit-claude-dispatch-observer.cjs","repo/scripts/toolkit-v3-native-helper-adapter.cjs","repo/scripts/toolkit-v3-helper-guard.cjs","repo/scripts/toolkit-gate-contract-compiler.cjs","repo/contracts/controller-kernel/stack-registry-v3.json","repo/contracts/controller-kernel/stack-registry-v3.schema.json"]) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);

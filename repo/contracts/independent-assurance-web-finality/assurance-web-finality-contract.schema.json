@@ -4,8 +4,15 @@
   "title": "Toolkit A4 Independent Assurance and Web-Finality Evidence",
   "description": "A source-owned evidence shape. It grants no mutation, Ready, merge, or finality authority.",
   "oneOf": [
-    { "$ref": "#/$defs/evidence" },
-    { "$ref": "#/$defs/report" }
+    {
+      "$ref": "#/$defs/evidence"
+    },
+    {
+      "$ref": "#/$defs/report"
+    },
+    {
+      "$ref": "#/$defs/continuousCandidateReview"
+    }
   ],
   "$defs": {
     "sha": {
@@ -31,50 +38,118 @@
     "candidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["head", "tree", "base", "current"],
+      "required": [
+        "head",
+        "tree",
+        "base",
+        "current"
+      ],
       "properties": {
-        "head": { "$ref": "#/$defs/sha" },
-        "tree": { "$ref": "#/$defs/sha" },
-        "base": { "$ref": "#/$defs/sha" },
-        "current": { "const": true }
+        "head": {
+          "$ref": "#/$defs/sha"
+        },
+        "tree": {
+          "$ref": "#/$defs/sha"
+        },
+        "base": {
+          "$ref": "#/$defs/sha"
+        },
+        "current": {
+          "const": true
+        }
       }
     },
     "pr": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["number", "head", "tree", "base", "base_ref", "open", "server_authoritative", "verifiable"],
+      "required": [
+        "number",
+        "head",
+        "tree",
+        "base",
+        "base_ref",
+        "open",
+        "server_authoritative",
+        "verifiable"
+      ],
       "properties": {
-        "number": { "type": "integer", "minimum": 1 },
-        "head": { "$ref": "#/$defs/sha" },
-        "tree": { "$ref": "#/$defs/sha" },
-        "base": { "$ref": "#/$defs/sha" },
-        "base_ref": { "const": "main" },
-        "open": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true }
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "head": {
+          "$ref": "#/$defs/sha"
+        },
+        "tree": {
+          "$ref": "#/$defs/sha"
+        },
+        "base": {
+          "$ref": "#/$defs/sha"
+        },
+        "base_ref": {
+          "const": "main"
+        },
+        "open": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        }
       }
     },
     "lock": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "current", "server_authoritative", "verifiable"],
+      "required": [
+        "id",
+        "current",
+        "server_authoritative",
+        "verifiable"
+      ],
       "properties": {
-        "id": { "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2" },
-        "current": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true }
+        "id": {
+          "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2"
+        },
+        "current": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        }
       }
     },
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["digest", "current", "authorised", "server_authoritative", "verifiable"],
+      "required": [
+        "digest",
+        "current",
+        "authorised",
+        "server_authoritative",
+        "verifiable"
+      ],
       "properties": {
-        "digest": { "$ref": "#/$defs/digest" },
-        "current": { "const": true },
-        "authorised": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true }
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "current": {
+          "const": true
+        },
+        "authorised": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        }
       }
     },
     "g4": {
@@ -107,144 +182,592 @@
         "verifiable"
       ],
       "properties": {
-        "status": { "const": "PASS" },
-        "provider": { "const": "OpenAI" },
-        "model_class": { "const": "GPT-5.6 Sol High" },
-        "reasoning": { "const": "high" },
-        "mode": { "const": "standard" },
-        "fresh": { "const": true },
-        "isolated": { "const": true },
-        "read_only": { "const": true },
-        "complete_candidate": { "const": true },
-        "candidate_head": { "$ref": "#/$defs/sha" },
-        "candidate_tree": { "$ref": "#/$defs/sha" },
-        "candidate_base": { "$ref": "#/$defs/sha" },
-        "lock_id": { "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2" },
-        "scope_digest": { "$ref": "#/$defs/digest" },
-        "root_only": { "const": true },
-        "mutation_authority": { "const": false },
-        "ready_authority": { "const": false },
-        "merge_authority": { "const": false },
-        "cleanup_authority": { "const": false },
-        "finality_authority": { "const": false },
-        "current": { "const": true },
-        "complete": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true }
+        "status": {
+          "const": "PASS"
+        },
+        "provider": {
+          "const": "OpenAI"
+        },
+        "model_class": {
+          "const": "GPT-5.6 Sol High"
+        },
+        "reasoning": {
+          "const": "high"
+        },
+        "mode": {
+          "const": "standard"
+        },
+        "fresh": {
+          "const": true
+        },
+        "isolated": {
+          "const": true
+        },
+        "read_only": {
+          "const": true
+        },
+        "complete_candidate": {
+          "const": true
+        },
+        "candidate_head": {
+          "$ref": "#/$defs/sha"
+        },
+        "candidate_tree": {
+          "$ref": "#/$defs/sha"
+        },
+        "candidate_base": {
+          "$ref": "#/$defs/sha"
+        },
+        "lock_id": {
+          "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2"
+        },
+        "scope_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "root_only": {
+          "const": true
+        },
+        "mutation_authority": {
+          "const": false
+        },
+        "ready_authority": {
+          "const": false
+        },
+        "merge_authority": {
+          "const": false
+        },
+        "cleanup_authority": {
+          "const": false
+        },
+        "finality_authority": {
+          "const": false
+        },
+        "current": {
+          "const": true
+        },
+        "complete": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        }
       }
     },
     "review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["current", "complete", "server_authoritative", "verifiable", "inventory_digest", "findings"],
+      "required": [
+        "current",
+        "complete",
+        "server_authoritative",
+        "verifiable",
+        "inventory_digest",
+        "findings"
+      ],
       "properties": {
-        "current": { "const": true },
-        "complete": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true },
-        "inventory_digest": { "$ref": "#/$defs/digest" },
-        "findings": { "type": "array" }
+        "current": {
+          "const": true
+        },
+        "complete": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "findings": {
+          "type": "array"
+        }
       }
     },
     "requiredCheck": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "required", "status", "server_authoritative", "verifiable"],
+      "required": [
+        "id",
+        "required",
+        "status",
+        "server_authoritative",
+        "verifiable"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "required": { "type": "boolean" },
-        "status": { "enum": ["success", "pending", "failed", "cancelled", "missing", "stale", "ambiguous"] },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "pending",
+            "failed",
+            "cancelled",
+            "missing",
+            "stale",
+            "ambiguous"
+          ]
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        }
       }
     },
     "requiredChecks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["current", "complete", "server_authoritative", "verifiable", "inventory_digest", "items"],
+      "required": [
+        "current",
+        "complete",
+        "server_authoritative",
+        "verifiable",
+        "inventory_digest",
+        "items"
+      ],
       "properties": {
-        "current": { "const": true },
-        "complete": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true },
-        "inventory_digest": { "$ref": "#/$defs/digest" },
-        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/requiredCheck" } }
+        "current": {
+          "const": true
+        },
+        "complete": {
+          "const": true
+        },
+        "server_authoritative": {
+          "const": true
+        },
+        "verifiable": {
+          "const": true
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/requiredCheck"
+          }
+        }
       }
     },
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "candidate", "pr", "lock", "scope", "g4", "review", "required_checks"],
+      "required": [
+        "contract_version",
+        "candidate",
+        "pr",
+        "lock",
+        "scope",
+        "g4",
+        "review",
+        "required_checks"
+      ],
       "properties": {
-        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v2" },
-        "candidate": { "$ref": "#/$defs/candidate" },
-        "pr": { "$ref": "#/$defs/pr" },
-        "lock": { "$ref": "#/$defs/lock" },
-        "scope": { "$ref": "#/$defs/scope" },
-        "g4": { "$ref": "#/$defs/g4" },
-        "review": { "$ref": "#/$defs/review" },
-        "required_checks": { "$ref": "#/$defs/requiredChecks" }
+        "contract_version": {
+          "const": "toolkit.assurance-web-finality.evidence.v2"
+        },
+        "candidate": {
+          "$ref": "#/$defs/candidate"
+        },
+        "pr": {
+          "$ref": "#/$defs/pr"
+        },
+        "lock": {
+          "$ref": "#/$defs/lock"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "g4": {
+          "$ref": "#/$defs/g4"
+        },
+        "review": {
+          "$ref": "#/$defs/review"
+        },
+        "required_checks": {
+          "$ref": "#/$defs/requiredChecks"
+        }
       }
     },
     "report": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "verdict", "material_blocker", "mutation_state", "unchanged_scope", "next_action"],
+      "required": [
+        "contract_version",
+        "verdict",
+        "material_blocker",
+        "mutation_state",
+        "unchanged_scope",
+        "next_action"
+      ],
       "properties": {
-        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v2" },
-        "verdict": { "$ref": "#/$defs/id" },
-        "material_blocker": { "type": "boolean" },
-        "verified_result": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "contract_version": {
+          "const": "toolkit.assurance-web-finality.evidence.v2"
+        },
+        "verdict": {
+          "$ref": "#/$defs/id"
+        },
+        "material_blocker": {
+          "type": "boolean"
+        },
+        "verified_result": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128
+        },
         "mutation_state": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["attempted", "performed"],
+          "required": [
+            "attempted",
+            "performed"
+          ],
           "properties": {
-            "attempted": { "type": "boolean" },
-            "performed": { "type": "boolean" }
+            "attempted": {
+              "type": "boolean"
+            },
+            "performed": {
+              "type": "boolean"
+            }
           }
         },
-        "unchanged_scope": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } },
-        "next_action": { "$ref": "#/$defs/id" },
+        "unchanged_scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "next_action": {
+          "$ref": "#/$defs/id"
+        },
         "safe_ids": {
           "oneOf": [
-            { "type": "array", "items": { "$ref": "#/$defs/id" } },
-            { "type": "object", "additionalProperties": { "$ref": "#/$defs/id" } }
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/id"
+              }
+            }
           ]
         },
-        "shas": { "type": "object", "additionalProperties": { "$ref": "#/$defs/sha" } },
-        "digests": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } },
+        "shas": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha"
+          }
+        },
+        "digests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/digest"
+          }
+        },
         "status_codes": {
           "oneOf": [
-            { "type": "array", "items": { "$ref": "#/$defs/id" } },
-            { "type": "object", "additionalProperties": { "$ref": "#/$defs/id" } }
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/id"
+              }
+            }
           ]
         },
         "timestamps": {
           "oneOf": [
-            { "type": "array", "items": { "type": "string", "maxLength": 64 } },
-            { "type": "object", "additionalProperties": { "type": "string", "maxLength": 64 } }
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
           ]
         },
-        "model_class": { "type": "string", "maxLength": 128 },
-        "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
-        "public_review_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
-        "public_check_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
-        "relative_scope_ids": { "type": "array", "items": { "$ref": "#/$defs/relativeScopeId" } }
+        "model_class": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "public_review_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicRef"
+          }
+        },
+        "public_check_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicRef"
+          }
+        },
+        "relative_scope_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativeScopeId"
+          }
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "material_blocker": { "const": false } } },
+          "if": {
+            "properties": {
+              "material_blocker": {
+                "const": false
+              }
+            }
+          },
           "then": {
-            "required": ["verified_result"],
-            "properties": { "verified_result": { "type": "string", "minLength": 1, "maxLength": 128 } }
+            "required": [
+              "verified_result"
+            ],
+            "properties": {
+              "verified_result": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
           }
         },
         {
-          "if": { "properties": { "material_blocker": { "const": true } } },
-          "then": { "properties": { "verified_result": { "type": ["null"], "maxLength": 128 } } }
+          "if": {
+            "properties": {
+              "material_blocker": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verified_result": {
+                "type": [
+                  "null"
+                ],
+                "maxLength": 128
+              }
+            }
+          }
         }
       ]
+    },
+    "continuousCandidateReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "decision_digest",
+        "candidate",
+        "route",
+        "origin",
+        "reviewer_thread",
+        "builder_thread",
+        "fork_parent",
+        "findings",
+        "coverage",
+        "validation_digest",
+        "effects_digest",
+        "source"
+      ],
+      "properties": {
+        "schema": {
+          "const": "toolkit.continuous-candidate-review.v1"
+        },
+        "decision_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "candidate": {
+          "$ref": "#/$defs/continuousCandidate"
+        },
+        "route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "reasoning"
+          ],
+          "properties": {
+            "provider": {
+              "enum": [
+                "openai",
+                "anthropic"
+              ]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "\\S"
+            },
+            "reasoning": {
+              "enum": [
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "const": "FRESH_THREAD"
+        },
+        "reviewer_thread": {
+          "$ref": "#/$defs/id"
+        },
+        "builder_thread": {
+          "$ref": "#/$defs/id"
+        },
+        "fork_parent": {
+          "type": "null"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "coverage": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "validation_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "effects_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "repository",
+            "revision",
+            "path",
+            "content_sha256",
+            "blob_sha1"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "\\S"
+            },
+            "repository": {
+              "type": "string",
+              "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "\\S"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "\\S"
+            },
+            "content_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "blob_sha1": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "continuousCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pr_number",
+        "branch",
+        "base_ref",
+        "base_sha",
+        "head_sha",
+        "tree_sha"
+      ],
+      "properties": {
+        "pr_number": {
+          "$ref": "#/$defs/issue"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "base_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "base_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "tree_sha": {
+          "$ref": "#/$defs/sha"
+        }
+      }
     }
   }
 }

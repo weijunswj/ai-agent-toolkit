@@ -6,6 +6,7 @@ const { types: utilTypes } = require('node:util');
 const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
 const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
+// Historical evidence.v2 contract labels; never used to select a V3 reviewer.
 const G4_MODEL = 'GPT-5.6 Sol High';
 const G4A_MODEL = 'GPT-5.6 Sol Max';
 const RECEIPT_DEPENDENCY_SCHEMA = 'toolkit.assurance-web-finality.receipt-dependency.v1';
@@ -1145,7 +1146,54 @@ function createReport(input = {}) {
   };
 }
 
+
+function evaluateV3Finality(store, admission) {
+  try {
+    receiptStoreRuntime.assertAuthenticAuthorityPacketStore(store);
+    receiptStoreRuntime.assertAuthenticSemanticGateAdmission(store, admission);
+    return store.readV3Lifecycle(admission);
+  } catch (error) {
+    return Object.freeze({ schema: 'toolkit.v3.release-state.v1', core: 'INCOMPLETE', parent: 'INCOMPLETE',
+      code: typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,100}$/.test(error.code)
+        ? error.code : 'V3_REQUIRED_EVIDENCE_HOLD', accepted: false, mutation_authority: false });
+  }
+}
+
+function evaluateContinuousAssurance(store, admission) {
+  try {
+    receiptStoreRuntime.assertAuthenticAuthorityPacketStore(store);
+    receiptStoreRuntime.assertAuthenticSemanticGateAdmission(store,admission);
+    const compiled=store.readControllerDecision(admission);
+    if(compiled.decision.schema==='toolkit.controller-decision.v2') return store.readV3Lifecycle(admission);
+    const accepted=store.readContinuousReview(admission);
+    const compiler=require('./toolkit-gate-contract-compiler.cjs'), adapter=require('./toolkit-codex-agent-adapter.cjs');
+    const packet=accepted.packet, observation=compiler.trustedJsonCopy(accepted.observation);
+    if(!exactKeys(observation,['review','qualification','workspace'])||!exactKeys(observation.review,
+      ['schema','decision_digest','candidate','route','origin','reviewer_thread','builder_thread','fork_parent','findings','coverage','validation_digest','effects_digest','source']))throw Error('CONTINUOUS_REVIEW_UNVERIFIED');
+    const review=observation.review;
+    if(review.schema!=='toolkit.continuous-candidate-review.v1'||review.decision_digest!==compiled.decision_digest
+      ||receiptStoreRuntime.canonicalSerialize(review.candidate)!==receiptStoreRuntime.canonicalSerialize(accepted.candidate)
+      ||receiptStoreRuntime.canonicalSerialize(packet.bindings.candidate)!==receiptStoreRuntime.canonicalSerialize(accepted.candidate)
+      ||packet.bindings.producer.stage!=='G4'||packet.bindings.producer.run===compiled.decision.identity.run
+      ||packet.body.verdict!=='PASS'||review.origin!=='FRESH_THREAD'||review.fork_parent!==null
+      ||typeof review.reviewer_thread!=='string'||review.reviewer_thread===review.builder_thread
+      ||!Array.isArray(review.findings)||!Array.isArray(review.coverage)
+      ||!compiled.decision.verification.requirements.every(id=>review.coverage.includes(id))
+      ||!isDigest(review.validation_digest)||!isDigest(review.effects_digest))throw Error('CONTINUOUS_REVIEW_UNVERIFIED');
+    if(receiptStoreRuntime.canonicalSerialize(review.route)!==receiptStoreRuntime.canonicalSerialize(compiled.decision.selection.routes.CANDIDATE_REVIEW))throw Error('CONTINUOUS_REVIEW_ROUTE_UNVERIFIED');
+    const disposition=packet.body.sections.find(section=>section.name==='disposition');
+    if(!disposition||disposition.text!==receiptStoreRuntime.canonicalSerialize(review))throw Error('CONTINUOUS_REVIEW_UNVERIFIED');
+    adapter.validateHostQualification(observation.qualification,compiled,'CANDIDATE_REVIEW',observation.workspace);
+    if(review.findings.some(f=>!isRecord(f)||!['BLOCKING','NON_BLOCKING','RESOLVED'].includes(f.disposition))
+      ||review.findings.some(f=>f.disposition==='BLOCKING'))return fail('CONTINUOUS_CANDIDATE_BLOCKED',{accepted:false});
+    return valid('CONTINUOUS_CANDIDATE_ASSURANCE',{accepted:true,packet_id:accepted.packet_id,decision_digest:compiled.decision_digest,
+      mutation_authority:false,finality_authority:false,final_audit:'SEPARATE_PROGRAMME_FINAL_AUDIT'});
+  }catch(_){return fail('CONTINUOUS_REQUIRED_EVIDENCE_HOLD',{accepted:false});}
+}
+
 module.exports = Object.freeze({
+  evaluateV3Finality,
+  evaluateContinuousAssurance,
   DESIGN_LOCK_ID,
   CONTRACT_VERSION,
   G4_AUTHORITY,

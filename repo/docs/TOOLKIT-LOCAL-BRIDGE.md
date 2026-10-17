@@ -2,6 +2,12 @@
 
 This document defines the plugin/update architecture for `weijunswj/ai-agent-toolkit`.
 
+## Current V3 installation scope
+
+Native Toolkit sources target Codex, Claude Code and an explicit OpenCode project plugin. Antigravity receives portable workspace skills only. Candidate construction, metadata validation and copied files do not prove native invocation, selected model/effort, user UAT or installed acceptance. Qualify each selected host before advertising it as supported; retain route gaps visibly and preserve rollback.
+
+The existing Codex/Claude managed-update paths remain host-local. OpenCode project setup uses `--install-opencode-project-plugin --opencode-project-root <absolute-path>`; Antigravity uses `--copy-antigravity-skills --antigravity-project-root <absolute-path>`. Both preview by default and require the explicit authorised `--write` effect. Neither command chooses a provider, copies credentials, changes global settings or enables auto-sync. Existing AG2 native state/files are retained for legacy read/disable and rollback only; no new native AG2 install/update/sync is supported.
+
 ## Current Source-Of-Truth Chain
 
 Current inspected chain:
@@ -13,7 +19,7 @@ Current inspected chain:
 5. `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs` maintain only managed root blocks and shims.
 6. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, source-lock audit, and canonical-surface audit enforce drift and safety rules.
 7. `.codex-plugin/**` and `.claude-plugin/**` are platform-specific native plugin metadata. They are not cross-platform source of truth.
-8. The Toolkit Local Bridge Hub under the user profile stores OpenCode and Antigravity 2 adapter state. It is not repo source of truth.
+8. The Toolkit Local Bridge Hub under the user profile stores OpenCode portable adapter state and retained legacy AG2 state. It is not repo source of truth.
 
 ## Architecture
 
@@ -29,12 +35,13 @@ Codex agents verify and refresh only the Codex native Toolkit plugin cache; Clau
 - Claude Code never installs or updates Codex.
 - Toolkit does not publish to public marketplaces from this repo. Marketplace-ready metadata is present in the manifests, but publication remains a separate human action.
 
-The shared bridge manages only non-native local adapter targets:
+The shared bridge has explicit bounded native/portable routes:
 
 - OpenCode global skills.
-- Antigravity 2 plugin-scoped local adapter skills under the Gemini config plugin root.
+- An OpenCode native project plugin, separately selected from global portable skill sync.
+- Antigravity portable workspace skills under `.agents/skills/`.
 
-OpenCode and Antigravity 2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
+OpenCode sync and project writes are opt-in. Antigravity skills copying is an explicit project write; it is never native/plugin auto-sync. Detection never authorises target writes.
 
 ## Local Bridge Hub
 
@@ -101,10 +108,10 @@ Post-merge native Windows UAT for issue #247 must:
 10. Leave the real 17 historical unmarked staging directories unchanged.
 
 1. Write a staging directory.
-2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
+2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and the Antigravity portable skills payload, which must carry no native plugin metadata.
 3. Rename staging into `current`.
 4. For OpenCode target sync, write into the OpenCode `skills/` root and atomically replace only Toolkit-managed skill folders.
-5. For Antigravity 2 target sync, write into the local `ai-agent-toolkit` plugin root and atomically replace only Toolkit-managed skill folders under that plugin's `skills/` directory.
+5. Antigravity has no sync target. Portable skills reach a workspace only through the explicit `--copy-antigravity-skills` project write.
 6. Remove only skill folders listed in the previous Toolkit-managed target manifest when they are no longer part of the current Toolkit skill set. Preserve unrelated user-created skills and unrelated files.
 
 Locks are owner-aware. Each lock records the PID of the process that created it, and acquisition classifies that owner with a signal-0 existence probe before deciding anything:
@@ -162,7 +169,8 @@ Write mode requires explicit `--write`:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path> --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
@@ -170,9 +178,10 @@ node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 Supported flags:
 
 - `--enable-target opencode`.
-- `--enable-target ag2`.
+- `--install-opencode-project-plugin --opencode-project-root <absolute-path>`.
+- `--copy-antigravity-skills --antigravity-project-root <absolute-path>`.
 - `--disable-target opencode`.
-- `--disable-target ag2`.
+- `--disable-target ag2` (legacy state disable only).
 - `--sync-enabled`.
 - `--enable-auto-sync`.
 - `--disable-auto-sync`.
@@ -192,8 +201,6 @@ Supported flags:
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.
 - `--force-downgrade`.
-- `--python-command <command>`.
-- `--set-ag2-python-command <command>`.
 - `--sync-source repo|codex-plugin|claude-plugin`.
 
 The updater must not:
@@ -461,7 +468,7 @@ Meaningful work means at least one of:
 
 - The configured Toolkit repo fast-forwarded.
 - The configured Toolkit repo was already advanced before the hook run compared with the last recorded bridge update state. This is reported as an inference, likely from a manual pull or another local Git update, not as proof of a manual action.
-- An enabled OpenCode or Antigravity 2 target was synced.
+- An enabled OpenCode target was synced.
 - A stale Toolkit-managed skill folder was removed from a managed target.
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
@@ -543,45 +550,12 @@ OpenCode loads one folder per skill under that root, for example `~/.config/open
 
 The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
 
-Antigravity 2 detection signals:
-
-- Antigravity user config exists, such as `%USERPROFILE%\.antigravity`.
-- Gemini/Antigravity plugin config exists, such as `%USERPROFILE%\.gemini\config` or `%USERPROFILE%\.gemini\config\plugins`.
-- The managed Toolkit AG2 adapter exists under the Toolkit Local Bridge Hub.
-- The managed Antigravity 2 plugin-scoped target exists under `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit`.
-- The user explicitly enabled the target.
-- Persisted bridge target state exists, such as `target_path`, `synced_version`, `synced_checksum`, or `last_sync`.
-- Saved AG2 Python command, when configured.
-- Explicit `--python-command`, for one run.
-- `python`, `python3`, and `py`.
-- Safe read-only user-local candidates such as Windows user Python locations, `UV_PYTHON`, `VIRTUAL_ENV`, and `CONDA_PREFIX`.
-- Optional package signal: a candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
-
-Antigravity 2 target path:
-
-- POSIX: `~/.gemini/config/plugins/ai-agent-toolkit/`.
-- Windows: `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit\`.
-- Required app-facing skills: every current Toolkit skill under `skills/<skill-name>/SKILL.md`, plus the `skills/ai-agent-toolkit/SKILL.md` adapter skill inside that plugin root.
-
-Persist a known non-PATH Antigravity 2/AG2 Python command with:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
-```
-
-Future audit and hook runs reuse the saved command. If the Python `ag2` package is not detected, audit output must list the exact Python commands tried and keep `python_command` empty unless a command actually has the package. Detection must never install Python, AG2, Antigravity 2, OpenCode, npm packages, or pip packages.
-
-Audit separates Antigravity 2 app/bridge relevance from the optional Python package signal:
-
-- `detected` means the Antigravity 2 bridge target is present or relevant.
-- `ag2_package_detected` means the Python package `ag2` was found.
-- `python_command` is set only when `ag2_package_detected` is true.
-- `signals.tried_python_commands` records package misses such as `Package(s) not found: ag2`.
+Antigravity has no bridge discovery or sync target. Audit reports retained legacy `ag2` state with `native_plugin_target_supported: false` and never probes Python or AG2 packages. Portable skills reach a workspace only through `--copy-antigravity-skills --antigravity-project-root <absolute-path>`, which previews by default and, with an explicit approved `--write`, writes only `<workspace>/.agents/skills/`. Retained `ag2` state supports legacy read, `--disable-target ag2` and rollback only.
 
 Audit also separates internal hub metadata from app-facing target sync:
 
 - `internal_adapter_path` points under the Toolkit Local Bridge Hub.
-- `target_path` points at the app-facing OpenCode skills root or Antigravity 2 plugin root.
+- `target_path` points at the app-facing OpenCode skills root.
 - `target_exists` reports whether the app-facing managed output files exist.
 - `synced` is true only when the enabled target state and the real app-facing output match the current full Toolkit skill payload and no previously managed Toolkit skill folder is stale. Hub metadata alone is not enough.
 
@@ -618,16 +592,16 @@ Apply OpenCode setup:
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 ```
 
-Dry-run Antigravity 2 setup:
+Preview a portable Antigravity skills copy into one workspace:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>
 ```
 
-Apply Antigravity 2 setup:
+Apply that exact approved copy:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
 Sync enabled targets:
@@ -649,7 +623,7 @@ Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge
 
 Hooks are optional automation. They must not contain unique critical policy.
 
-The packaged hooks only call the shared updater:
+The startup hooks call the shared updater. V3 helper hooks call the shared deterministic routing guard through native adapters:
 
 - Codex hook source: `.codex-plugin/hooks/hooks.json`.
 - Claude Code hook source: `.claude-plugin/hooks/hooks.json`.
@@ -660,7 +634,21 @@ The shared updater may run a passive repo-local instruction preflight from the h
 
 OpenCode and Antigravity 2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
 
-The packaged Toolkit hooks remain startup-only. The bridge uses `SessionStart` because update and sync work is most useful before the agent starts relying on local skills. Claude Code documents a `SessionEnd` event, but the Toolkit does not add a Claude-only exit hook because app exit hooks can be skipped or killed and Codex plugin `SessionEnd` support is not validated in this repo. Do not add unsupported hook event names such as `Stop` or `SessionEnd` to the packaged Codex or Claude plugin manifests without a current platform-supported, safe, fast implementation and matching tests.
+The bridge uses `SessionStart` for update and sync. Codex registers `PreToolUse` for `spawn_agent` and its `Agent` alias; Claude registers the parent `Agent|Task` path. The adapters require a launcher-selected, digest-pinned native binding with exact parent session, workspace, caller model, loaded helper identity and resolved host state. An unchecked binding cannot allow a helper. Claude resolves concrete model and effort precedence, rejecting unobserved alias/substitution/mod behavior. The OpenCode generator selects V1 `tool.execute.before/task` or V2 `ctx.tool.hook(execute.before)/subagent` separately; its V1 `chat.params` check also checks final observed provider parameters. The generated OpenCode plugin depends on the identified canonical runtime checkout; it is no longer an independent instructions-only payload.
+
+The OpenCode V1 adapter observes actual session parentage before requiring a helper binding, so root sessions remain usable without one. At `chat.params` it validates the loaded agent, concrete API model ID and effective effort through the shared guard. It retains the native mutable parameter object and rechecks it at the later `chat.headers` boundary, after all parameter plugins have run. Session observation is bounded; absent observation, role mismatch, remapping, late mutation or pinned-binding drift rejects the child. V2 tool-hook registration remains a separate API path and does not inherit V1 provider-boundary qualification.
+
+Each native entry can render its explicit helper definition from the same V3 registry used by the guard: `node repo/scripts/toolkit-codex-helper-hook.cjs --print-helper-definition G1`, `node repo/scripts/toolkit-claude-agent-hook.cjs --print-helper-definition G1`, or `node repo/scripts/toolkit-opencode-project-plugin.cjs --print-helper-definition G1`. `G0` selects the discovery helper instead. The output includes the resolved profile, registry digest, exact native model and effort, helper identity and leaf restriction. Rendering does not install, activate, grant permission or launch a helper; the trusted launcher must still verify native application, bind its observations and qualify the actual path before using it.
+
+User-level Claude Code helper subagents (`toolkit-g0-helper`, `toolkit-g1-helper`) are rendered from the same registry for an explicitly selected stack: `node repo/scripts/toolkit-claude-helper-agents.cjs --stack <stack-id>` previews, and `--write` installs into `~/.claude/agents`, backing up and replacing only generator-marked files or the retired `toolkit-v3-g0-evidence`/`toolkit-v3-g1-bounded` predecessors. Each file records the registry digest it came from; regenerate after a registry adoption rather than editing it. Installing the files grants no launch permission: the active Toolkit `Agent` hook and native permissions still decide.
+
+These source adapters do not establish native qualification. Codex hook errors, timeouts, disabled/untrusted hooks and specialized paths can fail open; a trusted launcher must verify required registration and enforce the final dispatch boundary. OpenCode ordering and native/AI SDK transformations require independent installed observation. A hook permission result, configuration file or inert child object is not native PASS. Keep the required fifteen-case matrix, positive execution and independently observed zero-effect negatives per installed path. Existing native permission and resource admission continue to apply. No global hook trust or settings are changed by source generation.
+
+The Core Codex adapter checks `hooks/list` on its actual parent client when `toolkit_request_helper` is requested, before creating a child capability. It requires both native aliases to match the exact launcher-owned helper-hook command and report enabled trusted registration, then rechecks current authority. This preflight holds an unqualified helper request without preventing direct lead work. It does not replace the native interception and downstream zero-effect matrix.
+
+Claude qualification uses a separate pinned task-session profile under an explicit task-owned `AI_AGENT_TOOLKIT_CONTROL_ROOT`. It does not change the global `claude-code` profile, select `BROADER_NATIVE`, or borrow the legacy direct launcher's older model contract. The source binds Opus 5.5 High, the fully qualified Haiku 5.5 XHigh leaf, parent `Agent|Task` command hook with a 10-second timeout, and mandatory native ask rules routed to the SDK host. The precheck records only the exact invocation digest and defers permission; the independent host `can_use_tool` boundary rechecks current route and primary proof before Agent creation. Missing proof, callback errors, configuration drift, leaves, replay and unqualified aliases are denied.
+
+Resource admission is separate. The external task gate requires a Root-admitted finite disposition tied to existing counters, permits one in-flight helper, journals consumption before an allow response, and keeps ambiguous attempts consumed and active. Native interruption and independent settlement callbacks are required; an observed terminal releases concurrency without refunding consumption. The profile's root-only or zero-capacity labels do not cap native concurrency. Parent invocation/turn bounds, unchanged physical/commit policy, whole-CLI/descendant control, actual mandatory callback registration, and route immutability after this boundary still require explicit Root binding and native proof before inference. The source's controlled ledger/transport tests are not that native proof. `SubagentStart` or a model-result event is observation, not a creation-blocking substitute.
 
 ## Codex SessionStart Output Contract
 

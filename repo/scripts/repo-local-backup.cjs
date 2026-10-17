@@ -171,7 +171,9 @@ function writeExclusive(filePath, bytes, mode = 0o600) {
   fs.writeFileSync(filePath, bytes, { flag: 'wx', mode });
 }
 
-function createRepoLocalBackup(repoRoot, options = {}) {
+class RepoLocalBackupGeneration {
+  #root; #operation; #captures; #options; #generation;
+  constructor(repoRoot,options={}) {
   const root = requireRealDirectory(repoRoot, 'Repository root');
   const operation = safeOperationName(options.operation);
   if (!Array.isArray(options.changes) || options.changes.length === 0) throw new Error('At least one affected file is required.');
@@ -184,6 +186,10 @@ function createRepoLocalBackup(repoRoot, options = {}) {
     if (!['full-file', 'managed-region'].includes(captureKind)) throw new Error(`Unsupported capture kind for ${capture.path}.`);
     return { capture, captureKind, replacement: replacementDescriptor(change) };
   });
+  this.#root=root;this.#operation=operation;this.#captures=captures;this.#options=options;
+  }
+  create() {
+    const root=this.#root,operation=this.#operation,captures=this.#captures,options=this.#options;
   const backupRoot = path.join(root, CANONICAL_BACKUP_DIR);
   if (fs.existsSync(backupRoot)) {
     const stat = fs.lstatSync(backupRoot);
@@ -191,7 +197,7 @@ function createRepoLocalBackup(repoRoot, options = {}) {
   } else {
     fs.mkdirSync(backupRoot, { mode: 0o700 });
   }
-  const generation = allocateGeneration(backupRoot, operation, options);
+  const generation = this.#generation=allocateGeneration(backupRoot, operation, options);
   fs.mkdirSync(generation.pendingPath, { mode: 0o700 });
   fs.mkdirSync(path.join(generation.pendingPath, 'files'), { mode: 0o700 });
   try {
@@ -224,6 +230,8 @@ function createRepoLocalBackup(repoRoot, options = {}) {
     throw error;
   }
 }
+}
+function createRepoLocalBackup(repoRoot,options={}) {return new RepoLocalBackupGeneration(repoRoot,options).create();}
 
 function validateDescriptor(descriptor, existedLabel) {
   if (!descriptor || typeof descriptor.existed !== 'boolean') throw new Error(`${existedLabel} existence state is invalid.`);
@@ -393,7 +401,9 @@ function restoreResult(inspected, prepared, cleanup) {
   };
 }
 
-function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
+class RepoLocalRestoreTransaction {
+  #inspected; #options; #cleanupId; #prepared=[];
+  constructor(repoRoot,metadataPath,options={}) {
   const inspected = readRepoLocalBackup(repoRoot, metadataPath);
   for (const file of inspected.files) {
     if (!currentMatches(file.target, file.entry.expected_replacement)) throw new Error(`Current file does not match the recorded Toolkit replacement: ${file.entry.path}`);
@@ -402,7 +412,11 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
   const transactionCleanupId = cleanupId(options.testCleanupId == null
     ? crypto.randomBytes(12).toString('hex')
     : options.testCleanupId);
-  const prepared = [];
+  this.#inspected=inspected;this.#options=options;this.#cleanupId=transactionCleanupId;
+  }
+  restore() {
+    const inspected=this.#inspected,options=this.#options,transactionCleanupId=this.#cleanupId;
+  const prepared = this.#prepared;
   try {
     for (let index = 0; index < inspected.files.length; index += 1) {
       const file = inspected.files[index];
@@ -482,6 +496,8 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
     throw new Error(`Restore failed; exact prior target state was restored.`);
   }
 }
+}
+function restoreRepoLocalBackup(repoRoot,metadataPath,options={}) {return new RepoLocalRestoreTransaction(repoRoot,metadataPath,options).restore();}
 
 function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, requestedCleanupId, options = {}) {
   const exactCleanupId = cleanupId(requestedCleanupId);

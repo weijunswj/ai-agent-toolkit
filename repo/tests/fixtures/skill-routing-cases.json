@@ -3,6 +3,7 @@
   "implicit_discovery_authorizes_mutation": false,
   "portfolio": [
     "codex-ssh-hostinger-coolify-setup-maintainer",
+    "controller-bootstrap",
     "frontend-art-direction",
     "github-program-reconciler",
     "local-ai-safety",
@@ -33,7 +34,8 @@
     "self-hosted-service-safety": "implicit",
     "skill-product-review": "implicit",
     "toolkit-setup": "implicit",
-    "windows-local-dev-services": "implicit"
+    "windows-local-dev-services": "implicit",
+    "controller-bootstrap": "explicit"
   },
   "cases": [
     {
@@ -63,6 +65,55 @@
       "prompt": "Implement this small application feature; the repository instructions are already present and current.",
       "expected": [],
       "excluded": ["repository-agent-rules"]
+    },
+    {
+      "id": "controller-bootstrap-positive",
+      "kind": "positive",
+      "prompt": "After context loss, explicitly recover the already-assigned controller for this Toolkit repository from authoritative CURRENT and verify the exact accepted governance sources.",
+      "expected": ["controller-bootstrap"],
+      "excluded": ["repository-agent-rules", "github-program-reconciler"]
+    },
+    {
+      "id": "controller-bootstrap-adversarial",
+      "kind": "adversarial",
+      "prompt": "Implement an ordinary local feature; there is no controller re-entry, authority recovery, repository handover, or CURRENT recovery request.",
+      "expected": [],
+      "excluded": ["controller-bootstrap"]
+    },
+    {
+      "id": "controller-bootstrap-negative-overlap",
+      "kind": "negative",
+      "prompt": "Install and verify generic AGENTS.md rules for this new repository; do not recover a controller or inspect programme lifecycle.",
+      "expected": ["repository-agent-rules"],
+      "excluded": ["controller-bootstrap", "github-program-reconciler"]
+    },
+    {
+      "id": "controller-bootstrap-positive-handover",
+      "kind": "positive",
+      "prompt": "Explicitly resume the already-assigned controller after a human-approved handover and reconstruct only the current bounded RUN from CURRENT.",
+      "expected": ["controller-bootstrap"],
+      "excluded": ["repository-agent-rules"]
+    },
+    {
+      "id": "controller-bootstrap-positive-current-recovery",
+      "kind": "positive",
+      "prompt": "Recover the assigned Toolkit repository controller after lost context, checking trusted Controller and Architecture sources before resuming the same admitted action.",
+      "expected": ["controller-bootstrap"],
+      "excluded": ["github-program-reconciler"]
+    },
+    {
+      "id": "controller-bootstrap-negative-ordinary-executor",
+      "kind": "negative",
+      "prompt": "Continue ordinary coding as an executor; no controller assignment, takeover, CURRENT recovery, or authority handover was requested.",
+      "expected": [],
+      "excluded": ["controller-bootstrap"]
+    },
+    {
+      "id": "controller-bootstrap-overlap-reconciliation",
+      "kind": "overlap",
+      "prompt": "Recover the assigned controller from CURRENT, then explicitly reconcile this repository's current-main GitHub programme without publishing changes.",
+      "expected": ["controller-bootstrap", "github-program-reconciler"],
+      "excluded": []
     },
     {
       "id": "codex-hostinger-positive",

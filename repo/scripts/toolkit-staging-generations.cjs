@@ -93,7 +93,11 @@ function stagingOwnerLiveness(pid, killFn = process.kill) {
   }
 }
 
-function createOwnedStagingGeneration(options) {
+class OwnedStagingCreation {
+  #options; #record; #stageCreated=false; #directoryIdentity=null;
+  constructor(options) {this.#options=options;}
+  create() {
+  const options=this.#options;
   const parent = path.resolve(options.parent);
   const target = path.resolve(options.target);
   if (!samePath(path.dirname(target), parent)) throw new Error('owned staging target must be an immediate child of its expected parent');
@@ -128,24 +132,24 @@ function createOwnedStagingGeneration(options) {
     state: 'registered'
   };
 
-  writeExclusiveJson(recordPath, record);
-  let stageCreatedByThisInvocation = false;
-  let createdDirectoryIdentity = null;
+  this.#record=record;
+  writeExclusiveJson(recordPath, this.#record);
+
   try {
     if (options.afterRegistration) options.afterRegistration({ record, recordPath, stagePath });
 
     fs.mkdirSync(stagePath);
-    stageCreatedByThisInvocation = true;
+    this.#stageCreated = true;
     const stageCheck = ordinaryDirectory(stagePath);
     if (!stageCheck.safe) throw new Error(`owned staging directory is unsafe: ${stageCheck.reason}`);
-    createdDirectoryIdentity = directoryIdentity(stageCheck.stat);
-    if (options.afterDirectoryCreated) options.afterDirectoryCreated({ record, recordPath, stagePath, directoryIdentity: createdDirectoryIdentity });
+    this.#directoryIdentity = directoryIdentity(stageCheck.stat);
+    if (options.afterDirectoryCreated) options.afterDirectoryCreated({ record, recordPath, stagePath, directoryIdentity: this.#directoryIdentity });
     const ready = {
       owner: OWNER,
       schema_version: SCHEMA_VERSION,
       generation_id: generationId,
       ownership_token: token,
-      directory_identity: createdDirectoryIdentity,
+      directory_identity: this.#directoryIdentity,
       ready_at: new Date().toISOString(),
       state: 'ready'
     };
@@ -159,10 +163,10 @@ function createOwnedStagingGeneration(options) {
       try {
         const check = ordinaryDirectory(stagePath);
         if (
-          stageCreatedByThisInvocation &&
-          createdDirectoryIdentity &&
+          this.#stageCreated &&
+          this.#directoryIdentity &&
           check.safe &&
-          identitiesMatch(createdDirectoryIdentity, directoryIdentity(check.stat)) &&
+          identitiesMatch(this.#directoryIdentity, directoryIdentity(check.stat)) &&
           fs.readFileSync(recordPath, 'utf8') === `${JSON.stringify(record, null, 2)}\n`
         ) {
           fs.rmSync(stagePath, { recursive: true });
@@ -182,6 +186,8 @@ function createOwnedStagingGeneration(options) {
     throw error;
   }
 }
+}
+function createOwnedStagingGeneration(options) {return new OwnedStagingCreation(options).create();}
 
 function markOwnedStaging(generation, state) {
   if (!['completed', 'failed'].includes(state)) throw new Error(`unsupported owned staging state: ${state}`);
@@ -322,18 +328,25 @@ function inspectOwnedGeneration(recordPath, options = {}) {
   return { classification: 'dead-owned', generation_id: record.generation_id, record_path: recordPath, staging_path: record.expected_staging_path, target_path: record.expected_final_target, failed: Boolean(failed), safe_to_reconcile: true };
 }
 
-function cleanupOwnedGeneration(generation, options = {}) {
-  const inspected = inspectOwnedGeneration(generation.recordPath, {
+class OwnedStagingCleanup {
+  #generation; #options;
+
+  #inspected; #expectedRecordBytes; #rechecked;
+  constructor(generation, options = {}) {this.#generation=generation;this.#options=options;}
+  run() {
+    const generation=this.#generation,options=this.#options;
+
+  const inspected = this.#inspected = inspectOwnedGeneration(generation.recordPath, {
     expectedParent: generation.record.expected_parent,
     liveness: options.currentOperation ? () => 'dead' : options.liveness
   });
   if (!inspected.safe_to_reconcile) return { cleaned: false, preserved: true, reason: inspected.classification, inspection: inspected };
-  const expectedRecordBytes = fs.readFileSync(generation.recordPath);
+  const expectedRecordBytes = this.#expectedRecordBytes = fs.readFileSync(generation.recordPath);
   if (options.beforeDelete) options.beforeDelete({ generation, inspection: inspected });
   if (!fs.readFileSync(generation.recordPath).equals(expectedRecordBytes)) {
     return { cleaned: false, preserved: true, reason: 'ownership-record-changed', inspection: inspected };
   }
-  const rechecked = inspectOwnedGeneration(generation.recordPath, {
+  const rechecked = this.#rechecked = inspectOwnedGeneration(generation.recordPath, {
     expectedParent: generation.record.expected_parent,
     liveness: options.currentOperation ? () => 'dead' : options.liveness
   });
@@ -344,7 +357,10 @@ function cleanupOwnedGeneration(generation, options = {}) {
   for (const kind of ['ready', 'completed', 'failed']) fs.rmSync(auxiliaryPath(generation.recordPath, kind), { force: true });
   fs.rmSync(generation.recordPath, { force: true });
   return { cleaned: true, preserved: false, reason: '', inspection: rechecked };
+
+  }
 }
+function cleanupOwnedGeneration(generation, options = {}) {return new OwnedStagingCleanup(generation,options).run();}
 
 function auditOwnedStaging(parents, options = {}) {
   const results = [];
@@ -455,44 +471,31 @@ function lookupExactOwnedGeneration(parents, generationId, options = {}) {
   return { complete: true, reason: '', candidates, checked_parents: checkedParents };
 }
 
-function reconcileOwnedStaging(parents, generationId, options = {}) {
-  let exact = lookupExactOwnedGeneration(parents, generationId, options);
-  const audit = auditOwnedStaging(parents, { ...options, limit: options.auditLimit || options.limit });
-  if (options.afterSupplementalAudit) options.afterSupplementalAudit({ audit, exact });
-  if (!exact.complete) return { reconciled: false, reason: exact.reason, exact_lookup: exact, audit };
-  if (exact.candidates.length !== 1) {
-    return {
-      reconciled: false,
-      reason: exact.candidates.length ? 'generation-id-ambiguous' : 'generation-id-not-found',
-      exact_lookup: exact,
-      audit
-    };
+class OwnedStagingReconciliation {
+  #parents; #generationId; #options; #exact; #match; #record; #audit;
+  constructor(parents,generationId,options={}) {this.#parents=parents;this.#generationId=generationId;this.#options=options;}
+  run() {
+    const parents=this.#parents,generationId=this.#generationId,options=this.#options;
+    this.#exact=lookupExactOwnedGeneration(parents,generationId,options);
+    this.#audit=auditOwnedStaging(parents,{...options,limit:options.auditLimit||options.limit});
+    if(options.afterSupplementalAudit)options.afterSupplementalAudit({audit:this.#audit,exact:this.#exact});
+    if(!this.#exact.complete)return {reconciled:false,reason:this.#exact.reason,exact_lookup:this.#exact,audit:this.#audit};
+    if(this.#exact.candidates.length!==1)return {reconciled:false,reason:this.#exact.candidates.length?'generation-id-ambiguous':'generation-id-not-found',exact_lookup:this.#exact,audit:this.#audit};
+    this.#match=this.#exact.candidates[0];
+    if(!this.#match.safe_to_reconcile)return {reconciled:false,reason:'generation-not-safe:'+this.#match.classification,generation:this.#match,audit:this.#audit};
+    if(!options.write)return {reconciled:false,dry_run:true,would_reconcile:true,generation:this.#match,audit:this.#audit};
+    this.#exact=lookupExactOwnedGeneration(parents,generationId,options);
+    if(!this.#exact.complete)return {reconciled:false,reason:this.#exact.reason,exact_lookup:this.#exact,audit:this.#audit};
+    if(this.#exact.candidates.length!==1)return {reconciled:false,reason:this.#exact.candidates.length?'generation-id-ambiguous':'exact-record-changed',exact_lookup:this.#exact,audit:this.#audit};
+    this.#match=this.#exact.candidates[0];
+    if(!this.#match.safe_to_reconcile)return {reconciled:false,reason:'generation-not-safe:'+this.#match.classification,generation:this.#match,exact_lookup:this.#exact,audit:this.#audit};
+    try{this.#record=readJson(this.#match.record_path);}catch(error){return {reconciled:false,reason:'exact-record-changed',detail:cleanDiagnostic(error),generation:this.#match,audit:this.#audit};}
+    const generation={record:this.#record,recordPath:this.#match.record_path,stagePath:this.#record.expected_staging_path};
+    const cleanup=cleanupOwnedGeneration(generation,{liveness:options.liveness,beforeDelete:options.beforeDelete});
+    return {reconciled:cleanup.cleaned,reason:cleanup.reason,generation:cleanup.inspection||this.#match,audit:this.#audit};
   }
-  let match = exact.candidates[0];
-  if (!match.safe_to_reconcile) return { reconciled: false, reason: `generation-not-safe:${match.classification}`, generation: match, audit };
-  if (!options.write) return { reconciled: false, dry_run: true, would_reconcile: true, generation: match, audit };
-  exact = lookupExactOwnedGeneration(parents, generationId, options);
-  if (!exact.complete) return { reconciled: false, reason: exact.reason, exact_lookup: exact, audit };
-  if (exact.candidates.length !== 1) {
-    return {
-      reconciled: false,
-      reason: exact.candidates.length ? 'generation-id-ambiguous' : 'exact-record-changed',
-      exact_lookup: exact,
-      audit
-    };
-  }
-  match = exact.candidates[0];
-  if (!match.safe_to_reconcile) return { reconciled: false, reason: `generation-not-safe:${match.classification}`, generation: match, exact_lookup: exact, audit };
-  let record;
-  try {
-    record = readJson(match.record_path);
-  } catch (error) {
-    return { reconciled: false, reason: 'exact-record-changed', detail: cleanDiagnostic(error), generation: match, audit };
-  }
-  const generation = { record, recordPath: match.record_path, stagePath: record.expected_staging_path };
-  const cleanup = cleanupOwnedGeneration(generation, { liveness: options.liveness, beforeDelete: options.beforeDelete });
-  return { reconciled: cleanup.cleaned, reason: cleanup.reason, generation: cleanup.inspection || match, audit };
 }
+function reconcileOwnedStaging(parents,generationId,options={}) {return new OwnedStagingReconciliation(parents,generationId,options).run();}
 
 module.exports = {
   OWNER,

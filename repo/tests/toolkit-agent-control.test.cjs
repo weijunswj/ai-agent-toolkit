@@ -86,7 +86,7 @@ function verifierFixture() {
   const work = root();
   const cache = path.join(work, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',"repo/scripts/toolkit-claude-task-session.cjs","repo/scripts/toolkit-claude-dispatch-observer.cjs","repo/scripts/toolkit-v3-native-helper-adapter.cjs","repo/scripts/toolkit-v3-helper-guard.cjs","repo/scripts/toolkit-gate-contract-compiler.cjs","repo/contracts/controller-kernel/stack-registry-v3.json","repo/contracts/controller-kernel/stack-registry-v3.schema.json"]) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
@@ -223,6 +223,22 @@ test('stale dead reservations recover but live ownership is preserved', () => {
   assert.deepEqual(state.reservations.map((entry) => entry.id), ['live']);
 });
 
+test('M09 dead pid and TTL cannot recover-release a v2 mode-0 reservation with unknown effects', () => {
+  const now = Date.now();
+  const sealedEnvelope = Object.freeze({ schema: 'toolkit.agent-control.resource-envelope.v1', dispatch_id: 'a'.repeat(64) });
+  const unknownMode0 = reservation('mode0-unknown', {
+    owner_pid: 99999999,
+    status: 'running',
+    expires_at_ms: 1,
+    producer_provenance: { schema: 'toolkit.agent-control.resource-provenance.v2', mode0_envelope: sealedEnvelope },
+  });
+  const expiredLegacy = reservation('legacy-expired', { owner_pid: 99999999, expires_at_ms: 1 });
+  const recovered = control.recoverState({ schema: control.SCHEMA, reservations: [unknownMode0, expiredLegacy], queue: [], checker_reviews: [] }, now);
+  assert.deepEqual(recovered.reservations.map((entry) => entry.id), ['mode0-unknown']);
+  assert.equal(recovered.reservations[0].producer_provenance.schema, 'toolkit.agent-control.resource-provenance.v2');
+  assert.deepEqual(recovered.reservations[0].producer_provenance.mode0_envelope, sealedEnvelope);
+});
+
 test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
   const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
   assert.deepEqual(invocation.raw_args.slice(0, 10), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
@@ -271,7 +287,7 @@ test('root-only and broader-native profiles never claim Toolkit admission covera
   }
 });
 
-test('Claude hook denies native Agent under root/direct profiles and allows broader native behavior', () => {
+test('Claude hook denies native Agent under root/direct profiles and requires routing binding for broader native behavior', async () => {
   for (const topology of [control.TOPOLOGIES.ROOT_ONLY, control.TOPOLOGIES.CLAUDE_DIRECT]) {
     const work = root();
     const capacityMode = topology === control.TOPOLOGIES.CLAUDE_DIRECT ? control.CAPACITY_MODES.AUTO : control.CAPACITY_MODES.ROOT_ONLY;
@@ -280,7 +296,7 @@ test('Claude hook denies native Agent under root/direct profiles and allows broa
   }
   const work = root();
   control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: work });
-  assert.deepEqual(hook.decision({ tool_name: 'Agent' }, { root: work }), {});
+  assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: work })).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('Codex and Claude profile state is isolated', () => {
@@ -403,12 +419,81 @@ test('Run-094 Linux native resource positive uses production proc-meminfo collec
   assert.equal(state.source, 'proc-meminfo');
   assert.equal(state.host_responsive, true);
   assert.equal(Object.hasOwn(state, 'fixture_id'), false);
-  for (const field of ['physical_total', 'physical_available', 'commit_total', 'commit_available']) {
+  assert.equal(Number.isSafeInteger(state.physical_total), true);
+  assert.ok(state.physical_total > 0);
+  for (const field of ['physical_available', 'commit_total', 'commit_available']) {
     assert.equal(Number.isSafeInteger(state[field]), true, field);
-    assert.ok(state[field] > 0, field);
   }
+  assert.ok(state.physical_available >= 0);
+  assert.ok(state.commit_total >= 0);
+  assert.ok(state.commit_available >= -Number.MAX_SAFE_INTEGER);
   assert.ok(state.physical_available <= state.physical_total);
   assert.ok(state.commit_available <= state.commit_total);
+  const capability = control.inspectResourceCapability();
+  assert.equal(capability.supported, true);
+  assert.equal(capability.source, 'proc-meminfo');
+  // The capability takes its own live sample: available counters move between reads,
+  // so only the source, the field set and the static totals are compared.
+  assert.equal(capability.resources.source, state.source);
+  assert.deepEqual(Object.keys(capability.resources).sort(), Object.keys(state).sort());
+  assert.equal(capability.resources.physical_total, state.physical_total);
+  assert.equal(capability.resources.commit_total, state.commit_total);
+});
+
+test('M01 signed Linux parser accepts exact subtraction and rejects malformed or unstable observations', () => {
+  const sample = [
+    'MemTotal: 4096 kB',
+    'MemAvailable: 0 kB',
+    'CommitLimit: 100 kB',
+    'Committed_AS: 200 kB',
+  ].join('\n');
+  const parsed = control.parseLinuxMeminfoCounters(0, sample, 0);
+  assert.deepEqual({
+    physical_total: parsed.physical_total,
+    physical_available: parsed.physical_available,
+    commit_total: parsed.commit_total,
+    commit_available: parsed.commit_available,
+    overcommit_mode: parsed.overcommit_mode,
+  }, {
+    physical_total: 4194304,
+    physical_available: 0,
+    commit_total: 102400,
+    commit_available: -102400,
+    overcommit_mode: 0,
+  });
+  assert.equal(control.inspectResources({ resourceState: parsed }), null, 'pure parser data cannot acquire native branding');
+  const invalid = [
+    sample.replace('MemAvailable: 0 kB\n', ''),
+    `${sample}\nMemTotal: 4096 kB`,
+    `${sample}\nCommitted_AS: -1 kB`,
+    sample.replace('CommitLimit: 100 kB', 'CommitLimit: -100 kB'),
+    sample.replace('Committed_AS: 200 kB', 'Committed_AS: 200 MB'),
+    sample.replace('MemTotal: 4096 kB', 'MemTotal: 9007199254740992 kB'),
+  ];
+  for (const source of invalid) assert.throws(() => control.parseLinuxMeminfoCounters(0, source, 0));
+  assert.throws(() => control.parseLinuxMeminfoCounters(0, sample, 2), /changed/i);
+  assert.throws(() => control.parseLinuxMeminfoCounters(3, sample, 3), /unsupported/i);
+});
+
+test('M02 and M04 caller-supplied evidence, profiles, flags, and channels cannot admit the mode-0 exception', async () => {
+  const work = root();
+  const boundedWorker = spec({ estimated_memory_bytes: control.GIB });
+  const attempts = [
+    { root: work, resourceState: resourceTest.FIXTURE },
+    { root: work, resources: resourceTest.FIXTURE },
+    { root: work, producer_provenance: { schema: 'toolkit.agent-control.resource-provenance.v2' } },
+    { root: work, effectChannel: { snapshot() { throw new Error('caller channel executed'); } } },
+    { root: work, profile: { ...profile(), overcommit_mode: 0, supported: true } },
+  ];
+  for (const options of attempts) {
+    const result = await control.admissionDecisionWithResourceEnvelope(boundedWorker, null, options);
+    assert.equal(result.result, control.RESULTS.REFUSE);
+    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  }
+  const launch = await control.launchWithResourceEnvelope(boundedWorker, null, { root: work, resourceState: resourceTest.FIXTURE });
+  assert.equal(launch.result, control.RESULTS.REFUSE);
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
 });
 
 test('Run-094 Windows native resource positive uses production operating-system counters', {
@@ -439,6 +524,12 @@ test('resource evidence schema preserves native and repository-test provenance w
   assert.equal(validateEvidence({ ...resourceTest.FIXTURE, fixture_id: 'other' }), false);
   assert.equal(validateEvidence({ ...resourceTest.FIXTURE, extra: true }), false);
   assert.equal(validateEvidence({ ...resourceTest.FIXTURE, physical_available: '8589934592' }), false);
+  const linuxSigned = {
+    source: 'proc-meminfo', physical_total: 1, physical_available: 0,
+    commit_total: 0, commit_available: -Number.MAX_SAFE_INTEGER, host_responsive: true,
+  };
+  assert.equal(validateEvidence(linuxSigned), true, JSON.stringify(validateEvidence.errors));
+  assert.equal(validateEvidence({ ...linuxSigned, commit_available: -Number.MAX_SAFE_INTEGER - 1 }), false);
   assert.equal(validateInvocation(resourceTest.INVOCATION), true, JSON.stringify(validateInvocation.errors));
   assert.equal(validateInvocation({ ...resourceTest.INVOCATION, extra: true }), false);
 });
