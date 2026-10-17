@@ -307,6 +307,8 @@ A rename/remove/move/re-signature or material identity/contract/schema/path/shap
 - Update/validate affected tests first.
 - If required consumers are outside authorised scope, escalate rather than silently breaking them or widening scope.
 
+**Change-local hygiene law (generic and prospective):** Every authorised code change must remove affected obsolete routes, dead code, stale flags, fallbacks, test fixtures and documentation while updating all verified current consumers. Keep compatibility only for a demonstrated present migration, safety or recovery obligation with its continuing owner and verifiable removal condition. Demand concise changed-path removal/retention evidence and focused regressions in the existing implementation/review; an unrelated whole-tree archaeology pass requires explicit scope. Do not widen an active worker's mutation authority or replay unresolved effects.
+
 ## Repair, convergence, and recovery
 
 - After an accepted G4 material implementation blocker, the next authorised G3 correction must identify the violated invariant, inspect materially equivalent in-Lock paths, close the defect family, and retain deterministic regressions for accepted same-family reproducers.

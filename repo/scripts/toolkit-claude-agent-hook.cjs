@@ -35,9 +35,7 @@ function decision(input, options = {}) {
     helper_identity: process.env.TOOLKIT_NATIVE_HELPER_IDENTITY,
     ...options.native_guard
   });
-  const reason = profile.topology === control.TOPOLOGIES.CLAUDE_DIRECT
-    ? 'Native Claude Agent launches bypass Toolkit resource admission and mode verification. Use repo/scripts/toolkit-agent-control.cjs launch with a complete productive-parent launch specification.'
-    : 'Claude agent launch is blocked because the selected or unverifiable Toolkit profile is root-only.';
+  const reason = 'Claude native Agent/Task launches are blocked at this hook. Governed V3 workers use only the registry-pinned launcher through an authorised controller; unqualified profiles remain root-only.';
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
 }
 

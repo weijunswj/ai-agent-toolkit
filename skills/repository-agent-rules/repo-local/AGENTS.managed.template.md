@@ -128,6 +128,8 @@ Keep the diff narrow, maintainable, and in style. Avoid unrelated refactors and 
 
 Use this minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed.
 
+**Change-local hygiene (all Toolkit-managed software repositories).** In each authorised implementation, refactor or correction, inspect affected direct, indirect, dynamic, generated, test, documentation and external consumers. Remove superseded code, routes, exports, settings, dependencies, fallbacks and references in the same change, rather than leaving dead compatibility layers. Retain a compatibility or migration path only with a verified current consumer, safety/recovery reason, named owner, removal trigger and focused regression; never discard active or UNKNOWN recovery effects. Record concise changed-path removal/retention evidence with normal tests and CI. This is part of existing implementation and review, not another gate, reviewer, unrelated whole-tree audit or retrospective mutation authority.
+
 Put persistent status/reports/plans/handoffs and operations/setup/CI/deployment/safety/troubleshooting notes under an existing documented path. Do not create root `STATUS.md`, `REPORT.md`, or `PLAN.md` unless required.
 
 After editing, run the smallest validation first, repair targeted failures, rerun, and review the diff for unrelated changes.
