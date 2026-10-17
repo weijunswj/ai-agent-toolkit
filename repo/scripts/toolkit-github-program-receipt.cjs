@@ -1706,12 +1706,6 @@ function digestWithout(value, key) {
   return digestValue(payload);
 }
 
-function digestWithoutKeys(value, keys) {
-  const payload = clone(value);
-  for (const key of keys) delete payload[key];
-  return digestValue(payload);
-}
-
 function validateHolderAttestation(value) {
   if (!exactKeys(value, HOLDER_ATTESTATION_KEYS)
     || value.schema !== HOLDER_ATTESTATION_SCHEMA_ID

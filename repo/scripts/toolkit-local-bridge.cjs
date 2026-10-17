@@ -1804,10 +1804,6 @@ function classifyUpdateReport(context) {
   };
 }
 
-function updateReportIsMeaningful(context) {
-  return classifyUpdateReport(context).meaningful;
-}
-
 function shortCommit(value) {
   const text = String(value || '');
   if (!text || text === 'none') return 'none';
@@ -2982,21 +2978,6 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
     throw error;
   }
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-}
-
-function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
-  return withOwnedStaging({
-    target: targetDir,
-    stagePrefix: `.${path.basename(targetDir)}.staging-`,
-    operation: options.operation || 'target-directory-copy',
-    sourceType: options.sourceType || 'repo'
-  }, (staging) => {
-    fs.cpSync(sourceDir, staging, { recursive: true });
-    if (requiredRelPath && !fs.existsSync(path.join(staging, requiredRelPath))) {
-      throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
-    }
-    replaceDirectoryAtomically(staging, targetDir);
-  });
 }
 
 function writeFileAtomically(filePath, content) {

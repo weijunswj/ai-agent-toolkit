@@ -513,10 +513,6 @@ function compileEvidenceManifest(manifest) {
   };
 }
 
-function isLowerHex(value, length) {
-  return typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`).test(value);
-}
-
 function validateBase64(value, location) {
   if (typeof value !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) fail(`${location} must be canonical base64`);
   const decoded = Buffer.from(value, 'base64');

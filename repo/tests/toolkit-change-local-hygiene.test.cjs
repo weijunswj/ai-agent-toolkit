@@ -39,3 +39,59 @@ test('current Claude hook cannot steer an agent to the retired direct launcher',
   assert.match(stale, /Use repo\/scripts\/toolkit-agent-control\.cjs launch/,
     'mutation demonstrates that the forbidden old steering would be detected');
 });
+
+// These removed helpers had exactly one local identifier occurrence (their own declarations)
+// and no exported/current call site at the checked candidate. Keep their dead branches out.
+const RETIRED_HELPERS = {
+  "repo/scripts/setup-toolkit-core.cjs": [
+    "inspectClaudeNativePluginState",
+    "formatBool",
+    "formatTargetState",
+    "currentHelperOutcome",
+    "helperRecommendationReason"
+  ],
+  "repo/scripts/toolkit-local-bridge.cjs": [
+    "updateReportIsMeaningful",
+    "copyDirectoryAtomically"
+  ],
+  "repo/scripts/sync-agent-instruction-shims.cjs": [
+    "slash",
+    "resolveRel"
+  ],
+  "repo/scripts/source-watch-advisory-targets.cjs": [
+    "optionalString"
+  ],
+  "repo/scripts/toolkit-assurance-web-finality.cjs": [
+    "sameReceiptCandidate"
+  ],
+  "repo/scripts/toolkit-evidence-plan-compiler.cjs": [
+    "isLowerHex"
+  ],
+  "repo/scripts/toolkit-github-program-receipt.cjs": [
+    "digestWithoutKeys"
+  ],
+  "repo/scripts/toolkit-github-program-state-v5.cjs": [
+    "keysFrom",
+    "authorityDigest",
+    "h2Array",
+    "h2PrProse",
+    "h2ReadChildUnbound"
+  ],
+  "repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs": [
+    "isSafeText",
+    "isSha"
+  ],
+  "repo/scripts/toolkit-v3-helper-guard.cjs": [
+    "defaultQualification"
+  ]
+};
+test('removed unreferenced helpers do not return in current runtime modules', () => {
+  for (const [rel, names] of Object.entries(RETIRED_HELPERS)) {
+    const source = read(rel);
+    for (const name of names) {
+      const pattern = new RegExp('^\\s*(?:async )?function\\s+' + name + '\\s*\\(', 'm');
+      assert.doesNotMatch(source, pattern, rel + ': dead helper ' + name);
+    }
+  }
+  assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /PR #513.*is the current V3 proposal continuation/);
+});

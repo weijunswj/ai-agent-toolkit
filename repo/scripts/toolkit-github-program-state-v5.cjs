@@ -816,7 +816,6 @@ function exactKeys(value, keys) {
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
-function keysFrom(required, optional = []) { return [...required, ...optional]; }
 function hasOnly(value, required, optional = []) {
   return isRecord(value)
     && required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
@@ -979,7 +978,6 @@ function authorityBinding(decision) {
     predecessor: clone(decision.web_authority.predecessor),
   };
 }
-function authorityDigest(decision) { return digestValue(authorityBinding(decision)); }
 function factsDigest(reviews, threads, comments, checks) {
   return digestValue({
     reviews: reviews.map(({ id, user, state, submitted_at, body_digest }) => ({ id, user, state, submitted_at, body_digest })),
@@ -4065,7 +4063,6 @@ function h2Audit(value, seen = new Set()) {
 function h2Sha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
 function h2Hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
 function h2Issue(value) { return Number.isSafeInteger(value) && value >= 1; }
-function h2Array(value) { return Array.isArray(value); }
 function h2StringArray(value, max = 4096) { return Array.isArray(value) && value.every((item) => h2SafeLine(item, max)); }
 function h2Comparable(left, right) {
   try { return h2Canonical(left) === h2Canonical(right); } catch (_error) { return false; }
@@ -5407,9 +5404,6 @@ function h2BuildPrTypedDocumentHistorical(projection) {
     '## What happens next', h2Bullet(current.next_action),
   ];
 }
-function h2PrProse(projection) {
-  return h2BuildPrTypedDocument(projection);
-}
 function h2BuildParentDoc(state, options = {}) {
   const checked = h2ValidateState(state);
   const projection = h2ProjectionState(checked.state, checked.history);
@@ -5768,11 +5762,6 @@ function h2ReadParentUnbound(read) {
   const envelope = h2ReadEnvelope(read);
   h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
   return h2ParseParentEnvelope(envelope, null);
-}
-function h2ReadChildUnbound(read) {
-  const envelope = h2ReadEnvelope(read);
-  h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
-  return h2ParseChildEnvelope(envelope, null, null);
 }
 function h2ValidateProviderObservation(value) {
   const keys = ['schema', 'provider', 'repository', 'pr_number', 'github_state', 'draft', 'merged', 'base_ref', 'base_sha', 'head', 'tree', 'observed_revision'];

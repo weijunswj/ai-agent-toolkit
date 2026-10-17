@@ -55,12 +55,6 @@ function requireString(value, label, targetId) {
   return value.trim();
 }
 
-function optionalString(value, label, targetId) {
-  if (value == null) return '';
-  if (typeof value !== 'string') throw new Error(`${targetId} ${label} must be a string when present`);
-  return value.trim();
-}
-
 function optionalStringArray(value, label, targetId) {
   if (value == null) return [];
   if (!Array.isArray(value)) throw new Error(`${targetId} ${label} must be an array when present`);

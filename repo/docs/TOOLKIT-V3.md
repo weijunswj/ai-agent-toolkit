@@ -51,7 +51,7 @@ Old gate names and receipts remain valid descriptions of historical work. Do not
 
 Preparation may be adopted from the exact reviewed preparation revision in the owner's handoff before the entire product rewrite is merged. Record that revision once. Keep it scoped to Toolkit V3; do not silently activate this migration in other repositories or in an already-running worker.
 
-[PR #513](https://github.com/weijunswj/ai-agent-toolkit/pull/513) is the current V3 proposal continuation; [PR #512](https://github.com/weijunswj/ai-agent-toolkit/pull/512) retains the earlier preparation. Reconcile the older PR's superseded disposition through its authorised lifecycle and read back the parent/child current pointers against the exact proposal revision. Until those updates are verified, report projection reconciliation as pending; an open historical preparation PR does not make its older text a competing current contract.
+[PR #517](https://github.com/weijunswj/ai-agent-toolkit/pull/517) is the current draft V3 Core implementation and hygiene candidate. [PR #513](https://github.com/weijunswj/ai-agent-toolkit/pull/513) and [PR #512](https://github.com/weijunswj/ai-agent-toolkit/pull/512) retain historical preparation only, not competing current contracts. The parent/child CURRENT projections and latest controlling Web decision, rather than old preparation PR text, determine the live checkpoint; any stale graph or native installation still needs authoritative reconciliation.
 
 ## 3. Core, Hardening and Later
 

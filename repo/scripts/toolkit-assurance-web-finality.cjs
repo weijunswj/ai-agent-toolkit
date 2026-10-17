@@ -218,18 +218,6 @@ function validReceiptCandidate(value) {
     && isSha(value.tree_sha);
 }
 
-function sameReceiptCandidate(left, right) {
-  if (left === null || right === null) return left === right;
-  return validReceiptCandidate(left)
-    && validReceiptCandidate(right)
-    && left.pr_number === right.pr_number
-    && left.branch === right.branch
-    && left.base_ref === right.base_ref
-    && left.base_sha === right.base_sha
-    && left.head_sha === right.head_sha
-    && left.tree_sha === right.tree_sha;
-}
-
 function validReceiptConsumerCandidate(value) {
   return exactKeys(value, ['head', 'tree', 'base'])
     && isSha(value.head)

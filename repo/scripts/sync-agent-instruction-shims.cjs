@@ -87,10 +87,6 @@ const claudeShimMarkerPairs = repoLocalMarkerPairs('claude', 'CLAUDE.SHIM');
 const geminiShimMarkerPairs = repoLocalMarkerPairs('gemini', 'GEMINI.SHIM');
 const antigravityBootstrapMarkerPairs = repoLocalMarkerPairs('antigravity', 'ANTIGRAVITY.BOOTSTRAP');
 
-function slash(value) {
-  return value.split(path.sep).join('/');
-}
-
 function normalizeWorkspaceRel(value) {
   return path.posix.normalize(String(value).replace(/\\/g, '/'));
 }
@@ -140,10 +136,6 @@ function safeWorkspacePath(relPath, label, options = {}) {
     throw new Error(`Unsafe path outside workspace for ${label}: ${normalized}`);
   }
   return path.join(root, normalized);
-}
-
-function resolveRel(relPath) {
-  return safeWorkspacePath(relPath, 'agent instruction path', { allowMissing: true });
 }
 
 function normalize(text) {

@@ -1164,25 +1164,6 @@ function inspectCodexNativePluginState(args) {
   };
 }
 
-function inspectClaudeNativePluginState(args) {
-  const probeRoot = scriptRootForReadOnlyProbe(args);
-  const result = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs({ ...args, repoRoot: probeRoot }, '--verify'),
-    { cwd: probeRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify, allowFailure: true, quiet: true }
-  );
-  if (result.status !== 0) {
-    return { status: 'needs-review', current: false, enforcement_verified: false, detail: (result.stderr || result.stdout || '').trim() };
-  }
-  try {
-    const summary = parseJsonFromOutput(result.stdout);
-    return { ...summary, status: summary.enforcement_verified === true ? 'fresh' : 'needs-review', detail: 'Installed Claude plugin and enforcement bytes verified.' };
-  } catch (error) {
-    return { status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
-  }
-}
-
 function printDelegationPreview(preview) {
   console.log('');
   console.log('# Codex helper-agent config preview');
@@ -1560,22 +1541,6 @@ async function collectCurrentState(args) {
   };
 }
 
-function formatBool(value) {
-  return value ? 'enabled' : 'disabled';
-}
-
-function formatTargetState(target) {
-  if (!target) return 'not detected';
-  const parts = [
-    `detected=${target.detected ? 'yes' : 'no'}`,
-    `enabled=${target.enabled ? 'yes' : 'no'}`,
-    `synced=${target.synced ? 'yes' : 'no'}`
-  ];
-  if (target.synced_version) parts.push(`version=${target.synced_version}`);
-  if (target.status) parts.push(`status=${target.status}`);
-  return parts.join(', ');
-}
-
 function currentReportRetentionDays(current) {
   return current?.audit?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
 }
@@ -1922,18 +1887,6 @@ function resolveClaudeTopologyCapacity(args, current) {
   return { topology, capacity_mode: capacityMode, manual_maximum: manualMaximum };
 }
 
-function currentHelperOutcome(current) {
-  const helperCount = current.delegation?.helper_count;
-  if (Number.isSafeInteger(helperCount)) {
-    if (helperCount === 0) return 'Codex currently works without helper agents.';
-    if (helperCount === 1) return 'Codex currently allows one helper at most.';
-    return `Codex currently allows up to ${helperCount} helpers. Risk: this may use substantial memory or make the computer unresponsive.`;
-  }
-  if (current.runtime?.runtime === RUNTIMES.DISABLED) return 'Helper agents are currently unavailable.';
-  if (current.runtime?.runtime === RUNTIMES.UNKNOWN) return 'The current helper limit could not be verified safely, so setup will not guess.';
-  return 'No effective helper limit is currently configured.';
-}
-
 function currentManagedSourceOutcome(current, args) {
   const managed = current?.managed || {};
   if (!managed.currentPath) return 'No Toolkit update source is configured yet.';
@@ -1970,12 +1923,6 @@ function targetCurrentOutcome(target, appName) {
   if (target.enabled === true) return `Toolkit synchronization is enabled, but the managed ${appName} files are stale or could not be verified as current.`;
   if (target.explicitly_disabled === true) return `Toolkit synchronization is turned off for ${appName}; existing files, if any, are left in place.`;
   return `${appName} was detected, but Toolkit synchronization is not enabled.`;
-}
-
-function helperRecommendationReason(current, runtimeSupported, migrationPending) {
-  if (migrationPending) return 'Preserving the exact legacy setting avoids changing native Codex configuration until you explicitly approve its migration.';
-  if (!runtimeSupported) return 'Toolkit cannot safely map a new limit to unavailable or unverifiable native helper controls.';
-  return 'Codex cannot currently prove Toolkit-controlled admission or enforce medium, non-fast execution for every helper and nested-helper path.';
 }
 
 function setupQuestionSpecs(args, current) {

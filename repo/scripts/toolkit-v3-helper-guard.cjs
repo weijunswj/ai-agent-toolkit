@@ -90,10 +90,6 @@ function route(value, location) {
   return result;
 }
 
-function defaultQualification() {
-  return Object.fromEntries(compiler.CHEAP_QUALIFIERS.map((key) => [key, { status: 'UNKNOWN', source: null }]));
-}
-
 function routeMismatch(actual, expected, location) {
   for (const field of ROUTE_FIELDS) {
     if (actual[field] !== expected[field]) {
