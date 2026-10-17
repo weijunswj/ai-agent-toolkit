@@ -172,7 +172,8 @@ test('persistent launcher workflow separates shared safeguards from host configu
   assert.match(dotMapping, /Model family: Luna/);
   assert.match(dotMapping, /Reasoning: High/);
   assert.match(dotMapping, /Service tier: Standard/);
-  assert.match(dotMapping, /Claude Code, with the exact controller-selected coding model\/effort and task packet/);
+  assert.match(dotMapping, /Claude Code, with the exact pinned-stack coding model\/effort for the dispatched role and member, and the task packet/);
+  assert.doesNotMatch(dotMapping, /controller-selected coding model/);
   assert.match(dotMapping, /visible PowerShell window on the user's selected connected, authorised laptop/);
   assert.match(dotMapping, /not permission to substitute Claude for a different registered coding route/);
   assert.match(dotMapping, /without silently switching to a hidden, cloud or different-agent execution path/);

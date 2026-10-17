@@ -229,3 +229,54 @@ test('present surfaces document only the portable Antigravity route that the bri
   const keyword = JSON.parse(texts['.claude-plugin/plugin.json']); keyword.keywords.push('ag2');
   assert.throws(() => antigravityPortableContract({ ...texts, '.claude-plugin/plugin.json': JSON.stringify(keyword) }, parseArgs));
 });
+
+// Owner records 08 (launch ownership) and 10 (finish before stopping), 17 October 2026: each is one
+// exact wording on every current surface, placed in the sections that govern it.
+const LAUNCH_OWNERSHIP = "Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.";
+const FINISH_BEFORE_STOP = '**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises bypassing a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.';
+const V3_DOC = 'repo/docs/TOOLKIT-V3.md';
+const LAUNCH_SURFACES = ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md', ...EXECUTION_SURFACES, ...RENEWAL_SURFACES, V3_DOC];
+const FINISH_SURFACES = ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md', ...EXECUTION_SURFACES, V3_DOC];
+
+function ownerLawContract(texts) {
+  for (const rel of LAUNCH_SURFACES) assert.ok(texts[rel].includes(LAUNCH_OWNERSHIP), `${rel}: launch ownership`);
+  for (const rel of FINISH_SURFACES) assert.ok(texts[rel].includes(FINISH_BEFORE_STOP), `${rel}: finish before stopping`);
+  for (const rel of EXECUTION_SURFACES) {
+    const shipping = texts[rel].match(/## Shipping Law\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+    assert.ok(shipping.includes(FINISH_BEFORE_STOP), `${rel}: finish-before-stop sits in Shipping Law`);
+    assert.match(texts[rel], /For adopted Toolkit V3 execution, automation-launched agents take models and effort only through an explicitly selected central stack registry revision/, rel);
+  }
+  const v3 = texts[V3_DOC];
+  assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP));
+  assert.ok(section(v3, 6).includes(FINISH_BEFORE_STOP));
+  assert.match(section(v3, 7), /It is not a terminal outcome; section 6's finish-before-stop rule continues the next dependency-ready authorised step/);
+  assert.match(section(v3, 8), /When the owner manually opens a G2 chat and selects its model and effort, that choice is authoritative for that first layer/);
+  assert.match(section(v3, 8), /keep independence, the complete scope and the reviewer-count obligation; a model or effort difference alone is not a G2 failure/);
+  assert.match(section(v3, 14), /Before inference by an automation-launched agent or helper, deterministically enforce/);
+  assert.match(section(v3, 14), /These checks never lock a human's manually selected first-layer model or effort/);
+  assert.match(section(v3, 18), /Missing, duplicate, stale or wrong-route automated returns cannot complete the set; an owner's manually selected reviewer model and effort are recorded as actual/);
+  assert.match(section(v3, 18), /a genuine HOLD blocks only its dependent steps/);
+  assert.match(section(v3, 19), /through a launcher that enforces the exact pinned-stack route for the role, not a prompt that merely names it/);
+  assert.match(texts['repo/CONTROLLER.md'], /every coding worker, successor or helper it dispatches automatically receives the exact pinned-stack route through a launcher that enforces it, not a prompt that merely names it/);
+  const profile = texts['repo/docs/PERSISTENT-AGENT-HELPER-PROFILE.md'];
+  assert.match(profile, /Apply Controller's finish-before-stop rule: advance every independently runnable authorised step to its verified terminal state before reporting/);
+  assert.match(profile, /committed to the immediate next Core under #501, with #423 for state and #467 for native hosts; this guidance is not installed proof/);
+  assert.match(texts['repo/docs/PERSISTENT-AGENT-STACK.md'], /exact pinned-stack coding model\/effort for the dispatched role and member/);
+}
+
+test('launch ownership and finish-before-stop are one wording on every current surface', () => {
+  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC) };
+  ownerLawContract(texts);
+  for (const [rel, before, after] of [
+    ['repo/CONTROLLER.md', 'is advisory relative to the stack and is not itself a blocker', 'must equal the stack recommendation'],
+    ['AGENTS.md', 'progress note is not a terminal outcome', 'progress note is a terminal outcome'],
+    [V3_DOC, 'holds only its dependent steps', 'stops all work'],
+    [V3_DOC, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
+    ['skills/controller-bootstrap/SKILL.md', 'without fallback or weaker effort', 'with the controller choosing the effort'],
+    ['repo/docs/PERSISTENT-AGENT-HELPER-PROFILE.md', 'this guidance is not installed proof', 'persistent dot operation is qualified'],
+    ['repo/contracts/agent-rules/GEMINI.template.md', 'automation-launched agents take models and effort', 'choose models and effort']
+  ]) {
+    assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
+    assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
+  }
+});
