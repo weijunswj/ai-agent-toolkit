@@ -31,6 +31,60 @@ function defaultClaude() {
   return process.platform === 'win32' && fs.existsSync(exe) ? exe : 'claude';
 }
 
+// The environment the native child receives, built once before any process and used both for every
+// check below and, as a fresh copy, for the spawn. Node's spawn (v22/v24) takes every enumerable key
+// including inherited ones (for...in), on Windows sorts the keys and keeps the first spelling of each
+// upper-cased name before dropping undefined values, writes `${key}=${value}`, and throws on NUL; libuv
+// (1.51) then copies the variables in WINDOWS_BACKFILL from this process into a Windows child that lacks
+// them. A shape whose child environment would differ from what an own-property reading shows holds here:
+// an inherited enumerable key, an empty key or one containing '=' or NUL, a NUL in a value, a non-string
+// value, two spellings of a route name on Windows (an undefined one included), and on Windows a non-ASCII
+// key that Node folds into an ASCII name (Windows keeps it distinct). Every value is read exactly once.
+// Node itself may still add NODE_V8_COVERAGE, and NODE_OPTIONS under the permission model, to the copy.
+const ROUTE_ENV = Object.freeze(['CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_EXTRA_BODY', 'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_CUSTOM_OAUTH_URL', 'USERPROFILE', 'HOME']);
+const WINDOWS_BACKFILL = Object.freeze(['HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP',
+  'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR']);
+const ENV_SHAPE = 'LAUNCHER_ENV_SHAPE_UNSUPPORTED', ENV_UNVERIFIED = 'LAUNCHER_EFFORT_SETTINGS_UNVERIFIED';
+const NON_ASCII = /[^\x00-\x7f]/;
+function childEnvironment(env, platform, parentEnv) {
+  if (!env || typeof env !== 'object' || Array.isArray(env)) fail('LAUNCHER_ARGS_INVALID');
+  const win = platform === 'win32', name = key => (win ? key.toUpperCase() : key);
+  let keys = [];
+  try { for (const key in env) keys.push(key); } catch { fail(ENV_SHAPE); }
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(env, key) || !key || /[=\0]/.test(key)) fail(ENV_SHAPE);
+    if (win && NON_ASCII.test(key) && !NON_ASCII.test(key.toUpperCase())) fail(ENV_SHAPE);
+  }
+  if (win) {
+    const spellings = new Map();
+    for (const key of keys) spellings.set(name(key), [...(spellings.get(name(key)) || []), key]);
+    for (const [upper, group] of spellings) {
+      if (group.length > 1 && ROUTE_ENV.includes(upper)) fail(ENV_UNVERIFIED);
+      if (group.length > 1 && group.some(key => NON_ASCII.test(key))) fail(ENV_SHAPE);
+    }
+    const seen = new Set();
+    keys = [...keys].sort().filter(key => !seen.has(name(key)) && seen.add(name(key)));
+  }
+  const out = Object.create(null);
+  for (const key of keys) {
+    let value;
+    try { value = env[key]; } catch { fail(ENV_SHAPE); }
+    if (value === undefined) continue;
+    if (typeof value !== 'string') fail(ROUTE_ENV.includes(name(key)) ? ENV_UNVERIFIED : ENV_SHAPE);
+    if (value.includes('\0')) fail(ENV_SHAPE);
+    out[key] = value;
+  }
+  const supplied = new Set(Object.keys(out).map(name));
+  if (win) {
+    for (const backfill of WINDOWS_BACKFILL) {
+      const value = parentEnv[backfill];
+      if (!supplied.has(backfill) && typeof value === 'string' && !value.includes('\0')) out[backfill] = value;
+    }
+  }
+  return { env: Object.freeze(out), supplied };
+}
+
 // Effort inputs other than --effort that Claude Code 2.1.x applies to a session, checked
 // before any native process starts. CLAUDE_CODE_EFFORT_LEVEL takes precedence over the flag,
 // and an effort in CLAUDE_CODE_EXTRA_BODY bypasses client clamps, so a conflicting value in
@@ -141,27 +195,27 @@ class EffortRouteCheck {
     try { return { file: '.config.json', config: JSON.parse(text) }; } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
   }
 
-  // CLAUDE_CONFIG_DIR as the native process receives it, or undefined when the caller omits it. Claude
-  // Code keeps an explicit empty value and resolves a relative one against the spawned session's cwd, so
-  // neither names a location checked here; both hold, as does a non-string value. On Windows more than one
-  // casing of the name holds even with equal values, since which entry the child reads is not established.
+  // CLAUDE_CONFIG_DIR as the native process receives it, or undefined when the child environment lacks it.
+  // Claude Code keeps an explicit empty value and resolves a relative one against the spawned session's cwd,
+  // so neither names a location checked here; both hold. The child environment holds at most one spelling.
   #configDir(env) {
-    const values = this.#values(env, 'CLAUDE_CONFIG_DIR').filter(v => v !== undefined);
+    const values = this.#values(env, 'CLAUDE_CONFIG_DIR');
     if (values.length === 0) return undefined;
     if (values.length > 1 || typeof values[0] !== 'string' || !this.#absolute(values[0])) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
     return values[0];
   }
 
   // The home directory the native process derives its default config home from, when CLAUDE_CONFIG_DIR is
-  // omitted: USERPROFILE on Windows, HOME elsewhere. A present value must be one absolute string, as for
-  // CLAUDE_CONFIG_DIR. On Windows a HOME without USERPROFILE holds, since the native home is then not
-  // established. An omitted variable uses this process's home directory.
-  #homeDir(env) {
+  // omitted: USERPROFILE on Windows (the caller's, else the one libuv copies from this process), HOME
+  // elsewhere. A present value must be one absolute string, as for CLAUDE_CONFIG_DIR. On Windows a caller
+  // HOME without a caller USERPROFILE holds, since the native home is then not established. When the child
+  // environment has no home variable the native process falls back to the account's profile directory.
+  #homeDir(env, supplied) {
     const name = this.#platform === 'win32' ? 'USERPROFILE' : 'HOME';
-    const values = this.#values(env, name).filter(v => v !== undefined);
+    if (this.#platform === 'win32' && supplied.has('HOME') && !supplied.has('USERPROFILE')) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    const values = this.#values(env, name);
     if (values.length === 0) {
-      if (this.#platform === 'win32' && this.#values(env, 'HOME').some(v => v !== undefined)) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
-      return os.homedir();
+      try { values.push(os.userInfo().homedir); } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
     }
     if (values.length > 1 || typeof values[0] !== 'string' || !this.#absolute(values[0])) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
     return values[0];
@@ -173,14 +227,15 @@ class EffortRouteCheck {
     return this.#platform === 'win32' ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(dir) : dir.startsWith('/');
   }
 
-  assert({ effort, model, env, cwd, args }) {
+  // `env` is the frozen child environment and `supplied` the names the caller gave it (see childEnvironment).
+  assert({ effort, model, env, supplied, cwd, args }) {
     const inherited = this.#envEffort(env, effort, CALLER_ENV_REFUSALS);
     const declared = EffortRouteCheck.#flagValues(args, '--setting-sources');
     const sources = declared.length ? declared.at(-1).split(',').map(s => s.trim()).filter(Boolean) : [...SETTING_SOURCES];
     if (sources.some(s => !SETTING_SOURCES.includes(s))) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
     const configOverride = this.#configDir(env);
     // The home directory matters only when no CLAUDE_CONFIG_DIR names the config home.
-    const home = configOverride === undefined ? this.#homeDir(env) : null;
+    const home = configOverride === undefined ? this.#homeDir(env, supplied) : null;
     const configDir = configOverride || path.join(home, '.claude');
     const files = { user: path.join(configDir, 'settings.json'), project: path.join(cwd, '.claude', 'settings.json'),
       local: path.join(cwd, '.claude', 'settings.local.json') };
@@ -212,11 +267,13 @@ class EffortRouteCheck {
 }
 
 class GateSessionLauncher {
-  #binding; #role; #claude; #spawn; #baseArgs; #effort;
+  #binding; #role; #claude; #spawn; #baseArgs; #effort; #platform; #parentEnv;
+  // `parent_env` is this process's environment as libuv reads it for the Windows backfill; tests model it.
   constructor({ captured, role, claude = defaultClaude(), spawn = spawnSync, base_args = [], read_file = file => fs.readFileSync(file, 'utf8'),
-    platform = process.platform }) {
+    platform = process.platform, parent_env = process.env }) {
     if (!ROLE_ROUTE[role]) fail('LAUNCHER_ROLE_UNSUPPORTED');
-    if (typeof read_file !== 'function' || typeof platform !== 'string') fail('LAUNCHER_ARGS_INVALID');
+    if (typeof read_file !== 'function' || typeof platform !== 'string' || !parent_env || typeof parent_env !== 'object') fail('LAUNCHER_ARGS_INVALID');
+    this.#platform = platform; this.#parentEnv = parent_env;
     this.#binding = new CapturedStackBinding(captured);
     this.#role = role; this.#claude = claude; this.#spawn = spawn;
     this.#baseArgs = confinedArgs(base_args);
@@ -231,7 +288,8 @@ class GateSessionLauncher {
 
   #run(args, cwd, env, expectedModel, effortAssurance) {
     const started = Date.now();
-    const r = this.#spawn(this.#claude, args, { cwd, env, encoding: 'utf8', timeout: 300000, maxBuffer: 32 * 1024 * 1024 });
+    // A fresh copy of the checked child environment: Node may add its own variables to the object it is given.
+    const r = this.#spawn(this.#claude, args, { cwd, env: Object.assign(Object.create(null), env), encoding: 'utf8', timeout: 300000, maxBuffer: 32 * 1024 * 1024 });
     const lines = String(r.stdout || '').split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     const init = lines.find(l => l.type === 'system' && l.subtype === 'init') || {};
     // A run that waits on a background helper emits one result per resumed turn;
@@ -249,12 +307,15 @@ class GateSessionLauncher {
       cost_usd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null, raw: r.stdout || '' };
   }
 
-  // Validates every caller input and the inherited effort route before any native process.
+  // Validates every caller input and the inherited effort route before any native process. The checks and
+  // the spawn use the same frozen child environment.
   #prepare(extra_args, env, cwd) {
     if (!env || typeof env !== 'object' || typeof cwd !== 'string' || !cwd) fail('LAUNCHER_ARGS_INVALID');
     const extra = confinedArgs(extra_args), { model, effort } = this.route;
-    const effortAssurance = this.#effort.assert({ effort, model, env, cwd: path.resolve(cwd), args: [...this.#baseArgs, ...extra] });
-    return { extra, model, effort, effortAssurance };
+    const child = childEnvironment(env, this.#platform, this.#parentEnv);
+    const effortAssurance = this.#effort.assert({ effort, model, env: child.env, supplied: child.supplied, cwd: path.resolve(cwd),
+      args: [...this.#baseArgs, ...extra] });
+    return { extra, model, effort, effortAssurance, childEnv: child.env };
   }
 
   // Starts a fresh native session for a session the gate has just launched.
@@ -262,10 +323,10 @@ class GateSessionLauncher {
     if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     const session = gate.assertExecutable(session_id);
     if (session.history.length !== 1 || session.history[0].event !== 'LAUNCH') fail('LAUNCHER_SESSION_NOT_FRESH');
-    const { extra, model, effort, effortAssurance } = this.#prepare(extra_args, env, cwd);
+    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--session-id', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, env, model, effortAssurance) };
+      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
   }
 
   // Resumes the same native session only while the gate keeps it executable,
@@ -273,10 +334,10 @@ class GateSessionLauncher {
   resume(gate, { session_id, prompt, cwd, env = process.env, extra_args = [] }) {
     if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     gate.assertExecutable(session_id);
-    const { extra, model, effort, effortAssurance } = this.#prepare(extra_args, env, cwd);
+    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--resume', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, env, model, effortAssurance) };
+      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
   }
 
   // Native session identity is derived from the gate assignment and gate session,

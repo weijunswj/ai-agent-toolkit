@@ -437,3 +437,225 @@ test('an omitted or absolute CLAUDE_CONFIG_DIR or home directory still launches 
   assert.throws(() => startEffort(launcher, { claude_config_dir: CONFIG }), refusedWith('LAUNCHER_SETTINGS_ENV_EFFORT_OVERRIDE_REFUSED'));
   assert.equal(calls.length, 0);
 });
+
+// E1: the environment the checks read must be the environment the native child receives. Node's spawn takes
+// inherited enumerable keys, on Windows keeps the lexicographically first spelling of a name before dropping
+// undefined, writes `${key}=${value}` and lets libuv copy USERPROFILE and other variables from this process.
+// X1-X5 are the reviewer's recheck-05 shapes; each holds on start and resume with zero processes.
+const fsModule = require('node:fs'), osModule = require('node:os');
+const { spawnSync } = require('node:child_process');
+const shape = 'LAUNCHER_ENV_SHAPE_UNSUPPORTED', unverifiedCode = 'LAUNCHER_EFFORT_SETTINGS_UNVERIFIED';
+const replied = () => gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+const winHome = winAbsolute('parent-home');
+
+// Rows modelled for the Windows host (and a few POSIX rows) through injected platform and parent environment.
+function envShapeRows() {
+  const inherited = (proto, own) => Object.assign(Object.create(proto), own);
+  const flipFirstLow = () => { let n = 0; return Object.defineProperty({ CLAUDE_CONFIG_DIR: CONFIG }, 'CLAUDE_CODE_EFFORT_LEVEL',
+    { enumerable: true, get: () => (n++ === 0 ? 'low' : 'high') }); };
+  return [
+    { name: 'X1 undefined CLAUDE_CONFIG_DIR beside an absolute Claude_Config_Dir', env: { CLAUDE_CONFIG_DIR: undefined, Claude_Config_Dir: CONFIG, USERPROFILE: HOME }, code: unverifiedCode },
+    { name: 'X2 undefined USERPROFILE beside an absolute userprofile', env: { USERPROFILE: undefined, userprofile: HOME }, code: unverifiedCode },
+    { name: 'X3 inherited CLAUDE_CODE_EFFORT_LEVEL', env: () => inherited({ CLAUDE_CODE_EFFORT_LEVEL: 'low' }, { CLAUDE_CONFIG_DIR: CONFIG }), code: shape },
+    { name: 'X4 inherited relative CLAUDE_CONFIG_DIR', env: () => inherited({ CLAUDE_CONFIG_DIR: 'rel' }, { USERPROFILE: HOME }), code: shape },
+    { name: 'X5 key CLAUDE_CONFIG_DIR=rel', env: { 'CLAUDE_CONFIG_DIR=rel': 'z', USERPROFILE: HOME }, code: shape },
+    { name: 'undefined uppercase effort beside a lowercase effort', env: { CLAUDE_CODE_EFFORT_LEVEL: undefined, claude_code_effort_level: 'low', CLAUDE_CONFIG_DIR: CONFIG }, code: unverifiedCode },
+    { name: 'defined uppercase config dir beside an undefined lowercase one', env: { CLAUDE_CONFIG_DIR: CONFIG, claude_config_dir: undefined }, code: unverifiedCode },
+    { name: 'undefined HOME beside a lowercase home', env: { HOME: undefined, home: HOME, CLAUDE_CONFIG_DIR: CONFIG }, code: unverifiedCode },
+    { name: 'inherited key under an own key of another casing', env: () => inherited({ claude_code_effort_level: 'low' }, { CLAUDE_CODE_EFFORT_LEVEL: 'high', CLAUDE_CONFIG_DIR: CONFIG }), code: shape },
+    { name: 'inherited unrelated key', env: () => inherited({ UNRELATED: '1' }, { CLAUDE_CONFIG_DIR: CONFIG }), code: shape },
+    { name: 'inherited relative HOME outside Windows', platform: 'linux', env: () => inherited({ HOME: 'rel' }, {}), code: shape },
+    { name: 'key with = outside Windows', platform: 'linux', env: { 'HOME=/x': 'y', HOME: '/home/owner' }, code: shape },
+    { name: 'key starting with =', env: { '=C:': CONFIG, CLAUDE_CONFIG_DIR: CONFIG }, code: shape },
+    { name: 'empty key', env: { '': 'x', CLAUDE_CONFIG_DIR: CONFIG }, code: shape },
+    { name: 'NUL in a key', env: { 'CLAUDE_CONFIG_DIR\u0000x': CONFIG }, code: shape },
+    { name: 'NUL in a value', env: { CLAUDE_CONFIG_DIR: `${CONFIG}\u0000x` }, code: shape },
+    { name: 'non-string unrelated value', env: { CLAUDE_CONFIG_DIR: CONFIG, UNRELATED: 7 }, code: shape },
+    { name: 'non-string effort value', env: { CLAUDE_CONFIG_DIR: CONFIG, CLAUDE_CODE_EFFORT_LEVEL: 3 }, code: unverifiedCode },
+    { name: 'dotless-i spelling Node folds into CLAUDE_CONFIG_DIR', env: { 'claude_config_dır': CONFIG, USERPROFILE: HOME }, code: shape },
+    { name: 'long-s spelling Node folds into USERPROFILE', env: { 'UſERPROFILE': HOME }, code: shape },
+    { name: 'two non-ASCII spellings of one name', env: { 'éX': '1', 'ÉX': '2', CLAUDE_CONFIG_DIR: CONFIG }, code: shape },
+    { name: 'getter whose first read is a lower effort', env: flipFirstLow, code: 'LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED' },
+    { name: 'getter that throws', env: () => Object.defineProperty({ CLAUDE_CONFIG_DIR: CONFIG }, 'X', { enumerable: true, get() { throw new Error('boom'); } }), code: shape },
+    { name: 'proxy whose keys cannot be enumerated', env: () => new Proxy({}, { ownKeys() { throw new Error('boom'); } }), code: shape }
+  ];
+}
+
+test('E1: every child-environment shape that differs from its own-property reading holds start and resume before any native process', () => {
+  for (const c of envShapeRows()) {
+    for (const mode of ['start', 'resume']) {
+      const calls = [];
+      const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls),
+        read_file: noFiles, platform: c.platform || 'win32', parent_env: { USERPROFILE: winHome } });
+      const env = typeof c.env === 'function' ? c.env() : c.env;
+      const call = () => (mode === 'start' ? launcher.start(gate(), { session_id: 's1', prompt: 'w', cwd: CWD, env })
+        : launcher.resume(replied(), { session_id: 's1', prompt: 'w', cwd: CWD, env }));
+      assert.throws(call, e => e.code === c.code && !/low|rel|claude-config|owner-home/.test(e.message), `${c.name}: ${mode}`);
+      assert.equal(calls.length, 0, `${c.name}: ${mode}: zero native processes`);
+    }
+  }
+  for (const env of [null, [], 'CLAUDE_CONFIG_DIR=x']) {
+    const calls = [], launcher = effortLauncher({ calls });
+    assert.throws(() => startEffort(launcher, env), refusedWith('LAUNCHER_ARGS_INVALID'));
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('E1: the spawned environment is the checked one: Node casing selection, undefined, symbols, getters, proxies and the Windows backfill', () => {
+  const spawnedEnv = (c, platform = 'win32') => {
+    let seen = null;
+    const reads = [];
+    const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', platform,
+      parent_env: c.parent || {}, read_file: file => { reads.push(file); return noFiles(); },
+      spawn: (cmd, args, options) => { seen = options.env; return fakeSpawn([])(cmd, args); } });
+    const run = (c.mode === 'resume' ? launcher.resume(replied(), { session_id: 's1', prompt: 'w', cwd: CWD, env: c.env })
+      : launcher.start(gate(), { session_id: 's1', prompt: 'w', cwd: CWD, env: c.env }));
+    return { env: { ...seen }, proto: Object.getPrototypeOf(seen), reads, run };
+  };
+  // Windows: the lexicographically first spelling of an unrelated name wins; undefined and symbol keys are not sent.
+  const sym = Symbol('ignored');
+  for (const mode of ['start', 'resume']) {
+    const r = spawnedEnv({ mode, env: { Path: 'second', PATH: 'first', DROPPED: undefined, [sym]: 'x', CLAUDE_CONFIG_DIR: CONFIG } });
+    assert.deepEqual(r.env, { PATH: 'first', CLAUDE_CONFIG_DIR: CONFIG }, mode);
+    assert.equal(r.proto, null, 'the spawn receives a null-prototype copy, so nothing inherited reaches the child');
+  }
+  // Windows: libuv's backfill from this process is part of the checked environment; a caller value is never replaced.
+  const parent = { USERPROFILE: winHome, PATH: 'parent-path', SYSTEMROOT: winAbsolute('Windows'), UNRELATED: 'not copied' };
+  const backfilled = spawnedEnv({ env: {}, parent });
+  assert.deepEqual(backfilled.env, { USERPROFILE: winHome, PATH: 'parent-path', SYSTEMROOT: winAbsolute('Windows') });
+  assert.ok(backfilled.reads.includes(pathModule.join(winHome, '.claude', '.config.json')), 'the backfilled home is the one checked');
+  const own = spawnedEnv({ env: { userprofile: HOME, Path: 'mine' }, parent });
+  assert.deepEqual(own.env, { userprofile: HOME, Path: 'mine', SYSTEMROOT: winAbsolute('Windows') });
+  assert.ok(own.reads.includes(pathModule.join(HOME, '.claude', '.config.json')));
+  // A caller HOME without a caller USERPROFILE still holds although the backfill supplies USERPROFILE.
+  assert.throws(() => spawnedEnv({ env: { HOME: HOME }, parent }), refusedWith(unverifiedCode));
+  // POSIX: no backfill; a missing HOME is the account's passwd home, not this process's HOME (only a POSIX
+  // test host has a POSIX account home to compare).
+  if (process.platform !== 'win32') {
+    const posix = spawnedEnv({ env: { Home: '/elsewhere' }, parent }, process.platform);
+    assert.deepEqual(posix.env, { Home: '/elsewhere' });
+    assert.ok(posix.reads.includes(pathModule.join(osModule.userInfo().homedir, '.claude', '.config.json')));
+  }
+  // Every value is read once: a getter that changes after the check cannot reach the child with another value.
+  let n = 0;
+  const flip = Object.defineProperty({ CLAUDE_CONFIG_DIR: CONFIG }, 'CLAUDE_CODE_EFFORT_LEVEL', { enumerable: true, get: () => (n++ === 0 ? 'high' : 'low') });
+  const flipped = spawnedEnv({ env: flip });
+  assert.equal(flipped.env.CLAUDE_CODE_EFFORT_LEVEL, 'high'); assert.equal(n, 1);
+  assert.equal(flipped.run.effort_assurance.inherited_effort, 'EQUAL');
+  let m = 0;
+  const lying = new Proxy({ CLAUDE_CONFIG_DIR: CONFIG, CLAUDE_CODE_EFFORT_LEVEL: 'high' }, { get: (t, k) => (k === 'CLAUDE_CODE_EFFORT_LEVEL' && m++ > 0 ? 'low' : t[k]) });
+  assert.equal(spawnedEnv({ env: lying }).env.CLAUDE_CODE_EFFORT_LEVEL, 'high');
+});
+
+// Real native children: a harmless Node stand-in receives the launcher's actual spawn options through the real
+// spawnSync, on this host's own platform (Windows locally, Linux in CI), and reports what it received.
+const STANDIN = pathModule.join(__dirname, 'support', 'claude-env-standin.cjs');
+function realChildLauncher() {
+  const dir = fsModule.mkdtempSync(pathModule.join(osModule.tmpdir(), 'launcher-env-'));
+  const markers = pathModule.join(dir, 'markers');
+  fsModule.mkdirSync(markers);
+  const spawned = [], reads = [];
+  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude',
+    read_file: file => { reads.push(file); return noFiles(); },
+    spawn: (cmd, args, options) => { const r = spawnSync(process.execPath, [STANDIN, ...args], options); spawned.push(options); return r; } });
+  const go = (mode, env) => (mode === 'start' ? launcher.start(gate(), { session_id: 's1', prompt: markers, cwd: dir, env })
+    : launcher.resume(replied(), { session_id: 's1', prompt: markers, cwd: dir, env }));
+  return { dir, spawned, reads, go, children: () => fsModule.readdirSync(markers).length, done: () => fsModule.rmSync(dir, { recursive: true, force: true }) };
+}
+// Names (never values) of the variables whose presence or value differs, so a failure cannot print this host's environment.
+const envDiff = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(k => a[k] !== b[k]).sort();
+const childValue = (env, name) => Object.entries(env).find(([k]) => (process.platform === 'win32' ? k.toUpperCase() === name : k === name))?.[1];
+
+test('E1: a real child receives exactly the checked environment and the config home the check read, on start and resume', () => {
+  const t = realChildLauncher();
+  try {
+    const abs = name => pathModule.join(t.dir, name);
+    const homeName = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+    const base = { ...process.env };
+    for (const k of Object.keys(base)) if (/^(CLAUDE_CONFIG_DIR|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_EXTRA_BODY|CLAUDE_CODE_CUSTOM_OAUTH_URL|USERPROFILE|HOME)$/i.test(k)) delete base[k];
+    const rows = [
+      { name: 'process.env default (the supported default object)', env: undefined },
+      { name: 'process.env passed explicitly', env: process.env },
+      { name: 'absolute config dir (accepted owner-UAT profile)', env: { ...base, CLAUDE_CONFIG_DIR: abs('config') } },
+      { name: 'omitted config dir with an absolute home', env: { ...base, [homeName]: abs('home') } },
+      { name: 'omitted config dir and home: native fallback', env: { ...base } },
+      { name: 'empty caller environment', env: {} },
+      { name: 'equal inherited-effort name', env: { ...base, CLAUDE_CONFIG_DIR: abs('config'), CLAUDE_CODE_EFFORT_LEVEL: 'high' } },
+      // On Windows the X1/X2 shapes collide and hold (rows above); on POSIX they are different variables.
+      ...(process.platform === 'win32' ? [{ name: 'two spellings of an unrelated name', env: { ...base, Path: 'second', PATH: base.PATH || base.Path || 'p' } }]
+        : [{ name: 'X1 POSIX analogue', env: { ...base, CLAUDE_CONFIG_DIR: undefined, Claude_Config_Dir: abs('config'), HOME: abs('home') } },
+          { name: 'X2 POSIX analogue', env: { ...base, HOME: undefined, home: abs('home') } }])
+    ];
+    for (const c of rows) {
+      for (const mode of ['start', 'resume']) {
+        const before = t.spawned.length, readsBefore = t.reads.length;
+        const run = t.go(mode, c.env);
+        assert.equal(run.exit, 0, `${c.name}: ${mode}`); assert.equal(run.is_error, false, `${c.name}: ${mode}`);
+        assert.equal(t.spawned.length, before + 1);
+        const report = JSON.parse(run.result_text), given = { ...t.spawned.at(-1).env };
+        assert.deepEqual(envDiff(report.env, given), [], `${c.name}: ${mode}: child environment equals the spawned one`);
+        assert.equal(report.effort, 'high');
+        const effort = childValue(report.env, 'CLAUDE_CODE_EFFORT_LEVEL');
+        assert.ok(effort === undefined || effort === 'high', `${c.name}: ${mode}: no unchecked effort in the child`);
+        const configHome = childValue(report.env, 'CLAUDE_CONFIG_DIR') || pathModule.join(report.home, '.claude');
+        assert.ok(t.reads.slice(readsBefore).includes(pathModule.join(configHome, '.config.json')),
+          `${c.name}: ${mode}: the check read the config home the child resolves`);
+        // An accepted shape reaches the child exactly as a direct spawn of the caller's own object would.
+        const direct = spawnSync(process.execPath, [STANDIN, '-p', pathModule.join(t.dir, 'markers')], c.env === undefined ? {} : { env: c.env });
+        const directReport = JSON.parse(JSON.parse(String(direct.stdout).trim().split(/\r?\n/).at(-1)).result);
+        assert.deepEqual(envDiff(report.env, directReport.env), [], `${c.name}: ${mode}: unchanged from a direct spawn`);
+        assert.equal(report.home, directReport.home);
+      }
+    }
+    assert.equal(t.children(), rows.length * 4, 'one launcher child and one direct child per row and mode');
+  } finally { t.done(); }
+});
+
+test('E1: with no home variable for the child, the check reads the native fallback home, not this process home variable', () => {
+  // POSIX: this process's HOME differs from the account home a HOME-less child uses. Windows: this process has
+  // no USERPROFILE, so libuv copies none and the child falls back to the profile directory.
+  const name = process.platform === 'win32' ? 'USERPROFILE' : 'HOME', saved = process.env[name];
+  const t = realChildLauncher();
+  try {
+    if (process.platform === 'win32') delete process.env[name]; else process.env[name] = pathModule.join(t.dir, 'not-the-account-home');
+    const base = { ...process.env };
+    for (const k of Object.keys(base)) if (/^(CLAUDE_CONFIG_DIR|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_EXTRA_BODY|CLAUDE_CODE_CUSTOM_OAUTH_URL|USERPROFILE|HOME)$/i.test(k)) delete base[k];
+    for (const mode of ['start', 'resume']) {
+      const readsBefore = t.reads.length, run = t.go(mode, base), report = JSON.parse(run.result_text);
+      assert.equal(childValue(report.env, name), undefined, mode);
+      assert.deepEqual(envDiff(report.env, { ...t.spawned.at(-1).env }), [], mode);
+      assert.ok(t.reads.slice(readsBefore).includes(pathModule.join(report.home, '.claude', '.config.json')), `${mode}: the check read the child's home`);
+    }
+  } finally {
+    if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    t.done();
+  }
+});
+
+test('E1: X1-X5 and their equivalents start no real child on start or resume on this host', () => {
+  const t = realChildLauncher();
+  try {
+    const abs = name => pathModule.join(t.dir, name);
+    const homeName = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+    const rows = [
+      { name: 'X3 inherited effort', env: () => Object.assign(Object.create({ CLAUDE_CODE_EFFORT_LEVEL: 'low' }), { CLAUDE_CONFIG_DIR: abs('config') }), code: shape },
+      { name: 'X4 inherited relative config dir', env: () => Object.assign(Object.create({ CLAUDE_CONFIG_DIR: 'rel' }), { [homeName]: abs('home') }), code: shape },
+      { name: 'X5 key with =', env: () => ({ 'CLAUDE_CONFIG_DIR=rel': 'z', [homeName]: abs('home') }), code: shape },
+      ...(process.platform === 'win32' ? [
+        { name: 'X1', env: () => ({ CLAUDE_CONFIG_DIR: undefined, Claude_Config_Dir: abs('config'), USERPROFILE: abs('home') }), code: unverifiedCode },
+        { name: 'X2', env: () => ({ USERPROFILE: undefined, userprofile: abs('home') }), code: unverifiedCode },
+        { name: 'dotless-i config dir', env: () => ({ 'claude_config_dır': abs('config'), USERPROFILE: abs('home') }), code: shape }] : [])
+    ];
+    for (const c of rows) {
+      for (const mode of ['start', 'resume']) assert.throws(() => t.go(mode, c.env()), refusedWith(c.code), `${c.name}: ${mode}`);
+    }
+    // An enumerable property on Object.prototype reaches a child through process.env and plain objects alike.
+    Object.defineProperty(Object.prototype, 'CLAUDE_CODE_EFFORT_LEVEL', { value: 'low', enumerable: true, configurable: true, writable: true });
+    try {
+      for (const env of [undefined, process.env, { CLAUDE_CONFIG_DIR: abs('config') }]) {
+        for (const mode of ['start', 'resume']) assert.throws(() => t.go(mode, env), refusedWith(shape), mode);
+      }
+    } finally { delete Object.prototype.CLAUDE_CODE_EFFORT_LEVEL; }
+    assert.equal(t.spawned.length, 0); assert.equal(t.children(), 0, 'zero real child processes');
+  } finally { t.done(); }
+});
