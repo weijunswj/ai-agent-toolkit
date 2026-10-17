@@ -37,7 +37,7 @@ function defaultClaude() {
 // either is refused rather than stripped. maxEffortLevel in a selected settings file clamps
 // the flag (lowest across files wins; modelSettings.<model>.maxEffortLevel replaces it per
 // model, "max" exempts), so a lower applicable clamp is refused too. Claude Code also copies
-// the `env` map of every enabled settings source, and of the legacy global config file
+// the `env` map of every enabled settings source, and of the global config file it selects
 // (whatever --setting-sources selects), into its process environment, so the same two
 // variables are checked there. Environment names are case-insensitive on Windows, so every
 // casing of a name is the same variable there. Managed/MDM, server-delivered settings and an
@@ -111,13 +111,29 @@ class EffortRouteCheck {
     return ranked.length ? EFFORT_ORDER[Math.min(...ranked)] : null;
   }
 
-  #readSettings(file) {
-    let text;
-    try { text = this.#readFile(file); } catch (error) {
+  // A file's text, or null when it does not exist; any other read failure holds the launch.
+  #readText(file) {
+    try { return this.#readFile(file); } catch (error) {
       if (error && error.code === 'ENOENT') return null;
       fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
     }
+  }
+
+  #readSettings(file) {
+    const text = this.#readText(file);
+    if (text === null) return null;
     try { return JSON.parse(text); } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
+  }
+
+  // The global config Claude Code 2.1.301 applies: <config home>/.config.json when that is a nonempty
+  // file, otherwise .claude.json in CLAUDE_CONFIG_DIR or the home directory. A custom OAuth URL changes
+  // the fallback file name, which is not modelled here, so it holds rather than guessing the location;
+  // a .config.json that cannot be read as a file (a directory, say) holds too.
+  #globalConfig(configDir, fallbackDir, env) {
+    if (this.#one(env, 'CLAUDE_CODE_CUSTOM_OAUTH_URL') !== undefined) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    const text = this.#readText(path.join(configDir, '.config.json'));
+    if (text === null || text === '') return { file: '.claude.json', config: this.#readSettings(path.join(fallbackDir, '.claude.json')) };
+    try { return { file: '.config.json', config: JSON.parse(text) }; } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
   }
 
   assert({ effort, model, env, cwd, args }) {
@@ -130,10 +146,11 @@ class EffortRouteCheck {
     const configDir = configOverride || path.join(home, '.claude');
     const files = { user: path.join(configDir, 'settings.json'), project: path.join(cwd, '.claude', 'settings.json'),
       local: path.join(cwd, '.claude', 'settings.local.json') };
-    // The legacy global config is read for its `env` map only; nothing else in it is inspected.
-    const legacy = this.#readSettings(path.join(configOverride || home, '.claude.json'));
+    // The selected global config is read for its `env` map only; nothing else in it is inspected.
+    const { file: globalFile, config: legacy } = this.#globalConfig(configDir, configOverride || home, env);
     if (legacy !== null && (typeof legacy !== 'object' || Array.isArray(legacy))) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
-    const checked = [{ source: 'legacy-global-config', present: legacy !== null, clamp: null, env_effort: this.#settingsEnv(legacy, effort) }];
+    const checked = [{ source: 'legacy-global-config', file: globalFile, present: legacy !== null, clamp: null,
+      env_effort: this.#settingsEnv(legacy, effort) }];
     for (const source of sources) {
       const settings = this.#readSettings(files[source]);
       checked.push({ source, present: settings !== null, clamp: settings === null ? null : EffortRouteCheck.#clamp(settings, model),

@@ -137,10 +137,13 @@ const CWD = pathModule.resolve('uat-project'), CONFIG = pathModule.resolve('clau
 const HOME = pathModule.resolve('owner-home');
 const FILES = { user: pathModule.join(CONFIG, 'settings.json'), project: pathModule.join(CWD, '.claude', 'settings.json'),
   local: pathModule.join(CWD, '.claude', 'settings.local.json'), legacy: pathModule.join(CONFIG, '.claude.json'),
-  homeLegacy: pathModule.join(HOME, '.claude.json') };
-function effortLauncher({ files = {}, base_args = [], calls = [], readError = null, platform = 'win32' } = {}) {
+  homeLegacy: pathModule.join(HOME, '.claude.json'), dotConfig: pathModule.join(CONFIG, '.config.json'),
+  homeDotConfig: pathModule.join(HOME, '.claude', '.config.json') };
+function effortLauncher({ files = {}, base_args = [], calls = [], readError = null, fileErrors = {}, platform = 'win32' } = {}) {
   const read_file = file => {
     if (readError) throw Object.assign(new Error('denied'), { code: readError });
+    const failing = Object.entries(fileErrors).find(([key]) => FILES[key] === file);
+    if (failing) throw Object.assign(new Error('unreadable'), { code: failing[1] });
     const hit = Object.entries(files).find(([key]) => (FILES[key] || pathModule.resolve(CWD, key)) === file);
     if (!hit) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
     return typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]);
@@ -285,6 +288,68 @@ test('absent, equal, unselected and unrelated settings env inputs still launch o
     assert.equal(run.effort_assurance.checked[0].source, 'legacy-global-config');
     assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--model'), calls[0].args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', 'high']);
   }
+});
+
+// R1c: Claude Code 2.1.301 takes its global config from a nonempty <config home>/.config.json before
+// falling back to .claude.json. The first two rows are the two reproduced H-R1b-1 bypasses.
+test('an effort in a nonempty .config.json global config is refused before any native process; unusable ones hold', () => {
+  const UAT = ['--setting-sources', 'project,local'];
+  const low = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } };
+  const level = 'LAUNCHER_SETTINGS_ENV_EFFORT_OVERRIDE_REFUSED', unverified = 'LAUNCHER_EFFORT_SETTINGS_UNVERIFIED';
+  const refused = [
+    { name: '.config.json in CLAUDE_CONFIG_DIR under the UAT sources', files: { dotConfig: low }, code: level },
+    { name: '.config.json in the default Windows config home', files: { homeDotConfig: low }, env: { USERPROFILE: HOME }, code: level },
+    { name: '.config.json env extra body effort', files: { dotConfig: { env: { CLAUDE_CODE_EXTRA_BODY: '{"output_config":{"effort":"low"}}' } } },
+      code: 'LAUNCHER_SETTINGS_ENV_EXTRA_BODY_EFFORT_REFUSED' },
+    { name: 'wrong-cased Windows key in .config.json env', files: { dotConfig: { env: { Claude_Code_Effort_Level: 'low' } } }, code: level },
+    { name: 'empty .config.json falls back to .claude.json', files: { dotConfig: '', legacy: low }, code: level },
+    { name: 'unparseable .config.json', files: { dotConfig: '{"env":' }, code: unverified },
+    { name: 'whitespace-only .config.json', files: { dotConfig: ' \n' }, code: unverified },
+    { name: '.config.json that is not an object', files: { dotConfig: '[]' }, code: unverified },
+    { name: '.config.json env that is not an object', files: { dotConfig: { env: ['CLAUDE_CODE_EFFORT_LEVEL=low'] } }, code: unverified },
+    { name: 'unreadable .config.json', fileErrors: { dotConfig: 'EACCES' }, code: unverified },
+    { name: '.config.json that is a directory', fileErrors: { dotConfig: 'EISDIR' }, code: unverified },
+    { name: 'custom OAuth URL selects an unmodelled global config name', env: { CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.invalid' }, code: unverified },
+    { name: 'wrong-cased Windows custom OAuth URL', files: { dotConfig: { env: {} } }, env: { claude_code_custom_oauth_url: 'https://oauth.invalid' }, code: unverified }
+  ];
+  for (const c of refused) {
+    const calls = [], launcher = effortLauncher({ files: c.files || {}, fileErrors: c.fileErrors || {}, base_args: UAT, calls });
+    const env = c.env && c.env.USERPROFILE ? c.env : baseEnv(c.env || {});
+    assert.throws(() => startEffort(launcher, env), e => e.code === c.code && !/low|oauth/i.test(e.message), c.name);
+    assert.equal(calls.length, 0, `${c.name}: zero native processes`);
+  }
+  const calls = [], launcher = effortLauncher({ files: { dotConfig: low }, base_args: UAT, calls });
+  const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+  assert.throws(() => launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: baseEnv({}) }), refusedWith(level));
+  assert.equal(calls.length, 0, 'a resumed gate is checked the same way');
+});
+
+test('the selected global config file decides the env check: absent or empty .config.json uses .claude.json', () => {
+  const high = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'high' } }, low = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } };
+  const allowed = [
+    { name: 'no .config.json', files: { legacy: high }, global: ['.claude.json', true, 'EQUAL'] },
+    { name: 'no global config at all', files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    { name: 'empty .config.json', files: { dotConfig: '', legacy: high }, global: ['.claude.json', true, 'EQUAL'] },
+    { name: 'equal effort in .config.json', files: { dotConfig: high }, global: ['.config.json', true, 'EQUAL'] },
+    { name: '.config.json takes precedence over .claude.json', files: { dotConfig: high, legacy: low }, global: ['.config.json', true, 'EQUAL'] },
+    { name: '.config.json without env', files: { dotConfig: { numStartups: 3 }, legacy: low }, global: ['.config.json', true, 'ABSENT'] },
+    { name: 'default config home .config.json', files: { homeDotConfig: high, homeLegacy: low }, env: { USERPROFILE: HOME }, global: ['.config.json', true, 'EQUAL'] }
+  ];
+  for (const c of allowed) {
+    const calls = [], launcher = effortLauncher({ files: c.files, base_args: ['--setting-sources', 'project,local'], calls });
+    const env = c.env || baseEnv({});
+    const g = gate(), run = launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env });
+    assert.equal(calls.length, 1, c.name);
+    const row = run.effort_assurance.checked[0];
+    assert.deepEqual([row.source, row.file, row.present, row.env_effort], ['legacy-global-config', ...c.global], c.name);
+    assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--model'), calls[0].args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', 'high']);
+  }
+  // Resume uses the same selection.
+  const calls = [], launcher = effortLauncher({ files: { dotConfig: high, legacy: low }, calls });
+  const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+  const run = launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: baseEnv({}) });
+  assert.equal(run.effort_assurance.checked[0].file, '.config.json');
+  assert.ok(calls[0].args.includes('--resume'));
 });
 
 test('the accepted owner-UAT invocation is unchanged by the effort-route check', () => {
