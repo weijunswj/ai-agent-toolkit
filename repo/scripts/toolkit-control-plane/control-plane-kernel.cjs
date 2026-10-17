@@ -1389,10 +1389,6 @@ class TrustedAuthorityContext {
 }
 function createTrustedAuthorityContext(authority,options={}) {return new TrustedAuthorityContext(authority,options);}
 
-function contextRootMatches(context, repository) {
-  const state = context && context.__state;
-  return Boolean(state);
-}
 
 function buildResult(overrides = {}) {
   return {

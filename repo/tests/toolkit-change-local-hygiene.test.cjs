@@ -83,6 +83,9 @@ const RETIRED_HELPERS = {
   ],
   "repo/scripts/toolkit-v3-helper-guard.cjs": [
     "defaultQualification"
+  ],
+  "repo/scripts/toolkit-control-plane/control-plane-kernel.cjs": [
+    "contextRootMatches"
   ]
 };
 test('removed unreferenced helpers do not return in current runtime modules', () => {
