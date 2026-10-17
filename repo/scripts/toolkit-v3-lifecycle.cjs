@@ -80,6 +80,27 @@ function reviewerContinuation(input) {
     retained_coverage_requires_applicability: true, affected_criteria: value.affected_criteria });
 }
 
+// A correction recheck for a finding family is admissible only on a closed family record evaluated
+// against the exact corrected candidate: the latest reproducer passing is never enough by itself. After
+// two NOT PASSED rechecks of the same family a consolidated root-cause reassessment must be referenced
+// instead of another one-case correction. This decides admissibility only; it launches nothing and does
+// not waive a genuine supported-path defect the recheck then finds.
+function familyRecheckAdmission(input) {
+  const value = copy(input);
+  keys(value, ['family_id', 'candidate', 'closure', 'same_family_not_passed', 'root_cause_reassessment_digest', 'latest_reproducer_passes']);
+  if (!id(value.family_id) || typeof value.candidate !== 'string' || !value.candidate || !Number.isSafeInteger(value.same_family_not_passed)
+    || value.same_family_not_passed < 0 || typeof value.latest_reproducer_passes !== 'boolean'
+    || value.root_cause_reassessment_digest !== null && !hex(value.root_cause_reassessment_digest)) refuse('V3_FAMILY_RECHECK_INVALID');
+  const closure = value.closure;
+  if (!closure || closure.schema !== 'toolkit.v3.launch-family-closure-evaluation.v1' || closure.family_id !== value.family_id) refuse('V3_FAMILY_CLOSURE_REQUIRED');
+  if (closure.candidate !== value.candidate) refuse('V3_FAMILY_CLOSURE_STALE');
+  if (closure.state !== 'FAMILY_CLOSED' || !Array.isArray(closure.gaps) || closure.gaps.length) refuse('V3_FAMILY_CLOSURE_OPEN');
+  if (value.same_family_not_passed >= 2 && value.root_cause_reassessment_digest === null) refuse('V3_FAMILY_ROOT_CAUSE_REASSESSMENT_REQUIRED');
+  return Object.freeze({ admissible: true, basis: 'FAMILY_CLOSURE', family_id: value.family_id, candidate: value.candidate,
+    closure_record_digest: closure.record_digest, latest_reproducer_sufficient: false,
+    root_cause_reassessment_digest: value.root_cause_reassessment_digest, genuine_defects_waived: false });
+}
+
 // One gate assignment (G0, G1 or G2) and the native sessions that work it.
 // Session states are ACTIVE, WAITING_OWNER (a question or UAT), INTERRUPTED,
 // SUBMITTED and RETIRED. Questions and UAT keep the gate unfinished; a checkpoint
@@ -508,4 +529,4 @@ function evaluateRecoveredLifecycle(input) {
 }
 
 module.exports = Object.freeze({ ReviewSetEvaluator, GateAssignment, successorPacket, SESSION_STATES, ACCEPTANCE_MODES,
-  planRenewal, classifyUatImpact, reviewerContinuation, evaluateRecoveredLifecycle, digest });
+  planRenewal, classifyUatImpact, reviewerContinuation, familyRecheckAdmission, evaluateRecoveredLifecycle, digest });

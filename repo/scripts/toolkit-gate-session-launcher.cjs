@@ -126,14 +126,51 @@ class EffortRouteCheck {
   }
 
   // The global config Claude Code 2.1.301 applies: <config home>/.config.json when that is a nonempty
-  // file, otherwise .claude.json in CLAUDE_CONFIG_DIR or the home directory. A custom OAuth URL changes
-  // the fallback file name, which is not modelled here, so it holds rather than guessing the location;
-  // a .config.json that cannot be read as a file (a directory, say) holds too.
+  // file, otherwise .claude.json in CLAUDE_CONFIG_DIR or the home directory. When .claude.json is absent
+  // it may instead select a zero-length writable .config.json; which file it then uses is not established
+  // here, so that row names the file as UNVERIFIED (neither file carries an env map). A custom OAuth URL
+  // changes the fallback file name, which is not modelled here, so it holds rather than guessing the
+  // location; a .config.json that cannot be read as a file (a directory, say) holds too.
   #globalConfig(configDir, fallbackDir, env) {
     if (this.#one(env, 'CLAUDE_CODE_CUSTOM_OAUTH_URL') !== undefined) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
     const text = this.#readText(path.join(configDir, '.config.json'));
-    if (text === null || text === '') return { file: '.claude.json', config: this.#readSettings(path.join(fallbackDir, '.claude.json')) };
+    if (text === null || text === '') {
+      const config = this.#readSettings(path.join(fallbackDir, '.claude.json'));
+      return { file: text === '' && config === null ? 'UNVERIFIED' : '.claude.json', config };
+    }
     try { return { file: '.config.json', config: JSON.parse(text) }; } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
+  }
+
+  // CLAUDE_CONFIG_DIR as the native process receives it, or undefined when the caller omits it. Claude
+  // Code keeps an explicit empty value and resolves a relative one against the spawned session's cwd, so
+  // neither names a location checked here; both hold, as does a non-string value. On Windows more than one
+  // casing of the name holds even with equal values, since which entry the child reads is not established.
+  #configDir(env) {
+    const values = this.#values(env, 'CLAUDE_CONFIG_DIR').filter(v => v !== undefined);
+    if (values.length === 0) return undefined;
+    if (values.length > 1 || typeof values[0] !== 'string' || !this.#absolute(values[0])) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    return values[0];
+  }
+
+  // The home directory the native process derives its default config home from, when CLAUDE_CONFIG_DIR is
+  // omitted: USERPROFILE on Windows, HOME elsewhere. A present value must be one absolute string, as for
+  // CLAUDE_CONFIG_DIR. On Windows a HOME without USERPROFILE holds, since the native home is then not
+  // established. An omitted variable uses this process's home directory.
+  #homeDir(env) {
+    const name = this.#platform === 'win32' ? 'USERPROFILE' : 'HOME';
+    const values = this.#values(env, name).filter(v => v !== undefined);
+    if (values.length === 0) {
+      if (this.#platform === 'win32' && this.#values(env, 'HOME').some(v => v !== undefined)) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+      return os.homedir();
+    }
+    if (values.length > 1 || typeof values[0] !== 'string' || !this.#absolute(values[0])) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    return values[0];
+  }
+
+  // Absolute on the target platform: a drive-letter or UNC path on Windows (a rooted `\dir` or a `C:dir`
+  // depends on the child's current drive or directory), a `/` path elsewhere.
+  #absolute(dir) {
+    return this.#platform === 'win32' ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(dir) : dir.startsWith('/');
   }
 
   assert({ effort, model, env, cwd, args }) {
@@ -141,8 +178,9 @@ class EffortRouteCheck {
     const declared = EffortRouteCheck.#flagValues(args, '--setting-sources');
     const sources = declared.length ? declared.at(-1).split(',').map(s => s.trim()).filter(Boolean) : [...SETTING_SOURCES];
     if (sources.some(s => !SETTING_SOURCES.includes(s))) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
-    const configOverride = this.#one(env, 'CLAUDE_CONFIG_DIR');
-    const home = this.#one(env, 'USERPROFILE') || this.#one(env, 'HOME') || os.homedir();
+    const configOverride = this.#configDir(env);
+    // The home directory matters only when no CLAUDE_CONFIG_DIR names the config home.
+    const home = configOverride === undefined ? this.#homeDir(env) : null;
     const configDir = configOverride || path.join(home, '.claude');
     const files = { user: path.join(configDir, 'settings.json'), project: path.join(cwd, '.claude', 'settings.json'),
       local: path.join(cwd, '.claude', 'settings.local.json') };

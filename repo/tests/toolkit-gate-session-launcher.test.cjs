@@ -277,7 +277,9 @@ test('absent, equal, unselected and unrelated settings env inputs still launch o
       env_effort: ['ABSENT', 'ABSENT', 'ABSENT'] },
     { name: 'unrelated settings env keys', files: { project: { env: { DISABLE_TELEMETRY: '1', CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"user_id":"controlled"}}' } } },
       env_effort: ['ABSENT', 'ABSENT', 'ABSENT', 'ABSENT'] },
-    { name: 'a lowercase name is a different variable outside Windows', platform: 'linux', env: { claude_code_effort_level: 'low' },
+    // Outside Windows only a / path is an absolute CLAUDE_CONFIG_DIR, whatever this test host's own path style.
+    { name: 'a lowercase name is a different variable outside Windows', platform: 'linux',
+      env: { CLAUDE_CONFIG_DIR: '/home/owner/claude-config', claude_code_effort_level: 'low' },
       env_effort: ['ABSENT', 'ABSENT', 'ABSENT', 'ABSENT'] }
   ];
   for (const c of allowed) {
@@ -362,4 +364,72 @@ test('the accepted owner-UAT invocation is unchanged by the effort-route check',
     '--effort', 'high', ...base_args, ...extra_args, '--output-format', 'stream-json', '--verbose']);
   assert.deepEqual(run.effort_assurance.setting_sources, ['project', 'local']);
   assert.equal(run.effort_assurance.client_clamp, null, 'the excluded user source does not clamp');
+});
+
+// R1c-F1: Claude Code keeps an explicit empty CLAUDE_CONFIG_DIR and resolves a relative one (or a relative home) against the
+// spawned session's cwd, so the launcher cannot name the global config either selects. The first two rows
+// are the reproduced bypasses: an effort in <cwd>/.config.json or <cwd>/rel/.config.json.
+test('an empty, relative, non-string or ambiguously cased CLAUDE_CONFIG_DIR or home directory holds start and resume before any native process', () => {
+  const low = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } }, unverified = 'LAUNCHER_EFFORT_SETTINGS_UNVERIFIED';
+  const held = [
+    { name: 'empty config dir with an effort in <cwd>/.config.json', files: { '.config.json': low }, env: { CLAUDE_CONFIG_DIR: '', USERPROFILE: HOME } },
+    { name: 'relative config dir with an effort in <cwd>/rel/.config.json', files: { 'rel/.config.json': low }, env: { CLAUDE_CONFIG_DIR: 'rel', USERPROFILE: HOME } },
+    { name: 'empty config dir in another Windows casing', files: { '.config.json': low }, env: { claude_config_dir: '', USERPROFILE: HOME } },
+    { name: 'relative config dir in another Windows casing', env: { Claude_Config_Dir: 'rel', USERPROFILE: HOME } },
+    { name: 'two Windows casings with equal absolute values', env: { CLAUDE_CONFIG_DIR: CONFIG, claude_config_dir: CONFIG } },
+    { name: 'two Windows casings with differing values', env: { CLAUDE_CONFIG_DIR: CONFIG, claude_config_dir: HOME } },
+    { name: 'an absolute and an empty Windows casing', env: { CLAUDE_CONFIG_DIR: CONFIG, Claude_Config_Dir: '' } },
+    { name: 'non-string config dir', env: { CLAUDE_CONFIG_DIR: 7, USERPROFILE: HOME } },
+    { name: 'Windows rooted path without a drive', env: { CLAUDE_CONFIG_DIR: '\\claude-config', USERPROFILE: HOME } },
+    { name: 'Windows drive-relative path', env: { CLAUDE_CONFIG_DIR: 'C:claude-config', USERPROFILE: HOME } },
+    { name: 'relative config dir outside Windows', platform: 'linux', env: { CLAUDE_CONFIG_DIR: 'rel', HOME: '/home/owner' } },
+    { name: 'empty config dir outside Windows', platform: 'linux', env: { CLAUDE_CONFIG_DIR: '', HOME: '/home/owner' } },
+    // The same family through the default config home: the home variable names <home>/.claude.
+    { name: 'relative USERPROFILE with an effort in <cwd>/rel/.claude/.config.json', files: { 'rel/.claude/.config.json': low }, env: { USERPROFILE: 'rel' } },
+    { name: 'empty USERPROFILE', env: { USERPROFILE: '' } },
+    { name: 'two Windows casings of USERPROFILE', env: { USERPROFILE: HOME, userprofile: HOME } },
+    { name: 'HOME without USERPROFILE on Windows', env: { HOME: HOME } },
+    { name: 'relative HOME outside Windows', platform: 'linux', env: { HOME: 'rel' } }
+  ];
+  for (const c of held) {
+    const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: ['--setting-sources', 'project,local'], calls, platform: c.platform || 'win32' });
+    assert.throws(() => startEffort(launcher, c.env), e => e.code === unverified && !/low|rel|claude-config/.test(e.message), `${c.name}: start`);
+    const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+    assert.throws(() => launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: c.env }), refusedWith(unverified), `${c.name}: resume`);
+    assert.equal(calls.length, 0, `${c.name}: zero native processes`);
+  }
+});
+
+test('an omitted or absolute CLAUDE_CONFIG_DIR or home directory still launches and resumes; a single Windows casing is honoured', () => {
+  const high = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'high' } }, low = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } };
+  const allowed = [
+    { name: 'omitted config dir', env: { USERPROFILE: HOME }, files: { homeLegacy: high }, global: ['.claude.json', true, 'EQUAL'] },
+    { name: 'absolute config dir', env: baseEnv({}), files: { dotConfig: high }, global: ['.config.json', true, 'EQUAL'] },
+    { name: 'absolute config dir in another Windows casing', env: { claude_config_dir: CONFIG }, files: { dotConfig: high }, global: ['.config.json', true, 'EQUAL'] },
+    { name: 'undefined config dir is omitted', env: { CLAUDE_CONFIG_DIR: undefined, USERPROFILE: HOME }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    { name: 'UNC config dir', env: { CLAUDE_CONFIG_DIR: '\\\\server\\share\\claude-config' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    { name: 'absolute config dir outside Windows', platform: 'linux', env: { CLAUDE_CONFIG_DIR: '/home/owner/claude-config' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    { name: 'an absolute config dir makes the home variable irrelevant', env: { CLAUDE_CONFIG_DIR: CONFIG, USERPROFILE: 'rel' }, files: { dotConfig: high }, global: ['.config.json', true, 'EQUAL'] },
+    { name: 'no home variable uses this process home', env: {}, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    { name: 'absolute HOME outside Windows', platform: 'linux', env: { HOME: '/home/owner' }, files: {}, global: ['.claude.json', false, 'ABSENT'] },
+    // R1c-N1: with no .claude.json Claude Code may select the zero-length .config.json; the file is not named.
+    { name: 'empty .config.json without .claude.json', env: baseEnv({}), files: { dotConfig: '' }, global: ['UNVERIFIED', false, 'ABSENT'] }
+  ];
+  for (const c of allowed) {
+    const calls = [], launcher = effortLauncher({ files: c.files, base_args: ['--setting-sources', 'project,local'], calls, platform: c.platform || 'win32' });
+    const run = startEffort(launcher, c.env);
+    const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+    const resumed = launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: c.env });
+    assert.equal(calls.length, 2, c.name);
+    for (const r of [run, resumed]) {
+      const row = r.effort_assurance.checked[0];
+      assert.deepEqual([row.source, row.file, row.present, row.env_effort], ['legacy-global-config', ...c.global], c.name);
+    }
+    assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--model'), calls[0].args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', 'high']);
+    assert.ok(calls[1].args.includes('--resume'));
+  }
+  // A single wrong-cased Windows name is the same variable: its .config.json is checked.
+  const calls = [], launcher = effortLauncher({ files: { dotConfig: low }, calls });
+  assert.throws(() => startEffort(launcher, { claude_config_dir: CONFIG }), refusedWith('LAUNCHER_SETTINGS_ENV_EFFORT_OVERRIDE_REFUSED'));
+  assert.equal(calls.length, 0);
 });
