@@ -134,16 +134,18 @@ test('resume refuses a gate of another role before any native process', () => {
 // tests never read this machine's real Claude configuration.
 const pathModule = require('node:path');
 const CWD = pathModule.resolve('uat-project'), CONFIG = pathModule.resolve('claude-config');
+const HOME = pathModule.resolve('owner-home');
 const FILES = { user: pathModule.join(CONFIG, 'settings.json'), project: pathModule.join(CWD, '.claude', 'settings.json'),
-  local: pathModule.join(CWD, '.claude', 'settings.local.json') };
-function effortLauncher({ files = {}, base_args = [], calls = [], readError = null } = {}) {
+  local: pathModule.join(CWD, '.claude', 'settings.local.json'), legacy: pathModule.join(CONFIG, '.claude.json'),
+  homeLegacy: pathModule.join(HOME, '.claude.json') };
+function effortLauncher({ files = {}, base_args = [], calls = [], readError = null, platform = 'win32' } = {}) {
   const read_file = file => {
     if (readError) throw Object.assign(new Error('denied'), { code: readError });
     const hit = Object.entries(files).find(([key]) => (FILES[key] || pathModule.resolve(CWD, key)) === file);
     if (!hit) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
     return typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]);
   };
-  return new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls), base_args, read_file });
+  return new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', spawn: fakeSpawn(calls), base_args, read_file, platform });
 }
 const baseEnv = extra => ({ CLAUDE_CONFIG_DIR: CONFIG, ...extra });
 const startEffort = (launcher, env, extra_args = []) => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env, extra_args });
@@ -219,6 +221,69 @@ test('effort settings that cannot be read or verified hold the launch', () => {
     const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: c.base_args || [], calls, readError: c.readError || null });
     assert.throws(() => startEffort(launcher, baseEnv({})), refusedWith('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'), JSON.stringify(c));
     assert.equal(calls.length, 0);
+  }
+});
+
+// R1b: the `env` map of every settings source Claude Code applies, the legacy global config and a
+// caller environment in any Windows casing carry the same effort rules. One frozen input matrix.
+test('an effort carried in an applied settings env map or a differently cased Windows key is refused before any native process', () => {
+  const UAT = ['--setting-sources', 'project,local'];
+  const low = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } };
+  const level = 'LAUNCHER_SETTINGS_ENV_EFFORT_OVERRIDE_REFUSED', body = 'LAUNCHER_SETTINGS_ENV_EXTRA_BODY_EFFORT_REFUSED';
+  const unverified = 'LAUNCHER_EFFORT_SETTINGS_UNVERIFIED';
+  const refused = [
+    { name: 'user settings env', files: { user: low }, code: level },
+    { name: 'project settings env', files: { project: low }, code: level },
+    { name: 'local settings env', files: { local: low }, code: level },
+    { name: '--settings JSON env', base_args: ['--settings', JSON.stringify(low)], code: level },
+    { name: '--settings file env', files: { 'policy.json': low }, base_args: ['--settings', 'policy.json'], code: level },
+    { name: 'project env extra body effort', files: { project: { env: { CLAUDE_CODE_EXTRA_BODY: '{"output_config":{"effort":"low"}}' } } }, code: body },
+    { name: '--settings JSON env extra body thinking', base_args: ['--settings', JSON.stringify({ env: { CLAUDE_CODE_EXTRA_BODY: '{"thinking":{"type":"disabled"}}' } })], code: body },
+    { name: 'legacy global config env under the UAT sources', files: { legacy: { numStartups: 3, env: { CLAUDE_CODE_EFFORT_LEVEL: 'medium' } } }, base_args: UAT, code: level },
+    { name: 'legacy global config in the home directory', files: { homeLegacy: low }, env: { USERPROFILE: HOME }, base_args: UAT, code: level },
+    { name: 'wrong-cased Windows key in a settings env', files: { project: { env: { claude_code_effort_level: 'low' } } }, code: level },
+    { name: 'wrong-cased Windows caller key', env: { claude_code_effort_level: 'low' }, code: 'LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED' },
+    { name: 'wrong-cased Windows caller extra body', env: { Claude_Code_Extra_Body: '{"reasoning_effort":"low"}' }, code: 'LAUNCHER_ENV_EXTRA_BODY_EFFORT_REFUSED' },
+    { name: 'conflicting Windows casings of one caller key', env: { CLAUDE_CODE_EFFORT_LEVEL: 'high', claude_code_effort_level: 'low' }, code: unverified },
+    { name: 'settings env that is not an object', files: { local: { env: 'CLAUDE_CODE_EFFORT_LEVEL=low' } }, code: unverified },
+    { name: 'non-string settings env effort', files: { project: { env: { CLAUDE_CODE_EFFORT_LEVEL: 3 } } }, code: unverified },
+    { name: 'unparseable settings env extra body', files: { project: { env: { CLAUDE_CODE_EXTRA_BODY: '{not json' } } }, code: unverified },
+    { name: 'unparseable legacy global config', files: { legacy: '{"env":' }, base_args: UAT, code: unverified },
+    { name: 'legacy global config that is not an object', files: { legacy: '[]' }, base_args: UAT, code: unverified }
+  ];
+  for (const c of refused) {
+    const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: c.base_args || [], calls });
+    const env = c.env && c.env.USERPROFILE ? c.env : baseEnv(c.env || {});
+    assert.throws(() => startEffort(launcher, env), e => e.code === c.code && !/low|medium/.test(e.message), c.name);
+    assert.equal(calls.length, 0, `${c.name}: zero native processes`);
+  }
+  // A resumed gate is checked the same way.
+  const calls = [], launcher = effortLauncher({ files: { project: low }, calls });
+  const replied = gate().transition('s1', 'ASK_OWNER', h('q')).transition('s1', 'OWNER_REPLY', h('a'));
+  assert.throws(() => launcher.resume(replied, { session_id: 's1', prompt: 'x', cwd: CWD, env: baseEnv({}) }), refusedWith(level));
+  assert.equal(calls.length, 0);
+});
+
+test('absent, equal, unselected and unrelated settings env inputs still launch on the pinned route', () => {
+  const high = { env: { CLAUDE_CODE_EFFORT_LEVEL: 'high' } };
+  const allowed = [
+    { name: 'absent everywhere', files: { project: { hooks: {} }, legacy: { numStartups: 3 } }, env_effort: ['ABSENT', 'ABSENT', 'ABSENT', 'ABSENT'] },
+    { name: 'equal in every source', files: { legacy: high, user: high, project: high, local: high, 'policy.json': high }, base_args: ['--settings', 'policy.json'],
+      env_effort: ['EQUAL', 'EQUAL', 'EQUAL', 'EQUAL', 'EQUAL'] },
+    { name: 'unselected user settings', files: { user: { env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } } }, base_args: ['--setting-sources', 'project,local'],
+      env_effort: ['ABSENT', 'ABSENT', 'ABSENT'] },
+    { name: 'unrelated settings env keys', files: { project: { env: { DISABLE_TELEMETRY: '1', CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"user_id":"controlled"}}' } } },
+      env_effort: ['ABSENT', 'ABSENT', 'ABSENT', 'ABSENT'] },
+    { name: 'a lowercase name is a different variable outside Windows', platform: 'linux', env: { claude_code_effort_level: 'low' },
+      env_effort: ['ABSENT', 'ABSENT', 'ABSENT', 'ABSENT'] }
+  ];
+  for (const c of allowed) {
+    const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: c.base_args || [], calls, platform: c.platform || 'win32' });
+    const run = startEffort(launcher, baseEnv(c.env || {}));
+    assert.equal(calls.length, 1, c.name);
+    assert.deepEqual(run.effort_assurance.checked.map(x => x.env_effort), c.env_effort, c.name);
+    assert.equal(run.effort_assurance.checked[0].source, 'legacy-global-config');
+    assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--model'), calls[0].args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', 'high']);
   }
 });
 

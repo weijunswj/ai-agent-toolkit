@@ -72,7 +72,15 @@ function currentOperatingContract(texts) {
   }
   // One wording: ARCHITECTURE and the portable rules repeat CONTROLLER's current paragraphs.
   const controller = texts['repo/CONTROLLER.md'];
-  for (const prefix of ['Reuse the agreed private TRANSPORT store,', 'G2 classifies concrete findings against agreed acceptance:',
+  // Storage is user-selected; a private TRANSPORT-* Git repository is only the default recommendation.
+  for (const rel of ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md']) {
+    assert.doesNotMatch(texts[rel], /agreed private TRANSPORT store/, rel);
+    assert.match(texts[rel], /a private `TRANSPORT-\*` Git repository is only the recommended default when no store was previously selected/, rel);
+  }
+  assert.match(read('repo/docs/TOOLKIT-V3.md'), /selection of another supported private backend takes precedence over that recommendation/);
+  assert.match(read('repo/docs/TOOLKIT-V3.md'), /Git current-tree expiry is the adapter for a Git store, not a universal storage interface/);
+  assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /TRANSPORT repo retaining the small index/);
+  for (const prefix of ['Reuse the user-selected private evidence store;', 'G2 classifies concrete findings against agreed acceptance:',
     'For adopted Toolkit V3 work, ']) {
     assert.equal(lineStarting(texts['repo/ARCHITECTURE.md'], prefix), lineStarting(controller, prefix), prefix);
   }

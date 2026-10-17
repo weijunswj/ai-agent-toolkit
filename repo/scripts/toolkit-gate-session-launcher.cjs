@@ -36,16 +36,57 @@ function defaultClaude() {
 // and an effort in CLAUDE_CODE_EXTRA_BODY bypasses client clamps, so a conflicting value in
 // either is refused rather than stripped. maxEffortLevel in a selected settings file clamps
 // the flag (lowest across files wins; modelSettings.<model>.maxEffortLevel replaces it per
-// model, "max" exempts), so a lower applicable clamp is refused too. Managed/MDM, server-
-// delivered settings and an organization's per-model cap are not observable here, and the
-// native init event does not report effort, so exact effort is reported as not exposed.
+// model, "max" exempts), so a lower applicable clamp is refused too. Claude Code also copies
+// the `env` map of every enabled settings source, and of the legacy global config file
+// (whatever --setting-sources selects), into its process environment, so the same two
+// variables are checked there. Environment names are case-insensitive on Windows, so every
+// casing of a name is the same variable there. Managed/MDM, server-delivered settings and an
+// organization's per-model cap are not observable here, and the native init event does not
+// report effort, so exact effort is reported as not exposed.
 const EFFORT_ORDER = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 const SETTING_SOURCES = Object.freeze(['user', 'project', 'local']);
 const UNOBSERVED_EFFORT_SOURCES = Object.freeze(['managed settings (managed-settings.json, MDM or policy helper)',
   'server-managed settings', 'organization per-model effort cap']);
+const CALLER_ENV_REFUSALS = Object.freeze({ level: 'LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED', body: 'LAUNCHER_ENV_EXTRA_BODY_EFFORT_REFUSED' });
+const SETTINGS_ENV_REFUSALS = Object.freeze({ level: 'LAUNCHER_SETTINGS_ENV_EFFORT_OVERRIDE_REFUSED',
+  body: 'LAUNCHER_SETTINGS_ENV_EXTRA_BODY_EFFORT_REFUSED' });
 class EffortRouteCheck {
-  #readFile;
-  constructor(readFile) { this.#readFile = readFile; }
+  #readFile; #platform;
+  constructor(readFile, platform) { this.#readFile = readFile; this.#platform = platform; }
+
+  // Every value an environment map holds for `name`, in each casing the platform treats as that name.
+  #values(map, name) {
+    return Object.entries(map).filter(([key]) => (this.#platform === 'win32' ? key.toUpperCase() === name : key === name)).map(([, v]) => v);
+  }
+
+  // One variable's value, or undefined; differing casings of it are ambiguous on Windows.
+  #one(map, name) {
+    const values = [...new Set(this.#values(map, name).filter(v => v !== undefined && v !== ''))];
+    if (values.length > 1 || values.some(v => typeof v !== 'string')) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    return values[0];
+  }
+
+  // Applies the effort rules to one environment map; returns 'EQUAL' or 'ABSENT'. Values are never reported.
+  #envEffort(map, effort, refusals) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    const level = this.#one(map, 'CLAUDE_CODE_EFFORT_LEVEL');
+    if (level !== undefined && level !== effort) fail(refusals.level);
+    const extra = this.#one(map, 'CLAUDE_CODE_EXTRA_BODY');
+    if (extra !== undefined) {
+      let body;
+      try { body = JSON.parse(extra); } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
+      const visit = value => value && typeof value === 'object' && Object.entries(value)
+        .some(([key, child]) => /effort|reasoning|thinking/i.test(key) || visit(child));
+      if (visit(body)) fail(refusals.body);
+    }
+    return level === undefined ? 'ABSENT' : 'EQUAL';
+  }
+
+  // A settings object's own `env` map, which must be an object when present.
+  #settingsEnv(settings, effort) {
+    if (settings === null || settings.env === undefined) return 'ABSENT';
+    return this.#envEffort(settings.env, effort, SETTINGS_ENV_REFUSALS);
+  }
 
   static #flagValues(args, flag) {
     const values = [];
@@ -80,26 +121,23 @@ class EffortRouteCheck {
   }
 
   assert({ effort, model, env, cwd, args }) {
-    const inherited = env.CLAUDE_CODE_EFFORT_LEVEL;
-    if (inherited !== undefined && inherited !== '' && inherited !== effort) fail('LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED');
-    const extra = env.CLAUDE_CODE_EXTRA_BODY;
-    if (extra !== undefined && extra !== '') {
-      let body;
-      try { body = JSON.parse(extra); } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
-      const visit = value => value && typeof value === 'object' && Object.entries(value)
-        .some(([key, child]) => /effort|reasoning|thinking/i.test(key) || visit(child));
-      if (visit(body)) fail('LAUNCHER_ENV_EXTRA_BODY_EFFORT_REFUSED');
-    }
+    const inherited = this.#envEffort(env, effort, CALLER_ENV_REFUSALS);
     const declared = EffortRouteCheck.#flagValues(args, '--setting-sources');
     const sources = declared.length ? declared.at(-1).split(',').map(s => s.trim()).filter(Boolean) : [...SETTING_SOURCES];
     if (sources.some(s => !SETTING_SOURCES.includes(s))) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
-    const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.USERPROFILE || env.HOME || os.homedir(), '.claude');
+    const configOverride = this.#one(env, 'CLAUDE_CONFIG_DIR');
+    const home = this.#one(env, 'USERPROFILE') || this.#one(env, 'HOME') || os.homedir();
+    const configDir = configOverride || path.join(home, '.claude');
     const files = { user: path.join(configDir, 'settings.json'), project: path.join(cwd, '.claude', 'settings.json'),
       local: path.join(cwd, '.claude', 'settings.local.json') };
-    const checked = [];
+    // The legacy global config is read for its `env` map only; nothing else in it is inspected.
+    const legacy = this.#readSettings(path.join(configOverride || home, '.claude.json'));
+    if (legacy !== null && (typeof legacy !== 'object' || Array.isArray(legacy))) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
+    const checked = [{ source: 'legacy-global-config', present: legacy !== null, clamp: null, env_effort: this.#settingsEnv(legacy, effort) }];
     for (const source of sources) {
       const settings = this.#readSettings(files[source]);
-      checked.push({ source, present: settings !== null, clamp: settings === null ? null : EffortRouteCheck.#clamp(settings, model) });
+      checked.push({ source, present: settings !== null, clamp: settings === null ? null : EffortRouteCheck.#clamp(settings, model),
+        env_effort: this.#settingsEnv(settings, effort) });
     }
     for (const value of EffortRouteCheck.#flagValues(args, '--settings')) {
       let settings;
@@ -107,12 +145,12 @@ class EffortRouteCheck {
         try { settings = JSON.parse(value); } catch { fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'); }
       } else settings = this.#readSettings(path.resolve(cwd, value));
       if (settings === null) fail('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED');
-      checked.push({ source: '--settings', present: true, clamp: EffortRouteCheck.#clamp(settings, model) });
+      checked.push({ source: '--settings', present: true, clamp: EffortRouteCheck.#clamp(settings, model), env_effort: this.#settingsEnv(settings, effort) });
     }
     const clamps = checked.map(c => c.clamp).filter(Boolean).map(v => EFFORT_ORDER.indexOf(v));
     const clamp = clamps.length ? EFFORT_ORDER[Math.min(...clamps)] : null;
     if (clamp !== null && EFFORT_ORDER.indexOf(clamp) < EFFORT_ORDER.indexOf(effort)) fail('LAUNCHER_EFFORT_CLAMPED');
-    return Object.freeze({ pinned_effort: effort, inherited_effort: inherited ? 'EQUAL' : 'ABSENT', setting_sources: sources,
+    return Object.freeze({ pinned_effort: effort, inherited_effort: inherited, setting_sources: sources,
       checked: checked.map(c => Object.freeze(c)), client_clamp: clamp, exact_effort: 'NOT_EXPOSED',
       unobserved_sources: UNOBSERVED_EFFORT_SOURCES });
   }
@@ -120,13 +158,14 @@ class EffortRouteCheck {
 
 class GateSessionLauncher {
   #binding; #role; #claude; #spawn; #baseArgs; #effort;
-  constructor({ captured, role, claude = defaultClaude(), spawn = spawnSync, base_args = [], read_file = file => fs.readFileSync(file, 'utf8') }) {
+  constructor({ captured, role, claude = defaultClaude(), spawn = spawnSync, base_args = [], read_file = file => fs.readFileSync(file, 'utf8'),
+    platform = process.platform }) {
     if (!ROLE_ROUTE[role]) fail('LAUNCHER_ROLE_UNSUPPORTED');
-    if (typeof read_file !== 'function') fail('LAUNCHER_ARGS_INVALID');
+    if (typeof read_file !== 'function' || typeof platform !== 'string') fail('LAUNCHER_ARGS_INVALID');
     this.#binding = new CapturedStackBinding(captured);
     this.#role = role; this.#claude = claude; this.#spawn = spawn;
     this.#baseArgs = confinedArgs(base_args);
-    this.#effort = new EffortRouteCheck(read_file);
+    this.#effort = new EffortRouteCheck(read_file, platform);
   }
 
   // The concrete native model and effort for this role, from the pinned registry only.
