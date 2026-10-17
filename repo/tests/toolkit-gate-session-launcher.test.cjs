@@ -133,8 +133,12 @@ test('resume refuses a gate of another role before any native process', () => {
 // Effort-route controls. Settings files are supplied through the injected reader so the
 // tests never read this machine's real Claude configuration.
 const pathModule = require('node:path');
-const CWD = pathModule.resolve('uat-project'), CONFIG = pathModule.resolve('claude-config');
-const HOME = pathModule.resolve('owner-home');
+// Most rows model the Windows host (platform 'win32'), where only a drive-letter or UNC path is an absolute
+// CLAUDE_CONFIG_DIR or USERPROFILE; on another test host those two use a drive-letter form. The launcher and
+// these fixtures join paths with the same host path module, so file identities still agree.
+const winAbsolute = name => (process.platform === 'win32' ? pathModule.resolve(name) : `C:\\${name}`);
+const CWD = pathModule.resolve('uat-project'), CONFIG = winAbsolute('claude-config');
+const HOME = winAbsolute('owner-home');
 const FILES = { user: pathModule.join(CONFIG, 'settings.json'), project: pathModule.join(CWD, '.claude', 'settings.json'),
   local: pathModule.join(CWD, '.claude', 'settings.local.json'), legacy: pathModule.join(CONFIG, '.claude.json'),
   homeLegacy: pathModule.join(HOME, '.claude.json'), dotConfig: pathModule.join(CONFIG, '.config.json'),
