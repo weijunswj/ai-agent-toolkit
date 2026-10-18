@@ -98,3 +98,52 @@ test('removed unreferenced helpers do not return in current runtime modules', ()
   }
   assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /PR #513.*is the current V3 proposal continuation/);
 });
+
+// The Toolkit direct (`toolkit-direct`) launcher is retired (Web decision 28). Its
+// reservation machinery survives only in the history module for the pinned run093 proof.
+const HISTORY_MODULE = 'repo/scripts/toolkit-agent-control-run093-history.cjs';
+const scriptFiles = () => fs.readdirSync(path.join(root, 'repo', 'scripts'))
+  .filter((name) => /\.c?js$/.test(name)).map((name) => `repo/scripts/${name}`);
+const RETIRED_SCRIPT_IDENTIFIERS = [
+  'toolkit-direct', 'claude-agent-capacity', 'claude-agent-maximum', 'claudeAgentCapacity', 'claudeManualMaximum',
+  'MODEL_CONTRACT', 'claudeInvocation', 'runValidatedClaude', 'launchWithResourceEnvelope', 'admissionDecisionWithResourceEnvelope',
+  'probeClaudeAgentCapability', 'AI_AGENT_TOOLKIT_CAPABILITY_PROBE', 'AI_AGENT_TOOLKIT_CHECKER', 'launchR093WithAuthenticatedController',
+  'launchR093WithResourceEnvelope', 'resourceOperation', 'mode0', 'MODE0', 'checkerResultStatus', 'checkerLaunchSpec', 'fable-5', 'opus-4.8',
+];
+const RETIRED_DOC_PHRASES = [
+  /toolkit-agent-control\.cjs (?:launch|checker|checker-result|status)\b/, /checker-result --review-id/,
+  /Direct Toolkit-managed subagents only/, /Fable 5 worker/, /Opus 4\.8 checker/, /AI_AGENT_TOOLKIT_CAPABILITY_PROBE/,
+];
+function retiredScriptHits(rel, source) {
+  let text = source;
+  // The history module's header names the retired setup choice once to explain itself, and
+  // the profile store defines the retired topology's wire value only to reject it.
+  if (rel === HISTORY_MODULE) text = text.replace('The Toolkit direct (`toolkit-direct`) Claude worker/checker topology is retired', '');
+  if (rel === 'repo/scripts/toolkit-agent-control.cjs') text = text.replace("CLAUDE_DIRECT: 'claude-toolkit-direct'", '');
+  return RETIRED_SCRIPT_IDENTIFIERS.filter((name) => text.includes(name));
+}
+
+test('retired direct-launcher routes, settings and setup choices do not return to current scripts', () => {
+  for (const rel of scriptFiles()) assert.deepEqual(retiredScriptHits(rel, read(rel)), [], rel);
+  for (const rel of scriptFiles().filter((file) => ![HISTORY_MODULE, 'repo/scripts/toolkit-agent-control.cjs'].includes(file))) {
+    const source = read(rel);
+    assert.doesNotMatch(source, /toolkit-agent-control-run093-history/, `${rel} must not load the retired launcher history`);
+    assert.doesNotMatch(source, /TOPOLOGIES\.CLAUDE_DIRECT/, `${rel} must not select the retired direct topology`);
+  }
+  const controlSource = read('repo/scripts/toolkit-agent-control.cjs');
+  for (const command of ['launch', 'checker', 'checker-result', 'status']) {
+    assert.doesNotMatch(controlSource, new RegExp(`args\\.command === '${command}'`), `retired CLI command ${command}`);
+  }
+  assert.doesNotMatch(read('repo/contracts/controller-kernel/launch-family-closure-v1.json'), /LEGACY_OUTSIDE_PROFILE|legacy\.agent-control-direct/);
+  // Mutation: a reintroduced identifier is detected.
+  assert.deepEqual(retiredScriptHits('repo/scripts/setup-toolkit-core.cjs', "choice === 'toolkit-direct'"), ['toolkit-direct']);
+  assert.deepEqual(retiredScriptHits(HISTORY_MODULE, 'const MODEL_CONTRACT = {};'), ['MODEL_CONTRACT']);
+});
+
+test('current documentation and skills no longer teach the retired direct launcher', () => {
+  const docs = ['README.md', 'repo/docs/HOW-TO-USE.md', 'repo/docs/FOR_AI_AGENTS.md', 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md', 'repo/docs/TOOLKIT-V3.md',
+    'repo/ARCHITECTURE.md', 'repo/CONTROLLER.md', 'skills/toolkit-setup/SKILL.md'];
+  for (const rel of docs) for (const phrase of RETIRED_DOC_PHRASES) assert.doesNotMatch(read(rel), phrase, `${rel}: ${phrase}`);
+  assert.match(read('skills/toolkit-setup/SKILL.md'), /`toolkit-direct`\) worker and checker topology is retired/);
+  assert.match(read('repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), /### Retired Toolkit Direct Launcher/);
+});

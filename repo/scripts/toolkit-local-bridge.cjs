@@ -3948,14 +3948,6 @@ class LocalBridgeRun {
   #argv; #testHooks; #args = null; #hubPath = null;
   constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
-  // Nested capability-probe and checker sessions never sync.
-  #environmentNoop() {
-    if (!this.#argv.includes('--hook')) return null;
-    if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1') return { status: 0, audit: null, capability_probe_noop: true };
-    if (process.env.AI_AGENT_TOOLKIT_CHECKER === '1') return { status: 0, audit: null, checker_session_noop: true };
-    return null;
-  }
-
   // Project-local install/copy commands that never touch hub state.
   #isolatedProjectCommand(args) {
     let result = null;
@@ -4065,8 +4057,6 @@ class LocalBridgeRun {
   }
 
   execute() {
-    const noop = this.#environmentNoop();
-    if (noop) return noop;
     const args = this.#args = parseArgs(this.#argv);
     const isolated = this.#isolatedProjectCommand(args);
     if (isolated) return isolated;
@@ -4134,13 +4124,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
   acquireLock,
-  defaultHubPath,
-  inspectDisplacedEvidence,
-  inspectLockForRecovery,
-  inspectRecoveryMarker,
   lockOwnerLiveness,
   parseArgs,
   releaseLock,
@@ -4159,8 +4144,6 @@ module.exports = {
   sanitizeOutputMessage,
   openUpdateReport,
   replaceDirectoryAtomically,
-  parseManagedMarkerBlocks,
-  nearestGitRoot,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,

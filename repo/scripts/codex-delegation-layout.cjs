@@ -263,4 +263,4 @@ function structuralLayout(text) {
   };
 }
 
-module.exports = { scanTomlLines, classifyStructuralLine, structuralLayout };
+module.exports = { structuralLayout };

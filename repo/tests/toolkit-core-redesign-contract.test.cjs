@@ -31,7 +31,7 @@ test('Closed decision and observation boundaries reject hostile descriptors with
  const evidence=clone(observations);Object.defineProperty(evidence[0],'content_base64',{enumerable:true,get(){hooks++;return observations[0].content_base64;}});
  assert.throws(()=>compiler.compileControllerDecision(decision,evidence));assert.equal(hooks,0);
 });
-test('Mode-0 mode, run, and envelope data cannot replace the authenticated effect channel',async()=>{
+test('Retired mode-0 run and envelope data cannot reach admission through a caller channel',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-mode0-nonauth-'));
  let hooks=0;const fake={
   snapshot(){hooks++;return {decision:{identity:{repository:'weijunswj/ai-agent-toolkit',run:'toolkit-core-construction-g3-20261007-001',lock:'DL-TK-CORE-CONSTRUCTION-G3-20261007-001'},decision_digest:'a'.repeat(64)},consumer:{stage:'G3'}};},
@@ -49,7 +49,8 @@ test('Mode-0 mode, run, and envelope data cannot replace the authenticated effec
    {root,effectChannel:fake},
    {root,producer_provenance:{schema:'toolkit.agent-control.resource-provenance.v2'}},
   ]){
-   const result=await agent.admissionDecisionWithResourceEnvelope(worker,fake,options);
+   assert.equal(Object.hasOwn(agent,'admissionDecisionWithResourceEnvelope'),false);
+   const result=agent.admissionDecision(worker,options);
    assert.equal(result.result,agent.RESULTS.REFUSE);
    assert.equal(fs.existsSync(agent.statePath({root})),false);
   }

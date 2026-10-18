@@ -785,7 +785,5 @@ module.exports = {
   skillDirs,
   validationCommandTargetFinding,
   validationCommandTargets,
-  validateSkillCreationGate,
-  validateSkillProductMigrationLedger,
   validate
 };

@@ -1829,16 +1829,16 @@ function createRuntime(options = {}) {
 
 module.exports = Object.freeze({
   consumeControllerDecisionReference: (...args) => programmeV5.consumeControllerDecisionReference(...args),
-  CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, REVIEW_EVIDENCE_VERSION, TRACKER_VERSION, LEGACY_V0_VERSION, DESIGN_LOCK, INTENTS, RESOURCE_KINDS, LIFECYCLES,
+  CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, LEGACY_V0_VERSION, INTENTS, RESOURCE_KINDS,
   AUTHORITY_PACKET_CURRENT_SCHEMA, AUTHORITY_PACKET_STAGES,
-  OBJECTIVE_STATUSES, MUTATION_TARGET_KINDS,
-  A4_MATERIAL_PREDICATES, A4_EXCLUSIONS, DF_TRIGGERS, DF_DISPOSITIONS, REVIEW_DISPOSITIONS, MANAGED_MARKERS,
-  SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, canonicalJson, sha256, isDigest, isSha,
+  MUTATION_TARGET_KINDS,
+  A4_MATERIAL_PREDICATES, DF_TRIGGERS, DF_DISPOSITIONS, MANAGED_MARKERS,
+  SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, sha256, isDigest, isSha,
   isPublicSafeEvidence, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
   replaceManagedBlock, validateTracker, validateAuthorityPacketCurrent, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
-  findingEvidenceDigest, deferredRootDigest, reviewEvidenceDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
+  reviewEvidenceDigest, durableEvidenceDigest, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
   programmeV5, projectionBootstrapRecovery: programmeV5.projectionBootstrapRecovery,
 });
 function representedPrNumbers(state) {

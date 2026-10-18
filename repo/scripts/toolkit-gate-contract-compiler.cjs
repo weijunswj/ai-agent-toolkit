@@ -1103,7 +1103,7 @@ function validateControllerExecutionPacket(input) {
 
 module.exports = {
   planV3Delegation,
-  trustedJsonCopy, RestrictedContractSchema, checkCoreSchema, contractSchema, CONTINUOUS_ROLES, HELPER_ROLES, CHEAP_QUALIFIERS, corePath, validateControllerDecision, resolveContinuousProfile, resolveControllerRole, compileControllerDecision, decisionReferences,
+  trustedJsonCopy, checkCoreSchema, contractSchema, CONTINUOUS_ROLES, HELPER_ROLES, CHEAP_QUALIFIERS, corePath, validateControllerDecision, resolveContinuousProfile, resolveControllerRole, compileControllerDecision, decisionReferences,
   SUPPORTED_MACROS,
   MACRO_NAMES,
   canonicalize,

@@ -499,15 +499,12 @@ function reconcileOwnedStaging(parents,generationId,options={}) {return new Owne
 
 module.exports = {
   OWNER,
-  OWNER_MARKER,
   RECORD_PREFIX,
   SCHEMA_VERSION,
   auditOwnedStaging,
   cleanupOwnedGeneration,
   createOwnedStagingGeneration,
   inspectOwnedGeneration,
-  lookupExactOwnedGeneration,
   markOwnedStaging,
-  reconcileOwnedStaging,
-  stagingOwnerLiveness
+  reconcileOwnedStaging
 };

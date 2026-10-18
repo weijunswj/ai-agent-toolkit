@@ -186,4 +186,4 @@ if (require.main === module) {
   try { run(); } catch (error) { process.stderr.write(`${error.code || error.message}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ ClaudeHelperAgentRenderer, AgentDirectoryInstaller, MARKER, LEGACY_FILES, run });
+module.exports = Object.freeze({ ClaudeHelperAgentRenderer, AgentDirectoryInstaller, MARKER, run });

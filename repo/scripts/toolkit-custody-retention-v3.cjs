@@ -2132,21 +2132,16 @@ class RetainedResourceRegister {
 }
 
 module.exports = Object.freeze({
-  RESOURCE_REGISTER_SCHEMA,
   RetainedResourceRegister,
-  DISPOSAL_OBSERVATION_SCHEMA,
   DISPOSAL_RECEIPT_SCHEMA,
-  GIT_EXPIRY_RECEIPT_SCHEMA,
   HOLD,
   LEGACY_REMOTE_BULK_RETENTION_MS,
   LEGACY_RETENTION_VIEW_SCHEMA,
   REMOTE_BULK_RETENTION_MS,
   RETENTION_VIEW_SCHEMA,
   TRANSFER_RETENTION_MS,
-  RetentionError,
   createLifecycleCleanupController,
   createTaskOwnedFixtureCleanupBackend,
-  createTaskOwnedFilesystemCleanupAdapter: options => require('./toolkit-filesystem-cleanup-adapter.cjs').createFilesystemCleanupAdapter(options),
   createTaskOwnedGitCurrentTreeExpiryAdapter: options => require('./toolkit-git-current-tree-expiry-adapter.cjs').createTaskOwnedGitCurrentTreeExpiryAdapter(options),
   executeFixtureDisposal,
   normalizeTargetIdentity,

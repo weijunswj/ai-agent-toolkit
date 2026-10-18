@@ -218,4 +218,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { EXECUTION_RULES_PATH, PLUGIN_RELATIVE_PATH, installProjectPlugin, parseArgs, renderPluginPayload, run };
+module.exports = { installProjectPlugin, parseArgs, renderPluginPayload, run };

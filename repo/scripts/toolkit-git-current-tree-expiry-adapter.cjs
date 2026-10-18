@@ -381,4 +381,4 @@ class GitCurrentTreeExpiryAdapter {
 }
 Object.freeze(GitCurrentTreeExpiryAdapter.prototype);
 function createTaskOwnedGitCurrentTreeExpiryAdapter(options) { return new GitCurrentTreeExpiryAdapter(options); }
-module.exports = Object.freeze({ GitCurrentTreeExpiryAdapter, createTaskOwnedGitCurrentTreeExpiryAdapter });
+module.exports = Object.freeze({ createTaskOwnedGitCurrentTreeExpiryAdapter });

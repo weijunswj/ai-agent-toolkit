@@ -1224,71 +1224,6 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   assert.doesNotMatch(result.stdout, /--force-downgrade/);
 });
 
-test('Claude checker SessionStart exits successfully before all optional maintenance and mutation', () => {
-  const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  const repoPath = path.join(root, 'managed-source');
-  const openCodeTarget = path.join(root, 'opencode-target');
-  const pluginRoot = path.join(root, 'installed-plugin');
-  fs.mkdirSync(repoPath, { recursive: true });
-  fs.mkdirSync(openCodeTarget, { recursive: true });
-  fs.mkdirSync(pluginRoot, { recursive: true });
-  fs.writeFileSync(path.join(repoPath, 'sentinel.txt'), 'repo update must not run\n');
-  fs.writeFileSync(path.join(openCodeTarget, 'sentinel.txt'), 'target sync must not run\n');
-  fs.writeFileSync(path.join(pluginRoot, 'sentinel.txt'), 'hook repair and cache refresh must not run\n');
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: expectedBridgeVersion,
-    bridge_versions_by_source: { 'claude-plugin': expectedBridgeVersion },
-    auto_sync_enabled: true,
-    repo_auto_update_enabled: true,
-    repo_path: repoPath,
-    repo_branch: 'main',
-    repo_remote: 'https://example.invalid/no-network.git',
-    update_report_enabled: true,
-    codex_plugin_auto_refresh_enabled: true,
-    targets: { opencode: { enabled: true, path: openCodeTarget } }
-  });
-  const env = isolatedHomeEnv(root, {
-    AI_AGENT_TOOLKIT_CHECKER: '1',
-    PLUGIN_ROOT: pluginRoot,
-    TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: path.join(root, 'network-or-maintenance-marker.txt')
-  });
-  const before = snapshotTree(root);
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], { env });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, '');
-  assert.deepEqual(snapshotTree(root), before);
-  assert.equal(fs.existsSync(env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER), false);
-
-  const previous = process.env.AI_AGENT_TOOLKIT_CHECKER;
-  process.env.AI_AGENT_TOOLKIT_CHECKER = '1';
-  try {
-    assert.deepEqual(runBridge(['--hook', '--unsupported-checker-fixture']), { status: 0, audit: null, checker_session_noop: true });
-  } finally {
-    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CHECKER;
-    else process.env.AI_AGENT_TOOLKIT_CHECKER = previous;
-  }
-});
-
-test('Claude capability-probe SessionStart exits before parsing, maintenance, or mutation', () => {
-  const root = tmpRoot();
-  const sentinel = path.join(root, 'owned-state.txt');
-  fs.writeFileSync(sentinel, 'unchanged\n');
-  const before = snapshotTree(root);
-  const previous = process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
-  process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = '1';
-  try {
-    assert.deepEqual(runBridge(['--hook', '--unsupported-capability-probe-fixture']), {
-      status: 0, audit: null, capability_probe_noop: true,
-    });
-  } finally {
-    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
-    else process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = previous;
-  }
-  assert.deepEqual(snapshotTree(root), before);
-});
 test('repo same-source downgrade names managed source remediation', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -5089,14 +5024,11 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
     assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /does not prove worker\/checker launch capability/i, relPath);
-    assert.match(text, /root-only is the conservative recommendation while strict capability is unverified/i, relPath);
-    assert.match(text, /direct.*(?:visible|displayed).*request/i, relPath);
-    assert.match(text, /selecting it does not mean it is (?:already )?(?:active|enabled)/i, relPath);
-    assert.match(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
-    assert.match(text, /verified-current no-maintenance SessionStart identity/i, relPath);
-    assert.match(text, /stale installed Toolkit code is never trusted/i, relPath);
-    assert.match(text, /Restart-pending, stale, or failed verification leaves root-only active/i, relPath);
+    assert.match(text, /The visible choices are `Root agent only`, `Broader native behaviour`, and `Keep current`/, relPath);
+    assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
+    assert.match(text, /setup runs no worker or checker launch probes/i, relPath);
+    assert.match(text, /restart-pending, stale, or failed verification leaves the safe root-only policy/i, relPath);
+    assert.doesNotMatch(text, /Direct Toolkit-managed subagents only|Fable 5 worker|Opus 4\.8 checker|AI_AGENT_TOOLKIT_CAPABILITY_PROBE/i, relPath);
     assert.doesNotMatch(text, /offers .* only when the detected CLI supports their real effects/i, relPath);
   }
 });

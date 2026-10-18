@@ -48,7 +48,6 @@ const FROZEN_VERSION = '2.11.0';
 const PR366_HEAD = 'a7dcb69da43100c5411076008307a221e89b720f';
 const PR366_TREE = '2c88782fa274e502fb6c8c5126d55470112f38e9';
 const PR366_BASE_SHA = 'e86a2d74fd771f6500aa02fe0892940933bf7647';
-const PR366_VERSION = '2.12.0';
 const TARGET_CANONICAL_DIGEST = '1d810f3d7df41012707672cd323c12ccfcff279c172165bbf732e1a49eae39aa';
 const FINALISATION_ROOT = 'E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002';
 const FINALISATION_LOCK = 'DL-S2-E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002';
@@ -971,12 +970,6 @@ function without(value, key) {
   const copy = clone(value);
   delete copy[key];
   return copy;
-}
-function authorityBinding(decision) {
-  return {
-    controlling: clone(decision.web_authority.controlling),
-    predecessor: clone(decision.web_authority.predecessor),
-  };
 }
 function factsDigest(reviews, threads, comments, checks) {
   return digestValue({
@@ -3771,11 +3764,8 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.10.10';
 const H2_VERSION = 'human-v2';
 const H2_RENDERER_REVISION = 'human-v2-r093';
-const H2_J_PRODUCER_COMMIT = 'da984fbac48c5a825e8d172cb528becd50749cd2';
-const H2_J_PRODUCER_BLOB = 'c3b7a609b8945f9aaaf6b7faed4be4737f3fba31';
 const H2_J_BODY_BYTES = 29752;
 const H2_J_BODY_SHA256 = '852022dccd148282490b1ef0588de9ce55a6a9c1a01edbc68550bf9e32ed693a';
 const H2_J_CANONICAL_SHA256 = '4122eead6382d95be5e0593d2e2f35b54a6c07bf8592cf4c5a5d9a67ee8b95c2';
@@ -6322,24 +6312,16 @@ module.exports = Object.freeze({
   validateControllerDecisionReference, controllerDecisionExtension, consumeControllerDecisionReference,
   REPOSITORY,
   PARENT_ISSUE,
-  CHILD_ISSUE,
   MAIN_SHA,
   RECOVERY_ROOT,
   LOCK,
   OLD_ROOT,
   PARKED_ROOT,
   WRITE_SAFETY_MODE,
-  STATE_SCHEMA,
-  PROJECTION_SCHEMA,
-  SURFACE_SCHEMA,
   V3_RELEASE_PLAN_SCHEMA,
-  V3_RELEASE_PROJECTION_SCHEMA,
-  V3_RELEASE_CATEGORIES,
   AUTHORITY_PACKET_CURRENT_SCHEMA,
   AUTHORITY_PACKET_STAGES,
-  DECISION_SCHEMA,
   EVIDENCE_SCHEMA,
-  BOOTSTRAP_SCHEMA,
   SOURCE_CANONICAL_DIGEST,
   SOURCE_PARENT_BODY_DIGEST,
   SOURCE_CHILD_BODY_DIGEST,
@@ -6348,28 +6330,15 @@ module.exports = Object.freeze({
   TARGET_CANONICAL_DIGEST,
   FINALISATION_ROOT,
   FINALISATION_LOCK,
-  FINALISATION_SCOPE,
-  FINALISATION_WRITE_SAFETY_MODE,
-  FINALISATION_DECISION_SCHEMA,
-  FINALISATION_EVIDENCE_SCHEMA,
-  FINALISATION_OPERATION_SCHEMA,
   FINALISATION_SOURCE_CANONICAL_DIGEST,
   FINALISATION_STAGE_A_CANONICAL_DIGEST,
   FINALISATION_STAGE_B_CANONICAL_DIGEST,
   PR380_HEAD,
   PR380_TREE,
-  PR380_BRANCH,
   PR380_BASE_SHA,
-  PR380_VERSION,
   PR380_MERGE_COMMIT,
-  FINAL_G4_EVIDENCE_REF,
-  POST_MERGE_TECHNICAL_EVIDENCE_REF,
-  PR379_NON_CONVERGENCE_EVIDENCE_REF,
-  FINALISATION_AUTHORITY,
   FINALISATION_CHECKPOINTS,
   FINALISATION_OPERATION_ORDER,
-  FINALISATION_TRANSITION_ID,
-  FINALISATION_PR379_SOURCE_REVISION,
   FINALISATION_SOURCE_STATE,
   FINALISATION_SOURCE_RENDERED,
   FINALISATION_SOURCE_PARENT_BODY_DIGEST,
@@ -6377,8 +6346,6 @@ module.exports = Object.freeze({
   FINALISATION_STAGE_A_TARGET_STATE,
   FINALISATION_STAGE_B_TARGET_STATE,
   FINALISATION_RENDERED_TARGETS,
-  FINALISATION_CHECKPOINT_TABLE,
-  FINALISATION_TARGET_TABLE,
   RECOVERY_EVIDENCE_REF,
   HOLD_EVIDENCE_REF,
   RETENTION_EVIDENCE_REF,
@@ -6391,8 +6358,6 @@ module.exports = Object.freeze({
   PR366_HEAD,
   PR366_TREE,
   PR366_BASE_SHA,
-  AUTHORITY_CONTROLLING,
-  AUTHORITY_PREDECESSOR,
   PR379_REVIEW_FACTS,
   PR379_COMMENT_FACTS,
   PR379_CHECK_FACTS,
@@ -6406,7 +6371,6 @@ module.exports = Object.freeze({
   validateAuthorityPacketCurrent,
   buildRecoveryTargetState,
   validateInterEpochStateV5,
-  validateFinalisationSourceState,
   createPostMergeEpochFinalisationDecision,
   validatePostMergeEpochFinalisationDecision,
   derivePostMergeEpochFinalisationTargets,
@@ -6420,16 +6384,12 @@ module.exports = Object.freeze({
   renderProgrammeV5,
   parseParentV5Body,
   parseChildV5Body,
-  parseProgrammeV5Body,
   validateEvidence,
-  validateProviderEvidence,
   buildPaginationEvidence,
   classifyPartialState,
   buildReceiptOperationDescriptor,
   verifyBootstrapWorkspaceProof,
-  validateControllerBootstrap,
   projectionBootstrapRecovery,
-  postMergeEpochFinalisation,
   humanSurfaceV2,
   programmeV5,
 });

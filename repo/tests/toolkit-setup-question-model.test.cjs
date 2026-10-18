@@ -299,7 +299,6 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
-  claudeCurrent.agentCapability = { launch_supported: false, resource_counter_supported: false };
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);

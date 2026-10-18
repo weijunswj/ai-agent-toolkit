@@ -62,9 +62,9 @@ function withFixture(root, callback) {
   return control.withRepositoryTestResourceInvocation(INVOCATION, target, callback);
 }
 
-function runAdmissionChild(spec, root, claudeCli) {
+function runAdmissionChild(spec, root, profile) {
   const target = registerOwnedRoot(root);
-  const input = JSON.stringify({ spec, root: target, claude_cli: claudeCli });
+  const input = JSON.stringify({ spec, root: target, profile });
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     delete env.NODE_OPTIONS;
@@ -121,11 +121,11 @@ if (require.main === module) {
     try {
       if (process.argv[2] !== 'admission') throw new Error('unsupported repository-test operation');
       const input = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
-      if (!input || Object.keys(input).sort().join('\u0000') !== 'claude_cli\u0000root\u0000spec'
-        || typeof input.root !== 'string' || typeof input.claude_cli !== 'string') throw new Error('repository-test input is invalid');
-      const result = control.withRepositoryTestResourceInvocation(INVOCATION, input.root, () => control.admissionDecision(
-        input.spec,
-        { root: input.root, claudeCli: input.claude_cli, repository_test_invocation: INVOCATION, resourceState: FIXTURE },
+      if (!input || Object.keys(input).sort().join('\u0000') !== 'profile\u0000root\u0000spec'
+        || typeof input.root !== 'string' || !input.profile || typeof input.profile !== 'object') throw new Error('repository-test input is invalid');
+      const result = control.withRepositoryTestResourceInvocation(INVOCATION, input.root, () => control.resourceAdmissionDecision(
+        input.spec, input.profile, FIXTURE,
+        { root: input.root, repository_test_invocation: INVOCATION, resourceState: FIXTURE },
       ));
       process.stdout.write(`${JSON.stringify(result)}\n`);
     } catch (error) {

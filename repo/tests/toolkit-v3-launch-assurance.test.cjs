@@ -26,7 +26,9 @@ test('the checked-in launch family record is closed against this checkout and cl
     ['claude.helper.parent-agent-hook', 'claude.worker.gate-session-launcher']);
   assert.ok(result.unqualified.some(u => u.path === 'codex.worker.app-server-adapter' && u.status === 'UNQUALIFIED'));
   assert.ok(result.held.some(h => h.invariant === 'dot.persistent-dispatch:PINNED_ROUTE' && h.hold === 'DOT_DISPATCH_OWNED_BY_501'));
-  assert.deepEqual(result.outside_profile, ['legacy.agent-control-direct']);
+  // The retired Toolkit direct launcher is no longer a launch path, inside or outside the profile.
+  assert.deepEqual(result.outside_profile, []);
+  assert.equal(value.inventory.some(s => s.file === 'repo/scripts/toolkit-agent-control.cjs'), false);
   // The R1c-F1 guard is part of the Claude worker's inherited-configuration claim.
   assert.ok(pathOf(value, 'claude.worker.gate-session-launcher').invariants.INHERITED_CONFIGURATION.code.some(c => c.contains.includes('#configDir(env)')));
 });

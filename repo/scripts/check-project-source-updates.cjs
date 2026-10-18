@@ -85,10 +85,6 @@ function discoverSourceLocks(workspace) {
     .sort((a, b) => a.relPath.localeCompare(b.relPath));
 }
 
-function isActiveThirdPartyLock(lock) {
-  return isActiveThirdPartyAttributionLock(lock);
-}
-
 function activeThirdPartyLocks(lockFiles) {
   return lockFiles.filter((lockFile) => {
     if (isActiveThirdPartyAttributionLock(lockFile.lock)) return true;
@@ -379,13 +375,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  activeThirdPartyLocks,
-  checkProjectSourceUpdates,
-  discoverSourceLocks,
-  isActiveThirdPartyLock,
-  latestCommitForLock,
   parseArgs,
-  parseGitHubRepo,
-  renderReviewReport,
-  renderSourceUpdatesSection
+  parseGitHubRepo
 };

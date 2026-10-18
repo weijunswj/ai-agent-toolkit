@@ -15,7 +15,6 @@ const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-star
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
 const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
 const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
-const CORE_ENTRYPOINT_REL_PATH = 'repo/scripts/toolkit-agent-control.cjs';
 const CACHE_FINGERPRINT_PATHS = [
   "repo/contracts/toolkit-local-bridge/version.json",
   "repo/scripts/toolkit-evidence-plan-compiler.cjs",
@@ -1208,24 +1207,13 @@ if (require.main === module) {
 }
 
 
-function coreEntrypointMetadata(sourceRoot) {
-  const absolute=path.resolve(sourceRoot,CORE_ENTRYPOINT_REL_PATH);
-  const stat=fs.lstatSync(absolute);
-  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('CORE_ENTRYPOINT_UNVERIFIED');
-  return Object.freeze({relative_path:CORE_ENTRYPOINT_REL_PATH,sha256:crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex'),
-    commands:['core-inspect','core-compile','core-run','core-recover','core-qualify'],
-    runtime_context:'AUTHENTIC_EXISTING_RECEIPT_AND_CURRENT_REQUIRED',qualification:'SEPARATE_NATIVE_BOUNDARY'});
-}
-
 module.exports = {
-  CORE_ENTRYPOINT_REL_PATH, coreEntrypointMetadata,
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,
   MARKETPLACE_REL_PATH,
   CACHE_FINGERPRINT_PATHS,
   CACHE_FINGERPRINT_DIRS,
-  SESSION_START_ARGS,
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
   SESSION_START_RUNTIME_REL_PATH,
@@ -1235,9 +1223,7 @@ module.exports = {
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
   inspectCodexPluginList,
-  inspectConfiguredPluginState,
   prepareInstalledSessionStart,
-  prepareInstalledSessionStartIfPresent,
   sourceSessionStartCommand,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
@@ -1247,6 +1233,5 @@ module.exports = {
   windowsSessionStartCommand,
   formatWindowsAliasFailure,
   isWindowsAppsAliasAccessDenied,
-  windowsAliasCliCandidate,
   main
 };

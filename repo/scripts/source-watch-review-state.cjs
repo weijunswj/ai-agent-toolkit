@@ -249,15 +249,11 @@ function findMatchingReviewRecord(reviewState, identity) {
 }
 
 module.exports = {
-  allowedDispositions,
   defaultReviewStatePath,
-  emptyReviewStateDocument,
   findMatchingReviewRecord,
-  matchesTargetIdentity,
   readReviewState,
   sourceLockIdentity,
   advisoryIdentity,
   validateIsoDate,
-  validateRecord,
-  validateReviewStateDocument
+  validateRecord
 };

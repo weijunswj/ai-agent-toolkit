@@ -407,4 +407,4 @@ function createCodexAdapter(channel, root, helperCapability=null, launchConfig=n
   const adapter=new NativeCodexAdapter(constructionToken,{channel,root,process:process.pid,active:false,role:null,thread:null,turn:null,client:null,helper,helperActive:false,launchConfig:configuredLaunch});
   return adapter;
 }
-module.exports=Object.freeze({assertAuthenticCodexAdapter: adapter => { state(adapter); return true; },inspect,validateHostQualification,validateResolvedThread,buildNativeRequest,toolDefinitions,toolDefinitionForRole,createCodexAdapter,verifyNativeHelperRegistration,CONFINEMENT_BOUNDARIES});
+module.exports=Object.freeze({assertAuthenticCodexAdapter: adapter => { state(adapter); return true; },inspect,validateHostQualification,validateResolvedThread,buildNativeRequest,toolDefinitions,toolDefinitionForRole,createCodexAdapter,verifyNativeHelperRegistration});

@@ -21,12 +21,12 @@
     { "file": "repo/scripts/toolkit-codex-agent-adapter.cjs", "class": "LAUNCH_PATH", "path": "codex.worker.app-server-adapter", "detail": "Owned codex app-server launcher for continuous roles, including review, and owned helpers." },
     { "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "class": "LAUNCH_PATH", "path": "opencode.helper.v1-task", "detail": "OpenCode V1 tool.execute.before/task, chat.params and chat.headers checks." },
     { "file": "repo/scripts/toolkit-opencode-project-plugin.cjs", "class": "LAUNCH_PATH", "path": "opencode.helper.v1-task", "detail": "Installs the V1 project plugin; refuses V2." },
-    { "file": "repo/scripts/toolkit-agent-control.cjs", "class": "LAUNCH_PATH", "path": "legacy.agent-control-direct", "detail": "Pre-V3 toolkit-controlled-direct worker/checker launch through a supervisor that spawns Claude." },
+    { "file": "repo/scripts/toolkit-agent-control-run093-history.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Retired Toolkit direct launcher history: its supervisor runs only the verified harmless run093 fixture worker, and PowerShell for Windows memory counters; it starts no model session." },
     { "file": "repo/scripts/audit-n8n-skills-plugin-hooks.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs plugin hook audit commands; starts no model session." },
     { "file": "repo/scripts/codex-delegation-common.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs Python to inspect Codex TOML; starts no model session." },
     { "file": "repo/scripts/codex-delegation-config.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Codex app-server for initialize, experimentalFeature/list and config/batchWrite only; a setup-time configuration writer, no thread or turn." },
     { "file": "repo/scripts/run-design-tests.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs design test commands." },
-    { "file": "repo/scripts/setup-claude-toolkit-plugin.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs claude plugin list/install/update/uninstall and git; no -p session. Also hosts spawnClaude, whose only model-session caller is the legacy agent-control path." },
+    { "file": "repo/scripts/setup-claude-toolkit-plugin.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs claude --version and plugin list/install/update/uninstall, and git; no -p session." },
     { "file": "repo/scripts/setup-codex-toolkit-plugin.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs codex plugin commands; no thread or turn." },
     { "file": "repo/scripts/setup-toolkit-core.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs setup commands and the managed setup script." },
     { "file": "repo/scripts/toolkit-github-program-receipt.cjs", "class": "NOT_A_MODEL_LAUNCH", "detail": "Runs PowerShell and Node for receipt custody operations." },
@@ -305,29 +305,6 @@
       "native_qualification": { "status": "HELD", "basis": "#501 owns persistent dot dispatch and its native qualification." },
       "mutation": null,
       "unqualified": ["dot dispatch to any host", "dot supervision and successor launch"]
-    },
-    {
-      "id": "legacy.agent-control-direct",
-      "host": "claude-code",
-      "kind": "LEGACY_OUTSIDE_PROFILE",
-      "in_profile": false,
-      "roles": ["pre-V3 toolkit-controlled-direct worker and checker children"],
-      "entrypoints": [
-        { "file": "repo/scripts/toolkit-agent-control.cjs", "contains": "const common = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort];" }
-      ],
-      "invariants": {
-        "PINNED_ROUTE": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision (retire, or refuse under V3 governance)", "reason": "Its model and effort come from a hard-coded pre-V3 MODEL_CONTRACT, not the pinned registry. It is not a V3 automated route and must not be used for V3 G0/G1/G2 work. It is not runtime-blocked in V3 checkouts, because the legacy lifecycle tests and W2-A history depend on it." },
-        "CALLER_OVERRIDE": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." },
-        "INHERITED_CONFIGURATION": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE; it applies none of the Claude worker launcher's configuration checks." },
-        "ZERO_EFFECT_REFUSAL": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." },
-        "RESUME_AND_SUCCESSOR": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." },
-        "GUARD_FAILURE": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." },
-        "NO_LEAF_OR_G2_DELEGATION": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." },
-        "OBSERVED_ROUTE": { "disposition": "HELD", "hold": "LEGACY_MODEL_CONTRACT_OUTSIDE_REGISTRY", "owner": "Web/owner decision", "reason": "As PINNED_ROUTE." }
-      },
-      "native_qualification": { "status": "HELD", "basis": "Outside the V3 supported profile." },
-      "mutation": null,
-      "unqualified": ["any V3 use of the legacy direct launcher"]
     }
   ]
 }

@@ -33,7 +33,9 @@ test('Fake stores/channels/adapters cannot reach a spawn, writer or receiver thr
    tasks_separable:true,concurrent_execution_possible:true,expected_wall_clock_speedup:'The worker can finish sooner.',
    root_retains_longest_or_critical_path:true,child_task_is_shorter_or_easier:true,root_productive_work_declared:true,
    child_prompt:'Implement the isolated bounded resource test.'};
-  const refusal=await agent.admissionDecisionWithResourceEnvelope(worker,fake,{root,resourceState:{source:'proc-meminfo',overcommit_mode:0}});
+  // The mode-0 controller launch path is retired; caller channels and data cannot reach admission.
+  assert.equal(Object.hasOwn(agent,'admissionDecisionWithResourceEnvelope'),false);
+  const refusal=agent.admissionDecision(worker,{root,effectChannel:fake,resourceState:{source:'proc-meminfo',overcommit_mode:0}});
   assert.equal(refusal.result,agent.RESULTS.REFUSE);
   assert.equal(fs.existsSync(agent.statePath({root})),false);
   assert.equal(fs.existsSync(path.join(root,'jobs')),false);

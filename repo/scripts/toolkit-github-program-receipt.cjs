@@ -5,7 +5,6 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const net = require('node:net');
 const { types: utilTypes } = require('node:util');
 
 const CapturedNativeError = Error;
@@ -20,86 +19,6 @@ const CapturedIsProxy = utilTypes.isProxy;
 const CapturedIsNativeError = utilTypes.isNativeError;
 const { spawnSync } = require('node:child_process');
 const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cjs');
-
-const CONTROLLER_RESOURCE_TRANSPORT_RESULT_SCHEMA = 'toolkit.agent-control.resource-operation-result.v1';
-const CONTROLLER_RESOURCE_TRANSPORT_FRAME_BYTES = 64 * 1024;
-const CONTROLLER_RESOURCE_TRANSPORT_LIFETIME_MS = 455000;
-const CONTROLLER_RESOURCE_REPOSITORY = 'weijunswj/ai-agent-toolkit';
-const CONTROLLER_RESOURCE_RUN = 'toolkit-core-construction-g3-20261007-001';
-const CONTROLLER_RESOURCE_LOCK = 'DL-TK-CORE-CONSTRUCTION-G3-20261007-001';
-
-function controllerResourceMountId(targetPath) {
-  const absolute = path.resolve(targetPath);
-  const unescape = (value) => value.replace(/\\040/g, ' ').replace(/\\011/g, '\t').replace(/\\134/g, '\\');
-  let selected = null;
-  for (const line of fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n')) {
-    const fields = line.split(' ');
-    if (fields.length < 6) continue;
-    const mountPoint = unescape(fields[4]);
-    if ((absolute === mountPoint || absolute.startsWith(`${mountPoint}${path.sep}`))
-      && (!selected || mountPoint.length > selected.mountPoint.length)) selected = { id: fields[0], mountPoint };
-  }
-  if (!selected || !/^\d+$/.test(selected.id)) throw new Error('Resource transport mount identity is unavailable.');
-  return selected.id;
-}
-
-async function createControllerResourceTransport(onRequest) {
-  if (process.platform !== 'linux' || typeof process.getuid !== 'function') throw new Error('Resource transport is Linux-only.');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-r093-'));
-  fs.chmodSync(directory, 0o700);
-  const socketPath = path.join(directory, 'operation.sock');
-  const server = net.createServer((socket) => {
-    socket.setTimeout(CONTROLLER_RESOURCE_TRANSPORT_LIFETIME_MS);
-    let buffer = Buffer.alloc(0);
-    let handled = false;
-    const refuse = () => { if (!socket.destroyed) socket.end('{"error_code":"RESOURCE_OPERATION_REFUSED"}\n'); };
-    socket.on('data', (chunk) => {
-      if (handled) return refuse();
-      buffer = Buffer.concat([buffer, chunk]);
-      if (buffer.length > CONTROLLER_RESOURCE_TRANSPORT_FRAME_BYTES) return refuse();
-      const newline = buffer.indexOf(0x0a);
-      if (newline < 0) return;
-      if (newline !== buffer.length - 1) return refuse();
-      handled = true;
-      let request;
-      try { request = JSON.parse(buffer.subarray(0, newline).toString('utf8')); }
-      catch { return refuse(); }
-      Promise.resolve().then(() => onRequest(request)).then((response) => {
-        const bytes = Buffer.from(`${JSON.stringify(response)}\n`, 'utf8');
-        if (bytes.length > CONTROLLER_RESOURCE_TRANSPORT_FRAME_BYTES) return refuse();
-        socket.end(bytes, () => {
-          if (request.action === 'SETTLE' && response?.result?.domain_empty === true) {
-            setTimeout(() => server.close(), 25).unref?.();
-          }
-        });
-      }).catch(refuse);
-    });
-    socket.on('timeout', refuse);
-  });
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(socketPath, resolve);
-  });
-  fs.chmodSync(socketPath, 0o600);
-  const stat = fs.lstatSync(socketPath);
-  if (!stat.isSocket() || stat.isSymbolicLink() || stat.uid !== process.getuid() || Buffer.byteLength(socketPath) >= 108) {
-    server.close();
-    fs.rmSync(directory, { recursive: true, force: true });
-    throw new Error('Resource transport endpoint identity could not be pinned.');
-  }
-  const transport = Object.freeze({
-    socket_path: socketPath,
-    owner_uid: process.getuid(),
-    device: Number(stat.dev),
-    inode: Number(stat.ino),
-    mount_id: controllerResourceMountId(socketPath),
-    server_generation: crypto.createHash('sha256').update(crypto.randomBytes(32)).digest('hex'),
-  });
-  const expiry = setTimeout(() => server.close(() => fs.rmSync(directory, { recursive: true, force: true })), CONTROLLER_RESOURCE_TRANSPORT_LIFETIME_MS);
-  expiry.unref?.();
-  server.once('close', () => { clearTimeout(expiry); try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
-  return { server, transport };
-}
 
 const PACKET_BUFFER_PROTOTYPE = Buffer.prototype;
 const PACKET_UINT8_ARRAY = Uint8Array;
@@ -335,9 +254,6 @@ const AUTHORITY_PACKET_BINDING_KEYS = Object.freeze([
   'authority', 'governance', 'candidate', 'applicability'
 ]);
 const AUTHORITY_PACKET_PRODUCER_KEYS = Object.freeze(['run', 'lock', 'stage', 'role']);
-const AUTHORITY_PACKET_AUTHORITY_KEYS = Object.freeze([
-  'repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'
-]);
 const AUTHORITY_PACKET_GOVERNANCE_KEYS = Object.freeze([
   'repository', 'main_commit', 'controller_blob', 'stack_registry_blob'
 ]);
@@ -371,7 +287,6 @@ const AUTHORITY_PACKET_SECTION_KEYS = Object.freeze(['name', 'text']);
 const AUTHORITY_PACKET_SOURCE_KEYS = Object.freeze([
   'repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_digest'
 ]);
-const AUTHORITY_PACKET_EVIDENCE_KEYS = Object.freeze(['id', 'kind']);
 const AUTHORITY_PACKET_EVENT_TYPES = Object.freeze([
   'READBACK_VERIFIED', 'WEB_ACCEPTANCE_BOUND', 'CURRENT_READBACK',
   'CONSUMER_COMPLETED', 'FINALITY_OBSERVED', 'BACKFILL_AUTHORISED'
@@ -401,14 +316,6 @@ const PROGRAMME_RECEIPT_STORE_OWNERS = new WeakMap();
 const CONTROLLER_EFFECT_CHANNELS = new WeakMap();
 const AUTHORITY_PACKET_READER_OWNERS = new WeakMap();
 const CLEANUP_CONTEXT_CACHE = new WeakMap();
-const AUTHORITY_PACKET_READER_KEYS = Object.freeze([
-  'readAuthority', 'readStart', 'screenPacket', 'readBackfillSource',
-  'readCandidate', 'readCurrent', 'readWebDecision', 'readDispatchOutcome', 'readRecoveryEvidence',
-  'readControllerEvidence', 'readContinuousReview', 'readV3LifecycleObservation', 'readV3RetentionObservation',
-  'readV3CleanupManifest', 'persistV3CleanupManifestCompareAndSwap', 'readV3CleanupOperationHistory',
-  'readV3CleanupCurrentApproval', 'readV3IndependentTransferRestore', 'readV3CleanupIndependentEffect',
-  'readV3RenewalObservation', 'launchV3Successor'
-]);
 
 class GprError extends Error {
   constructor(code, details = {}) {
@@ -2827,10 +2734,6 @@ function expectedAuthorityPacketSchemaFingerprint(DatabaseSync) {
 
 function buildFinalV3SchemaSql() {
   return FINAL_V3_SCHEMA_SQL;
-}
-
-function buildAuthorityPacketSchemaSql() {
-  return AUTHORITY_PACKET_SCHEMA_SQL;
 }
 
 function validateV2MigrationObservation(value) {
@@ -6801,19 +6704,13 @@ function createControllerEffectChannel(receiptStore, session, authorityStore, ad
   const prefix = 'toolkit-core:' + digestValue({ stable_root: compiled.decision.identity.stable_root, grant_id: compiled.decision.accounting.grant_id, first_admission_id: compiled.decision.accounting.first_admission_id });
   const constructionToken=Symbol('controller-effect-channel-construction');
   class ControllerEffectChannel {
-    #owner; #resourceTransportPromise=null; #resourceTransport=null; #resourceOperationState=null;
+    #owner;
     constructor(token,dependencies){
       if(token!==constructionToken)packetFail('GPR_PACKET_ADMISSION_REQUIRED');this.#owner=dependencies;
       for(const name of Object.getOwnPropertyNames(Object.getPrototypeOf(this)))if(name!=='constructor'){
         Object.defineProperty(this,name,{...Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this),name),enumerable:true});
       }
       Object.freeze(this);CONTROLLER_EFFECT_CHANNELS.set(this,this.#owner);
-    }
-    async #ensureResourceTransport(){
-      if(this.#resourceTransportPromise)return this.#resourceTransportPromise;
-      this.#resourceTransportPromise=createControllerResourceTransport(request=>this.resourceOperation(request))
-        .then(created=>{this.#resourceTransport=created;return created;});
-      return this.#resourceTransportPromise;
     }
     snapshot() {
       assertAuthenticControllerEffectChannel(this);
@@ -6877,91 +6774,6 @@ function createControllerEffectChannel(receiptStore, session, authorityStore, ad
       const snap = this.snapshot();
       return deepFreeze(packetClosedClone(callTrustedReaderSync(readers.readControllerResources,
         { decision_digest: snap.decision_digest, request: packetClosedClone(request) }, 'GPR_PACKET_AUTHORITY_UNVERIFIED')));
-    }
-    async launchR093WithResourceEnvelope(specInput, options = {}) {
-      assertAuthenticControllerEffectChannel(this);
-      const agentControl = require("./toolkit-agent-control.cjs");
-      if (typeof agentControl.launchWithResourceEnvelope !== "function") packetFail("GPR_PACKET_CONSUMER_NOT_PERMITTED");
-      return agentControl.launchWithResourceEnvelope(specInput, this, options);
-    }
-    async resourceOperation(requestInput) {
-      assertAuthenticControllerEffectChannel(this);
-      const snap = this.snapshot();
-      const request = packetClosedClone(requestInput);
-      const baseKeys = ['action', 'case_id', 'decision_digest', 'job_identity_digest', 'lock', 'repository', 'run'];
-      const transportedKeys = [...baseKeys, 'dispatch_id', 'reservation_id', 'transport_generation'];
-      const initial = exactKeys(request, baseKeys);
-      const transported = exactKeys(request, transportedKeys);
-      if ((!initial && !transported)
-        || !['OBSERVE', 'START', 'SETTLE'].includes(request.action)
-        || request.case_id !== 'R093-F5-NATIVE-COLLECTOR-POS'
-        || !isDigest(request.decision_digest) || !isDigest(request.job_identity_digest)
-        || request.decision_digest !== snap.decision_digest
-        || request.repository !== snap.decision.identity.repository || request.repository !== CONTROLLER_RESOURCE_REPOSITORY
-        || request.run !== snap.decision.identity.run || request.lock !== snap.decision.identity.lock
-        || request.run !== CONTROLLER_RESOURCE_RUN || request.lock !== CONTROLLER_RESOURCE_LOCK
-        || snap.consumer.stage !== 'G3'
-        || initial && request.action !== 'OBSERVE'
-        || transported && (!/^[a-f0-9-]{36}$/.test(request.reservation_id || '')
-          || !isDigest(request.dispatch_id) || !isDigest(request.transport_generation))) packetFail('GPR_PACKET_CONSUMER_NOT_PERMITTED');
-      const created = await this.#ensureResourceTransport();
-      if (transported && request.transport_generation !== created.transport.server_generation) packetFail('GPR_PACKET_BINDING_MISMATCH');
-      let operationState = this.#resourceOperationState;
-      if (initial) {
-        if (operationState) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-      } else {
-        if (!operationState || request.job_identity_digest !== operationState.job_identity_digest
-          || request.dispatch_id !== operationState.dispatch_id
-          || request.reservation_id !== operationState.reservation_id && operationState.reservation_id !== null) {
-          packetFail('GPR_PACKET_BINDING_MISMATCH');
-        }
-        if (request.action === 'OBSERVE') {
-          if (operationState.observations >= 3 || operationState.start_count !== 0) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-          operationState.observations += 1;
-          operationState.reservation_id = request.reservation_id;
-        } else if (request.action === 'START') {
-          if (operationState.observations !== 3 || operationState.start_count !== 0
-            || request.reservation_id !== operationState.reservation_id) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-          operationState.start_count = 1;
-        } else {
-          if (operationState.start_count !== 1 || operationState.settle_count !== 0
-            || request.reservation_id !== operationState.reservation_id) packetFail('GPR_PACKET_DISPATCH_UNRESOLVED');
-          operationState.settle_count = 1;
-        }
-      }
-      const operation = { ...request, identity: snap.decision.identity, current: snap.current, transport_identity: created.transport };
-      if (callTrustedReaderSync(readers.verifyControllerEffectPlan, operation, 'GPR_PACKET_AUTHORITY_UNVERIFIED') !== true) {
-        packetFail('GPR_PACKET_CONSUMER_NOT_PERMITTED');
-      }
-      let result = packetClosedClone(callTrustedReaderSync(readers.readControllerResources,
-        { decision_digest: snap.decision_digest, operation }, 'GPR_PACKET_AUTHORITY_UNVERIFIED'));
-      if (request.action === 'OBSERVE') {
-        if (!result || typeof result !== 'object' || Array.isArray(result)
-          || result.decision_digest !== snap.decision_digest || result.job_identity_digest !== request.job_identity_digest
-          || !isDigest(result.dispatch_id)) packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-        result.transport = created.transport;
-        if (initial) {
-          this.#resourceOperationState = {
-            job_identity_digest: request.job_identity_digest,
-            dispatch_id: result.dispatch_id,
-            reservation_id: null,
-            observations: 1,
-            start_count: 0,
-            settle_count: 0,
-          };
-        } else if (result.dispatch_id !== operationState.dispatch_id) packetFail('GPR_PACKET_BINDING_MISMATCH');
-        return deepFreeze(result);
-      }
-      return deepFreeze(packetClosedClone({
-        schema: CONTROLLER_RESOURCE_TRANSPORT_RESULT_SCHEMA,
-        action: request.action,
-        decision_digest: snap.decision_digest,
-        job_identity_digest: request.job_identity_digest,
-        dispatch_id: request.dispatch_id,
-        reservation_id: request.reservation_id,
-        transport_generation: created.transport.server_generation,
-        result,
-      }));
     }
     async prepare(requestInput) {
       const request = packetClosedClone(requestInput);
@@ -7052,48 +6864,6 @@ function createControllerEffectChannel(receiptStore, session, authorityStore, ad
   return channel;
 }
 
-async function launchR093WithAuthenticatedController(input) {
-  const keys = ['authority_store_options','consumer_intent','receipt_lease_ms','receipt_store_options','resource_root','spec','trusted_authority_readers'];
-  if (!isRecord(input) || !exactKeys(input, keys)) packetFail('GPR_PACKET_VALUE_INVALID');
-  const leaseMs = input.receipt_lease_ms;
-  if (!Number.isSafeInteger(leaseMs) || leaseMs < LIMITS.leaseMinMs || leaseMs > LIMITS.leaseMaxMs) packetFail('GPR_ALLOCATION_INVALID');
-  const readers = captureAuthorityPacketReaders(input.trusted_authority_readers);
-  if (!readers || typeof readers.readAuthority !== 'function' || typeof readers.readStart !== 'function') packetFail('GPR_PACKET_AUTHORITY_UNVERIFIED');
-  const consumerIntent = packetClosedConsumerIntent(input.consumer_intent, 'GPR_PACKET_ADMISSION_REQUIRED');
-  if (consumerIntent.repository !== CONTROLLER_RESOURCE_REPOSITORY || consumerIntent.consumer?.stage !== 'G3'
-    || consumerIntent.consumer?.run !== CONTROLLER_RESOURCE_RUN || consumerIntent.consumer?.lock !== CONTROLLER_RESOURCE_LOCK) packetFail('GPR_PACKET_CONSUMER_NOT_PERMITTED');
-  const authorityStore = createAuthorityPacketStore(input.authority_store_options, readers);
-  const admissionResult = authorityStore.admitSemanticGate(consumerIntent, readers);
-  const admission = admissionResult?.admission;
-  if (!admission) packetFail('GPR_PACKET_ADMISSION_REQUIRED');
-  assertAuthenticSemanticGateAdmission(authorityStore, admission);
-  const compiled = authorityStore.readControllerDecision(admission);
-  if (!compiled?.decision || compiled.consumer?.stage !== 'G3'
-    || compiled.decision.identity.repository !== CONTROLLER_RESOURCE_REPOSITORY
-    || compiled.decision.identity.run !== CONTROLLER_RESOURCE_RUN
-    || compiled.decision.identity.lock !== CONTROLLER_RESOURCE_LOCK) packetFail('GPR_PACKET_BINDING_MISMATCH');
-  const receiptStore = createProgrammeReceiptStore(input.receipt_store_options);
-  const receiptOwner = programmeReceiptStoreState(receiptStore);
-  const authorityOwner = authorityPacketStoreState(authorityStore);
-  if (canonicalSerialize(receiptOwner.config.namespace) !== canonicalSerialize(authorityOwner.config.namespace)) packetFail('GPR_PACKET_BINDING_MISMATCH');
-  const receiptCheck = openVerified(receiptOwner.config, false, true);
-  receiptCheck.close();
-  const authoritySnapshot = await callReader(readers.readAuthority, 'GPR_AUTHORITY_UNVERIFIED');
-  if (!isRecord(authoritySnapshot) || !isRecord(authoritySnapshot.authority)) fail('GPR_AUTHORITY_UNVERIFIED');
-  const authority = validateAuthority(authoritySnapshot.authority);
-  const start = validateStart(await callReader(readers.readStart, 'GPR_START_UNVERIFIED'));
-  const session = await receiptStore.startRun({
-    lock: compiled.decision.identity.lock,
-    authority,
-    start,
-    candidate: null,
-    lease_ms: leaseMs,
-    semantic_gate: { store: authorityStore, admission }
-  }, readers);
-  const effectChannel = createControllerEffectChannel(receiptStore, session, authorityStore, admission);
-  const launch = await effectChannel.launchR093WithResourceEnvelope(input.spec, { root: input.resource_root });
-  return Object.freeze({ launch, effectChannel });
-}
 function createAuthorityPacketStore(options, trustedAuthorityReaders) {
   const config = createStoreConfig(options || {});
   const readers = captureAuthorityPacketReaders(trustedAuthorityReaders);
@@ -8735,9 +8505,7 @@ if (require.main === module) {
 
 module.exports = Object.freeze({
   APPLICATION_ID,
-  AUTHORITY_PACKET_CONSUMER_CLASSES,
   AUTHORITY_PACKET_ACCEPTANCE_SCHEMA_ID,
-  AUTHORITY_PACKET_CURRENT_SCHEMA_ID,
   AUTHORITY_PACKET_DELIVERY_SCHEMA_ID,
   AUTHORITY_PACKET_EVENT_SCHEMA_ID,
   AUTHORITY_PACKET_LIMITS,
@@ -8746,18 +8514,10 @@ module.exports = Object.freeze({
   AUTHORITY_PACKET_V3_SCHEMA_ID,
   AUTHORITY_PACKET_STAGES,
   AUTHORITY_PACKET_USER_VERSION,
-  BUSY_TIMEOUT_MS,
-  BROKER_RECOVERY_CLASSIFICATION,
-  BROKER_RECOVERY_REASON,
-  HOLDER_ATTESTATION_ALGORITHM,
   HOLDER_ATTESTATION_KEYS,
-  HOLDER_ATTESTATION_SCHEMA_ID,
   LIMITS,
-  MIN_NODE_VERSION,
   OPERATION_KINDS,
-  OPERATION_STATES,
   PRE_RECOVERY_EVIDENCE_KEYS,
-  PRE_RECOVERY_EVIDENCE_SCHEMA_ID,
   RECEIPT_TYPES,
   RECOVERY_CHECKPOINT_V3_SCHEMA_ID,
   RECOVERY_CHECKPOINT_CONSUMER_SCHEMA_ID,
@@ -8768,7 +8528,6 @@ module.exports = Object.freeze({
   SCHEMA_ID,
   SEMANTIC_GATE_ADMISSION_EVENT_SCHEMA_ID,
   SEMANTIC_GATE_ADMISSION_SCHEMA_ID,
-  TERMINAL_TYPES,
   USER_VERSION,
   ZERO_OPERATION_INVENTORY_DIGEST,
   V3_MIGRATION_PLAN_SCHEMA_ID,
@@ -8777,7 +8536,6 @@ module.exports = Object.freeze({
   trustedGprErrorInfo,
   assertAuthenticControllerEffectChannel,
   createControllerEffectChannel,
-  launchR093WithAuthenticatedController,
   assertAuthenticAuthorityPacketStore,
   assertAuthenticSemanticGateAdmission,
   assertRuntimeSupport,
@@ -8785,8 +8543,6 @@ module.exports = Object.freeze({
   authorityPacketIdentities,
   authorityPacketRuntimeIdentity,
   authorityPacketStoreIdentity,
-  buildAuthorityPacketMigrationPlan,
-  buildAuthorityPacketSchemaSql,
   buildFinalV3SchemaSql,
   buildV2ToV3MigrationPlan,
   createAuthorityPacketStore,
@@ -8803,27 +8559,21 @@ module.exports = Object.freeze({
   planAuthorityPacketMigration,
   preRecoveryEvidenceDigest,
   validateAuthorityPacket,
-  validateRecoveryCheckpoint: packetValidateRecoveryCheckpoint,
-  validateAuthorityPacketAcceptance,
   validateAuthorityPacketCurrent,
   validateAuthorityPacketDelivery,
   validateAuthorityPacketDeliveryProcessResult,
   verifyFinalV3Database,
   verifyV3DurableEvidence,
   resolveDatabasePath,
-  validateAuthority,
   validateCandidate,
   validateHolderAttestation,
   validateOperationDescriptor,
-  validateOutcomeEvidence,
   validatePreRecoveryEvidence,
   validateReceiptChain,
   validateReceiptObject,
   validateRecoveryRecord,
   validateReservedOrphanPayload,
   validateSemanticGateAdmission,
-  validateStart,
-  validateVerificationPacket,
   validateVerifierProcessResult,
   validateWindowsStorageProof,
   readCurrentRecoveryCheckpoint,

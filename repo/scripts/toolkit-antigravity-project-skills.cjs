@@ -224,4 +224,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { PORTABLE_SKILLS_RELATIVE_PATH, copyPortableSkills, parseArgs, run };
+module.exports = { copyPortableSkills, parseArgs, run };

@@ -2,380 +2,94 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
-const Ajv2020 = require('ajv/dist/2020');
+const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
-const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
-const resourceTest = require('./toolkit-resource-test-support.cjs');
+
+const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
+const HISTORY_MODULE = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control-run093-history.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
-function resources(overrides = {}) {
-  return { ...resourceTest.FIXTURE, ...overrides };
-}
-
-const rawAdmissionDecision = control.admissionDecision;
-control.admissionDecision = (specInput, options = {}) => {
-  const supplied = options.resourceState ?? options.resource_state;
-  if (!resourceTest.isFixture(supplied)) return rawAdmissionDecision(specInput, options);
-  const testRoot = options.root || root();
-  return resourceTest.withFixture(testRoot, () => rawAdmissionDecision(specInput, resourceTest.options(testRoot, options)));
-};
-const rawResourceAdmissionDecision = control.resourceAdmissionDecision;
-control.resourceAdmissionDecision = (specInput, selectedProfile, resourcesInput, options = {}) => {
-  const supplied = options.resourceState ?? options.resource_state;
-  if (!resourceTest.isFixture(resourcesInput) && !resourceTest.isFixture(supplied)) {
-    return rawResourceAdmissionDecision(specInput, selectedProfile, resourcesInput, options);
-  }
-  const testRoot = options.root || root();
-  return resourceTest.withFixture(testRoot, () => rawResourceAdmissionDecision(
-    specInput, selectedProfile, resourcesInput, resourceTest.options(testRoot, options),
-  ));
-};
-const rawInspectResourceCapability = control.inspectResourceCapability;
-control.inspectResourceCapability = (options = {}) => {
-  const supplied = options.resourceState ?? options.resource_state;
-  if (!resourceTest.isFixture(supplied)) return rawInspectResourceCapability(options);
-  const testRoot = options.root || root();
-  return resourceTest.withFixture(testRoot, () => rawInspectResourceCapability(resourceTest.options(testRoot, options)));
-};
-function spec(overrides = {}) {
-  return {
-    child_responsibility: 'Implement the isolated parser shard and its focused tests.',
-    parent_responsibility: 'Reconcile interfaces and review the independent integration boundary.',
-    integration_plan: 'The root owns interface reconciliation and final integration judgement.',
-    validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
-    material_benefit: 'The shorter parser shard runs concurrently and reduces the implementation critical path.',
-    tasks_separable: true,
-    concurrent_execution_possible: true,
-    expected_wall_clock_speedup: 'The shorter parser fixture completes while the root handles the longer integration task.',
-    root_retains_longest_or_critical_path: true,
-    child_task_is_shorter_or_easier: true,
-    root_productive_work_declared: true,
-    child_prompt: 'Implement only the isolated parser shard and report changed files and tests.',
-    ...overrides,
-  };
-}
 function activationProof(overrides = {}) {
   return { schema: 3, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
     cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };
 }
-let defaultVerifier;
-function configured(topology, capacity_mode, overrides = {}) {
-  const nativeResources = control.inspectResources();
-  const resourceSource = nativeResources?.source || 'unsupported-or-malformed';
-  return { topology, capacity_mode, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), claude_cli: defaultVerifier?.cli || 'claude',
-    resource_counter_supported: topology === control.TOPOLOGIES.CLAUDE_DIRECT && ['proc-meminfo', 'win32-operating-system'].includes(resourceSource),
-    resource_counter_source: topology === control.TOPOLOGIES.CLAUDE_DIRECT ? resourceSource : 'not-applicable', ...overrides };
+function rootOnly(overrides = {}) {
+  return { topology: control.TOPOLOGIES.ROOT_ONLY, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY,
+    enforcement_verified: true, activation_proof: activationProof(), claude_cli: 'claude', ...overrides };
 }
-function profile(overrides = {}) {
-  return { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
-    capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
+function storedProfile(overrides = {}) {
+  return { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.ROOT_ONLY,
+    capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
     queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
-    controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), claude_cli: defaultVerifier?.cli || 'claude', status: 'configured', supported: true, ...overrides };
+    controller_version: control.CONTROL_VERSION, enforcement_verified: true, enforcement: 'native-agent-hook-deny',
+    activation_proof: activationProof(), claude_cli: 'claude', updated_at: new Date().toISOString(), ...overrides };
 }
-function verifiedOptions(overrides = {}) {
-  const selected = overrides.profile || profile();
-  return { claudeCli: defaultVerifier.cli, ...overrides, profile: selected };
+function writeProfile(work, contents) {
+  const target = control.profilePath('claude-code', { root: work });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, typeof contents === 'string' ? contents : `${JSON.stringify(contents, null, 2)}\n`);
+  return target;
 }
-function verifierFixture() {
+
+test('root-only and broader-native are the only configurable topologies; the retired direct topology is refused', () => {
   const work = root();
-  const cache = path.join(work, 'cache');
-  const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',"repo/scripts/toolkit-claude-task-session.cjs","repo/scripts/toolkit-claude-dispatch-observer.cjs","repo/scripts/toolkit-v3-native-helper-adapter.cjs","repo/scripts/toolkit-v3-helper-guard.cjs","repo/scripts/toolkit-gate-contract-compiler.cjs","repo/contracts/controller-kernel/stack-registry-v3.json","repo/contracts/controller-kernel/stack-registry-v3.schema.json"]) {
-    const target = path.join(cache, ...rel.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
+  const configured = control.configureProfile('claude-code', rootOnly(), { root: work });
+  assert.equal(configured.topology, control.TOPOLOGIES.ROOT_ONLY);
+  assert.equal(configured.enforcement, 'native-agent-hook-deny');
+  assert.equal(control.readProfile('claude-code', { root: work }).supported, true);
+  const broader = control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: work });
+  assert.equal(broader.enforcement, 'outside-toolkit-control');
+  assert.equal(broader.activation_proof, null);
+
+  const refused = root();
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), /direct topology is retired/i);
+  for (const capacity_mode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
+    assert.throws(() => control.configureProfile('claude-code', rootOnly({ capacity_mode }), { root: refused }), /Unsupported capacity mode/);
   }
-  const entry = { id: pluginSetup.pluginId(), version: control.CONTROL_VERSION, enabled: true, trusted: true, hooksActive: true, installPath: cache };
-  const statePath = path.join(work, 'claude-state.json');
-  fs.writeFileSync(statePath, `${JSON.stringify(entry, null, 2)}\n`);
-  const cli = path.join(work, 'fake-claude.cjs');
-  fs.writeFileSync(cli, `'use strict';\nconst fs=require('node:fs');const args=process.argv.slice(2);const entry=JSON.parse(fs.readFileSync(${JSON.stringify(statePath)},'utf8'));if(args[0]==='--version'){process.stdout.write('claude fake\\n');process.exit(0);}if(args[0]==='plugin'&&args[1]==='list'){process.stdout.write(JSON.stringify({installed:[entry]})+'\\n');process.exit(0);}process.exit(9);\n`);
-  const proof = pluginSetup.installedActivationProof(entry, control.CONTROL_VERSION);
-  return { work, cache, cli, entry, statePath, proof };
-}
-function enforcementFixture() {
-  const fixture = verifierFixture();
-  const { work, proof } = fixture;
-  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, { activation_proof: proof, claude_cli: fixture.cli }), { root: work });
-  return fixture;
-}
-function assertNoAdmissionResidue(fixture, result, name) {
-  assert.equal(result.result, control.RESULTS.REFUSE, name);
-  assert.equal(Object.prototype.hasOwnProperty.call(result, 'supervisor_pid'), false, name);
-  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false, name);
-  assert.equal(fs.existsSync(control.lockPath({ root: fixture.work })), false, name);
-  assert.equal(fs.existsSync(control.lockRecoveryPath({ root: fixture.work })), false, name);
-  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false, name);
-}
-defaultVerifier = verifierFixture();
-
-test('non-productive parent requests remain root-only', () => {
-  const result = control.admissionDecision(spec({ parent_responsibility: 'Wait for the child result.' }), verifiedOptions({ root: root(), resourceState: resources() }));
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.match(result.reason, /productive work|waiting/i);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: 'future-topology' }), { root: refused }), /Unsupported topology/);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ resourceState: {} }), { root: refused }), /Caller-provided resource evidence/);
+  assert.equal(fs.existsSync(control.profilePath('claude-code', { root: refused })), false);
+  assert.throws(() => control.configureProfile('codex', rootOnly(), { root: refused }), /not supported for this host/);
 });
 
-test('genuine independent work starts with a reservation and productive-root evidence', () => {
-  const work = root();
-  const result = control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() }));
-  assert.equal(result.result, control.RESULTS.START);
-  assert.equal(result.effort, 'medium');
-  assert.equal(result.non_fast, 'CLAUDE_CODE_DISABLE_FAST_MODE=1');
-  assert.equal(result.productive_parent, true);
-  assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 1);
-});
-
-test('worker scheduling contract refuses missing or contradictory speedup declarations', () => {
-  const launchOptions = verifiedOptions({ root: root(), resourceState: resources() });
-  assert.match(control.admissionDecision(spec({ expected_wall_clock_speedup: '' }), launchOptions).reason, /wall-clock speedup/i);
-  assert.match(control.admissionDecision(spec({ tasks_separable: false }), launchOptions).reason, /separable/i);
-  assert.match(control.admissionDecision(spec({ concurrent_execution_possible: false }), launchOptions).reason, /concurrently executable/i);
-  assert.match(control.admissionDecision(spec({ root_retains_longest_or_critical_path: false }), launchOptions).reason, /longest|critical-path/i);
-  assert.match(control.admissionDecision(spec({ child_task_is_shorter_or_easier: false }), launchOptions).reason, /shorter or easier/i);
-  assert.match(control.admissionDecision(spec({ root_productive_work_declared: false }), launchOptions).reason, /productive work/i);
-});
-
-test('delegating every substantive shard and duplicate parent work are rejected', () => {
-  const options = verifiedOptions({ root: root(), resourceState: resources() });
-  assert.equal(control.admissionDecision(spec({ delegates_all_substantive_work: true }), options).result, control.RESULTS.REFUSE);
-  assert.equal(control.admissionDecision(spec({ parent_responsibility: spec().child_responsibility }), options).result, control.RESULTS.REFUSE);
-});
-
-test('pressure queues boundedly and unknown state refuses root-only', () => {
-  const work = root();
-  const expensive = spec({ estimated_memory_bytes: 16 * control.GIB });
-  const queued = control.admissionDecision(expensive, verifiedOptions({ root: work, resourceState: resources() }));
-  assert.equal(queued.result, control.RESULTS.QUEUE);
-  assert.ok(queued.expires_at_ms > Date.now());
-  assert.equal(control.admissionDecision(spec({ ...expensive, queue_id: queued.queue_id }), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.QUEUE);
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: root(), resourceState: null })).result, control.RESULTS.REFUSE);
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: root(), resourceState: resources({ physical_available: control.GIB }) })).result, control.RESULTS.REFUSE);
-  fs.writeFileSync(control.statePath({ root: work }), '{ malformed');
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.REFUSE);
-});
-
-test('bounded queue retry keeps identity and starts only the oldest request after pressure clears', () => {
-  const work = root();
-  const queued = control.admissionDecision(spec({ estimated_memory_bytes: 16 * control.GIB }), verifiedOptions({ root: work, resourceState: resources() }));
-  assert.equal(queued.result, control.RESULTS.QUEUE);
-  const later = control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() }));
-  assert.equal(later.result, control.RESULTS.QUEUE);
-  const admitted = control.admissionDecision(spec({ queue_id: queued.queue_id }), verifiedOptions({ root: work, resourceState: resources() }));
-  assert.equal(admitted.result, control.RESULTS.START);
-  const state = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
-  assert.equal(state.queue.some((entry) => entry.id === queued.queue_id), false);
-});
-
-test('manual maximum is a backstop and never bypasses resource admission', () => {
-  const work = root();
-  const manual = profile({ capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 1 });
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, profile: manual, resourceState: resources() })).result, control.RESULTS.START);
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, profile: manual, resourceState: resources() })).result, control.RESULTS.QUEUE);
-});
-
-test('shared resource admission rejects malformed capacity profiles before reserving', () => {
-  for (const malformed of [
-    { capacity_mode: control.CAPACITY_MODES.MANUAL, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
-    { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
-    { capacity_mode: 'unverified', manual_maximum: 64, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
-  ]) {
-    const work = root();
-    const result = control.resourceAdmissionDecision(spec(), malformed, resources(), { root: work });
-    assert.equal(result.result, control.RESULTS.REFUSE);
-    assert.match(result.reason, /profile.*verified safely/i);
-    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  }
-});
-
-test('shared resource admission refuses Toolkit child recursion before creating state', () => {
-  const work = root();
-  const result = control.resourceAdmissionDecision(spec(), profile(), resources(), {
-    root: work,
-    env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' },
-  });
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.match(result.reason, /children cannot launch/i);
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-});
-
-test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
-  const work = root();
-  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });
-  const run = () => resourceTest.runAdmissionChild(spec(), work, defaultVerifier.cli).then((result) => result.result);
-  const results = await Promise.all([run(), run()]);
-  assert.deepEqual(results.sort(), ['queue', 'start']);
-});
-
-test('stale dead reservations recover but live ownership is preserved', () => {
-  const work = root();
-  fs.mkdirSync(path.dirname(control.statePath({ root: work })), { recursive: true });
-  fs.writeFileSync(control.statePath({ root: work }), JSON.stringify({ schema: control.SCHEMA, reservations: [
-    { id: 'dead', owner_pid: 99999999, expires_at_ms: 1 },
-    { id: 'live', owner_pid: process.pid, expires_at_ms: 1 },
-  ], queue: [] }));
-  const state = control.recoverState(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')), Date.now());
-  assert.deepEqual(state.reservations.map((entry) => entry.id), ['live']);
-});
-
-test('M09 dead pid and TTL cannot recover-release a v2 mode-0 reservation with unknown effects', () => {
-  const now = Date.now();
-  const sealedEnvelope = Object.freeze({ schema: 'toolkit.agent-control.resource-envelope.v1', dispatch_id: 'a'.repeat(64) });
-  const unknownMode0 = reservation('mode0-unknown', {
-    owner_pid: 99999999,
-    status: 'running',
-    expires_at_ms: 1,
-    producer_provenance: { schema: 'toolkit.agent-control.resource-provenance.v2', mode0_envelope: sealedEnvelope },
-  });
-  const expiredLegacy = reservation('legacy-expired', { owner_pid: 99999999, expires_at_ms: 1 });
-  const recovered = control.recoverState({ schema: control.SCHEMA, reservations: [unknownMode0, expiredLegacy], queue: [], checker_reviews: [] }, now);
-  assert.deepEqual(recovered.reservations.map((entry) => entry.id), ['mode0-unknown']);
-  assert.equal(recovered.reservations[0].producer_provenance.schema, 'toolkit.agent-control.resource-provenance.v2');
-  assert.deepEqual(recovered.reservations[0].producer_provenance.mode0_envelope, sealedEnvelope);
-});
-
-test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
-  const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
-  assert.deepEqual(invocation.raw_args.slice(0, 10), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
-  assert.equal(invocation.raw_args.filter((arg) => arg === '--no-session-persistence').length, 1);
-  assert.equal(invocation.raw_args.at(-1), '--no-session-persistence');
-  assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
-  assert.equal(invocation.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, '1');
-  assert.throws(() => control.validateLaunchSpec(spec({ depth: 2 })), /blocks nested/i);
-});
-
-test('standard child invocation inherits the current process environment without serializing it', () => {
-  const previous = process.env.TOOLKIT_STANDARD_ENV_MARKER;
-  process.env.TOOLKIT_STANDARD_ENV_MARKER = 'standard-process-environment';
-  try {
-    const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
-    assert.equal(invocation.env.TOOLKIT_STANDARD_ENV_MARKER, 'standard-process-environment');
-    assert.equal(invocation.raw_args.includes('standard-process-environment'), false);
-    assert.equal(invocation.stdin.includes('standard-process-environment'), false);
-  } finally {
-    if (previous === undefined) delete process.env.TOOLKIT_STANDARD_ENV_MARKER;
-    else process.env.TOOLKIT_STANDARD_ENV_MARKER = previous;
-  }
-});
-
-test('fast roots cannot propagate fast mode and unverifiable modes fail closed', () => {
-  const old = process.env.CLAUDE_CODE_DISABLE_FAST_MODE;
-  delete process.env.CLAUDE_CODE_DISABLE_FAST_MODE;
-  const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
-  assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
-  if (old !== undefined) process.env.CLAUDE_CODE_DISABLE_FAST_MODE = old;
-  assert.throws(() => control.validateLaunchSpec(spec({ effort: 'low' })), /medium/i);
-});
-
-test('higher effort is isolated to a named justified role', () => {
-  assert.throws(() => control.validateLaunchSpec(spec({ effort: 'high' })), /named difficult role/i);
-  const high = spec({ effort: 'high', difficult_role: 'protocol auditor', effort_justification: 'The narrow protocol proof crosses three state machines.' });
-  const work = root();
-  assert.equal(control.admissionDecision(high, verifiedOptions({ root: work, resourceState: resources() })).result, 'start');
-  assert.equal(control.admissionDecision(high, verifiedOptions({ root: work, resourceState: resources() })).result, 'refuse-root-only');
-});
-
-test('root-only and broader-native profiles never claim Toolkit admission coverage', () => {
-  for (const topology of [control.TOPOLOGIES.ROOT_ONLY, control.TOPOLOGIES.BROADER_NATIVE]) {
-    const result = control.admissionDecision(spec(), verifiedOptions({ root: root(), profile: profile({ topology }), resourceState: resources() }));
-    assert.equal(result.result, control.RESULTS.REFUSE);
-  }
-});
-
-test('Claude hook denies native Agent under root/direct profiles and requires routing binding for broader native behavior', async () => {
-  for (const topology of [control.TOPOLOGIES.ROOT_ONLY, control.TOPOLOGIES.CLAUDE_DIRECT]) {
-    const work = root();
-    const capacityMode = topology === control.TOPOLOGIES.CLAUDE_DIRECT ? control.CAPACITY_MODES.AUTO : control.CAPACITY_MODES.ROOT_ONLY;
-    control.configureProfile('claude-code', configured(topology, capacityMode), { root: work });
-    assert.equal(hook.decision({ tool_name: 'Agent' }, { root: work }).hookSpecificOutput.permissionDecision, 'deny');
-  }
-  const work = root();
-  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: work });
-  assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: work })).hookSpecificOutput.permissionDecision, 'deny');
-});
-
-test('Codex and Claude profile state is isolated', () => {
-  const work = root();
-  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO), { root: work });
-  assert.equal(control.readProfile('codex', { root: work }).topology, control.TOPOLOGIES.ROOT_ONLY);
-  assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.CLAUDE_DIRECT);
-});
-
-test('aggregate reserved memory is subtracted under the admission lock', async () => {
-  const work = root();
-  const expensive = spec({ estimated_memory_bytes: 3 * control.GIB });
-  const options = verifiedOptions({ root: work, resourceState: resources() });
-  assert.equal(control.admissionDecision(expensive, options).result, control.RESULTS.START);
-  assert.equal(control.admissionDecision(expensive, options).result, control.RESULTS.QUEUE);
-
-  const raceRoot = root();
-  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO), { root: raceRoot });
-  const run = () => resourceTest.runAdmissionChild(expensive, raceRoot, defaultVerifier.cli).then((result) => result.result);
-  assert.deepEqual((await Promise.all([run(), run()])).sort(), ['queue', 'start']);
-});
-
-test('malformed reservation costs fail closed instead of becoming free capacity', () => {
-  const work = root();
-  fs.mkdirSync(path.dirname(control.statePath({ root: work })), { recursive: true });
-  fs.writeFileSync(control.statePath({ root: work }), JSON.stringify({
-    schema: control.SCHEMA,
-    reservations: [{ id: 'bad', owner_pid: process.pid, created_at_ms: 1, expires_at_ms: Date.now() + 10000, estimated_memory_bytes: -1 }],
-    queue: [],
-  }));
-  assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.REFUSE);
-});
-
-test('complete profile validation rejects corrupted, partial, future, unknown and contradictory state', () => {
+test('a stored direct profile, or any corrupted, partial, future or contradictory profile, reads as unsupported root-only', () => {
   const cases = [
     '{',
     JSON.stringify({ schema: control.SCHEMA, host: 'claude-code' }),
-    JSON.stringify({ ...profile(), schema: control.SCHEMA + 1 }),
-    JSON.stringify({ ...profile(), topology: 'future-topology' }),
-    JSON.stringify({ ...profile(), worker_estimate_bytes: -1 }),
-    JSON.stringify({ ...profile(), topology: control.TOPOLOGIES.ROOT_ONLY, capacity_mode: control.CAPACITY_MODES.AUTO }),
+    storedProfile({ schema: control.SCHEMA + 1 }),
+    storedProfile({ topology: 'future-topology' }),
+    storedProfile({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }),
+    storedProfile({ capacity_mode: control.CAPACITY_MODES.AUTO }),
+    storedProfile({ manual_maximum: 1 }),
+    storedProfile({ worker_estimate_bytes: -1 }),
+    storedProfile({ queue_limit: 5 }),
+    storedProfile({ enforcement: 'toolkit-launch-boundary' }),
+    storedProfile({ controller_version: '2.10.14' }),
+    storedProfile({ claude_cli: './bin/claude' }),
+    storedProfile({ activation_proof: activationProof({ schema: 2 }) }),
   ];
   for (const contents of cases) {
     const work = root();
-    const target = control.profilePath('claude-code', { root: work });
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, contents);
+    writeProfile(work, contents);
     const read = control.readProfile('claude-code', { root: work });
-    assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);
+    assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY, String(contents).slice(0, 80));
     assert.equal(read.supported, false);
     assert.notEqual(read.status, 'configured');
-    assert.equal(control.admissionDecision(spec(), { root: work, resourceState: resources() }).result, control.RESULTS.REFUSE);
   }
+  const current = root();
+  writeProfile(current, storedProfile());
+  assert.equal(control.readProfile('claude-code', { root: current }).status, 'configured');
 });
 
-test('strict profiles reject relative path-like Claude commands', () => {
+test('root-only profiles require exact native activation proof bound to the installed plugin bytes', () => {
   const work = root();
-  assert.throws(() => control.configureProfile('claude-code', configured(
-    control.TOPOLOGIES.CLAUDE_DIRECT,
-    control.CAPACITY_MODES.AUTO,
-    { claude_cli: './bin/claude' },
-  ), { root: work }), /must be absolute/i);
-  const target = control.profilePath('claude-code', { root: work });
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, `${JSON.stringify({ ...profile(), claude_cli: './bin/claude', updated_at: new Date().toISOString() }, null, 2)}\n`);
-  assert.equal(control.readProfile('claude-code', { root: work }).supported, false);
-});
-
-test('strict profiles require exact native activation proof and direct profiles require resource counters', () => {
-  const work = root();
-  assert.throws(() => control.configureProfile('claude-code', {
-    topology: control.TOPOLOGIES.ROOT_ONLY, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, enforcement_verified: true,
-  }, { root: work }), /trust and activation/i);
-  const configuredDirect = control.configureProfile('claude-code', {
-    topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO,
-    enforcement_verified: true, activation_proof: activationProof(),
-  }, { root: work });
-  assert.equal(configuredDirect.resource_counter_verified, true);
-  assert.ok(['proc-meminfo', 'win32-operating-system'].includes(configuredDirect.resource_counter_source));
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ activation_proof: undefined }), { root: work }), /trust and activation/i);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ enforcement_verified: false }), { root: work }), /trust and activation/i);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ claude_cli: './bin/claude' }), { root: work }), /must be absolute/i);
   for (const bad of [
     null,
     activationProof({ schema: 2 }),
@@ -386,618 +100,79 @@ test('strict profiles require exact native activation proof and direct profiles 
   ]) {
     assert.equal(control.validActivationProof(bad), false);
   }
+  assert.equal(control.validActivationProof(activationProof()), true);
   assert.equal(control.validActivationProof(activationProof(), { cachePath: work, pluginVersion: control.CONTROL_VERSION }), false);
 });
 
-test('schema-2 strict profiles fail closed while a correct schema-3 proof persists and revalidates', () => {
-  const staleRoot = root();
-  const staleTarget = control.profilePath('claude-code', { root: staleRoot });
-  fs.mkdirSync(path.dirname(staleTarget), { recursive: true });
-  fs.writeFileSync(staleTarget, `${JSON.stringify({ ...profile(), activation_proof: activationProof({ schema: 2 }), updated_at: new Date().toISOString() }, null, 2)}\n`);
-  const stale = control.readProfile('claude-code', { root: staleRoot });
-  assert.equal(stale.supported, false);
-  assert.equal(stale.topology, control.TOPOLOGIES.ROOT_ONLY);
-  assert.throws(() => control.configureProfile('claude-code', configured(
-    control.TOPOLOGIES.CLAUDE_DIRECT,
-    control.CAPACITY_MODES.AUTO,
-    { activation_proof: activationProof({ schema: 2 }) },
-  ), { root: root() }), /trust and activation/i);
-
-  const fixture = enforcementFixture();
-  const persisted = control.readProfile('claude-code', { root: fixture.work });
-  assert.equal(persisted.activation_proof.schema, 3);
-  assert.match(persisted.activation_proof.process_launch_sha256, /^[a-f0-9]{64}$/);
-  assert.equal(control.verifyCurrentClaudeEnforcement(persisted, { claudeCli: fixture.cli }), true);
-});
-
-test('Run-094 Linux native resource positive uses production proc-meminfo collection without fixture context', {
-  skip: process.platform !== 'linux',
-}, () => {
-  assert.equal(process.platform, 'linux');
-  const state = control.inspectResources();
-  assert.ok(state);
-  assert.equal(state.source, 'proc-meminfo');
-  assert.equal(state.host_responsive, true);
-  assert.equal(Object.hasOwn(state, 'fixture_id'), false);
-  assert.equal(Number.isSafeInteger(state.physical_total), true);
-  assert.ok(state.physical_total > 0);
-  for (const field of ['physical_available', 'commit_total', 'commit_available']) {
-    assert.equal(Number.isSafeInteger(state[field]), true, field);
-  }
-  assert.ok(state.physical_available >= 0);
-  assert.ok(state.commit_total >= 0);
-  assert.ok(state.commit_available >= -Number.MAX_SAFE_INTEGER);
-  assert.ok(state.physical_available <= state.physical_total);
-  assert.ok(state.commit_available <= state.commit_total);
-  const capability = control.inspectResourceCapability();
-  assert.equal(capability.supported, true);
-  assert.equal(capability.source, 'proc-meminfo');
-  // The capability takes its own live sample: available counters move between reads,
-  // so only the source, the field set and the static totals are compared.
-  assert.equal(capability.resources.source, state.source);
-  assert.deepEqual(Object.keys(capability.resources).sort(), Object.keys(state).sort());
-  assert.equal(capability.resources.physical_total, state.physical_total);
-  assert.equal(capability.resources.commit_total, state.commit_total);
-});
-
-test('M01 signed Linux parser accepts exact subtraction and rejects malformed or unstable observations', () => {
-  const sample = [
-    'MemTotal: 4096 kB',
-    'MemAvailable: 0 kB',
-    'CommitLimit: 100 kB',
-    'Committed_AS: 200 kB',
-  ].join('\n');
-  const parsed = control.parseLinuxMeminfoCounters(0, sample, 0);
-  assert.deepEqual({
-    physical_total: parsed.physical_total,
-    physical_available: parsed.physical_available,
-    commit_total: parsed.commit_total,
-    commit_available: parsed.commit_available,
-    overcommit_mode: parsed.overcommit_mode,
-  }, {
-    physical_total: 4194304,
-    physical_available: 0,
-    commit_total: 102400,
-    commit_available: -102400,
-    overcommit_mode: 0,
-  });
-  assert.equal(control.inspectResources({ resourceState: parsed }), null, 'pure parser data cannot acquire native branding');
-  const invalid = [
-    sample.replace('MemAvailable: 0 kB\n', ''),
-    `${sample}\nMemTotal: 4096 kB`,
-    `${sample}\nCommitted_AS: -1 kB`,
-    sample.replace('CommitLimit: 100 kB', 'CommitLimit: -100 kB'),
-    sample.replace('Committed_AS: 200 kB', 'Committed_AS: 200 MB'),
-    sample.replace('MemTotal: 4096 kB', 'MemTotal: 9007199254740992 kB'),
-  ];
-  for (const source of invalid) assert.throws(() => control.parseLinuxMeminfoCounters(0, source, 0));
-  assert.throws(() => control.parseLinuxMeminfoCounters(0, sample, 2), /changed/i);
-  assert.throws(() => control.parseLinuxMeminfoCounters(3, sample, 3), /unsupported/i);
-});
-
-test('M02 and M04 caller-supplied evidence, profiles, flags, and channels cannot admit the mode-0 exception', async () => {
+test('invalidation records a root-only policy that reads as unsupported', () => {
   const work = root();
-  const boundedWorker = spec({ estimated_memory_bytes: control.GIB });
-  const attempts = [
-    { root: work, resourceState: resourceTest.FIXTURE },
-    { root: work, resources: resourceTest.FIXTURE },
-    { root: work, producer_provenance: { schema: 'toolkit.agent-control.resource-provenance.v2' } },
-    { root: work, effectChannel: { snapshot() { throw new Error('caller channel executed'); } } },
-    { root: work, profile: { ...profile(), overcommit_mode: 0, supported: true } },
-  ];
-  for (const options of attempts) {
-    const result = await control.admissionDecisionWithResourceEnvelope(boundedWorker, null, options);
-    assert.equal(result.result, control.RESULTS.REFUSE);
-    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  }
-  const launch = await control.launchWithResourceEnvelope(boundedWorker, null, { root: work, resourceState: resourceTest.FIXTURE });
-  assert.equal(launch.result, control.RESULTS.REFUSE);
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+  control.configureProfile('claude-code', rootOnly(), { root: work });
+  const invalidated = control.invalidateProfile('claude-code', 'proof lost', { root: work });
+  assert.equal(invalidated.status, 'capability-lost-root-only');
+  const stored = JSON.parse(fs.readFileSync(control.profilePath('claude-code', { root: work }), 'utf8'));
+  assert.equal(stored.enforcement, 'unverified-root-only-policy');
+  // Fixed schema-1 fields stay written so an installed earlier Toolkit reader still parses the file.
+  assert.equal(stored.queue_limit, control.MAX_QUEUE);
+  assert.equal(stored.reservation_limit, control.EMERGENCY_WORKER_CEILING);
+  assert.equal(control.readProfile('claude-code', { root: work }).supported, false);
 });
 
-test('Run-094 Windows native resource positive uses production operating-system counters', {
-  skip: process.platform !== 'win32',
-}, () => {
-  assert.equal(process.platform, 'win32');
-  const state = control.inspectResources();
-  assert.ok(state);
-  assert.equal(state.source, 'win32-operating-system');
-  assert.equal(state.host_responsive, true);
-  assert.equal(Object.hasOwn(state, 'fixture_id'), false);
-  for (const field of ['physical_total', 'physical_available', 'commit_total', 'commit_available']) {
-    assert.equal(Number.isSafeInteger(state[field]), true, field);
-    assert.ok(state[field] > 0, field);
-  }
-  assert.ok(state.physical_available <= state.physical_total);
-  assert.ok(state.commit_available <= state.commit_total);
-});
-
-test('resource evidence schema preserves native and repository-test provenance without coercion', () => {
-  const schemaPath = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'resource-evidence-v1.schema.json');
-  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
-  const ajv = new Ajv2020({ strict: true, allErrors: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
-  const validateEvidence = ajv.compile(schema);
-  const validateInvocation = ajv.compile({ ...schema.$defs.repositoryTestInvocation, $schema: schema.$schema });
-  assert.equal(validateEvidence(resourceTest.FIXTURE), true, JSON.stringify(validateEvidence.errors));
-  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, source: 'proc-meminfo' }), false);
-  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, fixture_id: 'other' }), false);
-  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, extra: true }), false);
-  assert.equal(validateEvidence({ ...resourceTest.FIXTURE, physical_available: '8589934592' }), false);
-  const linuxSigned = {
-    source: 'proc-meminfo', physical_total: 1, physical_available: 0,
-    commit_total: 0, commit_available: -Number.MAX_SAFE_INTEGER, host_responsive: true,
-  };
-  assert.equal(validateEvidence(linuxSigned), true, JSON.stringify(validateEvidence.errors));
-  assert.equal(validateEvidence({ ...linuxSigned, commit_available: -Number.MAX_SAFE_INTEGER - 1 }), false);
-  assert.equal(validateInvocation(resourceTest.INVOCATION), true, JSON.stringify(validateInvocation.errors));
-  assert.equal(validateInvocation({ ...resourceTest.INVOCATION, extra: true }), false);
-});
-
-test('repository-test fixture admission is privately scoped and cannot launch or become production profile proof', () => {
+test('Codex and Claude profile state is isolated', () => {
   const work = root();
-  const denied = rawResourceAdmissionDecision(spec(), profile(), resourceTest.FIXTURE, { root: work });
-  assert.equal(denied.result, control.RESULTS.REFUSE);
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  assert.equal(control.inspectResources({ resourceState: resourceTest.FIXTURE }), null);
-
-  const admitted = resourceTest.withFixture(work, () => rawResourceAdmissionDecision(
-    spec(), profile(), resourceTest.FIXTURE, resourceTest.options(work),
-  ));
-  assert.equal(admitted.result, control.RESULTS.START);
-  assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 1);
-
-  const launch = resourceTest.withFixture(work, () => control.launch(spec(), resourceTest.options(work, {
-    profile: profile(), claudeCli: process.execPath,
-  })));
-  assert.equal(launch.result, control.RESULTS.REFUSE);
-  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
-  assert.throws(() => resourceTest.withFixture(work, () => control.configureProfile('claude-code', configured(
-    control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO,
-  ), { root: work })), /cannot configure a production profile/i);
-
-  const descendantRoot = root();
-  resourceTest.registerOwnedRoot(descendantRoot);
-  const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const x=${JSON.stringify(resourceTest.FIXTURE)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};console.log(c.resourceAdmissionDecision(s,p,x,{root:${JSON.stringify(descendantRoot)}}).result)`;
-  const child = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', windowsHide: true, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' } });
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(child.stdout.trim(), control.RESULTS.REFUSE);
-  assert.equal(fs.existsSync(control.statePath({ root: descendantRoot })), false);
+  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: work });
+  assert.equal(control.readProfile('codex', { root: work }).topology, control.TOPOLOGIES.ROOT_ONLY);
+  assert.equal(control.readProfile('codex', { root: work }).supported, false);
+  assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.BROADER_NATIVE);
 });
 
-test('resource evidence aliases, inherited fields, accessors, Proxies, environment and globals do not grant test context', () => {
-  const fixture = resourceTest.FIXTURE;
-  assert.equal(control.inspectResources({ resourceState: null }), null);
-  assert.equal(control.inspectResources({ resource_state: undefined }), null);
-  assert.equal(control.inspectResources({ resourceState: fixture, resource_state: fixture }), null);
-  assert.equal(control.inspectResources({ resource: fixture }), null);
-  assert.equal(control.inspectResources({ resources: fixture }), null);
-  assert.equal(control.inspectResources({ resourceState: { ...fixture, source: 'proc-meminfo' } }), null);
+test('the Claude hook denies native Agent under root-only and retired direct profiles and requires a routing binding for broader-native', async () => {
+  const rootOnlyRoot = root();
+  control.configureProfile('claude-code', rootOnly(), { root: rootOnlyRoot });
+  const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot }).hookSpecificOutput;
+  assert.equal(denied.permissionDecision, 'deny');
+  assert.doesNotMatch(denied.permissionDecisionReason, /toolkit-agent-control|launch-spec|direct/i);
 
-  let accessorCalls = 0;
-  const accessor = {};
-  Object.defineProperty(accessor, 'resourceState', { enumerable: true, get() { accessorCalls += 1; return fixture; } });
-  assert.equal(control.inspectResources(accessor), null);
-  const proxyCounters = { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 };
-  const proxyOptions = new Proxy({ resourceState: fixture }, {
-    get(target, key, receiver) { proxyCounters.get += 1; return Reflect.get(target, key, receiver); },
-    ownKeys(target) { proxyCounters.ownKeys += 1; return Reflect.ownKeys(target); },
-    getOwnPropertyDescriptor(target, key) { proxyCounters.getOwnPropertyDescriptor += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
-    getPrototypeOf(target) { proxyCounters.getPrototypeOf += 1; return Reflect.getPrototypeOf(target); },
-  });
-  assert.equal(control.inspectResources(proxyOptions), null);
-  assert.deepEqual(proxyCounters, { get: 0, ownKeys: 0, getOwnPropertyDescriptor: 0, getPrototypeOf: 0 });
-  assert.equal(accessorCalls, 0);
+  const directRoot = root();
+  writeProfile(directRoot, storedProfile({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }));
+  assert.equal(hook.decision({ tool_name: 'Agent' }, { root: directRoot }).hookSpecificOutput.permissionDecision, 'deny');
 
-  const invocationRoot = root();
-  resourceTest.withFixture(invocationRoot, () => {
-    assert.equal(control.inspectResources({
-      ...resourceTest.options(invocationRoot),
-      repositoryTestInvocation: resourceTest.INVOCATION,
-    }), null);
-    assert.equal(control.inspectResources({
-      ...resourceTest.options(invocationRoot),
-      resource_state: fixture,
-    }), null);
-    globalThis.__toolkitRepositoryTestResource = true;
-    process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE = JSON.stringify(resourceTest.INVOCATION);
-    try {
-      const childRoot = root();
-      resourceTest.registerOwnedRoot(childRoot);
-      const source = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const f=${JSON.stringify(fixture)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};globalThis.__toolkitRepositoryTestResource=true;process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE=JSON.stringify(f);console.log(c.resourceAdmissionDecision(s,p,f,{root:${JSON.stringify(childRoot)}}).result)`;
-      const child = spawnSync(process.execPath, ['-e', source], {
-        cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', windowsHide: true,
-        env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' },
-      });
-      assert.equal(child.status, 0, child.stderr);
-      assert.equal(child.stdout.trim(), control.RESULTS.REFUSE);
-      assert.equal(fs.existsSync(control.statePath({ root: childRoot })), false);
-
-      const preloadRoot = root();
-      resourceTest.registerOwnedRoot(preloadRoot);
-      const preload = path.join(invocationRoot, 'resource-test-preload.cjs');
-      fs.writeFileSync(preload, `globalThis.__toolkitRepositoryTestResource=true;process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE=${JSON.stringify(JSON.stringify(resourceTest.INVOCATION))};`);
-      const preloadScript = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const f=${JSON.stringify(fixture)};const s=${JSON.stringify(spec())};const p=${JSON.stringify(profile())};console.log(c.resourceAdmissionDecision(s,p,f,{root:${JSON.stringify(preloadRoot)}}).result)`;
-      const preloaded = spawnSync(process.execPath, ['-e', preloadScript], {
-        cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', windowsHide: true,
-        env: { ...process.env, NODE_OPTIONS: `--require=${preload}`, NODE_PATH: '' },
-      });
-      assert.equal(preloaded.status, 0, preloaded.stderr);
-      assert.equal(preloaded.stdout.trim(), control.RESULTS.REFUSE);
-      assert.equal(fs.existsSync(control.statePath({ root: preloadRoot })), false);
-    } finally {
-      delete globalThis.__toolkitRepositoryTestResource;
-      delete process.env.TOOLKIT_REPOSITORY_TEST_RESOURCE;
-    }
-  });
+  const broaderRoot = root();
+  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: broaderRoot });
+  assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: broaderRoot })).hookSpecificOutput.permissionDecision, 'deny');
 });
 
-test('resource capability rejects unsupported malformed and overflowed states', () => {
-  assert.equal(control.inspectResourceCapability({ resourceState: null }).supported, false);
-  assert.equal(control.inspectResourceCapability({ resourceState: resources({ physical_available: Infinity }) }).supported, false);
-  assert.equal(control.inspectResourceCapability({ resourceState: resources({ commit_available: Number.MAX_VALUE }) }).supported, false);
-  assert.equal(control.inspectResourceCapability({ resourceState: resources() }).supported, true);
-});
-
-test('oversized Unicode prompts refuse before admission or artifact creation', () => {
-  const work = root();
-  const result = control.launch(spec({ child_prompt: `${'a'.repeat(control.MAX_PROMPT_BYTES - 2)}€` }), {
-    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(),
-  });
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.notEqual(result.status, 'launched');
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
-  const exact = control.claudeInvocation(spec({ child_prompt: 'a'.repeat(control.MAX_PROMPT_BYTES) }), { claudeCli: process.execPath });
-  assert.equal(exact.stdin.length, control.MAX_PROMPT_BYTES);
-});
-
-test('direct admission revalidates current Claude trust, hooks and installed identities before reservation', () => {
-  const cases = [
-    ['disabled plugin', ({ entry }) => { entry.enabled = false; }],
-    ['untrusted plugin', ({ entry }) => { entry.trusted = false; }],
-    ['inactive hooks', ({ entry }) => { entry.hooksActive = false; }],
-    ['changed hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' '); }],
-    ['changed controller bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n'); }],
-    ['changed process-launch bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs'), '\n'); }],
-    ['missing process-launch file', ({ cache }) => { fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs')); }],
-    ['non-file process-launch path', ({ cache }) => {
-      const target = path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs');
-      fs.unlinkSync(target);
-      fs.mkdirSync(target);
-    }],
-    ['changed agent hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs'), '\n'); }],
-    ['missing agent hook', ({ cache }) => { fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs')); }],
-    ['replayed proof for replaced cache', (fixture) => {
-      const replacement = path.join(fixture.work, 'replacement-cache');
-      fs.cpSync(fixture.cache, replacement, { recursive: true });
-      fixture.entry.installPath = replacement;
-    }],
-    ['replacement cache with changed process-launch bytes', (fixture) => {
-      const replacement = path.join(fixture.work, 'replacement-cache');
-      fs.cpSync(fixture.cache, replacement, { recursive: true });
-      fixture.entry.installPath = replacement;
-      const replacementProof = pluginSetup.installedActivationProof(fixture.entry, control.CONTROL_VERSION);
-      fs.appendFileSync(path.join(replacement, 'repo', 'scripts', 'claude-process-launch.cjs'), '\n');
-      control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, {
-        activation_proof: replacementProof,
-        claude_cli: fixture.cli,
-      }), { root: fixture.work });
-    }],
-  ];
-  for (const [name, mutate] of cases) {
-    const fixture = enforcementFixture();
-    mutate(fixture);
-    fs.writeFileSync(fixture.statePath, `${JSON.stringify(fixture.entry, null, 2)}\n`);
-    const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli });
-    assert.match(result.reason, /current Claude plugin trust, hook activation, and installed enforcement identity/i, name);
-    assertNoAdmissionResidue(fixture, result, name);
-  }
-
-  const current = enforcementFixture();
-  const currentProfile = control.readProfile('claude-code', { root: current.work });
-  const processBytes = fs.readFileSync(path.join(current.cache, 'repo', 'scripts', 'claude-process-launch.cjs'));
-  assert.equal(currentProfile.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processBytes).digest('hex'));
-  const admitted = control.admissionDecision(spec(), { root: current.work, claudeCli: current.cli, resourceState: resources() });
-  assert.equal(admitted.result, control.RESULTS.START);
-  assert.equal(control.releaseReservation(admitted.reservation_id, { root: current.work }), true);
-});
-
-test('symlinked installed process-launch dependency refuses before admission residue', { skip: process.platform === 'win32' }, (t) => {
-  const fixture = enforcementFixture();
-  const processPath = path.join(fixture.cache, 'repo', 'scripts', 'claude-process-launch.cjs');
-  const replacement = path.join(fixture.work, 'replacement-process-launch.cjs');
-  fs.copyFileSync(processPath, replacement);
-  fs.unlinkSync(processPath);
-  try { fs.symlinkSync(replacement, processPath); }
-  catch (error) {
-    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
-    throw error;
-  }
-  const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli });
-  assertNoAdmissionResidue(fixture, result, 'symlinked process-launch dependency');
-});
-
-test('symlinked installed agent hook refuses before admission state', { skip: process.platform === 'win32' }, (t) => {
-  const fixture = enforcementFixture();
-  const hookPath = path.join(fixture.cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
-  const replacement = path.join(fixture.work, 'replacement-hook.cjs');
-  fs.copyFileSync(hookPath, replacement);
-  fs.unlinkSync(hookPath);
-  try { fs.symlinkSync(replacement, hookPath); }
-  catch (error) {
-    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
-    throw error;
-  }
-  const result = control.admissionDecision(spec(), { root: fixture.work, resourceState: resources() });
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false);
-  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false);
-});
-
-test('effective Claude command precedence covers every current override before persisted profile and bare default', () => {
-  const persisted = profile({ claude_cli: 'persisted-claude' });
-  const env = { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'ai-environment-claude', CLAUDE_TOOLKIT_CLAUDE_CLI: 'toolkit-environment-claude', CLAUDE_CLI_PATH: 'legacy-environment-claude' };
-  assert.equal(control.effectiveClaudeCommand(persisted, { claudeCli: 'explicit-claude', env }), 'explicit-claude');
-  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'ai-environment-claude');
-  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
-  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'toolkit-environment-claude');
-  delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
-  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'legacy-environment-claude');
-  assert.equal(control.effectiveClaudeCommand(persisted, { env: {} }), 'persisted-claude');
-  assert.equal(control.effectiveClaudeCommand({}, { env: {} }), 'claude');
-});
-
-test('persisted Claude command launches without repetition and runtime overrides do not mutate it', () => {
-  const persisted = enforcementFixture();
-  const cleanEnv = { ...process.env };
-  delete cleanEnv.AI_AGENT_TOOLKIT_CLAUDE_CLI;
-  const normal = control.admissionDecision(spec(), { root: persisted.work, env: cleanEnv, resourceState: resources() });
-  assert.equal(normal.result, control.RESULTS.START);
-  control.releaseReservation(normal.reservation_id, { root: persisted.work });
-  assert.equal(control.readProfile('claude-code', { root: persisted.work }).claude_cli, persisted.cli);
-
-  const missing = path.join(persisted.work, 'missing-persisted.cjs');
-  const stored = control.readProfile('claude-code', { root: persisted.work });
-  fs.writeFileSync(control.profilePath('claude-code', { root: persisted.work }), `${JSON.stringify({ ...stored, status: undefined, supported: undefined, claude_cli: missing }, null, 2)}\n`);
-  const explicit = control.admissionDecision(spec(), { root: persisted.work, claudeCli: persisted.cli, env: { ...cleanEnv, AI_AGENT_TOOLKIT_CLAUDE_CLI: path.join(persisted.work, 'missing-env.cjs') }, resourceState: resources() });
-  assert.equal(explicit.result, control.RESULTS.START);
-  control.releaseReservation(explicit.reservation_id, { root: persisted.work });
-  assert.equal(control.readProfile('claude-code', { root: persisted.work }).claude_cli, missing);
-
-  const environment = control.admissionDecision(spec(), { root: persisted.work, env: { ...cleanEnv, AI_AGENT_TOOLKIT_CLAUDE_CLI: persisted.cli }, resourceState: resources() });
-  assert.equal(environment.result, control.RESULTS.START);
-  control.releaseReservation(environment.reservation_id, { root: persisted.work });
-});
-
-test('unavailable persisted Claude command refuses launch without residue', () => {
-  const fixture = enforcementFixture();
-  const stored = control.readProfile('claude-code', { root: fixture.work });
-  fs.writeFileSync(control.profilePath('claude-code', { root: fixture.work }), `${JSON.stringify({ ...stored, status: undefined, supported: undefined, claude_cli: path.join(fixture.work, 'missing.cjs') }, null, 2)}\n`);
-  const env = { ...process.env };
-  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
-  const result = control.launch(spec(), { root: fixture.work, env });
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.notEqual(result.status, 'launched');
-  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false);
-  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false);
-});
-
-test('missing strict profile refuses launch without throwing or creating residue', () => {
-  const work = root();
-  const result = control.launch(spec(), { root: work, env: { ...process.env } });
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.notEqual(result.status, 'launched');
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
-});
-
-test('Toolkit child marker refuses launch and admission before locks or artifacts', () => {
-  for (const depth of [undefined, 1, 2]) {
-    const work = root();
-    const childSpec = spec(depth === undefined ? {} : { depth });
-    const options = verifiedOptions({ root: work, env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' }, resourceState: resources() });
-    for (const result of [control.admissionDecision(childSpec, options), control.launch(childSpec, options)]) {
-      assert.equal(result.result, control.RESULTS.REFUSE);
-      assert.match(result.reason, /children cannot launch further workers/i);
-    }
-    assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
-    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-    assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
-  }
-});
-
-function createLockDirectory(work, owner, ageMs = 0) {
-  const target = control.lockPath({ root: work });
-  fs.mkdirSync(target, { recursive: true });
-  if (owner !== undefined) fs.writeFileSync(path.join(target, 'owner.json'), typeof owner === 'string' ? owner : JSON.stringify(owner), { mode: 0o600 });
-  if (ageMs) {
-    const old = new Date(Date.now() - ageMs);
-    fs.utimesSync(target, old, old);
-  }
-  return target;
-}
-
-function createRecoveryMarker(work, owner, ageMs = 0, displaced = false) {
-  const target = control.lockRecoveryPath({ root: work });
-  fs.mkdirSync(target, { recursive: true });
-  if (owner !== undefined) fs.writeFileSync(path.join(target, 'owner.json'), typeof owner === 'string' ? owner : JSON.stringify(owner), { mode: 0o600 });
-  if (displaced) fs.mkdirSync(path.join(target, 'stale-lock'));
-  if (ageMs) {
-    const old = new Date(Date.now() - ageMs);
-    fs.utimesSync(target, old, old);
-  }
-  return target;
-}
-
-test('fresh ownerless and malformed locks remain protected', () => {
-  for (const owner of [undefined, '{ malformed']) {
-    const work = root();
-    const target = createLockDirectory(work, owner);
-    assert.throws(() => control.acquireLock({ root: work, lockWaitMs: 30 }), /temporarily busy/i);
-    assert.equal(fs.existsSync(target), true);
-  }
-});
-
-test('stale ownerless, malformed and dead-owner locks recover while live owners remain protected', () => {
-  const staleAge = control.LOCK_TTL_MS + 2000;
-  for (const owner of [undefined, '{ malformed', { pid: -1, created_at_ms: 'bad' }, { pid: 99999999, created_at_ms: Date.now() - staleAge }]) {
-    const work = root();
-    const target = createLockDirectory(work, owner, staleAge);
-    const release = control.acquireLock({ root: work, lockWaitMs: 200 });
-    release();
-    assert.equal(fs.existsSync(target), false);
-    assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
-  }
-
-  const liveRoot = root();
-  const live = createLockDirectory(liveRoot, { pid: process.pid, created_at_ms: Date.now() - staleAge, token: 'legacy-live-owner' }, staleAge);
-  assert.throws(() => control.acquireLock({ root: liveRoot, lockWaitMs: 30 }), /temporarily busy/i);
-  assert.equal(fs.existsSync(live), true);
-});
-
-test('stale ownerless recovery preserves mutual exclusion across contenders', async () => {
-  const work = root();
-  createLockDirectory(work, undefined, control.LOCK_TTL_MS + 2000);
-  const log = path.join(work, 'critical.log');
-  const modulePath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
-  const script = `const fs=require('node:fs');const c=require(${JSON.stringify(modulePath)});const release=c.acquireLock({root:${JSON.stringify(work)},lockWaitMs:5000});fs.appendFileSync(${JSON.stringify(log)},'start\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);fs.appendFileSync(${JSON.stringify(log)},'end\\n');release();`;
-  const run = () => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr)));
-  });
-  await Promise.all([run(), run()]);
-  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split(/\r?\n/), ['start', 'end', 'start', 'end']);
-  assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
-});
-
-test('fresh and live-owner recovery markers remain protected', () => {
-  const staleAge = control.LOCK_TTL_MS + 2000;
-  for (const fixture of [
-    { owner: undefined, age: 0 },
-    { owner: '{ malformed', age: 0 },
-    { owner: { pid: process.pid, created_at_ms: Date.now() - staleAge, token: 'live' }, age: staleAge },
+test('the retired launch, checker, checker-result and status commands fail as usage errors without state', () => {
+  for (const args of [
+    ['launch', '--spec', 'spec.json'],
+    ['checker', '--input', '-'],
+    ['checker-result', '--review-id', `checker-${'a'.repeat(64)}`],
+    ['status'],
   ]) {
     const work = root();
-    const marker = createRecoveryMarker(work, fixture.owner, fixture.age);
-    assert.throws(() => control.acquireLock({ root: work, lockWaitMs: 30 }), /temporarily busy/i);
-    assert.equal(fs.existsSync(marker), true);
+    const result = spawnSync(process.execPath, [SCRIPT, ...args, '--root', work], { encoding: 'utf8', windowsHide: true, input: '{}' });
+    assert.equal(result.status, 1, args[0]);
+    assert.match(result.stderr, /FAIL: Usage: toolkit-agent-control\.cjs core/, args[0]);
+    assert.deepEqual(fs.readdirSync(work), [], args[0]);
   }
+  const held = spawnSync(process.execPath, [SCRIPT, 'core', 'run'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(held.status, 2);
+  assert.equal(JSON.parse(held.stdout).code, 'CORE_AUTHENTIC_INSTALLED_CONTEXT_REQUIRED');
 });
 
-test('stale dead-owner, ownerless and malformed recovery markers recover without residue', () => {
-  const staleAge = control.LOCK_TTL_MS + 2000;
-  for (const owner of [
-    { pid: 99999999, created_at_ms: Date.now() - staleAge, token: 'dead' },
-    undefined,
-    '{ malformed',
-  ]) {
-    const work = root();
-    createRecoveryMarker(work, owner, staleAge, true);
-    const release = control.acquireLock({ root: work, lockWaitMs: 200 });
-    release();
-    assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
-    assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
+test('current consumers never load the retired launcher history, and no launch-capable API remains exported', () => {
+  const probe = spawnSync(process.execPath, ['-e', [
+    `const c=require(${JSON.stringify(SCRIPT)});`,
+    `require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs'))});`,
+    'c.readProfile("claude-code",{root:process.argv[1]});',
+    `process.stdout.write(String(Object.keys(require.cache).some((f)=>f===${JSON.stringify(HISTORY_MODULE)})));`,
+  ].join(''), root()], { encoding: 'utf8', windowsHide: true });
+  assert.equal(probe.status, 0, probe.stderr);
+  assert.equal(probe.stdout, 'false');
+  for (const name of ['MODEL_CONTRACT', 'claudeInvocation', 'claudeInvocationArgs', 'runValidatedClaude', 'launchWithResourceEnvelope',
+    'admissionDecisionWithResourceEnvelope', 'checkerRequirement', 'checkerLaunchSpec', 'checkerResultStatus', 'readCheckerWorkflowInput',
+    'updateReservation', 'updateCheckerReview', 'effectiveClaudeCommand', 'verifyCurrentClaudeEnforcement', 'supervise']) {
+    assert.equal(Object.hasOwn(control, name), false, name);
   }
-});
-
-test('stale recovery-marker contenders remain mutually exclusive', async () => {
-  const work = root();
-  createRecoveryMarker(work, undefined, control.LOCK_TTL_MS + 2000, true);
-  const log = path.join(work, 'recovery-critical.log');
-  const modulePath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
-  const script = `const fs=require('node:fs');const c=require(${JSON.stringify(modulePath)});const release=c.acquireLock({root:${JSON.stringify(work)},lockWaitMs:5000});fs.appendFileSync(${JSON.stringify(log)},'start\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);fs.appendFileSync(${JSON.stringify(log)},'end\\n');release();`;
-  const run = () => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr)));
-  });
-  await Promise.all([run(), run()]);
-  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split(/\r?\n/), ['start', 'end', 'start', 'end']);
-  assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
-  assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
-});
-
-function reservation(id, overrides = {}) {
-  const now = Date.now();
-  return {
-    id, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT, depth: 1,
-    owner_pid: process.pid, created_at_ms: now, expires_at_ms: now + 60000,
-    estimated_memory_bytes: control.DEFAULT_WORKER_COST, effort: 'medium', status: 'reserved',
-    ...overrides,
-  };
-}
-
-function writeState(work, state) {
-  const target = control.statePath({ root: work });
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, typeof state === 'string' ? state : `${JSON.stringify(state, null, 2)}\n`);
-  return target;
-}
-
-test('reservation mutation preserves malformed, future, invalid-reservation and invalid-queue state bytes', () => {
-  const invalidStates = [
-    '{ malformed',
-    { schema: control.SCHEMA + 1, reservations: [reservation('target')], queue: [] },
-    { schema: control.SCHEMA, reservations: [reservation('target'), reservation('bad', { owner_pid: -1 })], queue: [] },
-    { schema: control.SCHEMA, reservations: [reservation('target')], queue: [{ id: '', created_at_ms: 1, expires_at_ms: 2 }] },
-    { schema: control.SCHEMA, reservations: [reservation('target'), reservation('target')], queue: [] },
-  ];
-  for (const invalid of invalidStates) {
-    const work = root();
-    const target = writeState(work, invalid);
-    const before = fs.readFileSync(target);
-    assert.equal(control.updateReservation('target', { status: 'running' }, { root: work }), false);
-    assert.deepEqual(fs.readFileSync(target), before);
-    assert.equal(control.releaseReservation('target', { root: work }), false);
-    assert.deepEqual(fs.readFileSync(target), before);
-    assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.REFUSE);
-  }
-});
-
-test('reservation update and release mutate only a valid target and missing targets preserve bytes', () => {
-  const work = root();
-  const target = writeState(work, { schema: control.SCHEMA, reservations: [reservation('target'), reservation('other')], queue: [] });
-  const beforeMissing = fs.readFileSync(target);
-  assert.equal(control.releaseReservation('missing', { root: work }), false);
-  assert.deepEqual(fs.readFileSync(target), beforeMissing);
-  assert.equal(control.updateReservation('target', { status: 'running', owner_pid: process.pid }, { root: work }), true);
-  let state = JSON.parse(fs.readFileSync(target, 'utf8'));
-  assert.equal(state.reservations.find((entry) => entry.id === 'target').status, 'running');
-  assert.equal(state.reservations.find((entry) => entry.id === 'other').status, 'reserved');
-  assert.equal(control.releaseReservation('target', { root: work }), true);
-  state = JSON.parse(fs.readFileSync(target, 'utf8'));
-  assert.deepEqual(state.reservations.map((entry) => entry.id), ['other']);
-});
-
-test('missing Claude executable forms refuse before admission or artifacts', () => {
-  for (const executable of ['missing-claude-command-for-toolkit-test', ...['cjs', 'exe', 'cmd', 'bat'].map((ext) => path.join(root(), `missing-claude.${ext}`))]) {
-    const work = root();
-    const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: executable }));
-    assert.equal(result.result, control.RESULTS.REFUSE, executable);
-    assert.notEqual(result.status, 'launched', executable);
-    assert.equal(fs.existsSync(control.statePath({ root: work })), false, executable);
-    assert.equal(fs.existsSync(path.join(work, 'jobs')), false, executable);
-  }
-});
-
-test('broken Claude executable symlink refuses before admission or artifacts', { skip: process.platform === 'win32' }, (t) => {
-  const work = root();
-  const broken = path.join(work, 'broken-claude');
-  try {
-    fs.symlinkSync(path.join(work, 'missing-target'), broken);
-  } catch (error) {
-    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
-    throw error;
-  }
-  const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: broken }));
-  assert.equal(result.result, control.RESULTS.REFUSE);
-  assert.notEqual(result.status, 'launched');
-  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
-  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+  assert.equal(Object.hasOwn(require('../scripts/toolkit-github-program-receipt.cjs'), 'launchR093WithAuthenticatedController'), false);
+  assert.equal(Object.hasOwn(require('../scripts/setup-toolkit-core.cjs'), 'probeClaudeAgentCapability'), false);
 });

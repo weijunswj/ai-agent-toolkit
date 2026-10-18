@@ -242,11 +242,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  ACTIONS,
-  assertPlan,
   exactPullRequests,
-  isExactLifecycleMatch,
   planLifecycle,
-  requireFreshPlan,
-  runCli
+  requireFreshPlan
 };

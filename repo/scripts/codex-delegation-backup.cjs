@@ -266,7 +266,6 @@ function restoreCodexDelegationBackup(metadataPath, options = {}) {return new Co
 
 module.exports = {
   BACKUP_SCHEMA,
-  writeJsonAtomically,
   captureCodexConfigSnapshot,
   snapshotsMatch,
   assertSnapshotCurrent,

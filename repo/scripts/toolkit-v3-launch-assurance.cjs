@@ -36,7 +36,7 @@ const INVARIANTS = Object.freeze({
   OBSERVED_ROUTE: 'An observed effective route that differs from the pinned route is not success.'
 });
 const INVARIANT_IDS = Object.freeze(Object.keys(INVARIANTS));
-const PATH_KINDS = Object.freeze(['OWNED_LAUNCHER', 'NATIVE_PRE_DISPATCH_HOOK', 'NO_TOOLKIT_LAUNCHER', 'LEGACY_OUTSIDE_PROFILE']);
+const PATH_KINDS = Object.freeze(['OWNED_LAUNCHER', 'NATIVE_PRE_DISPATCH_HOOK', 'NO_TOOLKIT_LAUNCHER']);
 // ENFORCED: shipped code enforces the invariant on this path. evidence says how it was shown:
 // NATIVE (exercised on the real host) or SOURCE_TEST (source tests only).
 const DISPOSITIONS = Object.freeze(['ENFORCED', 'HELD', 'NOT_APPLICABLE']);
@@ -168,4 +168,4 @@ class LaunchFamilyClosure {
   }
 }
 
-module.exports = Object.freeze({ INVARIANTS, INVARIANT_IDS, DISPOSITIONS, QUALIFICATION, LaunchPath, LaunchFamilyClosure });
+module.exports = Object.freeze({ INVARIANT_IDS, QUALIFICATION, LaunchFamilyClosure });

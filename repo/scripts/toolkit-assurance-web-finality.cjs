@@ -1188,8 +1188,6 @@ module.exports = Object.freeze({
   G4_MODEL,
   G4A_MODEL,
   RECEIPT_DEPENDENCY_SCHEMA,
-  MATERIAL_PREDICATES,
-  EXCLUSION_FLAGS,
   bindReceiptAdmission,
   validateReceiptDependencyProof,
   admitG4,

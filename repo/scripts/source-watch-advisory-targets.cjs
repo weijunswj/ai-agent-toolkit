@@ -409,8 +409,6 @@ function renderAdvisorySection(findings, advisoryDocPath = defaultAdvisoryDocPat
 module.exports = {
   advisoryFindings,
   defaultAdvisoryDocPath,
-  readAdvisoryDocument,
   renderAdvisorySection,
-  sanitizeGeneratedMarkdown,
-  validateAdvisoryDocument
+  sanitizeGeneratedMarkdown
 };

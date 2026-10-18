@@ -355,15 +355,6 @@ if (require.main === module) {
 
 module.exports = {
   auditSourceLocks,
-  discoverLockFiles,
-  gitBlobSha,
-  hashFile,
   isActiveThirdPartyAttributionLock,
-  isRetiredMigrationLock,
-  knownRetiredInternalSourceRepos,
-  activeSourceMappingIdentity,
-  normalizeRepoRelativePath,
-  validateLifecycleMetadata,
-  validateLocalPathTopology,
-  validateSourcePathProvenance
+  isRetiredMigrationLock
 };

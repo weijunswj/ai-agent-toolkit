@@ -528,5 +528,5 @@ function evaluateRecoveredLifecycle(input) {
     requires_fresh_publication_reconciliation: !publicationCurrent });
 }
 
-module.exports = Object.freeze({ ReviewSetEvaluator, GateAssignment, successorPacket, SESSION_STATES, ACCEPTANCE_MODES,
+module.exports = Object.freeze({ ReviewSetEvaluator, GateAssignment, successorPacket,
   planRenewal, classifyUatImpact, reviewerContinuation, familyRecheckAdmission, evaluateRecoveredLifecycle, digest });

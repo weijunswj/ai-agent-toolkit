@@ -29,11 +29,11 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
+    '--yes-recommended', '--claude-topology', 'root-only', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Selected topology: root-only/);
-  assert.match(result.stdout, /Capacity mode: root-only/);
+  assert.doesNotMatch(result.stdout, /Capacity mode:|Manual maximum backstop/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -93,7 +93,7 @@ test('target skip and disable remain distinct and native Antigravity sync is ref
   assert.match(ag2.stderr + ag2.stdout, /Unsupported target: ag2/);
 });
 
-test('setup docs explain automatic resource admission and honest enforcement disclosure', () => {
+test('setup docs claim no retired automatic admission and keep honest enforcement disclosure', () => {
   const docs = [
     'skills/toolkit-setup/SKILL.md',
     'repo/docs/FOR_AI_AGENTS.md',
@@ -110,10 +110,11 @@ test('setup docs explain automatic resource admission and honest enforcement dis
       assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
       assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
     }
-    assert.match(text, /automatically limit|automatic memory|available memory|memory admission/i, relPath);
+    // The retired Toolkit direct launcher's automatic memory admission is no longer claimed.
+    assert.doesNotMatch(text, /limited automatically from verified available memory|automatically limits controlled children/i, relPath);
     if (relPath !== 'skills/toolkit-setup/SKILL.md') assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
     assert.match(text, /does not ask|no ordinary .*capacity|no longer asks/i, relPath);
-    assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
+    assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement|no Markdown-only path is called hard enforcement/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
   const bridge = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');

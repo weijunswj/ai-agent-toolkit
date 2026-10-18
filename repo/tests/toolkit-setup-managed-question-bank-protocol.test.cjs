@@ -266,14 +266,12 @@ test('stale SessionStart and owned-state sentinels remain untouched through the 
     const fixture = realManagedFixture();
     seedOwnedMutationSentinels(fixture.root);
     const staleSessionStart = path.join(fixture.root, 'stale-session-start-sentinel.txt');
-    const workerProbe = path.join(fixture.root, 'worker-probe-sentinel.txt');
-    const checkerProbe = path.join(fixture.root, 'checker-probe-sentinel.txt');
+    const printProbe = path.join(fixture.root, 'print-probe-sentinel.txt');
     const fakeClaude = path.join(fixture.root, 'Claude CLI With Spaces', 'stale-claude.cjs');
     writeFile(fakeClaude, [
       "'use strict';", "const fs = require('node:fs');", "const args = process.argv.slice(2);",
       `fs.writeFileSync(${JSON.stringify(staleSessionStart)}, 'stale SessionStart ran');`,
-      `if (args.includes('--print') && args.includes('opus-4.8')) fs.writeFileSync(${JSON.stringify(checkerProbe)}, 'checker');`,
-      `if (args.includes('--print') && !args.includes('opus-4.8')) fs.writeFileSync(${JSON.stringify(workerProbe)}, 'worker');`,
+      `if (args.includes('--print')) fs.writeFileSync(${JSON.stringify(printProbe)}, 'session');`,
       "if (args.includes('--version')) console.log('2.3.25 stale'); else console.log('{}');",
     ].join('\n'));
     const baseEnv = isolatedHomeEnv(fixture.root);
@@ -284,12 +282,11 @@ test('stale SessionStart and owned-state sentinels remain untouched through the 
     assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
     assert.deepEqual(snapshotOwned(fixture.root), before);
     assert.equal(fs.existsSync(staleSessionStart), false);
-    assert.equal(fs.existsSync(workerProbe), false);
-    assert.equal(fs.existsSync(checkerProbe), false);
+    assert.equal(fs.existsSync(printProbe), false);
   }
 });
 
-test('Claude plan and JSON plan are observational and report launch verification deferred', () => {
+test('Claude plan and JSON plan are observational and launch no Claude session', () => {
   for (const json of [false, true]) {
     const fixture = realManagedFixture();
     seedOwnedMutationSentinels(fixture.root);
@@ -314,7 +311,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
     '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
     '--use-default-managed-checkout', '--enable-repo-auto-update', '--enable-update-reports',
     '--default-update-report-retention-days', '--claude-topology', 'root-only',
-    '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions',
+    '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
@@ -398,7 +395,7 @@ test('real explicit yes-recommended still shows one bank before synthetic-home s
   const fixture = realManagedFixture();
   const result = runRealManaged(fixture, [
     '--yes-recommended', '--claude-plugin-behavior', 'instructions',
-    '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only',
+    '--claude-topology', 'root-only',
   ]);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);

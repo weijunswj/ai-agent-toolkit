@@ -106,4 +106,4 @@ function claudeSpawnParts(executable, args = [], options = {}) {
   };
 }
 
-module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, escapeWindowsCommand, executableCandidates, quoteWindowsArgument, resolveClaudeCommandInput, validateExecutable };
+module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, resolveClaudeCommandInput, validateExecutable };
