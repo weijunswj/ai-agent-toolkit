@@ -4,9 +4,9 @@ Use this when a task may affect live systems, credentials, secrets, customer/pri
 
 ## Approval Rule
 
-Before a risky action, stop and ask for explicit current-turn approval naming the target and operation.
+Before a risky action, verify that explicit approval is bound to the exact action and remains valid; request fresh approval when the scope does not cover the action or is revoked, expired, or unresolved.
 
-Previous approval does not carry forward to a new risky action. Words like `continue`, `next`, `apply`, or `do it` apply only to the already-scoped action.
+Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
 
 ## Never Do By Default
 

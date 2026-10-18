@@ -21,7 +21,8 @@
     "test:design": "node repo/scripts/run-design-tests.cjs",
     "test:bridge": "node --test repo/tests/toolkit-local-bridge.test.cjs",
     "validate:all": "npm run validate:toolkit && npm run validate:surfaces && npm run validate:fallback-risk && npm test && npm run test:design && npm run validate:whitespace",
-    "safe-source-update": "node repo/scripts/safe-source-update.cjs"
+    "safe-source-update": "node repo/scripts/safe-source-update.cjs",
+    "test:core": "node --test --test-concurrency=1 repo/tests/toolkit-core-redesign-contract.test.cjs repo/tests/toolkit-codex-agent-adapter.test.cjs"
   },
   "license": "UNLICENSED",
   "devDependencies": {

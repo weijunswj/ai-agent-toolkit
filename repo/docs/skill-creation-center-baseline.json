@@ -1,6 +1,42 @@
 {
   "schema_version": 3,
   "skill_creation_review": {
+    "controller-bootstrap": {
+      "public_id": "controller-bootstrap",
+      "public_name": "Controller Bootstrap",
+      "existing_skill_review": "Reviewed controller-bootstrap against repository-agent-rules, github-program-reconciler, toolkit-setup, execution-loop, and accepted Controller/Architecture/registry sources; none owns explicit repository-controller re-entry from CURRENT after context loss or handover.",
+      "native_capability_review": "A host can load or invoke a skill but does not establish controller assignment, repository identity, approval, native permission, result delivery, or safe context-loss recovery.",
+      "trigger": "Use only when explicitly asked to bootstrap or recover the already-assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event.",
+      "positive_routing_examples": [
+        "After context loss, explicitly recover the assigned controller for this Toolkit repository from authoritative CURRENT and verify the exact accepted governance sources.",
+        "Review a same-repository controller handover and identify the outstanding writer and CURRENT evidence before any new effect.",
+        "Verify whether this exact host/version has evidence for explicit invocation, route, permission, result delivery, and resume."
+      ],
+      "negative_routing_examples": [
+        "Implement an ordinary application feature with no controller re-entry, authority recovery, or handover request.",
+        "Install generic AGENTS.md rules for a new repository.",
+        "Inspect or reconcile an N5 programme parent and direct children."
+      ],
+      "overlap_boundary": "Use repository-agent-rules for instruction-file installation, github-program-reconciler for explicit N5 programme state, and toolkit-setup for host package infrastructure; this product only guides an already-assigned repository controller through exact source/CURRENT re-entry.",
+      "invocation_mode": "explicit",
+      "invocation_mode_reason": "The role and effect boundary must be deliberately requested; invocation never assigns a controller or grants repository, worker, or native host authority.",
+      "decision": "new_product",
+      "decision_reason": "No retained skill combines assigned-controller re-entry, exact governance-source retrieval, CURRENT-first context-loss recovery, and separate host qualification.",
+      "unique_value": "Makes controller re-entry evidence-bound and fail-closed while keeping assignment, semantic authority, capability, custody, and native permission distinct.",
+      "runtime_footprint": "Instruction-first single skill with one qualification reference and native explicit-only metadata; no runtime adapter, token family, scheduler, installer, or authority store.",
+      "local_assets": "Canonical skill, explicit-only metadata, source/CURRENT/host qualification guidance, bounded routing examples, and focused contract tests.",
+      "output_contract": "Return a concise read-only bootstrap or recovery result bound to repository, owner, RUN/Lock, CURRENT, exact sources, approval, host limits, unresolved outcomes, and the next permitted action; otherwise HOLD with the exact missing evidence.",
+      "anti_bloat_review": "Excludes ordinary executor work, generic instruction installation, N5 reconciliation, arbitrary governance providers, embedded policy fallback, cross-host inference, autonomous timer work, and controller self-admission.",
+      "safety_boundary": "No skill text, packet, receipt, link, installation, or invocation supplies authority or native permission. External effects require an existing exact owner approval and independently proven host capability; ambiguous identity, CURRENT, source, handover, permission, or outcome remains zero-effect HOLD.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/controller-bootstrap/ owns the portable product; coupled policy, catalog, contract, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable; no third-party skill, copied code, provider workflow, or external instruction material is imported.",
+      "validation": [
+        "node --test repo/tests/controller-bootstrap.test.cjs repo/tests/controller-bootstrap-compatibility.test.cjs",
+        "node --test repo/tests/skill-routing.test.cjs repo/tests/skill-portability.test.cjs",
+        "node repo/scripts/validate-toolkit.cjs"
+      ]
+    },
     "codex-ssh-hostinger-coolify-setup-maintainer": {
       "public_id": "codex-ssh-hostinger-coolify-setup-maintainer",
       "public_name": "Codex SSH Hostinger Coolify Setup Maintainer",
@@ -459,13 +495,13 @@
     "toolkit-setup": {
       "public_id": "toolkit-setup",
       "public_name": "Toolkit Setup",
-      "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; no other current product routes native Toolkit plugin setup, managed checkout refresh, Windows hook repair, and OpenCode or Antigravity bridge support.",
-      "native_capability_review": "Codex and Claude package managers and OpenCode or Antigravity skill locations are target capabilities, but none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
-      "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, Windows hook repair, bridge audit or sync, and opt-in OpenCode or Antigravity support.",
+      "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; it owns cross-host Toolkit setup, native OpenCode project-plugin setup, OpenCode portable skill sync, and Antigravity portable-skill copying.",
+      "native_capability_review": "Codex and Claude have native plugin managers, OpenCode supports a project-local native Toolkit plugin, and Antigravity supports portable skills copying only; none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
+      "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, native OpenCode project-plugin setup, OpenCode portable skill sync, Antigravity portable skills copying, Windows hook repair, and bridge audit or sync.",
       "positive_routing_examples": [
         "Set up the AI Agent Toolkit for Codex using the managed checkout flow.",
-        "Audit why the Toolkit bridge target is stale and preview the safe repair without writing yet.",
-        "Repair and verify the installed Codex Toolkit plugin cache after a failed native update."
+        "Audit why a Toolkit bridge target is stale, including its OpenCode project-plugin destination, and preview the safe repair without writing yet.",
+        "Repair and verify the installed Codex Toolkit plugin cache after a failed native update, then copy the portable Toolkit skills to an Antigravity project."
       ],
       "negative_routing_examples": [
         "Implement ordinary application code that does not change Toolkit installation or host state.",
@@ -477,7 +513,7 @@
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "new_product",
       "decision_reason": "One compact setup router is safer and more discoverable than command-specific bridge skills while keeping implementation in shared Toolkit runtime and docs.",
-      "unique_value": "Provides one guarded route for managed checkout setup, native package behavior, downgrade refusal, Windows hook repair, bridge audit, opt-in targets, and version-aligned validation.",
+      "unique_value": "Provides one guarded route for managed checkout setup, native package behavior, downgrade refusal, Windows hook repair, bridge audit, OpenCode project-plugin install, portable-only target copying, and version-aligned validation.",
       "runtime_footprint": "Small routing skill with no bundled scripts; implementation and detailed behavior stay in canonical Toolkit setup runtime, contracts, docs, and tests.",
       "local_assets": "Canonical README, SKILL.md, and host metadata only; setup runtime, package contracts, bridge implementation, and validation remain under repo/**.",
       "output_contract": "Return discovered setup state, one consolidated question or preview when required, exact approved operations, version and readback evidence, validation, and any fail-closed blocker.",

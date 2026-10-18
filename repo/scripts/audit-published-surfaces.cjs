@@ -533,12 +533,10 @@ module.exports = {
   activeTopologyFindings,
   detectRetiredTopologyAtoms,
   legacyReferenceAllowed,
-  normaliseTopologyText: normalizeSource,
   parseFrontMatter,
   policyScopeForPath: topologyScopeForPath,
   skillDirs,
   snapshot,
-  standaloneIdentityMatches,
   validateTopologyScopePolicy,
   validate
 };

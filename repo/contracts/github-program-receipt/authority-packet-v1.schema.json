@@ -4,52 +4,302 @@
   "title": "Toolkit GitHub Programme Authority Packet v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "bindings", "body"],
+  "required": [
+    "schema",
+    "bindings",
+    "body"
+  ],
   "properties": {
-    "schema": { "const": "toolkit.github-program.authority-packet.v1" },
-    "bindings": { "$ref": "#/$defs/bindings" },
-    "body": { "$ref": "#/$defs/body" }
+    "schema": {
+      "const": "toolkit.github-program.authority-packet.v1"
+    },
+    "bindings": {
+      "$ref": "#/$defs/bindings"
+    },
+    "body": {
+      "$ref": "#/$defs/body"
+    }
   },
   "allOf": [
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G0-A" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG0A" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G0-A"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG0A"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G0-B" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG0B" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G0-B"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG0B"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G1" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG1" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G1"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG1"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G2" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG2" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G2"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG2"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G3" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG3" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G3"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG3"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "G4" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsG4" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "G4"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsG4"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "LOOP" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsLoop" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "LOOP"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsLoop"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "RECONVERGENCE" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsReconvergence" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "RECONVERGENCE"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsReconvergence"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "FINAL_AUDIT" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsFinalAudit" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "FINAL_AUDIT"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsFinalAudit"
+              }
+            }
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "bindings": { "properties": { "producer": { "properties": { "stage": { "const": "BROWSER" } } } } } } },
-      "then": { "properties": { "body": { "properties": { "sections": { "$ref": "#/$defs/sectionsBrowser" } } } } }
+      "if": {
+        "properties": {
+          "bindings": {
+            "properties": {
+              "producer": {
+                "properties": {
+                  "stage": {
+                    "const": "BROWSER"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "properties": {
+              "sections": {
+                "$ref": "#/$defs/sectionsBrowser"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -94,10 +344,34 @@
       "pattern": "^[A-Za-z0-9-]+$"
     },
     "stage": {
-      "enum": ["G0-A", "G0-B", "G1", "G2", "G3", "G4", "LOOP", "RECONVERGENCE", "FINAL_AUDIT", "BROWSER"]
+      "enum": [
+        "G0-A",
+        "G0-B",
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "LOOP",
+        "RECONVERGENCE",
+        "FINAL_AUDIT",
+        "BROWSER"
+      ]
     },
     "consumerClass": {
-      "enum": ["G0-A", "G0-B", "G1", "G2", "G3", "G4", "LOOP", "RECONVERGENCE", "FINAL_AUDIT", "BROWSER", "WEB", "FINALITY"]
+      "enum": [
+        "G0-A",
+        "G0-B",
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "LOOP",
+        "RECONVERGENCE",
+        "FINAL_AUDIT",
+        "BROWSER",
+        "WEB",
+        "FINALITY"
+      ]
     },
     "prose": {
       "type": "string",
@@ -108,271 +382,4745 @@
     "sourceReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "issue_number", "comment_id", "node_id", "author_login", "updated_at", "body_digest"],
+      "required": [
+        "repository",
+        "issue_number",
+        "comment_id",
+        "node_id",
+        "author_login",
+        "updated_at",
+        "body_digest"
+      ],
       "properties": {
-        "repository": { "$ref": "#/$defs/repository" },
-        "issue_number": { "$ref": "#/$defs/issue" },
-        "comment_id": { "$ref": "#/$defs/issue" },
-        "node_id": { "$ref": "#/$defs/id" },
-        "author_login": { "$ref": "#/$defs/login" },
-        "updated_at": { "$ref": "#/$defs/timestamp" },
-        "body_digest": { "$ref": "#/$defs/digest" }
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "issue_number": {
+          "$ref": "#/$defs/issue"
+        },
+        "comment_id": {
+          "$ref": "#/$defs/issue"
+        },
+        "node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "author_login": {
+          "$ref": "#/$defs/login"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "body_digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "producer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["run", "lock", "stage", "role"],
+      "required": [
+        "run",
+        "lock",
+        "stage",
+        "role"
+      ],
       "properties": {
-        "run": { "$ref": "#/$defs/physicalRunId" },
-        "lock": { "$ref": "#/$defs/id" },
-        "stage": { "$ref": "#/$defs/stage" },
-        "role": { "$ref": "#/$defs/stage" }
+        "run": {
+          "$ref": "#/$defs/physicalRunId"
+        },
+        "lock": {
+          "$ref": "#/$defs/id"
+        },
+        "stage": {
+          "$ref": "#/$defs/stage"
+        },
+        "role": {
+          "$ref": "#/$defs/stage"
+        }
       },
       "allOf": [
-        { "if": { "properties": { "stage": { "const": "G0-A" } } }, "then": { "properties": { "role": { "const": "G0-A" } } } },
-        { "if": { "properties": { "stage": { "const": "G0-B" } } }, "then": { "properties": { "role": { "const": "G0-B" } } } },
-        { "if": { "properties": { "stage": { "const": "G1" } } }, "then": { "properties": { "role": { "const": "G1" } } } },
-        { "if": { "properties": { "stage": { "const": "G2" } } }, "then": { "properties": { "role": { "const": "G2" } } } },
-        { "if": { "properties": { "stage": { "const": "G3" } } }, "then": { "properties": { "role": { "const": "G3" } } } },
-        { "if": { "properties": { "stage": { "const": "G4" } } }, "then": { "properties": { "role": { "const": "G4" } } } },
-        { "if": { "properties": { "stage": { "const": "LOOP" } } }, "then": { "properties": { "role": { "const": "LOOP" } } } },
-        { "if": { "properties": { "stage": { "const": "RECONVERGENCE" } } }, "then": { "properties": { "role": { "const": "RECONVERGENCE" } } } },
-        { "if": { "properties": { "stage": { "const": "FINAL_AUDIT" } } }, "then": { "properties": { "role": { "const": "FINAL_AUDIT" } } } },
-        { "if": { "properties": { "stage": { "const": "BROWSER" } } }, "then": { "properties": { "role": { "const": "BROWSER" } } } }
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G0-A"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G0-A"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G0-B"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G0-B"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G1"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G2"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G2"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G3"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "G4"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "G4"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "LOOP"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "LOOP"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "RECONVERGENCE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "RECONVERGENCE"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "FINAL_AUDIT"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "FINAL_AUDIT"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "BROWSER"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "BROWSER"
+              }
+            }
+          }
+        }
       ]
     },
     "governance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "main_commit", "controller_blob", "stack_registry_blob"],
+      "required": [
+        "repository",
+        "main_commit",
+        "controller_blob",
+        "stack_registry_blob"
+      ],
       "properties": {
-        "repository": { "$ref": "#/$defs/repository" },
-        "main_commit": { "$ref": "#/$defs/sha" },
-        "controller_blob": { "$ref": "#/$defs/sha" },
-        "stack_registry_blob": { "$ref": "#/$defs/sha" }
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "main_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "controller_blob": {
+          "$ref": "#/$defs/sha"
+        },
+        "stack_registry_blob": {
+          "$ref": "#/$defs/sha"
+        }
       }
     },
     "candidate": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["pr_number", "branch", "base_ref", "base_sha", "head_sha", "tree_sha"],
+      "required": [
+        "pr_number",
+        "branch",
+        "base_ref",
+        "base_sha",
+        "head_sha",
+        "tree_sha"
+      ],
       "properties": {
-        "pr_number": { "$ref": "#/$defs/issue" },
-        "branch": { "type": "string", "minLength": 1, "maxLength": 240 },
-        "base_ref": { "type": "string", "minLength": 1, "maxLength": 240 },
-        "base_sha": { "$ref": "#/$defs/sha" },
-        "head_sha": { "$ref": "#/$defs/sha" },
-        "tree_sha": { "$ref": "#/$defs/sha" }
+        "pr_number": {
+          "$ref": "#/$defs/issue"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "base_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "base_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "tree_sha": {
+          "$ref": "#/$defs/sha"
+        }
       }
     },
     "consumer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["class", "dependency_id", "scope_digest"],
+      "required": [
+        "class",
+        "dependency_id",
+        "scope_digest"
+      ],
       "properties": {
-        "class": { "$ref": "#/$defs/consumerClass" },
-        "dependency_id": { "$ref": "#/$defs/id" },
-        "scope_digest": { "$ref": "#/$defs/digest" }
+        "class": {
+          "$ref": "#/$defs/consumerClass"
+        },
+        "dependency_id": {
+          "$ref": "#/$defs/id"
+        },
+        "scope_digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "applicability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope_digest", "required_consumers", "retain_through_child_finality", "retain_through_candidate_finality"],
+      "required": [
+        "scope_digest",
+        "required_consumers",
+        "retain_through_child_finality",
+        "retain_through_candidate_finality"
+      ],
       "properties": {
-        "scope_digest": { "$ref": "#/$defs/digest" },
+        "scope_digest": {
+          "$ref": "#/$defs/digest"
+        },
         "required_consumers": {
           "type": "array",
           "maxItems": 16,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/consumer" }
+          "items": {
+            "$ref": "#/$defs/consumer"
+          }
         },
-        "retain_through_child_finality": { "type": "boolean" },
-        "retain_through_candidate_finality": { "type": "boolean" }
+        "retain_through_child_finality": {
+          "type": "boolean"
+        },
+        "retain_through_candidate_finality": {
+          "type": "boolean"
+        }
       }
     },
     "bindings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "parent_issue", "child_issue", "lane_id", "human_owner", "producer", "authority", "governance", "candidate", "applicability"],
+      "required": [
+        "repository",
+        "parent_issue",
+        "child_issue",
+        "lane_id",
+        "human_owner",
+        "producer",
+        "authority",
+        "governance",
+        "candidate",
+        "applicability"
+      ],
       "properties": {
-        "repository": { "$ref": "#/$defs/repository" },
-        "parent_issue": { "$ref": "#/$defs/issue" },
-        "child_issue": { "$ref": "#/$defs/issue" },
-        "lane_id": { "$ref": "#/$defs/id" },
-        "human_owner": { "$ref": "#/$defs/login" },
-        "producer": { "$ref": "#/$defs/producer" },
-        "authority": { "$ref": "#/$defs/sourceReference" },
-        "governance": { "$ref": "#/$defs/governance" },
-        "candidate": { "$ref": "#/$defs/candidate" },
-        "applicability": { "$ref": "#/$defs/applicability" }
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "parent_issue": {
+          "$ref": "#/$defs/issue"
+        },
+        "child_issue": {
+          "$ref": "#/$defs/issue"
+        },
+        "lane_id": {
+          "$ref": "#/$defs/id"
+        },
+        "human_owner": {
+          "$ref": "#/$defs/login"
+        },
+        "producer": {
+          "$ref": "#/$defs/producer"
+        },
+        "authority": {
+          "$ref": "#/$defs/sourceReference"
+        },
+        "governance": {
+          "$ref": "#/$defs/governance"
+        },
+        "candidate": {
+          "$ref": "#/$defs/candidate"
+        },
+        "applicability": {
+          "$ref": "#/$defs/applicability"
+        }
       }
     },
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "requirement", "observed", "required", "consequence", "disposition", "evidence_ids"],
+      "required": [
+        "id",
+        "requirement",
+        "observed",
+        "required",
+        "consequence",
+        "disposition",
+        "evidence_ids"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "requirement": { "$ref": "#/$defs/prose" },
-        "observed": { "$ref": "#/$defs/prose" },
-        "required": { "$ref": "#/$defs/prose" },
-        "consequence": { "$ref": "#/$defs/prose" },
-        "disposition": { "enum": ["BLOCKING", "NON_BLOCKING", "RESOLVED"] },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "requirement": {
+          "$ref": "#/$defs/prose"
+        },
+        "observed": {
+          "$ref": "#/$defs/prose"
+        },
+        "required": {
+          "$ref": "#/$defs/prose"
+        },
+        "consequence": {
+          "$ref": "#/$defs/prose"
+        },
+        "disposition": {
+          "enum": [
+            "BLOCKING",
+            "NON_BLOCKING",
+            "RESOLVED"
+          ]
+        },
         "evidence_ids": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/id" }
+          "items": {
+            "$ref": "#/$defs/id"
+          }
         }
       }
     },
     "section": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "text"],
+      "required": [
+        "name",
+        "text"
+      ],
       "properties": {
-        "name": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9_-]+$" },
-        "text": { "$ref": "#/$defs/prose" }
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "text": {
+          "$ref": "#/$defs/prose"
+        }
       }
     },
     "evidenceGitBlob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "repository", "commit", "path", "blob", "content_digest"],
+      "required": [
+        "id",
+        "kind",
+        "repository",
+        "commit",
+        "path",
+        "blob",
+        "content_digest"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "kind": { "const": "GIT_BLOB" },
-        "repository": { "$ref": "#/$defs/repository" },
-        "commit": { "$ref": "#/$defs/sha" },
-        "path": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\)(?!.*://)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$" },
-        "blob": { "$ref": "#/$defs/sha" },
-        "content_digest": { "$ref": "#/$defs/digest" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "GIT_BLOB"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\)(?!.*://)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+        },
+        "blob": {
+          "$ref": "#/$defs/sha"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "evidenceComment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "source"],
+      "required": [
+        "id",
+        "kind",
+        "source"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "kind": { "const": "GITHUB_COMMENT" },
-        "source": { "$ref": "#/$defs/sourceReference" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "GITHUB_COMMENT"
+        },
+        "source": {
+          "$ref": "#/$defs/sourceReference"
+        }
       }
     },
     "evidencePacket": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "packet_id", "packet_digest", "binding_digest"],
+      "required": [
+        "id",
+        "kind",
+        "packet_id",
+        "packet_digest",
+        "binding_digest"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "kind": { "const": "AUTHORITY_PACKET" },
-        "packet_id": { "type": "string", "pattern": "^ap1-[a-f0-9]{64}$" },
-        "packet_digest": { "$ref": "#/$defs/digest" },
-        "binding_digest": { "$ref": "#/$defs/digest" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "AUTHORITY_PACKET"
+        },
+        "packet_id": {
+          "type": "string",
+          "pattern": "^ap1-[a-f0-9]{64}$"
+        },
+        "packet_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "binding_digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "evidence": {
       "oneOf": [
-        { "$ref": "#/$defs/evidenceGitBlob" },
-        { "$ref": "#/$defs/evidenceComment" },
-        { "$ref": "#/$defs/evidencePacket" }
+        {
+          "$ref": "#/$defs/evidenceGitBlob"
+        },
+        {
+          "$ref": "#/$defs/evidenceComment"
+        },
+        {
+          "$ref": "#/$defs/evidencePacket"
+        }
       ]
     },
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verdict", "decision", "findings", "qualifications", "next_state", "sections", "evidence_refs", "gate_contract_ir"],
+      "required": [
+        "verdict",
+        "decision",
+        "findings",
+        "qualifications",
+        "next_state",
+        "sections",
+        "evidence_refs",
+        "gate_contract_ir"
+      ],
       "properties": {
-        "verdict": { "enum": ["PASS", "HOLD", "AMEND", "REENTRY_REQUIRED", "COMPLETE"] },
-        "decision": { "$ref": "#/$defs/prose" },
-        "findings": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/finding" } },
-        "qualifications": { "type": "array", "items": { "$ref": "#/$defs/prose" } },
-        "next_state": { "$ref": "#/$defs/prose" },
-        "sections": { "type": "array", "minItems": 3, "maxItems": 5, "items": { "$ref": "#/$defs/section" } },
-        "evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/evidence" } },
+        "verdict": {
+          "enum": [
+            "PASS",
+            "HOLD",
+            "AMEND",
+            "REENTRY_REQUIRED",
+            "COMPLETE"
+          ]
+        },
+        "decision": {
+          "$ref": "#/$defs/prose"
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "qualifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/prose"
+          }
+        },
+        "next_state": {
+          "$ref": "#/$defs/prose"
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/section"
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
         "gate_contract_ir": {
-          "type": ["object", "null"],
-          "properties": { "schema": { "const": "toolkit.gate-contract-ir.v1" } },
-          "required": ["schema"],
-          "additionalProperties": true
+          "anyOf": [
+            {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "schema": {
+                  "const": "toolkit.gate-contract-ir.v1"
+                }
+              },
+              "required": [
+                "schema"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "$ref": "#/$defs/gateContractIrV2"
+            }
+          ]
         }
       }
     },
-    "sectionsG0A": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionFraming" }, { "$ref": "#/$defs/sectionUnknowns" }, { "$ref": "#/$defs/sectionEvidenceQuestions" }, { "$ref": "#/$defs/sectionStopCondition" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionsG0B": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionQuestions" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionProvenance" }, { "$ref": "#/$defs/sectionCoverage" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionsG1": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionCausalModel" }, { "$ref": "#/$defs/sectionAlternatives" }, { "$ref": "#/$defs/sectionInvariants" }, { "$ref": "#/$defs/sectionArchitecture" }, { "$ref": "#/$defs/sectionAssumptions" }], "items": false, "minItems": 5, "maxItems": 5 },
-    "sectionsG2": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionImplementationContract" }, { "$ref": "#/$defs/sectionMutationBoundary" }, { "$ref": "#/$defs/sectionOracleMatrix" }, { "$ref": "#/$defs/sectionValidation" }, { "$ref": "#/$defs/sectionPublicationBoundary" }], "items": false, "minItems": 5, "maxItems": 5 },
-    "sectionsG3": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionImplementation" }, { "$ref": "#/$defs/sectionCandidateIdentity" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionRemainingObligations" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionsG4": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionCandidateIdentity" }, { "$ref": "#/$defs/sectionCoverage" }, { "$ref": "#/$defs/sectionFindingsAndReproducers" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 5, "maxItems": 5 },
-    "sectionsLoop": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionReconciliation" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionHandoff" }], "items": false, "minItems": 3, "maxItems": 3 },
-    "sectionsReconvergence": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionRootSynthesis" }, { "$ref": "#/$defs/sectionPriorFailures" }, { "$ref": "#/$defs/sectionRetainedDecisions" }, { "$ref": "#/$defs/sectionReentryBoundary" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionsFinalAudit": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionProgrammeCoverage" }, { "$ref": "#/$defs/sectionRemainingObligations" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionsBrowser": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/sectionScope" }, { "$ref": "#/$defs/sectionObservations" }, { "$ref": "#/$defs/sectionValidationResults" }, { "$ref": "#/$defs/sectionDisposition" }], "items": false, "minItems": 4, "maxItems": 4 },
-    "sectionFraming": { "$ref": "#/$defs/namedSectionFraming" },
-    "sectionUnknowns": { "$ref": "#/$defs/namedSectionUnknowns" },
-    "sectionEvidenceQuestions": { "$ref": "#/$defs/namedSectionEvidenceQuestions" },
-    "sectionStopCondition": { "$ref": "#/$defs/namedSectionStopCondition" },
-    "sectionQuestions": { "$ref": "#/$defs/namedSectionQuestions" },
-    "sectionObservations": { "$ref": "#/$defs/namedSectionObservations" },
-    "sectionProvenance": { "$ref": "#/$defs/namedSectionProvenance" },
-    "sectionCoverage": { "$ref": "#/$defs/namedSectionCoverage" },
-    "sectionCausalModel": { "$ref": "#/$defs/namedSectionCausalModel" },
-    "sectionAlternatives": { "$ref": "#/$defs/namedSectionAlternatives" },
-    "sectionInvariants": { "$ref": "#/$defs/namedSectionInvariants" },
-    "sectionArchitecture": { "$ref": "#/$defs/namedSectionArchitecture" },
-    "sectionAssumptions": { "$ref": "#/$defs/namedSectionAssumptions" },
-    "sectionImplementationContract": { "$ref": "#/$defs/namedSectionImplementationContract" },
-    "sectionMutationBoundary": { "$ref": "#/$defs/namedSectionMutationBoundary" },
-    "sectionOracleMatrix": { "$ref": "#/$defs/namedSectionOracleMatrix" },
-    "sectionValidation": { "$ref": "#/$defs/namedSectionValidation" },
-    "sectionPublicationBoundary": { "$ref": "#/$defs/namedSectionPublicationBoundary" },
-    "sectionImplementation": { "$ref": "#/$defs/namedSectionImplementation" },
-    "sectionCandidateIdentity": { "$ref": "#/$defs/namedSectionCandidateIdentity" },
-    "sectionValidationResults": { "$ref": "#/$defs/namedSectionValidationResults" },
-    "sectionRemainingObligations": { "$ref": "#/$defs/namedSectionRemainingObligations" },
-    "sectionFindingsAndReproducers": { "$ref": "#/$defs/namedSectionFindingsAndReproducers" },
-    "sectionDisposition": { "$ref": "#/$defs/namedSectionDisposition" },
-    "sectionReconciliation": { "$ref": "#/$defs/namedSectionReconciliation" },
-    "sectionHandoff": { "$ref": "#/$defs/namedSectionHandoff" },
-    "sectionRootSynthesis": { "$ref": "#/$defs/namedSectionRootSynthesis" },
-    "sectionPriorFailures": { "$ref": "#/$defs/namedSectionPriorFailures" },
-    "sectionRetainedDecisions": { "$ref": "#/$defs/namedSectionRetainedDecisions" },
-    "sectionReentryBoundary": { "$ref": "#/$defs/namedSectionReentryBoundary" },
-    "sectionProgrammeCoverage": { "$ref": "#/$defs/namedSectionProgrammeCoverage" },
-    "sectionScope": { "$ref": "#/$defs/namedSectionScope" },
-    "namedSectionFraming": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "framing" } } }] },
-    "namedSectionUnknowns": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "unknowns" } } }] },
-    "namedSectionEvidenceQuestions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "evidence_questions" } } }] },
-    "namedSectionStopCondition": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "stop_condition" } } }] },
-    "namedSectionQuestions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "questions" } } }] },
-    "namedSectionObservations": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "observations" } } }] },
-    "namedSectionProvenance": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "provenance" } } }] },
-    "namedSectionCoverage": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "coverage" } } }] },
-    "namedSectionCausalModel": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "causal_model" } } }] },
-    "namedSectionAlternatives": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "alternatives" } } }] },
-    "namedSectionInvariants": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "invariants" } } }] },
-    "namedSectionArchitecture": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "architecture" } } }] },
-    "namedSectionAssumptions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "assumptions" } } }] },
-    "namedSectionImplementationContract": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "implementation_contract" } } }] },
-    "namedSectionMutationBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "mutation_boundary" } } }] },
-    "namedSectionOracleMatrix": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "oracle_matrix" } } }] },
-    "namedSectionValidation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "validation" } } }] },
-    "namedSectionPublicationBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "publication_boundary" } } }] },
-    "namedSectionImplementation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "implementation" } } }] },
-    "namedSectionCandidateIdentity": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "candidate_identity" } } }] },
-    "namedSectionValidationResults": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "validation_results" } } }] },
-    "namedSectionRemainingObligations": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "remaining_obligations" } } }] },
-    "namedSectionFindingsAndReproducers": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "findings_and_reproducers" } } }] },
-    "namedSectionDisposition": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "disposition" } } }] },
-    "namedSectionReconciliation": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "reconciliation" } } }] },
-    "namedSectionHandoff": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "handoff" } } }] },
-    "namedSectionRootSynthesis": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "root_synthesis" } } }] },
-    "namedSectionPriorFailures": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "prior_failures" } } }] },
-    "namedSectionRetainedDecisions": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "retained_decisions" } } }] },
-    "namedSectionReentryBoundary": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "reentry_boundary" } } }] },
-    "namedSectionProgrammeCoverage": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "programme_coverage" } } }] },
-    "namedSectionScope": { "allOf": [{ "$ref": "#/$defs/section" }, { "properties": { "name": { "const": "scope" } } }] }
+    "sectionsG0A": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionFraming"
+        },
+        {
+          "$ref": "#/$defs/sectionUnknowns"
+        },
+        {
+          "$ref": "#/$defs/sectionEvidenceQuestions"
+        },
+        {
+          "$ref": "#/$defs/sectionStopCondition"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionsG0B": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionQuestions"
+        },
+        {
+          "$ref": "#/$defs/sectionObservations"
+        },
+        {
+          "$ref": "#/$defs/sectionProvenance"
+        },
+        {
+          "$ref": "#/$defs/sectionCoverage"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionsG1": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionCausalModel"
+        },
+        {
+          "$ref": "#/$defs/sectionAlternatives"
+        },
+        {
+          "$ref": "#/$defs/sectionInvariants"
+        },
+        {
+          "$ref": "#/$defs/sectionArchitecture"
+        },
+        {
+          "$ref": "#/$defs/sectionAssumptions"
+        }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "sectionsG2": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionImplementationContract"
+        },
+        {
+          "$ref": "#/$defs/sectionMutationBoundary"
+        },
+        {
+          "$ref": "#/$defs/sectionOracleMatrix"
+        },
+        {
+          "$ref": "#/$defs/sectionValidation"
+        },
+        {
+          "$ref": "#/$defs/sectionPublicationBoundary"
+        }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "sectionsG3": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionImplementation"
+        },
+        {
+          "$ref": "#/$defs/sectionCandidateIdentity"
+        },
+        {
+          "$ref": "#/$defs/sectionValidationResults"
+        },
+        {
+          "$ref": "#/$defs/sectionRemainingObligations"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionsG4": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionCandidateIdentity"
+        },
+        {
+          "$ref": "#/$defs/sectionCoverage"
+        },
+        {
+          "$ref": "#/$defs/sectionFindingsAndReproducers"
+        },
+        {
+          "$ref": "#/$defs/sectionValidationResults"
+        },
+        {
+          "$ref": "#/$defs/sectionDisposition"
+        }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "sectionsLoop": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionReconciliation"
+        },
+        {
+          "$ref": "#/$defs/sectionObservations"
+        },
+        {
+          "$ref": "#/$defs/sectionHandoff"
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "sectionsReconvergence": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionRootSynthesis"
+        },
+        {
+          "$ref": "#/$defs/sectionPriorFailures"
+        },
+        {
+          "$ref": "#/$defs/sectionRetainedDecisions"
+        },
+        {
+          "$ref": "#/$defs/sectionReentryBoundary"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionsFinalAudit": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionProgrammeCoverage"
+        },
+        {
+          "$ref": "#/$defs/sectionRemainingObligations"
+        },
+        {
+          "$ref": "#/$defs/sectionValidationResults"
+        },
+        {
+          "$ref": "#/$defs/sectionDisposition"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionsBrowser": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/sectionScope"
+        },
+        {
+          "$ref": "#/$defs/sectionObservations"
+        },
+        {
+          "$ref": "#/$defs/sectionValidationResults"
+        },
+        {
+          "$ref": "#/$defs/sectionDisposition"
+        }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sectionFraming": {
+      "$ref": "#/$defs/namedSectionFraming"
+    },
+    "sectionUnknowns": {
+      "$ref": "#/$defs/namedSectionUnknowns"
+    },
+    "sectionEvidenceQuestions": {
+      "$ref": "#/$defs/namedSectionEvidenceQuestions"
+    },
+    "sectionStopCondition": {
+      "$ref": "#/$defs/namedSectionStopCondition"
+    },
+    "sectionQuestions": {
+      "$ref": "#/$defs/namedSectionQuestions"
+    },
+    "sectionObservations": {
+      "$ref": "#/$defs/namedSectionObservations"
+    },
+    "sectionProvenance": {
+      "$ref": "#/$defs/namedSectionProvenance"
+    },
+    "sectionCoverage": {
+      "$ref": "#/$defs/namedSectionCoverage"
+    },
+    "sectionCausalModel": {
+      "$ref": "#/$defs/namedSectionCausalModel"
+    },
+    "sectionAlternatives": {
+      "$ref": "#/$defs/namedSectionAlternatives"
+    },
+    "sectionInvariants": {
+      "$ref": "#/$defs/namedSectionInvariants"
+    },
+    "sectionArchitecture": {
+      "$ref": "#/$defs/namedSectionArchitecture"
+    },
+    "sectionAssumptions": {
+      "$ref": "#/$defs/namedSectionAssumptions"
+    },
+    "sectionImplementationContract": {
+      "$ref": "#/$defs/namedSectionImplementationContract"
+    },
+    "sectionMutationBoundary": {
+      "$ref": "#/$defs/namedSectionMutationBoundary"
+    },
+    "sectionOracleMatrix": {
+      "$ref": "#/$defs/namedSectionOracleMatrix"
+    },
+    "sectionValidation": {
+      "$ref": "#/$defs/namedSectionValidation"
+    },
+    "sectionPublicationBoundary": {
+      "$ref": "#/$defs/namedSectionPublicationBoundary"
+    },
+    "sectionImplementation": {
+      "$ref": "#/$defs/namedSectionImplementation"
+    },
+    "sectionCandidateIdentity": {
+      "$ref": "#/$defs/namedSectionCandidateIdentity"
+    },
+    "sectionValidationResults": {
+      "$ref": "#/$defs/namedSectionValidationResults"
+    },
+    "sectionRemainingObligations": {
+      "$ref": "#/$defs/namedSectionRemainingObligations"
+    },
+    "sectionFindingsAndReproducers": {
+      "$ref": "#/$defs/namedSectionFindingsAndReproducers"
+    },
+    "sectionDisposition": {
+      "$ref": "#/$defs/namedSectionDisposition"
+    },
+    "sectionReconciliation": {
+      "$ref": "#/$defs/namedSectionReconciliation"
+    },
+    "sectionHandoff": {
+      "$ref": "#/$defs/namedSectionHandoff"
+    },
+    "sectionRootSynthesis": {
+      "$ref": "#/$defs/namedSectionRootSynthesis"
+    },
+    "sectionPriorFailures": {
+      "$ref": "#/$defs/namedSectionPriorFailures"
+    },
+    "sectionRetainedDecisions": {
+      "$ref": "#/$defs/namedSectionRetainedDecisions"
+    },
+    "sectionReentryBoundary": {
+      "$ref": "#/$defs/namedSectionReentryBoundary"
+    },
+    "sectionProgrammeCoverage": {
+      "$ref": "#/$defs/namedSectionProgrammeCoverage"
+    },
+    "sectionScope": {
+      "$ref": "#/$defs/namedSectionScope"
+    },
+    "namedSectionFraming": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "framing"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionUnknowns": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "unknowns"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionEvidenceQuestions": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "evidence_questions"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionStopCondition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "stop_condition"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionQuestions": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "questions"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionObservations": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "observations"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionProvenance": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "provenance"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionCoverage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "coverage"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionCausalModel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "causal_model"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionAlternatives": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "alternatives"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionInvariants": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "invariants"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionArchitecture": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "architecture"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionAssumptions": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "assumptions"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionImplementationContract": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "implementation_contract"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionMutationBoundary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "mutation_boundary"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionOracleMatrix": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "oracle_matrix"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionValidation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "validation"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionPublicationBoundary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "publication_boundary"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionImplementation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "implementation"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionCandidateIdentity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "candidate_identity"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionValidationResults": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "validation_results"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionRemainingObligations": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "remaining_obligations"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionFindingsAndReproducers": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "findings_and_reproducers"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "disposition"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionReconciliation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "reconciliation"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionHandoff": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "handoff"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionRootSynthesis": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "root_synthesis"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionPriorFailures": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "prior_failures"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionRetainedDecisions": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "retained_decisions"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionReentryBoundary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "reentry_boundary"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionProgrammeCoverage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "programme_coverage"
+            }
+          }
+        }
+      ]
+    },
+    "namedSectionScope": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/section"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "scope"
+            }
+          }
+        }
+      ]
+    },
+    "gateContractIrV2": {
+      "title": "Toolkit G2 Gate Contract IR v2",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "run",
+        "lock",
+        "source_stage",
+        "target_stage",
+        "mutation",
+        "requirements",
+        "required_validation",
+        "required_evidence",
+        "controller_decision"
+      ],
+      "properties": {
+        "schema": {
+          "const": "toolkit.gate-contract-ir.v2"
+        },
+        "run": {
+          "$ref": "#/$defs/gateContractIrV2/$defs/S"
+        },
+        "lock": {
+          "$ref": "#/$defs/gateContractIrV2/$defs/S"
+        },
+        "source_stage": {
+          "const": "G2"
+        },
+        "target_stage": {
+          "const": "G3"
+        },
+        "mutation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allow_paths",
+            "forbid_extra_paths"
+          ],
+          "properties": {
+            "allow_paths": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "forbid_extra_paths": {
+              "const": true
+            }
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/gateContractIrV2/$defs/Requirement"
+          }
+        },
+        "required_validation": {
+          "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+        },
+        "required_evidence": {
+          "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+        },
+        "controller_decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "identity",
+            "sources",
+            "selection",
+            "assurance",
+            "authority",
+            "accounting",
+            "construction",
+            "verification",
+            "recovery"
+          ],
+          "properties": {
+            "schema": {
+              "const": "toolkit.controller-decision.v1"
+            },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repository",
+                "programme",
+                "child",
+                "stable_root",
+                "run",
+                "lock",
+                "revision",
+                "supersedes"
+              ],
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "programme": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "child": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "stable_root": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "run": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "lock": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "supersedes": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "repository",
+                        "revision",
+                        "path",
+                        "content_sha256",
+                        "blob_sha1"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "repository": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                        },
+                        "revision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "content_sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "blob_sha1": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{40}$"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "sources": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "authority",
+                "controller",
+                "architecture",
+                "registry",
+                "requirements",
+                "base",
+                "custody"
+              ],
+              "properties": {
+                "authority": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "controller": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "architecture": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "registry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "requirements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "base": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "commit",
+                    "tree"
+                  ],
+                  "properties": {
+                    "commit": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    "tree": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    }
+                  }
+                },
+                "custody": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                }
+              }
+            },
+            "selection": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "registry_version",
+                "profile_id",
+                "builder_qualification",
+                "routes",
+                "discovery_bound",
+                "helper_bound",
+                "helper_depth",
+                "service_tier"
+              ],
+              "properties": {
+                "registry_version": {
+                  "const": 3
+                },
+                "profile_id": {
+                  "enum": [
+                    "owner-openai-continuous-v1",
+                    "owner-claude-continuous-v1",
+                    "owner-mixed-openai-builder-v1",
+                    "owner-mixed-claude-builder-v1"
+                  ]
+                },
+                "builder_qualification": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "bounded_scope",
+                    "understood_interfaces",
+                    "settled_product_trust",
+                    "understood_effects",
+                    "bounded_recovery",
+                    "inspectable_acceptance",
+                    "qualified_realization"
+                  ],
+                  "properties": {
+                    "bounded_scope": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "understood_interfaces": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "settled_product_trust": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "understood_effects": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "bounded_recovery": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "inspectable_acceptance": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "qualified_realization": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "POSITIVE",
+                            "NEGATIVE",
+                            "UNKNOWN"
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "repository",
+                                "revision",
+                                "path",
+                                "content_sha256",
+                                "blob_sha1"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "repository": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                                },
+                                "revision": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512,
+                                  "pattern": "\\S"
+                                },
+                                "content_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "blob_sha1": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "routes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "DISCOVERY",
+                    "BUILDER",
+                    "DESIGN_REVIEW",
+                    "CANDIDATE_REVIEW",
+                    "FINAL_AUDIT"
+                  ],
+                  "properties": {
+                    "DISCOVERY": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "reasoning"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "enum": [
+                            "openai",
+                            "anthropic"
+                          ]
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "reasoning": {
+                          "enum": [
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      }
+                    },
+                    "BUILDER": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "reasoning"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "enum": [
+                            "openai",
+                            "anthropic"
+                          ]
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "reasoning": {
+                          "enum": [
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      }
+                    },
+                    "DESIGN_REVIEW": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "reasoning"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "enum": [
+                            "openai",
+                            "anthropic"
+                          ]
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "reasoning": {
+                          "enum": [
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      }
+                    },
+                    "CANDIDATE_REVIEW": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "reasoning"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "enum": [
+                            "openai",
+                            "anthropic"
+                          ]
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "reasoning": {
+                          "enum": [
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      }
+                    },
+                    "FINAL_AUDIT": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider",
+                        "model",
+                        "reasoning"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "enum": [
+                            "openai",
+                            "anthropic"
+                          ]
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "reasoning": {
+                          "enum": [
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "discovery_bound": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "helper_bound": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "helper_depth": {
+                  "const": 1
+                },
+                "service_tier": {
+                  "enum": [
+                    "Standard",
+                    "UNSUPPORTED",
+                    "UNOBSERVED"
+                  ]
+                }
+              }
+            },
+            "assurance": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "policy",
+                "risk_classification",
+                "design_challenge_required",
+                "design_challenge",
+                "g3_review",
+                "inherited_reviews",
+                "candidate_review",
+                "final_audit"
+              ],
+              "properties": {
+                "policy": {
+                  "const": "continuous-builder-v1"
+                },
+                "risk_classification": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "design_challenge_required": {
+                  "type": "boolean"
+                },
+                "design_challenge": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "repository",
+                        "revision",
+                        "path",
+                        "content_sha256",
+                        "blob_sha1"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "repository": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                        },
+                        "revision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "content_sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "blob_sha1": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{40}$"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "g3_review": {
+                  "enum": [
+                    "BUILDER_VALIDATION",
+                    "STRONG_LEAF_REQUIRED",
+                    "PAIRED_REQUIRED"
+                  ]
+                },
+                "inherited_reviews": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "candidate_review": {
+                  "const": "FRESH_INDEPENDENT_EXACT_CANDIDATE"
+                },
+                "final_audit": {
+                  "const": "SEPARATE_PROGRAMME_FINAL_AUDIT"
+                }
+              }
+            },
+            "authority": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "approval",
+                "operations",
+                "targets",
+                "effect_ceiling",
+                "lifetime",
+                "issued_at",
+                "expires_at",
+                "revocations",
+                "successor_fit"
+              ],
+              "properties": {
+                "approval": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "READ",
+                      "PATCH",
+                      "VALIDATE",
+                      "HELPER",
+                      "QUALIFY",
+                      "TURN"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+                  },
+                  "minItems": 1,
+                  "maxItems": 88,
+                  "uniqueItems": true
+                },
+                "effect_ceiling": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "source_writes",
+                    "validation_invocations",
+                    "helper_launches",
+                    "native_turns",
+                    "candidate_submissions"
+                  ],
+                  "properties": {
+                    "source_writes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "validation_invocations": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "helper_launches": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "native_turns": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidate_submissions": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "lifetime": {
+                  "enum": [
+                    "EXPLICIT_EXPIRY",
+                    "UNTIL_CHILD_DISPOSITION"
+                  ]
+                },
+                "issued_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    }
+                  ]
+                },
+                "revocations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "successor_fit": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "accounting": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stable_root",
+                "debt",
+                "events",
+                "grant",
+                "remaining",
+                "history_certificates",
+                "grant_id",
+                "first_admission_id"
+              ],
+              "properties": {
+                "stable_root": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                },
+                "debt": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "count",
+                    "unknown_additional"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "EXACT",
+                        "AT_LEAST"
+                      ]
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unknown_additional": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "events": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "grant": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "repository",
+                    "revision",
+                    "path",
+                    "content_sha256",
+                    "blob_sha1"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "\\S"
+                    },
+                    "content_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blob_sha1": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "construction_cycles",
+                    "correction_cycles",
+                    "candidates",
+                    "helpers",
+                    "native_turns"
+                  ],
+                  "properties": {
+                    "construction_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "correction_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "helpers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "native_turns": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  }
+                },
+                "history_certificates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "grant_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "first_admission_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "construction": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "allow_paths",
+                "restrictions",
+                "releases",
+                "base",
+                "candidate_ceiling"
+              ],
+              "properties": {
+                "allow_paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+                  },
+                  "minItems": 1,
+                  "maxItems": 88,
+                  "uniqueItems": true
+                },
+                "restrictions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "restriction"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "restriction": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "releases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "base": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "commit",
+                    "tree"
+                  ],
+                  "properties": {
+                    "commit": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    "tree": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    }
+                  }
+                },
+                "candidate_ceiling": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "verification": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requirements",
+                "cases",
+                "trusted_producers",
+                "effect_oracles",
+                "required_consumers"
+              ],
+              "properties": {
+                "requirements": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "\\S"
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "requirement",
+                      "boundary",
+                      "kind",
+                      "runner",
+                      "max_invocations",
+                      "timeout_ms",
+                      "output_paths",
+                      "source"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "requirement": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "boundary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "kind": {
+                        "enum": [
+                          "NEGATIVE",
+                          "POSITIVE"
+                        ]
+                      },
+                      "runner": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "executable",
+                          "argv",
+                          "cwd",
+                          "id"
+                        ],
+                        "properties": {
+                          "executable": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "\\S"
+                          },
+                          "argv": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "\\S"
+                            },
+                            "minItems": 0,
+                            "maxItems": 256,
+                            "uniqueItems": true
+                          },
+                          "cwd": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "\\S"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          }
+                        }
+                      },
+                      "max_invocations": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "output_paths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "\\S"
+                        },
+                        "minItems": 0,
+                        "maxItems": 256,
+                        "uniqueItems": true
+                      },
+                      "source": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "repository",
+                          "revision",
+                          "path",
+                          "content_sha256",
+                          "blob_sha1"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "\\S"
+                          },
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                          },
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "\\S"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": "\\S"
+                          },
+                          "content_sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "blob_sha1": {
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{40}$"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "trusted_producers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "effect_oracles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "\\S"
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "required_consumers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "\\S"
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                }
+              }
+            },
+            "recovery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "custody",
+                "unresolved_dispatches",
+                "unresolved_effects",
+                "unresolved_publications",
+                "next_action"
+              ],
+              "properties": {
+                "custody": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "unresolved_dispatches": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "unresolved_effects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "unresolved_publications": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "repository",
+                      "revision",
+                      "path",
+                      "content_sha256",
+                      "blob_sha1"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "repository": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_.-]+/[a-z0-9_.-]+$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "\\S"
+                      },
+                      "content_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blob_sha1": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "minItems": 0,
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "next_action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "\\S"
+                }
+              }
+            }
+          }
+        }
+      },
+      "$defs": {
+        "S": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "J": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/J"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/J"
+              }
+            }
+          ]
+        },
+        "O": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/gateContractIrV2/$defs/J"
+          }
+        },
+        "E": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/gateContractIrV2/$defs/J"
+          }
+        },
+        "SSet": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gateContractIrV2/$defs/S"
+          }
+        },
+        "SSet0": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gateContractIrV2/$defs/S"
+          }
+        },
+        "Exclusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "surface",
+            "author_stage",
+            "run",
+            "lock",
+            "reason_code",
+            "reason",
+            "authority_ref"
+          ],
+          "properties": {
+            "surface": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "author_stage": {
+              "const": "G2"
+            },
+            "run": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "lock": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "reason_code": {
+              "const": "G2_EXPLICIT_EXCLUSION"
+            },
+            "reason": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "authority_ref": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            }
+          }
+        },
+        "Pair": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "left",
+            "right"
+          ],
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O"
+            },
+            "right": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O"
+            }
+          }
+        },
+        "ExactAllowlistParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "allow",
+            "reject_values",
+            "accept",
+            "reject"
+          ],
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "allow": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "reject_values": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "accept": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            },
+            "reject": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "SpellingVariantsRejectParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "allow",
+            "expected"
+          ],
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "allow": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "AliasClosureParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "aliases",
+            "value",
+            "expected"
+          ],
+          "properties": {
+            "aliases": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "value": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/J"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "TristateParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "states",
+            "expected"
+          ],
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "states": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "contains": {
+                "const": "UNKNOWN"
+              },
+              "items": {
+                "enum": [
+                  "UNKNOWN",
+                  "AMBIGUOUS"
+                ]
+              }
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "ContradictoryEvidenceParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pairs",
+            "expected"
+          ],
+          "properties": {
+            "pairs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/Pair"
+              }
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "OwnInheritedParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "value",
+            "expected"
+          ],
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "value": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/J"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "NullishParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "expected"
+          ],
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "DescriptorParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fields",
+            "expected"
+          ],
+          "properties": {
+            "fields": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "expected": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/E"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "accessor_calls"
+                  ],
+                  "properties": {
+                    "accessor_calls": {
+                      "const": 0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "RoundtripParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "fixture",
+            "expected"
+          ],
+          "properties": {
+            "sequence": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/S"
+              }
+            },
+            "fixture": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O"
+            },
+            "expected": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/E"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "state_before",
+                    "state_after"
+                  ],
+                  "properties": {
+                    "state_before": {
+                      "$ref": "#/$defs/gateContractIrV2/$defs/O"
+                    },
+                    "state_after": {
+                      "$ref": "#/$defs/gateContractIrV2/$defs/O"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "StructuralParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "surfaces",
+            "malformed",
+            "expected"
+          ],
+          "properties": {
+            "surfaces": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "malformed": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O",
+              "minProperties": 1
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "SecretPatternParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "patterns",
+            "surfaces",
+            "expected"
+          ],
+          "properties": {
+            "patterns": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/S",
+                "pattern": "SYNTHETIC"
+              }
+            },
+            "surfaces": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "PublicAliasParams": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "surfaces",
+            "input",
+            "expected"
+          ],
+          "properties": {
+            "surfaces": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "input": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "Macro": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "EXACT_ALLOWLIST"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/ExactAllowlistParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "SPELLING_VARIANTS_REJECT"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/SpellingVariantsRejectParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "ALIAS_CLOSURE"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/AliasClosureParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "TRISTATE_UNKNOWN_AMBIGUOUS"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/TristateParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "CONTRADICTORY_EVIDENCE"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/ContradictoryEvidenceParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "OWN_VS_INHERITED_PROPERTY"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/OwnInheritedParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "NULLISH_DEFAULT_MATRIX"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/NullishParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "DESCRIPTOR_ZERO_READ"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/DescriptorParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "ROUNDTRIP_STATE_STABILITY"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/RoundtripParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "STRUCTURAL_REVALIDATION"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/StructuralParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "SECRET_PATTERN_PARITY"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/SecretPatternParams"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "params"
+              ],
+              "properties": {
+                "name": {
+                  "const": "PUBLIC_ALIAS_SURFACE_PARITY"
+                },
+                "params": {
+                  "$ref": "#/$defs/gateContractIrV2/$defs/PublicAliasParams"
+                }
+              }
+            }
+          ]
+        },
+        "ExplicitCase": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "input",
+            "expected"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "surface": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "input": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/O"
+            },
+            "expected": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/E"
+            }
+          }
+        },
+        "Requirement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "invariant",
+            "surfaces",
+            "macros"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "invariant": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/S"
+            },
+            "surfaces": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet"
+            },
+            "macros": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/Macro"
+              }
+            },
+            "cases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/ExplicitCase"
+              }
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/gateContractIrV2/$defs/Exclusion"
+              }
+            },
+            "forbidden_behaviour": {
+              "$ref": "#/$defs/gateContractIrV2/$defs/SSet0"
+            }
+          },
+          "anyOf": [
+            {
+              "properties": {
+                "macros": {
+                  "minItems": 1
+                }
+              }
+            },
+            {
+              "required": [
+                "cases"
+              ],
+              "properties": {
+                "cases": {
+                  "minItems": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
   }
 }

@@ -226,9 +226,6 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-  auditSkill,
   auditSkillPortability,
-  cleanMarkdownTarget,
-  markdownTargets,
   skillDirs
 };

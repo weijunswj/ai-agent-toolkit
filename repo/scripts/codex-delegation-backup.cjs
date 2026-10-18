@@ -101,19 +101,26 @@ function assertSnapshotCurrent(configPath, expected, message = 'Codex config cha
   return current;
 }
 
-function createCodexConfigBackup(configPath = codexConfigPath(), options = {}) {
-  const snapshot = options.snapshot || captureCodexConfigSnapshot(configPath);
-  const current = assertSnapshotCurrent(configPath, snapshot);
+class CodexConfigBackupGeneration {
+  #configPath; #options;
+
+  #snapshot; #current; #generation; #metadata;
+  constructor(configPath = codexConfigPath(), options = {}) {this.#configPath=configPath;this.#options=options;}
+  run() {
+    const configPath=this.#configPath,options=this.#options;
+
+  const snapshot = this.#snapshot = options.snapshot || captureCodexConfigSnapshot(configPath);
+  const current = this.#current = assertSnapshotCurrent(configPath, snapshot);
   const id = options.generationId || `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
   if (!/^[A-Za-z0-9._-]+$/.test(id) || id === '.' || id === '..') throw new Error('Backup generation ID is unsafe.');
   const root = path.resolve(options.backupRoot || backupRoot(configPath));
-  const generation = path.join(root, id);
+  const generation = this.#generation = path.join(root, id);
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   fs.mkdirSync(generation, { recursive: false, mode: 0o700 });
   const backupPath = current.existed ? path.join(generation, 'config.toml.original') : null;
   if (backupPath) fs.writeFileSync(backupPath, current.bytes, { mode: 0o600 });
   const replacement = Buffer.from(options.replacementBytes || Buffer.alloc(0));
-  const metadata = {
+  const metadata = this.#metadata = {
     schema: BACKUP_SCHEMA,
     generation: id,
     created_at: new Date().toISOString(),
@@ -131,14 +138,23 @@ function createCodexConfigBackup(configPath = codexConfigPath(), options = {}) {
   const metadataPath = path.join(generation, 'restore.json');
   writeJsonAtomically(metadataPath, metadata, 0o600);
   return { ...metadata, metadata_path: metadataPath, original_bytes: current.bytes, snapshot: current };
-}
 
-function writeRegularFileAtomically(filePath, bytes, mode, options = {}) {
+  }
+}
+function createCodexConfigBackup(configPath = codexConfigPath(), options = {}) {return new CodexConfigBackupGeneration(configPath,options).run();}
+
+class CodexAtomicConfigReplacement {
+  #filePath; #bytes; #mode; #options;
+  #committed=false;
+  #temp;
+  constructor(filePath, bytes, mode, options = {}) {this.#filePath=filePath;this.#bytes=bytes;this.#mode=mode;this.#options=options;}
+  run() {
+    const filePath=this.#filePath,bytes=this.#bytes,mode=this.#mode,options=this.#options;
+
   const parent = path.dirname(filePath);
   fs.mkdirSync(parent, { recursive: true });
   if (options.expectedSnapshot) assertSnapshotCurrent(filePath, options.expectedSnapshot);
-  const temp = path.join(parent, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
-  let committed = false;
+  const temp = this.#temp = path.join(parent, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
   try {
     fs.writeFileSync(temp, bytes, { mode: mode == null ? 0o600 : mode });
     if (mode != null && process.platform !== 'win32') fs.chmodSync(temp, mode);
@@ -146,16 +162,19 @@ function writeRegularFileAtomically(filePath, bytes, mode, options = {}) {
     // a cross-platform compare-and-swap, so uncertainty always aborts first.
     if (options.expectedSnapshot) assertSnapshotCurrent(filePath, options.expectedSnapshot);
     fs.renameSync(temp, filePath);
-    committed = true;
+    this.#committed = true;
     if (typeof options.afterReplace === 'function') options.afterReplace({ filePath, bytes: Buffer.from(bytes), mode });
     return { committed: true };
   } catch (error) {
-    if (committed) error.atomicReplacementCommitted = true;
+    if (this.#committed) error.atomicReplacementCommitted = true;
     throw error;
   } finally {
     try { fs.rmSync(temp, { force: true }); } catch {}
   }
+
+  }
 }
+function writeRegularFileAtomically(filePath, bytes, mode, options = {}) {return new CodexAtomicConfigReplacement(filePath,bytes,mode,options).run();}
 
 function lstatRequired(filePath, label) {
   const stat = fs.lstatSync(filePath);
@@ -211,34 +230,42 @@ function readBackupMetadata(metadataPath, options = {}) {
   return { metadata, root, generationPath, metadataPath: resolvedMetadataPath, expectedConfigPath };
 }
 
-function restoreCodexDelegationBackup(metadataPath, options = {}) {
+class CodexConfigRestoreTransaction {
+  #metadataPath; #options;
+  #current;
+  #bytes; #restored;
+  constructor(metadataPath, options = {}) {this.#metadataPath=metadataPath;this.#options=options;}
+  run() {
+    const metadataPath=this.#metadataPath,options=this.#options;
+
   const { metadata, expectedConfigPath } = readBackupMetadata(metadataPath, options);
-  let current;
   try {
-    current = captureCodexConfigSnapshot(expectedConfigPath);
+    this.#current = captureCodexConfigSnapshot(expectedConfigPath);
   } catch (error) {
     throw new Error(`Current Codex config topology is unsupported for exact restore: ${error.message}`);
   }
-  if (!current.existed || current.file_type !== 'regular' || current.size_bytes !== metadata.replacement_size_bytes || current.sha256 !== metadata.replacement_sha256) {
+  if (!this.#current.existed || this.#current.file_type !== 'regular' || this.#current.size_bytes !== metadata.replacement_size_bytes || this.#current.sha256 !== metadata.replacement_sha256) {
     throw new Error('Current Codex config no longer matches the Toolkit replacement; refusing to overwrite or delete it.');
   }
   if (!metadata.existed) {
-    if (typeof options.beforeDelete === 'function') options.beforeDelete({ configPath: expectedConfigPath, metadata, current });
-    assertSnapshotCurrent(expectedConfigPath, current, 'Codex config changed immediately before restore deletion; refusing to delete the concurrent file.');
+    if (typeof options.beforeDelete === 'function') options.beforeDelete({ configPath: expectedConfigPath, metadata, current: this.#current });
+    assertSnapshotCurrent(expectedConfigPath, this.#current, 'Codex config changed immediately before restore deletion; refusing to delete the concurrent file.');
     fs.unlinkSync(expectedConfigPath);
     return { status: 'restored', config_path: expectedConfigPath, removed_created_file: true, exact: true };
   }
-  const bytes = fs.readFileSync(metadata.backup_path);
+  const bytes = this.#bytes = fs.readFileSync(metadata.backup_path);
   if (bytes.length !== metadata.original_size_bytes || sha256(bytes) !== metadata.original_sha256) throw new Error('Backup bytes failed integrity verification.');
-  writeRegularFileAtomically(expectedConfigPath, bytes, metadata.original_mode, { expectedSnapshot: current });
-  const restored = fs.readFileSync(expectedConfigPath);
+  writeRegularFileAtomically(expectedConfigPath, bytes, metadata.original_mode, { expectedSnapshot: this.#current });
+  const restored = this.#restored = fs.readFileSync(expectedConfigPath);
   if (!restored.equals(bytes)) throw new Error('Exact Codex config restoration failed.');
   return { status: 'restored', config_path: expectedConfigPath, removed_created_file: false, exact: true };
+
+  }
 }
+function restoreCodexDelegationBackup(metadataPath, options = {}) {return new CodexConfigRestoreTransaction(metadataPath,options).run();}
 
 module.exports = {
   BACKUP_SCHEMA,
-  writeJsonAtomically,
   captureCodexConfigSnapshot,
   snapshotsMatch,
   assertSnapshotCurrent,

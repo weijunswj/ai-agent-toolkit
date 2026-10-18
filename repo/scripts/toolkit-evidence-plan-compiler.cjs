@@ -89,7 +89,6 @@ const MACRO_STEPS = Object.freeze(Object.fromEntries(
 ));
 
 const PROVENANCE_SET = new Set(PROVENANCE_FIELDS);
-const EVIDENCE_MACRO_NAMES = Object.freeze(Object.keys(EVIDENCE_MACRO_FACETS));
 const EVIDENCE_ERROR_CODE = 'EVIDENCE_MANIFEST_INVALID';
 const RESPONSE_SCHEMA = 'toolkit.g0b-evidence-response.v1';
 const VERIFICATION_SCHEMA = 'toolkit.g0b-evidence-verification-context.v1';
@@ -511,10 +510,6 @@ function compileEvidenceManifest(manifest) {
     serial_packets: planCore.serial_packets.map(withPlanDigest),
     plan_digest: planDigest,
   };
-}
-
-function isLowerHex(value, length) {
-  return typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`).test(value);
 }
 
 function validateBase64(value, location) {
@@ -1059,8 +1054,6 @@ module.exports = {
   mergeEvidenceResponses,
   validateJsonCompatible,
   validateManifest,
-  validateResponseModel,
-  validateVerificationContext,
 };
 
 if (require.main === module) {

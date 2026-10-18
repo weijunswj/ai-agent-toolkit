@@ -15,7 +15,6 @@ const expectedCodexRows = [
   ['report-retention', 'Report retention'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['opencode-integration', 'OpenCode'],
-  ['antigravity-integration', 'Antigravity'],
 ];
 
 function assertGeneratedDocumentationEqual(actual, expected) {
@@ -161,9 +160,12 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.match(byId['report-retention'].whatThisControls, /does not modify project files, application logs, or unrelated operational logs/i);
   assert.equal(byId['codex-helper-agents'], undefined);
   assert.match(byId['codex-toolkit-maintenance'].choices.find((choice) => choice.value === 'disable').consequence, /not uninstalled/i);
-  assert.match(byId['opencode-integration'].afterApplying, /skill folders/i);
-  assert.match(byId['antigravity-integration'].afterApplying, /plugin metadata and skill folders/i);
-  assert.notEqual(byId['opencode-integration'].whatThisControls, byId['antigravity-integration'].whatThisControls);
+  assert.match(byId['opencode-integration'].afterApplying, /managed OpenCode skill folders/i);
+  assert.equal(byId['antigravity-integration'], undefined, 'portable Antigravity copies are not a native setup integration choice');
+  const toolkitSetupSkill = fs.readFileSync(path.join(repoRoot, 'skills/toolkit-setup/SKILL.md'), 'utf8');
+  assert.match(toolkitSetupSkill, /Antigravity.*portable workspace skills/i);
+  assert.match(toolkitSetupSkill, /--copy-antigravity-skills/);
+  assert.doesNotMatch(toolkitSetupSkill, /Antigravity native plugin install|Antigravity 2 sync/i);
 });
 
 test('legacy migration stays advanced while ordinary setup and authoritative guidance omit helper capacity', () => {
@@ -187,7 +189,13 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   const args = core.parseArgs(['--plan', '--host', 'codex']);
   const current = {
     managed: { currentPath: 'C:\\Synthetic Private\\missing', selectedPath: '', defaultPath: 'C:\\Elsewhere', exists: false, git: false, dirty: false, branch: '', remote: '' },
-    audit: { repo_auto_update: {}, targets: { opencode: { detected: true }, ag2: { detected: true } } },
+    audit: {
+      repo_auto_update: {},
+      targets: {
+        opencode: { detected: true },
+        ag2: { detected: false, native_plugin_target_supported: false, portable_project_skills_available: true },
+      },
+    },
     runtime: { runtime: 'unknown' },
     delegation: { status: 'unsupported', helper_count: null },
     nativePlugin: { status: 'unknown' },
@@ -195,6 +203,7 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   const rows = core.setupQuestionSpecs(args, current);
   for (const row of rows) assert.ok(row.choices.some((choice) => choice.value === row.recommended));
   assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
+  assert.equal(rows.some((row) => row.id === 'antigravity-integration'), false);
   assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
   const output = `${core.renderSetupQuestionBank(rows)}\n${JSON.stringify(rows)}`;
   assert.doesNotMatch(output, /Synthetic Private|C:\\|USERPROFILE|CODEX_HOME|GH_TOKEN|GITHUB_TOKEN/);
@@ -290,7 +299,6 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
-  claudeCurrent.agentCapability = { launch_supported: false, resource_counter_supported: false };
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
@@ -323,7 +331,7 @@ test('quick index, detailed bank, recommendations, and choices share one indexed
 
 test('conditional questions renumber without gaps and change the bound bank identity', () => {
   const withTargets = allRows();
-  const withoutTargets = withTargets.filter((row) => !['opencode-integration', 'antigravity-integration'].includes(row.id));
+  const withoutTargets = withTargets.filter((row) => row.id !== 'opencode-integration');
   const renumbered = core.withPresentationMetadata(withoutTargets.map((row) => ({ ...row, presentation: undefined })));
   assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, withTargets[0].presentation.bank_identity);

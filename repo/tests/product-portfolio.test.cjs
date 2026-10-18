@@ -51,8 +51,8 @@ function currentProducts() {
     .sort();
 }
 
-test('active portfolio is exactly the approved 15 products', () => {
-  assert.deepEqual(currentProducts(), expectedProducts);
+test('active skills preserve the approved 15-product portfolio plus the V3 controller bootstrap', () => {
+  assert.deepEqual(currentProducts(), [...expectedProducts, 'controller-bootstrap'].sort());
   assert.equal(fs.existsSync(path.join(root, 'skills', 'n8n-workflow-templates')), false);
   assert.equal(fs.existsSync(path.join(root, 'skills', 'context-preserving-ai-publisher')), false);
 });

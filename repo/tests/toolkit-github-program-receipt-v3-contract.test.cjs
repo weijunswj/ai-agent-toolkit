@@ -55,27 +55,22 @@ const RECOVERY_RECORD_KEYS = [
 ];
 
 function secureWindowsDirectory(root) {
-  if (process.platform !== 'win32') return;
-  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const script = [
-    '$ErrorActionPreference="Stop"',
-    '$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
-    '$icacls=Join-Path $env:SystemRoot "System32\\icacls.exe"',
-    '& $icacls $env:GPR_TEST_ROOT "/inheritance:r" "/grant:r" ("*${sid}:(OI)(CI)F") "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null',
-    'if ($LASTEXITCODE -ne 0) { throw "icacls-failed" }'
-  ].join(';');
-  const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
-    encoding: 'utf8', windowsHide: true, env: { ...process.env, GPR_TEST_ROOT: root }
+  // Qualify inherited permissions through the actual production guard; never repair ACLs.
+  require('../scripts/toolkit-github-program-receipt.cjs').resolveDatabasePath({
+    repository: 'weijunswj/ai-agent-toolkit', parent_issue: 421, child_issue: 461,
+    repositoryRoot, stateRoot: root
   });
-  if (result.status !== 0) throw new Error(`Unable to secure test state root: ${result.stderr}`);
+}
+
+let ownedCarrier;
+function ownedFixtureCarrier() {
+  ownedCarrier ||= new (require('./support/owned-receipt-carrier.cjs').OwnedReceiptCarrier)({ repositoryRoot, guard: secureWindowsDirectory });
+  return ownedCarrier.carrier();
 }
 
 function stateRoot() {
-  const parent = path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'github-program-receipt', 'tests');
-  fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') fs.chmodSync(parent, 0o700);
+  const parent = ownedFixtureCarrier();
   const root = fs.mkdtempSync(path.join(parent, 'v3-'));
-  if (process.platform !== 'win32') fs.chmodSync(root, 0o700);
   secureWindowsDirectory(root);
   cleanupRoots.add(root);
   return root;
@@ -2117,6 +2112,6 @@ test('receipt-v1 remains the historical compatibility contract', () => {
 });
 
 test.afterEach(() => {
-  for (const root of cleanupRoots) fs.rmSync(root, { recursive: true, force: true });
+  // Retain exclusively owned synthetic fixtures for invocation evidence; no disposal.
   cleanupRoots.clear();
 });

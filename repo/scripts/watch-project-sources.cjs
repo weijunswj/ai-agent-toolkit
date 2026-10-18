@@ -178,9 +178,5 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-  allowlists,
-  buildPlan,
-  discoverLocks,
-  planEntry,
-  renderMarkdown
+  allowlists
 };

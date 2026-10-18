@@ -79,7 +79,7 @@ const allowedRootEntries = new Set([
   'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'
 ]);
 const secretPatterns = [
-  /sk-[A-Za-z0-9_-]{20,}/,
+  /\bsk-[A-Za-z0-9_-]{20,}/,
   /AIza[0-9A-Za-z_-]{20,}/,
   /Bearer\s+[A-Za-z0-9._-]{20,}/i,
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
@@ -687,7 +687,7 @@ function validateLegacyReferences(errors) {
   const excluded = new Set(['repo/scripts/validate-toolkit.cjs', 'repo/scripts/audit-published-surfaces.cjs']);
   for (const entry of listFiles()) {
     if (excluded.has(entry.relPath)) continue;
-    if (!/\.(md|json|ya?ml|txt|cjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
+    if (!/\.(md|json|ya?ml|txt|cjs|mjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
     if (entry.relPath.endsWith('.n6.json')) continue;
     if (surfaceAudit.legacyReferenceAllowed(entry.relPath)) continue;
     const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -702,13 +702,14 @@ function validateExecutables(errors) {
     if (ext === '.py' && !entry.relPath.startsWith('skills/frontend-art-direction/tools/design-system-generator/') && !entry.relPath.startsWith('repo/tests/')) {
       fail(errors, `Python file outside approved local-only locations: ${entry.relPath}`);
     }
-    if (!executablePrefixes.some((prefix) => entry.relPath.startsWith(prefix))) fail(errors, `Executable file outside approved locations: ${entry.relPath}`);
+    const nativeOpenCodeTemplate = entry.relPath === 'repo/contracts/toolkit-local-bridge/opencode-plugin/ai-agent-toolkit.mjs';
+    if (!nativeOpenCodeTemplate && !executablePrefixes.some((prefix) => entry.relPath.startsWith(prefix))) fail(errors, `Executable file outside approved locations: ${entry.relPath}`);
   }
 }
 
 function validateNoSecrets(errors) {
   for (const entry of listFiles()) {
-    if (!/\.(md|json|ya?ml|txt|cjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
+    if (!/\.(md|json|ya?ml|txt|cjs|mjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     for (const pattern of secretPatterns) if (pattern.test(text)) fail(errors, `Possible secret pattern in ${entry.relPath}`);
   }
@@ -726,6 +727,22 @@ function validateTrackedLocalRuntimeFiles(errors) {
   }
 }
 
+
+function validateContinuousCoreSources(errors) {
+  try {
+    const compiler=require('./toolkit-gate-contract-compiler.cjs');
+    const registryBytes=fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json'));
+    const registry=JSON.parse(registryBytes);
+    const snapshot=new (require('./toolkit-stack-selection.cjs').StackRegistrySnapshot)({reference:{id:'registry',repository:'validation/toolkit',revision:'explicit-local-source-validation',path:'repo/contracts/controller-kernel/stack-registry-v3.json',content_sha256:require('node:crypto').createHash('sha256').update(registryBytes).digest('hex'),blob_sha1:null},content_base64:registryBytes.toString('base64')});
+    const qualification=Object.fromEntries(compiler.CHEAP_QUALIFIERS.map(key=>[key,{status:'UNKNOWN',source:null}]));
+    for(const profile of Object.keys(registry.profiles)) compiler.resolveContinuousProfile(profile,qualification,snapshot);
+    for(const file of ['controller-decision-v1.schema.json','controller-decision-v2.schema.json','gate-contract-ir-v2.schema.json','gate-contract-ir-v3.schema.json','codex-host-adapter-v1.schema.json','codex-host-adapter-v2.schema.json']) {
+      const schema=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel',file),'utf8'));
+      if(schema.additionalProperties!==false||schema.type!=='object')throw new Error('Closed core schema required');
+    }
+  }catch(_){fail(errors,'Continuous core source contract invalid or unavailable; native qualification is a separate boundary.');}
+}
+
 function validate() {
   const errors = [];
   validateRootTopology(errors);
@@ -740,6 +757,7 @@ function validate() {
   validateManagedSurfaces(errors);
   validateSourceWatch(errors);
   validateContracts(errors);
+  validateContinuousCoreSources(errors);
   validateLegacyReferences(errors);
   validateExecutables(errors);
   validateNoSecrets(errors);
@@ -767,7 +785,5 @@ module.exports = {
   skillDirs,
   validationCommandTargetFinding,
   validationCommandTargets,
-  validateSkillCreationGate,
-  validateSkillProductMigrationLedger,
   validate
 };

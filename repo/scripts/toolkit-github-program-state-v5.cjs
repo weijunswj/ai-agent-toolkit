@@ -19,6 +19,9 @@ const WRITE_SAFETY_MODE = 'WEB_EXCLUSIVE_SINGLE_WRITER_RECOVERY_WINDOW';
 const STATE_SCHEMA = 'toolkit.github-program.state.v5';
 const PROJECTION_SCHEMA = 'toolkit.github-program.projection.v1';
 const SURFACE_SCHEMA = 'toolkit.github-program.surface.v5';
+const V3_RELEASE_PLAN_SCHEMA = 'toolkit.github-program.v3-release-plan.v1';
+const V3_RELEASE_PROJECTION_SCHEMA = 'toolkit.github-program.v3-release-projection.v1';
+const V3_RELEASE_CATEGORIES = Object.freeze(['CORE', 'HARDENING', 'LATER']);
 const AUTHORITY_PACKET_CURRENT_SCHEMA = 'toolkit.github-program.authority-packet-current.v1';
 const AUTHORITY_PACKET_STAGES = Object.freeze(['G0-A', 'G0-B', 'G1', 'G2', 'G3', 'G4', 'LOOP', 'RECONVERGENCE', 'FINAL_AUDIT', 'BROWSER', 'WEB', 'FINALITY']);
 const AUTHORITY_PACKET_CURRENT_MAX_BYTES = 65536;
@@ -45,7 +48,6 @@ const FROZEN_VERSION = '2.11.0';
 const PR366_HEAD = 'a7dcb69da43100c5411076008307a221e89b720f';
 const PR366_TREE = '2c88782fa274e502fb6c8c5126d55470112f38e9';
 const PR366_BASE_SHA = 'e86a2d74fd771f6500aa02fe0892940933bf7647';
-const PR366_VERSION = '2.12.0';
 const TARGET_CANONICAL_DIGEST = '1d810f3d7df41012707672cd323c12ccfcff279c172165bbf732e1a49eae39aa';
 const FINALISATION_ROOT = 'E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002';
 const FINALISATION_LOCK = 'DL-S2-E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002';
@@ -813,7 +815,6 @@ function exactKeys(value, keys) {
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
-function keysFrom(required, optional = []) { return [...required, ...optional]; }
 function hasOnly(value, required, optional = []) {
   return isRecord(value)
     && required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
@@ -934,6 +935,15 @@ function validateAuthorityPacketCurrent(value, expected = {}) {
     value = h2TrustedDataCopy(value);
     expected = h2TrustedDataCopy(expected);
   } catch (_error) { return false; }
+  if (value?.schema === 'toolkit.github-program.authority-packet-current.v2') {
+    try {
+      receipt.validateAuthorityPacketCurrent(value);
+      for (const key of ['repository', 'parent_issue', 'child_issue', 'lane_id', 'human_owner']) {
+        if (Object.hasOwn(expected, key) && expected[key] !== value[key]) return false;
+      }
+      return true;
+    } catch (_error) { return false; }
+  }
   if (!validateHistoricalAuthorityPacketCurrent(value, expected)
     || !isPacketContractId(value.lane_id)
     || !isPacketContractId(value.consumer.run)
@@ -961,13 +971,6 @@ function without(value, key) {
   delete copy[key];
   return copy;
 }
-function authorityBinding(decision) {
-  return {
-    controlling: clone(decision.web_authority.controlling),
-    predecessor: clone(decision.web_authority.predecessor),
-  };
-}
-function authorityDigest(decision) { return digestValue(authorityBinding(decision)); }
 function factsDigest(reviews, threads, comments, checks) {
   return digestValue({
     reviews: reviews.map(({ id, user, state, submitted_at, body_digest }) => ({ id, user, state, submitted_at, body_digest })),
@@ -1360,7 +1363,34 @@ function eligibleRecoveryHold(child, state) {
     && same(child.holds[0], recoveryHold())
     && hasWebEvidence(state, HOLD_EVIDENCE_REF, HOLD_EVIDENCE_REFERENCE);
 }
+
+// Optional typed reference metadata. Authority always comes from the authentic packet/CURRENT consumer.
+function validateControllerDecisionReference(input, current = null) {
+  try {
+    const compiler = require('./toolkit-gate-contract-compiler.cjs');
+    const value = compiler.trustedJsonCopy(input);
+    if (!value || Object.keys(value).sort().join('|') !== ['schema','version','packet_id','decision_digest'].sort().join('|')
+      || value.schema !== 'toolkit.controller-decision-reference.v1' || value.version !== 1
+      || !/^ap1-[a-f0-9]{64}$/.test(value.packet_id) || !/^[a-f0-9]{64}$/.test(value.decision_digest)) return false;
+    return current === null || Array.isArray(current.predecessors) && current.predecessors.some(p => p.packet_id === value.packet_id && p.producer.stage === 'G2');
+  } catch (_) { return false; }
+}
+function controllerDecisionExtension(extensions) {
+  const found = (extensions || []).filter(e => typeof e.schema === 'string' && e.schema.startsWith('toolkit.controller-decision-reference.'));
+  if (found.length > 1 || found.some(e => !validateControllerDecisionReference(e))) throw new Error('CONTROLLER_DECISION_REFERENCE_INVALID');
+  return found[0] || null;
+}
+function consumeControllerDecisionReference(input, store, admission) {
+  const receipt = require('./toolkit-github-program-receipt.cjs');
+  receipt.assertAuthenticAuthorityPacketStore(store);receipt.assertAuthenticSemanticGateAdmission(store,admission);
+  if (!validateControllerDecisionReference(input)) throw new Error('CONTROLLER_DECISION_REFERENCE_INVALID');
+  const observed = store.readControllerDecision(admission);
+  if (input.packet_id !== observed.packet_id || input.decision_digest !== observed.decision_digest) throw new Error('CONTROLLER_DECISION_REFERENCE_STALE');
+  return observed;
+}
+
 function validateCanonicalStateV5(value) {
+  try { controllerDecisionExtension(value.extensions); } catch (_) { return failure('V5_STATE_INVALID'); }
   if (looksLikeInterEpochState(value)) return validateInterEpochStateV5(value);
   const required = ['active_lanes', 'children', 'concurrency_authority', 'design_lock', 'evidence_refs', 'extensions', 'historical_transitions', 'parent', 'predecessor_contract_digest', 'prs', 'repository', 'schema'];
   const optional = ['recovery'];
@@ -3734,11 +3764,8 @@ function verifyBootstrapWorkspaceProof(input = {}) {
 
 const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
 const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-SEQUENTIAL-HISTORY-EVIDENCE-008';
-const H2_PACKAGE_VERSION = '2.10.10';
 const H2_VERSION = 'human-v2';
 const H2_RENDERER_REVISION = 'human-v2-r093';
-const H2_J_PRODUCER_COMMIT = 'da984fbac48c5a825e8d172cb528becd50749cd2';
-const H2_J_PRODUCER_BLOB = 'c3b7a609b8945f9aaaf6b7faed4be4737f3fba31';
 const H2_J_BODY_BYTES = 29752;
 const H2_J_BODY_SHA256 = '852022dccd148282490b1ef0588de9ce55a6a9c1a01edbc68550bf9e32ed693a';
 const H2_J_CANONICAL_SHA256 = '4122eead6382d95be5e0593d2e2f35b54a6c07bf8592cf4c5a5d9a67ee8b95c2';
@@ -4026,7 +4053,6 @@ function h2Audit(value, seen = new Set()) {
 function h2Sha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
 function h2Hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
 function h2Issue(value) { return Number.isSafeInteger(value) && value >= 1; }
-function h2Array(value) { return Array.isArray(value); }
 function h2StringArray(value, max = 4096) { return Array.isArray(value) && value.every((item) => h2SafeLine(item, max)); }
 function h2Comparable(left, right) {
   try { return h2Canonical(left) === h2Canonical(right); } catch (_error) { return false; }
@@ -4328,6 +4354,7 @@ function h2ValidateActiveLane(value) {
   return !h2Own(value, 'work_claims') || h2StringArray(value.work_claims);
 }
 function h2ValidateGenericState(value) {
+  try { controllerDecisionExtension(value.extensions); } catch (_) { return false; }
   const required = ['active_lanes', 'children', 'evidence_refs', 'historical_transitions', 'parent', 'prs', 'repository', 'schema'];
   const optional = ['design_lock', 'extensions', 'dependencies', H2_HISTORY_KEY];
   if (!h2HasOnly(value, required, optional) || !h2Repository(value.repository)
@@ -4661,6 +4688,7 @@ function h2ProjectionState(state, history) {
       finality: current.finality.state,
       summary: current.summary,
       action: childAction.action,
+      ...(controllerDecisionExtension(state.extensions) ? { controller_decision_reference: h2Clone(controllerDecisionExtension(state.extensions)) } : {}),
       ...(current.lifecycle === 'CURRENT' && h2Own(current, 'authority_packet_current')
         && validateAuthorityPacketCurrent(current.authority_packet_current, { repository: state.repository, parent_issue: state.parent.issue, child_issue: current.issue })
         ? { authority_packet_current: h2Clone(current.authority_packet_current) } : {}),
@@ -5366,9 +5394,6 @@ function h2BuildPrTypedDocumentHistorical(projection) {
     '## What happens next', h2Bullet(current.next_action),
   ];
 }
-function h2PrProse(projection) {
-  return h2BuildPrTypedDocument(projection);
-}
 function h2BuildParentDoc(state, options = {}) {
   const checked = h2ValidateState(state);
   const projection = h2ProjectionState(checked.state, checked.history);
@@ -5728,11 +5753,6 @@ function h2ReadParentUnbound(read) {
   h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
   return h2ParseParentEnvelope(envelope, null);
 }
-function h2ReadChildUnbound(read) {
-  const envelope = h2ReadEnvelope(read);
-  h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
-  return h2ParseChildEnvelope(envelope, null, null);
-}
 function h2ValidateProviderObservation(value) {
   const keys = ['schema', 'provider', 'repository', 'pr_number', 'github_state', 'draft', 'merged', 'base_ref', 'base_sha', 'head', 'tree', 'observed_revision'];
   return h2IsPlain(value) && h2Exact(value, keys) && value.schema === H2_PROVIDER_OBSERVATION_SCHEMA
@@ -6062,6 +6082,180 @@ function h2PlanMigrationPublic(input) {
   });
 }
 
+function h2PreviewV3ReleasePlan(input) {
+  return h2Call('previewReleasePlan', () => {
+    h2Require(arguments.length === 1, true, 'RELEASE_PLAN_INPUT_INVALID', 'INPUT');
+    input = h2TrustedDataCopy(input);
+    h2Require(h2IsPlain(input) && h2Exact(input, ['current_read', 'expected_current', 'release_plan']), true,
+      'RELEASE_PLAN_INPUT_INVALID', 'INPUT');
+    h2Require(h2Audit(input.expected_current) && h2Audit(input.release_plan), true,
+      'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+
+    const current = h2ReadParentUnbound(input.current_read);
+    h2Require(current.historical_read_only !== true && current.renderer_revision === H2_RENDERER_REVISION, true,
+      'RELEASE_PLAN_CURRENT_READ_REQUIRED', 'READBACK');
+    h2Require(current.state.repository === REPOSITORY && current.state.parent.issue === 421, true,
+      'RELEASE_PLAN_TARGET_INVALID', 'IDENTITY');
+
+    const expectedKeys = ['body_sha256', 'canonical_sha256', 'revision'];
+    h2Require(h2Exact(input.expected_current, expectedKeys)
+      && h2Hash(input.expected_current.body_sha256)
+      && h2Hash(input.expected_current.canonical_sha256)
+      && (input.expected_current.revision === null || h2SafeLine(input.expected_current.revision, 1024)), true,
+    'RELEASE_PLAN_EXPECTED_CURRENT_INVALID', 'INPUT');
+    h2Require(input.expected_current.body_sha256 === current.read.body_sha256
+      && input.expected_current.canonical_sha256 === current.canonical_sha256
+      && input.expected_current.revision === current.read.revision, true,
+    'RELEASE_PLAN_EXPECTED_CURRENT_MISMATCH', 'READBACK');
+
+    const plan = input.release_plan;
+    h2Require(h2IsPlain(plan) && h2Exact(plan,
+      ['schema', 'version', 'source', 'owner_decision_ref', 'items'])
+      && plan.schema === V3_RELEASE_PLAN_SCHEMA && plan.version === 1, true,
+    'RELEASE_PLAN_INVALID', 'INPUT');
+    const sourceKeys = ['repository', 'parent_issue', 'body_sha256', 'canonical_sha256', 'revision'];
+    h2Require(h2Exact(plan.source, sourceKeys)
+      && h2Repository(plan.source.repository) && h2Issue(plan.source.parent_issue)
+      && h2Hash(plan.source.body_sha256) && h2Hash(plan.source.canonical_sha256)
+      && (plan.source.revision === null || h2SafeLine(plan.source.revision, 1024)), true,
+    'RELEASE_PLAN_SOURCE_INVALID', 'INPUT');
+    h2Require(plan.source.repository === current.state.repository
+      && plan.source.parent_issue === current.state.parent.issue
+      && plan.source.body_sha256 === current.read.body_sha256
+      && plan.source.canonical_sha256 === current.canonical_sha256
+      && plan.source.revision === current.read.revision, true,
+    'RELEASE_PLAN_SOURCE_MISMATCH', 'CANONICAL');
+
+    const ownerRef = plan.owner_decision_ref;
+    h2Require(h2Exact(ownerRef,
+      ['repository', 'issue_number', 'comment_id', 'node_id', 'author_login', 'updated_at', 'body_sha256'])
+      && ownerRef.repository === current.state.repository
+      && ownerRef.issue_number === current.state.parent.issue
+      && h2Issue(ownerRef.comment_id)
+      && typeof ownerRef.node_id === 'string' && /^[A-Za-z0-9_:-]{1,256}$/.test(ownerRef.node_id)
+      && typeof ownerRef.author_login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(ownerRef.author_login)
+      && typeof ownerRef.updated_at === 'string'
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(ownerRef.updated_at)
+      && h2Hash(ownerRef.body_sha256), true,
+    'RELEASE_PLAN_OWNER_DECISION_REF_INVALID', 'AUTHORITY');
+
+    const currentHistory = h2ValidateHistoryContainer(current.state[H2_HISTORY_KEY], current.state.repository);
+    const graph = programmeSurface.deriveProgrammeGraph(current.state, currentHistory);
+    const graphByIssue = new Map(graph.outcomes.map((item) => [item.native_issue.number, item]));
+    const childByIssueMap = new Map(current.state.children.map((child) => [child.issue, child]));
+    h2Require(Array.isArray(plan.items) && plan.items.length <= current.state.children.length, true,
+      'RELEASE_PLAN_INVALID', 'INPUT');
+    const seenChildren = new Set();
+    const groups = new Map();
+    const milestoneOrders = new Map();
+    const normalizedRows = [];
+    for (const item of plan.items) {
+      h2Require(h2Exact(item, ['child_issue', 'category', 'milestone_id', 'milestone_order'])
+        && h2Issue(item.child_issue)
+        && V3_RELEASE_CATEGORIES.includes(item.category)
+        && h2SafeId(item.milestone_id)
+        && Number.isSafeInteger(item.milestone_order) && item.milestone_order > 0, true,
+      'RELEASE_PLAN_ITEM_INVALID', 'INPUT');
+      if (seenChildren.has(item.child_issue)) {
+        throw h2Error('RELEASE_PLAN_DUPLICATE_CHILD_MAPPING', 'CANONICAL');
+      }
+      const child = childByIssueMap.get(item.child_issue);
+      h2Require(child, true, 'RELEASE_PLAN_CHILD_MAPPING_INVALID', 'CANONICAL');
+      seenChildren.add(item.child_issue);
+
+      const categoryOrderKey = item.category + '\u0000' + item.milestone_order;
+      const orderMilestone = groups.get(categoryOrderKey);
+      h2Require(orderMilestone === undefined || orderMilestone === item.milestone_id, true,
+        'RELEASE_PLAN_MILESTONE_ORDER_INVALID', 'CANONICAL');
+      groups.set(categoryOrderKey, item.milestone_id);
+      const milestoneOrderKey = item.category + '\u0000' + item.milestone_id;
+      const milestoneOrder = milestoneOrders.get(milestoneOrderKey);
+      h2Require(milestoneOrder === undefined || milestoneOrder === item.milestone_order, true,
+        'RELEASE_PLAN_MILESTONE_ORDER_INVALID', 'CANONICAL');
+      milestoneOrders.set(milestoneOrderKey, item.milestone_order);
+
+      const graphItem = graphByIssue.get(item.child_issue);
+      h2Require(graphItem, true, 'RELEASE_PLAN_CHILD_MAPPING_INVALID', 'CANONICAL');
+      normalizedRows.push({
+        category: item.category,
+        milestone_id: item.milestone_id,
+        milestone_order: item.milestone_order,
+        child_issue: child.issue,
+        outcome_id: graphItem.outcome_id,
+        lifecycle: child.lifecycle,
+        current_checkpoint: child.lifecycle === 'CURRENT'
+          ? { gate: graphItem.current_gate, work: graphItem.current_work }
+          : null,
+        canonical_child: h2Clone(child),
+      });
+    }
+    h2Require(seenChildren.size === childByIssueMap.size, true,
+      'RELEASE_PLAN_CHILD_MAPPING_MISSING', 'CANONICAL');
+
+    const categoryIndex = new Map(V3_RELEASE_CATEGORIES.map((category, index) => [category, index]));
+    const compareRows = (left, right) => categoryIndex.get(left.category) - categoryIndex.get(right.category)
+      || left.milestone_order - right.milestone_order || left.child_issue - right.child_issue;
+    normalizedRows.sort(compareRows);
+    const normalizedPlan = {
+      schema: plan.schema,
+      version: plan.version,
+      source: h2Clone(plan.source),
+      owner_decision_ref: h2Clone(ownerRef),
+      items: normalizedRows.map(({ category, milestone_id, milestone_order, child_issue }) => ({
+        child_issue, category, milestone_id, milestone_order,
+      })),
+    };
+    const activeRows = normalizedRows.filter((item) => item.lifecycle !== 'COMPLETED');
+    const completedRows = normalizedRows.filter((item) => item.lifecycle === 'COMPLETED');
+    const canonicalTransitions = h2Clone(current.state.historical_transitions);
+    const retiredTransitions = canonicalTransitions.filter((item) => item.disposition === 'RETIRED');
+    const otherTransitions = canonicalTransitions.filter((item) => item.disposition !== 'RETIRED');
+    const source = {
+      repository: current.state.repository,
+      parent_issue: current.state.parent.issue,
+      body_sha256: current.read.body_sha256,
+      canonical_sha256: current.canonical_sha256,
+      revision: current.read.revision,
+    };
+    const projection = {
+      schema: V3_RELEASE_PROJECTION_SCHEMA,
+      version: 1,
+      repository: current.state.repository,
+      parent_issue: current.state.parent.issue,
+      source,
+      owner_decision_ref: h2Clone(ownerRef),
+      category_order: [...V3_RELEASE_CATEGORIES],
+      categories: V3_RELEASE_CATEGORIES.map((category) => ({
+        category,
+        obligations: activeRows.filter((item) => item.category === category),
+      })),
+      completed_history: completedRows,
+      historical: {
+        retired_transitions: retiredTransitions,
+        other_transitions: otherTransitions,
+        pr_descriptors: h2Clone(current.state.prs),
+        pr_history: h2Clone(currentHistory.pr_history),
+        supplemental_transitions: h2Clone(currentHistory.transitions),
+        supplemental_evidence_refs: h2Clone(currentHistory.evidence_refs),
+        canonical_evidence_refs: h2Clone(current.state.evidence_refs),
+      },
+      canonical_context: {
+        state_schema: current.state.schema,
+        parent: h2Clone(current.state.parent),
+        active_lanes: h2Clone(current.state.active_lanes),
+      },
+      normalized_plan_sha256: h2Digest(normalizedPlan),
+    };
+    return h2Success('previewReleasePlan', 'RELEASE_PLAN_PREVIEW_READY', 'SERIALIZE', {
+      projection,
+      projection_sha256: h2Digest(projection),
+      source_body_sha256: current.read.body_sha256,
+      source_canonical_sha256: current.canonical_sha256,
+      expected_current: h2Clone(input.expected_current),
+    });
+  });
+}
+
 const humanSurfaceV2 = Object.freeze({
   readComplete: h2ReadCompletePublic,
   render: h2RenderPublic,
@@ -6109,28 +6303,25 @@ const programmeV5 = Object.freeze({
   },
   renderProgrammeV5,
   parseProgrammeV5Body,
+  previewReleasePlan: h2PreviewV3ReleasePlan,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
 });
 
 module.exports = Object.freeze({
+  validateControllerDecisionReference, controllerDecisionExtension, consumeControllerDecisionReference,
   REPOSITORY,
   PARENT_ISSUE,
-  CHILD_ISSUE,
   MAIN_SHA,
   RECOVERY_ROOT,
   LOCK,
   OLD_ROOT,
   PARKED_ROOT,
   WRITE_SAFETY_MODE,
-  STATE_SCHEMA,
-  PROJECTION_SCHEMA,
-  SURFACE_SCHEMA,
+  V3_RELEASE_PLAN_SCHEMA,
   AUTHORITY_PACKET_CURRENT_SCHEMA,
   AUTHORITY_PACKET_STAGES,
-  DECISION_SCHEMA,
   EVIDENCE_SCHEMA,
-  BOOTSTRAP_SCHEMA,
   SOURCE_CANONICAL_DIGEST,
   SOURCE_PARENT_BODY_DIGEST,
   SOURCE_CHILD_BODY_DIGEST,
@@ -6139,28 +6330,15 @@ module.exports = Object.freeze({
   TARGET_CANONICAL_DIGEST,
   FINALISATION_ROOT,
   FINALISATION_LOCK,
-  FINALISATION_SCOPE,
-  FINALISATION_WRITE_SAFETY_MODE,
-  FINALISATION_DECISION_SCHEMA,
-  FINALISATION_EVIDENCE_SCHEMA,
-  FINALISATION_OPERATION_SCHEMA,
   FINALISATION_SOURCE_CANONICAL_DIGEST,
   FINALISATION_STAGE_A_CANONICAL_DIGEST,
   FINALISATION_STAGE_B_CANONICAL_DIGEST,
   PR380_HEAD,
   PR380_TREE,
-  PR380_BRANCH,
   PR380_BASE_SHA,
-  PR380_VERSION,
   PR380_MERGE_COMMIT,
-  FINAL_G4_EVIDENCE_REF,
-  POST_MERGE_TECHNICAL_EVIDENCE_REF,
-  PR379_NON_CONVERGENCE_EVIDENCE_REF,
-  FINALISATION_AUTHORITY,
   FINALISATION_CHECKPOINTS,
   FINALISATION_OPERATION_ORDER,
-  FINALISATION_TRANSITION_ID,
-  FINALISATION_PR379_SOURCE_REVISION,
   FINALISATION_SOURCE_STATE,
   FINALISATION_SOURCE_RENDERED,
   FINALISATION_SOURCE_PARENT_BODY_DIGEST,
@@ -6168,8 +6346,6 @@ module.exports = Object.freeze({
   FINALISATION_STAGE_A_TARGET_STATE,
   FINALISATION_STAGE_B_TARGET_STATE,
   FINALISATION_RENDERED_TARGETS,
-  FINALISATION_CHECKPOINT_TABLE,
-  FINALISATION_TARGET_TABLE,
   RECOVERY_EVIDENCE_REF,
   HOLD_EVIDENCE_REF,
   RETENTION_EVIDENCE_REF,
@@ -6182,8 +6358,6 @@ module.exports = Object.freeze({
   PR366_HEAD,
   PR366_TREE,
   PR366_BASE_SHA,
-  AUTHORITY_CONTROLLING,
-  AUTHORITY_PREDECESSOR,
   PR379_REVIEW_FACTS,
   PR379_COMMENT_FACTS,
   PR379_CHECK_FACTS,
@@ -6197,7 +6371,6 @@ module.exports = Object.freeze({
   validateAuthorityPacketCurrent,
   buildRecoveryTargetState,
   validateInterEpochStateV5,
-  validateFinalisationSourceState,
   createPostMergeEpochFinalisationDecision,
   validatePostMergeEpochFinalisationDecision,
   derivePostMergeEpochFinalisationTargets,
@@ -6211,16 +6384,12 @@ module.exports = Object.freeze({
   renderProgrammeV5,
   parseParentV5Body,
   parseChildV5Body,
-  parseProgrammeV5Body,
   validateEvidence,
-  validateProviderEvidence,
   buildPaginationEvidence,
   classifyPartialState,
   buildReceiptOperationDescriptor,
   verifyBootstrapWorkspaceProof,
-  validateControllerBootstrap,
   projectionBootstrapRecovery,
-  postMergeEpochFinalisation,
   humanSurfaceV2,
   programmeV5,
 });

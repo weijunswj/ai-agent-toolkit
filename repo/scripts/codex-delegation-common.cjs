@@ -21,12 +21,6 @@ const CODEX_HELPER_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-GUIDA
 const CODEX_HELPER_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-GUIDANCE';
 const CODEX_V2_ROOT_GUIDANCE = 'Root-first. Capacity is only a backstop, not launch permission. Launch only independent, non-overlapping work with material benefit, active topology and resource admission, verified medium non-fast child execution, meaningful concurrent root work, and a root-owned integration plan. Otherwise stay root-only. Root works immediately and retains final judgment.';
 const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Apply the same launch gate before any child: active topology and admission, independent non-overlapping scope, material benefit, verified medium non-fast execution, and meaningful work retained by this agent. Never inherit fast mode. Return unsupported expertise needs to the root.';
-const CODEX_V2_TARGET_KEYS = [
-  'enabled',
-  'max_concurrent_threads_per_session',
-  'root_agent_usage_hint_text',
-  'subagent_usage_hint_text',
-];
 const RESTORE_FLAG = '--restore-codex-delegation-backup';
 const TOML_PARSE_CACHE = new Map();
 
@@ -187,7 +181,6 @@ module.exports = {
   CODEX_HELPER_GUIDANCE_END,
   CODEX_V2_ROOT_GUIDANCE,
   CODEX_V2_HELPER_GUIDANCE,
-  CODEX_V2_TARGET_KEYS,
   RESTORE_FLAG,
   cleanError,
   sha256,

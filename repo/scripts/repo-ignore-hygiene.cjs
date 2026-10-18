@@ -73,16 +73,6 @@ function discoverRepositoryBinding(repoRoot) {
   };
 }
 
-function discoverRepository(repoRoot) {
-  return withPathlessErrors(() => {
-    const binding = discoverRepositoryBinding(repoRoot);
-    return {
-      repository_identity_sha256: binding.repository_identity_sha256,
-      files: { gitignore: '.gitignore', info_exclude: '.git/info/exclude' },
-    };
-  });
-}
-
 function readSnapshot(filePath) {
   try {
     const stat = fs.lstatSync(filePath);
@@ -379,9 +369,7 @@ if (require.main === module) {
 module.exports = {
   RULES,
   CHOICES,
-  discoverRepository,
   readSnapshot,
-  appendRules,
   inspectIgnoreHygiene,
   previewIgnoreHygiene,
   applyIgnoreHygiene,

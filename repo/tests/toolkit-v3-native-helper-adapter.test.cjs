@@ -1,0 +1,193 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const compiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
+const { HOST_ENTRIES } = require('../scripts/toolkit-v3-helper-guard.cjs');
+const { renderNativeHelperDefinition, createNativeHelperAdapter, commandDecision, pinnedBindingObserver, resolveClaudeNativeState, verifyCodexHelperRegistration } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+const { createOpenCodeHelperHooks } = require('../scripts/toolkit-opencode-helper-adapter.cjs');
+const { capturedStack, TEST_PROFILES } = require('./support/captured-stack-fixture.cjs');
+const clone = value => JSON.parse(JSON.stringify(value));
+function fixture(entry_id) {
+  const entry = HOST_ENTRIES[entry_id], profile = TEST_PROFILES[entry.host];
+  const registry = compiler.contractSchema('stack-registry-v3.json');
+  const qualification = Object.fromEntries(compiler.CHEAP_QUALIFIERS.map(key => [key,{status:'UNKNOWN',source:null}]));
+  const captured=capturedStack(profile), route = captured.selection.routes.BUILDER_HELPER;
+  let state = { state:'ready', host_version:'controlled-adapter-test (not native qualification)',
+    registration:{...entry,registered:true,loaded:true,enabled:true},
+    session:{caller_role:'G1',profile_id:profile,registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
+    routing:{profile_id:profile,registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
+      effective_route:route,native_defaults:route,pinned_defaults:{provider:true,model:true,reasoning:true},inherited_route:null} };
+  let dispatches = [], observe = () => clone(state);
+  const adapter = createNativeHelperAdapter({source_capture:captured.source_capture,selection:captured.selection,entry_id,helper_identity:'ai-agent-toolkit:g1-helper',timeout_ms:5,
+    observe_host_state: (...args) => observe(...args), dispatch_native: request => { dispatches.push(request); return { first_model_request:'intercepted', task_effects:0 }; },
+    session_id:'parent',cwd:'owned',caller_model:'approved-lead'});
+  const event={hook_event_name:'PreToolUse',tool_name:entry.entry,session_id:'parent',cwd:'owned',model:'approved-lead',tool_input:{subagent_type:'ai-agent-toolkit:g1-helper'}};
+  return { captured,adapter,event,route,dispatches,get state(){return state},set state(s){state=s},set observe(fn){observe=fn} };
+}
+test('native adapter translation preserves original fifteen cases across every entry', async t => {
+  for (const entry of Object.keys(HOST_ENTRIES)) {
+    for (let id=1;id<=15;id++) await t.test(entry+' case '+id, async () => {
+      const f=fixture(entry), e=clone(f.event);
+      if(id===1) { e.tool_input.model=entry==='claude_parent_agent'?'claude-haiku-5-5':f.route.model; e.tool_input.effort=f.route.reasoning; }
+      if(id===2) f.state.routing.effective_route={...f.route,provider:'wrong'};
+      if(id===3) e.tool_input.effort='low';
+      if(id===4) f.state.routing.inherited_route={...f.route,model:'wrong'};
+      if(id===6) e.tool_input.model='wrong';
+      if(id===7) f.observe=()=>{throw Error('hook exception')};
+      if(id===8) { let n=0; f.observe=()=>++n===1?clone(f.state):new Promise(r=>setTimeout(()=>r(clone(f.state)),30)); }
+      if(id===9) f.state.registration.enabled=false;
+      if(id===10) delete f.state.routing.pinned_defaults.reasoning;
+      if(id===11) {let n=0;f.observe=()=>{const s=clone(f.state);if(++n===3)s.host_version='changed';return s;};}
+      if(id===12) e.tool_input.resume='old-helper';
+      if(id===13) e.tool_name='unchecked-entry';
+      if(id===14) f.state.session.caller_role='G1_HELPER';
+      if(id===15) { assert.deepEqual(await commandDecision({tool_name:'Read'},'codex'),{}); assert.equal(f.dispatches.length,0); return; }
+      const result=await f.adapter.invoke(e);
+      assert.equal(result.decision,[1,5].includes(id)?'ALLOW':'DENY',result.code);
+      assert.equal(f.dispatches.length,[1,5].includes(id)?1:0,'independent downstream observation');
+      if(result.decision==='ALLOW') assert.deepEqual(f.dispatches[0].route,f.route);
+    });
+  }
+});
+test('native caller identity, leaf delegation and fully-qualified helper cannot be supplied by tool arguments',async()=>{
+  for(const field of ['session_id','cwd','model']) {const f=fixture('codex_spawn_agent');f.event[field]='other';assert.equal((await f.adapter.invoke(f.event)).decision,'DENY');assert.equal(f.dispatches.length,0);}
+  const f=fixture('claude_parent_agent');f.event.tool_input.subagent_type='g1-helper';assert.equal((await f.adapter.invoke(f.event)).code,'NATIVE_HELPER_IDENTITY_MISMATCH');
+  f.event.tool_input.subagent_type='ai-agent-toolkit:g1-helper';f.event.agent_id='child';assert.equal((await f.adapter.invoke(f.event)).code,'NATIVE_LEAF_CANNOT_DELEGATE');
+  assert.equal(f.dispatches.length,0);
+});
+test('real hook command denies missing binding and accepts a pinned controlled parent binding', async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-native-hook-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const f=fixture('codex_spawn_agent'),file=path.join(root,'binding.json');
+  const envelope={source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',session_id:'parent',cwd:'owned',caller_model:'approved-lead',helper_identity:'ai-agent-toolkit:g1-helper',host_state:f.state};
+  const bytes=Buffer.from(JSON.stringify(envelope)),digest=crypto.createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(file,bytes);
+  const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs');
+  const env={...process.env,TOOLKIT_NATIVE_HELPER_BINDING:file,TOOLKIT_NATIVE_HELPER_BINDING_SHA256:digest};
+  let r=spawnSync(process.execPath,[script],{input:JSON.stringify(f.event),encoding:'utf8',env,timeout:10000});
+  assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision,'allow');
+  fs.writeFileSync(file,JSON.stringify({...envelope,session_id:'tampered'}));
+  r=spawnSync(process.execPath,[script],{input:JSON.stringify(f.event),encoding:'utf8',env,timeout:10000});
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision,'deny');
+  assert.throws(()=>pinnedBindingObserver(file,digest)(),/NATIVE_BINDING_DRIFT/);
+  assert.equal((await commandDecision(f.event,'codex')).hookSpecificOutput.permissionDecision,'deny');
+});
+test('Claude resolves actual precedence without treating force, aliases or allowlist substitutions as approval',()=>{
+  const f=fixture('claude_parent_agent');
+  const b={helper_identity:'ai-agent-toolkit:g1-helper',host_state:f.state,native_config:{loaded_agent:'ai-agent-toolkit:g1-helper',mods_present:false,provider:'anthropic',parent_model:'claude-opus-5-5',agent_model:'claude-haiku-5-5',agent_effort:'xhigh',session_effort:'high',available_models:['claude-haiku-5-5','claude-opus-5-5']}};
+  assert.deepEqual(resolveClaudeNativeState(b,{},{}).routing.effective_route,f.route);
+  assert.equal(resolveClaudeNativeState(b,{effort:'high'},{CLAUDE_CODE_EFFORT_LEVEL:'low'}).routing.effective_route.reasoning,'low');
+  assert.equal(resolveClaudeNativeState(b,{}, {CLAUDE_CODE_SUBAGENT_MODEL_FORCE:'1'}).routing.effective_route.model,'opus-5.5');
+  assert.throws(()=>resolveClaudeNativeState(b,{model:'haiku'},{}),/SUBSTITUTION_UNQUALIFIED/);
+  b.native_config.mods_present=true;assert.throws(()=>resolveClaudeNativeState(b,{},{}),/CONFIG_UNVERIFIED/);
+});
+test('trusted launcher refuses missing, disabled and untrusted native hook registrations',()=>{
+  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',matcher:'^(spawn_agent|Agent)$',enabled:true,trustStatus:'trusted'};
+  const response={data:[{cwd:'owned',hooks:[hook],errors:[],warnings:[]}]};
+  assert.equal(verifyCodexHelperRegistration(response,options).state,'REGISTRATION_VERIFIED');
+  for(const field of ['enabled','trustStatus']){const r=clone(response);r.data[0].hooks[0][field]=field==='enabled'?false:'untrusted';assert.throws(()=>verifyCodexHelperRegistration(r,options),/NOT_TRUSTED/);}
+  response.data[0].hooks=[];assert.throws(()=>verifyCodexHelperRegistration(response,options),/NOT_TRUSTED/);
+});
+test('native aliases, variants and inherited context cannot hide conflicting invocation values', async () => {
+  for (const [entry, change] of [
+    ['opencode_v1_task', { variant: 'low' }],
+    ['opencode_v2_subagent', { variant: 'low', effort: 'max' }],
+    ['codex_spawn_agent', { fork_context: true }],
+    ['claude_parent_agent', { agent_type: 'unchecked-helper' }],
+  ]) {
+    const f = fixture(entry);
+    Object.assign(f.event.tool_input, change);
+    assert.equal((await f.adapter.invoke(f.event)).decision, 'DENY');
+    assert.equal(f.dispatches.length, 0);
+  }
+});
+test('OpenCode observed root sessions require no helper binding; children cannot bypass late route checks', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-opencode-late-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const f = fixture('opencode_v1_task'), file = path.join(root, 'binding.json');
+  const bytes = Buffer.from(JSON.stringify({source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',api_generation:'V1',
+    session_id:'parent',helper_identity:'ai-agent-toolkit:g1-helper',host_state:f.state}));
+  fs.writeFileSync(file, bytes);
+  const hooks = createOpenCodeHelperHooks({generation:'V1',binding_path:file,
+    binding_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),
+    observe_session: id => ({id,...id==='child'?{parentID:'parent'}:{}})});
+  const input = {sessionID:'child',agent:'ai-agent-toolkit:g1-helper',model:{providerID:f.route.provider,id:f.route.model,api:{id:f.route.model}}};
+  let downstream = 0;
+  async function dispatch(params = {options:{reasoningEffort:f.route.reasoning}}) {
+    await hooks.finalParameters(input, params);
+    await hooks.finalHeaders(input);
+    downstream++;
+  }
+  await dispatch();
+  assert.equal(downstream, 1);
+  const sealed = {options:{reasoningEffort:f.route.reasoning}};
+  await hooks.finalParameters(input,sealed);await hooks.finalHeaders(input);
+  assert.throws(()=>{sealed.options.reasoningEffort='low';},TypeError);
+  assert.throws(()=>{sealed.options={reasoningEffort:'low'};},TypeError);
+  assert.equal(sealed.options.reasoningEffort,f.route.reasoning,'later headers callback cannot change admitted effort through retained params');
+  const mutated = {options:{reasoningEffort:f.route.reasoning}};
+  await hooks.finalParameters(input, mutated);
+  mutated.options = {reasoningEffort:'low'};
+  await assert.rejects(hooks.finalHeaders(input), /FINAL_ROUTE_MISMATCH/);
+  assert.equal(downstream, 1, 'no provider dispatch after a later plugin changes effort');
+  await assert.rejects(hooks.finalHeaders(input), /PARAMETER_CHECK_REQUIRED/);
+  await assert.rejects(dispatch({options:{reasoningEffort:'low'}}), /FINAL_ROUTE_MISMATCH/);
+  await assert.rejects(hooks.finalParameters({...input,agent:'unverified-agent'},{options:{reasoningEffort:f.route.reasoning}}), /LOADED_AGENT_MISMATCH/);
+  await assert.rejects(hooks.finalParameters({...input,model:{...input.model,api:{id:'silently-remapped-model'}}},{options:{reasoningEffort:f.route.reasoning}}), /CONCRETE_MODEL_UNVERIFIED/);
+  const withoutBinding = createOpenCodeHelperHooks({generation:'V1',observe_session:id=>({id})});
+  await withoutBinding.finalParameters({sessionID:'root'}, {});
+  await withoutBinding.finalHeaders({sessionID:'root'});
+  fs.writeFileSync(file, JSON.stringify({modified:true}));
+  await assert.rejects(dispatch(), /NATIVE_BINDING_DRIFT/);
+  assert.equal(downstream, 1);
+});
+test('OpenCode final child observations fail closed on timeout, missing identity and role mismatch', async t => {
+  const slow = createOpenCodeHelperHooks({generation:'V1',timeout_ms:5,observe_session:()=>new Promise(()=>{})});
+  await assert.rejects(slow.finalParameters({sessionID:'child'},{}), /OBSERVATION_TIMEOUT/);
+  const invalid = createOpenCodeHelperHooks({generation:'V1',observe_session:()=>({})});
+  await assert.rejects(invalid.finalParameters({sessionID:'child'},{}), /OBSERVATION_INVALID/);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-opencode-role-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const f=fixture('opencode_v1_task');f.state.session.caller_role='G2';
+  const bytes=Buffer.from(JSON.stringify({source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',api_generation:'V1',session_id:'parent',helper_identity:'ai-agent-toolkit:g1-helper',host_state:f.state})),file=path.join(root,'binding.json');fs.writeFileSync(file,bytes);
+  const hooks=createOpenCodeHelperHooks({generation:'V1',binding_path:file,binding_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),observe_session:id=>({id,parentID:'parent'})});
+  await assert.rejects(hooks.finalParameters({sessionID:'child',agent:'ai-agent-toolkit:g1-helper',model:{providerID:f.route.provider,id:f.route.model,api:{id:f.route.model}}},{options:{reasoningEffort:f.route.reasoning}}), /FINAL_ROUTE_MISMATCH/);
+});
+
+test('actual V1 receiver observes agent defaults before task effects and seals admitted arguments',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-opencode-agent-live-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const f=fixture('opencode_v1_task'),file=path.join(root,'binding.json'),bytes=Buffer.from(JSON.stringify({source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',api_generation:'V1',session_id:'parent',helper_identity:'ai-agent-toolkit:g1-helper',host_state:f.state}));fs.writeFileSync(file,bytes);
+ let observations=0,agent={name:'ai-agent-toolkit:g1-helper',mode:'subagent',model:{providerID:f.route.provider,modelID:f.route.model},variant:f.route.reasoning,options:{reasoningEffort:f.route.reasoning}};
+ const options={generation:'V1',binding_path:file,binding_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),observe_agent:()=>{observations++;return clone(agent)}};
+ const hooks=createOpenCodeHelperHooks(options),input={tool:'task',sessionID:'parent'},output={args:{subagent_type:agent.name}};
+ await hooks.check(input,output);assert.ok(observations>=2,'actual observer participates in repeated pre-dispatch guard reads');assert.throws(()=>{output.args.subagent_type='unqualified';},TypeError);assert.throws(()=>{output.args={subagent_type:'unqualified'};},TypeError);
+ let taskEffects=0;agent.model.modelID='wrong';await assert.rejects(async()=>{await hooks.check(input,{args:{subagent_type:agent.name}});taskEffects++;},/Toolkit helper held/);assert.equal(taskEffects,0);
+ await assert.rejects(createOpenCodeHelperHooks({...options,observe_agent:undefined}).check(input,{args:{subagent_type:agent.name}}),/Toolkit helper held/);
+ agent={...agent,model:{providerID:f.route.provider,modelID:f.route.model},variant:'low'};await assert.rejects(hooks.check(input,{args:{subagent_type:agent.name}}),/Toolkit helper held/);assert.equal(taskEffects,0);
+});
+test('production helper-definition commands require source-pinned selection without launching or activating', t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-definition-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const scripts = {codex:'toolkit-codex-helper-hook.cjs','claude-code':'toolkit-claude-agent-hook.cjs',opencode:'toolkit-opencode-project-plugin.cjs'};
+  for (const [host,script] of Object.entries(scripts)) for (const role of ['G0','G1']) {
+    const entry = Object.keys(HOST_ENTRIES).find(key => HOST_ENTRIES[key].host === host);
+    const expected = fixture(entry).route;
+    const rendered = renderNativeHelperDefinition(host,role,capturedStack(TEST_PROFILES[host]));
+    assert.deepEqual(rendered.route,expected);
+    assert.equal(rendered.qualification,'CONFIGURATION_GENERATED_ONLY');
+    const selected=capturedStack(TEST_PROFILES[host]);
+    const bytes=Buffer.from(JSON.stringify({source_capture:selected.source_capture,selection:selected.selection}));
+    const file=path.join(root,'binding.json');fs.writeFileSync(file,bytes);
+    const env={...process.env,TOOLKIT_NATIVE_HELPER_BINDING:file,TOOLKIT_NATIVE_HELPER_BINDING_SHA256:crypto.createHash('sha256').update(bytes).digest('hex')};
+    const denied=spawnSync(process.execPath,[path.resolve(__dirname,'../scripts',script),'--print-helper-definition',role],{encoding:'utf8',timeout:10000,env:{...env,TOOLKIT_NATIVE_HELPER_BINDING_SHA256:'0'.repeat(64)}});
+    assert.ok(denied.status!==0 || JSON.parse(denied.stdout).hookSpecificOutput?.permissionDecision==='deny');
+    const command = spawnSync(process.execPath,[path.resolve(__dirname,'../scripts',script),'--print-helper-definition',role],{encoding:'utf8',timeout:10000,env});
+    assert.equal(command.status,0,command.stderr);
+    assert.deepEqual(JSON.parse(command.stdout),rendered);
+    if (host === 'claude-code') {
+      assert.equal(rendered.native_configuration.model,'claude-haiku-5-5');
+      assert.equal(rendered.native_configuration.effort,'xhigh');
+      assert.deepEqual(rendered.native_configuration.disallowedTools,['Agent','Task']);
+    }
+  }
+  assert.throws(()=>renderNativeHelperDefinition('codex','G2'),/SELECTION_INVALID/);
+  assert.throws(()=>renderNativeHelperDefinition('unqualified-host','G1'),/SELECTION_INVALID/);
+});

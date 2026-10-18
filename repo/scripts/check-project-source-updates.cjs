@@ -85,10 +85,6 @@ function discoverSourceLocks(workspace) {
     .sort((a, b) => a.relPath.localeCompare(b.relPath));
 }
 
-function isActiveThirdPartyLock(lock) {
-  return isActiveThirdPartyAttributionLock(lock);
-}
-
 function activeThirdPartyLocks(lockFiles) {
   return lockFiles.filter((lockFile) => {
     if (isActiveThirdPartyAttributionLock(lockFile.lock)) return true;
@@ -111,10 +107,15 @@ function parseGitHubRepo(sourceRepo) {
   return { owner: parts[0], repo: parts[1] };
 }
 
-function requestJson(url, headers = {}) {
+class SourceWatchHttpRequest {
+  #url; #headers; #request; #chunks=[];
+  constructor(url,headers={}) {this.#url=url;this.#headers=headers;}
+  run() {
+    const url=this.#url,headers=this.#headers;
+
   const client = url.protocol === 'http:' ? http : https;
   return new Promise((resolve, reject) => {
-    const request = client.request(url, {
+    const request = this.#request = client.request(url, {
       method: 'GET',
       headers: {
         accept: 'application/vnd.github+json',
@@ -122,7 +123,7 @@ function requestJson(url, headers = {}) {
         ...headers
       }
     }, (response) => {
-      const chunks = [];
+      const chunks = this.#chunks;
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf8');
@@ -140,7 +141,10 @@ function requestJson(url, headers = {}) {
     request.on('error', reject);
     request.end();
   });
+
+  }
 }
+function requestJson(url,headers={}) {return new SourceWatchHttpRequest(url,headers).run();}
 
 async function latestCommitForLock(lock, env = process.env) {
   const { owner, repo } = parseGitHubRepo(lock.source_repo);
@@ -260,17 +264,23 @@ function removeReportIfPresent(workspace, reportPath) {
   if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 }
 
-async function checkProjectSourceUpdates({
+class ProjectSourceUpdateCheck {
+  #workspace; #report; #advisoryDoc; #reviewState; #env;
+  #locks; #reviewStateDocument; #updates; #advisoryResult;
+  constructor({
   workspace,
   report,
   advisoryDoc = defaultAdvisoryDocPath,
   reviewState = defaultReviewStatePath
-}, env = process.env) {
-  const locks = discoverSourceLocks(workspace);
-  const activeLocks = activeThirdPartyLocks(locks);
-  const reviewStateDocument = readReviewState(workspace, reviewState);
+}, env = process.env) {this.#workspace=workspace;this.#report=report;this.#advisoryDoc=advisoryDoc;this.#reviewState=reviewState;this.#env=env;}
+  async run() {
+    const workspace=this.#workspace,report=this.#report,advisoryDoc=this.#advisoryDoc,reviewState=this.#reviewState,env=this.#env;
 
-  const updates = [];
+  const locks = this.#locks = discoverSourceLocks(workspace);
+  const activeLocks = activeThirdPartyLocks(locks);
+  const reviewStateDocument = this.#reviewStateDocument = readReviewState(workspace, reviewState);
+
+  const updates = this.#updates = [];
   for (const lockFile of activeLocks) {
     const lock = lockFile.lock;
     const latestCommit = await latestCommitForLock(lock, env);
@@ -295,7 +305,7 @@ async function checkProjectSourceUpdates({
       tracked_files: Array.isArray(lock.files) ? lock.files : []
     });
   }
-  const advisoryResult = await advisoryFindings({
+  const advisoryResult = this.#advisoryResult = await advisoryFindings({
     workspace,
     advisoryDocPath: advisoryDoc,
     reviewStatePath: reviewState
@@ -336,7 +346,15 @@ async function checkProjectSourceUpdates({
       ? `PR needed: yes (${updates.length} source update${updates.length === 1 ? '' : 's'}, ${advisoryUpdates.length} advisory action${advisoryUpdates.length === 1 ? '' : 's'}).`
       : `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
   };
+
+  }
 }
+async function checkProjectSourceUpdates({
+  workspace,
+  report,
+  advisoryDoc = defaultAdvisoryDocPath,
+  reviewState = defaultReviewStatePath
+}, env = process.env) {return new ProjectSourceUpdateCheck({workspace,report,advisoryDoc,reviewState},env).run();}
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -357,13 +375,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  activeThirdPartyLocks,
-  checkProjectSourceUpdates,
-  discoverSourceLocks,
-  isActiveThirdPartyLock,
-  latestCommitForLock,
   parseArgs,
-  parseGitHubRepo,
-  renderReviewReport,
-  renderSourceUpdatesSection
+  parseGitHubRepo
 };

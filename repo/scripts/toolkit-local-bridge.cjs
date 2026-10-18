@@ -22,12 +22,17 @@ const {
   markOwnedStaging,
   reconcileOwnedStaging
 } = require('./toolkit-staging-generations.cjs');
+const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs');
+const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.10.15';
+const BRIDGE_VERSION = '3.0.6';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
-const SUPPORTED_TARGETS = ['opencode', 'ag2'];
+// Antigravity native/plugin installation is not supported by this source.
+// Existing AG2 state is retained below only for read/disable compatibility.
+const SUPPORTED_TARGETS = ['opencode'];
+const LEGACY_DISABLE_ONLY_TARGETS = ['ag2'];
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const DEFAULT_REPO_BRANCH = 'main';
@@ -141,8 +146,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     opencodeConfigDir: '',
     opencodeTarget: '',
     opencodeCommand: 'opencode',
-    pythonCommand: '',
-    setAg2PythonCommand: ''
+    installOpenCodeProjectPlugin: false,
+    opencodeProjectRoot: '',
+    copyAntigravitySkills: false,
+    antigravityProjectRoot: ''
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -197,10 +204,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--opencode-target=')) args.opencodeTarget = arg.slice('--opencode-target='.length);
     else if (arg === '--opencode-command') args.opencodeCommand = next();
     else if (arg.startsWith('--opencode-command=')) args.opencodeCommand = arg.slice('--opencode-command='.length);
-    else if (arg === '--python-command') args.pythonCommand = next();
-    else if (arg.startsWith('--python-command=')) args.pythonCommand = arg.slice('--python-command='.length);
-    else if (arg === '--set-ag2-python-command') args.setAg2PythonCommand = next();
-    else if (arg.startsWith('--set-ag2-python-command=')) args.setAg2PythonCommand = arg.slice('--set-ag2-python-command='.length);
+    else if (arg === '--install-opencode-project-plugin') args.installOpenCodeProjectPlugin = true;
+    else if (arg === '--opencode-project-root') args.opencodeProjectRoot = next();
+    else if (arg.startsWith('--opencode-project-root=')) args.opencodeProjectRoot = arg.slice('--opencode-project-root='.length);
+    else if (arg === '--copy-antigravity-skills') args.copyAntigravitySkills = true;
+    else if (arg === '--antigravity-project-root') args.antigravityProjectRoot = next();
+    else if (arg.startsWith('--antigravity-project-root=')) args.antigravityProjectRoot = arg.slice('--antigravity-project-root='.length);
     else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -209,8 +218,33 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  for (const target of [...args.enableTargets, ...args.disableTargets]) {
-    if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  for (const target of args.enableTargets) {
+    if (!SUPPORTED_TARGETS.includes(target)) {
+      if (LEGACY_DISABLE_ONLY_TARGETS.includes(target)) {
+        throw new Error('AG2 native/plugin target is unsupported; use --copy-antigravity-skills with a workspace path for portable skills only');
+      }
+      throw new Error(`Unsupported target: ${target}`);
+    }
+  }
+  for (const target of args.disableTargets) {
+    if (!SUPPORTED_TARGETS.includes(target) && !LEGACY_DISABLE_ONLY_TARGETS.includes(target)) {
+      throw new Error(`Unsupported target: ${target}`);
+    }
+  }
+  if (args.installOpenCodeProjectPlugin && args.copyAntigravitySkills) {
+    throw new Error('Choose one explicit project setup command at a time');
+  }
+  if (args.installOpenCodeProjectPlugin && !args.opencodeProjectRoot) {
+    throw new Error('--install-opencode-project-plugin requires --opencode-project-root <absolute-path>');
+  }
+  if (args.opencodeProjectRoot && !args.installOpenCodeProjectPlugin) {
+    throw new Error('--opencode-project-root requires --install-opencode-project-plugin');
+  }
+  if (args.copyAntigravitySkills && !args.antigravityProjectRoot) {
+    throw new Error('--copy-antigravity-skills requires --antigravity-project-root <absolute-path>');
+  }
+  if (args.antigravityProjectRoot && !args.copyAntigravitySkills) {
+    throw new Error('--antigravity-project-root requires --copy-antigravity-skills');
   }
   if (!SYNC_SOURCES.includes(args.syncSource)) {
     throw new Error(`--sync-source must be repo, codex-plugin, or claude-plugin: ${args.syncSource}`);
@@ -251,6 +285,24 @@ function assertReconciliationCommandArgs(args) {
   }
 }
 
+function assertIsolatedProjectCommandArgs(args, commandFlag, rootFlag) {
+  const allowed = new Set([commandFlag, rootFlag, '--write']);
+  const flags = args.argv.filter((value) => String(value).startsWith('--'))
+    .map((value) => String(value).split('=')[0]);
+  const incompatible = [...new Set(flags.filter((flag) => !allowed.has(flag)))];
+  if (incompatible.length) {
+    throw new Error(`Project setup command cannot be combined with: ${incompatible.join(', ')}`);
+  }
+  for (const flag of [commandFlag, rootFlag]) {
+    if (flags.filter((value) => value === flag).length !== 1) {
+      throw new Error(`Project setup command requires exactly one ${flag}`);
+    }
+  }
+  if (flags.filter((value) => value === '--write').length > 1) {
+    throw new Error('--write can only be specified once');
+  }
+}
+
 function printHelp() {
   console.log([
     'Toolkit Local Bridge updater',
@@ -261,16 +313,22 @@ function printHelp() {
     '  node repo/scripts/toolkit-local-bridge.cjs --audit',
     '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode',
     '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write',
-    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2',
-    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path>',
+    '  node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path> --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>',
+    '  node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id>',
     '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write',
     '',
     'Options:',
-    '  --enable-target opencode|ag2',
-    '  --disable-target opencode|ag2',
+    '  --enable-target opencode',
+    '  --disable-target opencode|ag2 (AG2 is legacy disable-only)',
+    '  --install-opencode-project-plugin',
+    '  --opencode-project-root <absolute-path>  project destination; preview unless --write',
+    '  --copy-antigravity-skills',
+    '  --antigravity-project-root <absolute-path> project destination; copies skills only, preview unless --write',
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
@@ -298,10 +356,7 @@ function printHelp() {
     '  --sync-source repo|codex-plugin|claude-plugin',
     '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current',
     '  --opencode-config-dir <path>  test or explicit setup override',
-    '  --opencode-target <path>      test override for the managed OpenCode skills root',
-    '  --python-command <command>    one-run AG2 Python detection override',
-    '  --set-ag2-python-command <command>',
-    '                                persist an AG2 Python command for future audit and hook runs'
+    '  --opencode-target <path>      test override for the managed OpenCode skills root'
   ].join('\n'));
 }
 
@@ -800,7 +855,8 @@ function normalizedState(raw) {
   for (const target of SUPPORTED_TARGETS) {
     state.targets[target] = { ...defaultTargetState(), ...(state.targets[target] || {}) };
   }
-  state.targets.ag2.python_command = state.targets.ag2.python_command || '';
+  // Preserve old AG2 target fields for safe disable-only compatibility.
+  state.targets.ag2 = { ...defaultTargetState(), ...(state.targets.ag2 || {}) };
   state.repo_branch = state.repo_branch || DEFAULT_REPO_BRANCH;
   state.repo_remote = state.repo_remote || DEFAULT_REPO_REMOTE;
   state.repo_path = state.repo_path || '';
@@ -849,9 +905,6 @@ function applyRequestedState(state, args) {
   if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
   if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
-  if (args.setAg2PythonCommand) {
-    next.targets.ag2.python_command = args.setAg2PythonCommand;
-  }
   for (const target of args.enableTargets) {
     next.targets[target].enabled = true;
     next.targets[target].explicitly_disabled = false;
@@ -928,171 +981,8 @@ function readDirectoryNames(dirPath) {
   }
 }
 
-function readDirectoryFileNames(dirPath) {
-  try {
-    return fs.readdirSync(dirPath, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-}
-
 function isValidSkillName(name) {
   return SKILL_NAME_PATTERN.test(String(name || ''));
-}
-
-function ag2EnvPythonCandidates() {
-  const candidates = [];
-  if (process.env.UV_PYTHON) candidates.push(process.env.UV_PYTHON);
-  if (process.env.VIRTUAL_ENV) {
-    candidates.push(path.join(process.env.VIRTUAL_ENV, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'));
-  }
-  if (process.env.CONDA_PREFIX) {
-    candidates.push(path.join(process.env.CONDA_PREFIX, process.platform === 'win32' ? 'python.exe' : 'bin/python'));
-  }
-  return candidates;
-}
-
-function windowsUserPythonCandidates() {
-  if (process.platform !== 'win32') return [];
-  const candidates = [];
-  const home = os.homedir();
-  if (home) {
-    const localBin = path.join(home, '.local', 'bin');
-    for (const fileName of readDirectoryFileNames(localBin)
-      .filter((name) => /^python.*\.exe$/i.test(name))
-      .sort((left, right) => left.localeCompare(right))) {
-      candidates.push(path.join(localBin, fileName));
-    }
-    const pyenvRoot = path.join(home, '.pyenv', 'pyenv-win', 'versions');
-    for (const version of readDirectoryNames(pyenvRoot)) {
-      candidates.push(path.join(pyenvRoot, version, 'python.exe'));
-    }
-  }
-  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
-  if (localAppData) {
-    const pythonRoot = path.join(localAppData, 'Programs', 'Python');
-    for (const version of readDirectoryNames(pythonRoot)) {
-      candidates.push(path.join(pythonRoot, version, 'python.exe'));
-    }
-  }
-  return candidates.filter((candidate) => fs.existsSync(candidate));
-}
-
-function uniqueCommandCandidates(commands) {
-  const seen = new Set();
-  const result = [];
-  for (const command of commands.map((item) => String(item || '').trim()).filter(Boolean)) {
-    const key = process.platform === 'win32' ? command.toLowerCase() : command;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(command);
-  }
-  return result;
-}
-
-function ag2PythonCandidates(args, targetState) {
-  return uniqueCommandCandidates([
-    targetState.python_command,
-    args.pythonCommand,
-    'python',
-    'python3',
-    'py',
-    ...ag2EnvPythonCandidates(),
-    ...windowsUserPythonCandidates()
-  ]);
-}
-
-function probeAg2Python(command) {
-  const python = commandProbe(command, ['--version']);
-  const ag2Package = python.ok ? commandProbe(command, ['-m', 'pip', 'show', 'ag2']) : {
-    ok: false,
-    output: '',
-    status: null,
-    error: 'python command did not run'
-  };
-  return {
-    command,
-    python_ok: python.ok,
-    python_output: python.output,
-    python_status: python.status,
-    python_error: python.error || '',
-    ag2_package_ok: ag2Package.ok,
-    ag2_package_output: ag2Package.output,
-    ag2_package_status: ag2Package.status,
-    ag2_package_error: ag2Package.error || ''
-  };
-}
-
-function discoverAg2(args, targetState, hubPath) {
-  const candidates = ag2PythonCandidates(args, targetState);
-  const tried = [];
-  let selected = null;
-  for (const candidate of candidates) {
-    const attempt = probeAg2Python(candidate);
-    tried.push(attempt);
-    if (attempt.python_ok && attempt.ag2_package_ok) {
-      selected = attempt;
-      break;
-    }
-  }
-  const internalAdapterPath = path.join(hubPath, 'adapters', 'ag2');
-  const home = os.homedir();
-  const antigravityConfigDir = home ? path.join(home, '.antigravity') : '';
-  const geminiConfigDir = home ? path.join(home, '.gemini', 'config') : '';
-  const geminiPluginsDir = geminiConfigDir ? path.join(geminiConfigDir, 'plugins') : '';
-  const defaultTargetPath = geminiPluginsDir ? path.join(geminiPluginsDir, TOOLKIT_NAME) : '';
-  const savedTargetPath = String(targetState.target_path || '');
-  const targetPath = savedTargetPath && path.resolve(savedTargetPath) !== path.resolve(internalAdapterPath)
-    ? savedTargetPath
-    : defaultTargetPath;
-  const antigravityConfigExists = Boolean(antigravityConfigDir && fs.existsSync(antigravityConfigDir));
-  const geminiConfigExists = Boolean(geminiConfigDir && fs.existsSync(geminiConfigDir));
-  const geminiPluginsDirExists = Boolean(geminiPluginsDir && fs.existsSync(geminiPluginsDir));
-  const managedAdapterExists = fs.existsSync(internalAdapterPath);
-  const appTargetExists = Boolean(targetPath && fs.existsSync(targetPath));
-  const persistedState = Boolean(
-    targetState.detected ||
-    targetState.target_path ||
-    targetState.synced_version ||
-    targetState.synced_checksum ||
-    targetState.last_sync
-  );
-  const explicitlyEnabled = targetState.enabled === true;
-  const ag2PackageDetected = Boolean(selected);
-  const detected = (
-    ag2PackageDetected ||
-    antigravityConfigExists ||
-    geminiConfigExists ||
-    geminiPluginsDirExists ||
-    managedAdapterExists ||
-    appTargetExists ||
-    persistedState ||
-    explicitlyEnabled
-  );
-  return {
-    target: 'ag2',
-    detected,
-    target_path: targetPath,
-    internal_adapter_path: internalAdapterPath,
-    python_command: selected?.command || '',
-    ag2_package_detected: ag2PackageDetected,
-    signals: {
-      selected_python_command: selected?.command || '',
-      tried_python_commands: tried,
-      antigravity_config_dir: antigravityConfigDir,
-      antigravity_config_exists: antigravityConfigExists,
-      gemini_config_dir: geminiConfigDir,
-      gemini_config_exists: geminiConfigExists,
-      gemini_plugins_dir: geminiPluginsDir,
-      gemini_plugins_dir_exists: geminiPluginsDirExists,
-      managed_adapter_exists: managedAdapterExists,
-      app_target_exists: appTargetExists,
-      persisted_state: persistedState,
-      explicitly_enabled: explicitlyEnabled
-    }
-  };
 }
 
 function hasToolkitSkillSource(sourceRoot) {
@@ -1231,94 +1121,23 @@ function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state
     ''
   ].join('\n');
 
-  const ag2Plugin = {
-    name: TOOLKIT_NAME,
-    version: BRIDGE_VERSION,
-    description: 'AI Agent Toolkit local bridge adapter for Antigravity 2.',
-    author: {
-      name: 'AI Agent Toolkit'
-    },
-    repository: DEFAULT_REPO_REMOTE,
-    license: 'UNLICENSED'
-  };
-
-  const ag2Readme = [
-    '# AI Agent Toolkit Antigravity 2 Adapter',
-    '',
-    'Generated by the Toolkit Local Bridge Hub after the user explicitly enables the Antigravity 2 target.',
-    '',
-    'This plugin-scoped skill folder is safe to load from the Antigravity/Gemini user plugin config. It is not source of truth. Update Toolkit through the native Codex or Claude Code plugin package and let the bridge sync enabled targets.',
-    ''
-  ].join('\n');
-
-  const ag2Skill = [
-    '---',
-    `name: ${TOOLKIT_NAME}`,
-    'description: Use when working in Antigravity 2 with the AI Agent Toolkit local bridge. Applies source-first policy, opt-in bridge setup, and audit/sync commands without using Codex or Claude private plugin caches.',
-    '---',
-    '',
-    '# AI Agent Toolkit AG2 Adapter',
-    '',
-    'Use this skill when Antigravity 2 needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
-    '',
-    'Core rules:',
-    '',
-    '- Treat AGENTS.md and Toolkit skills/docs as portable policy. Hooks are optional automation only.',
-    '- Do not install or update Codex or Claude Code from Antigravity 2.',
-    '- Do not read Codex or Claude private plugin cache paths as bridge source.',
-    '- Do not install npm, pip, Python, AG2, Antigravity 2, OpenCode, or any package by default.',
-    '- Do not mutate project repos by default.',
-    '- Use the Toolkit Local Bridge Hub manifest and state files under the user-local hub.',
-    '',
-    'Useful commands:',
-    '',
-    '```powershell',
-    'node repo/scripts/toolkit-local-bridge.cjs --audit',
-    'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
-    '```',
-    ''
-  ].join('\n');
-
-  const ag2Metadata = {
-    name: 'ai-agent-toolkit-ag2-adapter',
-    architecture_version: ARCHITECTURE_VERSION,
-    toolkit_bridge_version: BRIDGE_VERSION,
-    description: 'Local AG2 adapter metadata generated by the Toolkit Local Bridge Hub after explicit AG2 enablement.',
-    policy: {
-      source_of_truth: 'Toolkit source, skills, docs, validators, and native plugin package state',
-      no_package_install_by_default: true,
-      no_project_repo_mutation_by_default: true,
-      no_codex_or_claude_cross_update: true,
-      hooks_are_optional_automation_only: true
-    }
-  };
-
   const adapterFiles = {
     'SKILL.md': textPayload(opencodeSkill),
     'README.md': textPayload(opencodeReadme)
-  };
-  const ag2AdapterFiles = {
-    'SKILL.md': textPayload(ag2Skill),
-    'README.md': textPayload(ag2Readme)
   };
   const managedSkillNames = [TOOLKIT_NAME, ...toolkitSkillNames].sort();
   const opencodePayload = {
     [TARGET_MANIFEST_FILE]: targetManifestPayload('opencode', managedSkillNames)
   };
-  const ag2Payload = {
-    'plugin.json': textPayload(`${JSON.stringify(ag2Plugin, null, 2)}\n`),
-    'installed_version.json': textPayload(`${JSON.stringify({ version: BRIDGE_VERSION }, null, 2)}\n`),
-    'README.md': textPayload(ag2Readme),
-    'ai-agent-toolkit-ag2-adapter.json': textPayload(`${JSON.stringify(ag2Metadata, null, 2)}\n`),
-    [TARGET_MANIFEST_FILE]: targetManifestPayload('ag2', managedSkillNames)
-  };
+  // Keep a portable skill payload for explicit project-scoped Antigravity use.
+  // It contains no plugin metadata, bridge adapter, or native-runtime claim.
+  const ag2Payload = {};
 
   for (const [skillName, files] of Object.entries(toolkitSkills)) {
     addSkillToPayload(opencodePayload, skillName, files);
     addSkillToPayload(ag2Payload, skillName, files);
   }
   addSkillToPayload(opencodePayload, TOOLKIT_NAME, adapterFiles);
-  addSkillToPayload(ag2Payload, TOOLKIT_NAME, ag2AdapterFiles);
 
   return {
     opencode: opencodePayload,
@@ -1764,6 +1583,17 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   return findings;
 }
 
+// A Toolkit source checkout owns the canonical templates its managed blocks are
+// generated from; an installed plugin copy of them may be older.
+function toolkitSourceCheckoutVersion(targetRoot) {
+  const versionFile = path.join(targetRoot, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
+  if (!fs.existsSync(path.join(targetRoot, AGENT_RULES_TEMPLATE_DIR, 'AGENTS.managed.template.md'))
+    || !fs.existsSync(path.join(targetRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'))
+    || !fs.existsSync(versionFile)) return '';
+  const version = readJsonIfExists(versionFile)?.version || '';
+  return isValidBridgeVersion(version) ? version : '';
+}
+
 function runAgentRulesPreflight(args, options = {}) {
   if (!args.hook) return { status: 'not-applicable', targetRoot: '', findings: [] };
   const specs = agentRulesPreflightSpecs(args.syncSource);
@@ -1773,25 +1603,45 @@ function runAgentRulesPreflight(args, options = {}) {
   const gitRoot = nearestGitRoot(startRoot);
   const targetRoot = gitRoot || startRoot;
   const pluginRoot = agentRulesPluginRoot(args, options);
-  const templateRoot = path.join(pluginRoot, AGENT_RULES_TEMPLATE_DIR);
+  const runningVersion = options.runningVersion || BRIDGE_VERSION;
+  const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, notes: [] };
+  const sourceVersion = toolkitSourceCheckoutVersion(targetRoot);
+  let templateRoot = path.join(pluginRoot, AGENT_RULES_TEMPLATE_DIR);
+  let reference = 'installed-plugin';
+  if (sourceVersion) {
+    templateRoot = path.join(targetRoot, AGENT_RULES_TEMPLATE_DIR);
+    reference = 'source-checkout';
+    if (compareBridgeVersions(runningVersion, sourceVersion) < 0) {
+      base.notes.push(`the running Toolkit ${runningVersion} is older than this source checkout (${sourceVersion}); instructions were checked against the checkout's own canonical templates`);
+    }
+  } else {
+    const recordedVersion = options.state ? recordedBridgeVersionForSource(options.state, args.syncSource) : '';
+    if (recordedVersion && compareBridgeVersions(runningVersion, recordedVersion) < 0) {
+      // An older installed copy cannot judge instructions written by a newer Toolkit.
+      return { ...base, status: 'stale-installed-templates', reference, templateRoot, recordedVersion, findings: [] };
+    }
+  }
   const findings = [];
   for (const spec of specs) {
     findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
   }
-  return {
-    status: findings.length ? 'needs-attention' : 'ok',
-    targetRoot,
-    gitRoot,
-    gitRepoDetected: Boolean(gitRoot),
-    pluginRoot,
-    templateRoot,
-    findings
-  };
+  return { ...base, status: findings.length ? 'needs-attention' : 'ok', reference, templateRoot, findings };
 }
 
 function formatAgentRulesPreflight(result) {
   const findings = result.findings || [];
-  if (!findings.length) return '';
+  if (result.status === 'stale-installed-templates') {
+    return [
+      `Toolkit agent-rules preflight: the running Toolkit ${result.runningVersion} is older than the recorded Toolkit ${result.recordedVersion}, so its bundled templates cannot judge this repository's instructions.`,
+      'Repository instructions were not compared and must not be regenerated from this installed copy. Refresh Toolkit first (run `setup toolkit`), then start a fresh session.',
+      'No files were changed by this hook.'
+    ].join('\n');
+  }
+  if (!findings.length) {
+    return (result.notes || []).length
+      ? [`Toolkit agent-rules preflight: ${result.notes.join('; ')}.`, 'Repository instructions are current. No files were changed by this hook.'].join('\n')
+      : '';
+  }
   const shown = findings.slice(0, AGENT_RULES_PREFLIGHT_MAX_FINDINGS);
   const missingRootAgents = Boolean(result.gitRepoDetected) &&
     findings.some((finding) => finding.file === 'AGENTS.md' && finding.kind === 'missing');
@@ -1820,8 +1670,8 @@ function formatAgentRulesPreflight(result) {
   return lines.join('\n');
 }
 
-function maybePrintAgentRulesPreflight(args) {
-  const result = runAgentRulesPreflight(args);
+function maybePrintAgentRulesPreflight(args, state = null) {
+  const result = runAgentRulesPreflight(args, { state });
   const message = formatAgentRulesPreflight(result);
   if (message) console.log(message);
   return result;
@@ -1952,10 +1802,6 @@ function classifyUpdateReport(context) {
     actionable,
     kind: actionable ? 'action-required' : (successfulActivity ? 'successful-activity' : 'no-op'),
   };
-}
-
-function updateReportIsMeaningful(context) {
-  return classifyUpdateReport(context).meaningful;
 }
 
 function shortCommit(value) {
@@ -2448,10 +2294,21 @@ function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = fals
   const checksum = payloadChecksum(payloads);
   const discoveries = {
     opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
-    ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
+    ag2: {
+      target: 'ag2',
+      detected: false,
+      target_path: '',
+      internal_adapter_path: path.join(hubPath, 'adapters', 'ag2'),
+      ag2_package_detected: false,
+      python_command: '',
+      signals: {
+        native_plugin_target_supported: false,
+        legacy_state_preserved: Boolean(nextState.targets.ag2?.enabled || nextState.targets.ag2?.target_path),
+        portable_project_skills_available: true
+      }
+    }
   };
   updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
   const plannedTargetSyncs = SUPPORTED_TARGETS
     .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
     .map((target) => targetSyncPlan(target, discoveries[target], payloads));
@@ -2557,11 +2414,13 @@ function validateStagedHub(stagePath, checksum) {
   if (!fs.existsSync(path.join(stagePath, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
     throw new Error('staged OpenCode adapter SKILL.md missing');
   }
-  if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'plugin.json'))) {
-    throw new Error('staged AG2 adapter plugin metadata missing');
-  }
-  if (!fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
-    throw new Error('staged AG2 adapter SKILL.md missing');
+  const portableSkillsRoot = path.join(stagePath, 'adapters', 'ag2', 'skills');
+  const portableSkills = readDirectoryNames(portableSkillsRoot)
+    .filter((name) => isValidSkillName(name) && fs.existsSync(path.join(portableSkillsRoot, name, 'SKILL.md')));
+  if (!portableSkills.length) throw new Error('staged Antigravity portable skills payload missing');
+  if (fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'plugin.json'))
+    || fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'installed_version.json'))) {
+    throw new Error('staged Antigravity payload contains unsupported native/plugin metadata');
   }
 }
 
@@ -3121,21 +2980,6 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
 }
 
-function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
-  return withOwnedStaging({
-    target: targetDir,
-    stagePrefix: `.${path.basename(targetDir)}.staging-`,
-    operation: options.operation || 'target-directory-copy',
-    sourceType: options.sourceType || 'repo'
-  }, (staging) => {
-    fs.cpSync(sourceDir, staging, { recursive: true });
-    if (requiredRelPath && !fs.existsSync(path.join(staging, requiredRelPath))) {
-      throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
-    }
-    replaceDirectoryAtomically(staging, targetDir);
-  });
-}
-
 function writeFileAtomically(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
@@ -3267,9 +3111,7 @@ function updateTargetState(state, targetName, discovery, checksum, synced, skipR
 function stagingAuditParents(hubPath, discoveries) {
   const parents = [path.dirname(hubPath)];
   const opencodeTarget = discoveries?.opencode?.target_path;
-  const ag2Target = discoveries?.ag2?.target_path;
   if (opencodeTarget) parents.push(opencodeTarget);
-  if (ag2Target) parents.push(path.join(ag2Target, 'skills'));
   return [...new Set(parents.map((value) => path.resolve(value)))];
 }
 
@@ -3283,13 +3125,6 @@ function stagingReconciliationParents(args, hubPath, state) {
   );
   parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
 
-  const internalAg2Adapter = path.join(hubPath, 'adapters', 'ag2');
-  const savedAg2Target = String(state.targets.ag2.target_path || '');
-  const defaultAg2Target = path.join(os.homedir(), '.gemini', 'config', 'plugins', TOOLKIT_NAME);
-  const ag2Target = savedAg2Target && path.resolve(savedAg2Target) !== path.resolve(internalAg2Adapter)
-    ? savedAg2Target
-    : defaultAg2Target;
-  parents.push(assertSafeWritePath(path.join(ag2Target, 'skills'), 'Antigravity 2 staging reconciliation parent'));
   return [...new Set(parents.map((value) => path.resolve(value)))];
 }
 
@@ -3423,9 +3258,7 @@ function isHookNoop(args, existingState) {
   if (!args.hook) return false;
   if (!existingState || !existingState.hub_version) return true;
   const repoAutoUpdateActive = existingState.repo_auto_update_enabled && !args.skipRepoAutoUpdate;
-  if (!repoAutoUpdateActive && !existingState.auto_sync_enabled) return true;
-  if (repoAutoUpdateActive) return false;
-  return !SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled);
+  return !repoAutoUpdateActive && !existingState.auto_sync_enabled;
 }
 
 function shouldRunRepoAutoUpdate(args, state) {
@@ -3840,208 +3673,219 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
   return { status: 0 };
 }
 
-function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
-  const lock = acquireLock(path.dirname(hubPath), args);
-  if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
-    return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
+// One repository auto-update run: a locked fast-forward update of the managed checkout,
+// a snapshot refresh, delegated target sync from the updated checkout, and the final
+// update report. Each phase records failures in hub state and its own report; hook
+// runs degrade to a warning instead of failing the host.
+class RepositoryAutoUpdateOperation {
+  #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks;
+  #statusState = null; #snapshot = null; #updateResult = null; #plannedTargetSyncs = [];
+  #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = '';
+
+  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
+    this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#discoveries = discoveries;
+    this.#checksum = checksum; this.#payloads = payloads; this.#testHooks = testHooks;
   }
 
-  state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
-  assertSourceDowngradeAllowed(state, args);
+  #hubState(fallback) { return normalizedState(readJsonIfExists(path.join(this.#hubPath, 'state.json')) || fallback); }
+  #snapshotFor(state) { return deriveSnapshotGeneration({ args: this.#args, hubPath: this.#hubPath, state, prepareForWrite: true }); }
+  #write(snapshot) { writeHubSnapshot({ hubPath: this.#hubPath, args: this.#args, ...snapshot }, this.#testHooks); }
+  #audit(snapshot, state) { return buildAudit({ args: this.#args, hubPath: this.#hubPath, ...snapshot, state }); }
 
-  let statusState = state;
-  let updateResult = null;
-  let snapshot = null;
-  let plannedTargetSyncs = [];
-  let nativePluginCache = { status: '' };
-  let thirdPartyHookRepair = { status: '' };
-  const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
-  try {
-    try {
-      updateResult = validateAndUpdateRepo(state, args);
-      statusState = applyRepoUpdateStatus(state, updateResult.status, {
-        fromCommit: updateResult.fromCommit,
-        toCommit: updateResult.toCommit
-      });
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    } catch (error) {
-      const details = error.repoUpdateDetails || {};
-      statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
-        fromCommit: details.fromCommit || '',
-        toCommit: details.toCommit || '',
-        error: details.error || error.message
-      });
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      const report = maybeWriteUpdateReport({
-        args,
-        hubPath,
-        state: statusState,
-        checksum: snapshot.checksum,
-        context: {
-          repo: {
-            status: error.repoUpdateStatus || 'skipped',
-            repoPath: state.repo_path ? path.resolve(state.repo_path) : '',
-            fromCommit: details.fromCommit || '',
-            toCommit: details.toCommit || '',
-            changedFiles: details.changedFiles || [],
-            validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
-            branchSwitchedFrom: details.branchSwitchedFrom || '',
-            error: details.error || error.message
-          },
-          skippedTargets: snapshot.skippedTargets,
-          nativePluginCache: nativePluginCacheStatus(args, statusState),
-          targetSyncStatus: 'skipped'
-        }
-      });
-      statusState = report.state;
-      if (report.reportPath) {
-        snapshot = { ...snapshot, state: statusState };
-        writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      }
-      printUpdateReportLine(args, report.reportPath);
-      if (args.hook) {
-        hookSafeWarning(args, error.message);
-        return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: statusState }) };
-      }
-      throw error;
+  // A hook run reports the failure and keeps the host session usable; a direct run fails.
+  #hookSafe(error, snapshot, state) {
+    if (!this.#args.hook) throw error;
+    hookSafeWarning(this.#args, error.message);
+    return { status: 0, audit: this.#audit(snapshot, state) };
+  }
+
+  // Phase 1: validate and fast-forward the managed checkout under the hub lock.
+  #updateRepository() {
+    const args = this.#args, hubPath = this.#hubPath;
+    const lock = acquireLock(path.dirname(hubPath), args);
+    if (!lock.acquired) {
+      console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
+      return { status: 0, audit: buildAudit({ args, hubPath, state: this.#state, discoveries: this.#discoveries, checksum: this.#checksum, payloads: this.#payloads }) };
     }
-  } finally {
-    releaseLock(lock);
-  }
-
-  const refreshLock = acquireLock(path.dirname(hubPath), args);
-  try {
-    if (refreshLock.acquired) {
-      statusState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-      assertSourceDowngradeAllowed(statusState, args);
-      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
-      statusState = snapshot.state;
-      plannedTargetSyncs = snapshot.plannedTargetSyncs;
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    }
-  } finally {
-    releaseLock(refreshLock);
-  }
-
-  nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
-    repoPath: updateResult.repoPath
-  });
-  thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
-
-  try {
-    runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
-  } catch (error) {
-    const relock = acquireLock(path.dirname(hubPath), args);
-    let failedState = statusState;
-    let report = { state: failedState, reportPath: '' };
     try {
-      if (relock.acquired) {
-        const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-        assertSourceDowngradeAllowed(latestState, args);
-        failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
-          fromCommit: updateResult.fromCommit,
-          toCommit: updateResult.toCommit,
-          error: error.message
-        });
-        let failedSnapshot = deriveSnapshotGeneration({ args, hubPath, state: failedState, prepareForWrite: true });
-        failedState = failedSnapshot.state;
-        writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
-        report = maybeWriteUpdateReport({
-          args,
-          hubPath,
-          state: failedState,
-          checksum: failedSnapshot.checksum,
-          context: {
-            repo: {
-              status: 'sync-delegation-failed',
-              repoPath: updateResult.repoPath || state.repo_path || '',
-              fromCommit: updateResult.fromCommit,
-              toCommit: updateResult.toCommit,
-              changedFiles: updateResult.changedFiles || [],
-              validationStatus: updateResult.validation?.status || 'passed',
-              error: error.message
-            },
-            skippedTargets: failedSnapshot.skippedTargets,
-            nativePluginCache,
-            thirdPartyHookRepair,
-            targetSyncStatus: 'failed'
-          }
-        });
-        failedState = report.state;
-        if (report.reportPath) {
-          failedSnapshot = { ...failedSnapshot, state: failedState };
-          writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
-        }
-        snapshot = failedSnapshot;
+      const state = this.#state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
+      assertSourceDowngradeAllowed(state, args);
+      this.#statusState = state;
+      this.#previousObservedRepoCommit = state.last_repo_update_to_commit || '';
+      try {
+        this.#updateResult = validateAndUpdateRepo(state, args);
+        this.#statusState = applyRepoUpdateStatus(state, this.#updateResult.status, {
+          fromCommit: this.#updateResult.fromCommit, toCommit: this.#updateResult.toCommit });
+        this.#snapshot = this.#snapshotFor(this.#statusState);
+        this.#statusState = this.#snapshot.state;
+        this.#write(this.#snapshot);
+        return null;
+      } catch (error) {
+        return this.#recordUpdateFailure(error, state);
       }
     } finally {
-      releaseLock(relock);
+      releaseLock(lock);
     }
-    printUpdateReportLine(args, report.reportPath);
-    if (args.hook) {
-      hookSafeWarning(args, error.message);
-      return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: report.state }) };
-    }
-    throw error;
   }
 
-  const finalState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-  const plannedChecksum = snapshot.checksum;
-  if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot });
-  const reportLock = acquireLock(path.dirname(hubPath), args);
-  let report = { state: finalState, reportPath: '' };
-  try {
-    if (reportLock.acquired) {
-      const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || finalState);
-      assertSourceDowngradeAllowed(latestState, args);
-      let reportSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
-      const reportState = reportSnapshot.state;
-      const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
-        reportSnapshot.checksum === plannedChecksum &&
-        targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
-      ));
-      const reportContext = {
-        repo: repoReportContextFromUpdate(reportState, updateResult, previousObservedRepoCommit),
-        targetSyncs: completedTargetSyncs,
-        skippedTargets: reportSnapshot.skippedTargets,
-        nativePluginCache,
-        thirdPartyHookRepair,
-        targetSyncStatus: plannedTargetSyncs.length
-          ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
-          : 'not needed'
-      };
-      report = maybeWriteUpdateReport({
-        args,
-        hubPath,
-        state: reportState,
-        checksum: reportSnapshot.checksum,
-        context: reportContext
-      });
-      if (testHooks.afterFinalReportBuild) {
-        testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
-      }
-      if (report.reportPath) {
-        reportSnapshot = { ...reportSnapshot, state: report.state };
-        writeHubSnapshot({ hubPath, args, ...reportSnapshot }, testHooks);
-      }
-      snapshot = reportSnapshot;
+  #recordUpdateFailure(error, state) {
+    const args = this.#args, details = error.repoUpdateDetails || {};
+    let statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      fromCommit: details.fromCommit || '', toCommit: details.toCommit || '', error: details.error || error.message });
+    let snapshot = this.#snapshotFor(statusState);
+    statusState = snapshot.state;
+    this.#write(snapshot);
+    const report = maybeWriteUpdateReport({ args, hubPath: this.#hubPath, state: statusState, checksum: snapshot.checksum,
+      context: {
+        repo: {
+          status: error.repoUpdateStatus || 'skipped',
+          repoPath: state.repo_path ? path.resolve(state.repo_path) : '',
+          fromCommit: details.fromCommit || '',
+          toCommit: details.toCommit || '',
+          changedFiles: details.changedFiles || [],
+          validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
+          branchSwitchedFrom: details.branchSwitchedFrom || '',
+          error: details.error || error.message
+        },
+        skippedTargets: snapshot.skippedTargets,
+        nativePluginCache: nativePluginCacheStatus(args, statusState),
+        targetSyncStatus: 'skipped'
+      } });
+    statusState = report.state;
+    if (report.reportPath) {
+      snapshot = { ...snapshot, state: statusState };
+      this.#write(snapshot);
     }
-  } finally {
-    releaseLock(reportLock);
+    printUpdateReportLine(args, report.reportPath);
+    return this.#hookSafe(error, snapshot, statusState);
   }
-  printUpdateReportLine(args, report.reportPath);
-  if (!report.reportPath && !args.hook && updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
-    console.log('Toolkit already up to date.');
+
+  // Phase 2: re-derive the snapshot from the latest hub state and plan target syncs.
+  #refreshSnapshot() {
+    const refreshLock = acquireLock(path.dirname(this.#hubPath), this.#args);
+    try {
+      if (!refreshLock.acquired) return;
+      this.#statusState = this.#hubState(this.#statusState);
+      assertSourceDowngradeAllowed(this.#statusState, this.#args);
+      this.#snapshot = this.#snapshotFor(this.#statusState);
+      this.#statusState = this.#snapshot.state;
+      this.#plannedTargetSyncs = this.#snapshot.plannedTargetSyncs;
+      this.#write(this.#snapshot);
+    } finally {
+      releaseLock(refreshLock);
+    }
   }
-  const finalAudit = buildAudit({ args, hubPath, ...snapshot, state: report.state });
-  if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-  return { status: 0, audit: finalAudit };
+
+  // Phase 3: delegate target sync to the updated checkout; record a failure if it breaks.
+  #delegateSync() {
+    const args = this.#args, hubPath = this.#hubPath, updateResult = this.#updateResult;
+    this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath });
+    this.#thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, this.#statusState);
+    try {
+      runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
+      return null;
+    } catch (error) {
+      const relock = acquireLock(path.dirname(hubPath), args);
+      let report = { state: this.#statusState, reportPath: '' };
+      try {
+        if (relock.acquired) {
+          const latestState = this.#hubState(this.#statusState);
+          assertSourceDowngradeAllowed(latestState, args);
+          let failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+            fromCommit: updateResult.fromCommit, toCommit: updateResult.toCommit, error: error.message });
+          let failedSnapshot = this.#snapshotFor(failedState);
+          failedState = failedSnapshot.state;
+          this.#write(failedSnapshot);
+          report = maybeWriteUpdateReport({ args, hubPath, state: failedState, checksum: failedSnapshot.checksum,
+            context: {
+              repo: {
+                status: 'sync-delegation-failed',
+                repoPath: updateResult.repoPath || this.#state.repo_path || '',
+                fromCommit: updateResult.fromCommit,
+                toCommit: updateResult.toCommit,
+                changedFiles: updateResult.changedFiles || [],
+                validationStatus: updateResult.validation?.status || 'passed',
+                error: error.message
+              },
+              skippedTargets: failedSnapshot.skippedTargets,
+              nativePluginCache: this.#nativePluginCache,
+              thirdPartyHookRepair: this.#thirdPartyHookRepair,
+              targetSyncStatus: 'failed'
+            } });
+          failedState = report.state;
+          if (report.reportPath) {
+            failedSnapshot = { ...failedSnapshot, state: failedState };
+            this.#write(failedSnapshot);
+          }
+          this.#snapshot = failedSnapshot;
+        }
+      } finally {
+        releaseLock(relock);
+      }
+      printUpdateReportLine(args, report.reportPath);
+      return this.#hookSafe(error, this.#snapshot, report.state);
+    }
+  }
+
+  // Phase 4: report only target syncs confirmed against the planned checksum.
+  #finalReport() {
+    const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
+    const plannedTargetSyncs = this.#plannedTargetSyncs, statusState = this.#statusState;
+    const finalState = this.#hubState(statusState);
+    const plannedChecksum = this.#snapshot.checksum;
+    if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot: this.#snapshot });
+    const reportLock = acquireLock(path.dirname(hubPath), args);
+    let report = { state: finalState, reportPath: '' };
+    try {
+      if (reportLock.acquired) {
+        const latestState = this.#hubState(finalState);
+        assertSourceDowngradeAllowed(latestState, args);
+        let reportSnapshot = this.#snapshotFor(latestState);
+        const reportState = reportSnapshot.state;
+        const completedTargetSyncs = plannedTargetSyncs.filter(sync => (
+          reportSnapshot.checksum === plannedChecksum &&
+          targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
+        ));
+        const reportContext = {
+          repo: repoReportContextFromUpdate(reportState, this.#updateResult, this.#previousObservedRepoCommit),
+          targetSyncs: completedTargetSyncs,
+          skippedTargets: reportSnapshot.skippedTargets,
+          nativePluginCache: this.#nativePluginCache,
+          thirdPartyHookRepair: this.#thirdPartyHookRepair,
+          targetSyncStatus: plannedTargetSyncs.length
+            ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
+            : 'not needed'
+        };
+        report = maybeWriteUpdateReport({ args, hubPath, state: reportState, checksum: reportSnapshot.checksum, context: reportContext });
+        if (testHooks.afterFinalReportBuild) testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
+        if (report.reportPath) {
+          reportSnapshot = { ...reportSnapshot, state: report.state };
+          this.#write(reportSnapshot);
+        }
+        this.#snapshot = reportSnapshot;
+      }
+    } finally {
+      releaseLock(reportLock);
+    }
+    printUpdateReportLine(args, report.reportPath);
+    if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
+      console.log('Toolkit already up to date.');
+    }
+    const finalAudit = this.#audit(this.#snapshot, report.state);
+    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+    return { status: 0, audit: finalAudit };
+  }
+
+  run() {
+    const early = this.#updateRepository();
+    if (early) return early;
+    this.#refreshSnapshot();
+    const failed = this.#delegateSync();
+    if (failed) return failed;
+    return this.#finalReport();
+  }
 }
+function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,discoveries,checksum,payloads,testHooks}).run();}
 
 function persistActiveNoTargetWrite({
   args,
@@ -4098,194 +3942,171 @@ function persistActiveNoTargetWrite({
   }
 }
 
-function run(argv = process.argv.slice(2), testHooks = {}) {
-  if (process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE === '1' && argv.includes('--hook')) {
-    return { status: 0, audit: null, capability_probe_noop: true };
-  }
-  if (process.env.AI_AGENT_TOOLKIT_CHECKER === '1' && argv.includes('--hook')) {
-    return { status: 0, audit: null, checker_session_noop: true };
-  }
-  const args = parseArgs(argv);
-  assertReconciliationCommandArgs(args);
-  const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
-  const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-  if (args.reconcileStaging) {
-    assertSourceDowngradeAllowed(existingState, args);
-    return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
-  }
-  maybePrintAgentRulesPreflight(args);
+// One bridge invocation: isolated project commands, hook no-ops, audit, the
+// repository auto-update path, active no-target bookkeeping and the locked target sync.
+class LocalBridgeRun {
+  #argv; #testHooks; #args = null; #hubPath = null;
+  constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
-  assertSourceDowngradeAllowed(existingState, args);
+  // Project-local install/copy commands that never touch hub state.
+  #isolatedProjectCommand(args) {
+    let result = null;
+    if (args.installOpenCodeProjectPlugin) {
+      assertIsolatedProjectCommandArgs(args, '--install-opencode-project-plugin', '--opencode-project-root');
+      result = installProjectPlugin({ projectRoot: args.opencodeProjectRoot, write: args.write });
+    } else if (args.copyAntigravitySkills) {
+      assertIsolatedProjectCommandArgs(args, '--copy-antigravity-skills', '--antigravity-project-root');
+      result = copyPortableSkills({ projectRoot: args.antigravityProjectRoot,
+        sourceSkillsRoot: path.resolve(__dirname, '..', '..', 'skills'), write: args.write });
+    } else return null;
+    console.log(JSON.stringify(result, null, 2));
+    return { status: 0, result };
+  }
 
-  if (isHookNoop(args, existingState)) {
-    if (existingState?.hub_version && !existingState.auto_sync_enabled) {
-      console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
+  #reportContext(state, snapshot, targetSyncs) {
+    const args = this.#args;
+    return {
+      repo: repoReportContextFromState(state, args),
+      targetSyncs,
+      skippedTargets: snapshot.skippedTargets,
+      nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
+      thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
+      targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
+    };
+  }
+
+  // Prunes old update reports on write; otherwise reports the last recorded cleanup.
+  #cleanupReports(state) {
+    const args = this.#args;
+    const cleanupResult = args.write
+      ? cleanupUpdateReports({ retentionDays: state.update_report_retention_days })
+      : (state.last_update_report_cleanup || {
+          retention_days: state.update_report_retention_days,
+          report_log_directory: updateReportDir(),
+          max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
+          deleted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+          errors: []
+        });
+    state.last_update_report_cleanup = cleanupResult;
+    if (args.write && cleanupResult.error_count && !args.hook) {
+      console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
     }
-    return { status: 0, audit: null };
+    return cleanupResult;
   }
 
-  let nextState = applyRequestedState(existingState, args);
-  const cleanupResult = args.write
-    ? cleanupUpdateReports({ retentionDays: nextState.update_report_retention_days })
-    : (nextState.last_update_report_cleanup || {
-        retention_days: nextState.update_report_retention_days,
-        report_log_directory: updateReportDir(),
-        max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
-        deleted_count: 0,
-        skipped_count: 0,
-        error_count: 0,
-        errors: []
-      });
-  nextState.last_update_report_cleanup = cleanupResult;
-  if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
-  }
-  if (args.enableRepoAutoUpdate && !nextState.repo_path) {
-    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
-  }
-  const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
-  nextState = initialSnapshot.state;
-  let { discoveries, payloads, checksum } = initialSnapshot;
-  if (testHooks.afterInitialSnapshotDerivation) testHooks.afterInitialSnapshotDerivation(initialSnapshot);
-
-  const audit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-  if (args.audit || !args.write) {
-    console.log(JSON.stringify(audit, null, 2));
-  }
-  if (!args.write) return { status: 0, audit };
-  if (shouldRunRepoAutoUpdate(args, nextState)) {
-    return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads, testHooks });
-  }
-  const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
-  if (
-    args.syncEnabled &&
-    !args.enableTargets.length &&
-    !args.disableTargets.length &&
-    !args.enableAutoSync &&
-    !args.disableAutoSync &&
-    !args.enableRepoAutoUpdate &&
-    !args.disableRepoAutoUpdate &&
-    !hasTargetSync
-  ) {
-    const hasConfiguredState = Boolean(
-      existingState.hub_version ||
-      Object.keys(existingState.bridge_versions_by_source || {}).length ||
-      existingState.auto_sync_enabled ||
-      existingState.repo_auto_update_enabled ||
-      SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled)
-    );
-    if (!hasConfiguredState) {
-      if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
-      return { status: 0, audit };
-    }
-    const report = persistActiveNoTargetWrite({
-      args,
-      hubPath,
-      cleanupResult,
-      testHooks,
-      buildReportContext: (state, snapshot, targetSyncs) => ({
-        repo: repoReportContextFromState(state, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
-          repoPath: state.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      })
-    });
-    nextState = report.state;
-    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
-    const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
+  // An active run with no target to write still records its report and state.
+  #persistNoTargetWrite(cleanupResult, snapshot) {
+    const args = this.#args, hubPath = this.#hubPath;
+    const report = persistActiveNoTargetWrite({ args, hubPath, cleanupResult, testHooks: this.#testHooks,
+      buildReportContext: (state, current, targetSyncs) => this.#reportContext(state, current, targetSyncs) });
+    const { discoveries, payloads, checksum } = report.snapshot || snapshot;
+    const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
     return { status: 0, audit: finalAudit };
   }
-  if (args.hook && !hasTargetSync) {
-    const report = persistActiveNoTargetWrite({
-      args,
-      hubPath,
-      cleanupResult,
-      testHooks,
-      buildReportContext: (state, snapshot, targetSyncs) => ({
-        repo: repoReportContextFromState(state, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
-          repoPath: state.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      })
-    });
-    nextState = report.state;
-    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
-    const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    return { status: 0, audit: finalAudit };
+
+  #hasConfiguredState(existingState) {
+    return Boolean(existingState.hub_version || Object.keys(existingState.bridge_versions_by_source || {}).length
+      || existingState.auto_sync_enabled || existingState.repo_auto_update_enabled
+      || SUPPORTED_TARGETS.some(target => existingState.targets[target]?.enabled));
   }
 
-  const lock = acquireLock(path.dirname(hubPath), args);
-  if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
-    return { status: 0, audit };
-  }
-
-  try {
-    const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-    assertSourceDowngradeAllowed(lockedState, args);
-    nextState = applyRequestedState(lockedState, args);
-    nextState.last_update_report_cleanup = cleanupResult;
-    let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
-    nextState = snapshot.state;
-    ({ discoveries, payloads, checksum } = snapshot);
-    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-
-    const targetSyncs = [];
-    for (const plan of snapshot.plannedTargetSyncs) {
-      const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
-      updateTargetState(nextState, plan.target, discoveries[plan.target], checksum, true, '');
+  // Writes the hub snapshot and every planned target under the hub lock.
+  #lockedSync(cleanupResult, audit) {
+    const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
+    const lock = acquireLock(path.dirname(hubPath), args);
+    if (!lock.acquired) {
+      console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
+      return { status: 0, audit };
     }
-
-    nextState.updated_at = timestamp();
-    snapshot = { ...snapshot, state: nextState };
-    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-
-    const report = maybeWriteUpdateReport({
-      args,
-      hubPath,
-      state: nextState,
-      checksum,
-      context: {
-        repo: repoReportContextFromState(nextState, args),
-        targetSyncs,
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatusForReport(args, nextState, {
-          repoPath: nextState.repo_path,
-          validateRepo: true
-        }),
-        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
-        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
-      }
-    });
-    nextState = report.state;
-    if (report.reportPath) {
-      snapshot = { ...snapshot, state: nextState };
+    try {
+      const lockedState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+      assertSourceDowngradeAllowed(lockedState, args);
+      let state = applyRequestedState(lockedState, args);
+      state.last_update_report_cleanup = cleanupResult;
+      let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
+      state = snapshot.state;
+      const { discoveries, payloads, checksum } = snapshot;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      const targetSyncs = [];
+      for (const plan of snapshot.plannedTargetSyncs) {
+        const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
+        targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
+        updateTargetState(state, plan.target, discoveries[plan.target], checksum, true, '');
+      }
+      state.updated_at = timestamp();
+      snapshot = { ...snapshot, state };
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      const report = maybeWriteUpdateReport({ args, hubPath, state, checksum, context: this.#reportContext(state, snapshot, targetSyncs) });
+      state = report.state;
+      if (report.reportPath) {
+        snapshot = { ...snapshot, state };
+        writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      }
+      const finalAudit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+      if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+      else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+      else if (!args.hook) console.log('Toolkit local bridge sync complete.');
+      return { status: 0, audit: finalAudit };
+    } finally {
+      releaseLock(lock);
+    }
+  }
+
+  execute() {
+    const args = this.#args = parseArgs(this.#argv);
+    const isolated = this.#isolatedProjectCommand(args);
+    if (isolated) return isolated;
+    assertReconciliationCommandArgs(args);
+    const hubPath = this.#hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
+    const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+    if (args.reconcileStaging) {
+      assertSourceDowngradeAllowed(existingState, args);
+      return runStagingReconciliation({ args, hubPath, state: existingState, testHooks: this.#testHooks });
+    }
+    maybePrintAgentRulesPreflight(args, existingState);
+    assertSourceDowngradeAllowed(existingState, args);
+    if (isHookNoop(args, existingState)) {
+      if (existingState?.hub_version && !existingState.auto_sync_enabled) {
+        console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
+      }
+      return { status: 0, audit: null };
     }
 
-    const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-    if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-    else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    else if (!args.hook) console.log('Toolkit local bridge sync complete.');
-    return { status: 0, audit: finalAudit };
-  } finally {
-    releaseLock(lock);
+    const requested = applyRequestedState(existingState, args);
+    const cleanupResult = this.#cleanupReports(requested);
+    if (args.enableRepoAutoUpdate && !requested.repo_path) {
+      throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
+    }
+    const snapshot = deriveSnapshotGeneration({ args, hubPath, state: requested });
+    const state = snapshot.state;
+    const { discoveries, payloads, checksum } = snapshot;
+    if (this.#testHooks.afterInitialSnapshotDerivation) this.#testHooks.afterInitialSnapshotDerivation(snapshot);
+
+    const audit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+    if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
+    if (!args.write) return { status: 0, audit };
+    if (shouldRunRepoAutoUpdate(args, state)) {
+      return runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks: this.#testHooks });
+    }
+    const hasTargetSync = SUPPORTED_TARGETS.some(target => targetWouldSync(target, state, checksum, discoveries[target], payloads));
+    const plainSync = args.syncEnabled && !args.enableTargets.length && !args.disableTargets.length && !args.enableAutoSync
+      && !args.disableAutoSync && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate && !hasTargetSync;
+    if (plainSync) {
+      if (!this.#hasConfiguredState(existingState)) {
+        if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+        return { status: 0, audit };
+      }
+      return this.#persistNoTargetWrite(cleanupResult, snapshot);
+    }
+    if (args.hook && !hasTargetSync) return this.#persistNoTargetWrite(cleanupResult, snapshot);
+    return this.#lockedSync(cleanupResult, audit);
   }
 }
+function run(argv=process.argv.slice(2),testHooks={}){return new LocalBridgeRun(argv,testHooks).execute();}
 
 if (require.main === module) {
   try {
@@ -4303,13 +4124,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
   acquireLock,
-  defaultHubPath,
-  inspectDisplacedEvidence,
-  inspectLockForRecovery,
-  inspectRecoveryMarker,
   lockOwnerLiveness,
   parseArgs,
   releaseLock,
@@ -4328,8 +4144,6 @@ module.exports = {
   sanitizeOutputMessage,
   openUpdateReport,
   replaceDirectoryAtomically,
-  parseManagedMarkerBlocks,
-  nearestGitRoot,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,

@@ -1276,13 +1276,21 @@ function publicationRequest(input) {
   /* c8 ignore stop */
 }
 
-function createFakePublisher(config = {}) {
-  const records = new Map();
-  const expected = config.expected || {};
-  return {
-    protocol_version: PUBLISHER_PROTOCOL_VERSION,
-    records,
-    publish(evidence, request) {
+// This retained test publisher owns only in-memory records; it has no
+// transport, credentials, native trust or authority to publish a real check.
+class ControlledCheckPublisher {
+  #config; #expected; #records=new Map();
+  constructor(config={}) {
+    this.#config=config;this.#expected=config.expected||{};
+    Object.defineProperties(this,{
+      protocol_version:{value:PUBLISHER_PROTOCOL_VERSION,enumerable:true},
+      records:{value:this.#records,enumerable:true},
+      publish:{value:(evidence,request)=>this.#publish(evidence,request),enumerable:true},
+      read:{value:externalId=>this.#records.has(externalId)?clone(this.#records.get(externalId)):null,enumerable:true}
+    });
+  }
+  #publish(evidence, request) {
+      const config=this.#config,expected=this.#expected,records=this.#records;
       const evidenceResult = validateEvidence(evidence, config.evidence_expected || {});
       if (!evidenceResult.ok) return evidenceResult;
       const publication = publicationRequest({
@@ -1319,12 +1327,9 @@ function createFakePublisher(config = {}) {
       if (prior && canonicalSerialize(prior) !== canonicalSerialize(output)) return failure('publication_ambiguous');
       records.set(publication.external_id, output);
       return success({ publication: output, receipt_digest: digestValue(output) });
-    },
-    read(externalId) {
-      return records.has(externalId) ? clone(records.get(externalId)) : null;
-    },
-  };
+    }
 }
+function createFakePublisher(config={}) {return new ControlledCheckPublisher(config);}
 
 function initialGateState(identity) {
   const checked = gateStateIdentity(identity);

@@ -2,6 +2,12 @@
 
 This document defines the plugin/update architecture for `weijunswj/ai-agent-toolkit`.
 
+## Current V3 installation scope
+
+Native Toolkit sources target Codex, Claude Code and an explicit OpenCode project plugin. Antigravity receives portable workspace skills only. Candidate construction, metadata validation and copied files do not prove native invocation, selected model/effort, user UAT or installed acceptance. Qualify each selected host before advertising it as supported; retain route gaps visibly and preserve rollback.
+
+The existing Codex/Claude managed-update paths remain host-local. OpenCode project setup uses `--install-opencode-project-plugin --opencode-project-root <absolute-path>`; Antigravity uses `--copy-antigravity-skills --antigravity-project-root <absolute-path>`. Both preview by default and require the explicit authorised `--write` effect. Neither command chooses a provider, copies credentials, changes global settings or enables auto-sync. Existing AG2 native state/files are retained for legacy read/disable and rollback only; no new native AG2 install/update/sync is supported.
+
 ## Current Source-Of-Truth Chain
 
 Current inspected chain:
@@ -13,7 +19,7 @@ Current inspected chain:
 5. `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs` maintain only managed root blocks and shims.
 6. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, source-lock audit, and canonical-surface audit enforce drift and safety rules.
 7. `.codex-plugin/**` and `.claude-plugin/**` are platform-specific native plugin metadata. They are not cross-platform source of truth.
-8. The Toolkit Local Bridge Hub under the user profile stores OpenCode and Antigravity 2 adapter state. It is not repo source of truth.
+8. The Toolkit Local Bridge Hub under the user profile stores OpenCode portable adapter state and retained legacy AG2 state. It is not repo source of truth.
 
 ## Architecture
 
@@ -29,12 +35,13 @@ Codex agents verify and refresh only the Codex native Toolkit plugin cache; Clau
 - Claude Code never installs or updates Codex.
 - Toolkit does not publish to public marketplaces from this repo. Marketplace-ready metadata is present in the manifests, but publication remains a separate human action.
 
-The shared bridge manages only non-native local adapter targets:
+The shared bridge has explicit bounded native/portable routes:
 
 - OpenCode global skills.
-- Antigravity 2 plugin-scoped local adapter skills under the Gemini config plugin root.
+- An OpenCode native project plugin, separately selected from global portable skill sync.
+- Antigravity portable workspace skills under `.agents/skills/`.
 
-OpenCode and Antigravity 2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
+OpenCode sync and project writes are opt-in. Antigravity skills copying is an explicit project write; it is never native/plugin auto-sync. Detection never authorises target writes.
 
 ## Local Bridge Hub
 
@@ -101,10 +108,10 @@ Post-merge native Windows UAT for issue #247 must:
 10. Leave the real 17 historical unmarked staging directories unchanged.
 
 1. Write a staging directory.
-2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
+2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and the Antigravity portable skills payload, which must carry no native plugin metadata.
 3. Rename staging into `current`.
 4. For OpenCode target sync, write into the OpenCode `skills/` root and atomically replace only Toolkit-managed skill folders.
-5. For Antigravity 2 target sync, write into the local `ai-agent-toolkit` plugin root and atomically replace only Toolkit-managed skill folders under that plugin's `skills/` directory.
+5. Antigravity has no sync target. Portable skills reach a workspace only through the explicit `--copy-antigravity-skills` project write.
 6. Remove only skill folders listed in the previous Toolkit-managed target manifest when they are no longer part of the current Toolkit skill set. Preserve unrelated user-created skills and unrelated files.
 
 Locks are owner-aware. Each lock records the PID of the process that created it, and acquisition classifies that owner with a signal-0 existence probe before deciding anything:
@@ -162,7 +169,8 @@ Write mode requires explicit `--write`:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path> --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
@@ -170,9 +178,10 @@ node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 Supported flags:
 
 - `--enable-target opencode`.
-- `--enable-target ag2`.
+- `--install-opencode-project-plugin --opencode-project-root <absolute-path>`.
+- `--copy-antigravity-skills --antigravity-project-root <absolute-path>`.
 - `--disable-target opencode`.
-- `--disable-target ag2`.
+- `--disable-target ag2` (legacy state disable only).
 - `--sync-enabled`.
 - `--enable-auto-sync`.
 - `--disable-auto-sync`.
@@ -192,8 +201,6 @@ Supported flags:
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.
 - `--force-downgrade`.
-- `--python-command <command>`.
-- `--set-ag2-python-command <command>`.
 - `--sync-source repo|codex-plugin|claude-plugin`.
 
 The updater must not:
@@ -245,55 +252,25 @@ The wizard groups consequential decisions under `Updates and reports`, `Computer
 
 Advanced explicit Codex compatibility controls retain exact preview, backup, restore, ownership, and drift checks without appearing in the ordinary bank. Codex agents verify and refresh only the Codex native Toolkit plugin cache installed by the supported plugin flow, and hook trust guidance identifies the executing SessionStart bridge in that installed cache, while the managed checkout is only its refresh source. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then follows the equivalent isolated Claude cache path. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite remains reserved for bridge changes, PR review, and release validation.
 
-The ordinary canonical bank contains no Codex helper-count or Claude manual-capacity row. Toolkit explains automatic memory-safe management in setup status and final summaries. Existing saved/manual capacity values remain byte-preserved compatibility backstops unless an explicit advanced repair choice is approved; they may further restrict but never weaken live admission. Root-only remains available. Unsupported or unverifiable Codex/OpenCode native child paths fail closed to root-only rather than relying on Markdown guidance. Every actually supported Toolkit-managed host adapter invokes the shared atomic controller before launch. In this release only Claude has a verified direct launch interceptor and blocks native Agent/Task bypass through its hook; Codex and OpenCode remain root-only until an equivalent production adapter exists.
+The ordinary canonical bank contains no Codex helper-count row and no Claude capacity row. Existing saved Codex capacity values remain byte-preserved compatibility backstops unless an explicit advanced repair choice is approved. Root-only remains available. Unsupported or unverifiable Codex/OpenCode native child paths fail closed to root-only rather than relying on Markdown guidance. Governed V3 workers start only through the registry-pinned V3 launchers; on Claude the installed hook blocks native Agent/Task bypass under a root-only profile.
 
 Official Codex source at commit `2f7d89b1419bf7064346855b0acde23514b1ebc5` confirms effective runtime selection through `multi_agent_v2` before `multi_agent`, MultiAgentV2 table activation through `enabled = true`, session capacity at `[features.multi_agent_v2].max_concurrent_threads_per_session`, and root-inclusive total-thread semantics. V2 rejects legacy `agents.max_threads` when enabled. MultiAgentV2 also supports root and helper usage hints, which Toolkit uses for compact root-only-by-default policy. Helpers still receive spawn capability, so recursive-helper prevention is policy-only rather than a verified hard block. No documented Codex Security scan-scoped capacity activation exists in that source. Toolkit therefore never raises normal capacity automatically; alternatives include a lower-capacity ordinary or sequential review, Deep Scan on another sufficiently provisioned machine, or an explicitly approved temporary global increase with backup and restoration.
 
 The Codex helper count is a conservative memory backstop, not an active topology profile or launch permission. Current Codex plugin packaging has no custom-agent component, `SubagentStart` cannot stop a launch, and parent live runtime overrides are reapplied to children. Toolkit therefore cannot prove adaptive pre-spawn admission or a child-only standard-speed override for built-in, plugin, Security, third-party, or nested Codex paths. Those paths remain unsupported under the strict medium/non-fast contract rather than receiving a false enforcement claim.
 
-Claude Code 2.1.198 exposes the required external-session CLI controls, but CLI controls and installed bytes alone do not establish a strict Toolkit profile. Strict direct/root-only state additionally requires supported native plugin inspection to report both trust and active hook execution for the exact current plugin version/cache. The persisted proof binds installed-cache identity, hook bytes, controller bytes, and plugin version. Setup cannot create this proof, and install/update/restart/trust instructions are pending actions rather than proof. Missing, false, stale, malformed, wrong-version, or wrong-cache proof leaves strict state root-only/unapplied and invalidates a kept strict profile.
+CLI controls and installed bytes alone do not establish a strict Toolkit profile. A strict root-only profile additionally requires supported native plugin inspection to report both trust and active hook execution for the exact current plugin version/cache. The persisted proof binds installed-cache identity, hook bytes, controller bytes, and plugin version. Setup cannot create this proof, and install/update/restart/trust instructions are pending actions rather than proof. Missing, false, stale, malformed, wrong-version, or wrong-cache proof leaves strict state root-only/unapplied and invalidates a kept strict profile.
 
-This is Toolkit-controlled launch enforcement, not global Claude enforcement. Native agent teams, built-in paths, user-created agents, third-party/plugin agents, Security or named workflows, and direct user CLI invocations outside the controller remain outside Toolkit admission. `SubagentStart` is observable but too late to block; plugin agent definitions alone are lowest-precedence definition enforcement and are not used as proof of effective mode. Broader-native mode deliberately permits those outside paths without claiming coverage. Codex and Claude limitations and profile files are separate; neither host's state proves or mutates the other's behavior.
+This is Toolkit hook enforcement, not global Claude enforcement. Native agent teams, built-in paths, user-created agents, third-party/plugin agents, Security or named workflows, and direct user CLI invocations remain outside Toolkit control. `SubagentStart` is observable but too late to block; plugin agent definitions alone are lowest-precedence definition enforcement and are not used as proof of effective mode. Broader-native mode deliberately permits those outside paths without claiming coverage. Codex and Claude limitations and profile files are separate; neither host's state proves or mutates the other's behavior.
 
-### Claude Toolkit-Managed Direct Admission
+### Retired Toolkit Direct Launcher
 
-Pre-approval Claude setup and plan discovery are observational-only and launch no Claude session. Executable resolution and resource-counter inspection do not prove worker/checker launch capability; exact launch verification is deferred until after approval, and root-only is the conservative recommendation while strict capability is unverified. The ordinary bank exposes only the canonical topology row: Toolkit-direct remains visible as a request, and selecting it does not mean it is active. Capacity is derived from the final visible topology rather than pre-populated during question rendering. Root-only and broader-native use root-only/not-applicable Toolkit admission; direct derives automatic admission unless `Keep current` preserves a compatible direct automatic/manual mode or an explicit advanced capacity input restricts it. After approval, direct activation requires exact current installed/active Toolkit bytes, source/cache identity, native trust, the exact active `Agent|Task` hook, valid activation proof, supported resource counters, and exact isolated Fable 5 worker plus Opus 4.8 checker launches. Probes carry `AI_AGENT_TOOLKIT_CAPABILITY_PROBE=1` through the verified-current no-maintenance SessionStart identity; stale installed Toolkit code is never trusted to honor the marker and is never probed. Restart-pending, stale, or failed verification leaves root-only active and reports the capability loss honestly. Every later direct admission revalidates enabled/trusted/hook-active state and exact cache, hook, controller, and process-launch identity before reservation.
+The Toolkit direct (`toolkit-direct`) Claude worker and checker launcher is retired for every repository using this package. Setup offers only `root-only`, `broader-native` and `keep`; it runs no worker or checker launch probes, and `keep` resolves a stored direct profile (which now reads as unsupported) to root-only. The `--claude-agent-capacity` and `--claude-agent-maximum` flags are removed, and `toolkit-agent-control.cjs` no longer has `launch`, `checker`, `checker-result` or `status` commands. Repositories that relied on them must move governed work to the registry-pinned V3 launchers. Existing reservation state under `~/.ai-agent-toolkit/agent-control` is left untouched.
 
-Before an ordinary worker launch, the controller validates distinct meaningful child and parent responsibilities, genuine separability, concurrent executability, a concrete expected wall-clock speedup, the root's retained longest/critical-path task, a shorter/easier child task, immediate productive root work, root-owned integration and validation, and depth 1. It rejects delegating all substantive work, duplicate parent/child scope, non-speed rationales, child-longer allocations, waiting/polling/narration-only parent work, nested launches, unverifiable effort, and unjustified higher effort. The root must begin the declared retained work immediately after `start`; Toolkit validates the bounded declaration without pretending it can perfectly measure future duration. The pre-PR checker is a separate independent-verification exception and does not require worker speedup fields.
-
-The automatic controller reads physical memory availability plus commit/pagefile headroom from Win32 operating-system counters on Windows or `/proc/meminfo` on Linux. Setup treats this resource-admission capability separately from CLI launch capability. Unsupported platforms and malformed, non-integer, overflowed, contradictory, or unavailable counters omit/refuse automatic and manual direct profiles; manual capacity never bypasses resource safety. At launch, unknown or critical-pressure state returns `refuse-root-only`. The controller retains substantial physical and commit reserves, subtracts active reservations and the requested worker estimate, and queues only bounded temporary pressure.
-
-Before admission, the controller produces the exact UTF-8 prompt bytes once and enforces the 1 MiB bound. An oversized prompt returns a synchronous safe refusal and creates no reservation, queue entry, job specification, output/error artifact, or detached supervisor. Accepted bytes are serialized losslessly for the supervisor and sent only through stdin. Managed children use `--no-session-persistence`, and the detached supervisor inherits the exact preflight environment without serializing environment values into Toolkit artifacts or argv. The child adds only the existing non-fast, no-background, and child-marker overrides. One atomic directory lock then protects stale recovery, queue insertion, and reservation creation. A detached Toolkit supervisor owns only its reservation/child and releases on launch, stdin transport, or child-exit failure.
-
-Launch a reviewed specification with:
-
-```powershell
-node repo/scripts/toolkit-agent-control.cjs launch --spec path/to/launch-spec.json
-```
-
-The result is exactly `start`, `queue`, or `refuse-root-only`. `queue` entries expire after ten minutes and are visible through `node repo/scripts/toolkit-agent-control.cjs status`. Retry the same reviewed specification with the returned `queue_id`; only the oldest live entry can start, so later parents cannot leapfrog it. Refusal reports only the safe root-only action and no private process details.
+The reservation, resource-admission and supervisor machinery survives only in `repo/scripts/toolkit-agent-control-run093-history.cjs`, as the subject of the pinned historical Run-093/094 reclosure proof. Its admission and supervisor accept only the verified harmless run093 fixture worker, and its `launch` and `checkerWorkflow` always refuse; it cannot start a model.
 
 ### Setup Bank Approval References
 
-Non-interactive and managed-continuation concise answers must carry the displayed privacy-safe 80-bit bank reference. One canonical approval payload supplies both its SHA-256 bank identity and visible reference. The payload covers schema and host; ordered section titles; stable IDs and keys; indexed references; question titles and what each controls; displayed current/effective and verification state; availability and conditions; recommendations, labels, outcomes, and reasons; every canonical choice with its visible reference, label, and consequence; after-applying effects; and any displayed selection/default. The reference is validated before any indexed question or choice is mapped; missing, malformed, truncated, cross-host, reordered, conditional, recommendation-changed, or otherwise stale input fails before writes. Concise input is advertised only when every visible question is unresolved. If explicit flags resolved part of the bank, one canonical non-TTY answer plan drives both rendering and consumption: ordered question entries come first, followed by an ordered conditional detail block for custom checkout, custom retention, helper compatibility, helper risk approval, and manual Claude maximum where applicable. Every detail entry binds its stable owner, visible reference when present, activation choice, validation contract, privacy-safe description, and missing-value error. Choice-activated details are displayed before input, then the same plan derives and consumes only applicable detail lines in that exact order. Missing or misordered details fail before writes; path-like values are never treated as concise envelopes. Concise input is rejected before mapping and cannot override explicit selections. A fully explicit run does not wait for setup-question stdin or advertise a reply form. A live TTY uses the exact in-memory bank for one concise-command stage after rendering, with Enter selecting one-at-a-time prompts and invalid input re-prompted.
-
-### Supported Pre-PR Checker Workflow
-
-Do not hand-author a checker prompt, context digest, or review ID. Provide the bounded JSON input through stdin so private task and diff content does not enter argv:
-
-```powershell
-Get-Content -Raw .\bounded-checker-input.json | node repo/scripts/toolkit-agent-control.cjs checker --input -
-```
-
-The input contains readiness fields plus `task_contract`, `changed_files`, `diff`, `focused_validation`, and optional `surrounding_invariants`. The controller applies the deterministic trivial decision, validates all context bounds, builds the checker prompt and SHA-derived identity, performs RAM admission, and starts an admitted checker under the checker-only no-maintenance SessionStart identity. Caller-supplied prompt, digest, review ID, permission, model, role, or tool fields are rejected. A proven private regular file directly under the controller's `inputs` directory is also accepted and deleted immediately after its bounded read; stdin is preferred.
-
-`SKIPPED_TRIVIAL` and `ADMISSION_DENIED` are returned immediately. Admission denial includes the required bounded root-self-review contract and is not an independent pass. An admitted checker returns a deterministic review ID and a retrieval command; continue productive root work instead of idle polling. Retrieve the validated terminal result when it is needed:
-
-```powershell
-node repo/scripts/toolkit-agent-control.cjs checker-result --review-id checker-<sha256>
-```
-
-The terminal checker result is `PASS` or `FINDINGS`. A malformed, partial, non-success, timed-out, or oversized Claude result fails closed, clears only the pending review identity, and permits a legitimate retry with the same bounded input.
+Non-interactive and managed-continuation concise answers must carry the displayed privacy-safe 80-bit bank reference. One canonical approval payload supplies both its SHA-256 bank identity and visible reference. The payload covers schema and host; ordered section titles; stable IDs and keys; indexed references; question titles and what each controls; displayed current/effective and verification state; availability and conditions; recommendations, labels, outcomes, and reasons; every canonical choice with its visible reference, label, and consequence; after-applying effects; and any displayed selection/default. The reference is validated before any indexed question or choice is mapped; missing, malformed, truncated, cross-host, reordered, conditional, recommendation-changed, or otherwise stale input fails before writes. Concise input is advertised only when every visible question is unresolved. If explicit flags resolved part of the bank, one canonical non-TTY answer plan drives both rendering and consumption: ordered question entries come first, followed by an ordered conditional detail block for custom checkout, custom retention, helper compatibility, and helper risk approval where applicable. Every detail entry binds its stable owner, visible reference when present, activation choice, validation contract, privacy-safe description, and missing-value error. Choice-activated details are displayed before input, then the same plan derives and consumes only applicable detail lines in that exact order. Missing or misordered details fail before writes; path-like values are never treated as concise envelopes. Concise input is rejected before mapping and cannot override explicit selections. A fully explicit run does not wait for setup-question stdin or advertise a reply form. A live TTY uses the exact in-memory bank for one concise-command stage after rendering, with Enter selecting one-at-a-time prompts and invalid input re-prompted.
 
 Toolkit snapshots original bytes, topology, mode, and available identity metadata, validates TOML structure with Python 3.11+ standard-library `tomllib`, and binds the displayed proposal to that snapshot plus target path, runtime, helper count, affected keys, proposal digest, and backup generation. The final writer first proves the current target still matches the approved snapshot and retains that snapshot as its initial transaction baseline; it cannot silently replace consent with a fresh baseline. Only then may it ask official Codex app-server `config/batchWrite` to produce a proposal inside an isolated temporary `CODEX_HOME`. Runtime detection accepts V1-only or V2-only supported feature rows, gives enabled V2 precedence, otherwise uses enabled V1, and treats supported boolean-disabled rows as disabled; malformed, duplicate, contradictory, or unusable responses remain unknown. MultiAgentV2 uses independent exact markers for Toolkit-owned enablement, capacity, root guidance, and helper guidance. Pre-existing table enablement stays unmarked and byte-preserved; migrated boolean enablement remains unmarked user intent; fresh Toolkit enablement is independently marked and removed with Toolkit capacity. Exact proposal-delta validation rejects unrelated changes before atomic commitment. The complete exact PR #237 Toolkit-managed V1 block retains its existing explicit migration path. A malformed historical Toolkit marker region has a separate repair path only when the regular active Codex user config is valid UTF-8/TOML, the effective runtime has exactly one explicit supported table, every affected marker and canonical assignment is isolated inside it, and exact affected byte ranges can be proven. For each malformed category, classification derives one implied span from its matching marker, the nearest structurally valid neighbouring category in canonical family order, or the enclosing table boundary. The category's exact canonical assignment must occur inside that span, every other line must be a recognised marker in the one deterministic repair region or blank, and all category spans must be contained, deterministic, and non-overlapping. The visible proposal binds those spans, removal ranges and their hash, marker/assignment categories, affected keys, legacy/current replacement decision, proposal digest, full snapshot, filesystem identity/mode, runtime, helper count, and backup generation. Snapshot drift is rejected before editor invocation, backup, and atomic replacement; final semantic failure restores the exact original. An isolated marker-only repair may preserve compatible user-owned values byte-for-byte and writes no ownership markers. Inspection, planning, SessionStart, and ordinary reads never repair. Exact managed ownership still allows safe removal even when effective runtime detection is disabled or unknown. Temporary editor cleanup waits for actual child exit, uses bounded process-tree termination when EOF is insufficient, retries transient Windows locks with bounded backoff, and reports persistent residue honestly. Existing files receive exact-byte backups; missing files receive restore metadata. Restore validates generation-local paths, topology, modes, sizes, and hashes before mutation. Setup prints the verified absolute setup script and safely quoted PowerShell/POSIX restore commands that work outside the Toolkit checkout. Plugin, validation, preference, target, and final bridge-audit operations complete before config commitment, which remains the final fallible setup operation.
 
@@ -332,9 +309,7 @@ The verifier uses only supported Codex plugin commands. If no usable Codex CLI w
 
 Claude Code has the same three behavior choices in the setup question bank: `keep`, `instructions`, and recommended `install`. Installation freshness requires the reported identity, version, enabled state, exact source path, exact installed-cache path, and byte-for-byte current manifest, hooks, controller, process-launch helper, and native-agent hook. Strict enforcement is a separate result requiring host-reported `trusted: true` plus active hook execution. Activation-proof schema 3 binds the exact cache identity and SHA-256 hashes for hooks, controller, process-launch helper, and native-agent hook; every bound installed path must be a non-symlink regular file, and schema-2 proof fails closed as stale. If the host does not expose a supported active indication, setup reports strict enforcement unavailable rather than inferring it from bytes or enabled state. Setup uses supported marketplace/install/update commands and `--scope user`; it never writes trust state or treats restart guidance as activation proof. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
 
-Every Claude invocation path uses `repo/scripts/claude-process-launch.cjs`: plugin list/install/update, bounded capability and version probes, and direct workers share identical executable validation and argument boundaries. Relative path-like values are rejected on every platform. Direct launch refuses known-missing bare or explicit executables before admission. Availability preflight resolves symlinks only to require a regular executable target; broken, cyclic, directory, special-file, or non-executable targets refuse. POSIX bare `claude` remains unpinned so the official launcher can update its symlink target. Windows bare names exclude cwd and relative PATH entries, resolve to one absolute PATH candidate during preflight, and carry that candidate into execution; project-local `.cmd`, `.bat`, or `.exe` shadows cannot run. `.js`/`.cjs`/`.mjs` and explicit `.exe` paths run without a shell; explicit `.cmd`/`.bat` paths use `cmd.exe /d /s /v:off /c` with command and argument metacharacters escaped. Empty, quoted, control-character, ambiguous, or known-missing executable inputs are rejected. Children deny both `Agent` and legacy `Task`; prompts remain stdin-only.
-
-Admission lock ownership is published in a private `state.lock` directory. The `state.lock.recovery` marker publishes the same private PID, creation-time, and acquisition-token contract. Fresh ownerless/malformed locks or recovery markers are preserved through publication, and valid live owners are never reclaimed. Stale dead, ownerless, or malformed primary locks and recovery markers recover only after the bounded TTL; an interrupted recovery can therefore not wedge admission permanently, and contenders remain serialized. Reservation update/release first validates the complete state and leaves malformed JSON, future schemas, contradictory identities, invalid reservations, or invalid queue entries byte-for-byte unchanged.
+Every Claude invocation path uses `repo/scripts/claude-process-launch.cjs`: plugin list/install/update and version probes share identical executable validation and argument boundaries. Relative path-like values are rejected on every platform. Availability preflight resolves symlinks only to require a regular executable target; broken, cyclic, directory, special-file, or non-executable targets refuse. POSIX bare `claude` remains unpinned so the official launcher can update its symlink target. Windows bare names exclude cwd and relative PATH entries, resolve to one absolute PATH candidate during preflight, and carry that candidate into execution; project-local `.cmd`, `.bat`, or `.exe` shadows cannot run. `.js`/`.cjs`/`.mjs` and explicit `.exe` paths run without a shell; explicit `.cmd`/`.bat` paths use `cmd.exe /d /s /v:off /c` with command and argument metacharacters escaped. Empty, quoted, control-character, ambiguous, or known-missing executable inputs are rejected.
 
 Claude plugin mutations (`plugin update` and `plugin install`) are verification-driven, mirroring the Codex `plugin add` behavior. The helper launches the mutating CLI command asynchronously with ignored stdio, then polls `claude plugin list --json` through the state evaluator until the installed, enabled, current, source-correct state verifies. Success means the supported plugin state verified, not that the mutation process exited:
 
@@ -461,7 +436,7 @@ Meaningful work means at least one of:
 
 - The configured Toolkit repo fast-forwarded.
 - The configured Toolkit repo was already advanced before the hook run compared with the last recorded bridge update state. This is reported as an inference, likely from a manual pull or another local Git update, not as proof of a manual action.
-- An enabled OpenCode or Antigravity 2 target was synced.
+- An enabled OpenCode target was synced.
 - A stale Toolkit-managed skill folder was removed from a managed target.
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
@@ -543,45 +518,12 @@ OpenCode loads one folder per skill under that root, for example `~/.config/open
 
 The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
 
-Antigravity 2 detection signals:
-
-- Antigravity user config exists, such as `%USERPROFILE%\.antigravity`.
-- Gemini/Antigravity plugin config exists, such as `%USERPROFILE%\.gemini\config` or `%USERPROFILE%\.gemini\config\plugins`.
-- The managed Toolkit AG2 adapter exists under the Toolkit Local Bridge Hub.
-- The managed Antigravity 2 plugin-scoped target exists under `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit`.
-- The user explicitly enabled the target.
-- Persisted bridge target state exists, such as `target_path`, `synced_version`, `synced_checksum`, or `last_sync`.
-- Saved AG2 Python command, when configured.
-- Explicit `--python-command`, for one run.
-- `python`, `python3`, and `py`.
-- Safe read-only user-local candidates such as Windows user Python locations, `UV_PYTHON`, `VIRTUAL_ENV`, and `CONDA_PREFIX`.
-- Optional package signal: a candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
-
-Antigravity 2 target path:
-
-- POSIX: `~/.gemini/config/plugins/ai-agent-toolkit/`.
-- Windows: `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit\`.
-- Required app-facing skills: every current Toolkit skill under `skills/<skill-name>/SKILL.md`, plus the `skills/ai-agent-toolkit/SKILL.md` adapter skill inside that plugin root.
-
-Persist a known non-PATH Antigravity 2/AG2 Python command with:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
-```
-
-Future audit and hook runs reuse the saved command. If the Python `ag2` package is not detected, audit output must list the exact Python commands tried and keep `python_command` empty unless a command actually has the package. Detection must never install Python, AG2, Antigravity 2, OpenCode, npm packages, or pip packages.
-
-Audit separates Antigravity 2 app/bridge relevance from the optional Python package signal:
-
-- `detected` means the Antigravity 2 bridge target is present or relevant.
-- `ag2_package_detected` means the Python package `ag2` was found.
-- `python_command` is set only when `ag2_package_detected` is true.
-- `signals.tried_python_commands` records package misses such as `Package(s) not found: ag2`.
+Antigravity has no bridge discovery or sync target. Audit reports retained legacy `ag2` state with `native_plugin_target_supported: false` and never probes Python or AG2 packages. Portable skills reach a workspace only through `--copy-antigravity-skills --antigravity-project-root <absolute-path>`, which previews by default and, with an explicit approved `--write`, writes only `<workspace>/.agents/skills/`. Retained `ag2` state supports legacy read, `--disable-target ag2` and rollback only.
 
 Audit also separates internal hub metadata from app-facing target sync:
 
 - `internal_adapter_path` points under the Toolkit Local Bridge Hub.
-- `target_path` points at the app-facing OpenCode skills root or Antigravity 2 plugin root.
+- `target_path` points at the app-facing OpenCode skills root.
 - `target_exists` reports whether the app-facing managed output files exist.
 - `synced` is true only when the enabled target state and the real app-facing output match the current full Toolkit skill payload and no previously managed Toolkit skill folder is stale. Hub metadata alone is not enough.
 
@@ -618,16 +560,16 @@ Apply OpenCode setup:
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 ```
 
-Dry-run Antigravity 2 setup:
+Preview a portable Antigravity skills copy into one workspace:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>
 ```
 
-Apply Antigravity 2 setup:
+Apply that exact approved copy:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
 Sync enabled targets:
@@ -649,7 +591,7 @@ Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge
 
 Hooks are optional automation. They must not contain unique critical policy.
 
-The packaged hooks only call the shared updater:
+The startup hooks call the shared updater. V3 helper hooks call the shared deterministic routing guard through native adapters:
 
 - Codex hook source: `.codex-plugin/hooks/hooks.json`.
 - Claude Code hook source: `.claude-plugin/hooks/hooks.json`.
@@ -660,7 +602,21 @@ The shared updater may run a passive repo-local instruction preflight from the h
 
 OpenCode and Antigravity 2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
 
-The packaged Toolkit hooks remain startup-only. The bridge uses `SessionStart` because update and sync work is most useful before the agent starts relying on local skills. Claude Code documents a `SessionEnd` event, but the Toolkit does not add a Claude-only exit hook because app exit hooks can be skipped or killed and Codex plugin `SessionEnd` support is not validated in this repo. Do not add unsupported hook event names such as `Stop` or `SessionEnd` to the packaged Codex or Claude plugin manifests without a current platform-supported, safe, fast implementation and matching tests.
+The bridge uses `SessionStart` for update and sync. Codex registers `PreToolUse` for `spawn_agent` and its `Agent` alias; Claude registers the parent `Agent|Task` path. The adapters require a launcher-selected, digest-pinned native binding with exact parent session, workspace, caller model, loaded helper identity and resolved host state. An unchecked binding cannot allow a helper. Claude resolves concrete model and effort precedence, rejecting unobserved alias/substitution/mod behavior. The OpenCode generator selects V1 `tool.execute.before/task` or V2 `ctx.tool.hook(execute.before)/subagent` separately; its V1 `chat.params` check also checks final observed provider parameters. The generated OpenCode plugin depends on the identified canonical runtime checkout; it is no longer an independent instructions-only payload.
+
+The OpenCode V1 adapter observes actual session parentage before requiring a helper binding, so root sessions remain usable without one. At `chat.params` it validates the loaded agent, concrete API model ID and effective effort through the shared guard. It retains the native mutable parameter object and rechecks it at the later `chat.headers` boundary, after all parameter plugins have run. Session observation is bounded; absent observation, role mismatch, remapping, late mutation or pinned-binding drift rejects the child. V2 tool-hook registration remains a separate API path and does not inherit V1 provider-boundary qualification.
+
+Each native entry can render its explicit helper definition from the same V3 registry used by the guard: `node repo/scripts/toolkit-codex-helper-hook.cjs --print-helper-definition G1`, `node repo/scripts/toolkit-claude-agent-hook.cjs --print-helper-definition G1`, or `node repo/scripts/toolkit-opencode-project-plugin.cjs --print-helper-definition G1`. `G0` selects the discovery helper instead. The output includes the resolved profile, registry digest, exact native model and effort, helper identity and leaf restriction. Rendering does not install, activate, grant permission or launch a helper; the trusted launcher must still verify native application, bind its observations and qualify the actual path before using it.
+
+User-level Claude Code helper subagents (`toolkit-g0-helper`, `toolkit-g1-helper`) are rendered from the same registry for an explicitly selected stack: `node repo/scripts/toolkit-claude-helper-agents.cjs --stack <stack-id>` previews, and `--write` installs into `~/.claude/agents`, backing up and replacing only generator-marked files or the retired `toolkit-v3-g0-evidence`/`toolkit-v3-g1-bounded` predecessors. Each file records the registry digest it came from; regenerate after a registry adoption rather than editing it. Installing the files grants no launch permission: the active Toolkit `Agent` hook and native permissions still decide.
+
+These source adapters do not establish native qualification. Codex hook errors, timeouts, disabled/untrusted hooks and specialized paths can fail open; a trusted launcher must verify required registration and enforce the final dispatch boundary. OpenCode ordering and native/AI SDK transformations require independent installed observation. A hook permission result, configuration file or inert child object is not native PASS. Keep the required fifteen-case matrix, positive execution and independently observed zero-effect negatives per installed path. Existing native permission and resource admission continue to apply. No global hook trust or settings are changed by source generation.
+
+The Core Codex adapter checks `hooks/list` on its actual parent client when `toolkit_request_helper` is requested, before creating a child capability. It requires both native aliases to match the exact launcher-owned helper-hook command and report enabled trusted registration, then rechecks current authority. This preflight holds an unqualified helper request without preventing direct lead work. It does not replace the native interception and downstream zero-effect matrix.
+
+Claude qualification uses a separate pinned task-session profile under an explicit task-owned `AI_AGENT_TOOLKIT_CONTROL_ROOT`. It does not change the global `claude-code` profile or select `BROADER_NATIVE`. The source binds Opus 5.5 High, the fully qualified Haiku 5.5 XHigh leaf, parent `Agent|Task` command hook with a 10-second timeout, and mandatory native ask rules routed to the SDK host. The precheck records only the exact invocation digest and defers permission; the independent host `can_use_tool` boundary rechecks current route and primary proof before Agent creation. Missing proof, callback errors, configuration drift, leaves, replay and unqualified aliases are denied.
+
+Resource admission is separate. The external task gate requires a Root-admitted finite disposition tied to existing counters, permits one in-flight helper, journals consumption before an allow response, and keeps ambiguous attempts consumed and active. Native interruption and independent settlement callbacks are required; an observed terminal releases concurrency without refunding consumption. The profile's root-only or zero-capacity labels do not cap native concurrency. Parent invocation/turn bounds, unchanged physical/commit policy, whole-CLI/descendant control, actual mandatory callback registration, and route immutability after this boundary still require explicit Root binding and native proof before inference. The source's controlled ledger/transport tests are not that native proof. `SubagentStart` or a model-result event is observation, not a creation-blocking substitute.
 
 ## Codex SessionStart Output Contract
 

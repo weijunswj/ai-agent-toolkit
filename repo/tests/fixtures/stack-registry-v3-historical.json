@@ -1,0 +1,45 @@
+{
+  "schema": "toolkit.controller.stack-registry.v3",
+  "version": 3,
+  "profiles": {
+    "owner-openai-default": {
+      "routes": {
+        "DISCOVERY": { "provider": "openai", "model": "gpt-6.1-sol", "reasoning": "high" },
+        "DISCOVERY_HELPER": { "provider": "openai", "model": "gpt-6-luna", "reasoning": "max" },
+        "BUILDER": { "provider": "openai", "model": "gpt-6.1-sol", "reasoning": "high" },
+        "BUILDER_HELPER": { "provider": "openai", "model": "gpt-6-luna", "reasoning": "max" },
+        "REVIEW_SCOPE": { "provider": "openai", "model": "gpt-6.1-sol", "reasoning": "xhigh" },
+        "REVIEW_EXECUTION": { "provider": "openai", "model": "gpt-6-astra", "reasoning": "high" },
+        "DESIGN_CHALLENGE": null
+      }
+    },
+    "owner-claude": {
+      "routes": {
+        "DISCOVERY": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "high" },
+        "DISCOVERY_HELPER": { "provider": "anthropic", "model": "haiku-5.5", "reasoning": "xhigh" },
+        "BUILDER": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "high" },
+        "BUILDER_HELPER": { "provider": "anthropic", "model": "haiku-5.5", "reasoning": "xhigh" },
+        "REVIEW_SCOPE": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "xhigh" },
+        "REVIEW_EXECUTION": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "xhigh" },
+        "DESIGN_CHALLENGE": null
+      }
+    },
+    "owner-mixed-claude-gpt": {
+      "routes": {
+        "DISCOVERY": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "high" },
+        "DISCOVERY_HELPER": { "provider": "anthropic", "model": "haiku-5.5", "reasoning": "xhigh" },
+        "BUILDER": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "high" },
+        "BUILDER_HELPER": { "provider": "anthropic", "model": "haiku-5.5", "reasoning": "xhigh" },
+        "REVIEW_SCOPE": { "provider": "openai", "model": "gpt-6.1-sol", "reasoning": "xhigh" },
+        "REVIEW_EXECUTION": { "provider": "anthropic", "model": "opus-5.5", "reasoning": "xhigh" },
+        "DESIGN_CHALLENGE": { "provider": "openai", "model": "gpt-6.1-sol", "reasoning": "xhigh" }
+      }
+    }
+  },
+  "aliases": {
+    "owner-openai-continuous-v1": "owner-openai-default",
+    "owner-claude-continuous-v1": "owner-claude",
+    "owner-mixed-openai-builder-v1": "owner-mixed-claude-gpt",
+    "owner-mixed-claude-builder-v1": "owner-mixed-claude-gpt"
+  }
+}

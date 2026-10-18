@@ -94,4 +94,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { classify, renderSummary };
+module.exports = { classify};

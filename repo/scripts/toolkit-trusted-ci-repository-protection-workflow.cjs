@@ -77,16 +77,8 @@ function success(data = {}) {
   return { ok: true, status: 'valid', ...data };
 }
 
-function isSafeText(value, max = 512) {
-  return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
-}
-
 function isSafeSourceText(value, max = 128 * 1024) {
   return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
-}
-
-function isSha(value) {
-  return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 }
 
 function sha1(value) {

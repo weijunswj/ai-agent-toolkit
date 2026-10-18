@@ -49,8 +49,8 @@ For normal human setup, keep the journey short:
 8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
 10. Answer the complete setup wizard before any preference, target, or Codex configuration write. One semantic model drives chat, terminal, piped, flag, plan, JSON, summary, and execution modes, and rejects unexpected extra non-empty piped answers for every host before mutation. The normal Codex capacity recommendation is root agent only. One-helper and custom values are manual memory backstops, never a strict launch profile or launch permission. Effective runtime details, exact keys, root-inclusive capacity arithmetic, backups, and restore commands appear only in a technical proposal. Structurally complete user-owned controls already matching the selected outcome are preserved byte-for-byte without `apply`, editor, backup, replacement, or Toolkit markers; different replaceable controls require one `apply` confirmation. Isolated malformed recognised Toolkit marker material may receive the same explicit proposal/`apply` transaction only when one regular active config, valid UTF-8/TOML, one effective explicit table, canonical Toolkit assignments, exact affected ranges, and no user or structural ambiguity are proven. Marker-only repair preserves compatible user-owned values; unknown/obsolete markers, mixed families, interleaved content, unsupported tables/topology, and stale proposals remain unchanged and fail closed. Unsupported MultiAgentV2 child tables, explicit false or non-boolean V2 enablement, and unknown or unsupported detection make no mutation. Current host paths without verified admission, medium effort, and child-only non-fast enforcement stay root-only. Codex Security never raises normal capacity automatically or relabels a sequential review as official Deep Scan.
-11. The current wizard groups `Updates and reports`, `Computer performance`, and `Other coding apps`. It reports dynamic totals, shows one quick index, numbers resolved questions contiguously, and letters choices deterministically. Non-interactive replies prefix `all recommended` or changed-only input such as `1.2=B, 3.1=D` with the displayed privacy-safe bank reference; this prevents reinterpretation against another host, order, target set, recommendation, or choice bank. A live terminal offers one same-process concise-command stage, with Enter falling back to one-at-a-time questions and invalid input re-prompted. Empty or partial input never means all recommended. The wizard no longer asks ordinary users to select helper counts or manual capacity. Toolkit-controlled children are limited automatically from verified available memory. Root-only remains available through topology or explicit compatibility controls; saved/manual values are preserved as restrictive backstops and cannot raise the hard ceiling. Technical runtime, raw setting, backup, and restore details appear only when an explicit advanced repair choice requires a proposal.
-12. Add OpenCode or Antigravity 2 rows only when the app is detected or already enabled. These targets remain opt-in and host-local.
+11. The current wizard groups `Updates and reports`, `Computer performance`, and `Other coding apps`. It reports dynamic totals, shows one quick index, numbers resolved questions contiguously, and letters choices deterministically. Non-interactive replies prefix `all recommended` or changed-only input such as `1.2=B, 3.1=D` with the displayed privacy-safe bank reference; this prevents reinterpretation against another host, order, target set, recommendation, or choice bank. A live terminal offers one same-process concise-command stage, with Enter falling back to one-at-a-time questions and invalid input re-prompted. Empty or partial input never means all recommended. The wizard no longer asks ordinary users to select helper counts or capacity. Root-only remains available through topology or explicit Codex compatibility controls; saved Codex values are preserved as restrictive backstops. Technical runtime, raw setting, backup, and restore details appear only when an explicit advanced repair choice requires a proposal.
+12. Add an OpenCode row only when the app is detected or already enabled; it remains opt-in and host-local. Antigravity has no bridge target: use the explicit portable skills copy in [Antigravity 2](#antigravity-2).
 13. Meaningful update reports stay enabled by default. Action-required reports open automatically, successful update/refresh/repair/sync reports remain closed, true no-ops create no report, and legacy all-report auto-open state migrates to this failure-only behavior. Toolkit-managed reports/logs older than 7 days are cleaned up best-effort from the Toolkit report/log directory.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
@@ -59,7 +59,7 @@ Codex and Claude Code update Toolkit through their own native plugin systems:
 - Claude Code updates Toolkit through the Claude Code native plugin system using [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json).
 - Codex does not install or update Claude Code.
 - Claude Code does not install or update Codex.
-- OpenCode and Antigravity 2 are opt-in local bridge targets, not native plugin update targets.
+- OpenCode is an opt-in local bridge target, not a native plugin update target; Antigravity receives portable skills through an explicit copy only.
 
 Detailed plugin verification and bridge command mechanics live in [Toolkit Local Bridge](TOOLKIT-LOCAL-BRIDGE.md).
 
@@ -80,7 +80,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 | Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
 | Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
 | OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
-| Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` | Plugin-scoped manual copy for a specific Toolkit skill. |
+| Antigravity 2 | `<workspace>/.agents/skills/<skill-name>/SKILL.md` | Portable skills copy only; no native plugin install or sync. |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
@@ -132,39 +132,29 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity 2
 
-For Antigravity 2, use the observed plugin-scoped skill-folder install for Toolkit skills. Its internal bridge target remains `ag2`, but manual skill copying uses the plugin-scoped skill folder below.
+Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin, bridge sync target or automatic update; existing `ag2` bridge state is retained only for legacy read, disable and rollback.
 
-Run a dry-run bridge setup preview first:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
-```
-
-After explicit approval:
+Preview the copy into one workspace first:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>
 ```
 
-The bridge writes Antigravity 2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, Antigravity 2, AG2, or pip packages.
-
-If the AG2 package is installed under a Python that is not on PATH, persist the reviewed command so future audits and hooks can reuse it:
+After explicit approval of that exact write:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
+node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
-Audits list the selected AG2 Python command when detected, or the exact commands tried when Antigravity 2/AG2 is not detected.
+The copy writes only skill files under `<workspace>/.agents/skills/`. It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync. To stop using retained legacy bridge state, run `node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write`.
 
-**Use the Antigravity 2 plugin-scoped skill-folder location for toolkit skills:**
+**Use the portable workspace location for Toolkit skills:**
 
 | Location type | Skill folder path |
 |---|---|
-| Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
+| Workspace portable copy | `<workspace>/.agents/skills/<skill-name>/SKILL.md` |
 
-Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder. This plugin-scoped folder is for loading toolkit skills.
-
-**Put repo-local bootstrap outputs in the target repo, not inside the Antigravity 2 plugin folder:**
+**Put repo-local bootstrap outputs in the target repo:**
 
 1. `AGENTS.md`.
 2. `GEMINI.md`.
@@ -241,9 +231,9 @@ Native hooks run cached bridge copies. After a bridge fix is merged, the machine
 
 Refreshing one host never mutates the other host's cache.
 
-Claude strict direct/root-only enforcement is applied only when native plugin installation freshness, enabled state, host-reported trust, and active hook execution all verify for proof schema 3: exact plugin version, cache identity, hooks configuration, controller bytes, process-launch bytes, and executed native-agent hook-script bytes. Every bound installed path must be a non-symlink regular file. Schema-2 proof is stale and unsupported. Setup does not approve trust or manufacture activation proof, and an install/update or restart instruction is not proof that the current session executes the hook. Direct admission re-reads the current native state and every installed identity before reservation; stale or replayed proof fails closed. The original verified setup CLI is persisted, with explicit launch and current environment overrides taking precedence without rewriting the profile. Relative path-like commands are rejected on every platform. POSIX bare `claude` remains unpinned for official launcher updates; Windows bare commands resolve only from absolute PATH entries and execute that exact candidate, so project-local shims cannot shadow the trusted launcher. Toolkit-managed children cannot re-enter the controller. Primary locks and recovery markers preserve fresh/live owners and recover stale dead, ownerless, or malformed state only after the bounded TTL. Reservation update/release leaves unverifiable state byte-for-byte unchanged. Missing or lost proof leaves strict state root-only/unapplied; broader-native remains available explicitly outside Toolkit admission.
+Claude strict root-only enforcement is applied only when native plugin installation freshness, enabled state, host-reported trust, and active hook execution all verify for proof schema 3: exact plugin version, cache identity, hooks configuration, controller bytes, process-launch bytes, and executed native-agent hook-script bytes. Every bound installed path must be a non-symlink regular file. Schema-2 proof is stale and unsupported. Setup does not approve trust or manufacture activation proof, and an install/update or restart instruction is not proof that the current session executes the hook. The verified setup CLI is persisted, with explicit and current environment overrides taking precedence without rewriting the profile. Relative path-like commands are rejected on every platform. POSIX bare `claude` remains unpinned for official launcher updates; Windows bare commands resolve only from absolute PATH entries and execute that exact candidate, so project-local shims cannot shadow the trusted launcher. Missing or lost proof leaves strict state root-only/unapplied; broader-native remains available explicitly outside Toolkit control.
 
-Automatic or manual Claude direct capacity additionally requires supported validated Linux `/proc/meminfo` or Windows operating-system counters. Unsupported platforms and malformed/overflowed counters omit those choices and resolve recommended setup safely. Setup establishes launch capability with a 10-second empty-input, no-session-persistence invocation using the exact print/output/effort/disallowed-tools/permission argument shape. Actual Toolkit-managed children use the same `--no-session-persistence` contract. The detached supervisor inherits the exact environment used by preflight; no environment values are serialized into argv, job state, queues, reservations, or logs. This performs no substantive model prompt, project write, settings change, or conversation persistence; unsupported syntax is distinguished from authentication, network, quota, model, and other runtime failures, and any indeterminate result fails closed. Prompt limits use UTF-8 bytes at the synchronous launch boundary before reservations or artifacts. Explicit Claude CLI paths use one reviewed process contract: JavaScript and `.exe` paths are shell-free, while Windows `.cmd`/`.bat` shims use an escaped command-interpreter boundary without placing prompts in argv.
+The Toolkit direct (`toolkit-direct`) Claude worker and checker topology is retired. Setup offers root-only, broader-native and keep, runs no launch-capability probes, and resolves a stored direct profile to root-only. Governed workers use the registry-pinned V3 launchers.
 
 Policy layering stays portable:
 

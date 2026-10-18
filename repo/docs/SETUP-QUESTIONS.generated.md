@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 7 questions across 3 sections
+Toolkit setup choices - 6 questions across 3 sections
 
-Bank reference: 84PJ-ZBV2-N6C2-NQDK
+Bank reference: WCSY-6QX6-8S53-23DS
 
 Quick index
 
@@ -15,7 +15,6 @@ Quick index
 1.4 Report retention - Recommended: C - Keep current
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
 3.1 OpenCode - Recommended: C - Keep current
-3.2 Antigravity - Recommended: C - Keep current
 
 
 ## 1. Updates and reports
@@ -183,37 +182,10 @@ Quick index
 
 ---
 
-### 3.2 Antigravity
-
-**What this controls:** Whether Toolkit synchronizes an Antigravity plugin-scoped integration containing plugin metadata, installed-version metadata, the Toolkit adapter, and managed skill folders. This does not install Antigravity or the optional Python AG2 package.
-
-**Current:** Toolkit synchronization is enabled and the managed Antigravity files are current.
-
-**Verification:** state-derived
-
-**Recommended:** C - Keep current
-
-**Recommended outcome:** Keep the current Antigravity integration setting.
-
-**Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
-
-**Choices:**
-
-- **A. Keep synchronized** - Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.
-- **B. Turn off** - Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.
-- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed Antigravity files are current.
-- **D. Skip this time** - Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.
-
-**After applying:** Enable writes the Toolkit-owned Antigravity plugin metadata and skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Restart or reopen Antigravity if it does not reload plugin files automatically.
-
-**Selected:** C - Keep current
-
----
-
 Reply with the displayed bank reference and either:
 
-- `84PJ-ZBV2-N6C2-NQDK: all recommended`
-- only your changes, for example: `84PJ-ZBV2-N6C2-NQDK: 1.2=B, 3.1=A`
+- `WCSY-6QX6-8S53-23DS: all recommended`
+- only your changes, for example: `WCSY-6QX6-8S53-23DS: 1.2=B, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.

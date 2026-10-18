@@ -1,0 +1,12 @@
+interface:
+  display_name: Controller Bootstrap
+  short_description: Re-enter an explicitly assigned Toolkit repository controller safely.
+  primary_color: '#334155'
+  default_prompt: Use $controller-bootstrap only when explicitly asked to bootstrap or recover an already-assigned controller for one Toolkit-managed repository; establish identity, exact governance sources, CURRENT, approval, and host limits before any effect.
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

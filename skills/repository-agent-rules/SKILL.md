@@ -113,7 +113,15 @@ Do not delete duplicate, conflicting, or obsolete unmarked content automatically
 
 Do not create shims for platforms that are not in scope.
 
-If this skill creates, modifies, repairs, or backs up `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`, stop immediately and end with this exact format:
+If this skill creates, modifies, repairs, or backs up `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`, choose the ending by context.
+
+**Inside an unfinished, already-authorised task or gate** (the refresh is part of that work or covered by its standing authority): read the changed instruction files now and continue the task in this session without asking whether to restart. Show this notice once, in bold, only after the refresh actually succeeded:
+
+**Toolkit instructions refreshed. Continuing in this session. Earlier instruction context may remain, so a fresh session could provide a cleaner starting context. No action is required.**
+
+Reading files does not reload native hooks, tools or permissions; when one of those genuinely changed, reload it only through its supported mechanism and verify the result, or report the exact reload still required. When committing is authorised for the task, validate the refresh-owned files (run the sync check where it exists), commit only those files to the authorised non-main branch, push, and read back the remote ref. Never make an empty commit, stage unrelated or dirty files, include secrets, or regenerate instructions from a stale installed template.
+
+**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, stop immediately and end with this exact format:
 
 **SESSION RESET RECOMMENDED:**
 

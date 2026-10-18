@@ -8,7 +8,11 @@
     "unsupported_runtime": "GPR_UNSUPPORTED_RUNTIME"
   },
   "coordination_namespace": {
-    "key": ["repository", "parent_issue", "child_issue"],
+    "key": [
+      "repository",
+      "parent_issue",
+      "child_issue"
+    ],
     "one_database_per_namespace": true,
     "lock_is_row_binding_not_database_key": true,
     "active_ownership_child_wide": true,
@@ -57,7 +61,11 @@
       "state": "DORMANT_CONTRACT_ONLY",
       "target_user_version": 3,
       "receipt_schema": "toolkit.github-program.run-receipt.v1",
-      "durable_tables": ["holder_attestations", "recovery_records", "receipt_chain_digests"],
+      "durable_tables": [
+        "holder_attestations",
+        "recovery_records",
+        "receipt_chain_digests"
+      ],
       "legacy_v2": {
         "holder_proof": "ABSENT",
         "backfill": false,
@@ -145,8 +153,13 @@
         "process_id_is_diagnostic_only": true,
         "recovery_proof_requires_incarnation_bindings": true,
         "required_for_future_recoverable_allocations": true,
-        "platforms": ["windows", "linux"],
-        "unsupported_platforms_fail_closed": ["macos"]
+        "platforms": [
+          "windows",
+          "linux"
+        ],
+        "unsupported_platforms_fail_closed": [
+          "macos"
+        ]
       },
       "recovery": {
         "pre_recovery_evidence_schema": "toolkit.github-program.pre-recovery-evidence.v1",
@@ -331,6 +344,53 @@
       "private_filesystem_locations": false,
       "raw_environment_values": false
     },
+    "governance_source_binding": {
+      "authority_repository": "weijunswj/ai-agent-toolkit",
+      "task_and_governance_repositories_are_independent": true,
+      "task_repository_remains_packet_namespace": true,
+      "required_sources": [
+        {
+          "id": "controller",
+          "path": "repo/CONTROLLER.md"
+        },
+        {
+          "id": "architecture",
+          "path": "repo/ARCHITECTURE.md"
+        },
+        {
+          "id": "stack-registry",
+          "path": "repo/contracts/controller-kernel/stack-registry-v2.json"
+        }
+      ],
+      "one_binding_per_source": true,
+      "source_repository_and_revision_match_accepted_governance": true,
+      "controller_and_stack_registry_blobs_match_accepted_tuple": true,
+      "architecture_is_bound_at_same_accepted_revision": true,
+      "new_packet_governance_equals_independently_accepted_tuple": true,
+      "historical_packet_bindings_are_not_relabelled": true,
+      "trusted_reader": "captured_readGovernance",
+      "reader_result": [
+        "exact_binding",
+        "complete_base64_bytes_for_all_sources"
+      ],
+      "verify": [
+        "git_blob_sha1",
+        "content_sha256",
+        "packet_git_blob_evidence_refs"
+      ],
+      "revalidate_at": [
+        "packet_persistence",
+        "web_acceptance",
+        "current_projection",
+        "current_projection_confirmation_recomputes_exact_dependency_identity",
+        "semantic_gate_admission_and_revalidation",
+        "dispatch_and_recovery",
+        "terminal_completion_custody"
+      ],
+      "source_bytes_in_packet_or_logs": false,
+      "embedded_or_cached_policy_fallback": false,
+      "missing_or_mismatched_source": "GPR_PACKET_AUTHORITY_UNVERIFIED"
+    },
     "backfill": {
       "explicit_source_authority_required": true,
       "complete_source_required": true,
@@ -343,6 +403,63 @@
       "accepted": false,
       "consumable": false,
       "next_gate_admitted": false
+    },
+    "recoverable_packet_v3": {
+      "schema": "toolkit.github-program.authority-packet.v3",
+      "checkpoint_schema": "toolkit.github-program.recovery-checkpoint.v3",
+      "current_consumer_schema": "toolkit.github-program.current-consumer.v3",
+      "current_consumer_decision_digest": "Required closed route field; null is permitted for data-only recovery. Native controller consumption requires the exact compiled decision digest.",
+      "packet_identity": "Existing ap1 identity and immutable authority_packets/authority_packet_events rows; V1 packets remain unchanged.",
+      "current_projection": "The existing single CURRENT projection is the only predecessor source; no second store or parallel CURRENT is introduced.",
+      "tables": [
+        "authority_packets",
+        "authority_packet_events",
+        "semantic_gate_admissions",
+        "semantic_gate_admission_events"
+      ],
+      "schema_migration": false,
+      "service_tier_is_semantic_authority": false,
+      "native_permission_is_granted": false,
+      "recovery_requires_opaque_semantic_gate_admission": true,
+      "evidence_readback": "Trusted readRecoveryEvidence must re-read each referenced artifact and HELD custody record, then verify source digest and object identity.",
+      "controller_decision_reference": "Each checkpoint carries a nullable controller_decision_evidence_id. When present it must name a custody-held GIT_BLOB in the checkpoint evidence set; G0 discovery establishes it and continuations propagate the same immutable reference. Native use requires an opaque admission, freshly accepted CURRENT packet readback, exact blob and custody verification, typed decision validation, fresh source observations for every decision reference, and exact current role-route binding. Missing evidence holds; the pointer itself grants no permission.",
+      "owner_uat": "An ACCEPTED owner disposition requires an OWNER_UAT evidence ref bound to an owner-authored child-issue comment; finality must parse that trusted comment content and verify its UAT meaning.",
+      "admitted_reader": "readAdmittedAuthorityPackets(store, opaqueAdmission)",
+      "admitted_reader_checks": [
+        "revalidate opaque admission and authenticated current projection",
+        "select only current projection predecessors",
+        "re-read immutable accepted event and verify linked fresh readback",
+        "compare fresh trusted readWebDecision observation to accepted event",
+        "verify each V3 checkpoint evidence source and held custody"
+      ],
+      "admitted_owner_uat_observation": "For OWNER_UAT only, return the validated exact owner-authored child-comment source and UTF-8 content after trusted readRecoveryEvidence hash and custody checks; owner finality must validate meaning from that observed content.",
+      "admitted_controller_decision_observation": "For the checkpoint's exact GIT_BLOB controller-decision evidence id only, return UTF-8 content after trusted readRecoveryEvidence hash and custody checks; validate the typed decision and re-read all nested source references before use.",
+      "consumer_boundary": "Packet/readback validity is not controller admission, native permission, provider execution, or assurance PASS.",
+      "result_status_is_producer_claim_only": true,
+      "installed_qualification_pass_requires_trusted_run_evidence": true,
+      "packet_status_alone_is_assurance_pass": false,
+      "stage_body_sections": {
+        "G0": [
+          "framing",
+          "unknowns",
+          "evidence_questions",
+          "stop_condition"
+        ],
+        "G1": [
+          "implementation",
+          "candidate_identity",
+          "validation_results",
+          "remaining_obligations"
+        ],
+        "G2": [
+          "candidate_identity",
+          "coverage",
+          "findings_and_reproducers",
+          "validation_results",
+          "disposition"
+        ]
+      },
+      "v3_gate_contract_ir": "Must be null for all V3 packets; G2 is final review, not the historical executable design-contract gate."
     }
   },
   "allocator": {
@@ -367,7 +484,11 @@
     "run_started_prior_receipt_id": null,
     "append_only_chain": true,
     "exact_prior_continuity": true,
-    "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+    "terminal_types": [
+      "EXECUTOR_TERMINAL",
+      "G4_TERMINAL",
+      "RUN_INTERRUPTED"
+    ],
     "receipts_after_terminal": false,
     "stale_or_expired_fence_append": false,
     "candidate_initial": null,
@@ -376,11 +497,18 @@
     "terminal_append_and_release_atomic": true,
     "semantic_terminal_custody": {
       "common_boundary": "appendReceiptInternal",
-      "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+      "terminal_types": [
+        "EXECUTOR_TERMINAL",
+        "G4_TERMINAL",
+        "RUN_INTERRUPTED"
+      ],
       "applicability": "fresh_trusted_authority_observation",
       "required_input": {
         "field": "semantic_completion",
-        "keys": ["store", "outcome_ref"],
+        "keys": [
+          "store",
+          "outcome_ref"
+        ],
         "payload_evidence_digest_must_match": true
       },
       "substantive_output_must_preexist": true,
@@ -456,13 +584,33 @@
     ],
     "caller_functions_or_executable_objects": false,
     "multi_write_or_multi_resource_bundle": false,
-    "runtime_allocated_identity": ["operation_id", "provider_operation_key", "logical_operation_digest"],
-    "states": ["PREPARED", "IN_FLIGHT", "APPLIED", "NOT_APPLIED", "UNKNOWN"],
+    "runtime_allocated_identity": [
+      "operation_id",
+      "provider_operation_key",
+      "logical_operation_digest"
+    ],
+    "states": [
+      "PREPARED",
+      "IN_FLIGHT",
+      "APPLIED",
+      "NOT_APPLIED",
+      "UNKNOWN"
+    ],
     "prepared_and_in_flight_same_transaction": true,
     "committed_prepared_only_state": false,
-    "terminal_states": ["APPLIED", "NOT_APPLIED"],
-    "unresolved_states": ["IN_FLIGHT", "UNKNOWN"],
-    "unresolved_check_same_begin_immediate_transaction": ["allocation", "takeover", "operation_admission"],
+    "terminal_states": [
+      "APPLIED",
+      "NOT_APPLIED"
+    ],
+    "unresolved_states": [
+      "IN_FLIGHT",
+      "UNKNOWN"
+    ],
+    "unresolved_check_same_begin_immediate_transaction": [
+      "allocation",
+      "takeover",
+      "operation_admission"
+    ],
     "hold_scope": "repository_parent_child_across_locks_runs_leases_and_processes",
     "lease_release_clears_hold": false,
     "success_terminal_receipt_clears_hold": false
@@ -523,5 +671,17 @@
     "production_receipt_for_own_generation": false,
     "runtime_bootstrap_mode": false,
     "runtime_missing_receipt_exception": false
+  },
+  "continuous_core": {
+    "decision": "toolkit.controller-decision.v1",
+    "registry": "toolkit.controller.stack-registry.v3",
+    "nested_ir": "toolkit.gate-contract-ir.v2",
+    "outer_packet_unchanged": true,
+    "database_ddl_unchanged": true,
+    "effect_records": "Existing fenced mutation operations: conditional provider update for patch CAS; append create for one launch or validation invocation",
+    "history_unknown": "HOLD",
+    "source_observation": "Full independent bytes for every decision reference",
+    "json_capabilities": false,
+    "qualification": "Fresh independent native exact tuple and confinement evidence; no source-only PASS"
   }
 }

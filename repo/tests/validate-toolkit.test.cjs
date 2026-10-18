@@ -16,6 +16,7 @@ const legacyCuratedToken = 'curated_' + 'output_for_ai';
 const publisherReferencePaths = [];
 const currentSkillIds = [
   'codex-ssh-hostinger-coolify-setup-maintainer',
+  'controller-bootstrap',
   'frontend-art-direction',
   'github-program-reconciler',
   'local-ai-safety',
@@ -589,9 +590,9 @@ function oracleManifestSourceGuard(context, cwd, sourceCommit, expectedBlob, run
   const resolved = runner(context, cwd, ['rev-parse', revisionPath]);
   if (resolved.status !== 0 || resolved.stdout.trim() !== expectedBlob) return mismatch;
   const read = runner(context, cwd, ['show', revisionPath], { encoding: 'buffer' });
-  if (read.status !== 0 || !Buffer.isBuffer(read.stdout)) return mismatch;
+  if (read.status !== 0 || !Buffer.isBuffer(read.stdout)) return { ...mismatch, stage: 'read', status: read.status, error: String(read.stderr) };
   const independentHash = runner(context, cwd, ['hash-object', '--stdin'], { input: read.stdout });
-  if (independentHash.status !== 0 || independentHash.stdout.trim() !== expectedBlob) return mismatch;
+  if (independentHash.status !== 0 || independentHash.stdout.trim() !== expectedBlob) return { ...mismatch, stage: 'independent-hash', status: independentHash.status, actual: independentHash.stdout.trim(), error: String(independentHash.stderr) };
   return { code: 'PASS', blob: resolved.stdout.trim(), bytes: read.stdout, independentlyHashed: independentHash.stdout.trim() };
 }
 
@@ -1386,7 +1387,7 @@ test('hosted source-object contract proves shallow failure, isolated full-histor
         assert.equal(resolved.status, 0, event.label + ' full history must resolve I:path');
         assert.equal(resolved.stdout.trim(), expectedBlob, event.label + ' I:path must resolve to the pinned blob');
         const guarded = oracleManifestSourceGuard(fixture.context, full, fixture.integrationCommit, expectedBlob);
-        assert.equal(guarded.code, 'PASS', event.label + ' oracle-style guard positive control');
+        assert.equal(guarded.code, 'PASS', event.label + ' oracle-style guard positive control: ' + JSON.stringify({ stage: guarded.stage, status: guarded.status, actual: guarded.actual, error: guarded.error }));
         assert.equal(guarded.blob, expectedBlob);
         assert.equal(guarded.independentlyHashed, expectedBlob, event.label + ' independently Git-hashed bytes');
         assert.deepEqual(guarded.bytes, sourceBytes, event.label + ' source bytes read from the real fixture object');

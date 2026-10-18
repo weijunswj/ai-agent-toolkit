@@ -691,6 +691,5 @@ module.exports = {
   expectedCodexDelegationBlock,
   managedAssignmentBlock,
   expectedV2Block,
-  stateBase,
   codexDelegationConfigState,
 };

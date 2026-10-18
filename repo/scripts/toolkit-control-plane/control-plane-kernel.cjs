@@ -90,7 +90,13 @@ const POLICY = Object.freeze({
 
 const trustedContexts = new WeakSet();
 const ticketBindings = new WeakMap();
-let ticketSequence = 0;
+// Process-wide ticket identity allocation retains its original ordering. It is
+// unrelated to model/helper spending, which remains in the existing receipts.
+class TicketIdentitySequence {
+  #sequence=0;
+  next() {return this.#sequence+=1;}
+}
+const ticketIdentities=new TicketIdentitySequence();
 
 function own(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key);
@@ -1308,15 +1314,19 @@ function compactTickets(state, nowValue = ticketNow(state)) {
   return removed;
 }
 
-function createTrustedAuthorityContext(authority, options = {}) {
+class TrustedAuthorityContext {
+  #state;
+  constructor(authority, options = {}) {
   if (options && own(options, 'issuer')) throw ticketError('TICKET_ISSUER_INPUT_FORBIDDEN');
   const state = trustedAuthorityState(authority, options.root_context, options.now, options.maxEntries, options.maxLifetimeMs);
-  const context = {};
+  const context = this;
+  this.#state=state;
   state.context = context;
   contextState.set(context, state);
   trustedContexts.add(context);
 
   context.issue = (request) => {
+    const state=this.#state;
     if (!request || typeof request !== 'object' || own(request, 'issuer')) throw ticketError('TICKET_ISSUER_INPUT_FORBIDDEN');
     const nowValue = ticketNow(state);
     const maxUses = request.max_uses === undefined ? LIMITS.ticketDefaultUses : request.max_uses;
@@ -1331,7 +1341,7 @@ function createTrustedAuthorityContext(authority, options = {}) {
     compactTickets(state, nowValue);
     if (state.records.size >= state.maxEntries) throw ticketError('TICKET_STORE_FULL');
     const issuedAt = new Date(nowValue).toISOString();
-    const ticketId = digestCanonical({ sequence: ticketSequence += 1, issuer: state.authorityDigest, session_id: request.session_id, call_id: request.call_id, operation_digest: request.operation_digest });
+    const ticketId = digestCanonical({ sequence: ticketIdentities.next(), issuer: state.authorityDigest, session_id: request.session_id, call_id: request.call_id, operation_digest: request.operation_digest });
     const publicTicket = Object.freeze({
       contract_version: TICKET_CONTRACT_VERSION,
       ticket_id: ticketId,
@@ -1355,9 +1365,10 @@ function createTrustedAuthorityContext(authority, options = {}) {
     state.records.set(publicTicket, { binding, expiresAt, maxUses, consumedCount: 0 });
     return publicTicket;
   };
-  context.compact = () => compactTickets(state);
-  context.size = () => state.records.size;
+  context.compact = () => compactTickets(this.#state);
+  context.size = () => this.#state.records.size;
   context.consume = (ticket, expected) => {
+    const state=this.#state;
     compactTickets(state);
     const binding = ticketBindings.get(ticket);
     if (!binding) return { valid: false, reason_code: 'TICKET_INVALID' };
@@ -1374,13 +1385,10 @@ function createTrustedAuthorityContext(authority, options = {}) {
     if (record.consumedCount >= record.maxUses) state.records.delete(ticket);
     return { valid: true, reason_code: 'TICKET_CONSUMED' };
   };
-  return context;
+  }
 }
+function createTrustedAuthorityContext(authority,options={}) {return new TrustedAuthorityContext(authority,options);}
 
-function contextRootMatches(context, repository) {
-  const state = context && context.__state;
-  return Boolean(state);
-}
 
 function buildResult(overrides = {}) {
   return {

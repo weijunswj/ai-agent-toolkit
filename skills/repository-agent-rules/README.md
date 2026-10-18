@@ -49,7 +49,7 @@ Install copied skill folders according to the target platform's supported skill 
 | Codex | Direct whole-skill-folder install. | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
 | Claude Code | Direct whole-skill-folder install. | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
 | OpenCode | Short manual whole-skill-folder install only. | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
-| Antigravity | Plugin-scoped skill-folder install. | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+| Antigravity | Portable skills copy only; no native plugin install. | `<workspace>/.agents/skills/<skill-name>/` |
 
 Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
 Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.

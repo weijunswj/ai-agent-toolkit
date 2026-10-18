@@ -10,17 +10,17 @@ const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
+// Loaded only on the OpenCode project-install path, so setup's protocol probe and
+// older managed checkouts do not depend on the OpenCode payload module.
+function installOpenCodeProjectPlugin(options) { return require('./toolkit-opencode-project-plugin.cjs').installProjectPlugin(options); }
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPERS, RUNTIMES, RESTORE_FLAG } = delegation;
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
-const SUPPORTED_TARGETS = ['opencode', 'ag2'];
+const SUPPORTED_TARGETS = ['opencode'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
-const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
-const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
-const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
@@ -115,12 +115,8 @@ function emptySetupChoices() {
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
-    claudeAgentCapacity: '',
     claudePluginBehavior: '',
-    targets: {
-      opencode: '',
-      ag2: ''
-    }
+    targets: { opencode: '' }
   };
 }
 
@@ -142,6 +138,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoBranch: DEFAULT_REPO_BRANCH,
     repoRemote: DEFAULT_REPO_REMOTE,
     host: 'codex',
+    opencodeProjectRoot: '',
     codexCli: '',
     hub: '',
     verifyClaudePlugin: false,
@@ -157,9 +154,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     keepTargets: [],
     yesRecommended: false,
     codexHelperCount: null,
-    claudeManualMaximum: null,
-    claudeTopologyRequested: '',
-    claudeAgentCapacityExplicit: false,
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
     codexRuntime: RUNTIMES.UNKNOWN,
@@ -205,6 +199,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
     else if (arg === '--host') args.host = next();
     else if (arg.startsWith('--host=')) args.host = arg.slice('--host='.length);
+    else if (arg === '--opencode-project-root') args.opencodeProjectRoot = next();
+    else if (arg.startsWith('--opencode-project-root=')) args.opencodeProjectRoot = arg.slice('--opencode-project-root='.length);
     else if (arg === '--codex-cli') args.codexCli = next();
     else if (arg.startsWith('--codex-cli=')) args.codexCli = arg.slice('--codex-cli='.length);
     else if (arg === '--claude-cli') args.claudeCli = next();
@@ -278,34 +274,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.codexPluginAutoRefresh = false;
       args.setupChoices.codexPluginAutoRefresh = 'disable';
     } else if (arg === '--keep-codex-plugin-auto-refresh') args.setupChoices.codexPluginAutoRefresh = 'keep';
-    else if (arg === '--claude-topology') {
-      const choice = next().toLowerCase();
-      if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
-      args.claudeTopologyRequested = choice;
+    else if (arg === '--claude-topology' || arg.startsWith('--claude-topology=')) {
+      const choice = (arg === '--claude-topology' ? next() : arg.slice('--claude-topology='.length)).toLowerCase();
+      if (!['root-only', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
       args.setupChoices.claudeTopology = choice;
-    } else if (arg.startsWith('--claude-topology=')) {
-      const choice = arg.slice('--claude-topology='.length).toLowerCase();
-      if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
-      args.claudeTopologyRequested = choice;
-      args.setupChoices.claudeTopology = choice;
-    } else if (arg === '--claude-agent-capacity') {
-      const choice = next().toLowerCase();
-      if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
-      args.setupChoices.claudeAgentCapacity = choice;
-      args.claudeAgentCapacityExplicit = true;
-    } else if (arg.startsWith('--claude-agent-capacity=')) {
-      const choice = arg.slice('--claude-agent-capacity='.length).toLowerCase();
-      if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
-      args.setupChoices.claudeAgentCapacity = choice;
-      args.claudeAgentCapacityExplicit = true;
-    } else if (arg === '--claude-agent-maximum') {
-      args.claudeManualMaximum = parsePositiveInteger(next(), arg);
-      args.setupChoices.claudeAgentCapacity = 'manual';
-      args.claudeAgentCapacityExplicit = true;
-    } else if (arg.startsWith('--claude-agent-maximum=')) {
-      args.claudeManualMaximum = parsePositiveInteger(arg.slice('--claude-agent-maximum='.length), '--claude-agent-maximum');
-      args.setupChoices.claudeAgentCapacity = 'manual';
-      args.claudeAgentCapacityExplicit = true;
     }
     else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
@@ -392,7 +364,7 @@ function preferenceSummary(options) {
       : 'manual-verification-only',
     helper_capacity_backstop: options.host === 'codex'
       ? (choices.codexHelperCapacity || 'question-required')
-      : (choices.claudeAgentCapacity || 'question-required'),
+      : 'root-only',
     selected_topology: options.host === 'codex'
       ? 'native-unintercepted-root-only'
       : (choices.claudeTopology || 'question-required'),
@@ -404,8 +376,7 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
-    opencode_sync: targetChoice('opencode'),
-    ag2_antigravity_sync: targetChoice('ag2')
+    opencode_sync: targetChoice('opencode')
   };
 }
 
@@ -544,7 +515,7 @@ function setupPlan(options = {}) {
       },
       {
         id: 'approved_target_sync',
-        title: 'Enable only selected OpenCode and AG2/Antigravity targets, then sync enabled targets',
+      title: 'Enable only the selected OpenCode target, then sync enabled targets',
         commands: [
           ...(disableTargetArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', disableTargetArgs)] : []),
           ...((options.enableTargets || []).length ? [
@@ -565,7 +536,7 @@ function setupPlan(options = {}) {
           : 'Apply the selected Claude-only topology and admission profile as the final fallible setup operation',
         commands: host === 'codex' && ['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choices.codexHelperCapacity)
           ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
-          : (host === 'claude-code' && (choices.claudeTopology !== 'keep' || choices.claudeAgentCapacity !== 'keep')
+          : (host === 'claude-code' && choices.claudeTopology !== 'keep'
               ? ['write only the Claude Code profile under ~/.ai-agent-toolkit/agent-control/profiles/claude-code.json']
               : [])
       },
@@ -593,7 +564,7 @@ function printHelp() {
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
     '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode',
-    '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode --enable-target ag2',
+    '  node repo/scripts/setup-toolkit.cjs --opencode-project-root <absolute-path> [--execute]',
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
@@ -637,19 +608,46 @@ function printHelp() {
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
-    '  --claude-topology root-only|toolkit-direct|broader-native|keep',
-    '                               Claude-only topology; Toolkit direct is offered only when its launch controls verify',
-    '  --claude-agent-capacity automatic|root-only|keep|manual',
-    '                               canonical Claude admission mode; manual is still only a backstop',
-    '  --claude-agent-maximum <count>',
-    '                               positive manual maximum for Toolkit-managed Claude workers',
+    '  --claude-topology root-only|broader-native|keep',
+    '                               Claude-only topology; root-only blocks native Agent/Task at the installed hook',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
-    '  --enable-target opencode|ag2 enable and sync approved non-native bridge target',
-    '  --disable-target opencode|ag2 disable target without deleting files',
-    '  --keep-target opencode|ag2 preserve target state without refresh/sync',
-    '  --skip-target opencode|ag2 skip target writes for this run'
+    '  --enable-target opencode enable and sync the approved OpenCode skills target',
+    '  --disable-target opencode disable target without deleting files',
+    '  --keep-target opencode preserve target state without refresh/sync',
+    '  --skip-target opencode skip target writes for this run',
+    '  --opencode-project-root <absolute-path> install the project-native plugin; preview by default, --execute writes only .opencode/plugins/ai-agent-toolkit.js',
+    '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
+}
+
+function assertOpenCodeProjectPluginArgs(args) {
+  const allowed = new Set(['--opencode-project-root', '--plan', '--execute', '--json']);
+  const flags = args.argv.filter((value) => String(value).startsWith('--'))
+    .map((value) => String(value).split('=')[0]);
+  const incompatible = [...new Set(flags.filter((flag) => !allowed.has(flag)))];
+  if (incompatible.length) {
+    throw new Error(`OpenCode project-plugin setup cannot be combined with: ${incompatible.join(', ')}`);
+  }
+  if (flags.filter((flag) => flag === '--opencode-project-root').length !== 1) {
+    throw new Error('OpenCode project-plugin setup requires exactly one --opencode-project-root');
+  }
+  if (!path.isAbsolute(args.opencodeProjectRoot)) {
+    throw new Error('--opencode-project-root must be an absolute path');
+  }
+}
+
+function runOpenCodeProjectPluginSetup(args) {
+  assertOpenCodeProjectPluginArgs(args);
+  const result = installOpenCodeProjectPlugin({
+    projectRoot: args.opencodeProjectRoot,
+    write: args.execute
+  });
+  const payload = { status: 0, project_plugin: result };
+  const output = JSON.stringify(payload, null, 2);
+  if (args.json) process.stdout.write(`${output}\n`);
+  else console.log(output);
+  return payload;
 }
 
 function assertRepoRoot(repoRoot) {
@@ -1131,25 +1129,6 @@ function inspectCodexNativePluginState(args) {
   };
 }
 
-function inspectClaudeNativePluginState(args) {
-  const probeRoot = scriptRootForReadOnlyProbe(args);
-  const result = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs({ ...args, repoRoot: probeRoot }, '--verify'),
-    { cwd: probeRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify, allowFailure: true, quiet: true }
-  );
-  if (result.status !== 0) {
-    return { status: 'needs-review', current: false, enforcement_verified: false, detail: (result.stderr || result.stdout || '').trim() };
-  }
-  try {
-    const summary = parseJsonFromOutput(result.stdout);
-    return { ...summary, status: summary.enforcement_verified === true ? 'fresh' : 'needs-review', detail: 'Installed Claude plugin and enforcement bytes verified.' };
-  } catch (error) {
-    return { status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
-  }
-}
-
 function printDelegationPreview(preview) {
   console.log('');
   console.log('# Codex helper-agent config preview');
@@ -1238,13 +1217,6 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
     if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
   };
   if (args.host !== 'codex') {
-    if (args.host === 'claude-code') {
-      const selectedTopology = args.setupChoices.claudeTopology === 'keep' ? current.agentProfile.topology : args.setupChoices.claudeTopology;
-      const managedCapacity = ['automatic', 'manual'].includes(args.setupChoices.claudeAgentCapacity);
-      if (managedCapacity && !['toolkit-direct', agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(selectedTopology)) {
-        throw new Error('Automatic or manual Toolkit admission requires the Direct Toolkit-managed subagents topology.');
-      }
-    }
     assertQuestionBankConsumed();
     return null;
   }
@@ -1302,49 +1274,29 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
 
 async function applyHostDelegationControl(args, current, nativeCache = {}) {
   if (args.host === 'claude-code') {
-    const resolved = resolveClaudeTopologyCapacity(args, current);
-    const topology = resolved.topology;
-    const capacityMode = resolved.capacity_mode;
-    const strict = [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
+    const topology = resolveClaudeTopology(args, current);
+    const strict = topology === agentControl.TOPOLOGIES.ROOT_ONLY;
     const installedEnforcement = nativeCache.restart_required !== true
       && nativeCache.strict_enforcement_verified === true && nativeCache.trusted === true
       && nativeCache.hook_active === true && agentControl.validActivationProof(nativeCache.activation_proof, {
         pluginVersion: nativeCache.installed_version || nativeCache.version,
         cachePath: nativeCache.cache_path,
       });
-    const launchCapable = current.agentCapability?.launch_supported === true;
-    const nativeResources = agentControl.inspectResourceCapability();
-    const resourceCapable = current.agentCapability?.resource_counter_supported === true
-      && current.agentCapability?.resource_counter_source === nativeResources.source
-      && nativeResources.supported === true
-      && ['proc-meminfo', 'win32-operating-system'].includes(nativeResources.source);
-    const directEnforceable = launchCapable && installedEnforcement && resourceCapable;
-    const enforceable = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? directEnforceable : installedEnforcement;
-    if (topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT && !directEnforceable) {
-      const reason = nativeCache.restart_required === true
-        ? 'Current Toolkit activation is restart-pending; direct Claude capability verification was deferred.'
-        : 'Current Claude CLI controls, native hook trust/activation, installed Toolkit bytes, exact worker/checker launches, or required resource counters could not be verified.';
-      const invalidated = agentControl.invalidateProfile('claude-code', reason);
-      return { ...invalidated, status: nativeCache.restart_required === true ? 'restart-pending-root-only' : 'capability-lost-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
-    }
-    if (topology === agentControl.TOPOLOGIES.ROOT_ONLY && !installedEnforcement) {
+    if (strict && !installedEnforcement) {
       const invalidated = agentControl.invalidateProfile('claude-code', 'Root-only remains the safe fallback while current native hook trust/activation or installed Toolkit bytes are unverified.');
       return { ...invalidated, status: 'safe-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
     }
     const configured = agentControl.configureProfile('claude-code', {
       topology,
-      capacity_mode: capacityMode,
-      manual_maximum: resolved.manual_maximum,
+      capacity_mode: agentControl.CAPACITY_MODES.ROOT_ONLY,
       enforcement_verified: strict,
       activation_proof: nativeCache.activation_proof,
-      claude_cli: current.agentCapability?.claude_command || processLaunch.resolveClaudeCommandInput({
+      claude_cli: processLaunch.resolveClaudeCommandInput({
         explicit: args.claudeCli,
         persisted: current.agentProfile?.claude_cli,
       }),
-      resource_counter_supported: resourceCapable,
-      resource_counter_source: current.agentCapability?.resource_counter_source,
     });
-    return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: !strict || enforceable, client_scope: 'Claude-only Toolkit profile' };
+    return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: true, client_scope: 'Claude-only Toolkit profile' };
   }
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
@@ -1394,88 +1346,15 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
   return result;
 }
 
-function inspectClaudeAgentCapability(args) {
-  const env = Object.prototype.hasOwnProperty.call(args, 'env') ? args.env : process.env;
-  const requestedCommand = processLaunch.resolveClaudeCommandInput({
-    explicit: args.claudeCli,
-    persisted: args.persistedClaudeCli,
-    env,
-  });
-  let command;
-  try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
-  catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability();
-    return {
-      supported: false, launch_supported: false, executable_available: false,
-      launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
-      resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
-      launch_probe_status: 'deferred', version: '', version_verification: 'deferred',
-      direct_only: false, medium_effort: false, non_fast_environment_override: false,
-    };
-  }
+// Retired with the Toolkit direct topology: setup no longer inspects or probes agent
+// launch capability. This read-only native resource observation remains only because
+// the byte-pinned run093 proof (R093-F5-SETUP-SOURCE-BYPASS) calls it to show that
+// caller fixture evidence never reaches setup. Remove it with that proof.
+function inspectClaudeAgentCapability() {
   const resourceCapability = agentControl.inspectResourceCapability();
   return {
-    supported: false, launch_supported: false, executable_available: true,
-    launch_verification: 'deferred-until-post-approval', resource_counter_supported: resourceCapability.supported,
-    resource_counter_source: resourceCapability.source,
-    detector: 'Claude executable and resource counters inspected observationally; exact worker/checker launch capability is deferred until post-approval current-plugin verification',
-    launch_probe_status: 'deferred', launch_probe_exit_status: null, checker_probe_exit_status: null,
-    claude_command: command, version: '', version_verification: 'deferred',
-    direct_only: false, medium_effort: false, non_fast_environment_override: false,
-  };
-}
-
-function probeClaudeAgentCapability(args) {
-  const env = Object.prototype.hasOwnProperty.call(args, 'env') ? args.env : process.env;
-  const requestedCommand = processLaunch.resolveClaudeCommandInput({
-    explicit: args.claudeCli,
-    persisted: args.persistedClaudeCli,
-    env,
-  });
-  const helper = require('./setup-claude-toolkit-plugin.cjs');
-  let command;
-  try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
-  catch (error) {
-    const resourceCapability = agentControl.inspectResourceCapability();
-    return {
-      supported: false, launch_supported: false, resource_counter_supported: resourceCapability.supported,
-      resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
-      version: '', direct_only: false, medium_effort: false, non_fast_environment_override: false,
-    };
-  }
-  const probeEnv = { ...env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CAPABILITY_PROBE: '1' };
-  const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000, env: probeEnv });
-  const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
-  const probeSpecs = [
-    { role: agentControl.ROLES.WORKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].worker, effort: 'medium' },
-    { role: agentControl.ROLES.CHECKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].checker, effort: 'medium' },
-  ];
-  const probes = probeSpecs.map((spec) => helper.runClaudeCommand(command, agentControl.claudeInvocationArgs(spec), {
-    timeout: 10000,
-    input: '',
-    env: probeEnv,
-  }));
-  const probeOutput = probes.map((probe) => `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`).join('\n').trim();
-  const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--|unknown model|model .*not (?:found|available|supported)/i.test(probeOutput);
-  const launchSupported = versionResult.status === 0 && version.length > 0 && probes.every((probe) => probe.status === 0);
-  const resourceCapability = agentControl.inspectResourceCapability();
-  const probeStatus = launchSupported ? 'supported' : (unsupportedSyntax ? 'unsupported-syntax' : 'indeterminate-runtime-failure');
-  return {
-    supported: launchSupported && resourceCapability.supported,
-    launch_supported: launchSupported,
-    resource_counter_supported: resourceCapability.supported,
-    resource_counter_source: resourceCapability.source,
-    detector: launchSupported
-      ? 'post-approval claude --version plus bounded empty-input exact-argv capability probe with maintenance isolation'
-      : `Claude launch capability ${probeStatus}`,
-    launch_probe_status: probeStatus,
-    launch_probe_exit_status: Number.isInteger(probes[0]?.status) ? probes[0].status : null,
-    checker_probe_exit_status: Number.isInteger(probes[1]?.status) ? probes[1].status : null,
-    claude_command: command,
-    version,
-    direct_only: launchSupported,
-    medium_effort: launchSupported,
-    non_fast_environment_override: launchSupported,
+    supported: false, launch_supported: false,
+    resource_counter_supported: resourceCapability.supported, resource_counter_source: resourceCapability.source,
   };
 }
 
@@ -1519,28 +1398,11 @@ async function collectCurrentState(args) {
     managed: inspectManagedCheckout(args, audit),
     delegation: delegationState,
     delegationMigrationPreview,
-    agentCapability: args.host === 'claude-code' ? inspectClaudeAgentCapability({ ...args, persistedClaudeCli: agentProfile.claude_cli }) : { supported: false, detector: 'not applicable' },
     agentProfile,
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
       : inspectCodexNativePluginState(args)
   };
-}
-
-function formatBool(value) {
-  return value ? 'enabled' : 'disabled';
-}
-
-function formatTargetState(target) {
-  if (!target) return 'not detected';
-  const parts = [
-    `detected=${target.detected ? 'yes' : 'no'}`,
-    `enabled=${target.enabled ? 'yes' : 'no'}`,
-    `synced=${target.synced ? 'yes' : 'no'}`
-  ];
-  if (target.synced_version) parts.push(`version=${target.synced_version}`);
-  if (target.status) parts.push(`status=${target.status}`);
-  return parts.join(', ');
 }
 
 function currentReportRetentionDays(current) {
@@ -1581,21 +1443,10 @@ function recommendedChoice(key, current, args) {
     if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
   }
-  if (key === 'claudeTopology') return strictClaudeSetupCapability(current) ? 'toolkit-direct' : 'root-only';
-  if (key === 'claudeAgentCapacity') return strictClaudeSetupCapability(current) ? 'automatic' : 'root-only';
+  if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return 'keep';
-  if (key === 'ag2Target') return 'keep';
   return 'keep';
-}
-
-function strictClaudeSetupCapability(current) {
-  return current.agentCapability?.launch_supported === true
-    && current.agentCapability?.resource_counter_supported === true
-    && current.nativePlugin?.strict_enforcement_verified === true
-    && current.nativePlugin?.trusted === true
-    && current.nativePlugin?.hook_active === true
-    && agentControl.validActivationProof(current.nativePlugin?.activation_proof);
 }
 
 function wizardChoice(value, label, consequence) {
@@ -1836,70 +1687,18 @@ function assertManagedCheckoutChoiceAvailable(args, specs) {
   }
 }
 
-function reconcileClaudeQuestionChoices(args, current) {
-  if (args.host !== 'claude-code') return;
-  const choices = args.setupChoices;
-  const currentProfile = current.agentProfile || agentControl.readProfile('claude-code');
-  const requestedTopology = args.claudeTopologyRequested || choices.claudeTopology || 'keep';
-  const explicitCapacity = args.claudeAgentCapacityExplicit === true;
-  if (requestedTopology === 'keep' && currentProfile.supported === true) {
-    choices.claudeTopology = currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct'
-      : (currentProfile.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
-  }
-  if (requestedTopology === 'keep' && currentProfile.supported !== true) {
-    choices.claudeTopology = 'root-only';
-  }
-  if (explicitCapacity && choices.claudeAgentCapacity === 'root-only' && choices.claudeTopology !== 'broader-native') {
-    choices.claudeTopology = 'root-only';
-  }
-  if (['root-only', 'broader-native'].includes(choices.claudeTopology)) {
-    choices.claudeAgentCapacity = 'root-only';
-  } else if (choices.claudeTopology === 'toolkit-direct' && requestedTopology === 'keep' && !explicitCapacity) {
-    const compatibleKeep = currentProfile.supported === true && currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT
-      && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(currentProfile.capacity_mode);
-    choices.claudeAgentCapacity = compatibleKeep ? 'keep' : 'automatic';
-  } else if (choices.claudeTopology === 'toolkit-direct' && (!explicitCapacity || choices.claudeAgentCapacity === 'keep')) {
-    const compatibleKeep = currentProfile.supported === true && currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT
-      && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(currentProfile.capacity_mode);
-    choices.claudeAgentCapacity = explicitCapacity && choices.claudeAgentCapacity === 'keep' && compatibleKeep ? 'keep' : 'automatic';
-  }
-}
-
-function resolveClaudeTopologyCapacity(args, current) {
-  reconcileClaudeQuestionChoices(args, current);
+// `keep` preserves only a supported current profile. A stale, unverifiable or retired
+// (Toolkit direct) profile reads as unsupported, so keep resolves it to root-only.
+function resolveClaudeTopology(args, current) {
   const profile = current.agentProfile || agentControl.readProfile('claude-code');
-  const topologyChoice = args.setupChoices.claudeTopology || 'keep';
-  const capacityChoice = args.setupChoices.claudeAgentCapacity || 'keep';
-  // A direct selection authorizes post-approval verification; it never turns
-  // an observational snapshot into an optimistic capability claim.
-  let topology = topologyChoice === 'keep' && profile.supported === true ? profile.topology
-    : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice] || agentControl.TOPOLOGIES.ROOT_ONLY);
-  if (capacityChoice === 'root-only' && topology !== agentControl.TOPOLOGIES.BROADER_NATIVE) topology = agentControl.TOPOLOGIES.ROOT_ONLY;
-  let capacityMode;
-  if (topology !== agentControl.TOPOLOGIES.CLAUDE_DIRECT) capacityMode = agentControl.CAPACITY_MODES.ROOT_ONLY;
-  else if (capacityChoice === 'keep' && profile.supported === true && profile.topology === topology
-    && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) capacityMode = profile.capacity_mode;
-  else capacityMode = capacityChoice === 'manual' ? agentControl.CAPACITY_MODES.MANUAL : agentControl.CAPACITY_MODES.AUTO;
-  const manualMaximum = capacityMode === agentControl.CAPACITY_MODES.MANUAL ? (args.claudeManualMaximum ?? profile.manual_maximum) : 0;
-  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL && (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > agentControl.MAX_MANUAL_WORKERS)) {
-    throw new Error('Manual Claude agent maximum is outside the supported bounds.');
-  }
-  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL) args.claudeManualMaximum = manualMaximum;
-  args.setupChoices.claudeTopology = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct' : (topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
-  args.setupChoices.claudeAgentCapacity = capacityMode === agentControl.CAPACITY_MODES.AUTO ? 'automatic' : (capacityMode === agentControl.CAPACITY_MODES.MANUAL ? 'manual' : 'root-only');
-  return { topology, capacity_mode: capacityMode, manual_maximum: manualMaximum };
-}
-
-function currentHelperOutcome(current) {
-  const helperCount = current.delegation?.helper_count;
-  if (Number.isSafeInteger(helperCount)) {
-    if (helperCount === 0) return 'Codex currently works without helper agents.';
-    if (helperCount === 1) return 'Codex currently allows one helper at most.';
-    return `Codex currently allows up to ${helperCount} helpers. Risk: this may use substantial memory or make the computer unresponsive.`;
-  }
-  if (current.runtime?.runtime === RUNTIMES.DISABLED) return 'Helper agents are currently unavailable.';
-  if (current.runtime?.runtime === RUNTIMES.UNKNOWN) return 'The current helper limit could not be verified safely, so setup will not guess.';
-  return 'No effective helper limit is currently configured.';
+  const choice = args.setupChoices.claudeTopology || 'keep';
+  const kept = profile.supported === true
+    && [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.BROADER_NATIVE].includes(profile.topology);
+  const topology = choice === 'keep'
+    ? (kept ? profile.topology : agentControl.TOPOLOGIES.ROOT_ONLY)
+    : (choice === 'broader-native' ? agentControl.TOPOLOGIES.BROADER_NATIVE : agentControl.TOPOLOGIES.ROOT_ONLY);
+  args.setupChoices.claudeTopology = topology;
+  return topology;
 }
 
 function currentManagedSourceOutcome(current, args) {
@@ -1938,12 +1737,6 @@ function targetCurrentOutcome(target, appName) {
   if (target.enabled === true) return `Toolkit synchronization is enabled, but the managed ${appName} files are stale or could not be verified as current.`;
   if (target.explicitly_disabled === true) return `Toolkit synchronization is turned off for ${appName}; existing files, if any, are left in place.`;
   return `${appName} was detected, but Toolkit synchronization is not enabled.`;
-}
-
-function helperRecommendationReason(current, runtimeSupported, migrationPending) {
-  if (migrationPending) return 'Preserving the exact legacy setting avoids changing native Codex configuration until you explicitly approve its migration.';
-  if (!runtimeSupported) return 'Toolkit cannot safely map a new limit to unavailable or unverifiable native helper controls.';
-  return 'Codex cannot currently prove Toolkit-controlled admission or enforce medium, non-fast execution for every helper and nested-helper path.';
 }
 
 function setupQuestionSpecs(args, current) {
@@ -2091,7 +1884,6 @@ function setupQuestionSpecs(args, current) {
       afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
     }));
   } else {
-    const capabilitySupported = strictClaudeSetupCapability(current);
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
     specs.push(resolvedQuestion({
       id: 'claude-agent-topology',
@@ -2099,27 +1891,21 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'Whether Claude Code remains root-only, uses only directly controlled Toolkit workers, or permits broader native agent behavior. Broader native agents remain outside Toolkit resource admission.',
+      whatThisControls: 'Whether Claude Code remains root-only, with native Agent/Task launches blocked at the installed Toolkit hook, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.',
       choices: [
-        wizardChoice('toolkit-direct', 'Direct Toolkit-managed subagents only', capabilitySupported
-          ? 'Allow only direct Toolkit-controlled workers with verified resource admission and native Agent/Task bypass blocked.'
-          : 'Request direct Toolkit-controlled workers; setup verifies current active Toolkit bytes and exact worker/checker launches only after approval, and otherwise leaves root-only active.'),
         wizardChoice('root-only', 'Root agent only', 'Use no helper agents under the Toolkit profile.'),
-        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit admission and its resource guarantees.'),
-        wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale or unverifiable strict state falls back safely to root-only.`),
+        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees.'),
+        wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale, unverifiable or retired state falls back safely to root-only.`),
       ],
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
-        outcome: capabilitySupported ? 'Use direct Toolkit-managed subagents with native Agent launches blocked.' : 'Use the root agent only until every strict launch control is verifiable.',
-        reason: capabilitySupported ? 'The detected CLI, installed bytes, trust, active hook, and resource counters satisfy the strict direct-worker boundary.' : 'Unavailable or stale capability proof cannot safely support a strict direct-worker claim.',
+        outcome: 'Use the root agent only, with native Agent/Task launches blocked at the installed hook.',
+        reason: 'Root-only is the verified default; governed workers use the registry-pinned V3 launcher.',
       },
       selected: args.setupChoices.claudeTopology,
       current: `Current topology: ${activeProfile.topology || 'root-only'}.`,
       afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
-      availability: { status: capabilitySupported ? 'available' : 'post-approval-verification-required', condition: capabilitySupported ? 'Existing strict proof is present, but exact launch capability is reverified after approval.' : 'Direct mode is selectable as a request but remains inactive unless every post-approval gate verifies.' },
     }));
-    // Capacity is derived only after the visible topology answer is known. Rendering
-    // this bank cannot create hidden state that later overrides the user's choice.
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
@@ -2163,34 +1949,6 @@ function setupQuestionSpecs(args, current) {
       availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when OpenCode is detected or Toolkit already has enabled state for it.' },
     }));
   }
-  if (current.audit?.targets?.ag2?.detected || current.audit?.targets?.ag2?.enabled) {
-    const target = current.audit.targets.ag2;
-    const targetCurrent = targetCurrentOutcome(target, 'Antigravity');
-    specs.push(resolvedQuestion({
-      id: 'antigravity-integration',
-      key: 'ag2Target',
-      section: 'Other coding apps',
-      title: 'Antigravity',
-      prompt: 'Antigravity Toolkit choice',
-      whatThisControls: 'Whether Toolkit synchronizes an Antigravity plugin-scoped integration containing plugin metadata, installed-version metadata, the Toolkit adapter, and managed skill folders. This does not install Antigravity or the optional Python AG2 package.',
-      choices: [
-        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.'),
-        wizardChoice('disable', 'Turn off', 'Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${targetCurrent}`),
-        wizardChoice('skip', 'Skip this time', 'Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.'),
-      ],
-      recommendation: {
-        value: recommendedChoice('ag2Target', current, args),
-        outcome: target.enabled ? 'Keep the current Antigravity integration setting.' : 'Keep Antigravity unchanged unless you intentionally enable Toolkit synchronization.',
-        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving current managed behavior.' : 'Detection alone is not consent to write an Antigravity plugin-scoped folder.',
-      },
-      selected: args.setupChoices.targets.ag2,
-      current: targetCurrent,
-      currentVerification: target.detected === true || target.enabled === true ? 'state-derived' : 'unverified',
-      afterApplying: 'Enable writes the Toolkit-owned Antigravity plugin metadata and skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Restart or reopen Antigravity if it does not reload plugin files automatically.',
-      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when Antigravity is detected or Toolkit already has enabled state for it.' },
-    }));
-  }
   return withPresentationMetadata(specs.map((spec) => ({
     ...spec,
     recommended_value: spec.recommended,
@@ -2216,7 +1974,7 @@ function plannedQuestionBank(args, current) {
   for (const spec of initialSpecs) {
     if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
   }
-  if (planned.host === 'claude-code') resolveClaudeTopologyCapacity(planned, current);
+  if (planned.host === 'claude-code') resolveClaudeTopology(planned, current);
   const resolvedSpecs = setupQuestionSpecs(planned, current);
   assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
@@ -2336,14 +2094,6 @@ function buildNonTtyAnswerPlan(specs, args) {
       missing_message: 'Setup question bank requires an `approve` detail line for custom Codex helper counts above one.',
       secondary_condition: 'helper-count-above-one',
     },
-    {
-      owner_question_id: 'claude-agent-capacity', detail_type: 'claude-manual-maximum',
-      activation_key: 'claudeAgentCapacity', activation_value: 'manual',
-      supplied: () => args.claudeManualMaximum !== null,
-      validation_contract: 'positive integer worker maximum',
-      description: 'positive manual Claude worker maximum',
-      missing_message: 'Setup question bank requires the manual Claude capacity detail as a positive maximum line.',
-    },
   ];
   const details = [];
   for (const definition of detailDefinitions) {
@@ -2386,7 +2136,6 @@ function detailPlanEntryApplies(entry, args) {
   if (entry.detail_type === 'report-retention-days') return !args.updateReportRetentionDaysExplicit;
   if (entry.detail_type === 'codex-helper-count') return args.codexHelperCount === null;
   if (entry.detail_type === 'codex-helper-risk-approval') return args.codexHelperCount > 1 && !args.approveHighHelperCapacity;
-  if (entry.detail_type === 'claude-manual-maximum') return args.claudeManualMaximum === null;
   throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
 }
 
@@ -2401,7 +2150,6 @@ function approvedDetailSummary(entry, args) {
   if (entry.detail_type === 'report-retention-days') return `${args.updateReportRetentionDays} days`;
   if (entry.detail_type === 'codex-helper-count') return `${args.codexHelperCount} helper(s)`;
   if (entry.detail_type === 'codex-helper-risk-approval') return 'approved';
-  if (entry.detail_type === 'claude-manual-maximum') return `${args.claudeManualMaximum} worker(s)`;
   throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
 }
 
@@ -2628,14 +2376,9 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
-  else if (key === 'claudeTopology') {
-    args.setupChoices.claudeTopology = choice;
-    args.claudeTopologyRequested = choice;
-  }
-  else if (key === 'claudeAgentCapacity') args.setupChoices.claudeAgentCapacity = choice;
+  else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
-  else if (key === 'ag2Target') args.setupChoices.targets.ag2 = choice;
 }
 
 function choiceForKey(args, key) {
@@ -2646,10 +2389,8 @@ function choiceForKey(args, key) {
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
-  if (key === 'claudeAgentCapacity') return args.setupChoices.claudeAgentCapacity;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
-  if (key === 'ag2Target') return args.setupChoices.targets.ag2;
   return '';
 }
 
@@ -2868,19 +2609,6 @@ async function promptForHelperCount(lines, rl) {
   }
 }
 
-async function promptForClaudeManualMaximum(lines, rl) {
-  if (lines) {
-    const value = nextNonEmptyLine(lines);
-    if (!value) throw new Error('Manual Claude agent capacity requires a maximum answer');
-    return parsePositiveInteger(value, 'Manual Claude agent maximum');
-  }
-  for (;;) {
-    const answer = (await rl.question('Manual maximum for Toolkit-managed Claude workers: ')).trim();
-    try { return parsePositiveInteger(answer, 'Manual Claude agent maximum'); }
-    catch (error) { console.log(error.message); }
-  }
-}
-
 async function requireHighHelperCapacityApproval(args, lines, rl) {
   if (args.codexHelperCount <= 1 || args.approveHighHelperCapacity) return;
   console.log('WARNING: More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work.');
@@ -2934,8 +2662,6 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
       args.codexHelperCount = await promptForHelperCount(lines, null);
     } else if (entry.detail_type === 'codex-helper-risk-approval') {
       await requireHighHelperCapacityApproval(args, lines, null);
-    } else if (entry.detail_type === 'claude-manual-maximum') {
-      args.claudeManualMaximum = await promptForClaudeManualMaximum(lines, null);
     } else {
       throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
     }
@@ -2947,14 +2673,6 @@ function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
   if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
-  if (spec.key === 'claudeTopology' && value === 'toolkit-direct') {
-    return strictClaudeSetupCapability(current)
-      ? 'requested direct; exact launch and active-plugin verification still rerun after approval'
-      : 'request only; root-only remains active unless post-approval verification passes';
-  }
-  if (spec.key === 'claudeAgentCapacity' && value === 'automatic') {
-    return 'automatic requested; the final limit is derived post-approval from verified live capacity';
-  }
   return value;
 }
 
@@ -2979,8 +2697,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   let needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
   let needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-  let needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
-  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails;
   const needsCodexProposalInput = !isTTY && needsPipedCodexProposalApproval(args, current);
   const conciseAllowed = !args.yesRecommended
     && initialMissingCount > 0
@@ -3036,7 +2753,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
       needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
         && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-      needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
     }
   }
 
@@ -3063,12 +2779,10 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
       needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
         && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-      needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
       const detailInstructions = [];
       if (needsCustomPath) detailInstructions.push('Choose another update location requires `--repo-root <path>` or complete line-by-line input.');
       if (needsRetentionDetails) detailInstructions.push('Choose another report-retention duration requires `--update-report-retention-days <positive-days>` or complete line-by-line input.');
       if (needsHelperDetails) detailInstructions.push('The selected helper compatibility choice requires its explicit bounded helper details.');
-      if (needsClaudeManualDetails) detailInstructions.push('Manual Claude capacity requires `--claude-agent-maximum <positive-number>`.');
       if (detailInstructions.length) {
         throw new Error(`Concise non-interactive setup answer requires additional values: ${detailInstructions.join(' ')}`);
       }
@@ -3086,7 +2800,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
     needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
       && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-    needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
   }
 
   if (args.yesRecommended) {
@@ -3098,7 +2811,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails;
   if (remainingPromptedAnswers && !lines && !rl) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
@@ -3120,9 +2833,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
       await requireHighHelperCapacityApproval(args, lines, rl);
     }
-    if (args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null) {
-      args.claudeManualMaximum = await promptForClaudeManualMaximum(lines, rl);
-    }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
       args.repoRoot = await promptForCustomPath(lines, rl);
       args.repoRootExplicit = true;
@@ -3133,7 +2843,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
 
   if (lines) completeStdinConsumed = true;
 
-  if (args.host === 'claude-code') resolveClaudeTopologyCapacity(args, current);
+  if (args.host === 'claude-code') resolveClaudeTopology(args, current);
   const confirmedSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
   const displayedById = new Map(displayedSpecs.map((spec) => [spec.id, spec]));
@@ -3161,7 +2871,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
     console.log(`- Detail ${entry.order} ${owner}: ${entry.description} - ${approvedDetailSummary(entry, args)}`);
   }
-  if (!nonTtyAnswerPlan && args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
   if (!nonTtyAnswerPlan && args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
     console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
@@ -3169,7 +2878,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   }
   return {
     appeared: true,
-    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
@@ -3876,7 +3585,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
-  console.log('Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children from verified available memory.');
+  console.log('Helper-agent capacity questions shown: no');
   console.log('Preference/target writes before answers: no');
   console.log('');
   if (args.host === 'codex') {
@@ -3922,12 +3631,8 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   } else {
     console.log('## Claude Code agent topology');
     console.log(`Selected topology: ${unknown(delegation.topology)}`);
-    console.log(`Capacity mode: ${unknown(delegation.capacity_mode)}`);
-    console.log(`Manual maximum backstop: ${delegation.manual_maximum || 'not selected'}; restrictive only and never above the live memory ceiling`);
-    console.log('Toolkit-controlled child effort: medium by default; higher effort requires one named difficult role and narrow justification');
-    console.log('Toolkit-controlled child fast mode: disabled with CLAUDE_CODE_DISABLE_FAST_MODE=1');
-    console.log('Nested Toolkit-controlled children: blocked by direct-only --disallowedTools Agent');
-    console.log('Native, built-in, team, plugin, user-created, and third-party workers outside the launch script: not covered by Toolkit admission');
+    console.log('Governed V3 workers: launched only by the registry-pinned V3 launcher under an authorised controller');
+    console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook when root-only; outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
     console.log('');
   }
@@ -3980,50 +3685,59 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('### OpenCode');
   printTargetSummary('OpenCode', targets.opencode || {}, targetChoices.opencode);
   console.log('');
-  console.log('### AG2/Antigravity');
-  printTargetSummary('AG2', targets.ag2 || {}, targetChoices.ag2);
+  console.log('### Antigravity portable skills');
+  console.log('No native/plugin lifecycle is managed. The opt-in project copy targets <project>/.agents/skills only.');
+  console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
   console.log('');
   console.log('## Validation');
   printValidationSummary(validationResults);
 }
 
-async function execute(args) {
-  const current = await collectCurrentState(args);
-  args.codexRuntime = current.runtime.runtime;
-  const questionBank = await answerSetupQuestionBank(args, current);
-  await confirmSelectedDelegationProposal(args, current, questionBank);
-  const plan = setupPlan(args);
-  printSetupChecklist(plan);
-  const warning = activeToolkitWarning(args);
-  if (warning) console.warn(`WARNING: ${warning}`);
-  const validationResults = [];
-  const managed = verifyAndUpdateTrustedRepo(args, validationResults);
-  const nativeCache = args.host === 'claude-code'
-    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args))
-    : runCodexNativePluginSetup(args);
-  if (args.host === 'claude-code' && args.setupChoices.claudeTopology === 'toolkit-direct') {
-    const activeCurrent = nativeCache.restart_required !== true
-      && nativeCache.current === true
-      && nativeCache.installed_current === true
-      && nativeCache.strict_enforcement_verified === true
-      && nativeCache.trusted === true
-      && nativeCache.hook_active === true
-      && agentControl.validActivationProof(nativeCache.activation_proof, {
-        pluginVersion: nativeCache.installed_version || nativeCache.version,
-        cachePath: nativeCache.cache_path,
-      });
-    current.agentCapability = activeCurrent
-      ? probeClaudeAgentCapability({ ...args, persistedClaudeCli: current.agentProfile?.claude_cli })
-      : { ...current.agentCapability, launch_supported: false, supported: false, launch_probe_status: nativeCache.restart_required === true ? 'restart-pending' : 'current-active-plugin-unverified' };
+// One approved setup execution: collects current state and answers, verifies the
+// managed checkout and native plugin, refreshes direct-agent capability, then runs
+// validation, bridge sync/audit and delegation control in that order.
+class ToolkitSetupExecution {
+  #args; #current = null; #questionBank = null; #validationResults = [];
+  constructor(args) { this.#args = args; }
+
+  async #collectAndAnswer() {
+    const args = this.#args;
+    this.#current = await collectCurrentState(args);
+    args.codexRuntime = this.#current.runtime.runtime;
+    this.#questionBank = await answerSetupQuestionBank(args, this.#current);
+    await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
   }
-  runLiteValidation(args, validationResults);
-  writeBridgePreferences(args);
-  runApprovedTargetSync(args);
-  const audit = runBridgeAudit(args);
-  const delegation = await applyHostDelegationControl(args, current, nativeCache);
-  printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
-  return 0;
+
+  #announcePlan() {
+    printSetupChecklist(setupPlan(this.#args));
+    const warning = activeToolkitWarning(this.#args);
+    if (warning) console.warn(`WARNING: ${warning}`);
+  }
+
+  #nativePluginSetup() {
+    const args = this.#args;
+    if (args.host !== 'claude-code') return runCodexNativePluginSetup(args);
+    return args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args);
+  }
+
+  async execute() {
+    const args = this.#args;
+    await this.#collectAndAnswer();
+    this.#announcePlan();
+    const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const nativeCache = this.#nativePluginSetup();
+    runLiteValidation(args, this.#validationResults);
+    writeBridgePreferences(args);
+    runApprovedTargetSync(args);
+    const audit = runBridgeAudit(args);
+    const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
+    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, audit,
+      questionBank: this.#questionBank, validationResults: this.#validationResults });
+    return 0;
+  }
 }
+
+async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
@@ -4044,6 +3758,9 @@ async function main(argv = process.argv.slice(2)) {
   if (args.help) {
     printHelp();
     return 0;
+  }
+  if (args.opencodeProjectRoot) {
+    return runOpenCodeProjectPluginSetup(args).status;
   }
   if (args.verifyClaudePlugin) {
     runClaudeNativePluginVerify(args);
@@ -4084,14 +3801,10 @@ module.exports = {
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
-  SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL,
-  SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
-  SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
   SETUP_PAUSED_FOR_QUESTION_BANK,
   QUESTION_BANK_BEGIN,
   QUESTION_BANK_COMPLETE,
   MANAGED_QUESTION_BANK_PROTOCOL,
-  MANAGED_PROTOCOL_PROBE_FLAG,
   CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS,
   CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS,
   claudeSetupBudgets,
@@ -4099,7 +3812,6 @@ module.exports = {
   codexDelegationConfigState: delegation.codexDelegationConfigState,
   inspectCodexDelegationConfig: delegation.inspectCodexDelegationConfig,
   inspectClaudeAgentCapability,
-  probeClaudeAgentCapability,
   configureCodexDelegation: delegation.configureCodexDelegation,
   applyHostDelegationControl,
   parseArgs,
@@ -4107,26 +3819,20 @@ module.exports = {
   withPresentationMetadata,
   buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
-  questionBankSemanticIdentity,
   spreadsheetChoiceReference,
   parseConciseQuestionBankAnswer,
   assertQuestionBankAnswerBinding,
   answerSetupQuestionBank,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
-  reconcileClaudeQuestionChoices,
-  resolveClaudeTopologyCapacity,
+  resolveClaudeTopology,
   renderSetupQuestionBankTerminal,
   renderSetupQuestionDocumentation,
   setupQuestionDocumentationSpecs,
   emitCompleteQuestionBank,
-  inspectManagedBankOutput,
-  managedFailureMessage,
-  verifyManagedProtocolIdentity,
   runManagedQuestionBankChild,
   plannedQuestionBank,
   setupPlan,
-  normalizeRemote,
   canPreserveManagedCheckout,
   main
 };

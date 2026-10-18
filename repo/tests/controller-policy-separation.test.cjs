@@ -172,7 +172,8 @@ test('persistent launcher workflow separates shared safeguards from host configu
   assert.match(dotMapping, /Model family: Luna/);
   assert.match(dotMapping, /Reasoning: High/);
   assert.match(dotMapping, /Service tier: Standard/);
-  assert.match(dotMapping, /Claude Code, with the exact controller-selected coding model\/effort and task packet/);
+  assert.match(dotMapping, /Claude Code, with the exact pinned-stack coding model\/effort for the dispatched role and member, and the task packet/);
+  assert.doesNotMatch(dotMapping, /controller-selected coding model/);
   assert.match(dotMapping, /visible PowerShell window on the user's selected connected, authorised laptop/);
   assert.match(dotMapping, /not permission to substitute Claude for a different registered coding route/);
   assert.match(dotMapping, /without silently switching to a hidden, cloud or different-agent execution path/);
@@ -886,7 +887,15 @@ test('candidate acceptance, child completion, and per-repository wait removal st
 
 // These document-contract assertions do not prove host execution or runtime enforcement.
 test('interim document notes are dated, prominent and routed to canonical sections', () => {
-  for (const source of [controller, architecture]) {
+  assert.match(controller, /^# Toolkit Controller\r?\n\r?\n## Current V3 operating procedure/);
+  const historicalBoundary = controller.indexOf('## Historical compatibility reference');
+  const historicalHeading = controller.indexOf('# Toolkit Web Controller Governance', historicalBoundary);
+  assert.ok(historicalBoundary > controller.indexOf('## Current V3 operating procedure'));
+  assert.ok(historicalHeading > controller.indexOf('<details>', historicalBoundary));
+  const architectureBoundary = architecture.indexOf('## Historical compatibility reference');
+  const architectureHeading = architecture.indexOf('\n# ', architectureBoundary) + 1;
+  assert.ok(architectureHeading > architecture.indexOf('<details>', architectureBoundary));
+  for (const source of [controller.slice(historicalHeading), architecture.slice(architectureHeading)]) {
     assert.match(source, /^# [^\r\n]+\r?\n\r?\n\*\*Interim delivery-first operation - 6 October 2026:\*\*/);
     assert.match(source, /At the next safe controller admission\/reconciliation/);
     assert.match(source, /Preserve all accepted safety, assurance, authority and consumed history/);

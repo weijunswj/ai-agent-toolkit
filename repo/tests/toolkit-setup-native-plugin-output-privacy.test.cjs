@@ -31,7 +31,7 @@ test('Claude managed stale refresh captures write JSON and emits only the saniti
   const fixture = privateFixture();
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', fixture.setupRepo, '--repo-remote', fixture.origin,
-    '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only',
+    '--yes-recommended', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'install'
   ], { env: {
     ...isolatedHomeEnv(fixture.home),
@@ -72,7 +72,7 @@ test('Claude write-helper failure is bounded and does not echo captured private 
   const fixture = privateFixture();
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', fixture.setupRepo, '--repo-remote', fixture.origin,
-    '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only',
+    '--yes-recommended', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'install'
   ], { env: {
     ...isolatedHomeEnv(fixture.home),
