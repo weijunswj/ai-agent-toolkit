@@ -877,3 +877,81 @@ test('Codex Toolkit --write fails when timed-out plugin add leaves invalid cache
   assert.match(result.stderr, /installed-state verification failed/i);
   assert.match(result.stderr, /SessionStart|config\/cache fallback requires Codex config/i);
 });
+
+function writeFakeJsonCodex(root, body) {
+  const script = path.join(root, 'fake-json-codex.cjs');
+  fs.writeFileSync(script, `'use strict';\n${body}\n`, 'utf8');
+  return script;
+}
+
+function writeFakeCatalogueCodex(root, targetBytes) {
+  return writeFakeJsonCodex(root, `
+const target = ${targetBytes};
+const description = 'd'.repeat(900);
+const parts = [];
+let size = 16;
+for (let i = 0; size < target; i += 1) {
+  const item = JSON.stringify({ name: 'plugin-' + i, marketplace: 'catalogue', description });
+  parts.push(item);
+  size += item.length + 1;
+}
+process.stdout.write('{"available":[' + parts.join(',') + ']}');
+`);
+}
+
+const OBSERVED_CATALOGUE_BYTES = Math.ceil(3.08 * 1024 * 1024);
+const LIST_ARGS = ['plugin', 'list', '--json', '--available'];
+
+test('Codex JSON runner parses a real-size plugin catalogue that overflows the spawnSync default buffer', () => {
+  const fakeCodex = writeFakeCatalogueCodex(tmpRoot(), OBSERVED_CATALOGUE_BYTES);
+
+  // Default-buffer regression: this fixture must still overflow Node's 1 MiB default.
+  const unbounded = spawnSync(process.execPath, [fakeCodex, ...LIST_ARGS], { encoding: 'utf8', windowsHide: true });
+  assert.equal(unbounded.error && unbounded.error.code, 'ENOBUFS');
+  assert.ok(setup.CODEX_JSON_MAX_OUTPUT_BYTES > OBSERVED_CATALOGUE_BYTES);
+
+  const parsed = setup.runCodexJson(fakeCodex, LIST_ARGS);
+  assert.ok(JSON.stringify(parsed).length >= OBSERVED_CATALOGUE_BYTES);
+  assert.equal(parsed.available[0].name, 'plugin-0');
+
+  const inspected = setup.inspectCodexPluginList({ resolveCodexCommand: () => ({ command: fakeCodex, failures: [] }) });
+  assert.equal(inspected.ok, true);
+  assert.deepEqual(inspected.errors, []);
+  assert.equal(inspected.pluginList.available.length, parsed.available.length);
+});
+
+test('Codex JSON runner rejects output above the bound without echoing the catalogue', () => {
+  const fakeCodex = writeFakeCatalogueCodex(tmpRoot(), setup.CODEX_JSON_MAX_OUTPUT_BYTES + 64 * 1024);
+
+  assert.throws(
+    () => setup.runCodexJson(fakeCodex, LIST_ARGS),
+    (error) => {
+      assert.equal(error.message, 'codex plugin list --json --available output exceeded the 32 MiB limit');
+      return true;
+    }
+  );
+  const inspected = setup.inspectCodexPluginList({ resolveCodexCommand: () => ({ command: fakeCodex, failures: [] }) });
+  assert.equal(inspected.ok, false);
+  assert.deepEqual(inspected.errors, ['Codex CLI plugin inspection failed; current installed plugin state cannot be proven']);
+});
+
+test('Codex JSON runner keeps small-output, empty, failing and invalid JSON command behaviour', () => {
+  const root = tmpRoot();
+  const small = writeFakeJsonCodex(fs.mkdtempSync(path.join(root, 'small-')), `process.stdout.write('{"ok":true}\\n');`);
+  assert.deepEqual(setup.runCodexJson(small, ['plugin', 'marketplace', 'add', root, '--json']), { ok: true });
+
+  const empty = writeFakeJsonCodex(fs.mkdtempSync(path.join(root, 'empty-')), '');
+  assert.deepEqual(setup.runCodexJson(empty, ['plugin', 'remove', 'ai-agent-toolkit@ai-agent-toolkit-local', '--json']), {});
+
+  const failing = writeFakeJsonCodex(fs.mkdtempSync(path.join(root, 'failing-')), `process.stderr.write('remove refused'); process.exit(3);`);
+  assert.throws(
+    () => setup.runCodexJson(failing, ['plugin', 'remove', 'ai-agent-toolkit@ai-agent-toolkit-local', '--json']),
+    /^Error: codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local --json failed: remove refused$/
+  );
+
+  const invalid = writeFakeJsonCodex(fs.mkdtempSync(path.join(root, 'invalid-')), `process.stdout.write('not json');`);
+  assert.throws(
+    () => setup.runCodexJson(invalid, LIST_ARGS),
+    /codex plugin list --json --available returned invalid JSON:/
+  );
+});
