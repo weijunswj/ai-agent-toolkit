@@ -134,6 +134,16 @@ Put persistent status/reports/plans/handoffs and operations/setup/CI/deployment/
 
 After editing, run the smallest validation first, repair targeted failures, rerun, and review the diff for unrelated changes.
 
+## Human-readable Deliverables
+
+**Mandatory for new or materially changed human-facing work:** Name and explain what a person must use, operate, review or maintain in plain, accurate language suited to the intended audience. Applies to app screens, forms, field labels, dashboards, notifications, alerts, errors, instructions, exported documents, scripts' operator output, diagrams and automated workflows. Prefer concise business-purpose names and clear action/condition labels over internal release or programme labels such as `V3`, `N5`, run IDs and implementation history. The established `G0`, `G1` and `G2` gate names are legitimate when the reader needs those gate identities.
+
+For operational artefacts, make it possible to understand **what it is for, what starts it, its inputs, major decisions/actions, outputs or side effects, failure and recovery path, and who should act**. Explain real behaviour, not imagined success. Use stable machine keys/schema IDs for technical interoperability rather than exposing them as user-facing titles. Keep descriptions near the artefact (UI help, workflow canvas notes or maintained companion instructions), short enough to scan, with deeper technical details disclosed separately.
+
+For n8n, use a business-purpose workflow name and descriptive major node names; annotate the trigger, stages, inputs, outputs, error/duplicate/retry handling and manual recovery with supported sticky notes or a maintained equivalent. Preserve node IDs, expression references, connections, credentials and execution behaviour during renames. Existing live workflow changes require their separate instance/operation-specific approval. A tool's lack of a native description field is not permission to invent one.
+
+During the existing G1 validation and UAT, inspect the actual user/operator-facing surface and include enough evidence to establish clarity as well as correctness. The existing G2 review assesses relevant ambiguity; unsafe or materially misleading text is a real finding, not an optional cosmetic preference. No new gate or blanket whole-repository rename follows from unrelated work. Machine protocol strings, historical receipts, frozen evidence and current migration bindings remain unchanged unless their exact consumers and safe transition have been proven.
+
 ## Documentation Closure
 
 For broad docs/audit/planning/readiness/source-of-truth work, merge durable findings into the smallest canonical home; do not create root status/report/plan files unless required.

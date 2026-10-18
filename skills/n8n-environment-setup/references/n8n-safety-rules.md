@@ -202,9 +202,11 @@ Prefer simple built-in n8n nodes over Code nodes.
 
 Prefer readable workflow structure over clever compactness.
 
-Use clear node names.
+**Human-readable workflow presentation is mandatory** when creating or materially changing a workflow for an operator. Give the workflow a concise business-purpose name describing its outcome. Name major nodes by meaningful action or condition and object, not default labels such as "HTTP Request 1", "If2", or internal programme/version codes such as "N5"/"V3". Keep real gate names G0, G1 and G2 when they actually describe a Toolkit gate.
 
-Use sticky notes to document major workflow sections directly on the n8n canvas when useful.
+Provide an operator-facing explanation on the canvas using supported sticky notes, or in an explicit maintained companion description/README when canvas notes are unsuitable. It must state: when the workflow starts; input/source and scope; what the main stages/decisions do; where results are sent or written; expected side effects; how duplicates, retries and errors are handled; and the manual recovery/owner action where applicable. Keep notes concise and place explanations near the relevant stages. A maintainer should understand the business flow without opening every node or reading historical project tickets.
+
+Before a live or offline rename, inspect n8n expression and connection references to existing node names. Preserve node IDs, references, credentials, routes, execution semantics and native permission boundaries. Verify the rendered/exported workflow names, notes and behaviour after changes; include this presentation review in the existing G1 validation and G2 assurance, not a separate gate. Do not alter a live workflow without separately approved target, instance and operation.
 
 Sticky notes may include short operational bullets and a short required manual configuration block when the section contains non-credential static values that must be configured before the workflow can run.
 
