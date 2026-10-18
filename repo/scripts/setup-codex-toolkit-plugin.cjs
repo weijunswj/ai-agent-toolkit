@@ -9,12 +9,14 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.0.6';
+const EXPECTED_TOOLKIT_VERSION = '3.0.7';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
 const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
 const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
+// Real `codex plugin list --json --available` catalogues exceed spawnSync's 1 MiB default (~3 MiB observed).
+const CODEX_JSON_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const CACHE_FINGERPRINT_PATHS = [
   "repo/contracts/toolkit-local-bridge/version.json",
   "repo/scripts/toolkit-evidence-plan-compiler.cjs",
@@ -860,8 +862,13 @@ function resolveCodexCommand(explicitCommand) {
 function runCodexJson(command, args) {
   const result = spawnCodex(command, args, {
     encoding: 'utf8',
-    timeout: commandTimeoutMs()
+    timeout: commandTimeoutMs(),
+    maxBuffer: CODEX_JSON_MAX_OUTPUT_BYTES
   });
+  if (result.error && result.error.code === 'ENOBUFS') {
+    // Report the bound without echoing the truncated catalogue into the error.
+    throw new Error(`codex ${args.join(' ')} output exceeded the ${CODEX_JSON_MAX_OUTPUT_BYTES / (1024 * 1024)} MiB limit`);
+  }
   if (result.status !== 0) {
     throw new Error(`codex ${args.join(' ')} failed: ${commandOutput(result)}`);
   }
@@ -1211,6 +1218,7 @@ module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,
+  CODEX_JSON_MAX_OUTPUT_BYTES,
   MARKETPLACE_REL_PATH,
   CACHE_FINGERPRINT_PATHS,
   CACHE_FINGERPRINT_DIRS,
@@ -1224,6 +1232,7 @@ module.exports = {
   inspectCodexConfiguredPluginState,
   inspectCodexPluginList,
   prepareInstalledSessionStart,
+  runCodexJson,
   sourceSessionStartCommand,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
