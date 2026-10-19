@@ -223,13 +223,14 @@ test('effort settings that cannot be read or verified hold the launch', () => {
     { files: { project: [] } },
     { base_args: ['--setting-sources', 'user,enterprise'] },
     { base_args: ['--settings', 'missing.json'] },
-    { base_args: ['--settings'] },
     { readError: 'EACCES' }
   ]) {
     const calls = [], launcher = effortLauncher({ files: c.files || {}, base_args: c.base_args || [], calls, readError: c.readError || null });
     assert.throws(() => startEffort(launcher, baseEnv({})), refusedWith('LAUNCHER_EFFORT_SETTINGS_UNVERIFIED'), JSON.stringify(c));
     assert.equal(calls.length, 0);
   }
+  // A dangling --settings is now refused earlier, as an incomplete caller option (F2), still before any native process.
+  assert.throws(() => effortLauncher({ base_args: ['--settings'] }), refusedWith('LAUNCHER_ARG_UNSUPPORTED'));
 });
 
 // R1b: the `env` map of every settings source Claude Code applies, the legacy global config and a
@@ -365,16 +366,16 @@ test('the accepted owner-UAT invocation is unchanged by the effort-route check',
   const launcher = effortLauncher({ calls, base_args, files: { project: { hooks: {} }, user: { maxEffortLevel: 'low' } } });
   const g = gate(), run = launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args });
   assert.equal(run.is_error, false);
-  assert.deepEqual(calls[0].args, ['-p', 'work', '--session-id', GateSessionLauncher.nativeSessionId(g, 's1'), '--model', 'claude-opus-5-5',
-    '--effort', 'high', ...base_args, ...extra_args, '--disallowedTools', 'Agent,Task', '--output-format', 'stream-json', '--verbose']);
+  assert.deepEqual(calls[0].args, ['-p', '--session-id', GateSessionLauncher.nativeSessionId(g, 's1'), '--model', 'claude-opus-5-5',
+    '--effort', 'high', '--disallowedTools', 'Agent,Task', ...base_args, ...extra_args, '--output-format', 'stream-json', '--verbose', '--', 'work']);
   assert.deepEqual(run.effort_assurance.setting_sources, ['project', 'local']);
   assert.equal(run.effort_assurance.client_clamp, null, 'the excluded user source does not clamp');
 });
 
 // Claude Code runs a PreToolUse hook that cannot start, crashes or times out as a non-blocking
 // error, so a launched worker's helper path cannot rest on the hook alone. The launcher adds a
-// host-enforced deny rule for the helper tools on start and resume, after every caller argument,
-// and refuses the permission-bypass modes around it.
+// host-enforced deny rule for the helper tools on start and resume, before every caller argument,
+// accepts only complete supported caller options (F2) and refuses the permission-bypass modes.
 test('launched workers start and resume with the native helper tools denied by the host, whatever the caller allows', () => {
   const calls = [], launcher = effortLauncher({ calls, base_args: ['--setting-sources', 'project,local'], files: { project: { hooks: {} } } });
   const g = gate(), extra_args = ['--tools', 'Read,Agent', '--allowedTools', 'Agent', 'Task'];
@@ -383,8 +384,9 @@ test('launched workers start and resume with the native helper tools denied by t
   assert.equal(calls.length, 2);
   for (const call of calls) {
     const at = call.args.indexOf('--disallowedTools');
-    assert.ok(at > call.args.lastIndexOf('Task'), 'the deny follows every caller argument');
-    assert.deepEqual(call.args.slice(at, at + 3), ['--disallowedTools', 'Agent,Task', '--output-format']);
+    assert.equal(call.args.lastIndexOf('--disallowedTools'), at, 'one deny');
+    assert.ok(at < call.args.indexOf('--setting-sources'), 'the deny precedes every caller argument');
+    assert.deepEqual(call.args.slice(at, at + 3), ['--disallowedTools', 'Agent,Task', '--setting-sources']);
   }
 });
 
@@ -398,6 +400,71 @@ test('permission-bypass modes that could lift the helper deny are refused before
   // Same boundary: an ordinary permission mode still launches.
   launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args: ['--permission-mode', 'default'] });
   assert.equal(calls.length, 1);
+});
+
+// F2: Claude Code parses argv with commander: `--` ends option parsing (later tokens are ignored
+// operands) and a value-taking option consumes the next token whatever it is. A caller token that
+// ends parsing, leaves an option without its value or is not a supported option could turn the
+// helper deny into an operand or an option value, so it is refused before any native process.
+test('F2: caller arguments that end option parsing, leave an option without its value or are unsupported are refused on start and resume', () => {
+  const calls = [], launcher = effortLauncher({ calls, base_args: ['--setting-sources', 'project,local'], files: { project: { hooks: {} } } });
+  const refused = [['--'], ['--setting-sources', 'project,local', '--'], ['--append-system-prompt'], ['--name'], ['--setting-sources'],
+    ['--tools'], ['--tools', '--strict-mcp-config'], ['--setting-sources', '--disallowedTools'], ['--settings', '--'], ['--max-turns', '-1'],
+    ['-p'], ['-c'], ['-r', 'x'], ['--resume', 'x'], ['--continue'], ['stray'], ['--unknown-flag'], ['--strict-mcp-config=x'], ['--tools=Read'],
+    ['--disallowedTools', 'Bash'], ['--disallowed-tools', 'Bash'], ['--bare'], ['--name', 'x'], ['--', 'prompt']];
+  const g = gate();
+  for (const extra_args of refused) {
+    for (const run of [() => launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args }),
+      () => launcher.resume(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args })]) {
+      assert.throws(run, e => e.code === 'LAUNCHER_ARG_UNSUPPORTED', JSON.stringify(extra_args));
+    }
+  }
+  for (const base_args of [['--'], ['--append-system-prompt'], ['--setting-sources', 'project', '--'], ['stray']]) {
+    assert.throws(() => effortLauncher({ calls, base_args }), e => e.code === 'LAUNCHER_ARG_UNSUPPORTED', JSON.stringify(base_args));
+  }
+  assert.equal(calls.length, 0, 'no native process for a refused argument shape');
+});
+
+test('F2: the helper deny precedes every caller token and the prompt is the final operand, on start and resume', () => {
+  const calls = [], base_args = ['--setting-sources', 'project,local'];
+  const launcher = effortLauncher({ calls, base_args, files: { project: { hooks: {} } } });
+  const g = gate(), extra_args = ['--tools', 'Read,Agent', '--allowedTools', 'Agent', 'Task'];
+  for (const prompt of ['work', '--', '--disallowedTools', '-p', '- item', '--output-format=text']) {
+    launcher.start(g, { session_id: 's1', prompt, cwd: CWD, env: baseEnv({}), extra_args });
+    launcher.resume(g, { session_id: 's1', prompt, cwd: CWD, env: baseEnv({}), extra_args });
+  }
+  assert.equal(calls.length, 12);
+  for (const { args } of calls) {
+    const deny = args.indexOf('--disallowedTools');
+    assert.deepEqual(args.slice(deny, deny + 3), ['--disallowedTools', 'Agent,Task', '--setting-sources'], 'deny before the first caller token');
+    assert.equal(args.indexOf('--'), args.length - 2, 'a single terminator, immediately before the prompt');
+    assert.deepEqual(args.slice(-5, -2), ['--output-format', 'stream-json', '--verbose']);
+  }
+  assert.deepEqual(calls.filter((c, i) => i % 2 === 0).map(c => c.args.at(-1)), ['work', '--', '--disallowedTools', '-p', '- item', '--output-format=text']);
+  for (const prompt of [undefined, '', 7, ['work']]) {
+    assert.throws(() => launcher.start(g, { session_id: 's1', prompt, cwd: CWD, env: baseEnv({}) }), e => e.code === 'LAUNCHER_ARGS_INVALID', String(prompt));
+    assert.throws(() => launcher.resume(g, { session_id: 's1', prompt, cwd: CWD, env: baseEnv({}) }), e => e.code === 'LAUNCHER_ARGS_INVALID', String(prompt));
+  }
+  assert.equal(calls.length, 12);
+});
+
+test('F2: complete supported caller options still launch and resume', () => {
+  const calls = [], launcher = effortLauncher({ calls, base_args: ['--setting-sources', 'project,local', '--strict-mcp-config', '--plugin-dir', 'candidate'],
+    files: { project: { hooks: {} } } });
+  const g = gate();
+  const accepted = [[], ['--agents', 'agents.json', '--tools', 'Read,Edit', '--allowedTools', 'Read', 'Agent', '--include-hook-events'],
+    ['--tools', ''], ['--allowed-tools', 'Read', '--max-turns', '2'], ['--append-system-prompt', 'Be brief.'], ['--append-system-prompt=- leading dash'],
+    ['--settings={"permissions":{"allow":["Agent"]}}'], ['--add-dir', 'a', 'b', '--mcp-config', 'mcp.json'], ['--permission-mode', 'plan'],
+    ['--include-partial-messages', '--no-session-persistence']];
+  for (const extra_args of accepted) {
+    launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args });
+    launcher.resume(g, { session_id: 's1', prompt: 'again', cwd: CWD, env: baseEnv({}), extra_args });
+  }
+  assert.equal(calls.length, accepted.length * 2);
+  calls.forEach(({ args }, i) => {
+    const extra = accepted[Math.floor(i / 2)], deny = args.indexOf('--disallowedTools');
+    assert.deepEqual(args.slice(deny + 2 + 5, deny + 2 + 5 + extra.length), extra, 'caller options pass unchanged after the base options');
+  });
 });
 
 // R1c-F1: Claude Code keeps an explicit empty CLAUDE_CONFIG_DIR and resolves a relative one (or a relative home) against the

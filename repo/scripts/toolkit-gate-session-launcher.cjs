@@ -26,12 +26,36 @@ const ROUTE_FLAGS = Object.freeze(['--model', '--effort', '--fallback-model', '-
 // not depend on the hook, and refuses the permission-bypass modes around it.
 const HELPER_TOOLS_DENIED = Object.freeze(['--disallowedTools', 'Agent,Task']);
 const PERMISSION_BYPASS_FLAGS = Object.freeze(['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions']);
+// Claude Code parses argv with commander: `--` ends option parsing (later tokens are ignored
+// operands), an option taking a value consumes the next token whatever it is, and a variadic
+// option consumes tokens up to the next one starting with `-`. The deny is emitted before every
+// caller token and the prompt after a final `--`; caller tokens must form complete supported
+// options, so no caller token or prompt can end parsing early or turn a launcher token into a
+// value. Values starting with `-` are passed only in the `--option=value` form of a one-value option.
+const CALLER_FLAGS = new Set(['--strict-mcp-config', '--include-hook-events', '--include-partial-messages', '--no-session-persistence']);
+const CALLER_VALUE_OPTIONS = new Set(['--setting-sources', '--settings', '--max-turns', '--plugin-dir', '--permission-mode', '--agents',
+  '--append-system-prompt', '--max-budget-usd']);
+const CALLER_VARIADIC_OPTIONS = new Set(['--tools', '--allowedTools', '--allowed-tools', '--add-dir', '--mcp-config']);
 function confinedArgs(args) {
   if (!Array.isArray(args) || args.some(a => typeof a !== 'string')) fail('LAUNCHER_ARGS_INVALID');
   if (args.some(a => ROUTE_FLAGS.some(flag => a === flag || a.startsWith(`${flag}=`)))) fail('LAUNCHER_ROUTE_OVERRIDE_REFUSED');
   if (args.some((a, i) => PERMISSION_BYPASS_FLAGS.some(flag => a === flag || a.startsWith(`${flag}=`))
     || a === '--permission-mode=bypassPermissions' || (a === '--permission-mode' && args[i + 1] === 'bypassPermissions'))) fail('LAUNCHER_PERMISSION_BYPASS_REFUSED');
+  const isValue = token => typeof token === 'string' && !token.startsWith('-');
+  for (let i = 0; i < args.length;) {
+    const token = args[i], eq = token.indexOf('='), name = eq > 0 ? token.slice(0, eq) : token;
+    if (eq > 0 && CALLER_VALUE_OPTIONS.has(name)) { i += 1; continue; }
+    if (eq > 0 || !token.startsWith('--')) fail('LAUNCHER_ARG_UNSUPPORTED');
+    if (CALLER_FLAGS.has(token)) { i += 1; continue; }
+    if (CALLER_VALUE_OPTIONS.has(token) && isValue(args[i + 1])) { i += 2; continue; }
+    if (CALLER_VARIADIC_OPTIONS.has(token) && isValue(args[i + 1])) { i += 2; while (isValue(args[i])) i += 1; continue; }
+    fail('LAUNCHER_ARG_UNSUPPORTED');
+  }
   return [...args];
+}
+function confinedPrompt(prompt) {
+  if (typeof prompt !== 'string' || !prompt) fail('LAUNCHER_ARGS_INVALID');
+  return prompt;
 }
 
 function defaultClaude() {
@@ -317,8 +341,9 @@ class GateSessionLauncher {
 
   // Validates every caller input and the inherited effort route before any native process. The checks and
   // the spawn use the same frozen child environment.
-  #prepare(extra_args, env, cwd) {
+  #prepare(extra_args, env, cwd, prompt) {
     if (!env || typeof env !== 'object' || typeof cwd !== 'string' || !cwd) fail('LAUNCHER_ARGS_INVALID');
+    confinedPrompt(prompt);
     const extra = confinedArgs(extra_args), { model, effort } = this.route;
     const child = childEnvironment(env, this.#platform, this.#parentEnv);
     const effortAssurance = this.#effort.assert({ effort, model, env: child.env, supplied: child.supplied, cwd: path.resolve(cwd),
@@ -331,10 +356,10 @@ class GateSessionLauncher {
     if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     const session = gate.assertExecutable(session_id);
     if (session.history.length !== 1 || session.history[0].event !== 'LAUNCH') fail('LAUNCHER_SESSION_NOT_FRESH');
-    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
+    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd, prompt);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
-    return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--session-id', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, ...HELPER_TOOLS_DENIED, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
+    return { native_session_id: nativeId, ...this.#run(GateSessionLauncher.#argv(['--session-id', nativeId], model, effort, this.#baseArgs, extra, prompt),
+      cwd, childEnv, model, effortAssurance) };
   }
 
   // Resumes the same native session only while the gate keeps it executable,
@@ -342,10 +367,17 @@ class GateSessionLauncher {
   resume(gate, { session_id, prompt, cwd, env = process.env, extra_args = [] }) {
     if (!(gate instanceof GateAssignment) || gate.value.role !== this.#role) fail('LAUNCHER_GATE_ROLE_MISMATCH');
     gate.assertExecutable(session_id);
-    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
+    const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd, prompt);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
-    return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--resume', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, ...HELPER_TOOLS_DENIED, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
+    return { native_session_id: nativeId, ...this.#run(GateSessionLauncher.#argv(['--resume', nativeId], model, effort, this.#baseArgs, extra, prompt),
+      cwd, childEnv, model, effortAssurance) };
+  }
+
+  // One argv shape for start and resume: the helper deny precedes every caller token, and the prompt
+  // is the only operand, after a final `--`, so it is never parsed as an option.
+  static #argv(session, model, effort, base, extra, prompt) {
+    return ['-p', ...session, '--model', model, '--effort', effort, ...HELPER_TOOLS_DENIED, ...base, ...extra,
+      '--output-format', 'stream-json', '--verbose', '--', prompt];
   }
 
   // Native session identity is derived from the gate assignment and gate session,

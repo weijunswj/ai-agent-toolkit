@@ -66,9 +66,14 @@ class HostDialect {
 // `multi_agent_v1` namespaces. A namespaced MultiAgentV2 spawn (default namespace
 // `collaboration`, configurable) reaches hooks under its flattened name, the
 // namespace concatenated with `spawn_agent` (`collaborationspawn_agent`), with no
-// `Agent` matcher alias. Every such name is a helper spawn request here.
-const CODEX_SPAWN_TOOL = /^(?:Agent|[A-Za-z0-9_]*spawn_agent)$/;
-const CODEX_V2_PROBE_TOOL = 'collaborationspawn_agent';
+// `Agent` matcher alias. Codex accepts `features.multi_agent_v2.tool_namespace` only
+// as [A-Za-z0-9_-]+, so the registered matcher and this recogniser share that one
+// alphabet, hyphen included; both hooks.json copies carry exactly CODEX_SPAWN_MATCHER.
+const CODEX_TOOL_NAMESPACE = /^[A-Za-z0-9_-]+$/;
+const CODEX_SPAWN_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$';
+const CODEX_SPAWN_TOOL = new RegExp(CODEX_SPAWN_MATCHER);
+// Registration probes: default/V1 name, its alias, the default V2 namespace and a hyphenated one.
+const CODEX_REGISTRATION_PROBES = Object.freeze(['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent']);
 
 // Codex hook matcher semantics (codex-rs hooks/src/engine/matcher.rs): empty or `*`
 // matches everything; a pattern of only [A-Za-z0-9_|] is an exact pipe list; any
@@ -336,14 +341,19 @@ class NativeHookDecision {
   }
 }
 
-function verifyCodexHelperRegistration(response, { cwd, command }) {
+// Checks a Codex `hooks/list` response. This is an acceptance check run on that output (manually or by a
+// qualification harness); no production launcher calls it. `tool_namespace` is the configured
+// features.multi_agent_v2.tool_namespace, when one is set.
+function verifyCodexHelperRegistration(response, { cwd, command, tool_namespace }) {
+  if (tool_namespace !== undefined && (typeof tool_namespace !== 'string' || !CODEX_TOOL_NAMESPACE.test(tool_namespace))) fail('CODEX_TOOL_NAMESPACE_INVALID');
   const data = compiler.trustedJsonCopy(response);
   const entry = data?.data?.find(item => item.cwd === cwd);
   if (!entry || entry.errors?.length || entry.warnings?.length) fail('CODEX_HOOK_REGISTRATION_UNVERIFIED');
   const hooks = entry.hooks.filter(hook => hook.eventName === 'preToolUse' && hook.command === command);
-  // Evaluate the registered matcher the way Codex does, for the V1 name, its alias and
-  // the flattened MultiAgentV2 name; an exact `spawn_agent|Agent` list misses the last.
-  for (const name of ['spawn_agent', 'Agent', CODEX_V2_PROBE_TOOL]) {
+  // Evaluate the registered matcher the way Codex does, for the V1 name, its alias, the default and a
+  // hyphenated MultiAgentV2 name, and the configured namespace; an exact `spawn_agent|Agent` list misses V2.
+  const probes = tool_namespace === undefined ? CODEX_REGISTRATION_PROBES : [...CODEX_REGISTRATION_PROBES, `${tool_namespace}spawn_agent`];
+  for (const name of probes) {
     const matching = hooks.find(hook => {
       try { return new CodexHookMatcher(hook.matcher).matches(name); } catch { return false; }
     });
@@ -366,6 +376,6 @@ function readNativeSelectionFromEnvironment(environment = process.env) {
   return captured;
 }
 
-module.exports = Object.freeze({ HostDialect, CodexDialect, CodexHookMatcher, PinnedNativeBinding, NativeHelperAdapter, NativeHookDecision,
+module.exports = Object.freeze({ CODEX_SPAWN_MATCHER, HostDialect, CodexDialect, CodexHookMatcher, PinnedNativeBinding, NativeHelperAdapter, NativeHookDecision,
   renderNativeHelperDefinition, claudeNativeModel, readNativeSelectionFromEnvironment, createNativeHelperAdapter,
   pinnedBindingObserver, commandDecision, hookOutput, overrides, resolveClaudeNativeState, verifyCodexHelperRegistration });

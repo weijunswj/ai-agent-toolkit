@@ -24,7 +24,8 @@ function governed(input, environment = process.env) {
 }
 
 // Native hook names: `spawn_agent` (default and multi_agent_v1 namespaces), the
-// `Agent` alias, and the flattened MultiAgentV2 name such as `collaborationspawn_agent`.
+// `Agent` alias, and the flattened MultiAgentV2 name `<namespace>spawn_agent` for any
+// host-valid namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 async function decide(input, environment = process.env) {
   if (!governed(input, environment)) return {};
   const { CodexDialect, commandDecision } = adapter();

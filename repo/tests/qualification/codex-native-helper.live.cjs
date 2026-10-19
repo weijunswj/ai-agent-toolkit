@@ -105,10 +105,24 @@ r = hook(ok, v2(ok));
 record('20-v2-omitted-fork-turns-forks-history', 'deny', r, denied(r, /SESSION_TRANSITION/));
 r = hook(ok, v2(ok, { fork_turns: 'none', model: 'gpt-6.1-sol' }));
 record('21-v2-wrong-model-override', 'deny', r, denied(r, /OVERRIDE_CONFLICT|ROUTE_MISMATCH/));
+// F1: Codex accepts any [A-Za-z0-9_-]+ tool_namespace, so hyphenated names are matched and guarded identically.
+const hyphen = (ep, input = {}) => ({ ...v2(ep, input), tool_name: 'multi-agentspawn_agent' });
+r = hook(ok, hyphen(ok, { fork_turns: 'none' }));
+record('22-v2-hyphenated-namespace-correct-route', 'admitted: exit 0, no output', r, admitted(r));
+r = hook(ok, hyphen(ok));
+record('23-v2-hyphenated-omitted-fork-turns', 'deny', r, denied(r, /SESSION_TRANSITION/));
+// Unbound in the governed Toolkit checkout: held before any child, for the default and hyphenated V2 names.
+for (const tool of ['collaborationspawn_agent', 'multi-agentspawn_agent']) {
+  r = hook(ok, { ...v2(ok, { fork_turns: 'none' }), tool_name: tool, cwd: ROOT }, { TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_NATIVE_HELPER_BINDING_SHA256: '' });
+  record(`24-unbound-${tool}-held`, 'deny', r, denied(r, /NATIVE_BINDING_REQUIRED/));
+}
+const registered = new native.CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(ROOT, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse[0].matcher);
+const reached = ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent'].every(name => registered.matches(name));
+record('25-registered-matcher-reaches-every-spawn-name', 'matched', { reached }, reached);
 
 const report = { schema: 'toolkit.qualification.codex-native-helper-hook.v1', host: 'codex', host_version: codexVersion, stack: 'owner-gpt',
   hook_sha256: sha(fs.readFileSync(HOOK)), scope: 'HOOK_PROCESS_ONLY',
-  native_status: 'UNQUALIFIED: hook process only. Installed 3.0.8 matcher misses collaborationspawn_agent; 3.0.9 needs installation, owner re-trust of the changed hook and real host runs.',
+  native_status: 'UNQUALIFIED: hook process only. Installed 3.0.8 matcher misses namespaced V2 spawns; 3.0.9 needs installation, owner re-trust of the changed hook and real host runs.',
   cases, passed: cases.filter(c => c.pass).length, total: cases.length, result: cases.every(c => c.pass) ? 'HOOK_CASES_PASS' : 'FAIL' };
 fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
 console.log(`${report.result} ${report.passed}/${report.total}`);

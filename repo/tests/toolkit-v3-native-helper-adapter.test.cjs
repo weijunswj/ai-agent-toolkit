@@ -83,7 +83,7 @@ test('Claude resolves actual precedence without treating force, aliases or allow
   b.native_config.mods_present=true;assert.throws(()=>resolveClaudeNativeState(b,{},{}),/CONFIG_UNVERIFIED/);
 });
 test('trusted launcher refuses missing, disabled and untrusted native hook registrations',()=>{
-  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',matcher:'^(?:Agent|[A-Za-z0-9_]*spawn_agent)$',enabled:true,trustStatus:'trusted'};
+  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',matcher:'^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',enabled:true,trustStatus:'trusted'};
   const response={data:[{cwd:'owned',hooks:[hook],errors:[],warnings:[]}]};
   assert.equal(verifyCodexHelperRegistration(response,options).state,'REGISTRATION_VERIFIED');
   for(const field of ['enabled','trustStatus']){const r=clone(response);r.data[0].hooks[0][field]=field==='enabled'?false:'untrusted';assert.throws(()=>verifyCodexHelperRegistration(r,options),/NOT_TRUSTED/);}
@@ -91,6 +91,40 @@ test('trusted launcher refuses missing, disabled and untrusted native hook regis
   // MultiAgentV2 name, so the registration that let collaborationspawn_agent through is refused.
   for(const matcher of ['spawn_agent|Agent','^(spawn_agent|Agent)$']){const r=clone(response);r.data[0].hooks[0].matcher=matcher;assert.throws(()=>verifyCodexHelperRegistration(r,options),/NOT_TRUSTED/,matcher);}
   response.data[0].hooks=[];assert.throws(()=>verifyCodexHelperRegistration(response,options),/NOT_TRUSTED/);
+});
+// F1: Codex validates a MultiAgentV2 tool_namespace as [A-Za-z0-9_-]+. Registration is verified for the
+// default, V1, default-V2, a hyphenated and the actually configured namespace; a matcher that omits any holds.
+test('F1: registration verification probes a hyphenated and the configured tool namespace',()=>{
+  const { CODEX_SPAWN_MATCHER } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',enabled:true,trustStatus:'trusted'};
+  const response=matcher=>({data:[{cwd:'owned',hooks:[{...hook,matcher}],errors:[],warnings:[]}]});
+  // The 3.0.9 candidate matcher omitted `-`: it reported verified while hyphenated spawns escaped.
+  assert.throws(()=>verifyCodexHelperRegistration(response('^(?:Agent|[A-Za-z0-9_]*spawn_agent)$'),options),/CODEX_REQUIRED_HOOK_NOT_TRUSTED/);
+  assert.equal(verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),options).state,'REGISTRATION_VERIFIED');
+  for(const ns of ['collaboration','multi-agent','Team_Alpha-2','-'])assert.equal(verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),{...options,tool_namespace:ns}).state,'REGISTRATION_VERIFIED',ns);
+  // A matcher covering only the probe namespaces still holds for a different configured namespace.
+  const narrow='^(?:Agent|(?:collaboration|multi-agent)?spawn_agent)$';
+  assert.equal(verifyCodexHelperRegistration(response(narrow),options).state,'REGISTRATION_VERIFIED');
+  assert.throws(()=>verifyCodexHelperRegistration(response(narrow),{...options,tool_namespace:'team_x'}),/CODEX_REQUIRED_HOOK_NOT_TRUSTED/);
+  for(const ns of ['team.x','team x','',7,null])assert.throws(()=>verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),{...options,tool_namespace:ns}),/CODEX_TOOL_NAMESPACE_INVALID/,String(ns));
+});
+test('F1: the hook matcher and spawn recognition decide every Codex tool name identically',async t=>{
+  const { CODEX_SPAWN_MATCHER, CodexDialect } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+  const shipped=new CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(__dirname,'../../.codex-plugin/hooks/hooks.json'),'utf8')).hooks.PreToolUse[0].matcher);
+  const spawns=['spawn_agent','Agent','collaborationspawn_agent','multi_agent_v1spawn_agent','multi-agentspawn_agent','collab-v2spawn_agent','Team_Alpha-2spawn_agent','-spawn_agent'];
+  const others=['spawn_agents','Agents','Agent-x','list_agents','multi-agentlist_agents','multi.agentspawn_agent','multi agentspawn_agent','multi/agentspawn_agent','spawn_agentx','x-Agent','exec',''];
+  for(const name of spawns){assert.equal(shipped.matches(name),true,name);assert.equal(CodexDialect.isSpawnRequest(name),true,name);}
+  for(const name of others){assert.equal(shipped.matches(name),false,name);assert.equal(CodexDialect.isSpawnRequest(name),false,name);}
+  assert.equal(new CodexHookMatcher(CODEX_SPAWN_MATCHER).matches('multi-agentspawn_agent'),true);
+  // Bound positive and fork negative on a hyphenated namespace, at the same boundary as collaborationspawn_agent.
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-native-hook-f1-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const f=fixture('codex_spawn_agent'),file=path.join(root,'binding.json');
+  const envelope={source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',session_id:'parent',cwd:'owned',caller_model:'approved-lead',helper_identity:f.event.tool_input.subagent_type,host_state:f.state};
+  const bytes=Buffer.from(JSON.stringify(envelope)),digest=crypto.createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(file,bytes);
+  const options={binding_path:file,binding_sha256:digest},v2=input=>({...f.event,tool_name:'multi-agentspawn_agent',tool_input:{...f.event.tool_input,task_name:'leaf',message:'x',...input}});
+  assert.equal((await commandDecision(v2({fork_turns:'none'}),'codex',options)).hookSpecificOutput.permissionDecision,'allow');
+  for(const input of [{},{fork_turns:'all'},{fork_turns:'none',model:'other-model'}])assert.equal((await commandDecision(v2(input),'codex',options)).hookSpecificOutput.permissionDecision,'deny',JSON.stringify(input));
+  assert.match((await commandDecision(v2({fork_turns:'none'}),'codex',{})).hookSpecificOutput.permissionDecisionReason,/NATIVE_BINDING_REQUIRED/);
 });
 test('Codex hook matcher semantics follow the host: exact pipe lists, unanchored regexes and match-all',()=>{
   const exact=new CodexHookMatcher('spawn_agent|Agent');
