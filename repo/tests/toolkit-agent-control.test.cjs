@@ -176,3 +176,28 @@ test('current consumers never load the retired launcher history, and no launch-c
   assert.equal(Object.hasOwn(require('../scripts/toolkit-github-program-receipt.cjs'), 'launchR093WithAuthenticatedController'), false);
   assert.equal(Object.hasOwn(require('../scripts/setup-toolkit-core.cjs'), 'probeClaudeAgentCapability'), false);
 });
+
+test('a Claude hook whose decision modules cannot load still denies Agent and Task as a handled decision', () => {
+  // Claude Code treats a hook process error (crash, non-zero exit other than 2) as non-blocking,
+  // so a missing or broken module must surface as the hook's own deny, not as a crash.
+  const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const dir = root();
+  try {
+    const copy = path.join(dir, 'toolkit-claude-agent-hook.cjs'); fs.copyFileSync(HOOK, copy);
+    for (const tool of ['Agent', 'Task']) {
+      const broken = spawnSync(process.execPath, [copy], { input: JSON.stringify({ tool_name: tool, hook_event_name: 'PreToolUse', tool_input: { subagent_type: 'toolkit-g1-helper' } }),
+        encoding: 'utf8', windowsHide: true, env: { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir } });
+      assert.equal(broken.status, 0, broken.stderr);
+      const output = JSON.parse(broken.stdout).hookSpecificOutput;
+      assert.equal(output.permissionDecision, 'deny', tool);
+      assert.match(output.permissionDecisionReason, /could not verify the Claude topology safely/);
+    }
+    // Same boundary, intact modules: the root-only profile decision denies.
+    const intact = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ tool_name: 'Agent', hook_event_name: 'PreToolUse', tool_input: {} }),
+      encoding: 'utf8', windowsHide: true, env: { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir } });
+    assert.equal(intact.status, 0, intact.stderr);
+    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /unqualified profiles remain root-only/);
+    const other = spawnSync(process.execPath, [copy], { input: JSON.stringify({ tool_name: 'Read' }), encoding: 'utf8', windowsHide: true });
+    assert.deepEqual(JSON.parse(other.stdout), {}, 'other tools are untouched even when modules are missing');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

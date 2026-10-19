@@ -26,7 +26,7 @@ const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs'
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.0.8';
+const BRIDGE_VERSION = '3.0.9';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 // Antigravity native/plugin installation is not supported by this source.

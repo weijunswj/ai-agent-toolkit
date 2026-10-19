@@ -7,7 +7,30 @@ test('installed V1 export enumerator discovers js and registers the default/name
  const result=operation({projectRoot:root,write:true,generation:'V1'});const file=path.join(root,'.opencode/plugins/ai-agent-toolkit.js');assert.ok(fs.existsSync(file));
  const exports=await import(require('node:url').pathToFileURL(file).href);const factories=[],seen=new Set;for(const value of Object.values(exports)){if(seen.has(value))continue;seen.add(value);assert.equal(typeof value,'function');factories.push(value);}assert.equal(factories.length,1);
  const calls=[],ctx={client:{session:{get:async args=>{calls.push(args);return{data:{id:'root'}}}},app:{agents:async()=>({data:[]})}}};const hooks=await factories[0](ctx);await hooks['chat.params']({sessionID:'root'},{});assert.deepEqual(calls,[{path:{id:'root'}}]);assert.equal(typeof hooks['tool.execute.before'],'function');assert.equal(typeof hooks['chat.headers'],'function');
- await assert.rejects(factories[0]({}),/SESSION_OBSERVER_UNAVAILABLE/);assert.equal(fs.existsSync(path.join(root,'.opencode/plugins/ai-agent-toolkit.mjs')),false);
+ // A factory that threw would leave the native task tool unguarded; missing observers hold task instead.
+ const held=await factories[0]({});await assert.rejects(held['tool.execute.before']({tool:'task',sessionID:'root'},{args:{}}),/OPENCODE_SESSION_OBSERVER_UNAVAILABLE/);
+ assert.equal(await held['tool.execute.before']({tool:'read',sessionID:'root'},{args:{}}),undefined);
+ await assert.rejects(held['chat.params']({sessionID:'child'},{}),/OPENCODE_SESSION_OBSERVER_UNAVAILABLE/,'an unobservable session is treated as a helper child');
+ assert.equal(fs.existsSync(path.join(root,'.opencode/plugins/ai-agent-toolkit.mjs')),false);
+});
+
+test('the installed V1 plugin pins its helper runtime and holds task when that runtime is missing or drifted',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-v1-runtime-pins-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ plugin.installProjectPlugin({projectRoot:root,write:true,generation:'V1'});const file=path.join(root,'.opencode/plugins/ai-agent-toolkit.js'),bytes=fs.readFileSync(file,'utf8');
+ const pins=plugin.helperRuntimePins();assert.ok(Object.keys(pins).some(f=>f.endsWith('toolkit-v3-native-helper-adapter.cjs')));assert.ok(Object.keys(pins).some(f=>f.endsWith('toolkit-v3-helper-guard.cjs')));
+ assert.ok(bytes.includes(JSON.stringify(pins)),'the rendered plugin carries the exact runtime pins');
+ const ctx={client:{session:{get:async({path:{id}})=>({data:{id,parentID:id==='child'?'root':undefined}})},app:{agents:async()=>({data:[]})}}};
+ const variant=async(name,text)=>{const target=path.join(root,'.opencode/plugins',name);fs.writeFileSync(target,text);const m=await import(require('node:url').pathToFileURL(target).href);return m.default(ctx);};
+ // Same boundary, intact runtime: the guard itself decides (no launcher binding here).
+ const intact=await variant('intact.js',bytes);await assert.rejects(intact['tool.execute.before']({tool:'task',sessionID:'root'},{args:{}}),/NATIVE_BINDING_REQUIRED/);
+ const [first]=Object.keys(pins);
+ const drifted=await variant('drifted.js',bytes.replace(pins[first],'0'.repeat(64)));
+ await assert.rejects(drifted['tool.execute.before']({tool:'task',sessionID:'root'},{args:{}}),/OPENCODE_HELPER_RUNTIME_DRIFT/);
+ assert.equal(await drifted['tool.execute.before']({tool:'read',sessionID:'root'},{args:{}}),undefined);
+ assert.equal(await drifted['chat.params']({sessionID:'root'},{}),undefined,'root sessions stay usable');
+ await assert.rejects(drifted['chat.params']({sessionID:'child'},{}),/OPENCODE_HELPER_RUNTIME_DRIFT/);
+ const missing=await variant('missing.js',bytes.replace(JSON.stringify(first),JSON.stringify(path.join(root,'absent-module.cjs'))));
+ await assert.rejects(missing['tool.execute.before']({tool:'task',sessionID:'root'},{args:{}}),/OPENCODE_HELPER_RUNTIME_MISSING/);
 });
 
 test('actual public V2 unavailable pre-dispatch invariant cannot be satisfied by a controlled tool.hook object',()=>{

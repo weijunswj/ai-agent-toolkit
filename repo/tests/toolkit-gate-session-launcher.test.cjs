@@ -366,9 +366,38 @@ test('the accepted owner-UAT invocation is unchanged by the effort-route check',
   const g = gate(), run = launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args });
   assert.equal(run.is_error, false);
   assert.deepEqual(calls[0].args, ['-p', 'work', '--session-id', GateSessionLauncher.nativeSessionId(g, 's1'), '--model', 'claude-opus-5-5',
-    '--effort', 'high', ...base_args, ...extra_args, '--output-format', 'stream-json', '--verbose']);
+    '--effort', 'high', ...base_args, ...extra_args, '--disallowedTools', 'Agent,Task', '--output-format', 'stream-json', '--verbose']);
   assert.deepEqual(run.effort_assurance.setting_sources, ['project', 'local']);
   assert.equal(run.effort_assurance.client_clamp, null, 'the excluded user source does not clamp');
+});
+
+// Claude Code runs a PreToolUse hook that cannot start, crashes or times out as a non-blocking
+// error, so a launched worker's helper path cannot rest on the hook alone. The launcher adds a
+// host-enforced deny rule for the helper tools on start and resume, after every caller argument,
+// and refuses the permission-bypass modes around it.
+test('launched workers start and resume with the native helper tools denied by the host, whatever the caller allows', () => {
+  const calls = [], launcher = effortLauncher({ calls, base_args: ['--setting-sources', 'project,local'], files: { project: { hooks: {} } } });
+  const g = gate(), extra_args = ['--tools', 'Read,Agent', '--allowedTools', 'Agent', 'Task'];
+  launcher.start(g, { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args });
+  launcher.resume(g, { session_id: 's1', prompt: 'again', cwd: CWD, env: baseEnv({}), extra_args });
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    const at = call.args.indexOf('--disallowedTools');
+    assert.ok(at > call.args.lastIndexOf('Task'), 'the deny follows every caller argument');
+    assert.deepEqual(call.args.slice(at, at + 3), ['--disallowedTools', 'Agent,Task', '--output-format']);
+  }
+});
+
+test('permission-bypass modes that could lift the helper deny are refused before any native process', () => {
+  const calls = [], launcher = effortLauncher({ calls, base_args: ['--setting-sources', 'project,local'], files: { project: { hooks: {} } } });
+  for (const extra_args of [['--dangerously-skip-permissions'], ['--allow-dangerously-skip-permissions'], ['--permission-mode', 'bypassPermissions'], ['--permission-mode=bypassPermissions']]) {
+    assert.throws(() => launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args }), e => e.code === 'LAUNCHER_PERMISSION_BYPASS_REFUSED', extra_args.join(' '));
+  }
+  assert.throws(() => effortLauncher({ calls, base_args: ['--dangerously-skip-permissions'], files: {} }), e => e.code === 'LAUNCHER_PERMISSION_BYPASS_REFUSED');
+  assert.equal(calls.length, 0);
+  // Same boundary: an ordinary permission mode still launches.
+  launcher.start(gate(), { session_id: 's1', prompt: 'work', cwd: CWD, env: baseEnv({}), extra_args: ['--permission-mode', 'default'] });
+  assert.equal(calls.length, 1);
 });
 
 // R1c-F1: Claude Code keeps an explicit empty CLAUDE_CONFIG_DIR and resolves a relative one (or a relative home) against the

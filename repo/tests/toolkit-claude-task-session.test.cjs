@@ -28,7 +28,7 @@ test('task profile binds exact source routes and mandatory host ask without sele
  assert.deepEqual(f.profile.parent,{model:'claude-opus-5-5',effort:'high'});
  assert.equal(f.profile.helper.model,'claude-haiku-5-5');assert.equal(f.profile.helper.effort,'xhigh');
  assert.deepEqual(config.settings.permissions.ask,['Agent','Task']);assert.equal(config.settings.hooks.PreToolUse[0].hooks[0].timeout,10);
- assert.deepEqual(config.agents['ai-agent-toolkit:g1-helper'].disallowedTools,['Agent','Task']);
+ assert.deepEqual(config.agents['toolkit-g1-helper'].disallowedTools,['Agent','Task']);
  assert.equal(JSON.stringify(f.profile).includes('broader-native'),false);
  const changed=clone(f.profile);changed.resource_control.consumption_bounds=15;assert.throws(()=>task.validateTaskSessionProfile(changed),/PROFILE_DRIFT/);
 });

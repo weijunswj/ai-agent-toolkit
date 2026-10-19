@@ -1,12 +1,12 @@
 {
   "schema": "toolkit.v3.launch-family-closure.v1",
   "family_id": "automated-launch-route",
-  "statement": "Every automated Toolkit launch of a G0/G1/G2 worker, successor or permitted helper meets the shared pre-inference invariants in repo/scripts/toolkit-v3-launch-assurance.cjs, each through its own host adapter or launcher. ENFORCED means shipped code enforces the invariant on that path; evidence NATIVE means it was exercised on the real host, SOURCE_TEST means source tests only. Native qualification is a separate per-path field and is not raised by this record.",
+  "statement": "Every automated Toolkit launch of a G0/G1/G2 worker, successor or permitted helper meets the shared pre-inference invariants in repo/scripts/toolkit-v3-launch-assurance.cjs, each through its own host adapter or launcher. ENFORCED means shipped code enforces the invariant on that path; evidence SOURCE_TEST means in-process tests, PROCESS the real hook or launcher process without the host, NATIVE the real host, INSTALLED an installed consumer. Hook paths account for every guard-failure layer. Native qualification is a separate field, not raised here; superseded claims stay in its history.",
   "frozen_profile": {
     "hosts": [
-      "Claude Code 2.1.301 on Windows 11 (owner UAT host)",
-      "Codex app-server and PreToolUse hook (source only; native trust not granted)",
-      "OpenCode V1 project plugin (source only; provider login failing)",
+      "Claude Code 2.1.301 standalone CLI on Windows 11 (owner UAT host); the Desktop-bundled 2.1.299 entry still loads the orphaned Toolkit 2.10.14 cache and is outside this candidate until activated",
+      "Codex 0.163.0-alpha.10.2 Desktop app-server and PreToolUse hook on Windows 11 (Toolkit 3.0.8 installed, both hooks trusted 19 Oct 2026; MultiAgentV2 collaboration namespace observed)",
+      "OpenCode 1.18.32 V1 project plugin (source only; plugin, named helper and launcher binding not installed)",
       "Persistent controller (dot) dispatch through the Toolkit launchers above"
     ],
     "statement": "The supported profile is the four host routes above as they exist in this candidate. Paths outside it are listed with in_profile false and held."
@@ -74,15 +74,19 @@
           "code": [{ "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "gate.assertExecutable(session_id);" }],
           "tests": [{ "file": "repo/tests/toolkit-gate-session-launcher.test.cjs", "title": "resume is refused for waiting, submitted, interrupted and retired sessions before any native process" },
             { "file": "repo/tests/toolkit-gate-session-launcher.test.cjs", "title": "resume refuses a gate of another role before any native process" }] },
-        "GUARD_FAILURE": { "disposition": "NOT_APPLICABLE", "reason": "An owned launcher, not a hook: the checks are in the launcher's own call path, so there is no separately registered guard to be missing, disabled or timed out. An unreadable or invalid input holds as LAUNCHER_EFFORT_SETTINGS_UNVERIFIED." },
-        "NO_LEAF_OR_G2_DELEGATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "No automated G2 route ships for Claude: G2 is refused, not substituted; helper delegation is covered by the helper path.",
-          "code": [{ "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "if (!ROLE_ROUTE[role]) fail('LAUNCHER_ROLE_UNSUPPORTED');" }],
-          "tests": [{ "file": "repo/tests/toolkit-v3-launch-ownership.test.cjs", "title": "(e) no root route, however chosen, admits helper delegation from G2, a leaf or an absent request" }] },
+        "GUARD_FAILURE": { "disposition": "NOT_APPLICABLE", "reason": "An owned launcher, not a hook: its checks are in its own call path. An unreadable or invalid input holds as LAUNCHER_EFFORT_SETTINGS_UNVERIFIED. A launched worker's helper path does not rest on the fail-open parent hook: start and resume pass a host deny rule for Agent and Task." },
+        "NO_LEAF_OR_G2_DELEGATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "No automated G2 route ships for Claude: G2 is refused, not substituted. Launched workers get no native helper tools (host deny rule after every caller argument; permission-bypass modes refused), because Claude helper launches are unqualified and a failed hook does not block.",
+          "code": [{ "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "if (!ROLE_ROUTE[role]) fail('LAUNCHER_ROLE_UNSUPPORTED');" },
+            { "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "const HELPER_TOOLS_DENIED = Object.freeze(['--disallowedTools', 'Agent,Task']);" },
+            { "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "fail('LAUNCHER_PERMISSION_BYPASS_REFUSED')" }],
+          "tests": [{ "file": "repo/tests/toolkit-v3-launch-ownership.test.cjs", "title": "(e) no root route, however chosen, admits helper delegation from G2, a leaf or an absent request" },
+            { "file": "repo/tests/toolkit-gate-session-launcher.test.cjs", "title": "launched workers start and resume with the native helper tools denied by the host, whatever the caller allows" },
+            { "file": "repo/tests/toolkit-gate-session-launcher.test.cjs", "title": "permission-bypass modes that could lift the helper deny are refused before any native process" }] },
         "OBSERVED_ROUTE": { "disposition": "ENFORCED", "evidence": "NATIVE", "note": "The owner UAT streams report the pinned model in the native init event; effort is not reported natively.",
           "code": [{ "file": "repo/scripts/toolkit-gate-session-launcher.cjs", "contains": "const routeObserved = init.model === expectedModel;" }],
           "tests": [{ "file": "repo/tests/toolkit-gate-session-launcher.test.cjs", "title": "a native run whose observed model differs from the pinned route is not success" }] }
       },
-      "native_qualification": { "status": "DEMONSTRATED", "basis": "Owner UAT episode owner-202610161435 on Windows/Claude Code 2.1.301 (accepted; UAT_RETAINED). Refusal rows were not run natively; no paid wrong-effort inference." },
+      "native_qualification": { "status": "DEMONSTRATED", "basis": "Owner UAT episode owner-202610161435 on Windows/Claude Code 2.1.301 (accepted; UAT_RETAINED). Refusal rows were not run natively; no paid wrong-effort inference. The 19 Oct 2026 candidate adds a trailing Agent/Task host deny to start and resume: the launcher is source-tested; the deny itself was checked natively on 2.1.301 (Agent absent despite caller allows; present in the control)." },
       "mutation": { "custody": "archives/TK-A7F2/v3-core-20261012/g1-claude-20261016/g2-correction-07/mutation-proof-e1.json", "baseline": "d0f46ad1f204aece04320657bec8b48e21f4f3c7", "mutants_caught": 16 },
       "unqualified": ["exact effective effort (NOT_EXPOSED)", "managed/MDM, server-delivered and organization effort caps", "non-production OAuth global-config file names", "the child-environment model is Node 22/24 child_process serialization and the libuv 1.51 Windows backfill list, re-observed with real children on Windows 11 / Node 24.14.0 and in Linux CI only", "variables Node itself adds at spawn (NODE_V8_COVERAGE; NODE_OPTIONS under the permission model) are outside the checked environment", "Windows case folding of non-ASCII names other than the route names is taken from Node's selection, not independently from Windows", "the POSIX native fallback home (account passwd entry) is exercised only on POSIX hosts; its mutant survives on Windows, where it is equivalent", "symlinked config files", "which file Claude Code selects for a zero-length .config.json without .claude.json (reported UNVERIFIED)"]
     },
@@ -93,11 +97,11 @@
       "in_profile": true,
       "roles": ["G0 and G1 leaf helpers launched with Agent/Task"],
       "entrypoints": [
-        { "file": "repo/scripts/toolkit-claude-agent-hook.cjs", "contains": "return commandDecision(input, 'claude-code', {" },
+        { "file": "repo/scripts/toolkit-claude-agent-hook.cjs", "contains": "return nativeAdapter().commandDecision(input, 'claude-code', {" },
         { "file": ".claude-plugin/hooks/hooks.json", "contains": "toolkit-claude-agent-hook.cjs" }
       ],
       "invariants": {
-        "PINNED_ROUTE": { "disposition": "ENFORCED", "evidence": "NATIVE", "note": "Live 15-case Claude helper matrix at 7cdcf586 (hook, helper and registry bytes unchanged since).",
+        "PINNED_ROUTE": { "disposition": "ENFORCED", "evidence": "NATIVE", "note": "Native through the qualification launcher only: the 15-case matrix at 7cdcf586 and the 19 Oct 2026 receipt (Haiku 5.5 XHigh child under an Opus 5.5 High parent, session-defined helper). This candidate renames the Claude helper to toolkit-g1-helper and loads hook modules lazily; it is not re-run natively.",
           "code": [{ "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "routeMismatch(before.routing.effective_route, expectedRoute, 'effective_route');" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" },
             { "file": "repo/tests/toolkit-claude-helper-agents.test.cjs", "title": "helper definitions take model and effort only from the selected registry stack" }] },
@@ -113,10 +117,16 @@
         "RESUME_AND_SUCCESSOR": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "Resume and fork requests are refused, not checked and allowed.",
           "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED')" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" }] },
-        "GUARD_FAILURE": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "A hook process error denies; the parent hook is the supported blocking boundary.",
-          "code": [{ "file": "repo/scripts/toolkit-claude-agent-hook.cjs", "contains": "Toolkit could not verify the Claude topology safely; continue root-only." },
-            { "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "deny('HOOK_UNAVAILABLE', {" }],
-          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "trusted launcher refuses missing, disabled and untrusted native hook registrations" }] },
+        "GUARD_FAILURE": { "disposition": "HELD", "hold": "CLAUDE_HOOK_FAILURE_NON_BLOCKING", "owner": "#461 installation decision; #470 Claude Code host",
+          "reason": "Claude Code 2.1.301 runs a PreToolUse hook that cannot start, crashes, exits non-zero other than 2 or times out, and a missing hook, as non-blocking. Errors inside the hook deny. Launched workers carry a host deny rule; ordinary installed sessions have no backstop until an owner-approved native Agent/Task deny is installed.",
+          "failure_layers": [
+            { "layer": "HANDLED_EXCEPTION", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Any error inside the decision is caught and written as a JSON deny (PROCESS; host blocks a JSON deny on exit 0, NATIVE I1)." },
+            { "layer": "MODULE_LOAD", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Decision modules load inside the guarded path; a missing module is a handled deny (PROCESS test on a copy without modules)." },
+            { "layer": "PROCESS_START_OR_CRASH", "outcome": "PROCEEDS", "protection": "HELD", "basis": "NATIVE S1, 19 Oct 2026: a hook-process error (exit 1, missing script) is non-blocking, so the tool ran. Launched workers: host deny rule. Ordinary sessions: backstop held." },
+            { "layer": "HOST_TIMEOUT", "outcome": "PROCEEDS", "protection": "HELD", "basis": "NATIVE S1: exceeding the registered hook timeout gives outcome cancelled and the tool ran. Same protection split as a crash." },
+            { "layer": "MISSING_OR_DISABLED", "outcome": "PROCEEDS", "protection": "HELD", "basis": "No per-hook trust step; a disabled plugin or absent hook runs nothing. The Desktop entry loads the orphaned 2.10.14 hook, which allows every Agent call under broader-native (receipt case 13)." },
+            { "layer": "MATCHER_COVERAGE", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Agent|Task matches the observed native name: hook input names the tool Agent although stream init lists Task (NATIVE I1)." }
+          ] },
         "NO_LEAF_OR_G2_DELEGATION": { "disposition": "ENFORCED", "evidence": "NATIVE",
           "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_LEAF_CANNOT_DELEGATE')" },
             { "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "decision: 'NOOP_NO_HELPER_REQUEST'" }],
@@ -125,9 +135,11 @@
           "code": [{ "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "deny('POSTCHECK_CONFIGURATION_DRIFT'" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-helper-guard.test.cjs", "title": "Toolkit V3 helper guard: all fifteen approved synthetic cases for each exact host entry" }] }
       },
-      "native_qualification": { "status": "DEMONSTRATED", "basis": "Live 15-case Claude helper routing matrix on Claude Code 2.1.301 (qualification custody, run at 7cdcf586). The currently installed plugin (bridge 2.10.14) is root-only and denies every Agent launch, which is fail-closed, not this candidate." },
+      "native_qualification": { "status": "UNQUALIFIED", "basis": "Correct route and Toolkit-guard wrong-route prevention were shown natively only through the qualification launcher on Claude Code 2.1.301. Failure resilience is not established for ordinary installed sessions: hook start failure, crash, timeout and absence proceed natively. Installed sessions remain root-only.",
+        "history": [{ "status": "DEMONSTRATED", "basis": "Live 15-case Claude helper routing matrix on Claude Code 2.1.301 (qualification custody, run at 7cdcf586). The currently installed plugin (bridge 2.10.14) is root-only and denies every Agent launch, which is fail-closed, not this candidate.",
+          "superseded_by": "Claude native UAT receipt #461:6266920311 (19 Oct 2026) measured non-blocking hook failure and timeout; V3 section 14 host PASS needs failure resilience." }] },
       "mutation": null,
-      "unqualified": ["candidate hook activation in the installed plugin (not installed)"]
+      "unqualified": ["candidate hook activation in the installed plugin (not installed)", "ordinary installed sessions' native Agent/Task deny backstop (owner settings decision)", "the saved toolkit-g1-helper user agent as the loaded definition (only session-defined helpers were run)", "SessionStart:resume, not observed in print-mode resume or fork"]
     },
     {
       "id": "codex.helper.pretooluse-hook",
@@ -149,13 +161,28 @@
         "INHERITED_CONFIGURATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "Inherited and native-default routes from the pinned host observation must equal the pinned route.",
           "code": [{ "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "if (before.routing.inherited_route !== null) routeMismatch(before.routing.inherited_route, expectedRoute, 'inherited_route');" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" }] },
-        "ZERO_EFFECT_REFUSAL": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "Denial uses the blocking exit status 2 with the reason on stderr.",
-          "code": [{ "file": "repo/scripts/toolkit-codex-helper-hook.cjs", "contains": "process.exitCode = 2;" }],
-          "tests": [{ "file": "repo/tests/toolkit-codex-helper-hook.test.cjs", "title": "inside the V3-governed Toolkit checkout an unbound helper request is blocked before dispatch" }] },
-        "RESUME_AND_SUCCESSOR": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST",
-          "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED')" }],
-          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" }] },
-        "GUARD_FAILURE": { "disposition": "HELD", "hold": "CODEX_HOOK_TRUST_REQUIRED", "owner": "B4 (owner native hook trust or host-scope decision)", "reason": "A hook process error denies, but Codex runs an untrusted or missing hook as absent, so a raw spawn_agent is not blocked until the owner trusts the hook." },
+        "ZERO_EFFECT_REFUSAL": { "disposition": "ENFORCED", "evidence": "PROCESS", "note": "Denial uses the blocking exit status 2 with the reason on stderr; an admitted request is exit 0 with no output, because Codex records a bare permissionDecision allow as a failed hook run. The matcher is evaluated with Codex semantics and covers the flattened MultiAgentV2 name.",
+          "code": [{ "file": "repo/scripts/toolkit-codex-helper-hook.cjs", "contains": "process.exitCode = 2;" },
+            { "file": ".codex-plugin/hooks/hooks.json", "contains": "\"matcher\": \"^(?:Agent|[A-Za-z0-9_]*spawn_agent)$\"" },
+            { "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "const CODEX_SPAWN_TOOL = /^(?:Agent|[A-Za-z0-9_]*spawn_agent)$/;" }],
+          "tests": [{ "file": "repo/tests/toolkit-codex-helper-hook.test.cjs", "title": "inside the V3-governed Toolkit checkout an unbound helper request is blocked before dispatch" },
+            { "file": "repo/tests/toolkit-codex-helper-hook.test.cjs", "title": "the Codex plugin registers the blocking PreToolUse helper hook for spawn_agent, its Agent alias and namespaced MultiAgentV2 spawns" },
+            { "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "Codex hook matcher semantics follow the host: exact pipe lists, unanchored regexes and match-all" }] },
+        "RESUME_AND_SUCCESSOR": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "MultiAgentV2 forks the full history unless fork_turns is exactly none, so an omitted, all or counted fork_turns is a session transition.",
+          "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED')" },
+            { "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "forksSession(toolName, args) {" }],
+          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" },
+            { "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "Codex namespaced MultiAgentV2 spawns are guarded like spawn_agent, and only an explicit fork_turns none is fresh" }] },
+        "GUARD_FAILURE": { "disposition": "HELD", "hold": "CODEX_HOOK_FAILURE_NON_BLOCKING", "owner": "#461 installation decision; #469 Codex host",
+          "reason": "Codex continues the tool when a PreToolUse hook fails, exits non-zero other than 2, times out, returns unsupported output, or is untrusted or disabled (codex-rs 0.163.0-alpha.9 hooks pre_tool_use.rs; the installed build is 0.163.0-alpha.10.2). Errors the hook can see deny with exit 2. The uncontrolled native path needs an owner-approved disable of the native collab tools.",
+          "failure_layers": [
+            { "layer": "HANDLED_EXCEPTION", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Decision errors deny; the hook writes the reason on stderr with exit 2, which Codex blocks on (PROCESS)." },
+            { "layer": "MODULE_LOAD", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Decision modules load inside the guarded path; a copy without its modules denies with exit 2 in the governed checkout (PROCESS)." },
+            { "layer": "PROCESS_START_OR_CRASH", "outcome": "PROCEEDS", "protection": "HELD", "basis": "Host source: a failed run or a non-2 exit code is recorded as a failed hook and the tool continues." },
+            { "layer": "HOST_TIMEOUT", "outcome": "PROCEEDS", "protection": "HELD", "basis": "Host source: hook timed out is a failed hook run, not a block." },
+            { "layer": "MISSING_OR_DISABLED", "outcome": "PROCEEDS", "protection": "HELD", "basis": "Untrusted, changed or disabled hooks are skipped. Changing this matcher changes the hook hash, so 3.0.9 needs owner re-trust." },
+            { "layer": "MATCHER_COVERAGE", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Source now covers collaborationspawn_agent (SOURCE_TEST). NATIVE 19 Oct 2026: under installed 3.0.8 the exact spawn_agent|Agent list missed it and a real child launched with no hook run." }
+          ] },
         "NO_LEAF_OR_G2_DELEGATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST",
           "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_LEAF_CANNOT_DELEGATE')" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native caller identity, leaf delegation and fully-qualified helper cannot be supplied by tool arguments" }] },
@@ -163,9 +190,11 @@
           "code": [{ "file": "repo/scripts/toolkit-v3-helper-guard.cjs", "contains": "deny('POSTCHECK_CONFIGURATION_DRIFT'" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-helper-guard.test.cjs", "title": "Toolkit V3 helper guard: all fifteen approved synthetic cases for each exact host entry" }] }
       },
-      "native_qualification": { "status": "UNQUALIFIED", "basis": "B4: the hook-process matrix ran 17/17; the native run is held on owner hook trust." },
+      "native_qualification": { "status": "UNQUALIFIED", "basis": "Native UAT 19 Oct 2026 (Codex 0.163.0-alpha.10.2, Toolkit 3.0.8, both hooks trusted): a real owner-gpt Luna Max child launched as collaboration spawn_agent with no PreToolUse run, because Codex names it collaborationspawn_agent and the exact spawn_agent|Agent matcher misses that name. Corrected in source; native cases 2-14 not run.",
+        "history": [{ "status": "UNQUALIFIED", "basis": "B4: the hook-process matrix ran 17/17; the native run is held on owner hook trust.",
+          "superseded_by": "Web decision 58 hook trust and the Codex native UAT receipt #461:6266880735 (19 Oct 2026)." }] },
       "mutation": null,
-      "unqualified": ["native Codex hook trust and native matrix", "hosted or cloud Codex coverage"]
+      "unqualified": ["native Codex matrix cases 2-14 on this candidate", "installed 3.0.8 matcher misses MultiAgentV2 spawns until 3.0.9 is installed and its changed hook is re-trusted", "native resume_agent, send_message and followup_task delivery to an already admitted child", "hosted or cloud Codex coverage"]
     },
     {
       "id": "codex.worker.app-server-adapter",
@@ -221,15 +250,24 @@
         "INHERITED_CONFIGURATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "Host-specific: the loaded agent's model and variant are observed before task effects, and chat.params/chat.headers recheck the final provider parameters.",
           "code": [{ "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "contains": "throw new Error('OPENCODE_FINAL_ROUTE_MISMATCH: ' + result.code);" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "OpenCode observed root sessions require no helper binding; children cannot bypass late route checks" }] },
-        "ZERO_EFFECT_REFUSAL": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST",
-          "code": [{ "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "contains": "dispatch_native: () => ({ permission_check: 'VERIFIED', inference_dispatched: false })" }],
-          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "actual V1 receiver observes agent defaults before task effects and seals admitted arguments" }] },
+        "ZERO_EFFECT_REFUSAL": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "The installed plugin verifies the SHA-256 of every helper-runtime module it loads from the Toolkit checkout; a missing or drifted runtime or an absent host observer holds task instead of failing plugin load.",
+          "code": [{ "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "contains": "dispatch_native: () => ({ permission_check: 'VERIFIED', inference_dispatched: false })" },
+            { "file": "repo/scripts/toolkit-opencode-project-plugin.cjs", "contains": "function helperRuntimePins(entry = HELPER_RUNTIME_PATH) {" }],
+          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "actual V1 receiver observes agent defaults before task effects and seals admitted arguments" },
+            { "file": "repo/tests/toolkit-native-wiring.test.cjs", "title": "the installed V1 plugin pins its helper runtime and holds task when that runtime is missing or drifted" }] },
         "RESUME_AND_SUCCESSOR": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST",
           "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED')" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "native adapter translation preserves original fifteen cases across every entry" }] },
-        "GUARD_FAILURE": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST",
-          "code": [{ "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "contains": "reject(new Error('OPENCODE_SESSION_OBSERVATION_TIMEOUT'))" }],
-          "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "OpenCode final child observations fail closed on timeout, missing identity and role mismatch" }] },
+        "GUARD_FAILURE": { "disposition": "HELD", "hold": "OPENCODE_PLUGIN_ABSENCE_UNGUARDED", "owner": "#461 installation decision; #471 OpenCode host",
+          "reason": "Errors inside the in-process V1 hooks hold task, observer timeouts deny and a missing or drifted helper runtime holds task. With no project plugin loaded the native task tool runs unguarded, and the host's handling of a plugin that fails to load is unobserved; the owner-approved project assembly must also deny task outside a bound launch.",
+          "failure_layers": [
+            { "layer": "HANDLED_EXCEPTION", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "tool.execute.before throws a held error before task effects; observer calls have a bounded deadline (SOURCE_TEST)." },
+            { "layer": "MODULE_LOAD", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "Runtime modules are digest-checked before loading; missing, drifted or observer-less setups return hooks that hold task (SOURCE_TEST on the rendered plugin)." },
+            { "layer": "PROCESS_START_OR_CRASH", "outcome": "UNVERIFIED", "protection": "HELD", "basis": "The plugin runs in the host process; how OpenCode 1.18.32 treats a plugin file that fails to parse or import is unobserved." },
+            { "layer": "HOST_TIMEOUT", "outcome": "UNVERIFIED", "protection": "HELD", "basis": "No host-imposed V1 hook deadline is known; the plugin's own observer deadline is 150 ms." },
+            { "layer": "MISSING_OR_DISABLED", "outcome": "PROCEEDS", "protection": "HELD", "basis": "NATIVE 19 Oct 2026: the project plugin is absent on the owner host, so task has no Toolkit guard; a config-level task deny outside bound launches is proposed, not installed." },
+            { "layer": "MATCHER_COVERAGE", "outcome": "DENIED", "protection": "GUARD_DENIES", "basis": "NATIVE 19 Oct 2026: /experimental/tool/ids exposes task, the name the V1 hook checks." }
+          ] },
         "NO_LEAF_OR_G2_DELEGATION": { "disposition": "ENFORCED", "evidence": "SOURCE_TEST", "note": "Rendered helper agents carry permission.task deny.",
           "code": [{ "file": "repo/scripts/toolkit-v3-native-helper-adapter.cjs", "contains": "permission: { task: 'deny' }" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "production helper-definition commands require source-pinned selection without launching or activating" }] },
@@ -237,9 +275,11 @@
           "code": [{ "file": "repo/scripts/toolkit-opencode-helper-adapter.cjs", "contains": "throw new Error('OPENCODE_PARAMETER_CHECK_REQUIRED')" }],
           "tests": [{ "file": "repo/tests/toolkit-v3-native-helper-adapter.test.cjs", "title": "OpenCode observed root sessions require no helper binding; children cannot bypass late route checks" }] }
       },
-      "native_qualification": { "status": "UNQUALIFIED", "basis": "B4: OpenAI OAuth token refresh fails (401); owner re-login required." },
+      "native_qualification": { "status": "UNQUALIFIED", "basis": "Native UAT 19 Oct 2026 (OpenCode 1.18.32, V1 tool.execute.before/task): project plugin, named helper and launcher binding absent; no guarded dispatch and no UAT inference. Source adapter tests passed; that is not native enforcement.",
+        "history": [{ "status": "UNQUALIFIED", "basis": "B4: OpenAI OAuth token refresh fails (401); owner re-login required.",
+          "superseded_by": "OpenCode native UAT receipt of 19 Oct 2026 (Owner-relayed, local receipt SHA-256 7031bf86fb7996a010b49051b7ed59521e8a38ecd356548358adf73d51365f85)." }] },
       "mutation": null,
-      "unqualified": ["native OpenCode run", "a later SDK or native transform after chat.headers"]
+      "unqualified": ["native OpenCode run", "a later SDK or native transform after chat.headers", "an installed project assembly: plugin, toolkit-g1-helper agent and launcher binding", "host behaviour for a plugin that fails to load"]
     },
     {
       "id": "opencode.helper.v2-subagent",

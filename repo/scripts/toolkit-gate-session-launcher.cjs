@@ -20,9 +20,17 @@ const ROLE_ROUTE = Object.freeze({ G0: 'DISCOVERY', G1: 'BUILDER' });
 // Route-affecting native flags come only from the pinned registry binding. A caller may add
 // other supported flags, but never a conflicting model, effort, fallback model or main agent.
 const ROUTE_FLAGS = Object.freeze(['--model', '--effort', '--fallback-model', '--agent']);
+// Claude Code helper launches are not qualified for launched workers, and a PreToolUse hook
+// that cannot start, crashes or times out is non-blocking on Claude Code. The launcher
+// therefore removes the native helper tools itself, as a host-enforced deny rule that does
+// not depend on the hook, and refuses the permission-bypass modes around it.
+const HELPER_TOOLS_DENIED = Object.freeze(['--disallowedTools', 'Agent,Task']);
+const PERMISSION_BYPASS_FLAGS = Object.freeze(['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions']);
 function confinedArgs(args) {
   if (!Array.isArray(args) || args.some(a => typeof a !== 'string')) fail('LAUNCHER_ARGS_INVALID');
   if (args.some(a => ROUTE_FLAGS.some(flag => a === flag || a.startsWith(`${flag}=`)))) fail('LAUNCHER_ROUTE_OVERRIDE_REFUSED');
+  if (args.some((a, i) => PERMISSION_BYPASS_FLAGS.some(flag => a === flag || a.startsWith(`${flag}=`))
+    || a === '--permission-mode=bypassPermissions' || (a === '--permission-mode' && args[i + 1] === 'bypassPermissions'))) fail('LAUNCHER_PERMISSION_BYPASS_REFUSED');
   return [...args];
 }
 
@@ -326,7 +334,7 @@ class GateSessionLauncher {
     const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--session-id', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
+      ...this.#baseArgs, ...extra, ...HELPER_TOOLS_DENIED, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
   }
 
   // Resumes the same native session only while the gate keeps it executable,
@@ -337,7 +345,7 @@ class GateSessionLauncher {
     const { extra, model, effort, effortAssurance, childEnv } = this.#prepare(extra_args, env, cwd);
     const nativeId = GateSessionLauncher.nativeSessionId(gate, session_id);
     return { native_session_id: nativeId, ...this.#run(['-p', prompt, '--resume', nativeId, '--model', model, '--effort', effort,
-      ...this.#baseArgs, ...extra, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
+      ...this.#baseArgs, ...extra, ...HELPER_TOOLS_DENIED, '--output-format', 'stream-json', '--verbose'], cwd, childEnv, model, effortAssurance) };
   }
 
   // Native session identity is derived from the gate assignment and gate session,

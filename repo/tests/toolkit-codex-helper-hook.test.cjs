@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
+const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 function run(input, env = {}) {
   const clean = { ...process.env, ...env };
   for (const key of ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY']) if (!(key in env)) delete clean[key];
@@ -15,12 +16,15 @@ function run(input, env = {}) {
   return { status: r.status, output: JSON.parse(r.stdout.trim() || '{}'), stderr: r.stderr };
 }
 
-test('the Codex plugin registers the blocking PreToolUse helper hook for spawn_agent and its Agent alias', () => {
+test('the Codex plugin registers the blocking PreToolUse helper hook for spawn_agent, its Agent alias and namespaced MultiAgentV2 spawns', () => {
   const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
-  const entry = hooks.hooks.PreToolUse.find(item => item.matcher === 'spawn_agent|Agent');
+  const entry = hooks.hooks.PreToolUse.find(item => /toolkit-codex-helper-hook\.cjs/.test(item.hooks[0].command));
   assert.ok(entry, 'PreToolUse registration');
-  assert.match(entry.hooks[0].command, /toolkit-codex-helper-hook\.cjs/);
-  for (const name of ['spawn_agent', 'Agent']) assert.ok(new RegExp(`^(?:${entry.matcher})$`).test(name), name);
+  // Evaluated with Codex's matcher semantics: the observed native positive was dispatched as
+  // collaborationspawn_agent, which the former exact `spawn_agent|Agent` list never matched.
+  const matcher = new CodexHookMatcher(entry.matcher);
+  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent']) assert.ok(matcher.matches(name), name);
+  assert.equal(new CodexHookMatcher('spawn_agent|Agent').matches('collaborationspawn_agent'), false);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'codex-plugin', 'hooks', 'hooks.json'), 'utf8')), hooks);
 });
 
@@ -33,8 +37,8 @@ test('outside a V3-governed checkout and without a binding the hook makes no dec
 });
 
 test('inside the V3-governed Toolkit checkout an unbound helper request is blocked before dispatch', () => {
-  for (const tool of ['spawn_agent', 'Agent']) {
-    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper' } });
+  for (const tool of ['spawn_agent', 'Agent', 'collaborationspawn_agent']) {
+    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper', fork_turns: 'none' } });
     assert.equal(r.status, 2, tool);
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(r.stderr, /Toolkit helper held: NATIVE_BINDING_REQUIRED/);
@@ -48,5 +52,25 @@ test('a drifted pinned binding is blocked wherever it is supplied', () => {
     const binding = path.join(dir, 'binding.json'); fs.writeFileSync(binding, '{}');
     const r = run({ tool_name: 'spawn_agent', cwd: dir, tool_input: {} }, { TOOLKIT_NATIVE_HELPER_BINDING: binding, TOOLKIT_NATIVE_HELPER_BINDING_SHA256: '0'.repeat(64) });
     assert.equal(r.status, 2); assert.match(r.stderr, /NATIVE_BINDING_DRIFT/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a hook whose decision modules cannot load blocks a governed spawn with exit 2 instead of failing open', () => {
+  // A non-zero exit other than 2, or a crash, is a non-blocking hook failure on Codex.
+  // Run the real hook file from a directory without its modules, in the governed checkout.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-broken-'));
+  try {
+    const copy = path.join(dir, 'toolkit-codex-helper-hook.cjs'); fs.copyFileSync(HOOK, copy);
+    const event = { tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { fork_turns: 'none' } };
+    const clean = { ...process.env }; delete clean.TOOLKIT_NATIVE_HELPER_BINDING; delete clean.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
+    const broken = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });
+    assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed/);
+    assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    // Same boundary, intact modules: the guard itself decides.
+    const intact = run(event);
+    assert.equal(intact.status, 2); assert.match(intact.stderr, /NATIVE_BINDING_REQUIRED/);
+    // Outside a governed checkout the broken copy still makes no decision for other repositories.
+    const elsewhere = spawnSync(process.execPath, [copy], { input: JSON.stringify({ ...event, cwd: dir }), env: clean, encoding: 'utf8', timeout: 20000 });
+    assert.equal(elsewhere.status, 0); assert.equal(elsewhere.stdout, '');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
