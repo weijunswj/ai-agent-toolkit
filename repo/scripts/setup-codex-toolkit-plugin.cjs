@@ -1040,6 +1040,78 @@ function rollbackTargetError(root) {
   }
 }
 
+function toolkitCacheBase(codexHome) {
+  return path.join(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME);
+}
+
+// Structural listing (path, type, size) of the Toolkit marketplace cache that never follows links.
+function listToolkitCacheTree(base) {
+  const entries = [];
+  const stack = [''];
+  while (stack.length) {
+    const rel = stack.pop();
+    for (const entry of fs.readdirSync(path.join(base, rel), { withFileTypes: true })) {
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        entries.push(`${relPath}/`);
+        stack.push(relPath);
+      } else if (entry.isSymbolicLink()) {
+        entries.push(`${relPath}->${fs.readlinkSync(path.join(base, relPath))}`);
+      } else {
+        entries.push(`${relPath}:${entry.isFile() ? fs.lstatSync(path.join(base, relPath)).size : 'special'}`);
+      }
+    }
+  }
+  return entries.sort();
+}
+
+// Toolkit state proving that a Codex home already held an install: config naming the Toolkit
+// marketplace or plugin (enabled or disabled), an installed Toolkit entry in the native list, or
+// anything under the Toolkit marketplace cache. The native list hides a plugin whose marketplace is
+// gone, so config and cache are read directly. A cache layout that cannot be read counts as leftover
+// state. `sha256` fingerprints the plugin config state and cache layout for the rebind's own check.
+function inspectResidualToolkitState(codexHome, pluginList = null) {
+  const evidence = [];
+  const configText = readConfigSnapshot(codexHome).text;
+  const pluginConfig = inspectConfiguredPluginState(configText, pluginId());
+  if (pluginConfig.status === 'enabled' || pluginConfig.status === 'disabled') {
+    evidence.push(`Codex config still has [plugins."${pluginId()}"] (${pluginConfig.status})`);
+  } else if (configText.includes(TOOLKIT_MARKETPLACE_NAME)) {
+    evidence.push(`Codex config still names ${TOOLKIT_MARKETPLACE_NAME}`);
+  }
+  if (findInstalledEntry(pluginList)) evidence.push(`codex plugin list still reports ${pluginId()} as installed`);
+  const base = toolkitCacheBase(codexHome);
+  let cache = [];
+  try {
+    const stat = fs.lstatSync(base);
+    if (!stat.isDirectory()) {
+      cache = [stat.isSymbolicLink() ? `<link ${fs.readlinkSync(base)}>` : '<not a directory>'];
+      evidence.push(`the Toolkit plugin cache path ${base} is not a plain directory`);
+    } else {
+      cache = listToolkitCacheTree(base);
+      const generations = cache.filter((entry) => /^[^/]+\/[^/]+\/$/.test(entry)).map((entry) => entry.slice(0, -1));
+      if (cache.length) {
+        evidence.push(`the Toolkit plugin cache ${base} still holds ${generations.length ? generations.join(', ') : `${cache.length} entries`}`);
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      cache = [`<unreadable ${error.code || 'error'}>`];
+      evidence.push(`the Toolkit plugin cache ${base} cannot be read (${error.code || error.message})`);
+    }
+  }
+  return { evidence, sha256: sha256Hex(JSON.stringify({ pluginConfig: pluginConfig.status, cache })) };
+}
+
+function orphanedToolkitStateMessage(evidence) {
+  return [
+    `Marketplace ${TOOLKIT_MARKETPLACE_NAME} is not configured, but this Codex home still holds Toolkit state from an earlier install: ${evidence.join('; ')}.`,
+    '  This is not a fresh install, so setup will not add the marketplace, remove the plugin or replace its cache. No marketplace, plugin or cache changes were made.',
+    '  If the marketplace was removed outside setup, or a setup journal recorded an interrupted rebind, restore it with `codex plugin marketplace add <previous-source>` and rerun. A previous source other than this repo then needs the separately approved --rebind-marketplace-from transition.',
+    '  Deleting leftover Toolkit plugin config or cache by hand is a separate owner decision for this Codex home; setup never does it from this state.'
+  ].join('\n');
+}
+
 const SETUP_JOURNAL_FILE = 'ai-agent-toolkit-setup-journal.json';
 const SETUP_JOURNAL_RESOLVED = new Set(['completed', 'failed-no-effect', 'rolled-back']);
 
@@ -1096,10 +1168,15 @@ class CodexSetupJournal {
 }
 
 function pendingJournalMessage(pending, journalPath) {
-  const rollback = pending?.rollback?.marketplace_root
-    ? ` The previous marketplace source was ${pending.rollback.marketplace_root}.`
+  const previous = pending?.rollback?.marketplace_root;
+  const restore = previous
+    ? ` The previous marketplace source was ${previous}; if readback no longer shows it, restore it with \`codex plugin marketplace add ${previous} --json\`.`
     : '';
-  return `A previous Toolkit Codex setup step (${pending.step || 'unknown'}, status ${pending.status || 'unknown'}) did not finish with verified readback. Not retrying any native marketplace or plugin operation.${rollback} Review \`codex plugin marketplace list --json\` and \`codex plugin list --json\`, then remove ${journalPath} once the Codex home state is understood.`;
+  return [
+    `A previous Toolkit Codex setup step (${pending.step || 'unknown'}, status ${pending.status || 'unknown'}) did not finish with verified readback. Not retrying any native marketplace or plugin operation.${restore}`,
+    `  Review \`codex plugin marketplace list --json\`, \`codex plugin list --json\` and the Toolkit plugin cache. The journal at ${journalPath} records what was attempted; keep it as recovery evidence.`,
+    '  Deleting or moving the journal does not authorise replaying the step: a later --write rechecks everything and still refuses a missing marketplace with leftover Toolkit state. Move the journal aside only after the Codex home is back in a verified state.'
+  ].join('\n');
 }
 
 function marketplaceMismatchMessage(binding) {
@@ -1186,7 +1263,7 @@ class CodexToolkitWriteTransaction {
     if (state.ok && !this.#options.rebindFrom) return this.#result(state);
     if (state.refusesDowngrade) return this.#result(state);
 
-    const binding = this.#establishBinding(this.#inspectBinding(pluginList), state);
+    const binding = this.#establishBinding(this.#inspectBinding(pluginList), state, pluginList);
 
     try {
       const prepared = prepareInstalledSessionStartIfPresent({ codexHome: this.#options.codexHome });
@@ -1223,12 +1300,19 @@ class CodexToolkitWriteTransaction {
     return this.#result(addOutcome.state);
   }
 
-  #establishBinding(binding, state) {
+  // Runs on the state found at the start of this run, before any native mutation or journal entry.
+  // An absent marketplace found here is a fresh install only without leftover Toolkit state; the
+  // rebind's own intermediate absence is checked separately inside #rebindMarketplace.
+  #establishBinding(binding, state, pluginList) {
     if (this.#options.rebindFrom && binding.status !== 'mismatch') {
       throw new Error(`--rebind-marketplace-from only applies when the marketplace is bound to a different source; current binding is ${binding.status} (${binding.reason}). No marketplace, plugin or cache changes were made.`);
     }
     if (binding.status === 'bound') return binding;
-    if (binding.status === 'absent') return this.#addMarketplace(binding, state);
+    if (binding.status === 'absent') {
+      const residue = inspectResidualToolkitState(this.#options.codexHome, pluginList);
+      if (residue.evidence.length) throw new Error(orphanedToolkitStateMessage(residue.evidence));
+      return this.#addMarketplace(binding, state);
+    }
     if (binding.status === 'mismatch') {
       if (!this.#options.rebindFrom) throw new Error(marketplaceMismatchMessage(binding));
       return this.#rebindMarketplace(binding, state);
@@ -1276,7 +1360,10 @@ class CodexToolkitWriteTransaction {
       throw new Error(`Current marketplace source ${previousRoot} cannot serve as a rollback target: ${rollbackError}. No marketplace, plugin or cache changes were made.`);
     }
     const restoreCommand = `codex plugin marketplace add ${previousRoot} --json`;
-    this.#record('marketplace-remove', before, state, { rollback: { marketplace_root: previousRoot } });
+    // The plugin config and cache must survive the remove unchanged: that exact intermediate state,
+    // not any absent marketplace, is what this transaction may continue from.
+    const residue = inspectResidualToolkitState(this.#options.codexHome);
+    this.#record('marketplace-remove', before, state, { rollback: { marketplace_root: previousRoot, residue_sha256: residue.sha256 } });
 
     let removeError = null;
     try {
@@ -1293,6 +1380,11 @@ class CodexToolkitWriteTransaction {
         ? 'Readback shows the previous source is still bound; no change was made.'
         : `Readback is ${removed.status}; not retrying or rolling back automatically. After reviewing the Codex home, restore the previous source with \`${restoreCommand}\`.`;
       throw new Error(`codex plugin marketplace remove ${TOOLKIT_MARKETPLACE_NAME} --json did not produce a verified removal: ${removeError ? removeError.message : removed.reason}. ${outcome} No plugin or cache changes were made.`);
+    }
+    const intermediate = inspectResidualToolkitState(this.#options.codexHome);
+    if (intermediate.sha256 !== residue.sha256) {
+      this.#journal.finish('failed-unverified', { readback: { marketplace_status: removed.status, marketplace_root: null, residue_sha256: intermediate.sha256 } });
+      throw new Error(`codex plugin marketplace remove ${TOOLKIT_MARKETPLACE_NAME} --json changed the Toolkit plugin config or cache as well as the marketplace, so this is not the intermediate state the rebind continues from. Not adding, retrying or rolling back automatically. After reviewing the Codex home, restore the previous source with \`${restoreCommand}\`. Setup made no plugin add or removal.`);
     }
     this.#journal.step('marketplace-add');
 
@@ -1311,7 +1403,8 @@ class CodexToolkitWriteTransaction {
     this.#journal.step('rollback-add');
     const { error: rollbackAddError, after: restored } = this.#nativeAdd(previousRoot);
     const exact = !rollbackAddError && restored.status === 'mismatch' &&
-      comparablePath(restored.root) === comparablePath(previousRoot) && restored.configSha256 === before.configSha256;
+      comparablePath(restored.root) === comparablePath(previousRoot) && restored.configSha256 === before.configSha256 &&
+      inspectResidualToolkitState(this.#options.codexHome).sha256 === residue.sha256;
     this.#journal.finish(exact ? 'rolled-back' : 'failed-unverified', { readback: { marketplace_status: restored.status, marketplace_root: restored.root || null } });
     if (exact) {
       throw new Error(`Marketplace rebind failed: ${addFailure}. Rolled back: restored the previous marketplace source ${previousRoot} with byte-identical Codex config. No plugin or cache changes were made.`);
@@ -1461,6 +1554,7 @@ function usage() {
     `  codex plugin add ${pluginId()} --json`,
     '',
     `--write never removes the plugin or its cache unless ${TOOLKIT_MARKETPLACE_NAME} is read back as bound to this repo.`,
+    'If the marketplace is missing but Toolkit plugin config or cache remains, --write stops with no changes.',
     'If it is bound to a different source, --write stops with no changes. With separate owner approval,',
     '  --write --rebind-marketplace-from <current-source> runs the native marketplace remove + add once,',
     '  journaled, read back and rolled back on failure. An unresolved journal blocks every later retry.',
