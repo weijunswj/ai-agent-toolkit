@@ -117,12 +117,22 @@ function installedList(options = {}) {
   };
 }
 
+// Fake Codex CLI modelled on the qualified desktop app-server CLI 0.163.0-alpha.10.2 behaviour:
+// same-source `marketplace add` is an idempotent no-op (alreadyAdded true); a same-name add from a
+// different source exits 1 without changing config or cache; `marketplace remove` drops only the
+// marketplace section; `plugin remove` drops the plugin section and its cache.
+const FAKE_CONFIG_PREFIX = '# user-owned comment\nmodel = "user-model"\n\n[marketplaces.unrelated-local]\nsource_type = "local"\nsource = "C:/unrelated"\n\n[plugins."other@unrelated-local"]\nenabled = false\n';
+
 function writeFakeHangingCodex(codexHome, options = {}) {
   const fakeCodexScript = path.join(codexHome, 'fake-codex.cjs');
   const expectedToolkitVersion = setup.EXPECTED_TOOLKIT_VERSION;
+  const initialMarketplaceRoot = options.initialMarketplaceRoot !== undefined
+    ? options.initialMarketplaceRoot
+    : (options.initialInstalled ? repoRoot : '');
   writeJson(path.join(codexHome, 'state.json'), {
-    repoRoot: '',
-    installed: Boolean(options.initialInstalled)
+    marketplaceRoot: initialMarketplaceRoot,
+    installed: Boolean(options.initialInstalled),
+    calls: []
   });
   fs.writeFileSync(fakeCodexScript, `
 'use strict';
@@ -132,16 +142,39 @@ const path = require('node:path');
 
 const codexHome = process.env.CODEX_HOME;
 const statePath = path.join(codexHome, 'state.json');
+const configPath = path.join(codexHome, 'config.toml');
 const args = process.argv.slice(2);
 const omitSessionStart = ${JSON.stringify(Boolean(options.omitSessionStart))};
 const installDelayMs = ${JSON.stringify(options.installDelayMs || 0)};
+const configPrefix = ${JSON.stringify(FAKE_CONFIG_PREFIX)};
+const behaviour = ${JSON.stringify(options.behaviour || {})};
 
 function readState() {
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
 }
 
+function renderConfig(state) {
+  let text = configPrefix;
+  if (state.marketplaceRoot) {
+    text += '\\n[marketplaces.ai-agent-toolkit-local]\\nsource_type = ' + JSON.stringify(behaviour.configSourceType || 'local') + '\\nsource = ' + JSON.stringify(behaviour.configSourceOverride || state.marketplaceRoot) + '\\n';
+    if (behaviour.duplicateConfigSection) text += '\\n[marketplaces."ai-agent-toolkit-local"]\\nsource_type = "local"\\nsource = ' + JSON.stringify(state.marketplaceRoot) + '\\n';
+  }
+  if (state.installed) text += '\\n[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\\nenabled = true\\n';
+  fs.writeFileSync(configPath, text);
+}
+
 function writeState(state) {
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\\n');
+  renderConfig(state);
+}
+
+function recordCall(state) {
+  state.calls.push(args.filter((arg) => arg !== '--json').join(' '));
+}
+
+function sameRoot(left, right) {
+  const norm = (value) => path.resolve(String(value || '')).toLowerCase();
+  return norm(left) === norm(right);
 }
 
 function writeJson(value) {
@@ -177,11 +210,25 @@ function copyPackageFingerprint(repoRoot, cacheRoot) {
 
 function installCache(repoRoot) {
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', ${JSON.stringify(expectedToolkitVersion)});
-  fs.rmSync(root, { recursive: true, force: true });
-  copyPackageFingerprint(repoRoot, root);
+  // Publish the finished cache in one rename so a concurrent setup poll never sees a partial cache.
+  const staging = root + '.staging';
+  fs.rmSync(staging, { recursive: true, force: true });
+  copyPackageFingerprint(repoRoot, staging);
   if (omitSessionStart) {
-    fs.writeFileSync(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }, null, 2) + '\\n');
+    fs.writeFileSync(path.join(staging, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }, null, 2) + '\\n');
   }
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.renameSync(staging, root);
+}
+
+function fail(message) {
+  process.stderr.write('Error: ' + message + '\\n');
+  process.exit(1);
+}
+
+if (args[0] === '__render-config') {
+  renderConfig(readState());
+  process.exit(0);
 }
 
 if (args[0] === 'plugin' && args[1] === '--help') {
@@ -189,29 +236,77 @@ if (args[0] === 'plugin' && args[1] === '--help') {
   process.exit(0);
 }
 
+if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'list') {
+  const state = readState();
+  if (behaviour.marketplaceListFails) fail('marketplace list unavailable');
+  const marketplaces = [{ name: 'unrelated-local', root: 'C:/unrelated' }];
+  if (state.marketplaceRoot) {
+    const entry = { name: 'ai-agent-toolkit-local', root: state.marketplaceRoot };
+    if (behaviour.marketplaceListExtraKey) entry.sourceKind = 'unexpected';
+    marketplaces.unshift(entry);
+    if (behaviour.duplicateMarketplaceEntry) marketplaces.push({ name: 'ai-agent-toolkit-local', root: state.marketplaceRoot });
+  }
+  writeJson({ marketplaces });
+  process.exit(0);
+}
+
 if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
   const state = readState();
-  state.repoRoot = path.resolve(args[3]);
+  recordCall(state);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\\n');
+  const requested = path.resolve(args[3]);
+  if (behaviour.marketplaceAddFails) fail('marketplace add refused by fixture');
+  if (behaviour.marketplaceAddFailsForRoot && sameRoot(requested, behaviour.marketplaceAddFailsForRoot)) fail('marketplace add refused for this source by fixture');
+  if (state.marketplaceRoot && !sameRoot(state.marketplaceRoot, requested)) {
+    fail("marketplace 'ai-agent-toolkit-local' is already added from a different source; remove it before adding this source");
+  }
+  const alreadyAdded = Boolean(state.marketplaceRoot);
+  if (behaviour.marketplaceAddExitsAfterEffect) {
+    state.marketplaceRoot = requested;
+    writeState(state);
+    fail('marketplace add lost its connection after writing config');
+  }
+  if (!alreadyAdded) {
+    state.marketplaceRoot = behaviour.marketplaceAddBindsElsewhere || requested;
+    writeState(state);
+  }
+  writeJson({ marketplaceName: 'ai-agent-toolkit-local', installedRoot: requested, alreadyAdded });
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'remove') {
+  const state = readState();
+  recordCall(state);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\\n');
+  if (!state.marketplaceRoot) fail('marketplace \\x60ai-agent-toolkit-local\\x60 is not configured or installed');
+  if (behaviour.marketplaceRemoveFails) fail('marketplace remove refused by fixture');
+  state.marketplaceRoot = '';
   writeState(state);
-  writeJson({ marketplaceName: 'ai-agent-toolkit-local' });
+  if (behaviour.marketplaceRemoveExitsAfterEffect) fail('marketplace remove lost its connection after writing config');
+  writeJson({ marketplaceName: 'ai-agent-toolkit-local', installedRoot: null });
   process.exit(0);
 }
 
 if (args[0] === 'plugin' && args[1] === 'list') {
   const state = readState();
+  const visible = state.installed && state.marketplaceRoot;
   writeJson({
-    installed: state.installed ? [
+    installed: visible ? [
       {
         pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
         name: 'ai-agent-toolkit',
         marketplaceName: 'ai-agent-toolkit-local',
-        version: ${JSON.stringify(expectedToolkitVersion)},
+        version: state.installedVersion || ${JSON.stringify(expectedToolkitVersion)},
         installed: true,
         enabled: true,
         authPolicy: 'ON_USE',
         source: {
           source: 'local',
-          path: state.repoRoot
+          path: state.marketplaceRoot
+        },
+        marketplaceSource: {
+          sourceType: 'local',
+          source: behaviour.pluginMarketplaceSourceOverride || state.marketplaceRoot
         }
       }
     ] : [],
@@ -221,10 +316,16 @@ if (args[0] === 'plugin' && args[1] === 'list') {
 }
 
 if (args[0] === 'plugin' && args[1] === 'add') {
+  const startState = readState();
+  recordCall(startState);
+  fs.writeFileSync(statePath, JSON.stringify(startState, null, 2) + '\\n');
+  if (!startState.marketplaceRoot) fail('plugin marketplace ai-agent-toolkit-local is not configured');
+  if (behaviour.pluginAddFails) fail('plugin add refused by fixture');
   const finishInstall = () => {
     const state = readState();
-    installCache(state.repoRoot);
+    installCache(state.marketplaceRoot);
     state.installed = true;
+    state.installedVersion = ${JSON.stringify(expectedToolkitVersion)};
     writeState(state);
     process.stdout.write(JSON.stringify({ pluginId: args[2], authPolicy: 'ON_USE' }) + '\\n');
     setInterval(() => {}, 1000);
@@ -236,18 +337,69 @@ if (args[0] === 'plugin' && args[1] === 'add') {
 
 if (args[0] === 'plugin' && args[1] === 'remove') {
   const state = readState();
+  recordCall(state);
   state.installed = false;
   state.removeCount = (state.removeCount || 0) + 1;
   writeState(state);
   fs.rmSync(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit'), { recursive: true, force: true });
-  writeJson({ pluginId: args[2] });
+  writeJson({ pluginId: args[2], name: 'ai-agent-toolkit', marketplaceName: 'ai-agent-toolkit-local' });
   process.exit(0);
 }
 
 process.stderr.write('unexpected fake codex args: ' + args.join(' ') + '\\n');
 process.exit(9);
 `, 'utf8');
+  if (options.installedVersion) {
+    const statePath = path.join(codexHome, 'state.json');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    state.installedVersion = options.installedVersion;
+    writeJson(statePath, state);
+  }
+  // Keep a config a test wrote itself; otherwise start from the fake CLI's own rendering.
+  if (!fs.existsSync(path.join(codexHome, 'config.toml'))) {
+    const rendered = spawnSync(process.execPath, [fakeCodexScript, '__render-config'], {
+      env: { ...process.env, CODEX_HOME: codexHome },
+      encoding: 'utf8',
+      windowsHide: true
+    });
+    assert.equal(rendered.status, 0, rendered.stderr);
+  }
   return fakeCodexScript;
+}
+
+function readFakeState(codexHome) {
+  return JSON.parse(fs.readFileSync(path.join(codexHome, 'state.json'), 'utf8'));
+}
+
+function treeDigest(root) {
+  const crypto = require('node:crypto');
+  const hash = crypto.createHash('sha256');
+  if (!fs.existsSync(root)) return 'absent';
+  const stack = [root];
+  const entries = [];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const absPath = path.join(current, entry.name);
+      const relPath = path.relative(root, absPath).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        entries.push(`${relPath}/`);
+        stack.push(absPath);
+      } else if (entry.isFile()) {
+        entries.push(`${relPath}:${crypto.createHash('sha256').update(fs.readFileSync(absPath)).digest('hex')}`);
+      }
+    }
+  }
+  hash.update(entries.sort().join('\n'));
+  return hash.digest('hex');
+}
+
+function writeOldMarketplace(root) {
+  writeJson(path.join(root, '.agents', 'plugins', 'marketplace.json'), {
+    name: 'ai-agent-toolkit-local',
+    plugins: [{ name: 'ai-agent-toolkit', source: { source: 'local', path: '.' }, policy: { installation: 'AVAILABLE', authentication: 'ON_USE' } }]
+  });
+  return root;
 }
 
 function runSetupWrite(codexHome, fakeCodexPath, options = {}) {
@@ -262,18 +414,19 @@ function runSetupWrite(codexHome, fakeCodexPath, options = {}) {
     '--codex-home',
     codexHome,
     '--codex-cli',
-    fakeCodexPath
+    fakeCodexPath,
+    ...(options.extraArgs || [])
   );
   return spawnSync(process.execPath, args, {
     cwd: repoRoot,
     env: {
       ...process.env,
       CODEX_HOME: codexHome,
-      CODEX_TOOLKIT_CODEX_PLUGIN_ADD_DEADLINE_MS: '2000',
+      CODEX_TOOLKIT_CODEX_PLUGIN_ADD_DEADLINE_MS: options.addDeadlineMs || '2000',
       CODEX_TOOLKIT_CODEX_PLUGIN_ADD_POLL_MS: '50'
     },
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: options.timeout || 10000,
     windowsHide: true
   });
 }
@@ -954,4 +1107,326 @@ test('Codex JSON runner keeps small-output, empty, failing and invalid JSON comm
     () => setup.runCodexJson(invalid, LIST_ARGS),
     /codex plugin list --json --available returned invalid JSON:/
   );
+});
+
+// Marketplace-source binding safety: every destructive plugin or cache effect requires a positive,
+// independently read binding of ai-agent-toolkit-local to the requested source.
+
+const PLUGIN_REMOVE_CALL = 'plugin remove ai-agent-toolkit@ai-agent-toolkit-local';
+const PLUGIN_ADD_CALL = 'plugin add ai-agent-toolkit@ai-agent-toolkit-local';
+
+function bindingScenario(options = {}) {
+  const codexHome = tmpRoot();
+  const cacheBase = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local');
+  if (options.installed) {
+    const cacheRoot = writeInstalledCache(codexHome, { version: options.installedVersion });
+    if (options.staleCache) fs.appendFileSync(path.join(cacheRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n// stale cache\n');
+  }
+  const sentinel = path.join(codexHome, 'user-owned-sentinel.txt');
+  fs.writeFileSync(sentinel, 'unchanged\n');
+  const fakeCodex = writeFakeHangingCodex(codexHome, {
+    initialInstalled: Boolean(options.installed),
+    initialMarketplaceRoot: options.marketplaceRoot,
+    installedVersion: options.installedVersion,
+    behaviour: options.behaviour
+  });
+  const configPath = path.join(codexHome, 'config.toml');
+  return {
+    codexHome,
+    fakeCodex,
+    configPath,
+    cacheBase,
+    sentinel,
+    cacheBefore: treeDigest(cacheBase),
+    configBefore: fs.readFileSync(configPath, 'utf8'),
+    run(extraArgs = []) {
+      return runSetupWrite(codexHome, fakeCodex, { extraArgs });
+    },
+    calls() {
+      return readFakeState(codexHome).calls;
+    },
+    journal() {
+      const journalPath = setup.setupJournalPath(codexHome);
+      return fs.existsSync(journalPath) ? JSON.parse(fs.readFileSync(journalPath, 'utf8')) : null;
+    }
+  };
+}
+
+function assertNoEffects(scenario, result, pattern) {
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  if (pattern) assert.match(result.stderr, pattern);
+  assert.deepEqual(scenario.calls(), []);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore, 'plugin cache must be byte-identical');
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8'), scenario.configBefore, 'Codex config must be byte-identical');
+  assert.equal(fs.readFileSync(scenario.sentinel, 'utf8'), 'unchanged\n');
+  assert.equal(scenario.journal(), null, 'no setup journal is written before a native mutation starts');
+}
+
+test('source mismatch causes zero marketplace, plugin removal and cache effects', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot });
+  const result = scenario.run();
+  assertNoEffects(scenario, result, /already bound to a different source/i);
+  assert.match(result.stderr, /No marketplace, plugin or cache changes were made/i);
+  assert.match(result.stderr, /--rebind-marketplace-from/);
+});
+
+test('same-version stale cache under a different marketplace source is never removed', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, staleCache: true, marketplaceRoot: oldRoot });
+  assertNoEffects(scenario, scenario.run(), /already bound to a different source/i);
+});
+
+test('rebind authority naming a different current source fails before any effect', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const wrongRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot });
+  assertNoEffects(scenario, scenario.run(['--rebind-marketplace-from', wrongRoot]), /does not match the current marketplace source/i);
+});
+
+test('rebind refuses when the current source cannot serve as a rollback target', () => {
+  const missingOldRoot = path.join(tmpRoot(), 'deleted-checkout');
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: missingOldRoot });
+  assertNoEffects(scenario, scenario.run(['--rebind-marketplace-from', missingOldRoot]), /rollback target/i);
+});
+
+test('rebind authority is rejected when the marketplace is already bound or absent', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const bound = bindingScenario({ installed: true, staleCache: true });
+  assertNoEffects(bound, bound.run(['--rebind-marketplace-from', oldRoot]), /only applies when the marketplace is bound to a different source/i);
+  const absent = bindingScenario({ marketplaceRoot: '' });
+  assertNoEffects(absent, absent.run(['--rebind-marketplace-from', oldRoot]), /only applies when the marketplace is bound to a different source/i);
+});
+
+for (const [label, behaviour, pattern] of [
+  ['native marketplace list fails', { marketplaceListFails: true }, /marketplace list --json failed/i],
+  ['native marketplace list reports unexpected metadata', { marketplaceListExtraKey: true }, /unexpected native metadata/i],
+  ['native marketplace list reports a duplicate identity', { duplicateMarketplaceEntry: true }, /ambiguous/i],
+  ['config readback has duplicate marketplace sections', { duplicateConfigSection: true }, /ambiguous/i],
+  ['config readback disagrees with the native source', { configSourceOverride: 'C:/somewhere-else' }, /config readback .*does not match/i],
+  ['config readback reports an unsupported source type', { configSourceType: 'git' }, /unsupported source type/i],
+  ['installed plugin reports a different marketplace source', { pluginMarketplaceSourceOverride: 'C:/somewhere-else' }, /installed plugin marketplace source/i]
+]) {
+  test(`unverifiable binding (${label}) causes zero plugin removals and cache writes`, () => {
+    const scenario = bindingScenario({ installed: true, staleCache: true, behaviour });
+    assertNoEffects(scenario, scenario.run(), pattern);
+  });
+}
+
+test('a refused marketplace add for an absent marketplace stops before plugin installation', () => {
+  const scenario = bindingScenario({ marketplaceRoot: '', behaviour: { marketplaceAddFails: true } });
+  const result = scenario.run();
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [`plugin marketplace add ${repoRoot}`]);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8'), scenario.configBefore);
+  assert.equal(scenario.journal().status, 'failed-no-effect');
+});
+
+test('a marketplace add that binds an unexpected source stops before plugin installation', () => {
+  const elsewhere = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ marketplaceRoot: '', behaviour: { marketplaceAddBindsElsewhere: elsewhere } });
+  const result = scenario.run();
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [`plugin marketplace add ${repoRoot}`]);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  assert.equal(scenario.journal().status, 'failed-unverified');
+});
+
+test('an ambiguous marketplace add result blocks every later retry and plugin effect', () => {
+  const scenario = bindingScenario({ marketplaceRoot: '', behaviour: { marketplaceAddExitsAfterEffect: true } });
+  const first = scenario.run();
+  assert.equal(first.status, 1, `${first.stdout}\n${first.stderr}`);
+  assert.deepEqual(scenario.calls(), [`plugin marketplace add ${repoRoot}`]);
+  assert.equal(scenario.journal().status, 'failed-unverified');
+  const second = scenario.run();
+  assert.equal(second.status, 1, `${second.stdout}\n${second.stderr}`);
+  assert.match(second.stderr, /did not finish with verified readback/i);
+  assert.match(second.stderr, /Not retrying/i);
+  assert.deepEqual(scenario.calls(), [`plugin marketplace add ${repoRoot}`], 'no retry after an ambiguous native result');
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+});
+
+test('a failed marketplace remove during rebind stops before add and plugin replacement', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot, behaviour: { marketplaceRemoveFails: true } });
+  const result = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), ['plugin marketplace remove ai-agent-toolkit-local']);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8'), scenario.configBefore);
+  assert.equal(scenario.journal().status, 'failed-no-effect');
+});
+
+test('an ambiguous marketplace remove during rebind is never followed by add, rollback or plugin effects', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot, behaviour: { marketplaceRemoveExitsAfterEffect: true } });
+  const result = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), ['plugin marketplace remove ai-agent-toolkit-local']);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  const journal = scenario.journal();
+  assert.equal(journal.status, 'failed-unverified');
+  assert.equal(journal.rollback.marketplace_root, oldRoot);
+  assert.match(result.stderr, new RegExp(`codex plugin marketplace add ${escapeForRegex(oldRoot)}`));
+  const retry = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(retry.status, 1);
+  assert.deepEqual(scenario.calls(), ['plugin marketplace remove ai-agent-toolkit-local']);
+});
+
+test('a failed add after rebind remove restores the exact preimage and skips plugin replacement', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot, behaviour: { marketplaceAddFailsForRoot: repoRoot } });
+  const result = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [
+    'plugin marketplace remove ai-agent-toolkit-local',
+    `plugin marketplace add ${repoRoot}`,
+    `plugin marketplace add ${oldRoot}`
+  ]);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8'), scenario.configBefore);
+  assert.equal(scenario.journal().status, 'rolled-back');
+  assert.match(result.stderr, /restored the previous marketplace source/i);
+});
+
+test('already-correct registration performs no marketplace add and no effects when current', () => {
+  const scenario = bindingScenario({ installed: true });
+  const result = scenario.run();
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), []);
+  assert.equal(treeDigest(scenario.cacheBase), scenario.cacheBefore);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8'), scenario.configBefore);
+  assert.equal(JSON.parse(result.stdout).marketplace_transition, 'none');
+});
+
+test('already-correct registration replaces a stale cache exactly once without a duplicate add', () => {
+  const scenario = bindingScenario({ installed: true, staleCache: true });
+  const first = scenario.run();
+  assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
+  assert.deepEqual(scenario.calls(), [PLUGIN_REMOVE_CALL, PLUGIN_ADD_CALL]);
+  const second = scenario.run();
+  assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+  assert.deepEqual(scenario.calls(), [PLUGIN_REMOVE_CALL, PLUGIN_ADD_CALL], 'idempotent replay adds no effects');
+});
+
+test('exactly one permitted plugin replacement succeeds under a positively verified binding', () => {
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12' });
+  const result = scenario.run();
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [PLUGIN_REMOVE_CALL, PLUGIN_ADD_CALL]);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.version, setup.EXPECTED_TOOLKIT_VERSION);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8').startsWith(FAKE_CONFIG_PREFIX), true, 'unrelated config is preserved');
+  assert.equal(fs.readFileSync(scenario.sentinel, 'utf8'), 'unchanged\n');
+  assert.equal(scenario.journal().status, 'completed');
+});
+
+test('gated rebind performs one marketplace transition and one plugin replacement with readback', () => {
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', marketplaceRoot: oldRoot });
+  const result = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [
+    'plugin marketplace remove ai-agent-toolkit-local',
+    `plugin marketplace add ${repoRoot}`,
+    PLUGIN_REMOVE_CALL,
+    PLUGIN_ADD_CALL
+  ]);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.marketplace_transition, 'rebound');
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8').startsWith(FAKE_CONFIG_PREFIX), true);
+  const journal = scenario.journal();
+  assert.equal(journal.status, 'completed');
+  assert.equal(journal.rollback.marketplace_root, oldRoot);
+  const replay = scenario.run(['--rebind-marketplace-from', oldRoot]);
+  assert.equal(replay.status, 1, 'a replayed rebind authority is refused once the binding is current');
+  assert.equal(scenario.calls().length, 4);
+});
+
+test('a failed plugin add after verified removal preserves rollback state and unrelated content', () => {
+  const scenario = bindingScenario({ installed: true, installedVersion: '2.10.12', behaviour: { pluginAddFails: true } });
+  const result = scenario.run();
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(scenario.calls(), [PLUGIN_REMOVE_CALL, PLUGIN_ADD_CALL]);
+  const journal = scenario.journal();
+  assert.equal(journal.status, 'failed-unverified');
+  assert.equal(journal.preimage.installed_version, '2.10.12');
+  assert.equal(journal.preimage.marketplace_root, repoRoot);
+  assert.equal(fs.readFileSync(scenario.configPath, 'utf8').startsWith(FAKE_CONFIG_PREFIX), true);
+  assert.equal(fs.readFileSync(scenario.sentinel, 'utf8'), 'unchanged\n');
+  const retry = scenario.run();
+  assert.equal(retry.status, 1);
+  assert.match(retry.stderr, /did not finish with verified readback/i);
+  assert.deepEqual(scenario.calls(), [PLUGIN_REMOVE_CALL, PLUGIN_ADD_CALL], 'no automatic retry after a failed replacement');
+});
+
+test('plugin removal is never selected without a positively bound marketplace source', () => {
+  const state = { installed: { pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local' } };
+  for (const status of ['absent', 'mismatch', 'ambiguous', 'unverifiable', undefined]) {
+    assert.equal(setup.shouldRemoveBeforeInstall(state, { status }), false, String(status));
+  }
+  assert.equal(setup.shouldRemoveBeforeInstall(state, { status: 'bound' }), true);
+  assert.equal(setup.shouldRemoveBeforeInstall({ installed: null }, { status: 'bound' }), false);
+});
+
+function escapeForRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Opt-in qualification against a real Codex CLI. Set CODEX_TOOLKIT_REAL_CODEX_CLI to the exact
+// executable. It runs only against a fresh temporary CODEX_HOME and first proves the CLI honours it.
+const REAL_CODEX_CLI = process.env.CODEX_TOOLKIT_REAL_CODEX_CLI || '';
+const REAL_RUN = { timeout: 300000, addDeadlineMs: '240000' };
+
+test('real Codex CLI: mismatch is refused with no effects, then the gated rebind replaces once', { skip: !REAL_CODEX_CLI && 'set CODEX_TOOLKIT_REAL_CODEX_CLI to qualify a real Codex CLI', timeout: 600000 }, () => {
+  const codexHome = tmpRoot();
+  const env = { ...process.env, CODEX_HOME: codexHome };
+  const real = (args) => spawnSync(REAL_CODEX_CLI, args, { env, encoding: 'utf8', timeout: 300000, windowsHide: true, maxBuffer: setup.CODEX_JSON_MAX_OUTPUT_BYTES });
+  const json = (args) => {
+    const result = real([...args, '--json']);
+    assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+    return JSON.parse(result.stdout);
+  };
+  assert.deepEqual(json(['plugin', 'marketplace', 'list']), { marketplaces: [] }, 'the CLI must honour the fresh CODEX_HOME');
+
+  const oldRoot = writeOldMarketplace(tmpRoot());
+  writeJson(path.join(oldRoot, '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '2.10.12', description: 'previous generation fixture' });
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), '# user-owned comment\nmodel = "user-model"\n', 'utf8');
+  json(['plugin', 'marketplace', 'add', oldRoot]);
+  assert.equal(json(['plugin', 'add', 'ai-agent-toolkit@ai-agent-toolkit-local']).version, '2.10.12');
+  assert.match(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'), /^# user-owned comment\nmodel = "user-model"\n/);
+
+  const cacheBase = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local');
+  const configPath = path.join(codexHome, 'config.toml');
+  const configBefore = fs.readFileSync(configPath, 'utf8');
+  const cacheBefore = treeDigest(cacheBase);
+  const refused = runSetupWrite(codexHome, REAL_CODEX_CLI, REAL_RUN);
+  assert.equal(refused.status, 1, `${refused.stdout}\n${refused.stderr}`);
+  assert.match(refused.stderr, /already bound to a different source/i);
+  assert.equal(fs.readFileSync(configPath, 'utf8'), configBefore);
+  assert.equal(treeDigest(cacheBase), cacheBefore);
+  assert.equal(fs.existsSync(setup.setupJournalPath(codexHome)), false);
+
+  const rebound = runSetupWrite(codexHome, REAL_CODEX_CLI, { ...REAL_RUN, extraArgs: ['--rebind-marketplace-from', oldRoot] });
+  assert.equal(rebound.status, 0, `${rebound.stdout}\n${rebound.stderr}`);
+  const summary = JSON.parse(rebound.stdout);
+  assert.equal(summary.marketplace_transition, 'rebound');
+  assert.equal(summary.version, setup.EXPECTED_TOOLKIT_VERSION);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
+  assert.equal(fs.existsSync(path.join(cacheBase, 'ai-agent-toolkit', '2.10.12')), false, 'exactly one replacement removed the old generation');
+  assert.match(fs.readFileSync(configPath, 'utf8'), /^# user-owned comment\nmodel = "user-model"\n/);
+  assert.equal(JSON.parse(fs.readFileSync(setup.setupJournalPath(codexHome), 'utf8')).status, 'completed');
+  const listed = json(['plugin', 'marketplace', 'list']).marketplaces.filter((entry) => entry.name === 'ai-agent-toolkit-local');
+  assert.equal(listed.length, 1);
+  assert.equal(path.resolve(listed[0].root).toLowerCase(), repoRoot.toLowerCase());
+
+  const configAfter = fs.readFileSync(configPath, 'utf8');
+  const cacheAfter = treeDigest(cacheBase);
+  const replay = runSetupWrite(codexHome, REAL_CODEX_CLI, REAL_RUN);
+  assert.equal(replay.status, 0, `${replay.stdout}\n${replay.stderr}`);
+  assert.equal(JSON.parse(replay.stdout).marketplace_transition, 'none');
+  assert.equal(fs.readFileSync(configPath, 'utf8'), configAfter, 'an already-correct replay changes nothing');
+  assert.equal(treeDigest(cacheBase), cacheAfter);
 });

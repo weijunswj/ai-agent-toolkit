@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.0.7';
+const EXPECTED_TOOLKIT_VERSION = '3.0.8';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -927,8 +927,397 @@ function formatStateErrors(state, listError) {
   return 'no installed-state verification was available';
 }
 
-function shouldRemoveBeforeInstall(state) {
-  return Boolean(state?.installed);
+// Plugin removal destroys the installed cache, so it is only permitted under a positively verified
+// marketplace-source binding, never on installed state alone.
+function shouldRemoveBeforeInstall(state, binding) {
+  return binding?.status === 'bound' && Boolean(state?.installed);
+}
+
+function sha256Hex(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function readConfigSnapshot(codexHome) {
+  const configPath = codexConfigPath(codexHome);
+  if (!fs.existsSync(configPath)) return { exists: false, text: '', sha256: '' };
+  const bytes = fs.readFileSync(configPath);
+  return { exists: true, text: bytes.toString('utf8'), sha256: sha256Hex(bytes) };
+}
+
+function localMarketplaceSectionCount(configText) {
+  const name = escapeRegex(TOOLKIT_MARKETPLACE_NAME);
+  const pattern = new RegExp(`^marketplaces\\.(?:${name}|"${name}"|'${name}')$`);
+  return String(configText || '').split(/\r?\n/).filter((line) => {
+    const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    return Boolean(section) && pattern.test(section[1].trim());
+  }).length;
+}
+
+// Positive marketplace-source binding. The native marketplace list, the Codex config readback and
+// any installed plugin's marketplaceSource must all name one local source. An installed plugin's
+// own `source.path` follows the current marketplace mapping, so it is never treated as provenance.
+// Statuses: bound | absent | mismatch | ambiguous | unsupported | unverifiable.
+function evaluateMarketplaceBinding(marketplaceList, config, repoRoot, pluginList = null) {
+  const configSha256 = config?.sha256 || '';
+  const result = (status, reason, root = '') => ({ status, reason, root, configSha256 });
+  const label = `marketplace ${TOOLKIT_MARKETPLACE_NAME}`;
+  const section = `[marketplaces.${TOOLKIT_MARKETPLACE_NAME}]`;
+  const listed = marketplaceList?.marketplaces;
+  if (!marketplaceList || typeof marketplaceList !== 'object' || Object.keys(marketplaceList).join(',') !== 'marketplaces' ||
+    !Array.isArray(listed) || listed.some((entry) => !entry || typeof entry.name !== 'string')) {
+    return result('unverifiable', 'codex plugin marketplace list --json returned unexpected native metadata');
+  }
+  const entries = listed.filter((entry) => entry.name === TOOLKIT_MARKETPLACE_NAME);
+  const sections = localMarketplaceSectionCount(config?.text);
+  if (entries.length > 1 || sections > 1) {
+    return result('ambiguous', `${label} identity is ambiguous: the native list reports ${entries.length} entries and Codex config has ${sections} ${section} sections`);
+  }
+  if (entries.length === 0) {
+    if (sections !== 0) return result('unverifiable', `Codex config readback has ${section} but the native marketplace list does not report it`);
+    return result('absent', `${label} is not configured`);
+  }
+  const entry = entries[0];
+  if (Object.keys(entry).sort().join(',') !== 'name,root' || typeof entry.root !== 'string' || !entry.root.trim()) {
+    return result('unverifiable', `the native ${label} entry has unexpected native metadata`);
+  }
+  if (sections !== 1) return result('unverifiable', `the native list reports ${label} but Codex config readback has no ${section} section`, entry.root);
+  const values = parseTomlSectionValues(localMarketplaceSection(config.text));
+  if (values.source_type !== 'local') {
+    return result('unsupported', `Codex config ${section} uses an unsupported source type: ${values.source_type || '<missing>'}`, entry.root);
+  }
+  if (Object.keys(values).sort().join(',') !== 'source,source_type') {
+    return result('unverifiable', `Codex config ${section} has unexpected keys: ${Object.keys(values).sort().join(', ')}`, entry.root);
+  }
+  if (!values.source || comparablePath(values.source) !== comparablePath(entry.root)) {
+    return result('unverifiable', `Codex config readback source ${values.source || '<missing>'} does not match the native marketplace root ${entry.root}`, entry.root);
+  }
+  const installedEntries = pluginList ? findInstalledPluginEntries(pluginList, {
+    pluginId: pluginId(),
+    name: TOOLKIT_PLUGIN_NAME,
+    marketplaceName: TOOLKIT_MARKETPLACE_NAME
+  }) : [];
+  for (const installed of installedEntries) {
+    if (installed.marketplaceSource === undefined) continue;
+    const source = installed.marketplaceSource;
+    if (!source || source.sourceType !== 'local' || typeof source.source !== 'string' || comparablePath(source.source) !== comparablePath(entry.root)) {
+      return result('unverifiable', `the installed plugin marketplace source does not match the native marketplace root ${entry.root}`, entry.root);
+    }
+  }
+  if (comparablePath(entry.root) !== comparablePath(repoRoot)) {
+    return result('mismatch', `${label} is already bound to a different source: ${entry.root} (requested ${repoRoot})`, entry.root);
+  }
+  return result('bound', `${label} is bound to ${entry.root}`, entry.root);
+}
+
+function marketplaceAddOutputError(output, root) {
+  if (!output || Object.keys(output).sort().join(',') !== 'alreadyAdded,installedRoot,marketplaceName') {
+    return 'marketplace add returned unexpected native metadata';
+  }
+  if (output.marketplaceName !== TOOLKIT_MARKETPLACE_NAME) return `marketplace add reported marketplace ${output.marketplaceName}`;
+  if (typeof output.installedRoot !== 'string' || comparablePath(output.installedRoot) !== comparablePath(root)) {
+    return `marketplace add reported root ${output.installedRoot}`;
+  }
+  if (output.alreadyAdded !== false) return 'marketplace add reported an existing registration instead of a new one';
+  return '';
+}
+
+function marketplaceRemoveOutputError(output) {
+  if (!output || Object.keys(output).sort().join(',') !== 'installedRoot,marketplaceName' ||
+    output.marketplaceName !== TOOLKIT_MARKETPLACE_NAME || output.installedRoot !== null) {
+    return 'marketplace remove returned unexpected native metadata';
+  }
+  return '';
+}
+
+function rollbackTargetError(root) {
+  const wrapper = marketplacePath(root);
+  if (!fs.existsSync(wrapper)) return `${MARKETPLACE_REL_PATH} is missing`;
+  try {
+    const name = readJson(wrapper)?.name;
+    return name === TOOLKIT_MARKETPLACE_NAME ? '' : `${MARKETPLACE_REL_PATH} names marketplace ${name || '<missing>'}`;
+  } catch (error) {
+    return `${MARKETPLACE_REL_PATH} is unreadable: ${error.message}`;
+  }
+}
+
+const SETUP_JOURNAL_FILE = 'ai-agent-toolkit-setup-journal.json';
+const SETUP_JOURNAL_RESOLVED = new Set(['completed', 'failed-no-effect', 'rolled-back']);
+
+function setupJournalPath(codexHome) {
+  return path.join(codexHome, SETUP_JOURNAL_FILE);
+}
+
+// Records each native mutation before it starts so an interrupted or ambiguous outcome is never
+// retried blindly. Holds identities, versions and digests only, never Codex config contents.
+class CodexSetupJournal {
+  #path; #entry = null;
+
+  constructor(codexHome) { this.#path = setupJournalPath(codexHome); }
+
+  get path() { return this.#path; }
+  get isOpen() { return this.#entry?.status === 'in-progress'; }
+
+  unresolved() {
+    if (!fs.existsSync(this.#path)) return null;
+    let entry;
+    try {
+      entry = readJson(this.#path);
+    } catch {
+      return { status: 'unreadable', step: 'unknown' };
+    }
+    return SETUP_JOURNAL_RESOLVED.has(entry?.status) ? null : entry;
+  }
+
+  begin(step, fields) {
+    this.#entry = { schema: 1, status: 'in-progress', step, steps: [step], started_at: new Date().toISOString(), ...fields };
+    this.#flush();
+  }
+
+  step(step, fields = {}) {
+    Object.assign(this.#entry, fields, { step });
+    this.#entry.steps.push(step);
+    this.#flush();
+  }
+
+  finish(status, fields = {}) {
+    if (!this.isOpen) return;
+    Object.assign(this.#entry, fields, { status, finished_at: new Date().toISOString() });
+    this.#flush();
+  }
+
+  resolveByReadback(previous) {
+    this.#entry = { ...previous, status: 'completed', resolved_by: 'verified-readback', resolved_at: new Date().toISOString() };
+    this.#flush();
+  }
+
+  #flush() {
+    writeFileAtomically(this.#path, Buffer.from(`${JSON.stringify(this.#entry, null, 2)}\n`, 'utf8'));
+  }
+}
+
+function pendingJournalMessage(pending, journalPath) {
+  const rollback = pending?.rollback?.marketplace_root
+    ? ` The previous marketplace source was ${pending.rollback.marketplace_root}.`
+    : '';
+  return `A previous Toolkit Codex setup step (${pending.step || 'unknown'}, status ${pending.status || 'unknown'}) did not finish with verified readback. Not retrying any native marketplace or plugin operation.${rollback} Review \`codex plugin marketplace list --json\` and \`codex plugin list --json\`, then remove ${journalPath} once the Codex home state is understood.`;
+}
+
+function marketplaceMismatchMessage(binding) {
+  return [
+    `${binding.reason}. No marketplace, plugin or cache changes were made.`,
+    `  Codex refuses a same-name marketplace add from a different source; the supported transition is \`codex plugin marketplace remove ${TOOLKIT_MARKETPLACE_NAME}\` followed by \`codex plugin marketplace add <source>\`.`,
+    `  That transition needs separate owner approval for this Codex home. With that approval, rerun with --rebind-marketplace-from "${binding.root}" to run it as one journaled, readback-verified step with rollback.`
+  ].join('\n');
+}
+
+// One `setup --write` run. Order of effects: read-only inspection, then one marketplace transition
+// (add when absent, or the gated rebind), then cache preparation, then at most one plugin replacement.
+// Every destructive step requires a positive marketplace binding read back from native list + config.
+class CodexToolkitWriteTransaction {
+  #command; #options; #journal;
+  #pluginChanged = false; #transition = 'none'; #warnings = [];
+
+  constructor(command, options) {
+    this.#command = command;
+    this.#options = options;
+    this.#journal = new CodexSetupJournal(options.codexHome);
+  }
+
+  #listPlugins() {
+    return runCodexJson(this.#command, ['plugin', 'list', '--json', '--available']);
+  }
+
+  #evaluate(pluginList) {
+    return evaluateCodexToolkitPluginState(pluginList, {
+      codexHome: this.#options.codexHome,
+      repoRoot: this.#options.repoRoot,
+      allowConfigCacheFallback: true
+    });
+  }
+
+  #inspectBinding(pluginList) {
+    let listed;
+    try {
+      listed = runCodexJson(this.#command, ['plugin', 'marketplace', 'list', '--json']);
+    } catch (error) {
+      return { status: 'unverifiable', reason: `codex plugin marketplace list --json failed: ${error.message}`, root: '', configSha256: '' };
+    }
+    return evaluateMarketplaceBinding(listed, readConfigSnapshot(this.#options.codexHome), this.#options.repoRoot, pluginList);
+  }
+
+  #record(step, binding, state, extra = {}) {
+    if (this.#journal.isOpen) return this.#journal.step(step);
+    return this.#journal.begin(step, {
+      requested: { marketplace_root: this.#options.repoRoot, version: EXPECTED_TOOLKIT_VERSION },
+      preimage: {
+        marketplace_status: binding.status,
+        marketplace_root: binding.root || null,
+        config_sha256: binding.configSha256 || null,
+        installed_version: state?.installed?.version || null
+      },
+      ...extra
+    });
+  }
+
+  #result(state) {
+    return { state, pluginChanged: this.#pluginChanged, transition: this.#transition, warnings: this.#warnings };
+  }
+
+  async run() {
+    try {
+      return await this.#run();
+    } catch (error) {
+      this.#journal.finish('failed-unverified');
+      throw error;
+    }
+  }
+
+  async #run() {
+    const pending = this.#journal.unresolved();
+    let pluginList = this.#listPlugins();
+    let state = this.#evaluate(pluginList);
+    if (pending) {
+      if (state.ok && this.#inspectBinding(pluginList).status === 'bound') {
+        this.#journal.resolveByReadback(pending);
+        return this.#result(state);
+      }
+      throw new Error(pendingJournalMessage(pending, this.#journal.path));
+    }
+    if (state.ok && !this.#options.rebindFrom) return this.#result(state);
+    if (state.refusesDowngrade) return this.#result(state);
+
+    const binding = this.#establishBinding(this.#inspectBinding(pluginList), state);
+
+    try {
+      const prepared = prepareInstalledSessionStartIfPresent({ codexHome: this.#options.codexHome });
+      this.#pluginChanged = this.#pluginChanged || prepared.hooksChanged;
+    } catch {
+      // Verification decides whether replacement is required.
+    }
+    pluginList = this.#listPlugins();
+    state = this.#evaluate(pluginList);
+    if (state.ok || state.refusesDowngrade) {
+      this.#journal.finish('completed');
+      return this.#result(state);
+    }
+
+    const current = this.#inspectBinding(pluginList);
+    if (current.status !== 'bound' || current.configSha256 !== binding.configSha256 || comparablePath(current.root) !== comparablePath(binding.root)) {
+      throw new Error(`Marketplace binding changed after verification (${current.reason}). Not replacing the plugin; no plugin or cache removal was made.`);
+    }
+    this.#record('plugin-replacement', current, state);
+    this.#pluginChanged = true;
+    if (shouldRemoveBeforeInstall(state, current)) {
+      runCodexJson(this.#command, ['plugin', 'remove', pluginId(), '--json']);
+      if (findInstalledEntry(this.#listPlugins())) {
+        throw new Error(`codex plugin remove ${pluginId()} --json did not remove the installed plugin according to readback`);
+      }
+    }
+    const addOutcome = await runCodexAddAndVerify(this.#command, ['plugin', 'add', pluginId(), '--json'], {
+      codexHome: this.#options.codexHome,
+      repoRoot: this.#options.repoRoot
+    });
+    this.#pluginChanged = this.#pluginChanged || addOutcome.hookChanged;
+    if (addOutcome.warning) this.#warnings.push(addOutcome.warning);
+    this.#journal.finish('completed', { installed_version: addOutcome.state.installed?.version || null });
+    return this.#result(addOutcome.state);
+  }
+
+  #establishBinding(binding, state) {
+    if (this.#options.rebindFrom && binding.status !== 'mismatch') {
+      throw new Error(`--rebind-marketplace-from only applies when the marketplace is bound to a different source; current binding is ${binding.status} (${binding.reason}). No marketplace, plugin or cache changes were made.`);
+    }
+    if (binding.status === 'bound') return binding;
+    if (binding.status === 'absent') return this.#addMarketplace(binding, state);
+    if (binding.status === 'mismatch') {
+      if (!this.#options.rebindFrom) throw new Error(marketplaceMismatchMessage(binding));
+      return this.#rebindMarketplace(binding, state);
+    }
+    throw new Error(`${binding.reason}. The marketplace-source binding cannot be verified. No marketplace, plugin or cache changes were made.`);
+  }
+
+  // Runs one native marketplace add and returns the read-back binding, or null when it did not bind.
+  #nativeAdd(root) {
+    let error = null;
+    try {
+      const outputError = marketplaceAddOutputError(runCodexJson(this.#command, ['plugin', 'marketplace', 'add', root, '--json']), root);
+      if (outputError) error = new Error(outputError);
+    } catch (caught) {
+      error = caught;
+    }
+    return { error, after: this.#inspectBinding(null) };
+  }
+
+  #addMarketplace(before, state) {
+    const repoRoot = this.#options.repoRoot;
+    this.#record('marketplace-add', before, state);
+    const { error, after } = this.#nativeAdd(repoRoot);
+    if (!error && after.status === 'bound') {
+      this.#transition = 'added';
+      this.#journal.step('marketplace-added');
+      return after;
+    }
+    const noEffect = after.status === before.status && after.configSha256 === before.configSha256;
+    this.#journal.finish(noEffect ? 'failed-no-effect' : 'failed-unverified', { readback: { marketplace_status: after.status, marketplace_root: after.root || null } });
+    const outcome = noEffect
+      ? 'Readback shows no change was made.'
+      : `Readback is ${after.status} (${after.reason}); not retrying.`;
+    throw new Error(`codex plugin marketplace add ${repoRoot} --json did not produce a verified binding: ${error ? error.message : after.reason}. ${outcome} No plugin or cache changes were made.`);
+  }
+
+  #rebindMarketplace(before, state) {
+    const repoRoot = this.#options.repoRoot;
+    const previousRoot = before.root;
+    if (comparablePath(this.#options.rebindFrom) !== comparablePath(previousRoot)) {
+      throw new Error(`--rebind-marketplace-from ${this.#options.rebindFrom} does not match the current marketplace source ${previousRoot}. No marketplace, plugin or cache changes were made.`);
+    }
+    const rollbackError = rollbackTargetError(previousRoot);
+    if (rollbackError) {
+      throw new Error(`Current marketplace source ${previousRoot} cannot serve as a rollback target: ${rollbackError}. No marketplace, plugin or cache changes were made.`);
+    }
+    const restoreCommand = `codex plugin marketplace add ${previousRoot} --json`;
+    this.#record('marketplace-remove', before, state, { rollback: { marketplace_root: previousRoot } });
+
+    let removeError = null;
+    try {
+      const outputError = marketplaceRemoveOutputError(runCodexJson(this.#command, ['plugin', 'marketplace', 'remove', TOOLKIT_MARKETPLACE_NAME, '--json']));
+      if (outputError) removeError = new Error(outputError);
+    } catch (caught) {
+      removeError = caught;
+    }
+    const removed = this.#inspectBinding(null);
+    if (removeError || removed.status !== 'absent') {
+      const unchanged = removed.status === before.status && comparablePath(removed.root) === comparablePath(previousRoot) && removed.configSha256 === before.configSha256;
+      this.#journal.finish(unchanged ? 'failed-no-effect' : 'failed-unverified', { readback: { marketplace_status: removed.status, marketplace_root: removed.root || null } });
+      const outcome = unchanged
+        ? 'Readback shows the previous source is still bound; no change was made.'
+        : `Readback is ${removed.status}; not retrying or rolling back automatically. After reviewing the Codex home, restore the previous source with \`${restoreCommand}\`.`;
+      throw new Error(`codex plugin marketplace remove ${TOOLKIT_MARKETPLACE_NAME} --json did not produce a verified removal: ${removeError ? removeError.message : removed.reason}. ${outcome} No plugin or cache changes were made.`);
+    }
+    this.#journal.step('marketplace-add');
+
+    const { error: addError, after: added } = this.#nativeAdd(repoRoot);
+    if (!addError && added.status === 'bound') {
+      this.#transition = 'rebound';
+      this.#journal.step('marketplace-rebound');
+      return added;
+    }
+    const addFailure = addError ? addError.message : added.reason;
+    if (added.status !== 'absent') {
+      this.#journal.finish('failed-unverified', { readback: { marketplace_status: added.status, marketplace_root: added.root || null } });
+      throw new Error(`codex plugin marketplace add ${repoRoot} --json did not produce a verified binding: ${addFailure}. Readback is ${added.status}; not retrying or rolling back automatically. After reviewing the Codex home, restore the previous source with \`${restoreCommand}\`. No plugin or cache changes were made.`);
+    }
+
+    this.#journal.step('rollback-add');
+    const { error: rollbackAddError, after: restored } = this.#nativeAdd(previousRoot);
+    const exact = !rollbackAddError && restored.status === 'mismatch' &&
+      comparablePath(restored.root) === comparablePath(previousRoot) && restored.configSha256 === before.configSha256;
+    this.#journal.finish(exact ? 'rolled-back' : 'failed-unverified', { readback: { marketplace_status: restored.status, marketplace_root: restored.root || null } });
+    if (exact) {
+      throw new Error(`Marketplace rebind failed: ${addFailure}. Rolled back: restored the previous marketplace source ${previousRoot} with byte-identical Codex config. No plugin or cache changes were made.`);
+    }
+    throw new Error(`Marketplace rebind failed: ${addFailure}. Rollback to ${previousRoot} did not verify (${rollbackAddError ? rollbackAddError.message : restored.reason}); not retrying. After reviewing the Codex home, restore the previous source with \`${restoreCommand}\`. No plugin or cache changes were made.`);
+  }
 }
 
 function nextStepsForState(state) {
@@ -1032,6 +1421,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoRoot: repoRootFromScript(),
     codexHome: defaultCodexHome(),
     codexCommand: '',
+    rebindFrom: '',
     write: false,
     json: false
   };
@@ -1044,6 +1434,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--codex-home=')) options.codexHome = arg.slice('--codex-home='.length);
     else if (arg === '--codex-cli') options.codexCommand = next();
     else if (arg.startsWith('--codex-cli=')) options.codexCommand = arg.slice('--codex-cli='.length);
+    else if (arg === '--rebind-marketplace-from') options.rebindFrom = next();
+    else if (arg.startsWith('--rebind-marketplace-from=')) options.rebindFrom = arg.slice('--rebind-marketplace-from='.length);
     else if (arg === '--write') options.write = true;
     else if (arg === '--verify') options.write = false;
     else if (arg === '--json') options.json = true;
@@ -1052,6 +1444,10 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   options.repoRoot = path.resolve(options.repoRoot);
   options.codexHome = path.resolve(options.codexHome);
+  if (options.rebindFrom) {
+    if (!options.write) throw new Error('--rebind-marketplace-from requires --write');
+    options.rebindFrom = path.resolve(options.rebindFrom);
+  }
   return options;
 }
 
@@ -1063,6 +1459,11 @@ function usage() {
     'The supported install path is:',
     `  codex plugin marketplace add <local-ai-agent-toolkit-repo> --json`,
     `  codex plugin add ${pluginId()} --json`,
+    '',
+    `--write never removes the plugin or its cache unless ${TOOLKIT_MARKETPLACE_NAME} is read back as bound to this repo.`,
+    'If it is bound to a different source, --write stops with no changes. With separate owner approval,',
+    '  --write --rebind-marketplace-from <current-source> runs the native marketplace remove + add once,',
+    '  journaled, read back and rolled back on failure. An unresolved journal blocks every later retry.',
     '',
     'On Windows, pass the app-managed Codex CLI directly if bare `codex` resolves to WindowsApps:',
     `  node repo/scripts/setup-codex-toolkit-plugin.cjs --write --codex-cli "${windowsAliasCliCandidate()}"`,
@@ -1101,64 +1502,27 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   }
 
   const warnings = [];
-  let pluginList;
   let state;
   let pluginChanged = false;
+  let transition = 'none';
 
   try {
-    pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
     if (options.write) {
-      try {
-        const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
-        pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
-        // A stale unsupported cache is handled by the supported reinstall path.
-      }
-    }
-    state = evaluateCodexToolkitPluginState(pluginList, {
-      codexHome: options.codexHome,
-      repoRoot: options.repoRoot,
-      allowConfigCacheFallback: true
-    });
-  } catch (error) {
-    console.error(`FAIL: ${error.message}`);
-    return 1;
-  }
-
-  if (!state.ok && options.write && !state.refusesDowngrade) {
-    try {
-      runCodexJson(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot, '--json']);
-      pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
-      try {
-        const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
-        pluginChanged = pluginChanged || prepared.hooksChanged;
-      } catch {
-        // Verification decides whether reinstall is required.
-      }
-      state = evaluateCodexToolkitPluginState(pluginList, {
+      const outcome = await new CodexToolkitWriteTransaction(resolved.command, options).run();
+      ({ state, pluginChanged, transition } = outcome);
+      warnings.push(...outcome.warnings);
+    } else {
+      state = evaluateCodexToolkitPluginState(runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']), {
         codexHome: options.codexHome,
         repoRoot: options.repoRoot,
         allowConfigCacheFallback: true
       });
-
-      if (!state.ok) {
-        pluginChanged = true;
-        if (shouldRemoveBeforeInstall(state)) {
-          runCodexJson(resolved.command, ['plugin', 'remove', pluginId(), '--json']);
-        }
-        const addArgs = ['plugin', 'add', pluginId(), '--json'];
-        const addOutcome = await runCodexAddAndVerify(resolved.command, addArgs, {
-          codexHome: options.codexHome,
-          repoRoot: options.repoRoot
-        });
-        state = addOutcome.state;
-        pluginChanged = pluginChanged || addOutcome.hookChanged;
-        if (addOutcome.warning) warnings.push(addOutcome.warning);
-      }
-    } catch (error) {
-      console.error(`FAIL: ${error.message}`);
-      return 1;
+      const pending = new CodexSetupJournal(options.codexHome).unresolved();
+      if (pending) warnings.push(pendingJournalMessage(pending, setupJournalPath(options.codexHome)));
     }
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    return 1;
   }
 
   if (!state.ok) {
@@ -1185,6 +1549,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     hook_trust_status: hookTrustStatus,
     hook_trust_message: hookTrustMessage,
     hook_execution_status: pluginChanged ? 'skipped until the current hook is reviewed and trusted' : 'verification unavailable; open `/hooks` in Codex',
+    marketplace_transition: transition,
     install_path: codexToolkitInstallCommands(options.repoRoot),
     next_steps: nextStepsForState(reportedState, options),
     warnings
@@ -1228,11 +1593,14 @@ module.exports = {
   codexToolkitInstallCommands,
   defaultWindowsPowerShellPath,
   evaluateCodexToolkitPluginState,
+  evaluateMarketplaceBinding,
   findInstalledPluginEntries,
   inspectCodexConfiguredPluginState,
   inspectCodexPluginList,
   prepareInstalledSessionStart,
   runCodexJson,
+  setupJournalPath,
+  shouldRemoveBeforeInstall,
   sourceSessionStartCommand,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
