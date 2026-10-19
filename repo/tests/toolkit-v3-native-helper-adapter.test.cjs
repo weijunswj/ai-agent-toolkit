@@ -4,7 +4,7 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { spawnSync } = require('node:child_process');
 const compiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES } = require('../scripts/toolkit-v3-helper-guard.cjs');
-const { renderNativeHelperDefinition, createNativeHelperAdapter, commandDecision, pinnedBindingObserver, resolveClaudeNativeState, verifyCodexHelperRegistration } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+const { renderNativeHelperDefinition, createNativeHelperAdapter, commandDecision, pinnedBindingObserver, resolveClaudeNativeState, verifyCodexHelperRegistration, CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 const { createOpenCodeHelperHooks } = require('../scripts/toolkit-opencode-helper-adapter.cjs');
 const { capturedStack, TEST_PROFILES } = require('./support/captured-stack-fixture.cjs');
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -64,10 +64,12 @@ test('real hook command denies missing binding and accepts a pinned controlled p
   const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs');
   const env={...process.env,TOOLKIT_NATIVE_HELPER_BINDING:file,TOOLKIT_NATIVE_HELPER_BINDING_SHA256:digest};
   let r=spawnSync(process.execPath,[script],{input:JSON.stringify(f.event),encoding:'utf8',env,timeout:10000});
-  assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision,'allow');
+  // Codex rejects a bare permissionDecision:allow as unsupported output; an admitted request is exit 0 with no output.
+  assert.equal(r.status,0,r.stderr);assert.equal(r.stdout,'');assert.equal(r.stderr,'');
+  assert.equal((await commandDecision(f.event,'codex',{binding_path:file,binding_sha256:digest})).hookSpecificOutput.permissionDecision,'allow');
   fs.writeFileSync(file,JSON.stringify({...envelope,session_id:'tampered'}));
   r=spawnSync(process.execPath,[script],{input:JSON.stringify(f.event),encoding:'utf8',env,timeout:10000});
-  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision,'deny');
+  assert.equal(r.status,2);assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision,'deny');
   assert.throws(()=>pinnedBindingObserver(file,digest)(),/NATIVE_BINDING_DRIFT/);
   assert.equal((await commandDecision(f.event,'codex')).hookSpecificOutput.permissionDecision,'deny');
 });
@@ -81,11 +83,82 @@ test('Claude resolves actual precedence without treating force, aliases or allow
   b.native_config.mods_present=true;assert.throws(()=>resolveClaudeNativeState(b,{},{}),/CONFIG_UNVERIFIED/);
 });
 test('trusted launcher refuses missing, disabled and untrusted native hook registrations',()=>{
-  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',matcher:'^(spawn_agent|Agent)$',enabled:true,trustStatus:'trusted'};
+  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',matcher:'^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',enabled:true,trustStatus:'trusted'};
   const response={data:[{cwd:'owned',hooks:[hook],errors:[],warnings:[]}]};
   assert.equal(verifyCodexHelperRegistration(response,options).state,'REGISTRATION_VERIFIED');
   for(const field of ['enabled','trustStatus']){const r=clone(response);r.data[0].hooks[0][field]=field==='enabled'?false:'untrusted';assert.throws(()=>verifyCodexHelperRegistration(r,options),/NOT_TRUSTED/);}
+  // Codex treats a pattern of only names and pipes as an exact list: it misses the flattened
+  // MultiAgentV2 name, so the registration that let collaborationspawn_agent through is refused.
+  for(const matcher of ['spawn_agent|Agent','^(spawn_agent|Agent)$']){const r=clone(response);r.data[0].hooks[0].matcher=matcher;assert.throws(()=>verifyCodexHelperRegistration(r,options),/NOT_TRUSTED/,matcher);}
   response.data[0].hooks=[];assert.throws(()=>verifyCodexHelperRegistration(response,options),/NOT_TRUSTED/);
+});
+// F1: Codex validates a MultiAgentV2 tool_namespace as [A-Za-z0-9_-]+. Registration is verified for the
+// default, V1, default-V2, a hyphenated and the actually configured namespace; a matcher that omits any holds.
+test('F1: registration verification probes a hyphenated and the configured tool namespace',()=>{
+  const { CODEX_SPAWN_MATCHER } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+  const options={cwd:'owned',command:'approved-hook'},hook={eventName:'preToolUse',command:'approved-hook',enabled:true,trustStatus:'trusted'};
+  const response=matcher=>({data:[{cwd:'owned',hooks:[{...hook,matcher}],errors:[],warnings:[]}]});
+  // The 3.0.9 candidate matcher omitted `-`: it reported verified while hyphenated spawns escaped.
+  assert.throws(()=>verifyCodexHelperRegistration(response('^(?:Agent|[A-Za-z0-9_]*spawn_agent)$'),options),/CODEX_REQUIRED_HOOK_NOT_TRUSTED/);
+  assert.equal(verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),options).state,'REGISTRATION_VERIFIED');
+  for(const ns of ['collaboration','multi-agent','Team_Alpha-2','-'])assert.equal(verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),{...options,tool_namespace:ns}).state,'REGISTRATION_VERIFIED',ns);
+  // A matcher covering only the probe namespaces still holds for a different configured namespace.
+  const narrow='^(?:Agent|(?:collaboration|multi-agent)?spawn_agent)$';
+  assert.equal(verifyCodexHelperRegistration(response(narrow),options).state,'REGISTRATION_VERIFIED');
+  assert.throws(()=>verifyCodexHelperRegistration(response(narrow),{...options,tool_namespace:'team_x'}),/CODEX_REQUIRED_HOOK_NOT_TRUSTED/);
+  for(const ns of ['team.x','team x','',7,null])assert.throws(()=>verifyCodexHelperRegistration(response(CODEX_SPAWN_MATCHER),{...options,tool_namespace:ns}),/CODEX_TOOL_NAMESPACE_INVALID/,String(ns));
+});
+test('F1: the hook matcher and spawn recognition decide every Codex tool name identically',async t=>{
+  const { CODEX_SPAWN_MATCHER, CodexDialect } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+  const shipped=new CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(__dirname,'../../.codex-plugin/hooks/hooks.json'),'utf8')).hooks.PreToolUse[0].matcher);
+  const spawns=['spawn_agent','Agent','collaborationspawn_agent','multi_agent_v1spawn_agent','multi-agentspawn_agent','collab-v2spawn_agent','Team_Alpha-2spawn_agent','-spawn_agent'];
+  const others=['spawn_agents','Agents','Agent-x','list_agents','multi-agentlist_agents','multi.agentspawn_agent','multi agentspawn_agent','multi/agentspawn_agent','spawn_agentx','x-Agent','exec',''];
+  for(const name of spawns){assert.equal(shipped.matches(name),true,name);assert.equal(CodexDialect.isSpawnRequest(name),true,name);}
+  for(const name of others){assert.equal(shipped.matches(name),false,name);assert.equal(CodexDialect.isSpawnRequest(name),false,name);}
+  assert.equal(new CodexHookMatcher(CODEX_SPAWN_MATCHER).matches('multi-agentspawn_agent'),true);
+  // Bound positive and fork negative on a hyphenated namespace, at the same boundary as collaborationspawn_agent.
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-native-hook-f1-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const f=fixture('codex_spawn_agent'),file=path.join(root,'binding.json');
+  const envelope={source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',session_id:'parent',cwd:'owned',caller_model:'approved-lead',helper_identity:f.event.tool_input.subagent_type,host_state:f.state};
+  const bytes=Buffer.from(JSON.stringify(envelope)),digest=crypto.createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(file,bytes);
+  const options={binding_path:file,binding_sha256:digest},v2=input=>({...f.event,tool_name:'multi-agentspawn_agent',tool_input:{...f.event.tool_input,task_name:'leaf',message:'x',...input}});
+  assert.equal((await commandDecision(v2({fork_turns:'none'}),'codex',options)).hookSpecificOutput.permissionDecision,'allow');
+  for(const input of [{},{fork_turns:'all'},{fork_turns:'none',model:'other-model'}])assert.equal((await commandDecision(v2(input),'codex',options)).hookSpecificOutput.permissionDecision,'deny',JSON.stringify(input));
+  assert.match((await commandDecision(v2({fork_turns:'none'}),'codex',{})).hookSpecificOutput.permissionDecisionReason,/NATIVE_BINDING_REQUIRED/);
+});
+test('Codex hook matcher semantics follow the host: exact pipe lists, unanchored regexes and match-all',()=>{
+  const exact=new CodexHookMatcher('spawn_agent|Agent');
+  assert.equal(exact.matches('spawn_agent'),true);assert.equal(exact.matches('collaborationspawn_agent'),false);assert.equal(exact.matches('Agentx'),false);
+  const shipped=new CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(__dirname,'../../.codex-plugin/hooks/hooks.json'),'utf8')).hooks.PreToolUse[0].matcher);
+  for(const name of ['spawn_agent','Agent','collaborationspawn_agent','multi_agent_v1spawn_agent','teamspawn_agent'])assert.equal(shipped.matches(name),true,name);
+  for(const name of ['spawn_agents','Agents','list_agents','collaborationlist_agents','send_message','exec','Bash'])assert.equal(shipped.matches(name),false,name);
+  assert.equal(new CodexHookMatcher('').matches('anything'),true);assert.equal(new CodexHookMatcher('*').matches('x'),true);
+  assert.equal(new CodexHookMatcher('spawn').matches('collaborationspawn_agent'),false);assert.equal(new CodexHookMatcher('spawn.*').matches('collaborationspawn_agent'),true);
+});
+test('Codex namespaced MultiAgentV2 spawns are guarded like spawn_agent, and only an explicit fork_turns none is fresh',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-native-hook-v2-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const f=fixture('codex_spawn_agent'),file=path.join(root,'binding.json');
+  const envelope={source_capture:f.captured.source_capture,selection:f.captured.selection,schema:'toolkit.v3.native-helper-binding.v1',session_id:'parent',cwd:'owned',caller_model:'approved-lead',helper_identity:f.event.tool_input.subagent_type,host_state:f.state};
+  const bytes=Buffer.from(JSON.stringify(envelope)),digest=crypto.createHash('sha256').update(bytes).digest('hex');fs.writeFileSync(file,bytes);
+  const options={binding_path:file,binding_sha256:digest},v2=input=>({...f.event,tool_name:'collaborationspawn_agent',tool_input:{...f.event.tool_input,task_name:'leaf',message:'x',...input}});
+  // Same-boundary positive control: the V2 name with an explicit fresh child is admitted.
+  assert.equal((await commandDecision(v2({fork_turns:'none'}),'codex',options)).hookSpecificOutput.permissionDecision,'allow');
+  assert.equal((await commandDecision(v2({fork_turns:' NONE '}),'codex',options)).hookSpecificOutput.permissionDecision,'allow');
+  for(const fork of [{},{fork_turns:'all'},{fork_turns:'ALL'},{fork_turns:'3'},{fork_turns:''},{fork_turns:null},{fork_context:true}]){
+    const out=(await commandDecision(v2(fork),'codex',options)).hookSpecificOutput;
+    assert.equal(out.permissionDecision,'deny',JSON.stringify(fork));assert.match(out.permissionDecisionReason,/NATIVE_SESSION_TRANSITION_UNQUALIFIED/);
+  }
+  // A V1-shaped spawn_agent stays fresh by default, but a V2 argument shape on it is checked the same way.
+  assert.equal((await commandDecision(f.event,'codex',options)).hookSpecificOutput.permissionDecision,'allow');
+  assert.equal((await commandDecision({...f.event,tool_input:{...f.event.tool_input,task_name:'leaf'}},'codex',options)).hookSpecificOutput.permissionDecision,'deny');
+  // Wrong routes on the V2 name are refused before dispatch, exactly as on spawn_agent.
+  for(const change of [{model:'other-model'},{reasoning_effort:'low'},{subagent_type:'unchecked-helper'}]){
+    assert.equal((await commandDecision(v2({fork_turns:'none',...change}),'codex',options)).hookSpecificOutput.permissionDecision,'deny',JSON.stringify(change));
+  }
+  // Without a binding the V2 name is held in the governed checkout, through the real hook process.
+  const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs'),env={...process.env};delete env.TOOLKIT_NATIVE_HELPER_BINDING;delete env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
+  const r=spawnSync(process.execPath,[script],{input:JSON.stringify({hook_event_name:'PreToolUse',tool_name:'collaborationspawn_agent',cwd:path.resolve(__dirname,'../..'),tool_input:{task_name:'x',message:'x',fork_turns:'none'}}),encoding:'utf8',env,timeout:10000});
+  assert.equal(r.status,2);assert.match(r.stderr,/NATIVE_BINDING_REQUIRED/);
 });
 test('native aliases, variants and inherited context cannot hide conflicting invocation values', async () => {
   for (const [entry, change] of [

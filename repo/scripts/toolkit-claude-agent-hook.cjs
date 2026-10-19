@@ -2,8 +2,10 @@
 'use strict';
 
 const fs = require('node:fs');
-const control = require('./toolkit-agent-control.cjs');
-const { commandDecision, renderNativeHelperDefinition, readNativeSelectionFromEnvironment } = require('./toolkit-v3-native-helper-adapter.cjs');
+// Decision modules load inside the guarded path: a missing or broken module becomes a
+// handled deny, not a process crash that Claude Code treats as a non-blocking error.
+const control = () => require('./toolkit-agent-control.cjs');
+const nativeAdapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
 function readInput() {
   try { return JSON.parse(fs.readFileSync(0, 'utf8')); }
@@ -28,8 +30,9 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
-  const profile = control.readProfile('claude-code', options);
-  if (profile.topology === control.TOPOLOGIES.BROADER_NATIVE) return commandDecision(input, 'claude-code', {
+  const { readProfile, TOPOLOGIES } = control();
+  const profile = readProfile('claude-code', options);
+  if (profile.topology === TOPOLOGIES.BROADER_NATIVE) return nativeAdapter().commandDecision(input, 'claude-code', {
     binding_path: process.env.TOOLKIT_NATIVE_HELPER_BINDING,
     binding_sha256: process.env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256,
     helper_identity: process.env.TOOLKIT_NATIVE_HELPER_IDENTITY,
@@ -55,7 +58,7 @@ function traceDecision(input, output) {
 if (require.main === module) {
   const input = process.argv[2] === '--print-helper-definition' ? null : readInput();
   Promise.resolve().then(() => input === null
-    ? renderNativeHelperDefinition('claude-code', process.argv[3], readNativeSelectionFromEnvironment()) : decision(input)).then(output => {
+    ? nativeAdapter().renderNativeHelperDefinition('claude-code', process.argv[3], nativeAdapter().readNativeSelectionFromEnvironment()) : decision(input)).then(output => {
     if (input !== null) traceDecision(input, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
   }).catch(() => {

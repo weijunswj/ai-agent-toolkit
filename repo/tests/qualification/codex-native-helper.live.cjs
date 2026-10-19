@@ -49,19 +49,21 @@ function hook(ep, ev, envOverride = {}) {
   const env = { ...process.env, ...ep.env, ...envOverride };
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(ev), env, encoding: 'utf8', timeout: 20000 });
   const out = JSON.parse((r.stdout || '{}').trim() || '{}');
-  return { exit: r.status, decision: out.hookSpecificOutput?.permissionDecision || 'none', reason: out.hookSpecificOutput?.permissionDecisionReason || null };
+  return { exit: r.status, stdout: r.stdout || '', decision: out.hookSpecificOutput?.permissionDecision || 'none', reason: out.hookSpecificOutput?.permissionDecisionReason || null };
 }
 const cases = [];
 const record = (id, expected, observed, pass) => cases.push({ id, kind: 'HOOK', expected, observed, pass });
 const denied = (r, re) => r.decision === 'deny' && r.exit === 2 && re.test(r.reason || '');
+// Codex records a bare permissionDecision allow as a failed hook run, so an admitted request is exit 0 with no output.
+const admitted = r => r.exit === 0 && r.stdout === '';
 
 const ok = prepare('ok');
 let r = hook(ok, event(ok));
-record('01-correct-route-allowed-before-dispatch', 'allow', r, r.decision === 'allow' && r.exit === 0);
+record('01-correct-route-allowed-before-dispatch', 'admitted: exit 0, no output', r, admitted(r));
 r = hook(ok, { ...event(ok), tool_name: 'Agent' });
 record('13-agent-alias-held-unless-separately-bound', 'deny', r, denied(r, /HOST_ENTRY_MISMATCH/));
 r = hook(ok, event(ok, { model: 'gpt-6-luna', reasoning_effort: 'max' }));
-record('05-explicit-matching-route', 'allow', r, r.decision === 'allow');
+record('05-explicit-matching-route', 'admitted: exit 0, no output', r, admitted(r));
 r = hook(ok, event(ok, { model: 'gpt-6.1-sol' }));
 record('02-wrong-model-override', 'deny', r, denied(r, /OVERRIDE_CONFLICT|ROUTE_MISMATCH/));
 r = hook(ok, event(ok, { reasoning_effort: 'low' }));
@@ -95,10 +97,32 @@ r = hook(unregistered, event(unregistered));
 record('09-disabled-registration', 'deny', r, denied(r, /HOOK_UNAVAILABLE/));
 r = hook(ok, { tool_name: 'shell', cwd: ok.base, tool_input: {} });
 record('15-other-tool-no-decision', 'no decision', r, r.decision === 'none' && r.exit === 0);
+// MultiAgentV2 spawns reach hooks as the flattened collaborationspawn_agent and fork the full history unless fork_turns is none.
+const v2 = (ep, input = {}) => ({ ...event(ep, { task_name: 'leaf', ...input }), tool_name: 'collaborationspawn_agent' });
+r = hook(ok, v2(ok, { fork_turns: 'none' }));
+record('19-v2-namespaced-correct-route', 'admitted: exit 0, no output', r, admitted(r));
+r = hook(ok, v2(ok));
+record('20-v2-omitted-fork-turns-forks-history', 'deny', r, denied(r, /SESSION_TRANSITION/));
+r = hook(ok, v2(ok, { fork_turns: 'none', model: 'gpt-6.1-sol' }));
+record('21-v2-wrong-model-override', 'deny', r, denied(r, /OVERRIDE_CONFLICT|ROUTE_MISMATCH/));
+// F1: Codex accepts any [A-Za-z0-9_-]+ tool_namespace, so hyphenated names are matched and guarded identically.
+const hyphen = (ep, input = {}) => ({ ...v2(ep, input), tool_name: 'multi-agentspawn_agent' });
+r = hook(ok, hyphen(ok, { fork_turns: 'none' }));
+record('22-v2-hyphenated-namespace-correct-route', 'admitted: exit 0, no output', r, admitted(r));
+r = hook(ok, hyphen(ok));
+record('23-v2-hyphenated-omitted-fork-turns', 'deny', r, denied(r, /SESSION_TRANSITION/));
+// Unbound in the governed Toolkit checkout: held before any child, for the default and hyphenated V2 names.
+for (const tool of ['collaborationspawn_agent', 'multi-agentspawn_agent']) {
+  r = hook(ok, { ...v2(ok, { fork_turns: 'none' }), tool_name: tool, cwd: ROOT }, { TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_NATIVE_HELPER_BINDING_SHA256: '' });
+  record(`24-unbound-${tool}-held`, 'deny', r, denied(r, /NATIVE_BINDING_REQUIRED/));
+}
+const registered = new native.CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(ROOT, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse[0].matcher);
+const reached = ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent'].every(name => registered.matches(name));
+record('25-registered-matcher-reaches-every-spawn-name', 'matched', { reached }, reached);
 
 const report = { schema: 'toolkit.qualification.codex-native-helper-hook.v1', host: 'codex', host_version: codexVersion, stack: 'owner-gpt',
   hook_sha256: sha(fs.readFileSync(HOOK)), scope: 'HOOK_PROCESS_ONLY',
-  native_status: 'UNQUALIFIED: the plugin hook needs the owner\'s one-time trust in Codex, then real host positive/negative runs.',
+  native_status: 'UNQUALIFIED: hook process only. Installed 3.0.8 matcher misses namespaced V2 spawns; 3.0.9 needs installation, owner re-trust of the changed hook and real host runs.',
   cases, passed: cases.filter(c => c.pass).length, total: cases.length, result: cases.every(c => c.pass) ? 'HOOK_CASES_PASS' : 'FAIL' };
 fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
 console.log(`${report.result} ${report.passed}/${report.total}`);

@@ -71,6 +71,23 @@ function readRegularFile(filePath, label) {
   return fs.readFileSync(filePath);
 }
 
+const HELPER_RUNTIME_PATH = path.resolve(__dirname, 'toolkit-opencode-helper-adapter.cjs');
+// Every repository module the helper runtime loads, followed through its relative
+// requires, with the SHA-256 the rendered plugin verifies before loading any of it.
+function helperRuntimePins(entry = HELPER_RUNTIME_PATH) {
+  const pins = {}, pending = [entry];
+  while (pending.length) {
+    const file = pending.pop();
+    if (Object.hasOwn(pins, file)) continue;
+    const bytes = readRegularFile(file, 'Helper runtime module');
+    pins[file] = crypto.createHash('sha256').update(bytes).digest('hex');
+    for (const match of bytes.toString('utf8').matchAll(/require\(\s*'(\.{1,2}\/[^']+)'\s*\)/g)) {
+      pending.push(require.resolve(path.resolve(path.dirname(file), match[1])));
+    }
+  }
+  return Object.fromEntries(Object.entries(pins).sort(([a], [b]) => a.localeCompare(b)));
+}
+
 function renderPluginPayload(generation = 'V1') {
   if (!['V1','V2'].includes(generation)) throw new Error('OpenCode API generation must be V1 or V2');
   if (generation === 'V2') throw new Error('OPENCODE_V2_PRE_DISPATCH_API_UNAVAILABLE: installed public setup exposes no tool/session receiver; SDK hooks alone cannot satisfy helper pre-dispatch and zero-effect invariants');
@@ -85,7 +102,8 @@ function renderPluginPayload(generation = 'V1') {
   const sourceDigest = crypto.createHash('sha256').update(Buffer.from(executionRules)).digest('hex');
   return Buffer.from(`// AI-AGENT-TOOLKIT package ${version}; execution-rule SHA256 ${sourceDigest}\n`
     + template.replace(EXECUTION_RULES_TOKEN, JSON.stringify(executionRules))
-      .replace('__TOOLKIT_HELPER_RUNTIME_JSON__', JSON.stringify(path.resolve(__dirname, 'toolkit-opencode-helper-adapter.cjs')))
+      .replace('__TOOLKIT_HELPER_RUNTIME_JSON__', JSON.stringify(HELPER_RUNTIME_PATH))
+      .replace('__TOOLKIT_HELPER_RUNTIME_PINS_JSON__', JSON.stringify(helperRuntimePins()))
       .replace('__TOOLKIT_API_GENERATION_JSON__', JSON.stringify(generation)), 'utf8');
 }
 
@@ -218,4 +236,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { installProjectPlugin, parseArgs, renderPluginPayload, run };
+module.exports = { installProjectPlugin, parseArgs, renderPluginPayload, helperRuntimePins, run };

@@ -21,9 +21,16 @@ test('the checked-in launch family record is closed against this checkout and cl
   const value = record();
   for (const host of ['claude-code', 'codex', 'opencode', 'dot']) assert.ok(value.paths.some(p => p.host === host && p.in_profile), host);
   for (const p of value.paths) assert.deepEqual(Object.keys(p.invariants).sort(), [...INVARIANT_IDS].sort(), p.id);
-  // Only the two Claude paths carry native demonstrations; Codex, OpenCode and dot stay unqualified or held.
+  // Only the Claude worker launcher carries a native demonstration. The Claude helper hook's earlier
+  // demonstration is kept in history: the 19 Oct 2026 receipt showed its failure layers proceed natively.
   assert.deepEqual(value.paths.filter(p => p.native_qualification.status === 'DEMONSTRATED').map(p => p.id).sort(),
-    ['claude.helper.parent-agent-hook', 'claude.worker.gate-session-launcher']);
+    ['claude.worker.gate-session-launcher']);
+  assert.equal(pathOf(value, 'claude.helper.parent-agent-hook').native_qualification.history[0].status, 'DEMONSTRATED');
+  for (const id of ['claude.helper.parent-agent-hook', 'codex.helper.pretooluse-hook', 'opencode.helper.v1-task']) {
+    assert.equal(pathOf(value, id).invariants.GUARD_FAILURE.disposition, 'HELD', id);
+    assert.ok(result.guard_failure_layers_not_denied.some(l => l.path === id && l.layer === 'MISSING_OR_DISABLED'), id);
+  }
+  assert.ok(result.guard_failure_layers_not_denied.some(l => l.path === 'codex.helper.pretooluse-hook' && l.layer === 'HOST_TIMEOUT' && l.outcome === 'PROCEEDS'));
   assert.ok(result.unqualified.some(u => u.path === 'codex.worker.app-server-adapter' && u.status === 'UNQUALIFIED'));
   assert.ok(result.held.some(h => h.invariant === 'dot.persistent-dispatch:PINNED_ROUTE' && h.hold === 'DOT_DISPATCH_OWNED_BY_501'));
   // The retired Toolkit direct launcher is no longer a launch path, inside or outside the profile.
@@ -76,7 +83,28 @@ test('malformed or overstated records are refused', () => {
     ['an inventory site pointing at no path', v => { v.inventory[0].path = 'unknown.path'; }, 'LAUNCH_FAMILY_INVENTORY_INVALID'],
     ['a duplicated path', v => { v.paths.push(v.paths[0]); }, 'LAUNCH_FAMILY_PATH_DUPLICATE'],
     ['an owned launcher without entrypoints', v => { pathOf(v, 'claude.worker.gate-session-launcher').entrypoints = []; }, 'LAUNCH_FAMILY_ENTRYPOINT_REQUIRED'],
-    ['an unknown disposition', v => { pathOf(v, 'claude.worker.gate-session-launcher').invariants.OBSERVED_ROUTE.disposition = 'COVERED'; }, 'LAUNCH_FAMILY_DISPOSITION_INVALID']
+    ['an unknown disposition', v => { pathOf(v, 'claude.worker.gate-session-launcher').invariants.OBSERVED_ROUTE.disposition = 'COVERED'; }, 'LAUNCH_FAMILY_DISPOSITION_INVALID'],
+    // The 19 Oct 2026 overstatement: a hook-process error was said to deny, so the path stayed demonstrated.
+    ['a demonstrated hook path whose guard failure is held', v => { pathOf(v, 'claude.helper.parent-agent-hook').native_qualification.status = 'DEMONSTRATED'; }, 'LAUNCH_FAMILY_QUALIFICATION_UNSUPPORTED'],
+    ['a guard-failure claim enforced while a layer proceeds', v => {
+      const p = pathOf(v, 'claude.helper.parent-agent-hook'), layers = p.invariants.GUARD_FAILURE.failure_layers;
+      p.invariants.GUARD_FAILURE = { disposition: 'ENFORCED', evidence: 'SOURCE_TEST', failure_layers: layers,
+        code: [{ file: 'repo/scripts/toolkit-claude-agent-hook.cjs', contains: 'Toolkit could not verify the Claude topology safely; continue root-only.' }],
+        tests: [{ file: 'repo/tests/toolkit-agent-control.test.cjs', title: 'a Claude hook whose decision modules cannot load still denies Agent and Task as a handled decision' }] };
+    }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
+    ['the guard credited where the host never runs it', v => {
+      const layer = pathOf(v, 'codex.helper.pretooluse-hook').invariants.GUARD_FAILURE.failure_layers.find(l => l.layer === 'HOST_TIMEOUT');
+      layer.outcome = 'DENIED'; layer.protection = 'GUARD_DENIES';
+    }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
+    ['a denied layer without protection', v => { pathOf(v, 'opencode.helper.v1-task').invariants.GUARD_FAILURE.failure_layers[0].protection = 'NONE'; }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
+    ['a hook path without its failure layers', v => { delete pathOf(v, 'codex.helper.pretooluse-hook').invariants.GUARD_FAILURE.failure_layers; }, 'LAUNCH_FAMILY_FAILURE_LAYERS_REQUIRED'],
+    ['a missing failure layer', v => { pathOf(v, 'codex.helper.pretooluse-hook').invariants.GUARD_FAILURE.failure_layers.pop(); }, 'LAUNCH_FAMILY_FAILURE_LAYERS_REQUIRED'],
+    ['a process-only native claim', v => {
+      const p = pathOf(v, 'claude.worker.gate-session-launcher');
+      for (const id of Object.keys(p.invariants)) if (p.invariants[id].evidence === 'NATIVE') p.invariants[id].evidence = 'PROCESS';
+    }, 'LAUNCH_FAMILY_QUALIFICATION_UNSUPPORTED'],
+    ['an unknown evidence class', v => { pathOf(v, 'codex.helper.pretooluse-hook').invariants.PINNED_ROUTE.evidence = 'CRAFTED_EVENT'; }, 'LAUNCH_FAMILY_ENFORCEMENT_UNSUPPORTED'],
+    ['a superseded claim without its successor', v => { delete pathOf(v, 'claude.helper.parent-agent-hook').native_qualification.history[0].superseded_by; }, 'LAUNCH_FAMILY_RECORD_INVALID']
   ];
   for (const [name, mutate, code] of cases) {
     const value = record(); mutate(value);
