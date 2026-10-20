@@ -346,6 +346,21 @@ test('bridge runs the Claude refresh only from an opted-in Claude SessionStart h
   assert.equal(bridgeRun(['--hook', '--sync-enabled', '--sync-source', 'claude-plugin', '--hub', enabled]).length, 0, 'dry-run hooks never refresh');
 });
 
+test('an older Claude hook blocked by the downgrade guard never attempts a refresh and says it cannot self-upgrade', (t) => {
+  const root = tmp(t);
+  const home = isolateBridge(t, root);
+  const hub = writeHubState(path.join(home, 'newer'), {
+    claude_plugin_auto_refresh_enabled: true, repo_path: repoRoot,
+    hub_version: '99.0.0', bridge_versions_by_source: { 'claude-plugin': '99.0.0' }
+  });
+  let lockCalls = [];
+  assert.throws(() => {
+    lockCalls = bridgeRun(['--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin', '--hub', hub]);
+  }, /Refusing downgrade[\s\S]*cannot refresh itself automatically[\s\S]*setup toolkit --host claude-code/);
+  assert.deepEqual(lockCalls, []);
+  assert.equal(fs.existsSync(path.join(home, refresh.ATTEMPT_FILE)), false);
+});
+
 test('bridge preference flags: default off, setup-only, mutually exclusive, audited', (t) => {
   const root = tmp(t);
   const home = isolateBridge(t, root);
