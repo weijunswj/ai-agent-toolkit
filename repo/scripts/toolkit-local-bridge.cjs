@@ -27,7 +27,8 @@ const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs
 const {
   ATTEMPT_FILE: CLAUDE_AUTO_REFRESH_ATTEMPT_FILE,
   ClaudePluginAutoRefreshOperation,
-  claudeAutoRefreshStdoutLine
+  claudeAutoRefreshStdoutLine,
+  readAttemptFile: readClaudeAutoRefreshAttempt
 } = require('./toolkit-claude-plugin-auto-refresh.cjs');
 
 const ARCHITECTURE_VERSION = 2;
@@ -3378,34 +3379,39 @@ function claudeAutoRefreshAttemptPath(hubPath) {
   return path.join(path.dirname(hubPath), CLAUDE_AUTO_REFRESH_ATTEMPT_FILE);
 }
 
+// Audit view of the attempt record through the same conservative admission
+// the hook uses: anything without a recognised verified state is unreadable.
 function claudeAutoRefreshAttemptSummary(hubPath) {
-  try {
-    const record = JSON.parse(fs.readFileSync(claudeAutoRefreshAttemptPath(hubPath), 'utf8'));
-    return {
-      phase: String(record.phase || ''),
-      outcome: String(record.outcome || ''),
-      attempt_id: String(record.attempt_id || ''),
-      from_version: String(record.from_version || ''),
-      to_version: String(record.to_version || '')
-    };
-  } catch (error) {
-    return error && error.code === 'ENOENT' ? null : { phase: 'unreadable' };
-  }
+  const state = readClaudeAutoRefreshAttempt(claudeAutoRefreshAttemptPath(hubPath));
+  if (!state.record) return null;
+  const record = state.record;
+  return {
+    phase: state.phase,
+    pending: state.pending,
+    outcome: String(record.outcome || ''),
+    attempt_id: String(record.attempt_id || ''),
+    from_version: String(record.from_version || ''),
+    to_version: String(record.to_version || '')
+  };
 }
 
 // An explicit setup opt-in is the owner's acknowledgement that a held,
-// unverified attempt was reviewed. The previous record is retained inside the
-// replacement so its evidence is not lost.
+// unverified attempt was reviewed. Every pending record, including one with an
+// unknown or malformed state, can be cleared this way; the previous record is
+// retained inside the replacement (raw bytes when it is not valid JSON) so its
+// evidence is not lost.
 function clearClaudeAutoRefreshHold(hubPath) {
   const attemptPath = claudeAutoRefreshAttemptPath(hubPath);
-  let previous = null;
+  const state = readClaudeAutoRefreshAttempt(attemptPath);
+  if (!state.pending) return false;
+  let previous;
   try {
-    previous = JSON.parse(fs.readFileSync(attemptPath, 'utf8'));
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return false;
+    const text = fs.readFileSync(attemptPath, 'utf8');
+    try { previous = JSON.parse(text); } catch { previous = { phase: 'unreadable', raw: text }; }
+  } catch {
     previous = { phase: 'unreadable' };
   }
-  if (!previous || !['in-flight', 'held', 'unreadable'].includes(previous.phase)) return false;
+  if (!previous || typeof previous !== 'object' || Array.isArray(previous)) previous = { phase: 'unreadable', raw: previous };
   const temporary = `${attemptPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify({ schema: 1, phase: 'cleared', cleared_at: timestamp(), previous }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   fs.renameSync(temporary, attemptPath);
@@ -3487,6 +3493,8 @@ function maybeRunClaudePluginAutoRefresh(args, state, hubPath, testHooks = {}) {
     repoPath: state.repo_path,
     runningPluginRoot: runtimeClaudePluginRoot(),
     executingRoot: testHooks.claudeAutoRefreshExecutingRoot || path.resolve(__dirname, '..', '..'),
+    // Claude Code starts hooks in the session directory and names the project.
+    projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
     deps
   });
   let result;

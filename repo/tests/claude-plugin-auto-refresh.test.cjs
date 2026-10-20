@@ -39,15 +39,33 @@ function pluginTree(root, version, marker = 'same') {
   return root;
 }
 
+// Claude Code installs the plugin at
+// <config home>/plugins/cache/<marketplace>/<plugin>/<version>.
 function fixture(t, { running = '3.0.10', source = '3.0.11', sameBytes = false } = {}) {
   const root = tmp(t);
   const hubPath = path.join(root, 'home', 'current');
   fs.mkdirSync(hubPath, { recursive: true });
   const repoPath = pluginTree(path.join(root, 'source'), source);
+  const configHome = path.join(root, 'claude-home');
+  const family = path.join(configHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit');
+  const project = path.join(root, 'project');
+  fs.mkdirSync(project, { recursive: true });
   // A same-bytes cache is a separate installed copy; the managed checkout
   // itself is the in-place case covered by claude-plugin-auto-refresh-family.
-  const runningRoot = pluginTree(path.join(root, 'cache', running), running, sameBytes ? 'same' : 'cache');
-  return { root, hubPath, repoPath, runningRoot };
+  const runningRoot = pluginTree(path.join(family, running), running, sameBytes ? 'same' : 'cache');
+  return { root, hubPath, repoPath, runningRoot, configHome, family, project };
+}
+
+function argValue(args, name) { const index = args.indexOf(name); return index === -1 ? '' : args[index + 1]; }
+
+// The native identity a real helper reports for the args it was given.
+function nativeOf(args) {
+  return {
+    config_home: argValue(args, '--claude-config-home'),
+    plugins_root: argValue(args, '--claude-plugins-root'),
+    cache_family: path.dirname(argValue(args, '--running-plugin-root')),
+    project_context: argValue(args, '--project-context')
+  };
 }
 
 function deps(overrides = {}) {
@@ -75,7 +93,8 @@ function helperReplies(replies, calls, hubPath) {
     const reply = replies[mode];
     if (typeof reply === 'function') return reply(args, options);
     if (!reply) throw new Error(`unexpected helper mode ${mode}`);
-    return { ok: reply.ok !== false, status: 0, stdout: `${JSON.stringify(reply)}\n`, stderr: '', timedOut: false };
+    const report = typeof reply.build === 'function' ? reply.build(args) : { ...reply, native_identity: nativeOf(args) };
+    return { ok: report.ok !== false, status: 0, stdout: `${JSON.stringify(report)}\n`, stderr: '', timedOut: false };
   };
 }
 
@@ -89,13 +108,15 @@ function operation(f, depBundle, env = {}) {
     repoPath: f.repoPath,
     runningPluginRoot: f.runningRoot,
     executingRoot: f.runningRoot,
-    env,
+    projectDir: f.project,
+    env: { CLAUDE_CONFIG_DIR: f.configHome, ...env },
     deps: depBundle.deps
   });
 }
 
-const stalePlan = (f) => ({ ok: true, mode: 'plan', mutation_attempted: false, status: 'stale', installed: { version: '3.0.10', scope: 'project', install_path: f.runningRoot, project_path: path.join(f.root, 'project') } });
-const UPDATED = { ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', install_path: 'new', from_version: '3.0.10', to_version: '3.0.11' };
+const stalePlan = (f) => ({ ok: true, mode: 'plan', mutation_attempted: false, status: 'stale', installed: { version: '3.0.10', scope: 'project', install_path: f.runningRoot, project_path: f.project } });
+const updated = (f) => ({ build: (args) => ({ ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', scope: 'project', project_path: f.project,
+  install_path: path.join(f.family, '3.0.11'), from_version: '3.0.10', to_version: '3.0.11', native_identity: nativeOf(args) }) });
 
 test('recursion guard and foreign runtime stop before taking the hub lock', (t) => {
   const f = fixture(t);
@@ -181,7 +202,7 @@ test('failed managed source validation blocks the plan and the update', (t) => {
 test('stale cache: durable in-flight record precedes the in-place update, which preserves scope and reports a fresh session', (t) => {
   const f = fixture(t);
   const d = deps();
-  d.deps.runNode = helperReplies({ '--auto-refresh-plan': stalePlan(f), '--auto-refresh-apply': UPDATED }, d.calls, f.hubPath);
+  d.deps.runNode = helperReplies({ '--auto-refresh-plan': stalePlan(f), '--auto-refresh-apply': updated(f) }, d.calls, f.hubPath);
   const result = operation(f, d).run();
   assert.equal(result.refresh_status, 'updated');
   assert.equal(result.status, 'refreshed');
@@ -221,16 +242,19 @@ test('timeout with unknown outcome is held and never retried automatically', (t)
 
 test('a crash after the in-flight record (no outcome) is held; only that same install, verified current, resolves it', (t) => {
   const f = fixture(t);
-  const target = { plugin_id: 'ai-agent-toolkit@ai-agent-toolkit-local', scope: 'user', project_path: '', install_path: f.runningRoot };
-  const crashed = JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crashed', from_version: '3.0.10', to_version: '3.0.11', target });
-  fs.writeFileSync(path.join(path.dirname(f.hubPath), refresh.ATTEMPT_FILE), crashed);
+  const target = (fx) => ({ plugin_id: 'ai-agent-toolkit@ai-agent-toolkit-local', marketplace: 'ai-agent-toolkit-local', scope: 'user', project_path: '',
+    install_path: path.join(fx.family, '3.0.10'), config_home: fx.configHome, config_home_source: 'env',
+    plugins_root: path.join(fx.configHome, 'plugins'), plugins_root_source: 'config-home', cache_family: fx.family, source_path: fx.repoPath });
+  const crashed = (fx) => JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crashed', from_version: '3.0.10', to_version: '3.0.11', target: target(fx) });
+  fs.writeFileSync(path.join(path.dirname(f.hubPath), refresh.ATTEMPT_FILE), crashed(f));
   const d = deps();
   const held = operation(f, d).run();
   assert.equal(held.refresh_status, 'held');
   assert.equal(d.calls.node.length, 0);
 
+  // The same install namespace later runs the updated 3.0.11 cache.
   const current = fixture(t, { running: '3.0.11', source: '3.0.11', sameBytes: true });
-  fs.writeFileSync(path.join(path.dirname(current.hubPath), refresh.ATTEMPT_FILE), crashed);
+  fs.writeFileSync(path.join(path.dirname(current.hubPath), refresh.ATTEMPT_FILE), crashed(current));
   const check = deps();
   check.deps.runNode = helperReplies({ '--auto-refresh-plan': { ok: true, mutation_attempted: false, status: 'current',
     installed: { version: '3.0.11', scope: 'user', install_path: current.runningRoot, project_path: '' } } }, check.calls, current.hubPath);
@@ -263,7 +287,7 @@ test('a plan change detected by apply before mutation is deferred, not held', (t
   const d = deps();
   d.deps.runNode = helperReplies({
     '--auto-refresh-plan': stalePlan(f),
-    '--auto-refresh-apply': { ok: false, mutation_attempted: false, status: 'plan-changed', reason: 'state changed' }
+    '--auto-refresh-apply': { ok: false, mode: 'apply', mutation_attempted: false, status: 'plan-changed', reason: 'state changed' }
   }, d.calls, f.hubPath);
   const result = operation(f, d).run();
   assert.equal(result.status, 'deferred');
@@ -391,6 +415,17 @@ test('bridge preference flags: default off, setup-only, mutually exclusive, audi
   assert.equal(after.codex_plugin_auto_refresh_enabled, false, 'Claude opt-in does not change Codex');
   audit(['--disable-claude-plugin-auto-refresh', '--write', '--hub', hub]);
   assert.equal(audit(['--audit', '--hub', hub]).claude_plugin_auto_refresh_enabled, false);
+  // An unknown-state record is pending: audited as unreadable, and cleared only
+  // by explicit opt-in with its original content retained.
+  const unknown = { schema: 1, phase: 'mystery', attempt_id: 'legacy' };
+  fs.writeFileSync(path.join(path.dirname(hub), refresh.ATTEMPT_FILE), JSON.stringify(unknown));
+  const unknownAudit = audit(['--audit', '--hub', hub]).claude_plugin_auto_refresh_last_attempt;
+  assert.equal(unknownAudit.phase, 'unreadable');
+  assert.equal(unknownAudit.pending, true);
+  audit(['--enable-claude-plugin-auto-refresh', '--write', '--hub', hub]);
+  const recovered = readAttempt(hub);
+  assert.equal(recovered.phase, 'cleared');
+  assert.deepEqual(recovered.previous, unknown);
 });
 
 test('Claude action-required refresh outcomes open an update report; skipped and current do not', () => {

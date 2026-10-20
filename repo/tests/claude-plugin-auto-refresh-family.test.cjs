@@ -75,22 +75,48 @@ function deps(overrides = {}) {
   return { calls, deps: { ...base, ...overrides } };
 }
 
+// The native identity a real helper reports for the args it was given.
+function argValue(args, name) { const index = args.indexOf(name); return index === -1 ? '' : args[index + 1]; }
+function nativeOf(args) {
+  const runningRoot = argValue(args, '--running-plugin-root');
+  return {
+    ...(runningRoot ? {
+      config_home: argValue(args, '--claude-config-home'),
+      plugins_root: argValue(args, '--claude-plugins-root'),
+      cache_family: path.dirname(runningRoot)
+    } : {}),
+    project_context: argValue(args, '--project-context')
+  };
+}
+
 // Scripted helper replies keyed by mode; a reply may depend on the call args.
+// Object replies carry the native identity the helper verified for those args.
 function helper(d, replies) {
   d.deps.runNode = (script, args, options) => {
     const mode = args[0];
-    d.calls.node.push({ mode, args, env: options.env, timeout: options.timeout });
+    d.calls.node.push({ mode, args, env: options.env, timeout: options.timeout, cwd: options.cwd });
     const reply = typeof replies[mode] === 'function' ? replies[mode](args, options) : replies[mode];
     if (!reply) throw new Error(`unexpected helper mode ${mode}`);
     if (reply.raw) return reply.raw;
-    return { ok: reply.ok !== false, status: 0, stdout: `${JSON.stringify(reply)}\n`, stderr: '', timedOut: false };
+    const report = Object.prototype.hasOwnProperty.call(reply, 'native_identity') ? reply : { ...reply, native_identity: nativeOf(args) };
+    return { ok: reply.ok !== false, status: 0, stdout: `${JSON.stringify(report)}\n`, stderr: '', timedOut: false };
   };
   return d;
 }
 
-function op(h, { repoPath, runningRoot, env = {} }, d) {
+// Claude Code configuration home, plugin cache family and project of one host.
+function claudeHome(root, name = 'home-a') {
+  const configHome = path.join(root, name, '.claude');
+  const family = path.join(configHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit');
+  const project = path.join(root, name, 'project');
+  fs.mkdirSync(project, { recursive: true });
+  return { configHome, family, project, env: { CLAUDE_CONFIG_DIR: configHome } };
+}
+
+function op(h, { repoPath, runningRoot, env, projectDir, home = h.home || (h.home = claudeHome(h.root)) }, d) {
   return new refresh.ClaudePluginAutoRefreshOperation({
-    lockRoot: h.lockRoot, repoPath, runningPluginRoot: runningRoot, executingRoot: runningRoot, env, deps: d.deps
+    lockRoot: h.lockRoot, repoPath, runningPluginRoot: runningRoot, executingRoot: runningRoot,
+    env: env || home.env, projectDir: projectDir || home.project, deps: d.deps
   });
 }
 
@@ -107,13 +133,27 @@ function currentPlan(installPath, version, scope = 'user', projectPath = '') {
     installed: { version, scope, install_path: installPath, project_path: projectPath } };
 }
 
-// One managed source at 3.0.11 and a stale 3.0.10 cache-backed install.
+function updatedReply(args, scope = 'user', projectPath = '') {
+  return { ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', scope, project_path: projectPath,
+    from_version: '3.0.10', to_version: '3.0.11', install_path: path.join(path.dirname(argValue(args, '--running-plugin-root')), '3.0.11') };
+}
+
+// The complete native target the owner records for a host's install.
+function targetFor(home, repoPath, installPath, scope = 'user', projectPath = '') {
+  return { plugin_id: PLUGIN_ID, marketplace: 'ai-agent-toolkit-local', scope, project_path: projectPath, install_path: installPath,
+    config_home: home.configHome, config_home_source: 'env', plugins_root: path.join(home.configHome, 'plugins'),
+    plugins_root_source: 'config-home', cache_family: home.family, source_path: repoPath };
+}
+
+// One managed source at 3.0.11 and a stale 3.0.10 cache-backed install in
+// one Claude Code configuration home.
 function hosts(t) {
   const h = hub(t);
+  h.home = claudeHome(h.root);
   const repoPath = pluginTree(path.join(h.root, 'source'), '3.0.11');
-  const staleCache = pluginTree(path.join(h.root, 'cache', 'ai-agent-toolkit', '3.0.10'), '3.0.10', 'old');
-  const currentCache = pluginTree(path.join(h.root, 'cache', 'ai-agent-toolkit', '3.0.11'), '3.0.11');
-  return { h, repoPath, staleCache, currentCache };
+  const staleCache = pluginTree(path.join(h.home.family, '3.0.10'), '3.0.10', 'old');
+  const currentCache = pluginTree(path.join(h.home.family, '3.0.11'), '3.0.11');
+  return { h, repoPath, staleCache, currentCache, home: h.home };
 }
 
 // --- B1a: running-in-place identity ---------------------------------------
@@ -181,7 +221,7 @@ test('B1b: held cache-backed update -> in-place session -> the same entry again 
   assert.equal(op(h, { repoPath, runningRoot: staleCache }, first).run().refresh_status, 'unknown-outcome');
   const held = readAttempt(h);
   assert.equal(held.phase, 'held');
-  assert.deepEqual(held.target, { plugin_id: PLUGIN_ID, scope: 'user', project_path: '', install_path: staleCache });
+  assert.deepEqual(held.target, targetFor(h.home, repoPath, staleCache));
   const heldBytes = attemptBytes(h);
 
   // 3. A separate source-loaded session starts.
@@ -240,14 +280,16 @@ test('B1b: only the same target, independently verified current, reconciles a he
 
 test('B1b: a crashed in-flight attempt is reconciled only by its own verified target; corrupted or targetless records stay held', (t) => {
   for (const [label, content, reconcilable] of [
-    ['crashed in-flight with target', (cache) => JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crash', from_version: '3.0.10', to_version: '3.0.11',
-      target: { plugin_id: PLUGIN_ID, scope: 'user', project_path: '', install_path: cache } }), true],
+    ['crashed in-flight with target', (cache, home, repoPath) => JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crash', from_version: '3.0.10', to_version: '3.0.11',
+      target: targetFor(home, repoPath, cache) }), true],
+    ['crashed in-flight with a pre-namespace target', (cache) => JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crash', from_version: '3.0.10', to_version: '3.0.11',
+      target: { plugin_id: PLUGIN_ID, scope: 'user', project_path: '', install_path: cache } }), false],
     ['targetless in-flight', () => JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'old', to_version: '3.0.11' }), false],
     ['corrupted', () => '{ not json', false],
     ['wrong schema', () => JSON.stringify({ schema: 99, phase: 'completed' }), false]
   ]) {
-    const { h, repoPath, staleCache, currentCache } = hosts(t);
-    writeFile(attemptPath(h), content(staleCache));
+    const { h, repoPath, staleCache, currentCache, home } = hosts(t);
+    writeFile(attemptPath(h), content(staleCache, home, repoPath));
     const before = attemptBytes(h);
     const d = helper(deps(), { '--auto-refresh-plan': currentPlan(currentCache, '3.0.11', 'user') });
     const result = op(h, { repoPath, runningRoot: currentCache }, d).run();
@@ -305,12 +347,13 @@ test('B1b: the in-flight record names its target before the native update starts
   const { h, repoPath, staleCache } = hosts(t);
   let recordAtApply = null;
   const d = helper(deps(), {
-    '--auto-refresh-plan': stalePlan(staleCache, 'project', path.join(h.root, 'proj')),
-    '--auto-refresh-apply': () => { recordAtApply = readAttempt(h); return { ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', from_version: '3.0.10', to_version: '3.0.11', install_path: 'n' }; }
+    '--auto-refresh-plan': stalePlan(staleCache, 'project', h.home.project),
+    '--auto-refresh-apply': (args) => { recordAtApply = readAttempt(h); return updatedReply(args, 'project', h.home.project); }
   });
   assert.equal(op(h, { repoPath, runningRoot: staleCache }, d).run().refresh_status, 'updated');
   assert.equal(recordAtApply.phase, 'in-flight');
-  assert.deepEqual(recordAtApply.target, { plugin_id: PLUGIN_ID, scope: 'project', project_path: path.join(h.root, 'proj'), install_path: staleCache });
+  assert.deepEqual(recordAtApply.target, targetFor(h.home, repoPath, staleCache, 'project', h.home.project));
+  assert.equal(recordAtApply.project_context, h.home.project);
 });
 
 test('B1: lock contention skips before reading or writing the attempt record', (t) => {
@@ -355,6 +398,29 @@ test('H1: same-version freshness uses the full installed-enforcement identity, i
   assert.equal(cleanResult.execution, 'plugin-cache');
 });
 
+// O2: every local module the Claude hooks and the refresh helper can load,
+// including lazily required ones, is part of the enforcement identity, so a
+// same-version cache cannot run drifted runtime code that the check ignores.
+test('O2: the installed-enforcement identity covers the full local require graph of the Claude hook runtime', () => {
+  const entries = ['repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',
+    'repo/scripts/toolkit-claude-plugin-auto-refresh.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs'];
+  const reached = new Set();
+  const visit = (relPath) => {
+    if (reached.has(relPath)) return;
+    reached.add(relPath);
+    const text = fs.readFileSync(path.join(repoRoot, ...relPath.split('/')), 'utf8');
+    for (const match of text.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+      let next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), match[1]));
+      if (!fs.existsSync(path.join(repoRoot, ...next.split('/'))) && fs.existsSync(path.join(repoRoot, ...`${next}.cjs`.split('/')))) next = `${next}.cjs`;
+      if (/\.(cjs|js|json)$/.test(next)) visit(next);
+    }
+  };
+  entries.forEach(visit);
+  assert.ok(reached.size > entries.length, 'the graph was walked');
+  const missing = [...reached].filter((relPath) => !claudeSetup.INSTALLED_ENFORCEMENT_FILES.includes(relPath));
+  assert.deepEqual(missing, []);
+});
+
 test('H1: the hook-side identity set and the installed-enforcement validator are one contract', () => {
   for (const relPath of refresh.CURRENT_IDENTITY_FILES) assert.ok(claudeSetup.INSTALLED_ENFORCEMENT_FILES.includes(relPath), relPath);
   for (const relPath of claudeSetup.INSTALLED_ENFORCEMENT_FILES) assert.ok(fs.existsSync(path.join(repoRoot, ...relPath.split('/'))), relPath);
@@ -379,9 +445,9 @@ test('H3: the operation passes the pinned budget and environment to both helper 
   const { h, repoPath, staleCache } = hosts(t);
   const d = helper(deps(), {
     '--auto-refresh-plan': stalePlan(staleCache),
-    '--auto-refresh-apply': { ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', from_version: '3.0.10', to_version: '3.0.11', install_path: 'n' }
+    '--auto-refresh-apply': (args) => updatedReply(args)
   });
-  op(h, { repoPath, runningRoot: staleCache, env: { CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS: '900000' } }, d).run();
+  op(h, { repoPath, runningRoot: staleCache, env: { ...h.home.env, CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS: '900000' } }, d).run();
   const [plan, apply] = d.calls.node;
   assert.equal(plan.args[plan.args.indexOf('--budget-ms') + 1], String(refresh.PLAN_BUDGET_MS));
   assert.equal(plan.timeout, refresh.PLAN_TIMEOUT_MS);

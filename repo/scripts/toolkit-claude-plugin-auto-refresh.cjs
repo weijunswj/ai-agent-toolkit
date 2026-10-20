@@ -10,17 +10,26 @@
 // resolves an earlier attempt. Anything that cannot be proven safe is reported
 // as action required; an attempt whose effect is unknown is never retried
 // automatically and is resolved only by its own independently verified target.
+//
+// The Toolkit hub is shared by every Claude Code configuration home of one OS
+// user, so a target is a native install namespace, not just a plugin id and
+// scope: the effective Claude configuration home, the plugins root and the
+// stable per-plugin cache family that holds each versioned cache directory.
+// All native plugin commands run from the session's own project context.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
 const RECURSION_ENV = 'TOOLKIT_CLAUDE_PLUGIN_AUTO_REFRESH_ACTIVE';
 const ATTEMPT_FILE = 'claude-plugin-auto-refresh.json';
 const ATTEMPT_SCHEMA = 1;
-const PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
+const PLUGIN_NAME = 'ai-agent-toolkit';
+const MARKETPLACE_NAME = 'ai-agent-toolkit-local';
+const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
 const SETUP_HELPER_REL_PATH = ['repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'];
-const PENDING_PHASES = ['in-flight', 'held', 'unreadable'];
+const NATIVE_SCOPES = ['user', 'project', 'local'];
 
 // Startup budget, all within Claude Code's 600s default command-hook limit.
 // The helper environment is pinned so the helper's own worst case (which it
@@ -123,36 +132,195 @@ function enforcementIdentityFiles() {
   return [...new Set([...CURRENT_IDENTITY_FILES, ...INSTALLED_ENFORCEMENT_FILES])];
 }
 
-// The native install record an attempt targets: one record per scope and,
-// for project/local scope, per project. Its cache path changes with each version.
-function attemptTarget(installed) {
+function isAbsoluteDir(value) {
+  if (!value || !path.isAbsolute(String(value))) return false;
+  try { return fs.statSync(String(value)).isDirectory(); } catch { return false; }
+}
+
+// The verified native install namespace of a cache-backed session. Claude Code
+// installs this plugin at <plugins root>/cache/<marketplace>/<plugin>/<version>
+// (the shape recorded in installed_plugins.json), so the directory above the
+// version is the stable cache family that survives version changes. The
+// plugins root is CLAUDE_CODE_PLUGIN_CACHE_DIR when set, otherwise
+// <config home>/plugins; the config home is CLAUDE_CONFIG_DIR when set.
+// A missing CLAUDE_CONFIG_DIR proves the default home only when the running
+// cache sits under the default home's own plugins root and nothing scrubbed
+// the variable; anything else is unverified and fails closed.
+function resolveClaudeNativeIdentity({ env = process.env, runningRoot, homedir = os.homedir() } = {}) {
+  const fail = (reason) => ({ ok: false, reason });
+  if (!runningRoot || !path.isAbsolute(String(runningRoot))) return fail('the running plugin root is not an absolute path');
+  const installPath = path.resolve(String(runningRoot));
+  const version = path.basename(installPath);
+  const cacheFamily = path.dirname(installPath);
+  const marketplaceDir = path.dirname(cacheFamily);
+  const cacheDir = path.dirname(marketplaceDir);
+  const pluginsRoot = path.dirname(cacheDir);
+  if (!VERSION_PATTERN.test(version) || path.basename(cacheFamily) !== PLUGIN_NAME
+    || path.basename(marketplaceDir) !== MARKETPLACE_NAME || path.basename(cacheDir) !== 'cache') {
+    return fail(`the running plugin root is not a Claude Code cache entry of ${PLUGIN_ID}`);
+  }
+  const configEnv = String(env.CLAUDE_CONFIG_DIR || '').trim();
+  const cacheEnv = String(env.CLAUDE_CODE_PLUGIN_CACHE_DIR || '').trim();
+  const scrubbed = /^(1|true|yes)$/i.test(String(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB || '').trim());
+  let configHome;
+  let configSource;
+  if (configEnv) {
+    if (!path.isAbsolute(configEnv)) return fail('CLAUDE_CONFIG_DIR is not an absolute path');
+    configHome = path.resolve(configEnv);
+    configSource = 'env';
+  } else {
+    if (scrubbed) return fail('Claude Code scrubbed CLAUDE_CONFIG_DIR from this hook, so the configuration home cannot be verified');
+    if (cacheEnv) return fail('CLAUDE_CODE_PLUGIN_CACHE_DIR is set without CLAUDE_CONFIG_DIR, so the configuration home cannot be verified');
+    if (!homedir) return fail('the default Claude configuration home cannot be resolved');
+    configHome = path.resolve(homedir, '.claude');
+    configSource = 'default';
+  }
+  let expectedPluginsRoot;
+  let pluginsSource;
+  if (cacheEnv) {
+    if (!path.isAbsolute(cacheEnv)) return fail('CLAUDE_CODE_PLUGIN_CACHE_DIR is not an absolute path');
+    expectedPluginsRoot = path.resolve(cacheEnv);
+    pluginsSource = 'env';
+  } else {
+    expectedPluginsRoot = path.join(configHome, 'plugins');
+    pluginsSource = 'config-home';
+  }
+  if (!samePath(pluginsRoot, expectedPluginsRoot)) {
+    return fail('the running plugin cache is not under the plugins root of the configured Claude Code home');
+  }
   return {
-    plugin_id: PLUGIN_ID,
-    scope: String(installed?.scope || ''),
-    project_path: String(installed?.project_path || ''),
-    install_path: String(installed?.install_path || '')
+    ok: true,
+    identity: {
+      config_home: configHome,
+      config_home_source: configSource,
+      plugins_root: pluginsRoot,
+      plugins_root_source: pluginsSource,
+      cache_family: cacheFamily
+    }
   };
 }
 
-function sameTarget(target, installed) {
-  if (!target || target.plugin_id !== PLUGIN_ID || !target.scope) return false;
-  const projectPath = String(installed?.project_path || '');
-  return target.scope === String(installed?.scope || '')
-    && (target.project_path ? samePath(target.project_path, projectPath) : !projectPath);
+function sameNativeIdentity(left, right) {
+  return Boolean(left && right)
+    && ['config_home', 'plugins_root', 'cache_family'].every((key) => samePath(left[key], right[key]));
+}
+
+// True when a native install path is a versioned entry of the cache family.
+function inCacheFamily(installPath, cacheFamily, version) {
+  return Boolean(installPath && cacheFamily && VERSION_PATTERN.test(String(version || '')))
+    && samePath(path.dirname(path.resolve(String(installPath))), cacheFamily)
+    && path.basename(path.resolve(String(installPath))) === String(version);
+}
+
+// The immutable native target an attempt is bound to before any mutation:
+// one install record (scope and, for project/local scope, project) inside one
+// verified install namespace, sourced from one managed checkout. The versioned
+// cache path is evidence only; it changes with each update.
+function attemptTarget(installed, identity, sourcePath) {
+  return {
+    plugin_id: PLUGIN_ID,
+    marketplace: MARKETPLACE_NAME,
+    scope: String(installed?.scope || ''),
+    project_path: String(installed?.project_path || ''),
+    install_path: String(installed?.install_path || ''),
+    config_home: identity.config_home,
+    config_home_source: identity.config_home_source,
+    plugins_root: identity.plugins_root,
+    plugins_root_source: identity.plugins_root_source,
+    cache_family: identity.cache_family,
+    source_path: sourcePath
+  };
+}
+
+// A complete target names every identity field; anything older or partial
+// cannot be matched and stays held until explicit setup recovery.
+function completeTarget(target) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return false;
+  if (target.plugin_id !== PLUGIN_ID || target.marketplace !== MARKETPLACE_NAME || !NATIVE_SCOPES.includes(target.scope)) return false;
+  if (target.scope === 'user' ? Boolean(target.project_path) : !target.project_path) return false;
+  return ['config_home', 'plugins_root', 'cache_family', 'source_path', 'install_path']
+    .every((key) => typeof target[key] === 'string' && path.isAbsolute(target[key]));
+}
+
+// The recorded target matches this session's verified namespace and source.
+function sameNamespace(target, identity, sourcePath) {
+  return completeTarget(target) && sameNativeIdentity(target, identity) && samePath(target.source_path, sourcePath);
+}
+
+// The native install record a plan reports is the recorded target's record,
+// at any version inside the target's cache family.
+function sameInstallRecord(target, installed) {
+  if (!completeTarget(target) || !installed) return false;
+  const projectPath = String(installed.project_path || '');
+  return target.scope === String(installed.scope || '')
+    && (target.project_path ? samePath(target.project_path, projectPath) : !projectPath)
+    && inCacheFamily(installed.install_path, target.cache_family, installed.version);
+}
+
+// Conservative attempt-state admission. Only these exact, fully attested
+// terminal records discharge an attempt; `in-flight`, `held` and every
+// missing, unknown, malformed or unattested state are pending and are never
+// retried automatically. Unknown records are kept byte-for-byte.
+const TERMINAL_ATTESTATIONS = {
+  completed: (record) => typeof record.attempt_id === 'string' && Boolean(record.attempt_id)
+    && typeof record.completed_at === 'string' && Boolean(record.completed_at)
+    && record.target && typeof record.target === 'object'
+    && ((record.outcome === 'updated' && VERSION_PATTERN.test(String(record.to_version || '')))
+      || record.outcome === 'not-attempted'),
+  resolved: (record) => record.resolved_by === 'same-target-verified'
+    && typeof record.resolved_at === 'string' && Boolean(record.resolved_at)
+    && record.target && typeof record.target === 'object'
+    && record.previous && typeof record.previous === 'object',
+  cleared: (record) => typeof record.cleared_at === 'string' && Boolean(record.cleared_at)
+    && record.previous && typeof record.previous === 'object'
+};
+
+function classifyAttemptRecord(record) {
+  if (record === undefined) return { pending: false, phase: 'none', record: null };
+  if (!record || typeof record !== 'object' || Array.isArray(record) || record.schema !== ATTEMPT_SCHEMA) {
+    return { pending: true, phase: 'unreadable', record: { schema: ATTEMPT_SCHEMA, phase: 'unreadable' } };
+  }
+  if (record.phase === 'in-flight' || record.phase === 'held') return { pending: true, phase: record.phase, record };
+  const attest = Object.prototype.hasOwnProperty.call(TERMINAL_ATTESTATIONS, record.phase) ? TERMINAL_ATTESTATIONS[record.phase] : null;
+  if (attest && attest(record)) return { pending: false, phase: record.phase, record };
+  return {
+    pending: true,
+    phase: 'unreadable',
+    record: { schema: ATTEMPT_SCHEMA, phase: 'unreadable', recorded_phase: typeof record.phase === 'string' ? record.phase : '<missing>' }
+  };
+}
+
+function readAttemptFile(attemptPath) {
+  let text;
+  try {
+    text = fs.readFileSync(attemptPath, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return classifyAttemptRecord(undefined);
+    return classifyAttemptRecord(null);
+  }
+  try {
+    return classifyAttemptRecord(JSON.parse(text));
+  } catch {
+    return classifyAttemptRecord(null);
+  }
 }
 
 class ClaudePluginAutoRefreshOperation {
-  #lockRoot; #repoPath; #runningRoot; #executingRoot; #env; #deps; #attemptPath;
+  #lockRoot; #repoPath; #runningRoot; #executingRoot; #projectDir; #env; #homedir; #deps; #attemptPath;
 
+  // projectDir: the session's project context (CLAUDE_PROJECT_DIR, else the
+  // hook's working directory); every native plugin command runs from it.
   // deps: acquireLock(lockRoot) -> lock, releaseLock(lock), git(repoPath, args, {timeout}) -> {ok, stdout},
   // validateRepo(repoPath) (throws on failure), runNode(scriptPath, args, {cwd, timeout, env}) ->
   // {ok, status, stdout, stderr, error, timedOut}, now() -> ISO string.
-  constructor({ lockRoot, repoPath, runningPluginRoot, executingRoot, env = process.env, deps }) {
+  constructor({ lockRoot, repoPath, runningPluginRoot, executingRoot, projectDir = '', env = process.env, homedir = os.homedir(), deps }) {
     this.#lockRoot = lockRoot;
     this.#repoPath = repoPath ? path.resolve(repoPath) : '';
     this.#runningRoot = runningPluginRoot ? path.resolve(runningPluginRoot) : '';
     this.#executingRoot = executingRoot ? path.resolve(executingRoot) : '';
+    this.#projectDir = projectDir ? String(projectDir) : '';
     this.#env = env;
+    this.#homedir = homedir;
     this.#deps = deps;
     // The record lives beside the hub lock, outside the hub snapshot directory
     // that bridge writes replace atomically.
@@ -174,14 +342,29 @@ class ClaudePluginAutoRefreshOperation {
     return this.#result(status, { ...details, errors: [reason], manual_action: manualAction });
   }
 
-  #readAttempt() {
-    try {
-      const record = JSON.parse(fs.readFileSync(this.#attemptPath, 'utf8'));
-      return record && record.schema === ATTEMPT_SCHEMA ? record : { schema: ATTEMPT_SCHEMA, phase: 'unreadable' };
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return null;
-      return { schema: ATTEMPT_SCHEMA, phase: 'unreadable' };
-    }
+  // The pending attempt record, or null when no attempt is pending.
+  #readPendingAttempt() {
+    const state = readAttemptFile(this.#attemptPath);
+    return state.pending ? state.record : null;
+  }
+
+  #nativeIdentity() {
+    return resolveClaudeNativeIdentity({ env: this.#env, runningRoot: this.#runningRoot, homedir: this.#homedir });
+  }
+
+  #projectContext() {
+    return isAbsoluteDir(this.#projectDir) ? path.resolve(this.#projectDir) : '';
+  }
+
+  #identityArgs(identity, projectContext) {
+    return ['--running-plugin-root', this.#runningRoot, '--project-context', projectContext,
+      '--claude-config-home', identity.config_home, '--claude-plugins-root', identity.plugins_root];
+  }
+
+  // The plan report's verified native namespace is this session's namespace.
+  #reportMatchesIdentity(report, identity, projectContext) {
+    const native = report?.native_identity;
+    return sameNativeIdentity(native, identity) && samePath(native?.project_context, projectContext);
   }
 
   // Durable write: the record reaches disk before any mutation starts.
@@ -251,11 +434,11 @@ class ClaudePluginAutoRefreshOperation {
   }
 
   #heldResult(attempt, versions, extraReason = '') {
-    const target = attempt.target?.scope ? ` for the scope ${attempt.target.scope} install` : '';
+    const target = typeof attempt.target?.scope === 'string' && attempt.target.scope ? ` for the scope ${attempt.target.scope} install` : '';
     const base = attempt.phase === 'held'
       ? `a previous automatic refresh${target} (${attempt.outcome || 'unverified'}) was not verified`
       : attempt.phase === 'unreadable'
-        ? 'the previous automatic refresh record is unreadable, so its effect is unknown'
+        ? 'the previous automatic refresh record is unreadable or has no recognised verified state, so its effect is unknown'
         : `a previous automatic refresh${target} did not record its outcome; its effect is unknown`;
     return this.#actionRequired('held', `${base}${extraReason}; it is not retried automatically`,
       { ...versions, attempt_id: attempt.attempt_id || '', mutation_attempted: false }, HELD_ACTION);
@@ -276,7 +459,7 @@ class ClaudePluginAutoRefreshOperation {
   }
 
   #runLocked() {
-    const attempt = this.#readAttempt();
+    const attempt = this.#readPendingAttempt();
     const runningVersion = readManifestVersion(this.#runningRoot);
     if (!runningVersion) return this.#actionRequired('untrusted-runtime', 'the running Claude plugin root has no valid Toolkit manifest');
     const source = this.#verifySource();
@@ -288,7 +471,8 @@ class ClaudePluginAutoRefreshOperation {
       return this.#actionRequired('newer-than-source', `the running plugin ${runningVersion} is newer than managed source ${source.version}; downgrade is refused`, versions);
     }
     if (order === 0) return this.#runSameVersion(attempt, source, versions);
-    if (attempt && PENDING_PHASES.includes(attempt.phase)) return this.#heldResult(attempt, versions);
+    // One shared-hub fence: any pending attempt blocks every automatic update.
+    if (attempt) return this.#heldResult(attempt, versions);
     return this.#runStale(source, versions, runningVersion);
   }
 
@@ -297,10 +481,14 @@ class ClaudePluginAutoRefreshOperation {
   // install record says and never updates another entry or resolves an attempt.
   #runInPlace(attempt, source, runningVersion) {
     const versions = { running_version: runningVersion, source_version: source.version, source_commit: source.commit, execution: 'managed-source', mutation_attempted: false };
-    if (attempt && PENDING_PHASES.includes(attempt.phase)) {
+    if (attempt) {
       return this.#heldResult(attempt, versions, '; this session runs Toolkit directly from the managed checkout and cannot verify or resolve that install');
     }
-    const plan = this.#plan(source, ['--running-in-place']);
+    const projectContext = this.#projectContext();
+    if (!projectContext) {
+      return this.#actionRequired('project-context-unverified', 'the session project directory is not available, so Claude Code\'s plugin record cannot be read for this session', versions);
+    }
+    const plan = this.#plan(source, ['--running-in-place', '--project-context', projectContext]);
     if (!plan.report) {
       return this.#actionRequired('in-place-unverified', plan.timedOut
         ? 'the read-only check of Claude Code\'s plugin record timed out, so this in-place session could not be matched to its native install'
@@ -315,7 +503,8 @@ class ClaudePluginAutoRefreshOperation {
   // Same version from an installed cache: current only when every
   // installed-enforcement identity file matches the source. A pending attempt
   // is resolved only when its own target is independently verified current
-  // and is the install this session runs from.
+  // and is the install this session runs from: the same configuration home,
+  // plugins root, cache family, managed source, scope and project.
   #runSameVersion(attempt, source, versions) {
     let mismatch;
     try {
@@ -326,30 +515,47 @@ class ClaudePluginAutoRefreshOperation {
     if (mismatch) {
       return this.#actionRequired('stale-same-version', `the running plugin reports the source version but ${mismatch} differs from the managed source`, versions);
     }
-    if (!attempt || !PENDING_PHASES.includes(attempt.phase)) return this.#result('current', versions);
-    if (!attempt.target?.scope || attempt.to_version !== source.version) return this.#heldResult(attempt, versions);
+    if (!attempt) return this.#result('current', versions);
+    if (attempt.phase === 'unreadable' || !completeTarget(attempt.target) || attempt.to_version !== source.version) {
+      return this.#heldResult(attempt, versions);
+    }
+    const native = this.#nativeIdentity();
+    if (!native.ok) return this.#heldResult(attempt, versions, `; ${native.reason}`);
+    if (!sameNamespace(attempt.target, native.identity, this.#repoPath)) {
+      return this.#heldResult(attempt, versions, '; it belongs to a different Claude Code install, so this session cannot verify or resolve it');
+    }
+    const projectContext = this.#projectContext();
+    if (!projectContext) return this.#heldResult(attempt, versions, '; the session project directory is not available');
     try {
       this.#deps.validateRepo(this.#repoPath);
     } catch {
       return this.#heldResult(attempt, versions, '; the managed source failed validation, so the install could not be re-verified');
     }
-    const report = this.#plan(source, ['--running-plugin-root', this.#runningRoot]).report;
+    const report = this.#plan(source, this.#identityArgs(native.identity, projectContext)).report;
     const verified = report && report.status === 'current' && report.installed
       && report.installed.version === source.version
       && samePath(report.installed.install_path, this.#runningRoot)
-      && sameTarget(attempt.target, report.installed);
+      && this.#reportMatchesIdentity(report, native.identity, projectContext)
+      && sameInstallRecord(attempt.target, report.installed);
     if (!verified) return this.#heldResult(attempt, versions, '; this session could not verify that the same install is now current');
     this.#writeAttempt({ phase: 'resolved', resolved_by: 'same-target-verified', resolved_at: this.#deps.now(), target: attempt.target, previous: attempt });
     return this.#result('resolved-current', versions);
   }
 
   #runStale(source, versions, runningVersion) {
+    const native = this.#nativeIdentity();
+    if (!native.ok) return this.#actionRequired('native-identity-unverified', native.reason, versions);
+    const projectContext = this.#projectContext();
+    if (!projectContext) {
+      return this.#actionRequired('project-context-unverified', 'the session project directory is not available, so the plugin cannot be checked in this session\'s context', versions);
+    }
     try {
       this.#deps.validateRepo(this.#repoPath);
     } catch (error) {
       return this.#actionRequired('source-validation-failed', `managed source validation failed: ${error.message}`, versions);
     }
-    const plan = this.#plan(source, ['--running-plugin-root', this.#runningRoot]);
+    const identityArgs = this.#identityArgs(native.identity, projectContext);
+    const plan = this.#plan(source, identityArgs);
     const planReport = plan.report;
     if (!planReport) {
       return this.#actionRequired('plan-failed', plan.timedOut ? 'the read-only plugin state check timed out' : 'the read-only plugin state check returned no valid result', versions);
@@ -366,22 +572,32 @@ class ClaudePluginAutoRefreshOperation {
     if (fromVersion !== runningVersion || !samePath(planReport.installed?.install_path, this.#runningRoot)) {
       return this.#actionRequired('untrusted-runtime', 'Claude Code reports a different installed version or cache than the running hook', versions);
     }
+    if (!this.#reportMatchesIdentity(planReport, native.identity, projectContext)) {
+      return this.#actionRequired('native-identity-unverified', 'the plugin check did not confirm this session\'s Claude Code configuration home, plugin cache and project', versions);
+    }
     const attemptId = crypto.randomUUID();
-    const target = attemptTarget(planReport.installed);
+    const target = attemptTarget(planReport.installed, native.identity, this.#repoPath);
+    if (!completeTarget(target)) {
+      return this.#actionRequired('native-identity-unverified', 'the installed plugin record does not name a complete native target', versions);
+    }
     const scope = target.scope;
     this.#writeAttempt({
       phase: 'in-flight', attempt_id: attemptId, started_at: this.#deps.now(), pid: process.pid,
-      from_version: fromVersion, to_version: source.version, source_commit: source.commit, scope, target
+      from_version: fromVersion, to_version: source.version, source_commit: source.commit, scope, target,
+      project_context: projectContext
     });
     const apply = this.#helper('--auto-refresh-apply', [
       '--expected-commit', source.commit,
       '--expected-from-version', fromVersion,
       '--expected-to-version', source.version,
-      '--running-plugin-root', this.#runningRoot
+      ...identityArgs
     ], APPLY_BUDGET_MS, APPLY_TIMEOUT_MS);
     const report = apply.report;
     const details = { ...versions, attempt_id: attemptId, from_version: fromVersion, to_version: source.version, scope, mutation_attempted: true };
-    if (report && report.ok === true && report.status === 'updated') {
+    if (report && report.ok === true && report.status === 'updated'
+      && this.#reportMatchesIdentity(report, native.identity, projectContext)
+      && sameInstallRecord(target, { scope: report.scope, project_path: report.project_path, install_path: report.install_path, version: report.to_version })
+      && report.to_version === source.version) {
       this.#writeAttempt({ phase: 'completed', outcome: 'updated', attempt_id: attemptId, completed_at: this.#deps.now(), from_version: fromVersion, to_version: source.version, source_commit: source.commit, scope, target });
       return this.#result('updated', {
         ...details,
@@ -391,14 +607,16 @@ class ClaudePluginAutoRefreshOperation {
         warnings: report.warning ? [report.warning] : []
       });
     }
-    if (report && report.mutation_attempted === false) {
+    // Only an apply-mode report that positively says the native update never
+    // started may discharge the attempt; anything else stays held.
+    if (report && report.mode === 'apply' && report.ok !== true && report.mutation_attempted === false) {
       this.#writeAttempt({ phase: 'completed', outcome: 'not-attempted', attempt_id: attemptId, completed_at: this.#deps.now(), reason: report.status || '', target });
       return this.#result(report.status === 'source-moved' ? 'source-moved' : 'plan-changed', { ...details, mutation_attempted: false, errors: [report.reason || 'the plan changed before update'] });
     }
-    const outcome = report?.status || (apply.timedOut ? 'unknown-timeout' : 'unknown');
+    const outcome = report?.status === 'updated' ? 'update-unverified' : (report?.status || (apply.timedOut ? 'unknown-timeout' : 'unknown'));
     this.#writeAttempt({ phase: 'held', outcome, attempt_id: attemptId, held_at: this.#deps.now(), from_version: fromVersion, to_version: source.version, source_commit: source.commit, scope, target });
     const reason = report
-      ? `Claude Code plugin update was not verified (${outcome}): ${report.reason || 'no detail'}`
+      ? `Claude Code plugin update was not verified (${outcome}): ${report.reason || (report.status === 'updated' ? 'the reported install is not the verified target of this session' : 'no detail')}`
       : `Claude Code plugin update outcome is unknown (${apply.timedOut ? 'timed out' : 'no valid result'})`;
     return this.#actionRequired(report ? outcome : 'unknown-outcome', reason, details, HELD_ACTION);
   }
@@ -435,14 +653,26 @@ module.exports = {
   CURRENT_IDENTITY_FILES,
   ClaudePluginAutoRefreshOperation,
   HELD_ACTION,
+  MARKETPLACE_NAME,
+  PLUGIN_ID,
+  PLUGIN_NAME,
   HOOK_WORST_CASE_MS,
   MANUAL_ACTION,
   PLAN_BUDGET_MS,
   PLAN_TIMEOUT_MS,
   RECURSION_ENV,
+  attemptTarget,
   autoRefreshChildEnv,
+  classifyAttemptRecord,
   claudeAutoRefreshStdoutLine,
+  completeTarget,
   enforcementIdentityFiles,
+  inCacheFamily,
   lastJsonLine,
-  readManifestVersion
+  readAttemptFile,
+  readManifestVersion,
+  resolveClaudeNativeIdentity,
+  sameInstallRecord,
+  sameNativeIdentity,
+  samePath
 };

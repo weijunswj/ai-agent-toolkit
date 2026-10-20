@@ -1039,27 +1039,62 @@ function sourceCommit() {
 
 const AUTO_BUDGET = ['--budget-ms', '600000'];
 
+// Each fixture directory is one Claude Code configuration home: the plugin is
+// installed at <config home>/plugins/cache/<marketplace>/<plugin>/<version>
+// (the installed_plugins.json shape), and <dir>/project is the session project.
+function claudeConfigHome(dir) { return path.join(dir, 'claude'); }
+function cacheFamily(dir) { return path.join(claudeConfigHome(dir), 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit'); }
+function sessionProject(dir) { const project = path.join(dir, 'project'); fs.mkdirSync(project, { recursive: true }); return project; }
+
+// The helper's env for one fixture home, with no inherited Claude overrides.
+function autoRefreshEnv(dir, extra = {}) {
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeConfigHome(dir), ...extra };
+  for (const key of ['CLAUDE_CODE_PLUGIN_CACHE_DIR', 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']) if (!(key in extra)) delete env[key];
+  return env;
+}
+
+// Identity args the startup hook passes for a cache-backed session.
+function identityArgs(dir, runningRoot = staleCacheRoot(dir)) {
+  return ['--running-plugin-root', runningRoot, '--claude-config-home', claudeConfigHome(dir),
+    '--claude-plugins-root', path.join(claudeConfigHome(dir), 'plugins')];
+}
+
 function autoRefresh(mode, fake, extra = [], options = {}) {
-  const result = runSetup(mode, fake, ['--expected-commit', sourceCommit(), ...(options.budget || AUTO_BUDGET), ...extra], options);
+  const dir = path.dirname(fake);
+  const context = extra.includes('--project-context') ? [] : ['--project-context', sessionProject(dir)];
+  const result = runSetup(mode, fake, ['--expected-commit', sourceCommit(), ...(options.budget || AUTO_BUDGET), ...context, ...extra],
+    { ...options, env: options.env || autoRefreshEnv(dir) });
   const lines = String(result.stdout || '').trim().split(/\r?\n/);
   return { result, report: JSON.parse(lines[lines.length - 1] || '{}') };
 }
 
 function staleCacheRoot(dir) {
-  return path.join(dir, 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.0.9');
+  return path.join(cacheFamily(dir), '3.0.9');
+}
+
+// A current installed cache: the managed source's enforcement bytes copied
+// into the next versioned directory of the same cache family.
+function currentCacheRoot(dir) {
+  const root = path.join(cacheFamily(dir), expectedVersion());
+  for (const relPath of setup.INSTALLED_ENFORCEMENT_FILES) {
+    const target = path.join(root, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
+  return root;
 }
 
 function cacheFake(dir, options = {}) {
   return writeFakeClaude(dir, {
     initialInstalled: true,
     installedVersion: '3.0.9',
-    installPaths: { '3.0.9': staleCacheRoot(dir) },
+    installPaths: { '3.0.9': staleCacheRoot(dir), [expectedVersion()]: currentCacheRoot(dir) },
     ...options
   });
 }
 
 function applyArgs(dir, fromVersion) {
-  return ['--expected-from-version', fromVersion, '--expected-to-version', expectedVersion(), '--running-plugin-root', staleCacheRoot(dir)];
+  return ['--expected-from-version', fromVersion, '--expected-to-version', expectedVersion(), ...identityArgs(dir)];
 }
 
 function assertNoDestructiveFallback(stateDir) {
@@ -1072,8 +1107,9 @@ function assertNoDestructiveFallback(stateDir) {
 
 test('auto-refresh plan classifies an older cache-backed install as stale without any mutation', () => {
   const dir = tmpRoot();
-  const fake = cacheFake(dir, { initialScope: 'project' });
-  const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)]);
+  const fake = cacheFake(dir, { initialScope: 'project', projectPath: sessionProject(dir) });
+  const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--project-context', path.join(dir, 'project'), ...identityArgs(dir)],
+    { env: autoRefreshEnv(dir) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(report.status, 'stale');
   assert.equal(report.mutation_attempted, false);
@@ -1085,7 +1121,7 @@ test('auto-refresh plan classifies an older cache-backed install as stale withou
 
 test('auto-refresh apply runs only plugin update in the installed scope and reports a fresh session', () => {
   const dir = tmpRoot();
-  const fake = cacheFake(dir, { initialScope: 'project' });
+  const fake = cacheFake(dir, { initialScope: 'project', projectPath: sessionProject(dir) });
   const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(report.status, 'updated');
@@ -1100,7 +1136,7 @@ test('auto-refresh apply runs only plugin update in the installed scope and repo
 test('auto-refresh apply never falls back to uninstall or reinstall when the native update fails or does not land', () => {
   for (const [options, status] of [[{ failUpdate: true }, 'update-failed'], [{ updateSilentNoop: true }, 'update-unverified']]) {
     const dir = tmpRoot();
-    const fake = cacheFake(dir, options);
+    const fake = cacheFake(dir, typeof options === 'function' ? options(dir) : options);
     const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
     assert.equal(result.status, 1);
     assert.equal(report.status, status);
@@ -1110,20 +1146,22 @@ test('auto-refresh apply never falls back to uninstall or reinstall when the nat
 });
 
 test('auto-refresh refuses downgrade, missing, disabled, foreign-runtime and foreign-source installs without mutation', () => {
+  const dir0 = tmpRoot();
   const cases = [
-    [{ installedVersion: '9.9.9', installPaths: {} }, 'newer-than-source'],
+    [(dir) => ({ installedVersion: '9.9.9', installPaths: { '9.9.9': path.join(cacheFamily(dir), '9.9.9') } }), 'newer-than-source'],
     [{ initialInstalled: false }, 'missing'],
     [{ initialEnabled: false }, 'disabled'],
-    [{}, 'untrusted-runtime', path.join(repoRoot, 'not-the-cache')],
+    [{}, 'untrusted-runtime', path.join(cacheFamily(dir0), '3.0.8')],
+    [{}, 'native-identity-unverified', path.join(repoRoot, 'not-the-cache')],
     [{ initialRepoRoot: path.join(repoRoot, '..', 'another-toolkit-copy') }, 'untrusted-source']
   ];
   for (const [options, status, runningRoot] of cases) {
-    const dir = tmpRoot();
-    const fake = cacheFake(dir, options);
+    const dir = runningRoot ? dir0 : tmpRoot();
+    const fake = cacheFake(dir, typeof options === 'function' ? options(dir) : options);
     const root = runningRoot || staleCacheRoot(dir);
-    const { report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', root]);
+    const { report } = autoRefresh('--auto-refresh-plan', fake, identityArgs(dir, root));
     assert.equal(report.status, status, status);
-    const applied = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', expectedVersion(), '--running-plugin-root', root]);
+    const applied = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', expectedVersion(), ...identityArgs(dir, root)]);
     assert.equal(applied.report.mutation_attempted, false, status);
     assert.equal(readFakeClaudeState(dir).updateCount, 0, status);
     assertNoDestructiveFallback(dir);
@@ -1133,11 +1171,11 @@ test('auto-refresh refuses downgrade, missing, disabled, foreign-runtime and for
 test('auto-refresh apply refuses a moved source commit or a changed plan before mutation', () => {
   const dir = tmpRoot();
   const fake = cacheFake(dir);
-  const moved = runSetup('--auto-refresh-apply', fake, ['--expected-commit', 'b'.repeat(40), ...AUTO_BUDGET, ...applyArgs(dir, '3.0.9')]);
+  const moved = runSetup('--auto-refresh-apply', fake, ['--expected-commit', 'b'.repeat(40), ...AUTO_BUDGET, '--project-context', sessionProject(dir), ...applyArgs(dir, '3.0.9')], { env: autoRefreshEnv(dir) });
   assert.equal(JSON.parse(moved.stdout.trim()).status, 'source-moved');
   const changed = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.8'));
   assert.equal(changed.report.status, 'plan-changed');
-  const wrongTarget = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', '0.0.1', '--running-plugin-root', staleCacheRoot(dir)]);
+  const wrongTarget = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', '0.0.1', ...identityArgs(dir)]);
   assert.equal(wrongTarget.report.status, 'plan-changed');
   assert.equal(readFakeClaudeState(dir).updateCount, 0);
 });
@@ -1197,7 +1235,7 @@ test('B1a family: in-place plans report the native read-in-place evidence and th
   ];
   for (const [options, status] of cases) {
     const dir = tmpRoot();
-    const fake = cacheFake(dir, options);
+    const fake = cacheFake(dir, typeof options === 'function' ? options(dir) : options);
     const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-in-place']);
     assert.equal(report.status, status, `${status}: ${result.stderr}`);
     assert.equal(report.mutation_attempted, false, status);
@@ -1243,9 +1281,9 @@ test('L3: projectPath is the install record project context, not the plugin sour
   assert.equal(contextOnly.sourceIdentity, 'unverified');
 });
 
-test('L3: a project-scoped cache-backed apply verifies through readFromFolder despite a different projectPath', () => {
+test('L3: a project-scoped cache-backed apply verifies through readFromFolder in its own project context', () => {
   const dir = tmpRoot();
-  const fake = cacheFake(dir, { initialScope: 'project', readFromFolder: repoRoot, projectPath: path.join(dir, 'project'), omitSourcePath: true });
+  const fake = cacheFake(dir, { initialScope: 'project', readFromFolder: repoRoot, projectPath: sessionProject(dir), omitSourcePath: true });
   const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
   assert.equal(report.status, 'updated', result.stderr || report.reason);
   assert.equal(report.scope, 'project');
@@ -1254,8 +1292,8 @@ test('L3: a project-scoped cache-backed apply verifies through readFromFolder de
 
 test('L2 family: an older running cache while the installed entry is verified current asks for a fresh session', () => {
   const dir = tmpRoot();
-  const fake = cacheFake(dir, { installedVersion: expectedVersion(), installPaths: {} });
-  const { report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)]);
+  const fake = cacheFake(dir, { installedVersion: expectedVersion() });
+  const { report } = autoRefresh('--auto-refresh-plan', fake, identityArgs(dir));
   assert.equal(report.status, 'current');
   assert.equal(report.running_root_matches_install, false);
 });
@@ -1263,7 +1301,7 @@ test('L2 family: an older running cache while the installed entry is verified cu
 test('H3: the helper refuses an auto-refresh whose own worst-case budget exceeds the caller budget, before any Claude call', () => {
   const dir = tmpRoot();
   const fake = cacheFake(dir);
-  const plan = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)], { budget: ['--budget-ms', '1000'] });
+  const plan = autoRefresh('--auto-refresh-plan', fake, identityArgs(dir), { budget: ['--budget-ms', '1000'] });
   assert.equal(plan.report.status, 'budget-exceeded');
   assert.equal(plan.report.mutation_attempted, false);
   const apply = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'), { budget: ['--budget-ms', '1000'] });

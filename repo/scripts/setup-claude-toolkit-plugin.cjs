@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
+const nativeIdentity = require('./toolkit-claude-plugin-auto-refresh.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -77,11 +78,13 @@ function repoCommit(repoRoot) {
   return result.status === 0 ? String(result.stdout || '').trim().toLowerCase() : '';
 }
 
+// options.pluginsRoot pins the verified plugins root of an auto-refresh
+// session (CLAUDE_CODE_PLUGIN_CACHE_DIR or <config home>/plugins).
 function readClaudePluginRegistryState(options = {}) {
-  const configRoot = claudeConfigDir(options);
+  const pluginsRoot = options.pluginsRoot ? path.resolve(options.pluginsRoot) : path.join(claudeConfigDir(options), 'plugins');
   return {
-    knownMarketplaces: readJsonIfExists(path.join(configRoot, 'plugins', 'known_marketplaces.json')),
-    installedPlugins: readJsonIfExists(path.join(configRoot, 'plugins', 'installed_plugins.json')),
+    knownMarketplaces: readJsonIfExists(path.join(pluginsRoot, 'known_marketplaces.json')),
+    installedPlugins: readJsonIfExists(path.join(pluginsRoot, 'installed_plugins.json')),
     repoCommit: options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()))
   };
 }
@@ -259,6 +262,7 @@ const INSTALLED_ENFORCEMENT_PAIRS = [
   ['.claude-plugin/plugin.json', true],
   ['.claude-plugin/hooks/hooks.json', true],
   ['repo/scripts/toolkit-agent-control.cjs', false],
+  ['repo/scripts/toolkit-agent-control-run093-history.cjs', false],
   ['repo/scripts/claude-process-launch.cjs', false],
   ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
   ['repo/scripts/toolkit-claude-task-session.cjs', false],
@@ -612,7 +616,7 @@ function runClaudeCommand(command, args, options = {}) {
   return spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs(), ...options });
 }
 
-function spawnClaudeProcess(command, args) {
+function spawnClaudeProcess(command, args, cwd) {
   const parts = claudeSpawnParts(command, args);
   // stdio is ignored on purpose: the mutation's completion signal is the
   // supported plugin-state verification below, never captured output, and an
@@ -623,7 +627,8 @@ function spawnClaudeProcess(command, args) {
   return spawn(parts.command, parts.args, {
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     stdio: 'ignore',
-    windowsHide: true
+    windowsHide: true,
+    ...(cwd ? { cwd } : {})
   });
 }
 
@@ -678,7 +683,7 @@ class ClaudePluginMutationOperation {
   // Returns a failure result when the command cannot start, otherwise null.
   #start() {
     try {
-      this.#child = spawnClaudeProcess(this.#command, this.#mutationArgs);
+      this.#child = spawnClaudeProcess(this.#command, this.#mutationArgs, this.#options.cwd);
       this.#child.on('exit', (code, signal) => { this.#childExit = { code, signal }; });
       this.#child.on('error', (error) => { this.#childError = error; });
       this.#child.unref();
@@ -692,12 +697,13 @@ class ClaudePluginMutationOperation {
   async #pollOnce() {
     const options = this.#options;
     try {
-      const pluginList = runClaudeJson(this.#command, ['plugin', 'list', '--json']);
+      const pluginList = runClaudeJson(this.#command, ['plugin', 'list', '--json'], options.cwd ? { cwd: options.cwd } : {});
       this.#lastListError = null;
-      this.#lastState = evaluateClaudeToolkitPluginState(pluginList, {
+      this.#lastState = evaluateClaudeToolkitPluginState(options.selectEntries ? options.selectEntries(pluginList) : pluginList, {
         repoRoot: options.repoRoot,
         expectedVersion: options.expectedVersion,
-        repoCommit: this.#expectedSourceCommit
+        repoCommit: this.#expectedSourceCommit,
+        ...(options.pluginsRoot ? { pluginsRoot: options.pluginsRoot } : {})
       });
       if (!this.#lastState.ok) return null;
       // The synchronous state poll starves the event loop, so a child that
@@ -943,19 +949,41 @@ function autoRefreshInstalled(entry) {
   };
 }
 
-// Shared opening checks: exactly one enabled install record with an exact
-// version in a refreshable scope. Returns { result } to stop, or { entry, installed, result }.
-function autoRefreshEntry(pluginList, base) {
+// The install records that can belong to this session: every record without
+// a project context (user scope) and the project/local records of the
+// session's own project. Records of other projects are never candidates.
+function sessionToolkitEntries(pluginList, projectContext) {
   const entries = exactToolkitEntries(pluginList);
+  if (!projectContext) return { entries, foreign: 0 };
+  const own = entries.filter((entry) => !entry.projectPath || samePath(entry.projectPath, projectContext));
+  return { entries: own, foreign: entries.length - own.length };
+}
+
+// Shared opening checks: exactly one enabled install record for this
+// session's project context with an exact version in a refreshable scope.
+// Claude Code reports `enabled` for the project of the working directory the
+// list runs from, so the caller lists from the session's project context.
+// Returns { result } to stop, or { entry, installed, result }.
+function autoRefreshEntry(pluginList, base, projectContext = '') {
+  const { entries, foreign } = sessionToolkitEntries(pluginList, projectContext);
+  if (entries.length === 0 && foreign > 0) {
+    return { result: { ...base, status: 'foreign-project', reason: `Claude Code reports ${pluginId()} only for other projects, not for this session's project` } };
+  }
   if (entries.length === 0) return { result: { ...base, status: 'missing', reason: `${pluginId()} is not installed` } };
-  if (entries.length > 1) return { result: { ...base, status: 'ambiguous', reason: `Claude Code reports ${entries.length} ${pluginId()} installs` } };
+  if (entries.length > 1) return { result: { ...base, status: 'ambiguous', reason: `Claude Code reports ${entries.length} ${pluginId()} installs for this session` } };
   const entry = entries[0];
   const installed = autoRefreshInstalled(entry);
   const result = { ...base, installed };
-  if (entry.enabled === false) return { result: { ...result, status: 'disabled', reason: `${pluginId()} is installed but disabled` } };
+  if (entry.enabled === false) return { result: { ...result, status: 'disabled', reason: `${pluginId()} is installed but disabled for this session's project` } };
   if (entry.enabled !== true) return { result: { ...result, status: 'ambiguous', reason: 'Claude Code did not report the plugin enabled state' } };
   if (!VALID_SCOPES.includes(installed.scope)) {
     return { result: { ...result, status: 'ambiguous-scope', reason: `the installed scope is not an automatically refreshable scope: ${installed.scope || '<missing>'}` } };
+  }
+  if (installed.scope === 'user' ? Boolean(installed.project_path) : !installed.project_path) {
+    return { result: { ...result, status: 'ambiguous-scope', reason: `the ${installed.scope} install record has an inconsistent project context` } };
+  }
+  if (installed.scope !== 'user' && projectContext && !samePath(installed.project_path, projectContext)) {
+    return { result: { ...result, status: 'foreign-project', reason: `the ${installed.scope} install belongs to another project` } };
   }
   if (!AUTO_REFRESH_VERSION_PATTERN.test(installed.version)) {
     return { result: { ...result, status: 'ambiguous', reason: 'Claude Code did not report an exact installed version' } };
@@ -974,11 +1002,16 @@ function classifyAutoRefreshState(pluginList, options = {}) {
   if (options.runningPluginRoot && samePath(options.runningPluginRoot, repoRoot)) {
     return { ...base, status: 'untrusted-runtime', reason: 'this session runs Toolkit directly from the managed checkout, not from an installed plugin cache, so it cannot refresh a cache' };
   }
-  const opened = autoRefreshEntry(pluginList, base);
+  const opened = autoRefreshEntry(pluginList, base, options.projectContext);
   if (!opened.entry) return opened.result;
   const { entry, installed, result } = opened;
   if (!installed.install_path) {
     return { ...result, status: 'ambiguous', reason: 'Claude Code did not report an exact installed version and cache path' };
+  }
+  // The install must live in this session's verified plugin cache family:
+  // another configuration home or plugin cache root is a different install.
+  if (options.nativeIdentity && !nativeIdentity.inCacheFamily(installed.install_path, options.nativeIdentity.cache_family, installed.version)) {
+    return { ...result, status: 'foreign-install', reason: 'the installed plugin cache is not in this session\'s Claude Code plugin cache' };
   }
   const runningMatches = Boolean(options.runningPluginRoot) && samePath(options.runningPluginRoot, installed.install_path);
   const source = autoRefreshSourceEvidence(entry, repoRoot, options);
@@ -993,7 +1026,7 @@ function classifyAutoRefreshState(pluginList, options = {}) {
     }
     return { ...result, status: 'stale', source_identity: source.identity, reason: `installed ${installed.version} is older than managed source ${expectedVersion}` };
   }
-  const current = evaluateClaudeToolkitPluginState(pluginList, { ...options, repoRoot, expectedVersion });
+  const current = evaluateClaudeToolkitPluginState([entry], { ...options, repoRoot, expectedVersion });
   if (current.ok) return { ...result, status: 'current', source_identity: source.identity, running_root_matches_install: runningMatches, reason: '' };
   return {
     ...result,
@@ -1011,7 +1044,7 @@ function classifyInPlaceAutoRefreshState(pluginList, options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
   const expectedVersion = options.expectedVersion || readExpectedToolkitVersion(repoRoot);
   const base = { plugin_id: pluginId(), expected_version: expectedVersion, execution: 'managed-source', shadow_entries: shadowToolkitEntries(pluginList) };
-  const opened = autoRefreshEntry(pluginList, base);
+  const opened = autoRefreshEntry(pluginList, base, options.projectContext);
   if (!opened.entry) return opened.result;
   const { entry, installed, result } = opened;
   if (installed.read_from_folder && !samePath(installed.read_from_folder, repoRoot)) {
@@ -1042,7 +1075,38 @@ function autoRefreshFailure(status, reason, extra = {}) {
   return { ok: false, mode: extra.mode || '', status, reason, mutation_attempted: false, ...extra };
 }
 
-async function runAutoRefresh(options) {
+// The verified session context of one auto-refresh run: the session's
+// project directory, from which every native plugin command runs, and for a
+// cache-backed session the native install namespace the hook resolved, which
+// must equal this helper's own resolution from the same environment.
+function autoRefreshContext(options, env = process.env) {
+  const projectContext = options.projectContext ? path.resolve(options.projectContext) : '';
+  let isDirectory = false;
+  try { isDirectory = Boolean(projectContext) && fs.statSync(projectContext).isDirectory(); } catch { isDirectory = false; }
+  if (!isDirectory) return { error: ['project-context-unverified', 'the session project directory does not exist'] };
+  if (options.runningInPlace) return { projectContext, identity: null };
+  const native = nativeIdentity.resolveClaudeNativeIdentity({ env, runningRoot: options.runningPluginRoot });
+  if (!native.ok) return { error: ['native-identity-unverified', native.reason] };
+  if (!samePath(native.identity.config_home, options.claudeConfigHome) || !samePath(native.identity.plugins_root, options.claudePluginsRoot)) {
+    return { error: ['native-identity-unverified', 'the Claude Code configuration home or plugins root differs from the one the startup hook verified'] };
+  }
+  return { projectContext, identity: native.identity };
+}
+
+function nativeIdentityReport(context) {
+  return {
+    ...(context.identity ? {
+      config_home: context.identity.config_home,
+      plugins_root: context.identity.plugins_root,
+      cache_family: context.identity.cache_family
+    } : {}),
+    project_context: context.projectContext
+  };
+}
+
+// progress.mutationStarted is set before the native update can start, so a
+// failure after that point is never reported as "no mutation attempted".
+async function runAutoRefresh(options, progress = {}) {
   const mode = options.autoRefresh;
   const repoErrors = validateRepoPluginSource(options.repoRoot);
   if (repoErrors.length) return autoRefreshFailure('source-invalid', repoErrors.join('; '), { mode });
@@ -1058,37 +1122,52 @@ async function runAutoRefresh(options) {
   if (mode === 'apply' && (options.expectedToVersion !== expectedVersion || !AUTO_REFRESH_VERSION_PATTERN.test(options.expectedFromVersion))) {
     return autoRefreshFailure('plan-changed', 'the managed source version no longer matches the verified plan', { mode });
   }
+  const context = autoRefreshContext(options);
+  if (context.error) return autoRefreshFailure(context.error[0], context.error[1], { mode });
+  const native = nativeIdentityReport(context);
   const resolved = resolveClaudeCommand(options.claudeCommand);
   if (!resolved.command) return autoRefreshFailure('cli-unavailable', 'no usable Claude Code CLI was found', { mode });
+  const classifyOptions = {
+    repoRoot: options.repoRoot, expectedVersion, repoCommit: commit, runningPluginRoot: options.runningPluginRoot,
+    projectContext: context.projectContext,
+    ...(context.identity ? { nativeIdentity: context.identity, pluginsRoot: context.identity.plugins_root } : {})
+  };
   let plan;
   try {
-    const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
+    const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json'], { cwd: context.projectContext });
     const classify = options.runningInPlace ? classifyInPlaceAutoRefreshState : classifyAutoRefreshState;
-    plan = classify(pluginList, {
-      repoRoot: options.repoRoot, expectedVersion, repoCommit: commit, runningPluginRoot: options.runningPluginRoot
-    });
+    plan = classify(pluginList, classifyOptions);
   } catch (error) {
     return autoRefreshFailure('plan-failed', error.message, { mode });
   }
-  if (mode === 'plan') return { ok: true, mode, mutation_attempted: false, source_commit: commit, ...plan };
+  if (mode === 'plan') return { ok: true, mode, mutation_attempted: false, source_commit: commit, ...plan, native_identity: native };
   if (plan.status !== 'stale' || plan.installed.version !== options.expectedFromVersion) {
     return autoRefreshFailure('plan-changed', `the installed plugin state changed before update: ${plan.status}`, { mode, plan_status: plan.status });
   }
+  const base = {
+    mode, mutation_attempted: true, source_commit: commit, plugin_id: pluginId(), scope: plan.installed.scope,
+    project_path: plan.installed.project_path, from_version: plan.installed.version, to_version: expectedVersion,
+    native_identity: native
+  };
+  progress.mutationStarted = true;
+  progress.base = base;
   const outcome = await runClaudeMutationAndVerify(
     resolved.command,
     ['plugin', 'update', pluginId(), '--scope', plan.installed.scope],
-    { repoRoot: options.repoRoot, expectedVersion, repoCommit: commit }
+    {
+      repoRoot: options.repoRoot, expectedVersion, repoCommit: commit, cwd: context.projectContext,
+      pluginsRoot: context.identity.plugins_root,
+      selectEntries: (pluginList) => sessionToolkitEntries(pluginList, context.projectContext).entries
+    }
   );
-  const base = {
-    mode, mutation_attempted: true, source_commit: commit, plugin_id: pluginId(), scope: plan.installed.scope,
-    from_version: plan.installed.version, to_version: expectedVersion
-  };
   if (!outcome.ok) {
     return { ok: false, ...base, status: outcome.childFailed ? 'update-failed' : 'update-unverified', reason: outcome.failure };
   }
   const verified = outcome.state?.installed ? autoRefreshInstalled(outcome.state.installed) : null;
-  if (!verified || verified.scope !== plan.installed.scope || verified.project_path !== plan.installed.project_path) {
-    return { ok: false, ...base, status: 'update-unverified', reason: 'the verified install is not the same scope and project as the planned install' };
+  if (!verified || verified.scope !== plan.installed.scope || verified.project_path !== plan.installed.project_path
+    || verified.version !== expectedVersion
+    || !nativeIdentity.inCacheFamily(verified.install_path, context.identity.cache_family, verified.version)) {
+    return { ok: false, ...base, status: 'update-unverified', reason: 'the verified install is not the planned install record in the plugin cache of this session' };
   }
   return {
     ok: true,
@@ -1131,6 +1210,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     expectedToVersion: '',
     runningPluginRoot: '',
     runningInPlace: false,
+    projectContext: '',
+    claudeConfigHome: '',
+    claudePluginsRoot: '',
     budgetMs: 0
   };
   let budgetRaw = null;
@@ -1145,6 +1227,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--expected-to-version') options.expectedToVersion = next();
     else if (arg === '--running-plugin-root') options.runningPluginRoot = next();
     else if (arg === '--running-in-place') options.runningInPlace = true;
+    else if (arg === '--project-context') options.projectContext = next();
+    else if (arg === '--claude-config-home') options.claudeConfigHome = next();
+    else if (arg === '--claude-plugins-root') options.claudePluginsRoot = next();
     else if (arg === '--budget-ms') budgetRaw = next();
     else if (arg === '--repo-root') options.repoRoot = next();
     else if (arg.startsWith('--repo-root=')) options.repoRoot = arg.slice('--repo-root='.length);
@@ -1180,9 +1265,19 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (options.autoRefresh === 'apply' && (!options.expectedFromVersion || !options.expectedToVersion)) {
       throw new Error('--auto-refresh-apply requires --expected-from-version and --expected-to-version');
     }
+    if (!options.projectContext || !path.isAbsolute(options.projectContext)) {
+      throw new Error('--auto-refresh-plan/--auto-refresh-apply require --project-context <absolute session project directory>');
+    }
+    if (options.runningPluginRoot) {
+      if (!path.isAbsolute(options.claudeConfigHome) || !path.isAbsolute(options.claudePluginsRoot)) {
+        throw new Error('--running-plugin-root requires --claude-config-home and --claude-plugins-root <absolute paths>');
+      }
+    } else if (options.claudeConfigHome || options.claudePluginsRoot) {
+      throw new Error('--claude-config-home and --claude-plugins-root are only valid with --running-plugin-root');
+    }
   } else if (options.expectedCommit || options.expectedFromVersion || options.expectedToVersion || options.runningPluginRoot
-    || options.runningInPlace || budgetRaw !== null) {
-    throw new Error('--expected-*, --running-plugin-root, --running-in-place and --budget-ms are only valid with --auto-refresh-plan or --auto-refresh-apply');
+    || options.runningInPlace || budgetRaw !== null || options.projectContext || options.claudeConfigHome || options.claudePluginsRoot) {
+    throw new Error('--expected-*, --running-plugin-root, --running-in-place, --project-context, --claude-config-home, --claude-plugins-root and --budget-ms are only valid with --auto-refresh-plan or --auto-refresh-apply');
   }
   options.repoRoot = path.resolve(options.repoRoot);
   return options;
@@ -1201,9 +1296,12 @@ function usage() {
     'This script is Claude Code-only; it never installs or updates Codex.',
     '',
     'Automatic SessionStart refresh (called by the Toolkit bridge, not by users):',
-    '  --auto-refresh-plan  --expected-commit <sha> --budget-ms <ms> (--running-plugin-root <cache path> | --running-in-place)',
-    '  --auto-refresh-apply --expected-commit <sha> --budget-ms <ms> --expected-from-version <x.y.z> --expected-to-version <x.y.z> --running-plugin-root <cache path>',
-    'Plan is read-only. Apply runs only `claude plugin update` in the installed scope for the cache this session runs from;',
+    '  --auto-refresh-plan  --expected-commit <sha> --budget-ms <ms> --project-context <dir>',
+    '                       (--running-plugin-root <cache path> --claude-config-home <dir> --claude-plugins-root <dir> | --running-in-place)',
+    '  --auto-refresh-apply --expected-commit <sha> --budget-ms <ms> --expected-from-version <x.y.z> --expected-to-version <x.y.z>',
+    '                       --project-context <dir> --running-plugin-root <cache path> --claude-config-home <dir> --claude-plugins-root <dir>',
+    'Plan is read-only. Every Claude Code plugin command runs from the session project directory. Apply runs only',
+    '`claude plugin update` in the installed scope for the cache this session runs from, in its verified configuration home;',
     'it never uninstalls, installs, changes scope or downgrades, and an in-place session (Toolkit read directly from the managed checkout) never applies.'
   ].join('\n');
 }
@@ -1223,10 +1321,14 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (options.autoRefresh) {
     let result;
+    const progress = { mutationStarted: false };
     try {
-      result = await runAutoRefresh(options);
+      result = await runAutoRefresh(options, progress);
     } catch (error) {
-      result = autoRefreshFailure('plan-failed', error.message, { mode: options.autoRefresh });
+      // After the native update may have started, the effect is unknown.
+      result = progress.mutationStarted
+        ? { ok: false, ...progress.base, status: 'update-unverified', reason: `the automatic update stopped after the native update started: ${error.message}` }
+        : autoRefreshFailure('plan-failed', error.message, { mode: options.autoRefresh });
     }
     console.log(JSON.stringify(result));
     return result.ok ? 0 : 1;
