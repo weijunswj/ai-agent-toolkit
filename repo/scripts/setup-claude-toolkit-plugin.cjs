@@ -262,7 +262,6 @@ const INSTALLED_ENFORCEMENT_PAIRS = [
   ['.claude-plugin/plugin.json', true],
   ['.claude-plugin/hooks/hooks.json', true],
   ['repo/scripts/toolkit-agent-control.cjs', false],
-  ['repo/scripts/toolkit-agent-control-run093-history.cjs', false],
   ['repo/scripts/claude-process-launch.cjs', false],
   ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
   ['repo/scripts/toolkit-claude-task-session.cjs', false],

@@ -398,9 +398,14 @@ test('H1: same-version freshness uses the full installed-enforcement identity, i
   assert.equal(cleanResult.execution, 'plugin-cache');
 });
 
-// O2: every local module the Claude hooks and the refresh helper can load,
-// including lazily required ones, is part of the enforcement identity, so a
-// same-version cache cannot run drifted runtime code that the check ignores.
+// O2: every local module the Claude hooks and the refresh helper can load is
+// part of the enforcement identity, so a same-version cache cannot run drifted
+// runtime code that the check ignores. One exclusion: the byte-pinned retired
+// launcher history, which agent control loads only for the retired
+// `supervise` command and historical-proof accessors; the change-local
+// hygiene contract forbids current scripts from depending on it.
+const RETIRED_HISTORY_MODULES = ['repo/scripts/toolkit-agent-control-run093-history.cjs'];
+
 test('O2: the installed-enforcement identity covers the full local require graph of the Claude hook runtime', () => {
   const entries = ['repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs',
     'repo/scripts/toolkit-claude-plugin-auto-refresh.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs'];
@@ -418,7 +423,7 @@ test('O2: the installed-enforcement identity covers the full local require graph
   entries.forEach(visit);
   assert.ok(reached.size > entries.length, 'the graph was walked');
   const missing = [...reached].filter((relPath) => !claudeSetup.INSTALLED_ENFORCEMENT_FILES.includes(relPath));
-  assert.deepEqual(missing, []);
+  assert.deepEqual(missing, RETIRED_HISTORY_MODULES, 'only the retired launcher history is outside the identity');
 });
 
 test('H1: the hook-side identity set and the installed-enforcement validator are one contract', () => {
