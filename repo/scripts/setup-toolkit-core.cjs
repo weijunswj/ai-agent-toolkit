@@ -1435,10 +1435,12 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
-  if (key === 'repoAutoUpdate') return 'enable';
+  // Startup maintenance stays off unless the user turns it on: it fetches, validates and can
+  // switch the active Toolkit at session start.
+  if (key === 'repoAutoUpdate') return 'disable';
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
-  if (key === 'codexPluginAutoRefresh') return 'enable';
+  if (key === 'codexPluginAutoRefresh') return 'disable';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
@@ -1793,8 +1795,8 @@ function setupQuestionSpecs(args, current) {
       ],
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
-        outcome: 'Turn on clean, verified automatic updates.',
-        reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
+        outcome: 'Keep automatic startup updates and enabled-target sync off; update with `setup toolkit` when convenient.',
+        reason: 'Startup updates fetch from the network, run validation and can change the active Toolkit at the start of a session; updating on request keeps sessions quiet and predictable.',
       },
       selected: args.setupChoices.repoAutoUpdate,
       current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
@@ -1875,8 +1877,8 @@ function setupQuestionSpecs(args, current) {
       ],
       recommendation: {
         value: recommendedChoice('codexPluginAutoRefresh', current, args),
-        outcome: 'Turn on native Toolkit cache refresh and safe Windows hook maintenance.',
-        reason: 'Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.',
+        outcome: 'Keep automatic Codex Toolkit maintenance off; refresh the plugin with `setup toolkit` when convenient.',
+        reason: 'Automatic refresh changes the installed Codex plugin at session start; refreshing on request keeps Codex sessions predictable, and setup still verifies the installed plugin.',
       },
       selected: args.setupChoices.codexPluginAutoRefresh,
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
@@ -1891,15 +1893,15 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'Whether Claude Code remains root-only, with native Agent/Task launches blocked at the installed Toolkit hook, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.',
+      whatThisControls: 'Whether Claude Code stays root-first, where the installed Toolkit hook admits only the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories and leaves other work unrestricted, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.',
       choices: [
-        wizardChoice('root-only', 'Root agent only', 'Use no helper agents under the Toolkit profile.'),
+        wizardChoice('root-only', 'Root agent only', 'Use no helper agents other than the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories.'),
         wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees.'),
         wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale, unverifiable or retired state falls back safely to root-only.`),
       ],
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
-        outcome: 'Use the root agent only, with native Agent/Task launches blocked at the installed hook.',
+        outcome: 'Use the root agent, with only the Toolkit G0/G1 leaf helpers admitted at the installed hook in Toolkit-governed repositories.',
         reason: 'Root-only is the verified default; governed workers use the registry-pinned V3 launcher.',
       },
       selected: args.setupChoices.claudeTopology,
@@ -3632,7 +3634,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     console.log('## Claude Code agent topology');
     console.log(`Selected topology: ${unknown(delegation.topology)}`);
     console.log('Governed V3 workers: launched only by the registry-pinned V3 launcher under an authorised controller');
-    console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook when root-only; outside Toolkit control when broader-native');
+    console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
     console.log('');
   }

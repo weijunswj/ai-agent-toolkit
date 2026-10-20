@@ -131,7 +131,7 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
     /G0 MUST delegate suitable separable evidence gathering by default/,
     /G1 MUST delegate suitable independent implementation or validation by default/,
     /isolated context and one minimal self-contained task packet/,
-    /must not spawn or delegate to other subagents/,
+    /Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none/,
     /Mutating sibling subagents require disjoint mutation ownership and scope/,
     /Read-only siblings may investigate genuinely separable questions in parallel/,
     /Model, reasoning, service tier, and route are launch\/controller metadata/,

@@ -367,7 +367,7 @@ test('portable rules require the compact host-neutral depth-1 topology contract'
     /Briefly record a substantial-work exception/,
     /G2 reviewers have no helpers/,
     /a launcher without a helper tier field must not block suitable delegation/,
-    /must not spawn or delegate to other subagents/,
+    /Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none/,
     /Mutating sibling subagents require disjoint mutation ownership and scope/,
     /Read-only siblings may investigate genuinely separable questions in parallel/,
     /root or parent remains responsible for integrating and validating every returned result/i,

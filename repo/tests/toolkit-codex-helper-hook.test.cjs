@@ -9,9 +9,10 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
 const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 function run(input, env = {}) {
   const clean = { ...process.env, ...env };
-  for (const key of ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY']) if (!(key in env)) delete clean[key];
+  for (const key of MARKERS) if (!(key in env)) delete clean[key];
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env: clean, encoding: 'utf8', timeout: 20000 });
   return { status: r.status, output: JSON.parse(r.stdout.trim() || '{}'), stderr: r.stderr };
 }
@@ -75,12 +76,13 @@ test('a drifted pinned binding is blocked wherever it is supplied', () => {
 
 test('a hook whose decision modules cannot load blocks a governed spawn with exit 2 instead of failing open', () => {
   // A non-zero exit other than 2, or a crash, is a non-blocking hook failure on Codex.
-  // Run the real hook file from a directory without its modules, in the governed checkout.
+  // Run the real hook file with the shared predicate but without the decision modules, in the governed checkout.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-broken-'));
   try {
     const copy = path.join(dir, 'toolkit-codex-helper-hook.cjs'); fs.copyFileSync(HOOK, copy);
+    fs.copyFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-governed-repo.cjs'), path.join(dir, 'toolkit-governed-repo.cjs'));
     const event = { tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { fork_turns: 'none' } };
-    const clean = { ...process.env }; delete clean.TOOLKIT_NATIVE_HELPER_BINDING; delete clean.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
+    const clean = { ...process.env }; for (const key of MARKERS) delete clean[key];
     const broken = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });
     assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed/);
     assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
@@ -90,5 +92,25 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
     // Outside a governed checkout the broken copy still makes no decision for other repositories.
     const elsewhere = spawnSync(process.execPath, [copy], { input: JSON.stringify({ ...event, cwd: dir }), env: clean, encoding: 'utf8', timeout: 20000 });
     assert.equal(elsewhere.status, 0); assert.equal(elsewhere.stdout, '');
+    // Without the predicate itself, only a launcher marker gates.
+    fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
+    const unknown = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });
+    assert.equal(unknown.status, 0); assert.equal(unknown.stdout, '');
+    const marked = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: { ...clean, TOOLKIT_GATE_ROLE: 'G1' }, encoding: 'utf8', timeout: 20000 });
+    assert.equal(marked.status, 2); assert.match(marked.stderr, /Toolkit helper guard failed/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the shared predicate scopes the hook: a managed repository is governed, a plain repository is not', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-scope-'));
+  try {
+    const plain = path.join(dir, 'plain'), managed = path.join(dir, 'managed');
+    for (const repo of [plain, managed]) fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(plain, 'AGENTS.md'), '# Rules\n');
+    fs.copyFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(managed, 'AGENTS.md'));
+    const nested = path.join(managed, 'src'); fs.mkdirSync(nested);
+    assert.deepEqual(run({ tool_name: 'spawn_agent', cwd: plain, tool_input: { fork_turns: 'none' } }).output, {});
+    const held = run({ tool_name: 'spawn_agent', cwd: nested, tool_input: { fork_turns: 'none' } });
+    assert.equal(held.status, 2); assert.match(held.stderr, /NATIVE_BINDING_REQUIRED/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

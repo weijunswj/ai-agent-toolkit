@@ -20,6 +20,7 @@ const { types } = require('node:util');
 const compiler = require('./toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('./toolkit-v3-helper-guard.cjs');
 const { CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
+const helperSpec = require('./toolkit-claude-helper-spec.cjs');
 
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 const HELPER_PROMPT = 'Complete only the lead-assigned bounded leaf task. Do not spawn or delegate to another agent. Do not approve scope, publish, activate or declare programme completion. Return exact changed files, checks and blockers to the lead.';
@@ -135,9 +136,14 @@ class ClaudeDialect extends HostDialect {
   // (toolkit-claude-helper-agents.cjs) and a launcher's session --agents definition both
   // load as `toolkit-<role>-helper`. Toolkit ships no plugin agent, so no plugin-scoped
   // identity exists. Which source was loaded is a launcher observation, not this name.
+  // Tools, limits, description and instructions come from the same helper spec as the
+  // saved user agent, so a session definition never inherits the parent's tools.
   nativeDefinition(name, route, callerRole) {
+    const spec = helperSpec.roleSpec(callerRole);
+    if (spec.name !== name) fail('NATIVE_HELPER_DEFINITION_SELECTION_INVALID');
     return { name, model: CLAUDE_NATIVE_MODELS[route.model], effort: route.reasoning,
-      disallowedTools: ['Agent', 'Task'], description: 'Bounded leaf work explicitly assigned by the Toolkit ' + callerRole + ' lead.', prompt: HELPER_PROMPT };
+      tools: [...spec.tools], disallowedTools: [...spec.disallowed], maxTurns: spec.maxTurns,
+      description: spec.description, prompt: helperSpec.roleInstructions(spec) };
   }
   helperIdentity(_name, native) { return native.name; }
   entryFor() { return 'claude_parent_agent'; }

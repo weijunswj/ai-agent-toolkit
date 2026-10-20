@@ -5,15 +5,15 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 6 questions across 3 sections
 
-Bank reference: WCSY-6QX6-8S53-23DS
+Bank reference: Y2W9-ECPZ-QXXE-HZR9
 
 Quick index
 
 1.1 Update source - Recommended: B - Keep the current update source
-1.2 Automatic updates - Recommended: A - Turn on
+1.2 Automatic updates - Recommended: B - Turn off
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
-2.1 Codex Toolkit maintenance - Recommended: A - Turn on
+2.1 Codex Toolkit maintenance - Recommended: B - Turn off
 3.1 OpenCode - Recommended: C - Keep current
 
 
@@ -53,11 +53,11 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn off
 
-**Recommended outcome:** Turn on clean, verified automatic updates.
+**Recommended outcome:** Keep automatic startup updates and enabled-target sync off; update with `setup toolkit` when convenient.
 
-**Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
+**Why:** Startup updates fetch from the network, run validation and can change the active Toolkit at the start of a session; updating on request keeps sessions quiet and predictable.
 
 **Choices:**
 
@@ -67,7 +67,7 @@ Quick index
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn off
 
 ---
 
@@ -134,11 +134,11 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn off
 
-**Recommended outcome:** Turn on native Toolkit cache refresh and safe Windows hook maintenance.
+**Recommended outcome:** Keep automatic Codex Toolkit maintenance off; refresh the plugin with `setup toolkit` when convenient.
 
-**Why:** Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.
+**Why:** Automatic refresh changes the installed Codex plugin at session start; refreshing on request keeps Codex sessions predictable, and setup still verifies the installed plugin.
 
 **Choices:**
 
@@ -148,7 +148,7 @@ Quick index
 
 **After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn off
 
 ---
 
@@ -184,8 +184,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `WCSY-6QX6-8S53-23DS: all recommended`
-- only your changes, for example: `WCSY-6QX6-8S53-23DS: 1.2=B, 3.1=A`
+- `Y2W9-ECPZ-QXXE-HZR9: all recommended`
+- only your changes, for example: `Y2W9-ECPZ-QXXE-HZR9: 1.2=A, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.

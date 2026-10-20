@@ -258,7 +258,14 @@ test('production helper-definition commands require source-pinned selection with
     if (host === 'claude-code') {
       assert.equal(rendered.native_configuration.model,'claude-haiku-5-5');
       assert.equal(rendered.native_configuration.effort,'xhigh');
-      assert.deepEqual(rendered.native_configuration.disallowedTools,['Agent','Task']);
+      // One helper spec for both Claude renderers: the session definition carries the saved agent's tools and denies.
+      const spec=require('../scripts/toolkit-claude-helper-spec.cjs').roleSpec(role);
+      assert.deepEqual(rendered.native_configuration.tools,spec.tools);
+      assert.deepEqual(rendered.native_configuration.disallowedTools,spec.disallowed);
+      assert.equal(rendered.native_configuration.maxTurns,spec.maxTurns);
+      assert.equal(rendered.native_configuration.description,spec.description);
+      assert.ok(rendered.native_configuration.disallowedTools.includes('Agent')&&rendered.native_configuration.disallowedTools.includes('Task'));
+      if (role==='G0') assert.equal(rendered.native_configuration.tools.some(tool=>['Bash','Edit','Write'].includes(tool)),false,'G0 is read-only');
     }
   }
   assert.throws(()=>renderNativeHelperDefinition('codex','G2'),/SELECTION_INVALID/);

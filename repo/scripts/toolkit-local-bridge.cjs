@@ -26,7 +26,7 @@ const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs'
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.0.9';
+const BRIDGE_VERSION = '3.1.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 // Antigravity native/plugin installation is not supported by this source.
@@ -51,7 +51,6 @@ const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'repository-agent-rules', 'repo-local');
-const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
 const AGENT_RULES_PREFLIGHT_FILES = {
   'codex-plugin': [
     { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' }
@@ -1594,6 +1593,39 @@ function toolkitSourceCheckoutVersion(targetRoot) {
   return isValidBridgeVersion(version) ? version : '';
 }
 
+// A git root is Toolkit-managed when one of its expected instruction files carries
+// an AI-AGENT-TOOLKIT managed block (complete or broken), or when hub state names it
+// as the managed Toolkit checkout. Everything else is ordinary work and stays silent.
+function agentRulesRootIsManaged(targetRoot, specs, state) {
+  if (state?.repo_path && path.resolve(state.repo_path) === path.resolve(targetRoot)) return true;
+  for (const spec of specs) {
+    const file = path.join(targetRoot, spec.target);
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      const parsed = parseManagedMarkerBlocks(fs.readFileSync(file, 'utf8'));
+      if (parsed.blocks.size || parsed.errors.length) return true;
+    } catch { /* unreadable or absent: not evidence of management */ }
+  }
+  return false;
+}
+
+// The newest Toolkit version this machine has recorded: any sync source, or the
+// managed checkout named in hub state.
+function newestKnownToolkitVersion(state) {
+  const versions = Object.values(state?.bridge_versions_by_source || {}).filter(isValidBridgeVersion);
+  if (state?.repo_path) {
+    try {
+      const version = readJsonIfExists(path.join(state.repo_path, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'))?.version;
+      if (isValidBridgeVersion(version)) versions.push(version);
+    } catch { /* an unreadable checkout adds no version */ }
+  }
+  return versions.reduce((newest, version) => (!newest || compareBridgeVersions(version, newest) > 0 ? version : newest), '');
+}
+
+// Direction is 'newer' when the repository rules may come from a newer Toolkit than
+// the running copy (repository rules stay authoritative), 'older' when the repository
+// can be refreshed from the running Toolkit, and 'drift' when a Toolkit source checkout
+// differs from its own canonical templates.
 function runAgentRulesPreflight(args, options = {}) {
   if (!args.hook) return { status: 'not-applicable', targetRoot: '', findings: [] };
   const specs = agentRulesPreflightSpecs(args.syncSource);
@@ -1604,76 +1636,76 @@ function runAgentRulesPreflight(args, options = {}) {
   const targetRoot = gitRoot || startRoot;
   const pluginRoot = agentRulesPluginRoot(args, options);
   const runningVersion = options.runningVersion || BRIDGE_VERSION;
-  const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, notes: [] };
+  const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, findings: [] };
+  if (!gitRoot || !agentRulesRootIsManaged(gitRoot, specs, options.state)) return { ...base, status: 'not-managed' };
+
   const sourceVersion = toolkitSourceCheckoutVersion(targetRoot);
-  let templateRoot = path.join(pluginRoot, AGENT_RULES_TEMPLATE_DIR);
-  let reference = 'installed-plugin';
-  if (sourceVersion) {
-    templateRoot = path.join(targetRoot, AGENT_RULES_TEMPLATE_DIR);
-    reference = 'source-checkout';
-    if (compareBridgeVersions(runningVersion, sourceVersion) < 0) {
-      base.notes.push(`the running Toolkit ${runningVersion} is older than this source checkout (${sourceVersion}); instructions were checked against the checkout's own canonical templates`);
-    }
-  } else {
-    const recordedVersion = options.state ? recordedBridgeVersionForSource(options.state, args.syncSource) : '';
-    if (recordedVersion && compareBridgeVersions(runningVersion, recordedVersion) < 0) {
-      // An older installed copy cannot judge instructions written by a newer Toolkit.
-      return { ...base, status: 'stale-installed-templates', reference, templateRoot, recordedVersion, findings: [] };
-    }
-  }
+  const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
+  const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
-  for (const spec of specs) {
-    findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
-  }
-  return { ...base, status: findings.length ? 'needs-attention' : 'ok', reference, templateRoot, findings };
+  for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
+  const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
+  const result = { ...base, reference, templateRoot, authorVersion, findings };
+  // A source checkout newer than the running copy is reported even when it matches
+  // its own templates: the installed copy is the stale side.
+  if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
+  if (!findings.length) return { ...result, status: 'ok' };
+  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'older' };
 }
 
+// One neutral line. Never an instruction to halt work or to question the user.
 function formatAgentRulesPreflight(result) {
-  const findings = result.findings || [];
-  if (result.status === 'stale-installed-templates') {
-    return [
-      `Toolkit agent-rules preflight: the running Toolkit ${result.runningVersion} is older than the recorded Toolkit ${result.recordedVersion}, so its bundled templates cannot judge this repository's instructions.`,
-      'Repository instructions were not compared and must not be regenerated from this installed copy. Refresh Toolkit first (run `setup toolkit`), then start a fresh session.',
-      'No files were changed by this hook.'
-    ].join('\n');
+  if (result.status !== 'needs-attention') return '';
+  const files = [...new Set((result.findings || []).map((finding) => finding.file))].join(', ');
+  if (result.direction === 'newer') {
+    return `Toolkit note: this repository's Toolkit rules may come from a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); the repository rules are authoritative. Refresh Toolkit when convenient. No files were changed.`;
   }
-  if (!findings.length) {
-    return (result.notes || []).length
-      ? [`Toolkit agent-rules preflight: ${result.notes.join('; ')}.`, 'Repository instructions are current. No files were changed by this hook.'].join('\n')
-      : '';
+  if (result.direction === 'drift') {
+    return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs when convenient. No files were changed.`;
   }
-  const shown = findings.slice(0, AGENT_RULES_PREFLIGHT_MAX_FINDINGS);
-  const missingRootAgents = Boolean(result.gitRepoDetected) &&
-    findings.some((finding) => finding.file === 'AGENTS.md' && finding.kind === 'missing');
-  const staleOrBrokenManagedContent = findings.some((finding) => [
-    'broken-marker',
-    'missing-block',
-    'stale-block',
-    'template-broken',
-    'unmanaged'
-  ].includes(finding.kind));
-  const lines = [
-    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
-    ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
-  ];
-  if (missingRootAgents) {
-    lines.unshift("STOP: Root AGENTS.md is missing. Toolkit repo-local repository-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.");
-  } else if (staleOrBrokenManagedContent) {
-    lines.unshift("STOP: Toolkit-managed repo-local instruction blocks are stale or broken. Stop before repository work. Ask the user whether to repair/refresh Toolkit repo-local rules now or proceed without current Toolkit repo-local rules. Do not repair, refresh, create backups, or write anything without the user's decision.");
-  } else {
-    lines.unshift("STOP: Toolkit repo-local instructions need attention. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without current Toolkit repo-local rules. Do not install, repair, create backups, or write anything without the user's decision.");
-  }
-  if (findings.length > shown.length) {
-    lines.push(`- ${findings.length - shown.length} more issue(s) omitted.`);
-  }
-  lines.push('No files were changed by this hook.');
-  return lines.join('\n');
+  return `Toolkit note: this repository's Toolkit rules (${files}) are older than the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
 }
 
-function maybePrintAgentRulesPreflight(args, state = null) {
+function agentRulesNoticeKey(result, message) {
+  const digest = crypto.createHash('sha256');
+  digest.update(`${path.resolve(result.targetRoot)}\0${result.runningVersion}\0${message}\0`);
+  for (const finding of result.findings || []) digest.update(`${finding.file}\0${finding.kind}\0${finding.detail}\0`);
+  return digest.digest('hex');
+}
+
+// Remembers which notices were already shown, so a notice appears once per
+// (root, running version, finding digest); resume and compact never replay it.
+// The ledger lives in the Toolkit hub, never in the repository.
+class AgentRulesNoticeLedger {
+  static LIMIT = 200;
+  #file;
+  constructor(hubPath) { this.#file = hubPath ? path.join(hubPath, 'agent-rules-notices.json') : ''; }
+
+  #read() {
+    try {
+      const value = this.#file ? readJsonIfExists(this.#file) : null;
+      return value && typeof value.shown === 'object' && value.shown ? value.shown : {};
+    } catch { return {}; }
+  }
+
+  // Returns true when this key is new and records it; a failed write still shows it.
+  claim(key) {
+    const shown = this.#read();
+    if (Object.hasOwn(shown, key)) return false;
+    shown[key] = timestamp();
+    const kept = Object.entries(shown).sort((left, right) => String(right[1]).localeCompare(String(left[1])))
+      .slice(0, AgentRulesNoticeLedger.LIMIT);
+    try { if (this.#file) writeJson(this.#file, { schema_version: 1, shown: Object.fromEntries(kept) }); }
+    catch { /* rate limiting is best effort; the notice itself is harmless */ }
+    return true;
+  }
+}
+
+function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
   const result = runAgentRulesPreflight(args, { state });
   const message = formatAgentRulesPreflight(result);
-  if (message) console.log(message);
+  if (message && new AgentRulesNoticeLedger(hubPath).claim(agentRulesNoticeKey(result, message))) console.log(message);
   return result;
 }
 
@@ -4067,7 +4099,7 @@ class LocalBridgeRun {
       assertSourceDowngradeAllowed(existingState, args);
       return runStagingReconciliation({ args, hubPath, state: existingState, testHooks: this.#testHooks });
     }
-    maybePrintAgentRulesPreflight(args, existingState);
+    maybePrintAgentRulesPreflight(args, existingState, hubPath);
     assertSourceDowngradeAllowed(existingState, args);
     if (isHookNoop(args, existingState)) {
       if (existingState?.hub_version && !existingState.auto_sync_enabled) {
