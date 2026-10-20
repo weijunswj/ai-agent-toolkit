@@ -6,14 +6,15 @@ const fs = require('node:fs');
 // denies with the blocking exit status instead of crashing as a non-blocking failure.
 const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
-// Enforcement applies only in Toolkit-governed work, decided by the predicate shared with
-// the Claude hook (launcher marker, managed GLOBAL-AGENTS.MD-TEMPLATE block, or Toolkit
-// checkout at the nearest git root). Elsewhere the hook makes no decision, so ordinary
-// work keeps its native behaviour. Helper depth on Codex stays advisory: PreToolUse
-// carries no caller-agent identity.
+// Enforcement applies only inside Toolkit itself: a Toolkit checkout at the nearest git
+// root, or a session a Toolkit launcher started (launcher marker). It uses the predicate
+// shared with the Claude hook with the managed-block test turned off, so repositories that
+// only carry the managed GLOBAL-AGENTS.MD-TEMPLATE block keep native Codex helpers until
+// the Codex lane (#469) adds a named-helper allow-list. Elsewhere the hook makes no
+// decision. Helper depth on Codex stays advisory: PreToolUse carries no caller-agent identity.
 const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 function governed(input, environment = process.env) {
-  try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment).governed; }
+  try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment, { managedBlock: false }).governed; }
   // Without the predicate, gate only when a launcher marker says this is governed work.
   catch { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
 }

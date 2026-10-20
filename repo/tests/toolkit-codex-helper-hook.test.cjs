@@ -101,7 +101,7 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the shared predicate scopes the hook: a managed repository is governed, a plain repository is not', () => {
+test('the Codex hook stays inside Toolkit: a managed-block-only repository keeps native helpers, the checkout and a launcher marker gate', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-scope-'));
   try {
     const plain = path.join(dir, 'plain'), managed = path.join(dir, 'managed');
@@ -109,8 +109,16 @@ test('the shared predicate scopes the hook: a managed repository is governed, a 
     fs.writeFileSync(path.join(plain, 'AGENTS.md'), '# Rules\n');
     fs.copyFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(managed, 'AGENTS.md'));
     const nested = path.join(managed, 'src'); fs.mkdirSync(nested);
-    assert.deepEqual(run({ tool_name: 'spawn_agent', cwd: plain, tool_input: { fork_turns: 'none' } }).output, {});
-    const held = run({ tool_name: 'spawn_agent', cwd: nested, tool_input: { fork_turns: 'none' } });
-    assert.equal(held.status, 2); assert.match(held.stderr, /NATIVE_BINDING_REQUIRED/);
+    const spawn = cwd => ({ tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd, tool_input: { fork_turns: 'none' } });
+    for (const cwd of [plain, managed, nested]) {
+      const r = run(spawn(cwd));
+      assert.equal(r.status, 0, cwd); assert.deepEqual(r.output, {}, cwd);
+    }
+    // The Claude hook still treats the same managed-block-only repository as governed.
+    assert.equal(require('../scripts/toolkit-governed-repo.cjs').governedRepo(nested, {}).governed, true);
+    const checkout = run(spawn(ROOT));
+    assert.equal(checkout.status, 2); assert.match(checkout.stderr, /NATIVE_BINDING_REQUIRED/);
+    const marked = run(spawn(managed), { TOOLKIT_GATE_ROLE: 'G1' });
+    assert.equal(marked.status, 2); assert.match(marked.stderr, /NATIVE_BINDING_REQUIRED/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

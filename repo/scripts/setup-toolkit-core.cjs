@@ -1435,12 +1435,10 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
-  // Startup maintenance stays off unless the user turns it on: it fetches, validates and can
-  // switch the active Toolkit at session start.
-  if (key === 'repoAutoUpdate') return 'disable';
+  if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
-  if (key === 'codexPluginAutoRefresh') return 'disable';
+  if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
@@ -1795,8 +1793,8 @@ function setupQuestionSpecs(args, current) {
       ],
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
-        outcome: 'Keep automatic startup updates and enabled-target sync off; update with `setup toolkit` when convenient.',
-        reason: 'Startup updates fetch from the network, run validation and can change the active Toolkit at the start of a session; updating on request keeps sessions quiet and predictable.',
+        outcome: 'Turn on clean, verified automatic updates.',
+        reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
       },
       selected: args.setupChoices.repoAutoUpdate,
       current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
@@ -1877,8 +1875,8 @@ function setupQuestionSpecs(args, current) {
       ],
       recommendation: {
         value: recommendedChoice('codexPluginAutoRefresh', current, args),
-        outcome: 'Keep automatic Codex Toolkit maintenance off; refresh the plugin with `setup toolkit` when convenient.',
-        reason: 'Automatic refresh changes the installed Codex plugin at session start; refreshing on request keeps Codex sessions predictable, and setup still verifies the installed plugin.',
+        outcome: 'Turn on native Toolkit cache refresh and safe Windows hook maintenance.',
+        reason: 'Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.',
       },
       selected: args.setupChoices.codexPluginAutoRefresh,
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),

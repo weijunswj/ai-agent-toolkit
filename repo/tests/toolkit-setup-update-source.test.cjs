@@ -151,10 +151,9 @@ test('valid custom Update source keep preserves its configured checkout through 
     ...isolatedHomeEnv(root),
     SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditState(setupRepo)),
   };
-  // Automatic updates are no longer recommended, so turn them on explicitly to see the kept source passed on.
   const result = run([
     '--execute', '--repo-root', setupRepo, '--managed-checkout', 'keep',
-    '--repo-remote', origin, '--yes-recommended', '--codex-helper-capacity', 'keep', '--enable-repo-auto-update',
+    '--repo-remote', origin, '--yes-recommended', '--codex-helper-capacity', 'keep',
   ], { env, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /1\.1 Update source: B - Keep the current update source[\s\S]*Preserve this effective behavior: Toolkit uses a separate clean custom checkout/i);

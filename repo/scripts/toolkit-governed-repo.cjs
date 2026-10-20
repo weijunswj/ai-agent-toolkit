@@ -9,6 +9,9 @@
 //     this session for a gate, a pinned task profile or a pinned helper binding);
 //   - the nearest git root's AGENTS.md carries the managed GLOBAL-AGENTS.MD-TEMPLATE block;
 //   - the nearest git root is a Toolkit source checkout.
+// The managed-block test can be turned off (`managedBlock: false`) for a host whose
+// helper policy is only qualified inside Toolkit itself: Codex keeps native helpers in
+// repositories that merely carry the managed block until its own allow-list exists (#469).
 // The walk stops at the first `.git` (a directory, or the file a worktree uses). Node
 // built-ins only. A read error never gates on its own: without a launcher marker the
 // result is ungoverned.
@@ -27,8 +30,11 @@ const CHECKOUT_FILES = Object.freeze([
 const AGENTS_READ_LIMIT = 1024 * 1024;
 
 class GovernedRepoPredicate {
-  #environment;
-  constructor(environment = process.env) { this.#environment = environment || {}; }
+  #environment; #managedBlock;
+  constructor(environment = process.env, { managedBlock = true } = {}) {
+    this.#environment = environment || {};
+    this.#managedBlock = managedBlock !== false;
+  }
 
   // The gate role a Toolkit launcher declared for this session, if any.
   gateRole() {
@@ -77,7 +83,7 @@ class GovernedRepoPredicate {
       root = GovernedRepoPredicate.gitRoot(typeof cwd === 'string' && cwd ? cwd : process.cwd());
       if (marker) return result(true, 'launcher-marker', root);
       if (!root) return result(false, 'no-git-root');
-      if (GovernedRepoPredicate.#hasGovernedBlock(root)) return result(true, 'managed-agents-block', root);
+      if (this.#managedBlock && GovernedRepoPredicate.#hasGovernedBlock(root)) return result(true, 'managed-agents-block', root);
       if (GovernedRepoPredicate.#isToolkitCheckout(root)) return result(true, 'toolkit-checkout', root);
       return result(false, 'ungoverned-repository', root);
     } catch {
@@ -86,6 +92,6 @@ class GovernedRepoPredicate {
   }
 }
 
-function governedRepo(cwd, environment = process.env) { return new GovernedRepoPredicate(environment).evaluate(cwd); }
+function governedRepo(cwd, environment = process.env, options = {}) { return new GovernedRepoPredicate(environment, options).evaluate(cwd); }
 
 module.exports = Object.freeze({ GovernedRepoPredicate, governedRepo, LAUNCHER_MARKERS });
