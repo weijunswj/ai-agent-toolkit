@@ -55,6 +55,7 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-opencode-project-plugin.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
+    'repo/scripts/toolkit-claude-plugin-auto-refresh.cjs',
   ]) copyFile(relPath, pluginRoot);
   writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
