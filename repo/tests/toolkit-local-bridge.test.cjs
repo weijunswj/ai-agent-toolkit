@@ -1218,7 +1218,8 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   assert.match(result.stdout, /Toolkit local bridge hook skipped: Refusing downgrade/);
   assert.match(result.stdout, /setup toolkit --host claude-code/);
   assert.match(result.stdout, /or `setup toolkit` from Claude Code/);
-  assert.match(result.stdout, /restart Claude Code/);
+  assert.match(result.stdout, /start a fresh Claude Code session/);
+  assert.doesNotMatch(result.stdout, /<private-path>/, 'operator guidance survives output path redaction');
   assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
   assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
   assert.doesNotMatch(result.stdout, /--force-downgrade/);

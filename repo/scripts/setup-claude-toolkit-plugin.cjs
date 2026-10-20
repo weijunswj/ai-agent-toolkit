@@ -234,121 +234,129 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
 
   return errors;
 }
+
+// Installed-enforcement identity contract: every file whose installed cache
+// bytes must equal the managed source before an install counts as current.
+// Manual setup verification and the SessionStart auto-refresh same-version
+// check both use this one list. The boolean marks JSON files with extra checks.
+const INSTALLED_ENFORCEMENT_PAIRS = [
+  ["repo/scripts/toolkit-stack-selection.cjs",false],
+  ["repo/scripts/toolkit-v3-lifecycle.cjs",false],
+  ["repo/scripts/toolkit-github-program-receipt.cjs",false],
+  ["repo/scripts/toolkit-execution-loop.cjs",false],
+  ["repo/scripts/toolkit-github-program-state-v5.cjs",false],
+  ["repo/scripts/toolkit-github-governance-review-reconciler.cjs",false],
+  ["repo/scripts/toolkit-assurance-web-finality.cjs",false],
+  ["repo/scripts/toolkit-capability-registry.cjs",false],
+  ["repo/scripts/toolkit-programme-surface-v1.cjs",false],
+  ["repo/scripts/toolkit-codex-agent-adapter.cjs",false],
+  ["repo/contracts/controller-kernel/controller-decision-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/controller-decision-v2.schema.json",true],
+  ["repo/contracts/controller-kernel/gate-contract-ir-v2.schema.json",true],
+  ["repo/contracts/controller-kernel/gate-contract-ir-v3.schema.json",true],
+  ["repo/contracts/controller-kernel/codex-host-adapter-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/codex-host-adapter-v2.schema.json",true],
+  ['.claude-plugin/plugin.json', true],
+  ['.claude-plugin/hooks/hooks.json', true],
+  ['repo/scripts/toolkit-agent-control.cjs', false],
+  ['repo/scripts/claude-process-launch.cjs', false],
+  ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+  ['repo/scripts/toolkit-claude-task-session.cjs', false],
+  ['repo/scripts/toolkit-claude-dispatch-observer.cjs', false],
+  ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
+  ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
+  ['repo/scripts/toolkit-gate-session-launcher.cjs', false],
+  ['repo/scripts/toolkit-programme-publication.cjs', false],
+  ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
+  ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
+  ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
+  ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
+  ['repo/scripts/setup-claude-toolkit-plugin.cjs', false],
+  ['repo/scripts/toolkit-local-bridge.cjs', false],
+  ['repo/scripts/toolkit-claude-plugin-auto-refresh.cjs', false],
+  ['repo/scripts/repo-ignore-hygiene.cjs', false],
+  ['repo/scripts/repo-local-backup.cjs', false],
+  ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
+  ["repo/scripts/toolkit-custody-retention-v3.cjs",false],
+  ["repo/scripts/toolkit-evidence-plan-compiler.cjs",false],
+  ["repo/scripts/toolkit-filesystem-cleanup-adapter.cjs",false],
+  ["repo/scripts/toolkit-git-current-tree-expiry-adapter.cjs",false],
+  ["repo/scripts/toolkit-recoverable-cleanup-windows.ps1",false],
+  ["repo/scripts/toolkit-opencode-helper-adapter.cjs",false],
+  ["repo/scripts/toolkit-opencode-project-plugin.cjs",false],
+  ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
+  ["repo/scripts/toolkit-staging-generations.cjs",false],
+  ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
+  ["repo/scripts/repair-codex-plugin-windows-hooks.cjs",false],
+  ["repo/scripts/audit-n8n-skills-plugin-hooks.cjs",false],
+  ["repo/scripts/setup-toolkit-core.cjs",false],
+  ["repo/scripts/setup-toolkit.cjs",false],
+  ["repo/scripts/codex-delegation-backup.cjs",false],
+  ["repo/scripts/codex-delegation-common.cjs",false],
+  ["repo/scripts/codex-delegation-config.cjs",false],
+  ["repo/scripts/codex-delegation-layout.cjs",false],
+  ["repo/scripts/codex-delegation-state.cjs",false],
+  ["repo/scripts/toolkit-codex-helper-hook.cjs",false],
+  ["repo/scripts/toolkit-codex-session-start.cjs",false],
+  ["repo/scripts/toolkit-codex-session-start.ps1",false],
+  ["repo/contracts/bounded-local-execution-loop/execution-loop-contract.schema.json",true],
+  ["repo/contracts/bounded-local-execution-loop/execution-loop-policy.json",true],
+  ["repo/contracts/control-plane-kernel/control-plane-contract.schema.json",true],
+  ["repo/contracts/control-plane-kernel/control-plane-policy.json",true],
+  ["repo/contracts/control-plane-kernel/fixture-manifest.json",true],
+  ["repo/contracts/controller-kernel/evidence-manifest-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/gate-contract-ir-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/programme-surface-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/resource-evidence-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/stack-registry-v1.json",true],
+  ["repo/contracts/controller-kernel/stack-registry-v1.schema.json",true],
+  ["repo/contracts/controller-kernel/stack-registry-v2.json",true],
+  ["repo/contracts/controller-kernel/stack-registry-v2.schema.json",true],
+  ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-contract.schema.json",true],
+  ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-policy.json",true],
+  ["repo/contracts/github-governance-review-reconciler/templates/child-v3.md",false],
+  ["repo/contracts/github-governance-review-reconciler/templates/parent-v3.md",false],
+  ["repo/contracts/github-governance-review-reconciler/templates/pr-v3.md",false],
+  ["repo/contracts/github-governance-review-reconciler/tracker-v3-grammar.json",true],
+  ["repo/contracts/github-program-receipt/authority-packet-v1.schema.json",true],
+  ["repo/contracts/github-program-receipt/authority-packet-v3.schema.json",true],
+  ["repo/contracts/github-program-receipt/github-program-receipt-policy.json",true],
+  ["repo/contracts/github-program-receipt/holder-attestation-v1.schema.json",true],
+  ["repo/contracts/github-program-receipt/pre-recovery-evidence-v1.schema.json",true],
+  ["repo/contracts/github-program-receipt/recovery-record-v1.schema.json",true],
+  ["repo/contracts/github-program-receipt/run-receipt-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/controller-bootstrap-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/human-surface-v2.schema.json",true],
+  ["repo/contracts/github-program-reconciler/post-merge-finalisation-decision-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/post-merge-finalisation-evidence-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/programme-state-v5.schema.json",true],
+  ["repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",true],
+  ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-decision-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-evidence-v1.schema.json",true],
+  ["repo/contracts/github-program-reconciler/v3-release-plan-projection-v1.schema.json",true],
+  ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-contract.schema.json",true],
+  ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-policy.json",true],
+  ["repo/contracts/repository-capability-registry/repository-capability-contract.schema.json",true],
+  ["repo/contracts/repository-capability-registry/repository-capability-policy.json",true],
+  ["repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json",true],
+  ["repo/contracts/toolkit-local-bridge/claude-plugin/marketplace.json",true],
+  ["repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json",true],
+  ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/composer-icon.png",false],
+  ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/logo.png",false],
+  ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
+  ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
+  ["repo/contracts/toolkit-local-bridge/opencode-plugin/ai-agent-toolkit.mjs",false],
+  ["repo/contracts/toolkit-local-bridge/version.json",true],
+  ["repo/CONTROLLER.md",false],
+  ["repo/ARCHITECTURE.md",false],
+];
+const INSTALLED_ENFORCEMENT_FILES = INSTALLED_ENFORCEMENT_PAIRS.map(([relPath]) => relPath);
+
 function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   const errors = [];
   const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
   if (!installPath) return ['installed plugin state does not expose an exact cache path'];
-  const pairs = [
-    ["repo/scripts/toolkit-stack-selection.cjs",false],
-    ["repo/scripts/toolkit-v3-lifecycle.cjs",false],
-    ["repo/scripts/toolkit-github-program-receipt.cjs",false],
-    ["repo/scripts/toolkit-execution-loop.cjs",false],
-    ["repo/scripts/toolkit-github-program-state-v5.cjs",false],
-    ["repo/scripts/toolkit-github-governance-review-reconciler.cjs",false],
-    ["repo/scripts/toolkit-assurance-web-finality.cjs",false],
-    ["repo/scripts/toolkit-capability-registry.cjs",false],
-    ["repo/scripts/toolkit-programme-surface-v1.cjs",false],
-    ["repo/scripts/toolkit-codex-agent-adapter.cjs",false],
-    ["repo/contracts/controller-kernel/controller-decision-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/controller-decision-v2.schema.json",true],
-    ["repo/contracts/controller-kernel/gate-contract-ir-v2.schema.json",true],
-    ["repo/contracts/controller-kernel/gate-contract-ir-v3.schema.json",true],
-    ["repo/contracts/controller-kernel/codex-host-adapter-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/codex-host-adapter-v2.schema.json",true],
-    ['.claude-plugin/plugin.json', true],
-    ['.claude-plugin/hooks/hooks.json', true],
-    ['repo/scripts/toolkit-agent-control.cjs', false],
-    ['repo/scripts/claude-process-launch.cjs', false],
-    ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
-    ['repo/scripts/toolkit-claude-task-session.cjs', false],
-    ['repo/scripts/toolkit-claude-dispatch-observer.cjs', false],
-    ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
-    ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
-    ['repo/scripts/toolkit-gate-session-launcher.cjs', false],
-    ['repo/scripts/toolkit-programme-publication.cjs', false],
-    ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
-    ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
-    ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
-    ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
-    ['repo/scripts/toolkit-local-bridge.cjs', false],
-    ['repo/scripts/toolkit-claude-plugin-auto-refresh.cjs', false],
-    ['repo/scripts/repo-ignore-hygiene.cjs', false],
-    ['repo/scripts/repo-local-backup.cjs', false],
-    ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
-    ["repo/scripts/toolkit-custody-retention-v3.cjs",false],
-    ["repo/scripts/toolkit-evidence-plan-compiler.cjs",false],
-    ["repo/scripts/toolkit-filesystem-cleanup-adapter.cjs",false],
-    ["repo/scripts/toolkit-git-current-tree-expiry-adapter.cjs",false],
-    ["repo/scripts/toolkit-recoverable-cleanup-windows.ps1",false],
-    ["repo/scripts/toolkit-opencode-helper-adapter.cjs",false],
-    ["repo/scripts/toolkit-opencode-project-plugin.cjs",false],
-    ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
-    ["repo/scripts/toolkit-staging-generations.cjs",false],
-    ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
-    ["repo/scripts/repair-codex-plugin-windows-hooks.cjs",false],
-    ["repo/scripts/audit-n8n-skills-plugin-hooks.cjs",false],
-    ["repo/scripts/setup-toolkit-core.cjs",false],
-    ["repo/scripts/setup-toolkit.cjs",false],
-    ["repo/scripts/codex-delegation-backup.cjs",false],
-    ["repo/scripts/codex-delegation-common.cjs",false],
-    ["repo/scripts/codex-delegation-config.cjs",false],
-    ["repo/scripts/codex-delegation-layout.cjs",false],
-    ["repo/scripts/codex-delegation-state.cjs",false],
-    ["repo/scripts/toolkit-codex-helper-hook.cjs",false],
-    ["repo/scripts/toolkit-codex-session-start.cjs",false],
-    ["repo/scripts/toolkit-codex-session-start.ps1",false],
-    ["repo/contracts/bounded-local-execution-loop/execution-loop-contract.schema.json",true],
-    ["repo/contracts/bounded-local-execution-loop/execution-loop-policy.json",true],
-    ["repo/contracts/control-plane-kernel/control-plane-contract.schema.json",true],
-    ["repo/contracts/control-plane-kernel/control-plane-policy.json",true],
-    ["repo/contracts/control-plane-kernel/fixture-manifest.json",true],
-    ["repo/contracts/controller-kernel/evidence-manifest-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/gate-contract-ir-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/programme-surface-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/resource-evidence-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/stack-registry-v1.json",true],
-    ["repo/contracts/controller-kernel/stack-registry-v1.schema.json",true],
-    ["repo/contracts/controller-kernel/stack-registry-v2.json",true],
-    ["repo/contracts/controller-kernel/stack-registry-v2.schema.json",true],
-    ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-contract.schema.json",true],
-    ["repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-policy.json",true],
-    ["repo/contracts/github-governance-review-reconciler/templates/child-v3.md",false],
-    ["repo/contracts/github-governance-review-reconciler/templates/parent-v3.md",false],
-    ["repo/contracts/github-governance-review-reconciler/templates/pr-v3.md",false],
-    ["repo/contracts/github-governance-review-reconciler/tracker-v3-grammar.json",true],
-    ["repo/contracts/github-program-receipt/authority-packet-v1.schema.json",true],
-    ["repo/contracts/github-program-receipt/authority-packet-v3.schema.json",true],
-    ["repo/contracts/github-program-receipt/github-program-receipt-policy.json",true],
-    ["repo/contracts/github-program-receipt/holder-attestation-v1.schema.json",true],
-    ["repo/contracts/github-program-receipt/pre-recovery-evidence-v1.schema.json",true],
-    ["repo/contracts/github-program-receipt/recovery-record-v1.schema.json",true],
-    ["repo/contracts/github-program-receipt/run-receipt-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/controller-bootstrap-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/human-surface-v2.schema.json",true],
-    ["repo/contracts/github-program-reconciler/post-merge-finalisation-decision-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/post-merge-finalisation-evidence-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/programme-state-v5.schema.json",true],
-    ["repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",true],
-    ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-decision-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/projection-bootstrap-recovery-evidence-v1.schema.json",true],
-    ["repo/contracts/github-program-reconciler/v3-release-plan-projection-v1.schema.json",true],
-    ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-contract.schema.json",true],
-    ["repo/contracts/independent-assurance-web-finality/assurance-web-finality-policy.json",true],
-    ["repo/contracts/repository-capability-registry/repository-capability-contract.schema.json",true],
-    ["repo/contracts/repository-capability-registry/repository-capability-policy.json",true],
-    ["repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json",true],
-    ["repo/contracts/toolkit-local-bridge/claude-plugin/marketplace.json",true],
-    ["repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json",true],
-    ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/composer-icon.png",false],
-    ["repo/contracts/toolkit-local-bridge/codex-plugin/assets/logo.png",false],
-    ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
-    ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
-    ["repo/contracts/toolkit-local-bridge/opencode-plugin/ai-agent-toolkit.mjs",false],
-    ["repo/contracts/toolkit-local-bridge/version.json",true],
-    ["repo/CONTROLLER.md",false],
-    ["repo/ARCHITECTURE.md",false],
-  ];
-  for (const [relPath, json] of pairs) {
+  for (const [relPath, json] of INSTALLED_ENFORCEMENT_PAIRS) {
     const source = path.join(repoRoot, ...relPath.split('/'));
     const installedFile = path.join(installPath, ...relPath.split('/'));
     if (!fs.existsSync(installedFile)) {
@@ -463,15 +471,15 @@ function spawnClaude(command, args, options = {}) {
   });
 }
 
-function positiveIntEnv(name, fallback) {
-  const raw = process.env[name];
+function positiveIntEnv(name, fallback, env = process.env) {
+  const raw = env[name];
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function commandTimeoutMs() {
-  return positiveIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS', 120000);
+function commandTimeoutMs(env = process.env) {
+  return positiveIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS', 120000, env);
 }
 
 const MUTATION_DEADLINE_DEFAULT_MS = 120000;
@@ -487,8 +495,8 @@ const MUTATION_POLL_MIN_MS = 25;
 // would silently truncate ('100junk', '100.5', '1e3'), signs, empty or
 // whitespace-only input, zero/negative values (below min), and values above
 // the documented maximum all fall back to the default.
-function boundedIntEnv(name, fallback, min, max) {
-  const raw = process.env[name];
+function boundedIntEnv(name, fallback, min, max, env = process.env) {
+  const raw = env[name];
   if (raw === undefined || raw === null) return fallback;
   const trimmed = String(raw).trim();
   if (!/^\d+$/.test(trimmed)) return fallback;
@@ -499,8 +507,8 @@ function boundedIntEnv(name, fallback, min, max) {
 
 // One mutation helper owns both `plugin update` and `plugin install`, so the
 // controls use the general MUTATION name rather than per-command names.
-function mutationDeadlineMs() {
-  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS', MUTATION_DEADLINE_DEFAULT_MS, 1, MUTATION_DEADLINE_MAX_MS);
+function mutationDeadlineMs(env = process.env) {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS', MUTATION_DEADLINE_DEFAULT_MS, 1, MUTATION_DEADLINE_MAX_MS, env);
 }
 
 function mutationPollMs() {
@@ -510,8 +518,8 @@ function mutationPollMs() {
 const PROBE_TIMEOUT_DEFAULT_MS = 10000;
 const PROBE_TIMEOUT_MAX_MS = 60000;
 
-function probeTimeoutMs() {
-  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS);
+function probeTimeoutMs(env = process.env) {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS, env);
 }
 
 // The canonical resolver selects exactly one effective command by precedence,
@@ -543,6 +551,24 @@ function writeBudgetMs(explicitCommand = '') {
     + commandTimeoutMs() // plugin marketplace add
     + mutationPhase // plugin install + state polling
     + 15000; // spawn/cleanup/JSON-report grace
+}
+
+// Worst-case wall-clock budget for one SessionStart auto-refresh helper run in
+// the given environment. The hook pins that environment and passes its own
+// outer budget; the helper refuses before any Claude call when this ceiling
+// would not fit, so an outer kill cannot cut a still-progressing update short.
+const AUTO_REFRESH_GIT_TIMEOUT_MS = 10000;
+
+function autoRefreshBudgetMs(mode, explicitCommand = '', env = process.env) {
+  const resolution = commandCandidates(explicitCommand, { env }).length * probeTimeoutMs(env);
+  const plan = AUTO_REFRESH_GIT_TIMEOUT_MS // source commit read
+    + resolution // CLI resolution
+    + commandTimeoutMs(env) // read-only plugin list
+    + 15000; // spawn/JSON-report grace
+  if (mode !== 'apply') return plan;
+  return plan
+    + mutationDeadlineMs(env) // in-place plugin update + state polling
+    + commandTimeoutMs(env); // one plugin list started just before the deadline
 }
 
 function commandCandidates(explicitCommand, options = {}) {
@@ -738,11 +764,14 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
   return new ClaudePluginMutationOperation(command,mutationArgs,options).run();
 }
 
-// Claude plugin-list output is not a documented/versioned schema. Older
-// releases exposed projectPath; current releases can omit it while retaining
-// installPath. Match on stable identity fields, then bind a path-less entry to
-// the managed source only through Claude's marketplace/install registries,
-// exact source commit, and exact installed-cache bytes.
+// Claude plugin-list output is not a documented/versioned schema. Claude Code
+// 2.1.301 emits per-install records with installPath (the plugin cache),
+// projectPath (the install record's project context for project/local scope,
+// never the plugin source) and, for a directory-source plugin read in place,
+// readFromFolder and folderVersion. Match on stable identity fields, take the
+// source from readFromFolder (or a legacy source/path field), and bind a
+// source-less entry to the managed source only through Claude's
+// marketplace/install registries, exact source commit, and exact installed-cache bytes.
 function findPluginEntries(node, matches = []) {
   if (!node || typeof node !== 'object') return matches;
   if (Array.isArray(node)) {
@@ -761,6 +790,12 @@ function findPluginEntries(node, matches = []) {
     if (value && typeof value === 'object') findPluginEntries(value, matches);
   }
   return matches;
+}
+
+// The plugin source a plugin-list record names; projectPath is deliberately
+// excluded because it is the install record's project context.
+function listedPluginSourcePath(entry) {
+  return entry?.readFromFolder || entry?.source?.path || entry?.path || '';
 }
 
 function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
@@ -789,7 +824,7 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
       errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
     }
   }
-  const listedSourcePath = installed.projectPath || installed.source?.path || installed.path || '';
+  const listedSourcePath = listedPluginSourcePath(installed);
   let sourcePath = listedSourcePath;
   let sourceIdentity = 'plugin-list';
   let sourceMatches = Boolean(listedSourcePath) && path.resolve(listedSourcePath) === repoRoot;
@@ -841,7 +876,7 @@ function exactToolkitEntries(pluginList) {
   for (const entry of findPluginEntries(pluginList)) {
     const id = entry.id || `${entry.name || entry.pluginName || ''}@${entry.marketplace || entry.marketplaceName || ''}`;
     if (id !== pluginId()) continue;
-    const key = `${path.resolve(String(entry.installPath || ''))}|${entry.scope || ''}`;
+    const key = `${path.resolve(String(entry.installPath || ''))}|${entry.scope || ''}|${entry.projectPath ? path.resolve(String(entry.projectPath)) : ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     entries.push(entry);
@@ -865,7 +900,7 @@ function shadowToolkitEntries(pluginList) {
 }
 
 function autoRefreshSourceEvidence(entry, repoRoot, options = {}) {
-  const listed = entry.readFromFolder || entry.projectPath || entry.source?.path || entry.path || '';
+  const listed = listedPluginSourcePath(entry);
   if (listed) {
     return samePath(listed, repoRoot)
       ? { ok: true, identity: 'plugin-list' }
@@ -887,53 +922,120 @@ function autoRefreshSourceEvidence(entry, repoRoot, options = {}) {
   }
   const pluginRecords = registry?.installedPlugins?.plugins?.[pluginId()] ?? registry?.installedPlugins?.[pluginId()] ?? [];
   const records = (Array.isArray(pluginRecords) ? pluginRecords : [pluginRecords])
-    .filter((record) => record && samePath(record.installPath, entry.installPath));
+    .filter((record) => record && samePath(record.installPath, entry.installPath)
+      && (!record.scope || record.scope === entry.scope)
+      && (!record.projectPath || !entry.projectPath || samePath(record.projectPath, entry.projectPath)));
   if (records.length !== 1 || records[0].version !== entry.version) {
     return { ok: false, reason: 'the Claude installed-plugin registry record is missing, ambiguous or inconsistent' };
   }
   return { ok: true, identity: 'claude-plugin-registry' };
 }
 
-// Read-only classification shared by the plan and apply phases.
+// The exact native install record identity: one record per scope and, for
+// project/local scope, per project. Its cache path changes with each version.
+function autoRefreshInstalled(entry) {
+  return {
+    version: String(entry.version || ''),
+    scope: String(entry.scope || ''),
+    install_path: entry.installPath ? path.resolve(String(entry.installPath)) : '',
+    project_path: entry.projectPath ? path.resolve(String(entry.projectPath)) : '',
+    read_from_folder: entry.readFromFolder ? path.resolve(String(entry.readFromFolder)) : ''
+  };
+}
+
+// Shared opening checks: exactly one enabled install record with an exact
+// version in a refreshable scope. Returns { result } to stop, or { entry, installed, result }.
+function autoRefreshEntry(pluginList, base) {
+  const entries = exactToolkitEntries(pluginList);
+  if (entries.length === 0) return { result: { ...base, status: 'missing', reason: `${pluginId()} is not installed` } };
+  if (entries.length > 1) return { result: { ...base, status: 'ambiguous', reason: `Claude Code reports ${entries.length} ${pluginId()} installs` } };
+  const entry = entries[0];
+  const installed = autoRefreshInstalled(entry);
+  const result = { ...base, installed };
+  if (entry.enabled === false) return { result: { ...result, status: 'disabled', reason: `${pluginId()} is installed but disabled` } };
+  if (entry.enabled !== true) return { result: { ...result, status: 'ambiguous', reason: 'Claude Code did not report the plugin enabled state' } };
+  if (!VALID_SCOPES.includes(installed.scope)) {
+    return { result: { ...result, status: 'ambiguous-scope', reason: `the installed scope is not an automatically refreshable scope: ${installed.scope || '<missing>'}` } };
+  }
+  if (!AUTO_REFRESH_VERSION_PATTERN.test(installed.version)) {
+    return { result: { ...result, status: 'ambiguous', reason: 'Claude Code did not report an exact installed version' } };
+  }
+  return { entry, installed, result };
+}
+
+// Read-only classification shared by the plan and apply phases for a session
+// running from an installed plugin cache. Only an older install whose cache is
+// exactly this session's running root may be updated; a verified current
+// install while this session runs another root only needs a fresh session.
 function classifyAutoRefreshState(pluginList, options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
   const expectedVersion = options.expectedVersion || readExpectedToolkitVersion(repoRoot);
-  const base = { plugin_id: pluginId(), expected_version: expectedVersion, shadow_entries: shadowToolkitEntries(pluginList) };
-  const entries = exactToolkitEntries(pluginList);
-  if (entries.length === 0) return { ...base, status: 'missing', reason: `${pluginId()} is not installed` };
-  if (entries.length > 1) return { ...base, status: 'ambiguous', reason: `Claude Code reports ${entries.length} ${pluginId()} installs` };
-  const entry = entries[0];
-  const installed = {
-    version: String(entry.version || ''),
-    scope: String(entry.scope || ''),
-    install_path: entry.installPath ? path.resolve(String(entry.installPath)) : ''
-  };
-  const result = { ...base, installed };
-  if (entry.enabled === false) return { ...result, status: 'disabled', reason: `${pluginId()} is installed but disabled` };
-  if (entry.enabled !== true) return { ...result, status: 'ambiguous', reason: 'Claude Code did not report the plugin enabled state' };
-  if (!VALID_SCOPES.includes(installed.scope)) {
-    return { ...result, status: 'ambiguous-scope', reason: `the installed scope is not an automatically refreshable scope: ${installed.scope || '<missing>'}` };
+  const base = { plugin_id: pluginId(), expected_version: expectedVersion, execution: 'plugin-cache', shadow_entries: shadowToolkitEntries(pluginList) };
+  if (options.runningPluginRoot && samePath(options.runningPluginRoot, repoRoot)) {
+    return { ...base, status: 'untrusted-runtime', reason: 'this session runs Toolkit directly from the managed checkout, not from an installed plugin cache, so it cannot refresh a cache' };
   }
-  if (!AUTO_REFRESH_VERSION_PATTERN.test(installed.version) || !installed.install_path) {
+  const opened = autoRefreshEntry(pluginList, base);
+  if (!opened.entry) return opened.result;
+  const { entry, installed, result } = opened;
+  if (!installed.install_path) {
     return { ...result, status: 'ambiguous', reason: 'Claude Code did not report an exact installed version and cache path' };
   }
-  if (options.runningPluginRoot && !samePath(options.runningPluginRoot, installed.install_path)) {
-    return { ...result, status: 'untrusted-runtime', reason: 'the running Toolkit hook is not the installed local-marketplace plugin cache' };
-  }
+  const runningMatches = Boolean(options.runningPluginRoot) && samePath(options.runningPluginRoot, installed.install_path);
   const source = autoRefreshSourceEvidence(entry, repoRoot, options);
   if (!source.ok) return { ...result, status: 'untrusted-source', reason: source.reason };
   const order = compareSemver(installed.version, expectedVersion);
   if (order > 0) {
     return { ...result, status: 'newer-than-source', reason: `installed ${installed.version} is newer than managed source ${expectedVersion}; downgrade is refused` };
   }
-  if (order < 0) return { ...result, status: 'stale', source_identity: source.identity, reason: `installed ${installed.version} is older than managed source ${expectedVersion}` };
+  if (order < 0) {
+    if (!runningMatches) {
+      return { ...result, status: 'untrusted-runtime', reason: 'the running Toolkit hook is not the installed local-marketplace plugin cache' };
+    }
+    return { ...result, status: 'stale', source_identity: source.identity, reason: `installed ${installed.version} is older than managed source ${expectedVersion}` };
+  }
   const current = evaluateClaudeToolkitPluginState(pluginList, { ...options, repoRoot, expectedVersion });
-  if (current.ok) return { ...result, status: 'current', source_identity: source.identity, reason: '' };
+  if (current.ok) return { ...result, status: 'current', source_identity: source.identity, running_root_matches_install: runningMatches, reason: '' };
   return {
     ...result,
     status: 'stale-same-version',
     reason: 'the installed cache reports the source version but its bytes or identity are not current; Claude Code does not update a same-version install in place'
   };
+}
+
+// Read-only classification for a session running Toolkit directly from the
+// managed checkout (Claude Code reads a directory-source plugin in place).
+// Nothing here can be applied: it only reports whether Claude Code's own
+// record confirms the in-place read and whether its separate install record,
+// which another Claude Code entry may load as a cache, still names an older version.
+function classifyInPlaceAutoRefreshState(pluginList, options = {}) {
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = options.expectedVersion || readExpectedToolkitVersion(repoRoot);
+  const base = { plugin_id: pluginId(), expected_version: expectedVersion, execution: 'managed-source', shadow_entries: shadowToolkitEntries(pluginList) };
+  const opened = autoRefreshEntry(pluginList, base);
+  if (!opened.entry) return opened.result;
+  const { entry, installed, result } = opened;
+  if (installed.read_from_folder && !samePath(installed.read_from_folder, repoRoot)) {
+    return { ...result, status: 'untrusted-source', reason: 'Claude Code reads the Toolkit plugin from a different folder than the managed checkout' };
+  }
+  if (!installed.read_from_folder && !samePath(installed.install_path, repoRoot)) {
+    return { ...result, status: 'in-place-unverified', reason: 'Claude Code does not report reading Toolkit directly from the managed checkout, so this session cannot be matched to its native install' };
+  }
+  const folderVersion = String(entry.folderVersion || '');
+  if (folderVersion && folderVersion !== expectedVersion) {
+    return { ...result, status: 'in-place-unverified', reason: `Claude Code reports folder version ${folderVersion}, not managed source version ${expectedVersion}` };
+  }
+  const order = compareSemver(installed.version, expectedVersion);
+  if (order > 0) {
+    return { ...result, status: 'newer-than-source', reason: `Claude Code's install record reports ${installed.version}, newer than managed source ${expectedVersion}; downgrade is refused` };
+  }
+  if (order < 0) {
+    return {
+      ...result,
+      status: 'in-place-record-stale',
+      reason: `this session runs Toolkit ${expectedVersion} directly from the managed checkout, but Claude Code's install record for ${pluginId()} (scope ${installed.scope}) still reports ${installed.version}; a Claude Code app that loads the installed plugin cache instead may still run the older Toolkit, and an in-place session never updates it automatically`
+    };
+  }
+  return { ...result, status: 'in-place-current', reason: '' };
 }
 
 function autoRefreshFailure(status, reason, extra = {}) {
@@ -945,6 +1047,10 @@ async function runAutoRefresh(options) {
   const repoErrors = validateRepoPluginSource(options.repoRoot);
   if (repoErrors.length) return autoRefreshFailure('source-invalid', repoErrors.join('; '), { mode });
   const expectedVersion = readExpectedToolkitVersion(options.repoRoot);
+  const neededBudget = autoRefreshBudgetMs(mode, options.claudeCommand, process.env);
+  if (neededBudget > options.budgetMs) {
+    return autoRefreshFailure('budget-exceeded', `this check can take up to ${neededBudget}ms, more than the ${options.budgetMs}ms the startup hook allows`, { mode });
+  }
   const commit = repoCommit(options.repoRoot);
   if (!/^[a-f0-9]{40}$/.test(options.expectedCommit) || commit !== options.expectedCommit) {
     return autoRefreshFailure('source-moved', 'the managed Toolkit checkout is not at the verified commit', { mode });
@@ -956,7 +1062,9 @@ async function runAutoRefresh(options) {
   if (!resolved.command) return autoRefreshFailure('cli-unavailable', 'no usable Claude Code CLI was found', { mode });
   let plan;
   try {
-    plan = classifyAutoRefreshState(runClaudeJson(resolved.command, ['plugin', 'list', '--json']), {
+    const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
+    const classify = options.runningInPlace ? classifyInPlaceAutoRefreshState : classifyAutoRefreshState;
+    plan = classify(pluginList, {
       repoRoot: options.repoRoot, expectedVersion, repoCommit: commit, runningPluginRoot: options.runningPluginRoot
     });
   } catch (error) {
@@ -978,17 +1086,18 @@ async function runAutoRefresh(options) {
   if (!outcome.ok) {
     return { ok: false, ...base, status: outcome.childFailed ? 'update-failed' : 'update-unverified', reason: outcome.failure };
   }
-  if (outcome.state?.installed?.scope && outcome.state.installed.scope !== plan.installed.scope) {
-    return { ok: false, ...base, status: 'update-unverified', reason: 'the verified install changed scope' };
+  const verified = outcome.state?.installed ? autoRefreshInstalled(outcome.state.installed) : null;
+  if (!verified || verified.scope !== plan.installed.scope || verified.project_path !== plan.installed.project_path) {
+    return { ok: false, ...base, status: 'update-unverified', reason: 'the verified install is not the same scope and project as the planned install' };
   }
   return {
     ok: true,
     ...base,
     status: 'updated',
-    install_path: outcome.state?.installed?.installPath ? path.resolve(outcome.state.installed.installPath) : '',
+    install_path: verified.install_path,
     warning: outcome.warning || '',
     fresh_session_required: true,
-    trust_action: 'Start a fresh Claude Code session to load the updated plugin, and approve any plugin or hook trust prompt Claude Code shows.'
+    trust_action: 'Start a fresh Claude Code session to load the updated plugin (clearing or compacting the conversation keeps the old one), and approve any plugin or hook trust prompt Claude Code shows.'
   };
 }
 
@@ -1020,8 +1129,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     expectedCommit: '',
     expectedFromVersion: '',
     expectedToVersion: '',
-    runningPluginRoot: ''
+    runningPluginRoot: '',
+    runningInPlace: false,
+    budgetMs: 0
   };
+  let budgetRaw = null;
   let scopeExplicit = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -1032,6 +1144,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--expected-from-version') options.expectedFromVersion = next();
     else if (arg === '--expected-to-version') options.expectedToVersion = next();
     else if (arg === '--running-plugin-root') options.runningPluginRoot = next();
+    else if (arg === '--running-in-place') options.runningInPlace = true;
+    else if (arg === '--budget-ms') budgetRaw = next();
     else if (arg === '--repo-root') options.repoRoot = next();
     else if (arg.startsWith('--repo-root=')) options.repoRoot = arg.slice('--repo-root='.length);
     else if (arg === '--claude-cli') options.claudeCommand = next();
@@ -1052,11 +1166,23 @@ function parseArgs(argv = process.argv.slice(2)) {
     // Automatic refresh always keeps the installed scope and never installs.
     if (options.write || scopeExplicit) throw new Error('--auto-refresh-plan/--auto-refresh-apply cannot be combined with --write or --scope');
     if (!options.expectedCommit) throw new Error('--auto-refresh-plan/--auto-refresh-apply require --expected-commit');
+    options.budgetMs = /^\d+$/.test(String(budgetRaw ?? '')) ? Number.parseInt(budgetRaw, 10) : 0;
+    if (!Number.isSafeInteger(options.budgetMs) || options.budgetMs <= 0) {
+      throw new Error('--auto-refresh-plan/--auto-refresh-apply require --budget-ms <positive integer milliseconds>');
+    }
+    if (options.runningInPlace && options.runningPluginRoot) throw new Error('Choose only one of --running-plugin-root or --running-in-place');
+    if (!options.runningInPlace && !options.runningPluginRoot) {
+      throw new Error('--auto-refresh-plan/--auto-refresh-apply require --running-plugin-root or --running-in-place');
+    }
+    if (options.autoRefresh === 'apply' && options.runningInPlace) {
+      throw new Error('--auto-refresh-apply cannot be combined with --running-in-place: an in-place session never applies');
+    }
     if (options.autoRefresh === 'apply' && (!options.expectedFromVersion || !options.expectedToVersion)) {
       throw new Error('--auto-refresh-apply requires --expected-from-version and --expected-to-version');
     }
-  } else if (options.expectedCommit || options.expectedFromVersion || options.expectedToVersion || options.runningPluginRoot) {
-    throw new Error('--expected-* and --running-plugin-root are only valid with --auto-refresh-plan or --auto-refresh-apply');
+  } else if (options.expectedCommit || options.expectedFromVersion || options.expectedToVersion || options.runningPluginRoot
+    || options.runningInPlace || budgetRaw !== null) {
+    throw new Error('--expected-*, --running-plugin-root, --running-in-place and --budget-ms are only valid with --auto-refresh-plan or --auto-refresh-apply');
   }
   options.repoRoot = path.resolve(options.repoRoot);
   return options;
@@ -1075,9 +1201,10 @@ function usage() {
     'This script is Claude Code-only; it never installs or updates Codex.',
     '',
     'Automatic SessionStart refresh (called by the Toolkit bridge, not by users):',
-    '  --auto-refresh-plan  --expected-commit <sha> [--running-plugin-root <path>]',
-    '  --auto-refresh-apply --expected-commit <sha> --expected-from-version <x.y.z> --expected-to-version <x.y.z> [--running-plugin-root <path>]',
-    'Apply runs only `claude plugin update` in the installed scope; it never uninstalls, installs, changes scope or downgrades.'
+    '  --auto-refresh-plan  --expected-commit <sha> --budget-ms <ms> (--running-plugin-root <cache path> | --running-in-place)',
+    '  --auto-refresh-apply --expected-commit <sha> --budget-ms <ms> --expected-from-version <x.y.z> --expected-to-version <x.y.z> --running-plugin-root <cache path>',
+    'Plan is read-only. Apply runs only `claude plugin update` in the installed scope for the cache this session runs from;',
+    'it never uninstalls, installs, changes scope or downgrades, and an in-place session (Toolkit read directly from the managed checkout) never applies.'
   ].join('\n');
 }
 
@@ -1247,8 +1374,11 @@ module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
   MARKETPLACE_REL_PATH,
+  INSTALLED_ENFORCEMENT_FILES,
+  autoRefreshBudgetMs,
   claudeSpawnParts,
   classifyAutoRefreshState,
+  classifyInPlaceAutoRefreshState,
   commandCandidates,
   evaluateClaudeToolkitPluginState,
   parseArgs,

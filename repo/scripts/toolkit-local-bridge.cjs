@@ -365,7 +365,7 @@ function printHelp() {
     '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
     '  --enable-claude-plugin-auto-refresh',
-    '                                persist opt-in Claude Code Toolkit cache refresh by native in-place plugin update;',
+    '                                persist opt-in Claude Code Toolkit cache refresh by native plugin update of the installed cache;',
     '                                also clears a held unverified refresh attempt',
     '  --disable-claude-plugin-auto-refresh',
     '  --audit',
@@ -3304,7 +3304,7 @@ function shouldRunRepoAutoUpdate(args, state) {
 
 function downgradeRemediation(syncSource) {
   if (syncSource === 'claude-plugin') {
-    return 'the installed Claude Code plugin cache is stale and this older hook cannot refresh itself automatically, even with Claude plugin auto-refresh enabled; run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code. If using the raw native command, run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user`; if it still reports stale, rerun setup so it can reinstall through the supported Claude Code marketplace path';
+    return 'this Claude Code session runs an older Toolkit plugin than one a newer session already recorded. If the plugin was refreshed after this session started, start a fresh Claude Code session (clearing or compacting the conversation keeps the old plugin). Otherwise the installed Claude Code plugin cache is stale and this older hook cannot refresh itself automatically, even with Claude plugin auto-refresh enabled; run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then start a fresh Claude Code session. If using the raw native command, run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user`; if it still reports stale, rerun setup so it can reinstall through the supported Claude Code marketplace path';
   }
   if (syncSource === 'codex-plugin') {
     return 'the installed Codex plugin cache is stale; run `setup toolkit` in Codex to refresh it';
@@ -3412,6 +3412,46 @@ function clearClaudeAutoRefreshHold(hubPath) {
   return true;
 }
 
+const CLAUDE_AUTO_REFRESH_REPORT_FILE = 'claude-plugin-auto-refresh-report.json';
+
+// With repo auto-update and auto-sync both off, a hook run stops before the
+// normal report path. A meaningful Claude refresh outcome still gets its update
+// report when reports are enabled, without rewriting hub state or turning any
+// maintenance on: the deduplication signature lives beside the attempt record.
+function persistClaudeRefreshReport({ args, hubPath, state, claudeRefresh, testHooks = {} }) {
+  if (!claudeRefresh || !shouldConsiderUpdateReport(args, state)) return '';
+  const context = {
+    repo: repoReportContextFromState(state, args),
+    targetSyncs: [],
+    skippedTargets: [],
+    nativePluginCache: claudeRefresh,
+    thirdPartyHookRepair: { status: '' },
+    targetSyncStatus: 'not needed'
+  };
+  if (!classifyUpdateReport(context).meaningful) return '';
+  const lock = acquireLock(path.dirname(hubPath), args);
+  if (!lock.acquired) return '';
+  try {
+    const markerPath = path.join(path.dirname(hubPath), CLAUDE_AUTO_REFRESH_REPORT_FILE);
+    const marker = readJsonIfExists(markerPath);
+    const reportState = { ...state, last_update_report_signature: typeof marker?.signature === 'string' ? marker.signature : '' };
+    const report = maybeWriteUpdateReport({
+      args, hubPath, state: reportState, checksum: '', context,
+      ...(testHooks.openUpdateReport ? { openReport: testHooks.openUpdateReport } : {})
+    });
+    if (report.reportPath) {
+      const temporary = `${markerPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+      fs.writeFileSync(temporary, `${JSON.stringify({
+        schema: 1, signature: report.state.last_update_report_signature, report_path: report.reportPath, written_at: timestamp()
+      }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+      fs.renameSync(temporary, markerPath);
+    }
+    return report.reportPath;
+  } finally {
+    releaseLock(lock);
+  }
+}
+
 // Claude-only: runs from the Claude SessionStart hook after setup opt-in.
 // Codex, OpenCode, repo and manual runs never reach this path.
 function maybeRunClaudePluginAutoRefresh(args, state, hubPath, testHooks = {}) {
@@ -3420,7 +3460,7 @@ function maybeRunClaudePluginAutoRefresh(args, state, hubPath, testHooks = {}) {
   const deps = {
     acquireLock: (lockRoot) => acquireLock(lockRoot, args),
     releaseLock,
-    git: (repoPath, gitArgs) => gitCommand(repoPath, gitArgs),
+    git: (repoPath, gitArgs, gitOptions) => gitCommand(repoPath, gitArgs, gitOptions),
     validateRepo: (repoPath) => runRepoValidation(repoPath, { hookMode: true }),
     runNode: (scriptPath, nodeArgs, options) => {
       const result = spawnSync(process.execPath, [scriptPath, ...nodeArgs], {
@@ -4200,6 +4240,7 @@ class LocalBridgeRun {
     assertSourceDowngradeAllowed(existingState, args);
     this.#claudeRefresh = maybeRunClaudePluginAutoRefresh(args, existingState, hubPath, this.#testHooks);
     if (isHookNoop(args, existingState)) {
+      persistClaudeRefreshReport({ args, hubPath, state: existingState, claudeRefresh: this.#claudeRefresh, testHooks: this.#testHooks });
       if (existingState?.hub_version && !existingState.auto_sync_enabled) {
         console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
       }
@@ -4279,5 +4320,6 @@ module.exports = {
   discoverCodexPluginHookRoots,
   repairThirdPartyCodexPluginHooks,
   clearClaudeAutoRefreshHold,
+  downgradeRemediation,
   maybeRunClaudePluginAutoRefresh
 };

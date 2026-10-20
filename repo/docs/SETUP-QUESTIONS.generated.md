@@ -198,7 +198,7 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: WBHH-KAM4-DT9F-VMVY
+Bank reference: HGV8-V2A8-BHTD-9PZR
 
 Quick index
 
@@ -378,7 +378,7 @@ Quick index
 
 ### 3.2 Claude Code automatic Toolkit refresh
 
-**What this controls:** Whether the Claude Code startup hook may run Claude Code's own in-place plugin update when the installed Toolkit plugin is older than the verified, clean managed source. It never installs, uninstalls, re-scopes or downgrades the plugin, never retries an update whose outcome is unknown, and never changes Codex.
+**What this controls:** Whether the Claude Code startup hook may run Claude Code's own plugin update when the installed Toolkit plugin cache it runs from is older than the verified, clean managed source. When Claude Code reads Toolkit directly from the managed checkout, the hook only reports the separate install record and never updates it. It never installs, uninstalls, re-scopes or downgrades the plugin, never retries an update whose outcome is unknown, and never changes Codex.
 
 **Current:** Automatic Claude Code Toolkit refresh is off; refresh stays manual.
 
@@ -392,11 +392,11 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Opt in to automatic in-place refresh. Startup checks still fail closed and report the manual action when a refresh cannot be proven safe.
+- **A. Turn on** - Opt in to automatic refresh of the installed plugin cache. Startup checks still fail closed and report the manual action when a refresh cannot be proven safe, including sessions that run Toolkit directly from the managed checkout.
 - **B. Turn off** - Keep Claude Code plugin refresh manual through `setup toolkit`; the installed plugin is not changed or uninstalled.
 - **C. Keep current** - Preserve this effective behavior: Automatic Claude Code Toolkit refresh is off; refresh stays manual.
 
-**After applying:** Turning this on stores the preference and clears any held unverified refresh record. A later refresh takes effect only in a fresh Claude Code session; approve any trust prompt Claude Code shows. Turning it off changes only future startup behavior.
+**After applying:** Turning this on stores the preference and clears any held unverified refresh record. A later refresh takes effect only in a fresh Claude Code session (clearing or compacting the conversation keeps the old plugin); approve any trust prompt Claude Code shows. Turning it off changes only future startup behavior.
 
 **Selected:** C - Keep current
 
@@ -431,8 +431,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `WBHH-KAM4-DT9F-VMVY: all recommended`
-- only your changes, for example: `WBHH-KAM4-DT9F-VMVY: 1.2=B, 3.3=A`
+- `HGV8-V2A8-BHTD-9PZR: all recommended`
+- only your changes, for example: `HGV8-V2A8-BHTD-9PZR: 1.2=B, 3.3=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.

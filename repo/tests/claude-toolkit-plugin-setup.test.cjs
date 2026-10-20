@@ -56,7 +56,14 @@ function writeFakeClaude(stateDir, options = {}) {
     updateCount: 0,
     uninstallCount: 0,
     trusted: options.trusted === undefined ? true : options.trusted,
-    hooksActive: options.hooksActive === undefined ? true : options.hooksActive
+    hooksActive: options.hooksActive === undefined ? true : options.hooksActive,
+    // Native 2.1.301 plugin-list fields: per-version cache paths, the folder a
+    // directory-source plugin is read from, and the install record's project context.
+    installPaths: options.installPaths || {},
+    readFromFolder: options.readFromFolder || '',
+    folderVersion: options.folderVersion || '',
+    projectPath: options.projectPath || '',
+    omitSourcePath: Boolean(options.omitSourcePath)
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
@@ -188,8 +195,11 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       version: state.version,
       enabled: state.enabled !== false,
       scope: state.scope || 'user',
-      source: { path: state.repoRoot },
-      installPath: state.repoRoot,
+      ...(state.omitSourcePath ? {} : { source: { path: state.repoRoot } }),
+      installPath: (state.installPaths || {})[state.version] || state.repoRoot,
+      ...(state.readFromFolder ? { readFromFolder: state.readFromFolder } : {}),
+      ...(state.folderVersion ? { folderVersion: state.folderVersion } : {}),
+      ...(state.projectPath ? { projectPath: state.projectPath } : {}),
       trusted: state.trusted,
       hooksActive: state.hooksActive
     }
@@ -360,9 +370,11 @@ test('Claude Toolkit plugin state evaluator does not offer an in-place update fo
 });
 
 test('Claude Toolkit plugin state evaluator accepts the real claude plugin list --json shape', () => {
-  // Confirmed against a real Claude Code 2.1.197 install: a flat array of
-  // { id: "name@marketplace", version, scope, enabled, projectPath } objects,
-  // with no wrapping object and no separate name/marketplace fields.
+  // Claude Code 2.1.301 `plugin list --json` emits a flat array of
+  // { id: "name@marketplace", version, scope, enabled, installPath,
+  // readFromFolder, folderVersion, installedAt, lastUpdated, projectPath }
+  // records. readFromFolder is the folder a directory-source plugin is read
+  // from; projectPath is the install record's project context, not a source.
   const realShapeList = [
     {
       id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`,
@@ -370,9 +382,11 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
       scope: 'user',
       enabled: true,
       installPath: repoRoot,
+      readFromFolder: repoRoot,
+      folderVersion: expectedVersion(),
       installedAt: '2026-07-01T14:44:35.944Z',
       lastUpdated: '2026-07-01T14:44:35.944Z',
-      projectPath: repoRoot
+      projectPath: path.join(os.tmpdir(), 'unrelated-project')
     }
   ];
   const state = setup.evaluateClaudeToolkitPluginState(realShapeList, { repoRoot });
@@ -1013,21 +1027,39 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
 });
 
 
+
 // Automatic SessionStart refresh: only Claude Code's in-place `plugin update`
-// in the installed scope; everything else fails closed with no mutation.
+// in the installed scope; everything else fails closed with no mutation. The
+// fake reports a separate 3.0.9 cache path, and the managed checkout as the
+// install path once updated (its bytes are the current source bytes).
 function sourceCommit() {
   const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true });
   return result.stdout.trim().toLowerCase();
 }
 
-function autoRefresh(mode, fake, extra = []) {
-  const result = runSetup(mode, fake, ['--expected-commit', sourceCommit(), ...extra]);
+const AUTO_BUDGET = ['--budget-ms', '600000'];
+
+function autoRefresh(mode, fake, extra = [], options = {}) {
+  const result = runSetup(mode, fake, ['--expected-commit', sourceCommit(), ...(options.budget || AUTO_BUDGET), ...extra], options);
   const lines = String(result.stdout || '').trim().split(/\r?\n/);
   return { result, report: JSON.parse(lines[lines.length - 1] || '{}') };
 }
 
-function applyArgs(fromVersion) {
-  return ['--expected-from-version', fromVersion, '--expected-to-version', expectedVersion(), '--running-plugin-root', repoRoot];
+function staleCacheRoot(dir) {
+  return path.join(dir, 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.0.9');
+}
+
+function cacheFake(dir, options = {}) {
+  return writeFakeClaude(dir, {
+    initialInstalled: true,
+    installedVersion: '3.0.9',
+    installPaths: { '3.0.9': staleCacheRoot(dir) },
+    ...options
+  });
+}
+
+function applyArgs(dir, fromVersion) {
+  return ['--expected-from-version', fromVersion, '--expected-to-version', expectedVersion(), '--running-plugin-root', staleCacheRoot(dir)];
 }
 
 function assertNoDestructiveFallback(stateDir) {
@@ -1038,13 +1070,14 @@ function assertNoDestructiveFallback(stateDir) {
   return fake;
 }
 
-test('auto-refresh plan classifies an older install as stale without any mutation', () => {
+test('auto-refresh plan classifies an older cache-backed install as stale without any mutation', () => {
   const dir = tmpRoot();
-  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', initialScope: 'project' });
-  const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', repoRoot]);
+  const fake = cacheFake(dir, { initialScope: 'project' });
+  const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(report.status, 'stale');
   assert.equal(report.mutation_attempted, false);
+  assert.equal(report.execution, 'plugin-cache');
   assert.deepEqual(report.installed.scope, 'project');
   assert.equal(readFakeClaudeState(dir).updateCount, 0);
   assertNoDestructiveFallback(dir);
@@ -1052,8 +1085,8 @@ test('auto-refresh plan classifies an older install as stale without any mutatio
 
 test('auto-refresh apply runs only plugin update in the installed scope and reports a fresh session', () => {
   const dir = tmpRoot();
-  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', initialScope: 'project' });
-  const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.9'));
+  const fake = cacheFake(dir, { initialScope: 'project' });
+  const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(report.status, 'updated');
   assert.equal(report.scope, 'project');
@@ -1067,8 +1100,8 @@ test('auto-refresh apply runs only plugin update in the installed scope and repo
 test('auto-refresh apply never falls back to uninstall or reinstall when the native update fails or does not land', () => {
   for (const [options, status] of [[{ failUpdate: true }, 'update-failed'], [{ updateSilentNoop: true }, 'update-unverified']]) {
     const dir = tmpRoot();
-    const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', ...options });
-    const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.9'));
+    const fake = cacheFake(dir, options);
+    const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
     assert.equal(result.status, 1);
     assert.equal(report.status, status);
     assert.equal(report.mutation_attempted, true);
@@ -1078,18 +1111,19 @@ test('auto-refresh apply never falls back to uninstall or reinstall when the nat
 
 test('auto-refresh refuses downgrade, missing, disabled, foreign-runtime and foreign-source installs without mutation', () => {
   const cases = [
-    [{ initialInstalled: true, installedVersion: '9.9.9' }, [], 'newer-than-source'],
-    [{}, [], 'missing'],
-    [{ initialInstalled: true, installedVersion: '3.0.9', initialEnabled: false }, [], 'disabled'],
-    [{ initialInstalled: true, installedVersion: '3.0.9' }, ['--running-plugin-root', path.join(repoRoot, 'not-the-cache')], 'untrusted-runtime'],
-    [{ initialInstalled: true, installedVersion: '3.0.9', initialRepoRoot: path.join(repoRoot, '..', 'another-toolkit-copy') }, [], 'untrusted-source']
+    [{ installedVersion: '9.9.9', installPaths: {} }, 'newer-than-source'],
+    [{ initialInstalled: false }, 'missing'],
+    [{ initialEnabled: false }, 'disabled'],
+    [{}, 'untrusted-runtime', path.join(repoRoot, 'not-the-cache')],
+    [{ initialRepoRoot: path.join(repoRoot, '..', 'another-toolkit-copy') }, 'untrusted-source']
   ];
-  for (const [options, extra, status] of cases) {
+  for (const [options, status, runningRoot] of cases) {
     const dir = tmpRoot();
-    const fake = writeFakeClaude(dir, options);
-    const { report } = autoRefresh('--auto-refresh-plan', fake, extra);
+    const fake = cacheFake(dir, options);
+    const root = runningRoot || staleCacheRoot(dir);
+    const { report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', root]);
     assert.equal(report.status, status, status);
-    const applied = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', expectedVersion(), ...extra]);
+    const applied = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', expectedVersion(), '--running-plugin-root', root]);
     assert.equal(applied.report.mutation_attempted, false, status);
     assert.equal(readFakeClaudeState(dir).updateCount, 0, status);
     assertNoDestructiveFallback(dir);
@@ -1098,36 +1132,144 @@ test('auto-refresh refuses downgrade, missing, disabled, foreign-runtime and for
 
 test('auto-refresh apply refuses a moved source commit or a changed plan before mutation', () => {
   const dir = tmpRoot();
-  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9' });
-  const moved = runSetup('--auto-refresh-apply', fake, ['--expected-commit', 'b'.repeat(40), ...applyArgs('3.0.9')]);
+  const fake = cacheFake(dir);
+  const moved = runSetup('--auto-refresh-apply', fake, ['--expected-commit', 'b'.repeat(40), ...AUTO_BUDGET, ...applyArgs(dir, '3.0.9')]);
   assert.equal(JSON.parse(moved.stdout.trim()).status, 'source-moved');
-  const changed = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.8'));
+  const changed = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.8'));
   assert.equal(changed.report.status, 'plan-changed');
-  const wrongTarget = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', '0.0.1']);
+  const wrongTarget = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', '0.0.1', '--running-plugin-root', staleCacheRoot(dir)]);
   assert.equal(wrongTarget.report.status, 'plan-changed');
   assert.equal(readFakeClaudeState(dir).updateCount, 0);
 });
 
-test('auto-refresh modes reject install, scope and unbound arguments', () => {
-  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', '--write', '--expected-commit', 'a']), /cannot be combined/);
-  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--scope', 'user', '--expected-commit', 'a']), /cannot be combined/);
-  assert.throws(() => setup.parseArgs(['--auto-refresh-plan']), /require --expected-commit/);
-  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', '--expected-commit', 'a']), /requires --expected-from-version/);
-  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--auto-refresh-apply', '--expected-commit', 'a']), /only one/);
+test('auto-refresh modes reject install, scope, unbound and in-place apply arguments', () => {
+  const bound = ['--expected-commit', 'a', '--budget-ms', '1'];
+  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', '--write', ...bound]), /cannot be combined/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--scope', 'user', ...bound, '--running-in-place']), /cannot be combined/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--budget-ms', '1', '--running-in-place']), /require --expected-commit/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--expected-commit', 'a', '--running-in-place']), /require --budget-ms/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--expected-commit', 'a', '--budget-ms', 'x', '--running-in-place']), /require --budget-ms/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', ...bound]), /--running-plugin-root or --running-in-place/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', ...bound, '--running-in-place', '--running-plugin-root', 'x']), /only one of --running-plugin-root or --running-in-place/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', ...bound, '--expected-from-version', '1.0.0', '--expected-to-version', '1.0.1', '--running-in-place']), /in-place session never applies/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', ...bound, '--running-plugin-root', 'x']), /requires --expected-from-version/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--auto-refresh-apply', ...bound]), /only one/);
   assert.throws(() => setup.parseArgs(['--verify', '--expected-commit', 'a']), /only valid with/);
+  assert.throws(() => setup.parseArgs(['--verify', '--running-in-place']), /only valid with/);
+  assert.throws(() => setup.parseArgs(['--verify', '--budget-ms', '5']), /only valid with/);
 });
 
 test('auto-refresh classification fails closed on ambiguous, managed-scope and same-version drift and reports shadows', () => {
-  const entry = (overrides = {}) => ({ id: setup.pluginId(), version: '3.0.9', scope: 'user', enabled: true, installPath: path.join(repoRoot, 'cache-a'), readFromFolder: repoRoot, ...overrides });
-  const classify = (plugins) => setup.classifyAutoRefreshState(plugins, { repoRoot, expectedVersion: expectedVersion(), registryState: null });
+  const cache = path.join(repoRoot, 'cache-a');
+  const entry = (overrides = {}) => ({ id: setup.pluginId(), version: '3.0.9', scope: 'user', enabled: true, installPath: cache, readFromFolder: repoRoot, ...overrides });
+  const classify = (plugins, runningPluginRoot = cache) => setup.classifyAutoRefreshState(plugins, { repoRoot, expectedVersion: expectedVersion(), registryState: null, runningPluginRoot });
   assert.equal(classify([entry(), entry({ installPath: path.join(repoRoot, 'cache-b'), scope: 'project' })]).status, 'ambiguous');
   assert.equal(classify([entry({ scope: 'managed' })]).status, 'ambiguous-scope');
   assert.equal(classify([entry({ enabled: undefined })]).status, 'ambiguous');
   assert.equal(classify([entry({ version: 'unknown' })]).status, 'ambiguous');
   assert.equal(classify([entry({ readFromFolder: path.join(repoRoot, '..', 'other') })]).status, 'untrusted-source');
-  const drift = classify([entry({ version: expectedVersion(), installPath: path.join(repoRoot, 'missing-cache') })]);
+  const drift = classify([entry({ version: expectedVersion(), installPath: path.join(repoRoot, 'missing-cache') })], path.join(repoRoot, 'missing-cache'));
   assert.equal(drift.status, 'stale-same-version');
   const shadowed = classify([entry(), { id: 'ai-agent-toolkit@synced', scope: 'synced', version: 'unknown', enabled: true, installPath: '' }]);
   assert.equal(shadowed.status, 'stale');
   assert.deepEqual(shadowed.shadow_entries, [{ id: 'ai-agent-toolkit@synced', scope: 'synced', version: 'unknown' }]);
+});
+
+// --- B1 family (PR #522 G2) ----------------------------------------------------
+
+test('B1a family: a cache-backed plan refuses the managed checkout as its running root', () => {
+  const entry = { id: setup.pluginId(), version: '3.0.9', scope: 'user', enabled: true, installPath: repoRoot, readFromFolder: repoRoot };
+  const plan = setup.classifyAutoRefreshState([entry], { repoRoot, expectedVersion: expectedVersion(), registryState: null, runningPluginRoot: repoRoot });
+  assert.equal(plan.status, 'untrusted-runtime');
+  assert.match(plan.reason, /managed checkout/);
+});
+
+test('B1a family: in-place plans report the native read-in-place evidence and the separate install record, never mutate', () => {
+  const cases = [
+    [{ readFromFolder: repoRoot, omitSourcePath: true }, 'in-place-record-stale'],
+    [{ readFromFolder: repoRoot, omitSourcePath: true, installedVersion: expectedVersion(), installPaths: {} }, 'in-place-current'],
+    [{ readFromFolder: repoRoot, folderVersion: '0.0.1', omitSourcePath: true }, 'in-place-unverified'],
+    [{ omitSourcePath: true }, 'in-place-unverified'],
+    [{ readFromFolder: path.join(repoRoot, '..', 'another-toolkit-copy'), omitSourcePath: true }, 'untrusted-source'],
+    [{ readFromFolder: repoRoot, initialEnabled: false }, 'disabled'],
+    [{ readFromFolder: repoRoot, installedVersion: '9.9.9', installPaths: {} }, 'newer-than-source'],
+    [{ initialInstalled: false }, 'missing']
+  ];
+  for (const [options, status] of cases) {
+    const dir = tmpRoot();
+    const fake = cacheFake(dir, options);
+    const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-in-place']);
+    assert.equal(report.status, status, `${status}: ${result.stderr}`);
+    assert.equal(report.mutation_attempted, false, status);
+    assert.equal(report.execution, 'managed-source', status);
+    assert.equal(readFakeClaudeState(dir).updateCount, 0, status);
+    assertNoDestructiveFallback(dir);
+  }
+  const dir = tmpRoot();
+  const { report } = autoRefresh('--auto-refresh-plan', cacheFake(dir, { readFromFolder: repoRoot, omitSourcePath: true }), ['--running-in-place']);
+  assert.equal(report.installed.version, '3.0.9');
+  assert.equal(path.resolve(report.installed.install_path), path.resolve(staleCacheRoot(dir)));
+  assert.equal(path.resolve(report.installed.read_from_folder), path.resolve(repoRoot));
+  assert.match(report.reason, /directly from the managed checkout/);
+});
+
+test('L3: projectPath is the install record project context, not the plugin source', () => {
+  const otherProject = path.join(os.tmpdir(), 'some-other-project');
+  const cache = path.join(repoRoot, 'cache-a');
+  const commit = 'a'.repeat(40);
+  const registryState = {
+    knownMarketplaces: { [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { source: 'directory', path: repoRoot } } },
+    installedPlugins: { plugins: { [setup.pluginId()]: [{ scope: 'project', projectPath: otherProject, version: '3.0.9', installPath: cache, gitCommitSha: commit }] } },
+    repoCommit: commit
+  };
+  for (const scope of ['project', 'local']) {
+    const pathless = { id: setup.pluginId(), version: '3.0.9', scope, enabled: true, installPath: cache, projectPath: otherProject };
+    const plan = setup.classifyAutoRefreshState([pathless], { repoRoot, expectedVersion: expectedVersion(), runningPluginRoot: cache,
+      registryState: { ...registryState, installedPlugins: { plugins: { [setup.pluginId()]: [{ ...registryState.installedPlugins.plugins[setup.pluginId()][0], scope }] } } } });
+    assert.equal(plan.status, 'stale', `${scope} entry with a project context and registry source evidence is refreshable`);
+    assert.equal(plan.installed.project_path, otherProject);
+    const listed = setup.classifyAutoRefreshState([{ ...pathless, readFromFolder: repoRoot }], { repoRoot, expectedVersion: expectedVersion(), registryState: null, runningPluginRoot: cache });
+    assert.equal(listed.status, 'stale', scope);
+  }
+  // A current install whose record names another project still verifies through readFromFolder.
+  const current = setup.evaluateClaudeToolkitPluginState([{ id: setup.pluginId(), version: expectedVersion(), scope: 'project', enabled: true,
+    installPath: repoRoot, readFromFolder: repoRoot, projectPath: otherProject }], { repoRoot });
+  assert.deepEqual(current.errors, []);
+  assert.equal(current.ok, true);
+  // projectPath alone never proves the plugin source.
+  const contextOnly = setup.evaluateClaudeToolkitPluginState([{ id: setup.pluginId(), version: expectedVersion(), scope: 'user', enabled: true,
+    installPath: repoRoot, projectPath: repoRoot }], { repoRoot, registryState: null });
+  assert.equal(contextOnly.ok, false);
+  assert.equal(contextOnly.sourceIdentity, 'unverified');
+});
+
+test('L3: a project-scoped cache-backed apply verifies through readFromFolder despite a different projectPath', () => {
+  const dir = tmpRoot();
+  const fake = cacheFake(dir, { initialScope: 'project', readFromFolder: repoRoot, projectPath: path.join(dir, 'project'), omitSourcePath: true });
+  const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'));
+  assert.equal(report.status, 'updated', result.stderr || report.reason);
+  assert.equal(report.scope, 'project');
+  assert.deepEqual(readFakeClaudeState(dir).updateArgs, [[setup.pluginId(), '--scope', 'project']]);
+});
+
+test('L2 family: an older running cache while the installed entry is verified current asks for a fresh session', () => {
+  const dir = tmpRoot();
+  const fake = cacheFake(dir, { installedVersion: expectedVersion(), installPaths: {} });
+  const { report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)]);
+  assert.equal(report.status, 'current');
+  assert.equal(report.running_root_matches_install, false);
+});
+
+test('H3: the helper refuses an auto-refresh whose own worst-case budget exceeds the caller budget, before any Claude call', () => {
+  const dir = tmpRoot();
+  const fake = cacheFake(dir);
+  const plan = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', staleCacheRoot(dir)], { budget: ['--budget-ms', '1000'] });
+  assert.equal(plan.report.status, 'budget-exceeded');
+  assert.equal(plan.report.mutation_attempted, false);
+  const apply = autoRefresh('--auto-refresh-apply', fake, applyArgs(dir, '3.0.9'), { budget: ['--budget-ms', '1000'] });
+  assert.equal(apply.report.status, 'budget-exceeded');
+  assert.equal(apply.report.mutation_attempted, false);
+  assert.equal(readFakeClaudeState(dir).updateCount, 0);
+  const budget = setup.autoRefreshBudgetMs('apply', '', { CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS: '45000', CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS: '10000', CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '150000' });
+  assert.equal(budget, 10000 + 10000 + 45000 + 150000 + 45000 + 15000);
 });

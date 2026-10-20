@@ -626,7 +626,7 @@ function printHelp() {
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
     '  --enable-claude-plugin-auto-refresh',
-    '                               opt in: let the Claude SessionStart hook run Claude Code\'s own in-place plugin update when the cache is older than the verified managed source',
+    '                               opt in: let the Claude SessionStart hook run Claude Code\'s own plugin update when the installed cache it runs from is older than the verified managed source (a session running Toolkit directly from the managed checkout only reports)',
     '  --skip-claude-plugin-auto-refresh',
     '                               keep Claude Code plugin refresh manual (default)',
     '  --keep-claude-plugin-auto-refresh',
@@ -1949,9 +1949,9 @@ function setupQuestionSpecs(args, current) {
       section: 'Other coding apps',
       title: 'Claude Code automatic Toolkit refresh',
       prompt: 'Claude Code automatic refresh choice',
-      whatThisControls: 'Whether the Claude Code startup hook may run Claude Code\'s own in-place plugin update when the installed Toolkit plugin is older than the verified, clean managed source. It never installs, uninstalls, re-scopes or downgrades the plugin, never retries an update whose outcome is unknown, and never changes Codex.',
+      whatThisControls: 'Whether the Claude Code startup hook may run Claude Code\'s own plugin update when the installed Toolkit plugin cache it runs from is older than the verified, clean managed source. When Claude Code reads Toolkit directly from the managed checkout, the hook only reports the separate install record and never updates it. It never installs, uninstalls, re-scopes or downgrades the plugin, never retries an update whose outcome is unknown, and never changes Codex.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Opt in to automatic in-place refresh. Startup checks still fail closed and report the manual action when a refresh cannot be proven safe.'),
+        wizardChoice('enable', 'Turn on', 'Opt in to automatic refresh of the installed plugin cache. Startup checks still fail closed and report the manual action when a refresh cannot be proven safe, including sessions that run Toolkit directly from the managed checkout.'),
         wizardChoice('disable', 'Turn off', 'Keep Claude Code plugin refresh manual through `setup toolkit`; the installed plugin is not changed or uninstalled.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.claude_plugin_auto_refresh_enabled, 'Automatic Claude Code Toolkit refresh is on.', 'Automatic Claude Code Toolkit refresh is off; refresh stays manual.', 'The automatic Claude Code refresh preference could not be verified; setup treats it as off.')}`),
       ],
@@ -1963,7 +1963,7 @@ function setupQuestionSpecs(args, current) {
       selected: args.setupChoices.claudePluginAutoRefresh,
       current: currentBooleanOutcome(current.audit?.claude_plugin_auto_refresh_enabled, 'Automatic Claude Code Toolkit refresh is on.', 'Automatic Claude Code Toolkit refresh is off; refresh stays manual.', 'The automatic Claude Code refresh preference could not be verified; setup treats it as off.'),
       currentVerification: typeof current.audit?.claude_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
-      afterApplying: 'Turning this on stores the preference and clears any held unverified refresh record. A later refresh takes effect only in a fresh Claude Code session; approve any trust prompt Claude Code shows. Turning it off changes only future startup behavior.',
+      afterApplying: 'Turning this on stores the preference and clears any held unverified refresh record. A later refresh takes effect only in a fresh Claude Code session (clearing or compacting the conversation keeps the old plugin); approve any trust prompt Claude Code shows. Turning it off changes only future startup behavior.',
     }));
   }
 
@@ -3736,7 +3736,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
     if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
     console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
-    console.log(`Claude plugin automatic refresh at startup: ${args.claudePluginAutoRefresh ? 'on (in-place native update only; fails closed and never retries an unknown outcome)' : 'off (manual refresh through setup toolkit)'}`);
+    console.log(`Claude plugin automatic refresh at startup: ${args.claudePluginAutoRefresh ? 'on (native update of the installed plugin cache only; sessions running Toolkit in place only report; fails closed and never retries an unknown outcome)' : 'off (manual refresh through setup toolkit)'}`);
     console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
   } else {

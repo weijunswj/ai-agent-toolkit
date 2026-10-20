@@ -29,10 +29,10 @@ function writeFile(filePath, text) {
   fs.writeFileSync(filePath, text, 'utf8');
 }
 
-// A plugin tree with the identity files the operation compares.
+// A plugin tree with every identity file the same-version check compares.
 function pluginTree(root, version, marker = 'same') {
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version }));
-  for (const relPath of refresh.CURRENT_IDENTITY_FILES) {
+  for (const relPath of refresh.enforcementIdentityFiles()) {
     if (relPath === '.claude-plugin/plugin.json') continue;
     writeFile(path.join(root, ...relPath.split('/')), `${relPath}:${version}:${marker}\n`);
   }
@@ -44,7 +44,9 @@ function fixture(t, { running = '3.0.10', source = '3.0.11', sameBytes = false }
   const hubPath = path.join(root, 'home', 'current');
   fs.mkdirSync(hubPath, { recursive: true });
   const repoPath = pluginTree(path.join(root, 'source'), source);
-  const runningRoot = sameBytes ? repoPath : pluginTree(path.join(root, 'cache', running), running, 'cache');
+  // A same-bytes cache is a separate installed copy; the managed checkout
+  // itself is the in-place case covered by claude-plugin-auto-refresh-family.
+  const runningRoot = pluginTree(path.join(root, 'cache', running), running, sameBytes ? 'same' : 'cache');
   return { root, hubPath, repoPath, runningRoot };
 }
 
@@ -92,7 +94,7 @@ function operation(f, depBundle, env = {}) {
   });
 }
 
-const STALE_PLAN = { ok: true, mode: 'plan', mutation_attempted: false, status: 'stale', installed: { version: '3.0.10', scope: 'project', install_path: 'x' } };
+const stalePlan = (f) => ({ ok: true, mode: 'plan', mutation_attempted: false, status: 'stale', installed: { version: '3.0.10', scope: 'project', install_path: f.runningRoot, project_path: path.join(f.root, 'project') } });
 const UPDATED = { ok: true, mode: 'apply', mutation_attempted: true, status: 'updated', install_path: 'new', from_version: '3.0.10', to_version: '3.0.11' };
 
 test('recursion guard and foreign runtime stop before taking the hub lock', (t) => {
@@ -179,7 +181,7 @@ test('failed managed source validation blocks the plan and the update', (t) => {
 test('stale cache: durable in-flight record precedes the in-place update, which preserves scope and reports a fresh session', (t) => {
   const f = fixture(t);
   const d = deps();
-  d.deps.runNode = helperReplies({ '--auto-refresh-plan': STALE_PLAN, '--auto-refresh-apply': UPDATED }, d.calls, f.hubPath);
+  d.deps.runNode = helperReplies({ '--auto-refresh-plan': stalePlan(f), '--auto-refresh-apply': UPDATED }, d.calls, f.hubPath);
   const result = operation(f, d).run();
   assert.equal(result.refresh_status, 'updated');
   assert.equal(result.status, 'refreshed');
@@ -201,7 +203,7 @@ test('timeout with unknown outcome is held and never retried automatically', (t)
   const f = fixture(t);
   const d = deps();
   d.deps.runNode = helperReplies({
-    '--auto-refresh-plan': STALE_PLAN,
+    '--auto-refresh-plan': stalePlan(f),
     '--auto-refresh-apply': () => ({ ok: false, status: null, stdout: '', stderr: '', timedOut: true })
   }, d.calls, f.hubPath);
   const first = operation(f, d).run();
@@ -217,19 +219,27 @@ test('timeout with unknown outcome is held and never retried automatically', (t)
   assert.equal(again.calls.validate, 0);
 });
 
-test('a crash after the in-flight record (no outcome) is held; a later current cache resolves it', (t) => {
+test('a crash after the in-flight record (no outcome) is held; only that same install, verified current, resolves it', (t) => {
   const f = fixture(t);
-  fs.writeFileSync(path.join(path.dirname(f.hubPath), refresh.ATTEMPT_FILE), JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crashed' }));
+  const target = { plugin_id: 'ai-agent-toolkit@ai-agent-toolkit-local', scope: 'user', project_path: '', install_path: f.runningRoot };
+  const crashed = JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crashed', from_version: '3.0.10', to_version: '3.0.11', target });
+  fs.writeFileSync(path.join(path.dirname(f.hubPath), refresh.ATTEMPT_FILE), crashed);
   const d = deps();
   const held = operation(f, d).run();
   assert.equal(held.refresh_status, 'held');
   assert.equal(d.calls.node.length, 0);
 
   const current = fixture(t, { running: '3.0.11', source: '3.0.11', sameBytes: true });
-  fs.writeFileSync(path.join(path.dirname(current.hubPath), refresh.ATTEMPT_FILE), JSON.stringify({ schema: 1, phase: 'in-flight', attempt_id: 'crashed' }));
-  const resolved = operation(current, deps()).run();
+  fs.writeFileSync(path.join(path.dirname(current.hubPath), refresh.ATTEMPT_FILE), crashed);
+  const check = deps();
+  check.deps.runNode = helperReplies({ '--auto-refresh-plan': { ok: true, mutation_attempted: false, status: 'current',
+    installed: { version: '3.0.11', scope: 'user', install_path: current.runningRoot, project_path: '' } } }, check.calls, current.hubPath);
+  const resolved = operation(current, check).run();
   assert.equal(resolved.refresh_status, 'resolved-current');
+  assert.equal(check.calls.validate, 1);
+  assert.deepEqual(check.calls.node.map((call) => call.mode), ['--auto-refresh-plan'], 'read-only verification only');
   assert.equal(readAttempt(current.hubPath).phase, 'resolved');
+  assert.equal(readAttempt(current.hubPath).resolved_by, 'same-target-verified');
   assert.equal(readAttempt(current.hubPath).previous.attempt_id, 'crashed');
 });
 
@@ -237,7 +247,7 @@ test('a definite native update failure is held; explicit setup opt-in clears the
   const f = fixture(t);
   const d = deps();
   d.deps.runNode = helperReplies({
-    '--auto-refresh-plan': STALE_PLAN,
+    '--auto-refresh-plan': stalePlan(f),
     '--auto-refresh-apply': { ok: false, mutation_attempted: true, status: 'update-failed', reason: 'exited with 1' }
   }, d.calls, f.hubPath);
   assert.equal(operation(f, d).run().refresh_status, 'update-failed');
@@ -252,7 +262,7 @@ test('a plan change detected by apply before mutation is deferred, not held', (t
   const f = fixture(t);
   const d = deps();
   d.deps.runNode = helperReplies({
-    '--auto-refresh-plan': STALE_PLAN,
+    '--auto-refresh-plan': stalePlan(f),
     '--auto-refresh-apply': { ok: false, mutation_attempted: false, status: 'plan-changed', reason: 'state changed' }
   }, d.calls, f.hubPath);
   const result = operation(f, d).run();
