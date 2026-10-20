@@ -172,6 +172,62 @@ test('F1b: only explicit setup opt-in clears an unknown record, retaining it as 
   assert.equal(corrupted.updates(c).length, 0);
 });
 
+test('F1b: terminal-shaped records with malformed nested targets hold every automatic update; producer-shaped ones and explicit clearing discharge', (t) => {
+  const w = world(t);
+  const a = heldHomeA(w);
+  const held = w.attempt();
+  const target = held.target;
+  const elsewhere = path.join(w.root, 'elsewhere');
+  const completedUpdated = { schema: 1, phase: 'completed', outcome: 'updated', attempt_id: held.attempt_id, completed_at: '2026-10-20T12:00:00Z',
+    from_version: held.from_version, to_version: held.to_version, source_commit: held.source_commit, scope: target.scope, target };
+  const notAttempted = { schema: 1, phase: 'completed', outcome: 'not-attempted', attempt_id: held.attempt_id, completed_at: '2026-10-20T12:00:00Z',
+    reason: 'plan-changed', target };
+  const resolved = { schema: 1, phase: 'resolved', resolved_by: 'same-target-verified', resolved_at: '2026-10-20T12:00:00Z', target, previous: held };
+  const malformed = [
+    ['completed with an empty target', { ...completedUpdated, target: {} }],
+    ['completed with an array target', { ...notAttempted, target: [] }],
+    ['completed with a target missing its cache family', { ...completedUpdated, target: { ...target, cache_family: undefined } }],
+    ['completed with a target in another cache family', { ...completedUpdated, target: { ...target, cache_family: path.join(elsewhere, 'ai-agent-toolkit') } }],
+    ['completed with an install path outside its family', { ...completedUpdated, target: { ...target, install_path: path.join(elsewhere, w.version) } }],
+    ['completed updated without its source commit', { ...completedUpdated, source_commit: undefined }],
+    ['completed updated with a scope other than its target', { ...completedUpdated, scope: 'local' }],
+    ['resolved with empty target and previous', { ...resolved, target: {}, previous: {} }],
+    ['resolved with an array previous', { ...resolved, previous: [] }],
+    ['resolved with a previous for another target', { ...resolved, previous: { ...held, target: { ...target, source_path: elsewhere } } }],
+    ['resolved with a previous that was not pending', { ...resolved, previous: { ...held, phase: 'completed' } }],
+    ['cleared with an array previous', { schema: 1, phase: 'cleared', cleared_at: '2026-10-20T12:00:00Z', previous: [] }]
+  ];
+  for (const [label, record] of malformed) {
+    const bytes = JSON.stringify(record);
+    fs.writeFileSync(w.attemptPath, bytes);
+    const result = w.session(bridge, a);
+    assert.equal(result.status, 'held', `${label}: ${result.line}`);
+    assert.equal(w.updates(a).length, 1, `${label}: no automatic apply`);
+    assert.equal(w.attemptBytes(), bytes, `${label}: kept byte-for-byte`);
+  }
+
+  // Positive controls: producer-shaped terminal records discharge, one apply each.
+  let applies = 1;
+  for (const [label, record] of [['completed updated', completedUpdated], ['completed not-attempted', notAttempted], ['resolved', resolved]]) {
+    writeJson(w.attemptPath, record);
+    assert.equal(w.session(bridge, a).status, 'update-failed', label);
+    applies += 1;
+    assert.equal(w.updates(a).length, applies, label);
+    assert.equal(w.attempt().phase, 'held', label);
+  }
+
+  // Explicit setup recovery clears a malformed terminal record, keeping it verbatim.
+  const malformedTerminal = { ...completedUpdated, target: [] };
+  writeJson(w.attemptPath, malformedTerminal);
+  assert.equal(w.session(bridge, a).status, 'held');
+  assert.equal(w.setupOptIn(bridge), true);
+  assert.deepEqual(w.attempt().previous, malformedTerminal, 'the malformed record is retained as evidence');
+  assert.equal(w.session(bridge, a).status, 'update-failed');
+  assert.equal(w.updates(a).length, applies + 1, 'one apply after explicit recovery');
+  assert.equal(w.session(bridge, a).status, 'held');
+  assert.equal(w.updates(a).length, applies + 1);
+});
+
 test('F1b: a crash after the in-flight record holds; repeated SessionStarts never retry; only the same verified target resolves it', (t) => {
   const w = world(t);
   const a = heldHomeA(w);

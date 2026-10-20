@@ -49,6 +49,7 @@ const APPLY_BUDGET_MS = 285000;
 const APPLY_TIMEOUT_MS = 290000;
 const HOOK_WORST_CASE_MS = 3 * GIT_TIMEOUT_MS + SOURCE_VALIDATION_BUDGET_MS + PLAN_TIMEOUT_MS + APPLY_TIMEOUT_MS;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const COMMIT_PATTERN = /^[a-f0-9]{40}$/;
 // Core files that must match for a same-version cache to count as current.
 // The full set adds the installed-enforcement identity contract from the
 // setup helper, which is itself in this core set.
@@ -76,6 +77,14 @@ const REPORT_STATUS = {
   'plan-changed': 'deferred',
   'source-moved': 'deferred'
 };
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
 
 function samePath(left, right) {
   if (!left || !right) return false;
@@ -232,14 +241,36 @@ function attemptTarget(installed, identity, sourcePath) {
   };
 }
 
-// A complete target names every identity field; anything older or partial
-// cannot be matched and stays held until explicit setup recovery.
+const TARGET_KEYS = Object.keys(attemptTarget({}, {}, ''));
+
+// A complete target names every identity field with the values and layout
+// attemptTarget() and resolveClaudeNativeIdentity() produce; anything older,
+// partial or inconsistent cannot be matched and stays held until explicit
+// setup recovery.
 function completeTarget(target) {
-  if (!target || typeof target !== 'object' || Array.isArray(target)) return false;
+  if (!isPlainObject(target)) return false;
   if (target.plugin_id !== PLUGIN_ID || target.marketplace !== MARKETPLACE_NAME || !NATIVE_SCOPES.includes(target.scope)) return false;
-  if (target.scope === 'user' ? Boolean(target.project_path) : !target.project_path) return false;
-  return ['config_home', 'plugins_root', 'cache_family', 'source_path', 'install_path']
-    .every((key) => typeof target[key] === 'string' && path.isAbsolute(target[key]));
+  if (typeof target.project_path !== 'string') return false;
+  if (target.scope === 'user' ? Boolean(target.project_path) : !path.isAbsolute(target.project_path)) return false;
+  if (!['config_home', 'plugins_root', 'cache_family', 'source_path', 'install_path']
+    .every((key) => typeof target[key] === 'string' && path.isAbsolute(target[key]))) return false;
+  if (!['env', 'default'].includes(target.config_home_source) || !['env', 'config-home'].includes(target.plugins_root_source)) return false;
+  if (target.plugins_root_source === 'config-home' && !samePath(target.plugins_root, path.join(target.config_home, 'plugins'))) return false;
+  return samePath(target.cache_family, path.join(target.plugins_root, 'cache', MARKETPLACE_NAME, PLUGIN_NAME))
+    && inCacheFamily(target.install_path, target.cache_family, path.basename(path.resolve(target.install_path)));
+}
+
+// Two records name the same target only when every identity field is equal.
+function sameTarget(left, right) {
+  return completeTarget(left) && completeTarget(right) && TARGET_KEYS.every((key) => left[key] === right[key]);
+}
+
+// The pending attempt shape #runStale writes before any mutation (in-flight,
+// then held): the only records a same-target verification may resolve.
+function resolvableAttempt(attempt) {
+  return isPlainObject(attempt) && (attempt.phase === 'in-flight' || attempt.phase === 'held')
+    && nonEmptyString(attempt.attempt_id) && VERSION_PATTERN.test(String(attempt.to_version || ''))
+    && completeTarget(attempt.target);
 }
 
 // The recorded target matches this session's verified namespace and source.
@@ -260,19 +291,21 @@ function sameInstallRecord(target, installed) {
 // Conservative attempt-state admission. Only these exact, fully attested
 // terminal records discharge an attempt; `in-flight`, `held` and every
 // missing, unknown, malformed or unattested state are pending and are never
-// retried automatically. Unknown records are kept byte-for-byte.
+// retried automatically. Unknown records are kept byte-for-byte. Each
+// attestation is the full shape its only producer writes: `completed` by
+// #runStale, `resolved` by #runSameVersion, and `cleared` by the bridge's
+// explicit setup recovery, which keeps any malformed old record verbatim
+// inside a plain-object `previous` (so that payload is not target-checked).
 const TERMINAL_ATTESTATIONS = {
-  completed: (record) => typeof record.attempt_id === 'string' && Boolean(record.attempt_id)
-    && typeof record.completed_at === 'string' && Boolean(record.completed_at)
-    && record.target && typeof record.target === 'object'
-    && ((record.outcome === 'updated' && VERSION_PATTERN.test(String(record.to_version || '')))
-      || record.outcome === 'not-attempted'),
-  resolved: (record) => record.resolved_by === 'same-target-verified'
-    && typeof record.resolved_at === 'string' && Boolean(record.resolved_at)
-    && record.target && typeof record.target === 'object'
-    && record.previous && typeof record.previous === 'object',
-  cleared: (record) => typeof record.cleared_at === 'string' && Boolean(record.cleared_at)
-    && record.previous && typeof record.previous === 'object'
+  completed: (record) => nonEmptyString(record.attempt_id) && nonEmptyString(record.completed_at)
+    && completeTarget(record.target)
+    && (record.outcome === 'updated'
+      ? VERSION_PATTERN.test(String(record.from_version || '')) && VERSION_PATTERN.test(String(record.to_version || ''))
+        && COMMIT_PATTERN.test(String(record.source_commit || '')) && record.scope === record.target.scope
+      : record.outcome === 'not-attempted' && typeof record.reason === 'string'),
+  resolved: (record) => record.resolved_by === 'same-target-verified' && nonEmptyString(record.resolved_at)
+    && resolvableAttempt(record.previous) && sameTarget(record.target, record.previous.target),
+  cleared: (record) => nonEmptyString(record.cleared_at) && isPlainObject(record.previous)
 };
 
 function classifyAttemptRecord(record) {
@@ -392,7 +425,7 @@ class ClaudePluginAutoRefreshOperation {
     if (!top.ok || !samePath(top.stdout.trim(), repoPath)) return { ok: false, reason: 'the configured managed Toolkit path is not the root of a git checkout' };
     const head = this.#git(['rev-parse', 'HEAD']);
     const commit = head.ok ? head.stdout.trim().toLowerCase() : '';
-    if (!/^[a-f0-9]{40}$/.test(commit)) return { ok: false, reason: 'the managed Toolkit checkout commit could not be read' };
+    if (!COMMIT_PATTERN.test(commit)) return { ok: false, reason: 'the managed Toolkit checkout commit could not be read' };
     const status = this.#git(['status', '--porcelain', '--untracked-files=normal']);
     if (!status.ok) return { ok: false, reason: 'the managed Toolkit checkout status could not be read' };
     if (status.stdout.trim()) return { ok: false, reason: 'the managed Toolkit checkout has uncommitted changes' };
@@ -516,7 +549,7 @@ class ClaudePluginAutoRefreshOperation {
       return this.#actionRequired('stale-same-version', `the running plugin reports the source version but ${mismatch} differs from the managed source`, versions);
     }
     if (!attempt) return this.#result('current', versions);
-    if (attempt.phase === 'unreadable' || !completeTarget(attempt.target) || attempt.to_version !== source.version) {
+    if (!resolvableAttempt(attempt) || attempt.to_version !== source.version) {
       return this.#heldResult(attempt, versions);
     }
     const native = this.#nativeIdentity();

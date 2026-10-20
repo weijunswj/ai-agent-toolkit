@@ -322,6 +322,114 @@ test('an already-installed current plugin while this session runs an older cache
   assert.equal(d.calls.node.length, 1);
 });
 
+// The terminal records each real producer writes: completed (updated and
+// not-attempted) by the stale-cache update, resolved by same-target
+// verification, cleared by explicit setup recovery of a malformed record.
+function producedTerminalRecords(t) {
+  const f = fixture(t);
+  const attemptFile = path.join(path.dirname(f.hubPath), refresh.ATTEMPT_FILE);
+  const run = (replies) => {
+    fs.rmSync(attemptFile, { force: true });
+    const d = deps();
+    d.deps.runNode = helperReplies(replies, d.calls, f.hubPath);
+    operation(f, d).run();
+    return readAttempt(f.hubPath);
+  };
+  const updatedRecord = run({ '--auto-refresh-plan': stalePlan(f), '--auto-refresh-apply': updated(f) });
+  const notAttempted = run({ '--auto-refresh-plan': stalePlan(f),
+    '--auto-refresh-apply': { ok: false, mode: 'apply', mutation_attempted: false, status: 'plan-changed', reason: 'state changed' } });
+  const held = run({ '--auto-refresh-plan': stalePlan(f),
+    '--auto-refresh-apply': { ok: false, mutation_attempted: true, status: 'update-failed', reason: 'exited with 1' } });
+
+  const current = fixture(t, { running: '3.0.11', source: '3.0.11', sameBytes: true });
+  const currentTarget = { ...held.target, install_path: path.join(current.family, '3.0.10'), config_home: current.configHome,
+    plugins_root: path.join(current.configHome, 'plugins'), cache_family: current.family, source_path: current.repoPath, project_path: current.project };
+  const currentAttempt = path.join(path.dirname(current.hubPath), refresh.ATTEMPT_FILE);
+  fs.writeFileSync(currentAttempt, JSON.stringify({ ...held, to_version: '3.0.11', target: currentTarget }));
+  const check = deps();
+  check.deps.runNode = helperReplies({ '--auto-refresh-plan': { ok: true, mutation_attempted: false, status: 'current',
+    installed: { version: '3.0.11', scope: 'project', install_path: current.runningRoot, project_path: current.project } } }, check.calls, current.hubPath);
+  assert.equal(operation(current, check).run().refresh_status, 'resolved-current');
+  const resolved = readAttempt(current.hubPath);
+
+  fs.writeFileSync(attemptFile, '[]');
+  assert.equal(bridge.clearClaudeAutoRefreshHold(f.hubPath), true);
+  const cleared = readAttempt(f.hubPath);
+  assert.deepEqual(cleared.previous, { phase: 'unreadable', raw: [] }, 'the malformed old record is retained verbatim');
+  fs.rmSync(attemptFile, { force: true });
+  return { f, attemptFile, updatedRecord, notAttempted, resolved, cleared };
+}
+
+test('F1b: terminal records with malformed nested targets or attestation fields stay held byte-for-byte with zero helper calls', (t) => {
+  const { f, attemptFile, updatedRecord: u, notAttempted: n, resolved: r, cleared: c } = producedTerminalRecords(t);
+  assert.equal(u.phase, 'completed');
+  assert.equal(n.outcome, 'not-attempted');
+  assert.equal(r.phase, 'resolved');
+  const clone = (record) => JSON.parse(JSON.stringify(record));
+  const withTarget = (record, edit) => { const copy = clone(record); copy.target = edit(copy.target); return copy; };
+  const without = (record, key) => { const copy = clone(record); delete copy[key]; return copy; };
+  const elsewhere = path.join(f.root, 'elsewhere');
+  const malformed = [
+    ['completed updated, array target', withTarget(u, () => [])],
+    ['completed updated, empty target', withTarget(u, () => ({}))],
+    ['completed not-attempted, array target', withTarget(n, () => [])],
+    ['completed not-attempted, empty target', withTarget(n, () => ({}))],
+    ['completed, target without install path', withTarget(u, (x) => { delete x.install_path; return x; })],
+    ['completed, target without source path', withTarget(u, (x) => { delete x.source_path; return x; })],
+    ['completed, target of another plugin', withTarget(u, (x) => ({ ...x, plugin_id: 'other@ai-agent-toolkit-local' }))],
+    ['completed, target with an unknown scope', withTarget(u, (x) => ({ ...x, scope: 'global' }))],
+    ['completed, user target naming a project', withTarget(u, (x) => ({ ...x, scope: 'user' }))],
+    ['completed, project target with a relative project', withTarget(u, (x) => ({ ...x, project_path: 'project' }))],
+    ['completed, target with an unknown home source', withTarget(u, (x) => ({ ...x, config_home_source: 'guessed' }))],
+    ['completed, target with an unknown cache-root source', withTarget(u, (x) => ({ ...x, plugins_root_source: 'guessed' }))],
+    ['completed, plugins root outside its config home', withTarget(u, (x) => ({ ...x, plugins_root: path.join(elsewhere, 'plugins') }))],
+    ['completed, cache family outside its plugins root', withTarget(u, (x) => ({ ...x, cache_family: path.join(elsewhere, 'ai-agent-toolkit') }))],
+    ['completed, install path outside its cache family', withTarget(u, (x) => ({ ...x, install_path: path.join(elsewhere, '3.0.10') }))],
+    ['completed, install path not a versioned entry', withTarget(u, (x) => ({ ...x, install_path: path.join(x.cache_family, 'latest') }))],
+    ['completed updated, scope not the target scope', { ...clone(u), scope: 'user' }],
+    ['completed updated, without from version', without(u, 'from_version')],
+    ['completed updated, without source commit', without(u, 'source_commit')],
+    ['completed updated, malformed source commit', { ...clone(u), source_commit: 'HEAD' }],
+    ['completed not-attempted, without reason', without(n, 'reason')],
+    ['completed not-attempted, non-text reason', { ...clone(n), reason: 7 }],
+    ['completed, unknown outcome', { ...clone(u), outcome: 'probably-updated' }],
+    ['resolved, empty target and previous', { ...clone(r), target: {}, previous: {} }],
+    ['resolved, array target', withTarget(r, () => [])],
+    ['resolved, array previous', { ...clone(r), previous: [] }],
+    ['resolved, previous not a pending attempt', { ...clone(r), previous: { ...clone(r.previous), phase: 'completed' } }],
+    ['resolved, previous without attempt id', { ...clone(r), previous: without(r.previous, 'attempt_id') }],
+    ['resolved, previous without target version', { ...clone(r), previous: without(r.previous, 'to_version') }],
+    ['resolved, previous for another target', { ...clone(r), previous: withTarget(r.previous, (x) => ({ ...x, source_path: elsewhere })) }],
+    ['resolved, both targets equally malformed', { ...clone(r), target: {}, previous: { ...clone(r.previous), target: {} } }],
+    ['cleared, array previous', { ...clone(c), previous: [] }],
+    ['cleared, text previous', { ...clone(c), previous: 'held' }],
+    ['cleared, empty timestamp', { ...clone(c), cleared_at: '' }]
+  ];
+  for (const [label, record] of malformed) {
+    assert.equal(refresh.classifyAttemptRecord(record).pending, true, label);
+    const bytes = JSON.stringify(record);
+    fs.writeFileSync(attemptFile, bytes);
+    const d = deps();
+    const result = operation(f, d).run();
+    assert.equal(result.refresh_status, 'held', label);
+    assert.equal(d.calls.node.length, 0, `${label}: no plan or apply`);
+    assert.equal(d.calls.validate, 0, label);
+    assert.equal(fs.readFileSync(attemptFile, 'utf8'), bytes, `${label}: kept byte-for-byte`);
+  }
+
+  // Positive controls: every producer-shaped terminal record discharges.
+  for (const [label, record] of [['completed updated', u], ['completed not-attempted', n], ['resolved', r], ['cleared malformed record', c],
+    ['cleared empty-object record', { ...clone(c), previous: {} }]]) {
+    assert.equal(refresh.classifyAttemptRecord(record).pending, false, label);
+    fs.writeFileSync(attemptFile, JSON.stringify(record));
+    const d = deps();
+    d.deps.runNode = helperReplies({ '--auto-refresh-plan': stalePlan(f),
+      '--auto-refresh-apply': { ok: false, mutation_attempted: true, status: 'update-failed', reason: 'exited with 1' } }, d.calls, f.hubPath);
+    assert.equal(operation(f, d).run().refresh_status, 'update-failed', label);
+    assert.deepEqual(d.calls.node.map((call) => call.mode), ['--auto-refresh-plan', '--auto-refresh-apply'], label);
+  }
+});
+
 function writeHubState(root, state) {
   const hubPath = path.join(root, 'current');
   writeFile(path.join(hubPath, 'state.json'), JSON.stringify({ hub_version: '3.0.10', bridge_versions_by_source: {}, ...state }));
