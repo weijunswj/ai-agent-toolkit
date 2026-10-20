@@ -151,6 +151,9 @@ function verifySessionStartHook(hooksPath) {
   if (/--enable-target|--disable-target|--force-downgrade/.test(joined)) {
     errors.push('SessionStart command must not enable, disable, or force-downgrade targets');
   }
+  if (/--(?:enable|disable)-(?:claude|codex)-plugin-auto-refresh/.test(joined)) {
+    errors.push('SessionStart command must not change plugin auto-refresh preferences');
+  }
   const preToolUse = hooks?.hooks?.PreToolUse;
   const agentGroups = Array.isArray(preToolUse)
     ? preToolUse.filter((group) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(group?.matcher || '')))
@@ -268,6 +271,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
     ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['repo/scripts/toolkit-claude-plugin-auto-refresh.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
     ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
@@ -814,6 +818,180 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   return { ok: errors.length === 0, installed, errors, refusesDowngrade, staleVersion, canUpdateInPlace, sourcePath, sourceIdentity };
 }
 
+// Automatic SessionStart refresh is deliberately narrower than manual setup:
+// it may only run Claude Code's own in-place `plugin update` for exactly one
+// enabled, correctly sourced, older install in its existing scope. Missing,
+// disabled, ambiguous, newer, same-version-drifted, foreign-runtime and
+// foreign-source states are reported for manual action and never trigger
+// uninstall, marketplace add, install, scope change or downgrade.
+const AUTO_REFRESH_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+
+function samePath(left, right) {
+  if (!left || !right) return false;
+  const normalize = (value) => {
+    const resolved = path.resolve(String(value)).replace(/[\\/]+$/, '');
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(left) === normalize(right);
+}
+
+function exactToolkitEntries(pluginList) {
+  const seen = new Set();
+  const entries = [];
+  for (const entry of findPluginEntries(pluginList)) {
+    const id = entry.id || `${entry.name || entry.pluginName || ''}@${entry.marketplace || entry.marketplaceName || ''}`;
+    if (id !== pluginId()) continue;
+    const key = `${path.resolve(String(entry.installPath || ''))}|${entry.scope || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function shadowToolkitEntries(pluginList) {
+  const shadows = [];
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    const id = typeof node.id === 'string' ? node.id : '';
+    if (id.startsWith(`${TOOLKIT_PLUGIN_NAME}@`) && id !== pluginId()) {
+      shadows.push({ id, scope: String(node.scope || ''), version: String(node.version || '') });
+    }
+    for (const value of Object.values(node)) if (value && typeof value === 'object') visit(value);
+  };
+  visit(pluginList);
+  return shadows;
+}
+
+function autoRefreshSourceEvidence(entry, repoRoot, options = {}) {
+  const listed = entry.readFromFolder || entry.projectPath || entry.source?.path || entry.path || '';
+  if (listed) {
+    return samePath(listed, repoRoot)
+      ? { ok: true, identity: 'plugin-list' }
+      : { ok: false, reason: 'the installed plugin is not sourced from the managed Toolkit checkout' };
+  }
+  let registry;
+  try {
+    registry = Object.prototype.hasOwnProperty.call(options, 'registryState')
+      ? options.registryState
+      : readClaudePluginRegistryState({ ...options, repoRoot });
+  } catch {
+    return { ok: false, reason: 'Claude plugin registry state could not be read safely' };
+  }
+  const marketplaces = registry?.knownMarketplaces || {};
+  const marketplace = marketplaces[TOOLKIT_MARKETPLACE_NAME] || marketplaces.marketplaces?.[TOOLKIT_MARKETPLACE_NAME] || null;
+  const sourcePath = marketplace?.source?.path || marketplace?.path || '';
+  if (!samePath(sourcePath, repoRoot)) {
+    return { ok: false, reason: 'the Toolkit marketplace is not registered to the managed Toolkit checkout' };
+  }
+  const pluginRecords = registry?.installedPlugins?.plugins?.[pluginId()] ?? registry?.installedPlugins?.[pluginId()] ?? [];
+  const records = (Array.isArray(pluginRecords) ? pluginRecords : [pluginRecords])
+    .filter((record) => record && samePath(record.installPath, entry.installPath));
+  if (records.length !== 1 || records[0].version !== entry.version) {
+    return { ok: false, reason: 'the Claude installed-plugin registry record is missing, ambiguous or inconsistent' };
+  }
+  return { ok: true, identity: 'claude-plugin-registry' };
+}
+
+// Read-only classification shared by the plan and apply phases.
+function classifyAutoRefreshState(pluginList, options = {}) {
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = options.expectedVersion || readExpectedToolkitVersion(repoRoot);
+  const base = { plugin_id: pluginId(), expected_version: expectedVersion, shadow_entries: shadowToolkitEntries(pluginList) };
+  const entries = exactToolkitEntries(pluginList);
+  if (entries.length === 0) return { ...base, status: 'missing', reason: `${pluginId()} is not installed` };
+  if (entries.length > 1) return { ...base, status: 'ambiguous', reason: `Claude Code reports ${entries.length} ${pluginId()} installs` };
+  const entry = entries[0];
+  const installed = {
+    version: String(entry.version || ''),
+    scope: String(entry.scope || ''),
+    install_path: entry.installPath ? path.resolve(String(entry.installPath)) : ''
+  };
+  const result = { ...base, installed };
+  if (entry.enabled === false) return { ...result, status: 'disabled', reason: `${pluginId()} is installed but disabled` };
+  if (entry.enabled !== true) return { ...result, status: 'ambiguous', reason: 'Claude Code did not report the plugin enabled state' };
+  if (!VALID_SCOPES.includes(installed.scope)) {
+    return { ...result, status: 'ambiguous-scope', reason: `the installed scope is not an automatically refreshable scope: ${installed.scope || '<missing>'}` };
+  }
+  if (!AUTO_REFRESH_VERSION_PATTERN.test(installed.version) || !installed.install_path) {
+    return { ...result, status: 'ambiguous', reason: 'Claude Code did not report an exact installed version and cache path' };
+  }
+  if (options.runningPluginRoot && !samePath(options.runningPluginRoot, installed.install_path)) {
+    return { ...result, status: 'untrusted-runtime', reason: 'the running Toolkit hook is not the installed local-marketplace plugin cache' };
+  }
+  const source = autoRefreshSourceEvidence(entry, repoRoot, options);
+  if (!source.ok) return { ...result, status: 'untrusted-source', reason: source.reason };
+  const order = compareSemver(installed.version, expectedVersion);
+  if (order > 0) {
+    return { ...result, status: 'newer-than-source', reason: `installed ${installed.version} is newer than managed source ${expectedVersion}; downgrade is refused` };
+  }
+  if (order < 0) return { ...result, status: 'stale', source_identity: source.identity, reason: `installed ${installed.version} is older than managed source ${expectedVersion}` };
+  const current = evaluateClaudeToolkitPluginState(pluginList, { ...options, repoRoot, expectedVersion });
+  if (current.ok) return { ...result, status: 'current', source_identity: source.identity, reason: '' };
+  return {
+    ...result,
+    status: 'stale-same-version',
+    reason: 'the installed cache reports the source version but its bytes or identity are not current; Claude Code does not update a same-version install in place'
+  };
+}
+
+function autoRefreshFailure(status, reason, extra = {}) {
+  return { ok: false, mode: extra.mode || '', status, reason, mutation_attempted: false, ...extra };
+}
+
+async function runAutoRefresh(options) {
+  const mode = options.autoRefresh;
+  const repoErrors = validateRepoPluginSource(options.repoRoot);
+  if (repoErrors.length) return autoRefreshFailure('source-invalid', repoErrors.join('; '), { mode });
+  const expectedVersion = readExpectedToolkitVersion(options.repoRoot);
+  const commit = repoCommit(options.repoRoot);
+  if (!/^[a-f0-9]{40}$/.test(options.expectedCommit) || commit !== options.expectedCommit) {
+    return autoRefreshFailure('source-moved', 'the managed Toolkit checkout is not at the verified commit', { mode });
+  }
+  if (mode === 'apply' && (options.expectedToVersion !== expectedVersion || !AUTO_REFRESH_VERSION_PATTERN.test(options.expectedFromVersion))) {
+    return autoRefreshFailure('plan-changed', 'the managed source version no longer matches the verified plan', { mode });
+  }
+  const resolved = resolveClaudeCommand(options.claudeCommand);
+  if (!resolved.command) return autoRefreshFailure('cli-unavailable', 'no usable Claude Code CLI was found', { mode });
+  let plan;
+  try {
+    plan = classifyAutoRefreshState(runClaudeJson(resolved.command, ['plugin', 'list', '--json']), {
+      repoRoot: options.repoRoot, expectedVersion, repoCommit: commit, runningPluginRoot: options.runningPluginRoot
+    });
+  } catch (error) {
+    return autoRefreshFailure('plan-failed', error.message, { mode });
+  }
+  if (mode === 'plan') return { ok: true, mode, mutation_attempted: false, source_commit: commit, ...plan };
+  if (plan.status !== 'stale' || plan.installed.version !== options.expectedFromVersion) {
+    return autoRefreshFailure('plan-changed', `the installed plugin state changed before update: ${plan.status}`, { mode, plan_status: plan.status });
+  }
+  const outcome = await runClaudeMutationAndVerify(
+    resolved.command,
+    ['plugin', 'update', pluginId(), '--scope', plan.installed.scope],
+    { repoRoot: options.repoRoot, expectedVersion, repoCommit: commit }
+  );
+  const base = {
+    mode, mutation_attempted: true, source_commit: commit, plugin_id: pluginId(), scope: plan.installed.scope,
+    from_version: plan.installed.version, to_version: expectedVersion
+  };
+  if (!outcome.ok) {
+    return { ok: false, ...base, status: outcome.childFailed ? 'update-failed' : 'update-unverified', reason: outcome.failure };
+  }
+  if (outcome.state?.installed?.scope && outcome.state.installed.scope !== plan.installed.scope) {
+    return { ok: false, ...base, status: 'update-unverified', reason: 'the verified install changed scope' };
+  }
+  return {
+    ok: true,
+    ...base,
+    status: 'updated',
+    install_path: outcome.state?.installed?.installPath ? path.resolve(outcome.state.installed.installPath) : '',
+    warning: outcome.warning || '',
+    fresh_session_required: true,
+    trust_action: 'Start a fresh Claude Code session to load the updated plugin, and approve any plugin or hook trust prompt Claude Code shows.'
+  };
+}
+
 function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
   return [
     ['plugin', 'marketplace', 'add', repoRoot],
@@ -837,17 +1015,29 @@ function parseArgs(argv = process.argv.slice(2)) {
     claudeCommand: '',
     scope: DEFAULT_SCOPE,
     write: false,
-    json: false
+    json: false,
+    autoRefresh: '',
+    expectedCommit: '',
+    expectedFromVersion: '',
+    expectedToVersion: '',
+    runningPluginRoot: ''
   };
+  let scopeExplicit = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
-    if (arg === '--repo-root') options.repoRoot = next();
+    if (arg === '--auto-refresh-plan') options.autoRefresh = options.autoRefresh ? 'conflict' : 'plan';
+    else if (arg === '--auto-refresh-apply') options.autoRefresh = options.autoRefresh ? 'conflict' : 'apply';
+    else if (arg === '--expected-commit') options.expectedCommit = next().toLowerCase();
+    else if (arg === '--expected-from-version') options.expectedFromVersion = next();
+    else if (arg === '--expected-to-version') options.expectedToVersion = next();
+    else if (arg === '--running-plugin-root') options.runningPluginRoot = next();
+    else if (arg === '--repo-root') options.repoRoot = next();
     else if (arg.startsWith('--repo-root=')) options.repoRoot = arg.slice('--repo-root='.length);
     else if (arg === '--claude-cli') options.claudeCommand = next();
     else if (arg.startsWith('--claude-cli=')) options.claudeCommand = arg.slice('--claude-cli='.length);
-    else if (arg === '--scope') options.scope = next();
-    else if (arg.startsWith('--scope=')) options.scope = arg.slice('--scope='.length);
+    else if (arg === '--scope') { options.scope = next(); scopeExplicit = true; }
+    else if (arg.startsWith('--scope=')) { options.scope = arg.slice('--scope='.length); scopeExplicit = true; }
     else if (arg === '--write') options.write = true;
     else if (arg === '--verify') options.write = false;
     else if (arg === '--json') options.json = true;
@@ -856,6 +1046,17 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (!VALID_SCOPES.includes(options.scope)) {
     throw new Error(`--scope must be one of ${VALID_SCOPES.join(', ')}: ${options.scope}`);
+  }
+  if (options.autoRefresh === 'conflict') throw new Error('Choose only one of --auto-refresh-plan or --auto-refresh-apply');
+  if (options.autoRefresh) {
+    // Automatic refresh always keeps the installed scope and never installs.
+    if (options.write || scopeExplicit) throw new Error('--auto-refresh-plan/--auto-refresh-apply cannot be combined with --write or --scope');
+    if (!options.expectedCommit) throw new Error('--auto-refresh-plan/--auto-refresh-apply require --expected-commit');
+    if (options.autoRefresh === 'apply' && (!options.expectedFromVersion || !options.expectedToVersion)) {
+      throw new Error('--auto-refresh-apply requires --expected-from-version and --expected-to-version');
+    }
+  } else if (options.expectedCommit || options.expectedFromVersion || options.expectedToVersion || options.runningPluginRoot) {
+    throw new Error('--expected-* and --running-plugin-root are only valid with --auto-refresh-plan or --auto-refresh-apply');
   }
   options.repoRoot = path.resolve(options.repoRoot);
   return options;
@@ -871,7 +1072,12 @@ function usage() {
     `  claude plugin install ${pluginId()} --scope ${DEFAULT_SCOPE}`,
     '',
     'The local repo must expose .claude-plugin/marketplace.json and .claude-plugin/plugin.json.',
-    'This script is Claude Code-only; it never installs or updates Codex.'
+    'This script is Claude Code-only; it never installs or updates Codex.',
+    '',
+    'Automatic SessionStart refresh (called by the Toolkit bridge, not by users):',
+    '  --auto-refresh-plan  --expected-commit <sha> [--running-plugin-root <path>]',
+    '  --auto-refresh-apply --expected-commit <sha> --expected-from-version <x.y.z> --expected-to-version <x.y.z> [--running-plugin-root <path>]',
+    'Apply runs only `claude plugin update` in the installed scope; it never uninstalls, installs, changes scope or downgrades.'
   ].join('\n');
 }
 
@@ -887,6 +1093,16 @@ async function main(argv = process.argv.slice(2)) {
   if (options.help) {
     console.log(usage());
     return 0;
+  }
+  if (options.autoRefresh) {
+    let result;
+    try {
+      result = await runAutoRefresh(options);
+    } catch (error) {
+      result = autoRefreshFailure('plan-failed', error.message, { mode: options.autoRefresh });
+    }
+    console.log(JSON.stringify(result));
+    return result.ok ? 0 : 1;
   }
 
   const repoErrors = validateRepoPluginSource(options.repoRoot);
@@ -1032,8 +1248,10 @@ module.exports = {
   TOOLKIT_MARKETPLACE_NAME,
   MARKETPLACE_REL_PATH,
   claudeSpawnParts,
+  classifyAutoRefreshState,
   commandCandidates,
   evaluateClaudeToolkitPluginState,
+  parseArgs,
   mutationDeadlineMs,
   mutationPollMs,
   installedActivationProof,

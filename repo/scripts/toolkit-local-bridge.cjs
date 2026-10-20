@@ -24,9 +24,14 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs');
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
+const {
+  ATTEMPT_FILE: CLAUDE_AUTO_REFRESH_ATTEMPT_FILE,
+  ClaudePluginAutoRefreshOperation,
+  claudeAutoRefreshStdoutLine
+} = require('./toolkit-claude-plugin-auto-refresh.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.0.9';
+const BRIDGE_VERSION = '3.0.10';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 // Antigravity native/plugin installation is not supported by this source.
@@ -139,6 +144,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     disableUpdateReportOpen: false,
     enableCodexPluginAutoRefresh: false,
     disableCodexPluginAutoRefresh: false,
+    enableClaudePluginAutoRefresh: false,
+    disableClaudePluginAutoRefresh: false,
     suppressUpdateReport: false,
     reconcileStaging: '',
     syncSource: 'repo',
@@ -187,6 +194,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--disable-update-report-open') args.disableUpdateReportOpen = true;
     else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
     else if (arg === '--disable-codex-plugin-auto-refresh') args.disableCodexPluginAutoRefresh = true;
+    else if (arg === '--enable-claude-plugin-auto-refresh') args.enableClaudePluginAutoRefresh = true;
+    else if (arg === '--disable-claude-plugin-auto-refresh') args.disableClaudePluginAutoRefresh = true;
     else if (arg === '--suppress-update-report') args.suppressUpdateReport = true;
     else if (arg === '--reconcile-staging') args.reconcileStaging = next();
     else if (arg.startsWith('--reconcile-staging=')) args.reconcileStaging = arg.slice('--reconcile-staging='.length);
@@ -267,6 +276,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
     throw new Error('--enable-codex-plugin-auto-refresh and --disable-codex-plugin-auto-refresh cannot be used together');
+  }
+  if (args.enableClaudePluginAutoRefresh && args.disableClaudePluginAutoRefresh) {
+    throw new Error('--enable-claude-plugin-auto-refresh and --disable-claude-plugin-auto-refresh cannot be used together');
+  }
+  if (args.hook && (args.enableClaudePluginAutoRefresh || args.disableClaudePluginAutoRefresh)) {
+    throw new Error('Claude plugin auto-refresh preference can only be changed by setup, not by a hook');
   }
   if (args.reconcileStaging && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.reconcileStaging)) {
     throw new Error('--reconcile-staging requires one exact generation ID from a prior audit');
@@ -349,6 +364,10 @@ function printHelp() {
     '  --enable-codex-plugin-auto-refresh',
     '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
+    '  --enable-claude-plugin-auto-refresh',
+    '                                persist opt-in Claude Code Toolkit cache refresh by native in-place plugin update;',
+    '                                also clears a held unverified refresh attempt',
+    '  --disable-claude-plugin-auto-refresh',
     '  --audit',
     '  --reconcile-staging <generation-id>',
     '                                audit one new-format owned generation; add --write for exact cleanup',
@@ -833,6 +852,7 @@ function defaultState() {
     update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     last_update_report_cleanup: null,
     codex_plugin_auto_refresh_enabled: false,
+    claude_plugin_auto_refresh_enabled: false,
     created_at: '',
     updated_at: '',
     last_sync_source: '',
@@ -879,6 +899,7 @@ function normalizedState(raw) {
     ? state.last_update_report_cleanup
     : null;
   state.codex_plugin_auto_refresh_enabled = state.codex_plugin_auto_refresh_enabled === true;
+  state.claude_plugin_auto_refresh_enabled = state.claude_plugin_auto_refresh_enabled === true;
   return state;
 }
 
@@ -905,6 +926,8 @@ function applyRequestedState(state, args) {
   if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
   if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
+  if (args.enableClaudePluginAutoRefresh) next.claude_plugin_auto_refresh_enabled = true;
+  if (args.disableClaudePluginAutoRefresh) next.claude_plugin_auto_refresh_enabled = false;
   for (const target of args.enableTargets) {
     next.targets[target].enabled = true;
     next.targets[target].explicitly_disabled = false;
@@ -1786,7 +1809,7 @@ function classifyUpdateReport(context) {
   const actionable = repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
-    || ['stale', 'refresh-failed'].includes(cacheStatus)
+    || ['stale', 'refresh-failed', 'action-required'].includes(cacheStatus)
     || ['repair-failed', 'partial-failed'].includes(repairStatus)
     || ['failed', 'not confirmed'].includes(targetStatus)
     || Boolean(context.warning);
@@ -1854,6 +1877,12 @@ function warningSuggestion(warning) {
 }
 
 function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, state }) {
+  if (nativePluginCache.host === 'claude-code' && nativePluginCache.status === 'action-required') {
+    return nativePluginCache.manual_action || 'run `setup toolkit --host claude-code`';
+  }
+  if (nativePluginCache.host === 'claude-code' && nativePluginCache.fresh_session_required) {
+    return 'start a fresh Claude Code session to load the refreshed Toolkit plugin';
+  }
   if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       return 'Codex auto-refresh is enabled and will retry on the next hook run';
@@ -1968,7 +1997,10 @@ function buildUpdateReport({ args, state, checksum, context }) {
   if (!targetSyncs.length && !skippedTargets.length && repo.status) {
     lines.push('- No enabled target sync was completed.');
   }
-  if (nativePluginCache.status === 'refreshed') {
+  if (nativePluginCache.host === 'claude-code' && nativePluginCache.refresh_status) {
+    const line = claudeAutoRefreshStdoutLine(nativePluginCache);
+    if (line) lines.push(`- ${line.replace(/^Toolkit Claude plugin auto-refresh: /, 'Claude Code native plugin cache auto-refresh: ')}`);
+  } else if (nativePluginCache.status === 'refreshed') {
     lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
@@ -3215,6 +3247,8 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       errors: []
     },
     codex_plugin_auto_refresh_enabled: state.codex_plugin_auto_refresh_enabled,
+    claude_plugin_auto_refresh_enabled: state.claude_plugin_auto_refresh_enabled,
+    claude_plugin_auto_refresh_last_attempt: claudeAutoRefreshAttemptSummary(hubPath),
     last_update_report_path: state.last_update_report_path,
     repo_auto_update: {
       enabled: state.repo_auto_update_enabled,
@@ -3334,10 +3368,102 @@ function claudeNativePluginCacheStatus(args, state) {
   };
 }
 
-function nativePluginCacheStatus(args, state) {
+function nativePluginCacheStatus(args, state, claudeRefresh = null) {
   if (args.syncSource === 'codex-plugin') return codexNativePluginCacheStatus(args, state);
-  if (args.syncSource === 'claude-plugin') return claudeNativePluginCacheStatus(args, state);
+  if (args.syncSource === 'claude-plugin') return claudeRefresh || claudeNativePluginCacheStatus(args, state);
   return { status: '' };
+}
+
+function claudeAutoRefreshAttemptPath(hubPath) {
+  return path.join(path.dirname(hubPath), CLAUDE_AUTO_REFRESH_ATTEMPT_FILE);
+}
+
+function claudeAutoRefreshAttemptSummary(hubPath) {
+  try {
+    const record = JSON.parse(fs.readFileSync(claudeAutoRefreshAttemptPath(hubPath), 'utf8'));
+    return {
+      phase: String(record.phase || ''),
+      outcome: String(record.outcome || ''),
+      attempt_id: String(record.attempt_id || ''),
+      from_version: String(record.from_version || ''),
+      to_version: String(record.to_version || '')
+    };
+  } catch (error) {
+    return error && error.code === 'ENOENT' ? null : { phase: 'unreadable' };
+  }
+}
+
+// An explicit setup opt-in is the owner's acknowledgement that a held,
+// unverified attempt was reviewed. The previous record is retained inside the
+// replacement so its evidence is not lost.
+function clearClaudeAutoRefreshHold(hubPath) {
+  const attemptPath = claudeAutoRefreshAttemptPath(hubPath);
+  let previous = null;
+  try {
+    previous = JSON.parse(fs.readFileSync(attemptPath, 'utf8'));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    previous = { phase: 'unreadable' };
+  }
+  if (!previous || !['in-flight', 'held', 'unreadable'].includes(previous.phase)) return false;
+  const temporary = `${attemptPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify({ schema: 1, phase: 'cleared', cleared_at: timestamp(), previous }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  fs.renameSync(temporary, attemptPath);
+  return true;
+}
+
+// Claude-only: runs from the Claude SessionStart hook after setup opt-in.
+// Codex, OpenCode, repo and manual runs never reach this path.
+function maybeRunClaudePluginAutoRefresh(args, state, hubPath, testHooks = {}) {
+  if (!args.hook || !args.write || args.syncSource !== 'claude-plugin') return null;
+  if (!state.claude_plugin_auto_refresh_enabled) return null;
+  const deps = {
+    acquireLock: (lockRoot) => acquireLock(lockRoot, args),
+    releaseLock,
+    git: (repoPath, gitArgs) => gitCommand(repoPath, gitArgs),
+    validateRepo: (repoPath) => runRepoValidation(repoPath, { hookMode: true }),
+    runNode: (scriptPath, nodeArgs, options) => {
+      const result = spawnSync(process.execPath, [scriptPath, ...nodeArgs], {
+        cwd: options.cwd,
+        encoding: 'utf8',
+        timeout: options.timeout,
+        windowsHide: true,
+        env: options.env
+      });
+      return {
+        ok: result.status === 0,
+        status: result.status,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        error: result.error ? result.error.message : '',
+        timedOut: Boolean(result.error && result.error.code === 'ETIMEDOUT') || result.signal === 'SIGTERM'
+      };
+    },
+    now: timestamp,
+    ...(testHooks.claudeAutoRefreshDeps || {})
+  };
+  const operation = new ClaudePluginAutoRefreshOperation({
+    lockRoot: path.dirname(hubPath),
+    repoPath: state.repo_path,
+    runningPluginRoot: runtimeClaudePluginRoot(),
+    executingRoot: testHooks.claudeAutoRefreshExecutingRoot || path.resolve(__dirname, '..', '..'),
+    deps
+  });
+  let result;
+  try {
+    result = operation.run();
+  } catch (error) {
+    result = {
+      host: 'claude-code',
+      status: 'action-required',
+      refresh_status: 'refresh-error',
+      errors: [`Claude plugin auto-refresh stopped: ${sanitizeOutputMessage(error.message)}`],
+      manual_action: 'run `setup toolkit --host claude-code`, then start a fresh Claude Code session'
+    };
+  }
+  const line = claudeAutoRefreshStdoutLine(result);
+  if (line) console.log(sanitizeOutputMessage(line));
+  return result;
 }
 
 function isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot) {
@@ -3642,7 +3768,7 @@ function nativePluginCacheStatusForReport(args, state, options = {}) {
       validateRepo: options.validateRepo === true
     });
   }
-  return nativePluginCacheStatus(args, state);
+  return nativePluginCacheStatus(args, state, options.claudeRefresh || null);
 }
 
 function runDelegatedRepoSync({ args, hubPath, repoPath }) {
@@ -3678,13 +3804,13 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 // update report. Each phase records failures in hub state and its own report; hook
 // runs degrade to a warning instead of failing the host.
 class RepositoryAutoUpdateOperation {
-  #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks;
+  #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks; #claudeRefresh;
   #statusState = null; #snapshot = null; #updateResult = null; #plannedTargetSyncs = [];
   #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = '';
 
-  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
+  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {}, claudeRefresh = null }) {
     this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#discoveries = discoveries;
-    this.#checksum = checksum; this.#payloads = payloads; this.#testHooks = testHooks;
+    this.#checksum = checksum; this.#payloads = payloads; this.#testHooks = testHooks; this.#claudeRefresh = claudeRefresh;
   }
 
   #hubState(fallback) { return normalizedState(readJsonIfExists(path.join(this.#hubPath, 'state.json')) || fallback); }
@@ -3748,7 +3874,7 @@ class RepositoryAutoUpdateOperation {
           error: details.error || error.message
         },
         skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatus(args, statusState),
+        nativePluginCache: nativePluginCacheStatus(args, statusState, this.#claudeRefresh),
         targetSyncStatus: 'skipped'
       } });
     statusState = report.state;
@@ -3779,7 +3905,7 @@ class RepositoryAutoUpdateOperation {
   // Phase 3: delegate target sync to the updated checkout; record a failure if it breaks.
   #delegateSync() {
     const args = this.#args, hubPath = this.#hubPath, updateResult = this.#updateResult;
-    this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath });
+    this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath, claudeRefresh: this.#claudeRefresh });
     this.#thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, this.#statusState);
     try {
       runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
@@ -3885,7 +4011,7 @@ class RepositoryAutoUpdateOperation {
     return this.#finalReport();
   }
 }
-function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,discoveries,checksum,payloads,testHooks}).run();}
+function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {}, claudeRefresh = null }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,discoveries,checksum,payloads,testHooks,claudeRefresh}).run();}
 
 function persistActiveNoTargetWrite({
   args,
@@ -3945,7 +4071,7 @@ function persistActiveNoTargetWrite({
 // One bridge invocation: isolated project commands, hook no-ops, audit, the
 // repository auto-update path, active no-target bookkeeping and the locked target sync.
 class LocalBridgeRun {
-  #argv; #testHooks; #args = null; #hubPath = null;
+  #argv; #testHooks; #args = null; #hubPath = null; #claudeRefresh = null;
   constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
   // Project-local install/copy commands that never touch hub state.
@@ -3969,7 +4095,7 @@ class LocalBridgeRun {
       repo: repoReportContextFromState(state, args),
       targetSyncs,
       skippedTargets: snapshot.skippedTargets,
-      nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
+      nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true, claudeRefresh: this.#claudeRefresh }),
       thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
       targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
     };
@@ -4031,6 +4157,9 @@ class LocalBridgeRun {
       state = snapshot.state;
       const { discoveries, payloads, checksum } = snapshot;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
+      if (args.enableClaudePluginAutoRefresh && clearClaudeAutoRefreshHold(hubPath) && !args.hook) {
+        console.log('Toolkit local bridge: cleared the held Claude plugin auto-refresh attempt; the next Claude SessionStart re-checks plugin state.');
+      }
       const targetSyncs = [];
       for (const plan of snapshot.plannedTargetSyncs) {
         const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
@@ -4069,6 +4198,7 @@ class LocalBridgeRun {
     }
     maybePrintAgentRulesPreflight(args, existingState);
     assertSourceDowngradeAllowed(existingState, args);
+    this.#claudeRefresh = maybeRunClaudePluginAutoRefresh(args, existingState, hubPath, this.#testHooks);
     if (isHookNoop(args, existingState)) {
       if (existingState?.hub_version && !existingState.auto_sync_enabled) {
         console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
@@ -4090,7 +4220,7 @@ class LocalBridgeRun {
     if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
     if (!args.write) return { status: 0, audit };
     if (shouldRunRepoAutoUpdate(args, state)) {
-      return runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks: this.#testHooks });
+      return runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks: this.#testHooks, claudeRefresh: this.#claudeRefresh });
     }
     const hasTargetSync = SUPPORTED_TARGETS.some(target => targetWouldSync(target, state, checksum, discoveries[target], payloads));
     const plainSync = args.syncEnabled && !args.enableTargets.length && !args.disableTargets.length && !args.enableAutoSync
@@ -4147,5 +4277,7 @@ module.exports = {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
-  repairThirdPartyCodexPluginHooks
+  repairThirdPartyCodexPluginHooks,
+  clearClaudeAutoRefreshHold,
+  maybeRunClaudePluginAutoRefresh
 };

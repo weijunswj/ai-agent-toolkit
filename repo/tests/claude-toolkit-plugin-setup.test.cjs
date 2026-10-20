@@ -46,7 +46,9 @@ function writeFakeClaude(stateDir, options = {}) {
   writeJson(path.join(stateDir, 'state.json'), {
     repoRoot: options.initialRepoRoot || (options.initialInstalled ? repoRoot : ''),
     installed: Boolean(options.initialInstalled),
-    scope: options.initialInstalled ? 'user' : '',
+    scope: options.initialInstalled ? (options.initialScope || 'user') : '',
+    enabled: options.initialEnabled !== false,
+    updateArgs: [],
     version: initialVersion,
     failListRemaining: options.failListTimes || 0,
     marketplaceAddCount: 0,
@@ -136,6 +138,7 @@ if (args[0] === 'plugin' && args[1] === 'update') {
   }
   const state = readState();
   state.updateCount += 1;
+  state.updateArgs.push(args.slice(2));
   if (${JSON.stringify(updateSilentNoop)}) {
     writeState(state);
     process.exit(0);
@@ -183,7 +186,7 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       name: ${JSON.stringify(setup.TOOLKIT_PLUGIN_NAME)},
       marketplace: ${JSON.stringify(setup.TOOLKIT_MARKETPLACE_NAME)},
       version: state.version,
-      enabled: true,
+      enabled: state.enabled !== false,
       scope: state.scope || 'user',
       source: { path: state.repoRoot },
       installPath: state.repoRoot,
@@ -1007,4 +1010,124 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
   const state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /not a regular file.*toolkit-local-bridge/i);
+});
+
+
+// Automatic SessionStart refresh: only Claude Code's in-place `plugin update`
+// in the installed scope; everything else fails closed with no mutation.
+function sourceCommit() {
+  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true });
+  return result.stdout.trim().toLowerCase();
+}
+
+function autoRefresh(mode, fake, extra = []) {
+  const result = runSetup(mode, fake, ['--expected-commit', sourceCommit(), ...extra]);
+  const lines = String(result.stdout || '').trim().split(/\r?\n/);
+  return { result, report: JSON.parse(lines[lines.length - 1] || '{}') };
+}
+
+function applyArgs(fromVersion) {
+  return ['--expected-from-version', fromVersion, '--expected-to-version', expectedVersion(), '--running-plugin-root', repoRoot];
+}
+
+function assertNoDestructiveFallback(stateDir) {
+  const fake = readFakeClaudeState(stateDir);
+  assert.equal(fake.uninstallCount, 0, 'never uninstalls');
+  assert.equal(fake.installCount, 0, 'never installs');
+  assert.equal(fake.marketplaceAddCount, 0, 'never re-registers the marketplace');
+  return fake;
+}
+
+test('auto-refresh plan classifies an older install as stale without any mutation', () => {
+  const dir = tmpRoot();
+  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', initialScope: 'project' });
+  const { result, report } = autoRefresh('--auto-refresh-plan', fake, ['--running-plugin-root', repoRoot]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(report.status, 'stale');
+  assert.equal(report.mutation_attempted, false);
+  assert.deepEqual(report.installed.scope, 'project');
+  assert.equal(readFakeClaudeState(dir).updateCount, 0);
+  assertNoDestructiveFallback(dir);
+});
+
+test('auto-refresh apply runs only plugin update in the installed scope and reports a fresh session', () => {
+  const dir = tmpRoot();
+  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', initialScope: 'project' });
+  const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.9'));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(report.status, 'updated');
+  assert.equal(report.scope, 'project');
+  assert.equal(report.fresh_session_required, true);
+  assert.match(report.trust_action, /fresh Claude Code session/);
+  const state = assertNoDestructiveFallback(dir);
+  assert.deepEqual(state.updateArgs, [[setup.pluginId(), '--scope', 'project']], 'plugin update <id> --scope <installed scope> only');
+  assert.equal(state.scope, 'project', 'scope is never changed');
+});
+
+test('auto-refresh apply never falls back to uninstall or reinstall when the native update fails or does not land', () => {
+  for (const [options, status] of [[{ failUpdate: true }, 'update-failed'], [{ updateSilentNoop: true }, 'update-unverified']]) {
+    const dir = tmpRoot();
+    const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9', ...options });
+    const { result, report } = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.9'));
+    assert.equal(result.status, 1);
+    assert.equal(report.status, status);
+    assert.equal(report.mutation_attempted, true);
+    assertNoDestructiveFallback(dir);
+  }
+});
+
+test('auto-refresh refuses downgrade, missing, disabled, foreign-runtime and foreign-source installs without mutation', () => {
+  const cases = [
+    [{ initialInstalled: true, installedVersion: '9.9.9' }, [], 'newer-than-source'],
+    [{}, [], 'missing'],
+    [{ initialInstalled: true, installedVersion: '3.0.9', initialEnabled: false }, [], 'disabled'],
+    [{ initialInstalled: true, installedVersion: '3.0.9' }, ['--running-plugin-root', path.join(repoRoot, 'not-the-cache')], 'untrusted-runtime'],
+    [{ initialInstalled: true, installedVersion: '3.0.9', initialRepoRoot: path.join(repoRoot, '..', 'another-toolkit-copy') }, [], 'untrusted-source']
+  ];
+  for (const [options, extra, status] of cases) {
+    const dir = tmpRoot();
+    const fake = writeFakeClaude(dir, options);
+    const { report } = autoRefresh('--auto-refresh-plan', fake, extra);
+    assert.equal(report.status, status, status);
+    const applied = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', expectedVersion(), ...extra]);
+    assert.equal(applied.report.mutation_attempted, false, status);
+    assert.equal(readFakeClaudeState(dir).updateCount, 0, status);
+    assertNoDestructiveFallback(dir);
+  }
+});
+
+test('auto-refresh apply refuses a moved source commit or a changed plan before mutation', () => {
+  const dir = tmpRoot();
+  const fake = writeFakeClaude(dir, { initialInstalled: true, installedVersion: '3.0.9' });
+  const moved = runSetup('--auto-refresh-apply', fake, ['--expected-commit', 'b'.repeat(40), ...applyArgs('3.0.9')]);
+  assert.equal(JSON.parse(moved.stdout.trim()).status, 'source-moved');
+  const changed = autoRefresh('--auto-refresh-apply', fake, applyArgs('3.0.8'));
+  assert.equal(changed.report.status, 'plan-changed');
+  const wrongTarget = autoRefresh('--auto-refresh-apply', fake, ['--expected-from-version', '3.0.9', '--expected-to-version', '0.0.1']);
+  assert.equal(wrongTarget.report.status, 'plan-changed');
+  assert.equal(readFakeClaudeState(dir).updateCount, 0);
+});
+
+test('auto-refresh modes reject install, scope and unbound arguments', () => {
+  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', '--write', '--expected-commit', 'a']), /cannot be combined/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--scope', 'user', '--expected-commit', 'a']), /cannot be combined/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan']), /require --expected-commit/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-apply', '--expected-commit', 'a']), /requires --expected-from-version/);
+  assert.throws(() => setup.parseArgs(['--auto-refresh-plan', '--auto-refresh-apply', '--expected-commit', 'a']), /only one/);
+  assert.throws(() => setup.parseArgs(['--verify', '--expected-commit', 'a']), /only valid with/);
+});
+
+test('auto-refresh classification fails closed on ambiguous, managed-scope and same-version drift and reports shadows', () => {
+  const entry = (overrides = {}) => ({ id: setup.pluginId(), version: '3.0.9', scope: 'user', enabled: true, installPath: path.join(repoRoot, 'cache-a'), readFromFolder: repoRoot, ...overrides });
+  const classify = (plugins) => setup.classifyAutoRefreshState(plugins, { repoRoot, expectedVersion: expectedVersion(), registryState: null });
+  assert.equal(classify([entry(), entry({ installPath: path.join(repoRoot, 'cache-b'), scope: 'project' })]).status, 'ambiguous');
+  assert.equal(classify([entry({ scope: 'managed' })]).status, 'ambiguous-scope');
+  assert.equal(classify([entry({ enabled: undefined })]).status, 'ambiguous');
+  assert.equal(classify([entry({ version: 'unknown' })]).status, 'ambiguous');
+  assert.equal(classify([entry({ readFromFolder: path.join(repoRoot, '..', 'other') })]).status, 'untrusted-source');
+  const drift = classify([entry({ version: expectedVersion(), installPath: path.join(repoRoot, 'missing-cache') })]);
+  assert.equal(drift.status, 'stale-same-version');
+  const shadowed = classify([entry(), { id: 'ai-agent-toolkit@synced', scope: 'synced', version: 'unknown', enabled: true, installPath: '' }]);
+  assert.equal(shadowed.status, 'stale');
+  assert.deepEqual(shadowed.shadow_entries, [{ id: 'ai-agent-toolkit@synced', scope: 'synced', version: 'unknown' }]);
 });

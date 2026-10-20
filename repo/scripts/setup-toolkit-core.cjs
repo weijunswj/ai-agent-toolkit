@@ -113,6 +113,7 @@ function emptySetupChoices() {
     updateReports: '',
     updateReportRetention: '',
     codexPluginAutoRefresh: '',
+    claudePluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
     claudePluginBehavior: '',
@@ -148,6 +149,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
     codexPluginAutoRefresh: true,
+    claudePluginAutoRefresh: false,
     enableTargets: [],
     disableTargets: [],
     skipTargets: [],
@@ -274,6 +276,13 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.codexPluginAutoRefresh = false;
       args.setupChoices.codexPluginAutoRefresh = 'disable';
     } else if (arg === '--keep-codex-plugin-auto-refresh') args.setupChoices.codexPluginAutoRefresh = 'keep';
+    else if (arg === '--enable-claude-plugin-auto-refresh') {
+      args.claudePluginAutoRefresh = true;
+      args.setupChoices.claudePluginAutoRefresh = 'enable';
+    } else if (arg === '--skip-claude-plugin-auto-refresh' || arg === '--disable-claude-plugin-auto-refresh') {
+      args.claudePluginAutoRefresh = false;
+      args.setupChoices.claudePluginAutoRefresh = 'disable';
+    } else if (arg === '--keep-claude-plugin-auto-refresh') args.setupChoices.claudePluginAutoRefresh = 'keep';
     else if (arg === '--claude-topology' || arg.startsWith('--claude-topology=')) {
       const choice = (arg === '--claude-topology' ? next() : arg.slice('--claude-topology='.length)).toLowerCase();
       if (!['root-only', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
@@ -361,7 +370,7 @@ function preferenceSummary(options) {
     repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
-      : 'manual-verification-only',
+      : (choices.claudePluginAutoRefresh || 'question-required'),
     helper_capacity_backstop: options.host === 'codex'
       ? (choices.codexHelperCapacity || 'question-required')
       : 'root-only',
@@ -510,6 +519,14 @@ function setupPlan(options = {}) {
                 '--write',
                 ...hubArgs
               ])]
+            : []),
+          ...(host === 'claude-code'
+            && ['enable', 'disable'].includes(choices.claudePluginAutoRefresh)
+            ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', [
+                options.claudePluginAutoRefresh === true ? '--enable-claude-plugin-auto-refresh' : '--disable-claude-plugin-auto-refresh',
+                '--write',
+                ...hubArgs
+              ])]
             : [])
         ]
       },
@@ -608,6 +625,12 @@ function printHelp() {
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
+    '  --enable-claude-plugin-auto-refresh',
+    '                               opt in: let the Claude SessionStart hook run Claude Code\'s own in-place plugin update when the cache is older than the verified managed source',
+    '  --skip-claude-plugin-auto-refresh',
+    '                               keep Claude Code plugin refresh manual (default)',
+    '  --keep-claude-plugin-auto-refresh',
+    '                               preserve the Claude plugin auto-refresh preference',
     '  --claude-topology root-only|broader-native|keep',
     '                               Claude-only topology; root-only blocks native Agent/Task at the installed hook',
     '  --claude-plugin-behavior keep|instructions|install',
@@ -1439,6 +1462,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
+  if (key === 'claudePluginAutoRefresh') return 'keep';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
@@ -1919,6 +1943,28 @@ function setupQuestionSpecs(args, current) {
       current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
       afterApplying: 'If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.',
     }));
+    specs.push(resolvedQuestion({
+      id: 'claude-toolkit-maintenance',
+      key: 'claudePluginAutoRefresh',
+      section: 'Other coding apps',
+      title: 'Claude Code automatic Toolkit refresh',
+      prompt: 'Claude Code automatic refresh choice',
+      whatThisControls: 'Whether the Claude Code startup hook may run Claude Code\'s own in-place plugin update when the installed Toolkit plugin is older than the verified, clean managed source. It never installs, uninstalls, re-scopes or downgrades the plugin, never retries an update whose outcome is unknown, and never changes Codex.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Opt in to automatic in-place refresh. Startup checks still fail closed and report the manual action when a refresh cannot be proven safe.'),
+        wizardChoice('disable', 'Turn off', 'Keep Claude Code plugin refresh manual through `setup toolkit`; the installed plugin is not changed or uninstalled.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.claude_plugin_auto_refresh_enabled, 'Automatic Claude Code Toolkit refresh is on.', 'Automatic Claude Code Toolkit refresh is off; refresh stays manual.', 'The automatic Claude Code refresh preference could not be verified; setup treats it as off.')}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('claudePluginAutoRefresh', current, args),
+        outcome: 'Keep the current setting; automatic refresh stays off unless you explicitly turn it on.',
+        reason: 'Automatic refresh changes the installed plugin during Claude Code startup, so it is an explicit opt-in rather than a default.',
+      },
+      selected: args.setupChoices.claudePluginAutoRefresh,
+      current: currentBooleanOutcome(current.audit?.claude_plugin_auto_refresh_enabled, 'Automatic Claude Code Toolkit refresh is on.', 'Automatic Claude Code Toolkit refresh is off; refresh stays manual.', 'The automatic Claude Code refresh preference could not be verified; setup treats it as off.'),
+      currentVerification: typeof current.audit?.claude_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
+      afterApplying: 'Turning this on stores the preference and clears any held unverified refresh record. A later refresh takes effect only in a fresh Claude Code session; approve any trust prompt Claude Code shows. Turning it off changes only future startup behavior.',
+    }));
   }
 
   if (current.audit?.targets?.opencode?.detected || current.audit?.targets?.opencode?.enabled) {
@@ -2280,8 +2326,8 @@ function renderSetupQuestionBank(specs, options = {}) {
   ].join('\n');
 }
 
-function setupQuestionDocumentationSpecs() {
-  const args = parseArgs(['--plan', '--host', 'codex']);
+function setupQuestionDocumentationSpecs(host = 'codex') {
+  const args = parseArgs(['--plan', '--host', host]);
   const managedPath = defaultManagedSourcePath();
   const current = {
     managed: {
@@ -2299,6 +2345,7 @@ function setupQuestionDocumentationSpecs() {
       update_report_enabled: true,
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
       codex_plugin_auto_refresh_enabled: true,
+      claude_plugin_auto_refresh_enabled: false,
       targets: {
         opencode: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
         ag2: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
@@ -2306,24 +2353,36 @@ function setupQuestionDocumentationSpecs() {
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
+    agentProfile: { supported: true, topology: agentControl.TOPOLOGIES.ROOT_ONLY },
     nativePlugin: { status: 'fresh' },
   };
   return plannedQuestionBank(args, current).specs;
 }
 
-function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpecs()) {
+function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpecs(), claudeSpecs = setupQuestionDocumentationSpecs('claude-code')) {
   specs = ensurePresentationMetadata(specs);
+  claudeSpecs = ensurePresentationMetadata(claudeSpecs);
   return [
     '<!-- Generated by repo/scripts/generate-setup-question-docs.cjs from setup-toolkit-core.cjs. Do not edit directly. -->',
     '# Toolkit setup question reference',
     '',
-    'This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
+    'This reference uses privacy-safe representative Codex and Claude Code states in which all current ordinary questions for each host are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
+    '',
+    '# Codex setup',
     '',
     ...renderQuestionBankHeader(specs, false),
     '',
     renderQuestionRows(specs),
     '',
     ...renderAnswerGuide(specs, true),
+    '',
+    '# Claude Code setup',
+    '',
+    ...renderQuestionBankHeader(claudeSpecs, false),
+    '',
+    renderQuestionRows(claudeSpecs),
+    '',
+    ...renderAnswerGuide(claudeSpecs, true),
     '',
   ].join('\n');
 }
@@ -2375,6 +2434,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
+  else if (key === 'claudePluginAutoRefresh') args.setupChoices.claudePluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
@@ -2387,6 +2447,7 @@ function choiceForKey(args, key) {
   if (key === 'updateReports') return args.setupChoices.updateReports;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
+  if (key === 'claudePluginAutoRefresh') return args.setupChoices.claudePluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
@@ -2673,6 +2734,7 @@ function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
   if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
+  if (spec.key === 'claudePluginAutoRefresh') return args.claudePluginAutoRefresh ? 'enable' : 'disable';
   return value;
 }
 
@@ -2917,6 +2979,9 @@ function applySetupChoices(args, current) {
   if (args.host === 'codex') {
     if (choices.codexPluginAutoRefresh === 'keep') args.codexPluginAutoRefresh = current.audit?.codex_plugin_auto_refresh_enabled === true;
     else args.codexPluginAutoRefresh = choices.codexPluginAutoRefresh === 'enable';
+  } else {
+    if (choices.claudePluginAutoRefresh === 'keep') args.claudePluginAutoRefresh = current.audit?.claude_plugin_auto_refresh_enabled === true;
+    else args.claudePluginAutoRefresh = choices.claudePluginAutoRefresh === 'enable';
   }
 
   args.enableTargets = [];
@@ -3419,6 +3484,14 @@ function writeBridgePreferences(args) {
       [args.codexPluginAutoRefresh ? '--enable-codex-plugin-auto-refresh' : '--disable-codex-plugin-auto-refresh', '--write']
     );
   }
+
+  if (args.host === 'claude-code' && ['enable', 'disable'].includes(choices.claudePluginAutoRefresh)) {
+    runBridgeWrite(
+      args,
+      'node repo/scripts/toolkit-local-bridge.cjs Claude cache preference --write',
+      [args.claudePluginAutoRefresh ? '--enable-claude-plugin-auto-refresh' : '--disable-claude-plugin-auto-refresh', '--write']
+    );
+  }
 }
 
 function runApprovedTargetSync(args) {
@@ -3663,6 +3736,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
     if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
     console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Claude plugin automatic refresh at startup: ${args.claudePluginAutoRefresh ? 'on (in-place native update only; fails closed and never retries an unknown outcome)' : 'off (manual refresh through setup toolkit)'}`);
     console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
   } else {

@@ -67,6 +67,7 @@ The hub contains:
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path`, `update_report_enabled`, failure-only opening behavior, `update_report_retention_days`, max retained report count, and last cleanup status. Legacy `update_report_open_enabled=true` is retained only as migration evidence and is normalized to failure-only behavior.
+- Claude Code plugin cache auto-refresh preference: `claude_plugin_auto_refresh_enabled`, off by default; see [Claude Code Plugin Cache Auto-Refresh](#claude-code-plugin-cache-auto-refresh). Its attempt record `claude-plugin-auto-refresh.json` lives beside the lock file, outside the atomically replaced hub directory.
 - Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`. On Codex/Windows, this same opt-in also allows trusted Toolkit startup hooks to reconcile the exactly recognised installed `n8n-skills@n8n-io` hook cache after supported plugin updates.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
@@ -200,6 +201,8 @@ Supported flags:
 - `--enable-update-report-open` and `--disable-update-report-open` remain compatibility flags; both retain failure-only opening and never restore success-report auto-opening.
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.
+- `--enable-claude-plugin-auto-refresh` (setup only; rejected with `--hook`; also clears a held refresh attempt).
+- `--disable-claude-plugin-auto-refresh` (setup only).
 - `--force-downgrade`.
 - `--sync-source repo|codex-plugin|claude-plugin`.
 
@@ -207,7 +210,7 @@ The updater must not:
 
 - Install npm, pip, Python, Antigravity 2, OpenCode, Codex, or Claude Code.
 - Manage Codex plugin installation or update.
-- Manage Claude Code plugin installation or update.
+- Manage Claude Code plugin installation, or update it other than through the opt-in Claude-only in-place `claude plugin update` described in [Claude Code Plugin Cache Auto-Refresh](#claude-code-plugin-cache-auto-refresh).
 - Mutate project repositories by default.
 - Write outside the current user home or temp directories.
 - Use Codex or Claude private plugin cache paths as source.
@@ -416,7 +419,7 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
-9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and before delegated target sync completes, so a stale Codex cache can still be refreshed when a later target sync step fails safely. On Codex/Windows, the same opt-in then inspects only the installed `n8n-skills@n8n-io` cache. An exact supported pristine layout is rewritten through the Toolkit PowerShell/Git Bash wrapper; an exact repaired layout is a no-op; unknown or malformed layouts fail closed and are recorded for compatibility review. Claude Code hooks report check-only/manual native refresh status and do not mutate Codex or Claude plugin caches from the opposite host.
+9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and before delegated target sync completes, so a stale Codex cache can still be refreshed when a later target sync step fails safely. On Codex/Windows, the same opt-in then inspects only the installed `n8n-skills@n8n-io` cache. An exact supported pristine layout is rewritten through the Toolkit PowerShell/Git Bash wrapper; an exact repaired layout is a no-op; unknown or malformed layouts fail closed and are recorded for compatibility review. Claude Code hooks report check-only/manual native refresh status unless `claude_plugin_auto_refresh_enabled` is on, in which case they follow [Claude Code Plugin Cache Auto-Refresh](#claude-code-plugin-cache-auto-refresh). Neither host mutates the other host's plugin cache.
 10. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
 Before the repo-update and target-sync work, the same startup hook also runs a passive repo-local instruction preflight against the current working directory. For Codex it checks `AGENTS.md`; for Claude Code it checks `AGENTS.md` and `CLAUDE.md`. The preflight reads only the expected files and bundled repo-local templates, verifies `AI-AGENT-TOOLKIT` managed marker structure, compares expected managed block content, prints a concise warning for missing, broken, or stale content, and never writes files, creates backups, or performs repair. When findings exist, the agent should pause and ask whether to run `repository-agent-rules` check/repair/refresh now or proceed with the current task despite the warning.
@@ -457,6 +460,7 @@ Meaningful work means at least one of:
 - Repo auto-update auto-switched a clean non-configured branch back to the configured branch.
 - Repo auto-update skipped safely because the tree was dirty, the remote did not match, branch switching failed, fetch failed, or the fetched commit was not a fast-forward. Dirty-checkout reports should name the configured Toolkit source path and suggest finishing or stashing those changes, or rerunning `setup toolkit` to use the dedicated clean managed `main` checkout for startup updates.
 - The Codex native plugin cache is stale relative to the configured repo source, was auto-refreshed, or failed auto-refresh.
+- The opted-in Claude Code plugin cache was refreshed in place, or its automatic refresh needs manual action.
 - A non-Toolkit installed Codex plugin cache had unsafe Windows hook launchers repaired, or third-party hook repair failed.
 
 Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. Meaningful reports are also deduplicated by event signature: if a later hook sees the same repo status, target-sync result, native plugin cache status, and checksum, it does not create or open another timestamped report. In hook mode, the bridge prints only:
@@ -475,7 +479,24 @@ During `setup toolkit`, report creation and retention remain in the upfront wiza
 
 Toolkit-managed update reports/logs older than the configured retention window are cleaned up best-effort on setup and hook/update runs. Default retention is 7 days and can be configured with `--update-report-retention-days <positive-integer>`. Cleanup also caps retained files to the newest 200 Toolkit reports inside the retention window. Cleanup only considers Toolkit report filenames under the Toolkit-managed update report/log directory, never arbitrary user files, and never treats cleanup failure as a setup or startup blocker. Setup and audit summaries include retention days, max retained reports, deleted count, skipped/error count, and the report/log directory path.
 
-Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. On Windows, that opt-in also permits exact supported `n8n-skills@n8n-io` hook reconciliation. Claude Code reports check-only/manual native refresh state and does not let Codex mutate Claude Code cache.
+Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. On Windows, that opt-in also permits exact supported `n8n-skills@n8n-io` hook reconciliation. Claude Code has its own opt-in question; without it Claude Code reports check-only/manual native refresh state. Codex never mutates Claude Code cache.
+
+## Claude Code Plugin Cache Auto-Refresh
+
+Claude Code plugin cache auto-refresh is a separate, Claude-only preference, `claude_plugin_auto_refresh_enabled`, off by default. Only an explicit setup choice (`--enable-claude-plugin-auto-refresh`) turns it on; a hook cannot change it, and the shipped Claude `SessionStart` command is rejected if it carries any auto-refresh preference flag. Codex, OpenCode, repo, manual and dry-run bridge runs never reach the refresh path.
+
+When it is on, the Claude `SessionStart` hook (`--sync-source claude-plugin`) runs the refresh owner in [toolkit-claude-plugin-auto-refresh.cjs](../scripts/toolkit-claude-plugin-auto-refresh.cjs) after the source-downgrade check and before the normal sync flow:
+
+1. Stops if it is already inside an automatic refresh (`TOOLKIT_CLAUDE_PLUGIN_AUTO_REFRESH_ACTIVE`), or if the code executing is not the plugin root Claude Code reports in `CLAUDE_PLUGIN_ROOT`.
+2. Takes the Toolkit hub lock without waiting. A concurrent session or maintenance run makes this hook skip quietly.
+3. Verifies the managed source: configured path is the root of a Git checkout, `HEAD` is readable, the working tree is clean, and `.claude-plugin/plugin.json` declares the Toolkit name and an exact version.
+4. Compares the running cache with the source. Newer-than-source is refused (no downgrade). Equal versions with identical identity files are current and finish without validation or a Claude CLI call. Equal versions with different bytes are reported as action required, because Claude Code does not update a same-version install in place.
+5. For an older running cache, refuses to continue while a previous attempt record is `in-flight`, `held` or unreadable, runs hook-light validation, then asks the managed source's [setup-claude-toolkit-plugin.cjs](../scripts/setup-claude-toolkit-plugin.cjs) for a read-only `--auto-refresh-plan` bound to the verified commit and running root.
+6. Only a plan of exactly one enabled `ai-agent-toolkit@ai-agent-toolkit-local` install, in a `user`, `project` or `local` scope, at an exact older version, sourced from the managed checkout and matching the running root, proceeds. Missing, disabled, ambiguous, managed/synced-scope, foreign-source, foreign-runtime and newer installs are reported for manual action. Other `ai-agent-toolkit@*` entries, such as a claude.ai-synced copy, are reported as shadow entries and never touched.
+7. Durably records an `in-flight` attempt beside the hub lock (`claude-plugin-auto-refresh.json`), then runs `--auto-refresh-apply`, which re-checks the commit, versions and plan and runs only `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope <installed scope>`. It never passes `-y`, never uninstalls, never re-adds the marketplace, never installs and never changes scope. Success requires Claude Code's plugin list to verify the current version, source commit and installed bytes.
+8. Records the outcome. A verified update reports the old and new versions, the unchanged scope and that a fresh Claude Code session is required (the CLI applies plugin updates on restart, and the running session keeps its old cache directory). A definite failure, an unverified update, a timeout or a crash leaves a `held` (or `in-flight`) record; later sessions report it and do not retry. The hold clears when a later session runs a current cache, or when setup explicitly re-enables the preference, which keeps the previous record inside the replacement as evidence.
+
+The manual `setup toolkit --host claude-code` path keeps its existing install, update and recovery behaviour, including its uninstall-and-reinstall fallback; the automatic path never runs that fallback. Outcomes are printed as one `Toolkit Claude plugin auto-refresh:` line, included in update reports, and summarised in `--audit` as `claude_plugin_auto_refresh_enabled` and `claude_plugin_auto_refresh_last_attempt`. Native qualification (a real `claude plugin update` from an active Claude Code `SessionStart`, fresh-session activation and trust prompts) is still required on an installed host before this path is treated as qualified.
 
 ## Windows Codex Plugin Hook Repair
 
