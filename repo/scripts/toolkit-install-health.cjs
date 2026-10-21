@@ -85,7 +85,7 @@ class ToolkitInstallHealthCheck {
     }
     if (plugin.updated_this_run === true) {
       return this.#check('plugin', label, STATUS.RESTART, `Toolkit ${this.#expectedVersion} was installed this run.`,
-        'Restart Claude Code. The next session start checks the install again and reports only a problem.');
+        `Restart Claude Code so it loads Toolkit ${this.#expectedVersion}. After that, each session start rechecks the update record, helper definitions and depth setting, and reports only a problem.`);
     }
     return this.#check('plugin', label, STATUS.PASSED, `Claude Code runs Toolkit ${this.#expectedVersion} from the managed checkout.`);
   }

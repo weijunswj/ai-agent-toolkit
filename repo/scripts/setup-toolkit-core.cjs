@@ -3688,6 +3688,15 @@ function applyClaudeSubagentDepth(args, setting = new ClaudeSubagentDepthSetting
   return setting.apply(args.claudeSubagentDepthChoice || 'keep');
 }
 
+// safe-root-only is Toolkit's expected default whenever setup records no verified hook activation;
+// Claude Code 2.1.306 reports none, so it is not a failure and is never called verified.
+function profileOutcomeSummary(delegation) {
+  if (delegation.status === 'safe-root-only') {
+    return 'safe-root-only: root-only, Toolkit\'s safe default. Setup recorded no verified hook activation (current Claude Code versions do not report one), so the Toolkit hook keeps root-only. This is expected; no action is needed.';
+  }
+  return delegation.status || 'unchanged';
+}
+
 function subagentDepthOutcomeSummary(result) {
   if (!result) return 'unchanged';
   if (result.status === 'held') return `held; ${result.detail} Toolkit did not change it.`;
@@ -3777,7 +3786,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Selected topology: ${unknown(delegation.topology)}`);
     console.log('Governed V3 workers: launched only by the registry-pinned V3 launcher under an authorised controller');
     console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
-    console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
+    console.log(`Profile outcome this run: ${profileOutcomeSummary(delegation)}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');

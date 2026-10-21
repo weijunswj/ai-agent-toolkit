@@ -139,7 +139,7 @@ test('a same-run plugin install reports its facts and restart required, never a 
   assert.match(result.stdout, /Claude plugin status: installed this run/);
   assert.doesNotMatch(result.stdout, /Claude plugin status: refreshed/);
   assert.match(result.stdout, /Install check: restart required\n/);
-  assert.match(result.stdout, /Next step:\n1\. Restart Claude Code\./);
+  assert.match(result.stdout, /Next step:\n1\. Restart Claude Code so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions and depth setting, and reports only a problem\./);
 });
 
 test('setup refreshes Toolkit helper definitions made stale by a stack registry change', () => {

@@ -137,7 +137,10 @@ class ClaudeSubagentDepthSetting {
       return { status: 'owner-value-kept', changed: false, ...before };
     }
     if (choice === 'enable') {
-      if (before.state === STATES.TOOLKIT) return { status: 'one-layer', changed: false, ...before };
+      if (before.state === STATES.TOOLKIT) {
+        if (record.legacy) this.#saveRecord(record.entries);
+        return { status: 'one-layer', changed: false, ...before };
+      }
       this.#turnOn(read, key, record);
       return { status: 'one-layer', changed: true, state: STATES.TOOLKIT, value: ONE_LAYER };
     }
