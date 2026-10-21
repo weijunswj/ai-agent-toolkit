@@ -2003,7 +2003,8 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
-      currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'verified' : 'unverified',
+      // Read from the stored profile and the Claude Code user settings; setup does not test the hook itself.
+      currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'state-derived' : 'unverified',
       afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
     }));
     specs.push(resolvedQuestion({

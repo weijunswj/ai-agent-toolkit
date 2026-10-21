@@ -191,13 +191,13 @@ Sync already-enabled targets after approval:
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 ```
 
-Enable opt-in repo-backed auto-update from a trusted local Toolkit checkout:
+Enable opt-in repo-backed auto-update from the managed clean Toolkit checkout:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
 ```
 
-After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the configured local repo as source of truth: they validate the repo and remote, refuse dirty worktrees without stashing or switching, auto-switch a clean non-configured branch back to the configured branch, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then sync enabled bridge targets from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:
+After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the managed checkout as source of truth: they validate the repo and remote, refuse dirty worktrees without stashing or switching, switch the clean managed checkout back to the configured branch if it is on another one, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then sync enabled bridge targets from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:
 
 ```powershell
 npm run validate:all
@@ -224,10 +224,10 @@ node repo/scripts/toolkit-local-bridge.cjs --disable-repo-auto-update --write
 
 The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Repo, Codex, and Claude Code bridge copies record and enforce their versions independently, while `hub_version` remains a reporting and older-cache compatibility watermark only. Disabled and never-enabled targets are not touched.
 
-Native hooks run cached bridge copies. After a bridge fix is merged, the machine is not fully updated until every affected host cache is refreshed:
+Codex hooks run the bridge copy in Codex's plugin cache. Claude Code runs Toolkit in place from the managed checkout. After a bridge fix is merged:
 
-- In Codex, run `setup toolkit`.
-- In Claude Code, run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code.
+- In Codex, run `setup toolkit` to refresh its cache.
+- In Claude Code, the fix arrives when the managed checkout updates: with automatic updates on, that happens at the next session start. To update at once, run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code.
 
 Refreshing one host never mutates the other host's cache.
 

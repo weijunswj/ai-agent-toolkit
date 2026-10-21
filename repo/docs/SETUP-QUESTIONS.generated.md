@@ -225,7 +225,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: Y3CA-ZYXJ-H2Y7-MYDD
+Bank reference: 0Z97-PDDD-XRWP-Y0ZH
 
 Quick index
 
@@ -380,7 +380,7 @@ Quick index
 
 **Current:** Current topology: root-only. CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies. The Toolkit hook refuses nested launches in normal folders once this Toolkit version's plugin is installed and active.
 
-**Verification:** verified
+**Verification:** state-derived
 
 **Recommended:** A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 
