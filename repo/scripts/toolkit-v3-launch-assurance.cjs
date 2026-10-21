@@ -50,7 +50,10 @@ const SITE_CLASSES = Object.freeze(['LAUNCH_PATH', 'NOT_A_MODEL_LAUNCH']);
 // layer: what the host does there, and what, if anything, protects the helper path.
 const FAILURE_LAYERS = Object.freeze(['HANDLED_EXCEPTION', 'MODULE_LOAD', 'PROCESS_START_OR_CRASH', 'HOST_TIMEOUT', 'MISSING_OR_DISABLED', 'MATCHER_COVERAGE']);
 const LAYER_OUTCOMES = Object.freeze(['DENIED', 'PROCEEDS', 'UNVERIFIED']);
-const LAYER_PROTECTIONS = Object.freeze(['GUARD_DENIES', 'HOST_DENY_RULE', 'HELD', 'NONE']);
+// HOST_BLOCKS_ON_FAILURE: the host itself blocks the tool when the hook process fails to start, exits
+// with an error or times out (Claude Code onFailure block). It cannot cover a hook that never runs.
+const LAYER_PROTECTIONS = Object.freeze(['GUARD_DENIES', 'HOST_DENY_RULE', 'HOST_BLOCKS_ON_FAILURE', 'HELD', 'NONE']);
+const HOST_FAILURE_LAYERS = Object.freeze(['PROCESS_START_OR_CRASH', 'HOST_TIMEOUT']);
 
 class LaunchPath {
   #value;
@@ -107,7 +110,8 @@ class LaunchPath {
       closedKeys(l, ['layer', 'outcome', 'protection', 'basis']);
       if (!LAYER_OUTCOMES.includes(l.outcome) || !LAYER_PROTECTIONS.includes(l.protection) || !text(l.basis)) refuse('LAUNCH_FAMILY_FAILURE_LAYERS_REQUIRED', { path: v.id, layer: l.layer });
       const hostRunsGuard = !['PROCESS_START_OR_CRASH', 'HOST_TIMEOUT', 'MISSING_OR_DISABLED'].includes(l.layer);
-      if ((l.protection === 'GUARD_DENIES' && !hostRunsGuard) || (l.outcome === 'DENIED' && ['HELD', 'NONE'].includes(l.protection))) {
+      if ((l.protection === 'GUARD_DENIES' && !hostRunsGuard) || (l.outcome === 'DENIED' && ['HELD', 'NONE'].includes(l.protection))
+          || (l.protection === 'HOST_BLOCKS_ON_FAILURE' && !HOST_FAILURE_LAYERS.includes(l.layer))) {
         refuse('LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED', { path: v.id, layer: l.layer });
       }
     }

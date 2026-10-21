@@ -182,6 +182,34 @@ test('current consumers never load the retired launcher history, and no launch-c
   assert.equal(Object.hasOwn(require('../scripts/setup-toolkit-core.cjs'), 'probeClaudeAgentCapability'), false);
 });
 
+test('a Claude Agent hook call whose input cannot be read is refused in governed work and left alone elsewhere', () => {
+  // The hook runs only for the Agent|Task matcher, so unreadable input is an agent launch Toolkit cannot check.
+  const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const CHECKOUT = path.resolve(__dirname, '..', '..');
+  const dir = root();
+  const clean = { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir };
+  for (const key of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']) delete clean[key];
+  const call = (input, cwd, env = clean) => {
+    const result = spawnSync(process.execPath, [HOOK], { input, cwd, encoding: 'utf8', windowsHide: true, env });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const READ_DENIAL = /^Toolkit could not read this agent launch, so it cannot check it; do the work in this session\.$/;
+  try {
+    for (const input of ['{ not json', 'null', '[]', '"Agent"', JSON.stringify({ hook_event_name: 'PreToolUse', tool_input: {} })]) {
+      const governed = call(input, CHECKOUT).hookSpecificOutput;
+      assert.equal(governed?.permissionDecision, 'deny', `governed: ${input}`);
+      assert.match(governed.permissionDecisionReason, READ_DENIAL);
+      assert.deepEqual(call(input, dir), {}, `normal folder: ${input}`);
+      assert.equal(call(input, dir, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).hookSpecificOutput?.permissionDecision, 'deny', `launcher marker: ${input}`);
+    }
+    // A readable input names its own working folder; it decides governance.
+    const named = call(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: CHECKOUT }), dir).hookSpecificOutput;
+    assert.equal(named?.permissionDecision, 'deny');
+    assert.deepEqual(call(JSON.stringify({ tool_name: 'Read', cwd: CHECKOUT }), CHECKOUT), {}, 'other tools are untouched');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a Claude hook whose decision modules cannot load still denies Agent and Task as a handled decision', () => {
   // Claude Code treats a hook process error (crash, non-zero exit other than 2) as non-blocking,
   // so a missing or broken module must surface as the hook's own deny, not as a crash.
