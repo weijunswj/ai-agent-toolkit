@@ -20,7 +20,7 @@ Apply only floor categories relevant to the task. Broken critical workflows, mat
 
 This skill installs and repairs the always-on repository ruleset, but the skill itself is not an always-on routing action. Keep the steady-state path cheap. Use it only when instructions are missing, unchecked, suspected stale, structurally broken, changed since the last check, or explicitly requested.
 
-Native Toolkit plugin startup hooks may run a passive repo-local instruction preflight before ordinary work. That hook may compare only the expected `AI-AGENT-TOOLKIT` managed blocks in the required platform files against the bundled repo-local templates, then print a concise warning for missing, broken, or stale managed content. It must not back up, rewrite, repair, create files, read unrelated repo docs, or inspect unmarked user-authored content. If the hook reports a problem, pause and ask whether to run this skill with an explicit check, repair, refresh, or bootstrap request now, or proceed with the current task despite the warning.
+Native Toolkit plugin startup hooks may run a passive repo-local instruction preflight before ordinary work. That hook may compare only the expected `AI-AGENT-TOOLKIT` managed blocks in the required platform files against the bundled repo-local templates. It must not back up, rewrite, repair, create files, read unrelated repo docs, or inspect unmarked user-authored content. It is silent outside Toolkit-managed git roots; inside one it prints at most one neutral note, once per finding. The note never pauses the current task: carry on with it, and run this skill only when the user explicitly asks for a check, repair, refresh, or bootstrap.
 
 All questions that require user action or confirmation must be fully bolded. This includes target-path questions, approval questions, and same-session continuation questions.
 
@@ -125,13 +125,13 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
-3. Watch the required checks on the pull request's exact head.
-4. Read the owner's stored choice with `node "<Toolkit plugin root>/repo/scripts/toolkit-local-bridge.cjs" --audit` (read-only; field `refresh_pr_auto_merge_enabled`). Merge only when that field is `true` and every required check has passed on that exact head. This skill grants no merge authority of its own; the owner's setup choice "Merge rule-refresh PRs when the required checks pass" is the only source.
+3. Watch every check on the pull request's exact head.
+4. Read the owner's stored choice with `node "<Toolkit plugin root>/repo/scripts/toolkit-local-bridge.cjs" --audit` (read-only; field `refresh_pr_auto_merge_enabled`). Merge only when that field is `true`, every required check has passed on that exact head, and no check on that head is failing or pending. This skill grants no merge authority of its own; the owner's setup choice "Merge rule-refresh PRs when the required checks pass" is the only source. Never set or change that choice yourself; only setup, with the owner's answer, does.
 
 Stop at the open pull request and report its link, head and the reason instead of merging when:
 
 - the stored choice is off, missing or cannot be read;
-- a required check fails, or is still pending when the watch ends;
+- any check on the exact head fails, or is still pending when the watch ends;
 - review rules or branch protection block the merge;
 - the pull request contains any file this refresh does not own;
 - the repository has no GitHub remote (then leave the refreshed files uncommitted and report them).

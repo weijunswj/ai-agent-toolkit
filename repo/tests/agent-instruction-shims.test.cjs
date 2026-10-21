@@ -820,14 +820,20 @@ test('a rules refresh is carried to a pull request and merges only under the own
   assert.ok(flow.length > 0, 'refresh pull request flow present before the standalone ending');
   assert.match(flow, /Stage only the files this refresh wrote/);
   assert.match(flow, /never stage dirty, unrelated or backup files/);
-  assert.match(flow, /Watch the required checks on the pull request's exact head/);
+  assert.match(flow, /Watch every check on the pull request's exact head/);
   assert.match(flow, /toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/);
-  assert.match(flow, /Merge only when that field is `true` and every required check has passed on that exact head/);
+  assert.match(flow, /Merge only when that field is `true`, every required check has passed on that exact head, and no check on that head is failing or pending/);
   assert.match(flow, /This skill grants no merge authority of its own/);
-  for (const stop of [/stored choice is off, missing or cannot be read/, /fails, or is still pending when the watch ends/,
+  assert.match(flow, /Never set or change that choice yourself; only setup, with the owner's answer, does/);
+  for (const stop of [/stored choice is off, missing or cannot be read/, /any check on the exact head fails, or is still pending when the watch ends/,
     /review rules or branch protection block the merge/, /any file this refresh does not own/, /no GitHub remote/]) assert.match(flow, stop);
+  assert.doesNotMatch(flow, /a required check fails/, 'stopping is not limited to required checks');
   assert.match(flow, /Never use an admin bypass, force-push, rewrite history/);
   assert.doesNotMatch(flow, /standing (owner )?approval/i, 'the skill text carries no approval of its own');
+  // The startup note never pauses work or sends the agent to ask the user.
+  assert.doesNotMatch(skill, /pause and ask|despite the warning/i);
+  assert.match(skill, /The note never pauses the current task/);
+  assert.match(skill, /run this skill only when the user explicitly asks/);
   assert.match(skill, /after the pull request outcome above \(merged, stopped at the open pull request, or no GitHub remote\), stop and end with this exact format/);
   assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > skill.indexOf('**Carry the refresh to a pull request.**'));
   assert.match(skill, /Apart from the refresh pull request above \(a branch, commit, push and pull request of refresh-owned files, a check watch, and a merge only when the owner's stored choice allows it\), it must not push/);

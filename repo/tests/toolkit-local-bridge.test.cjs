@@ -3290,7 +3290,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   assert.deepEqual(snapshotTree(root), before);
 });
 
-test('SessionStart notice offers a refresh for older or broken repository blocks, once per finding, without writing', async (t) => {
+test('SessionStart notice offers a refresh for differing or broken repository blocks, once per finding, without writing', async (t) => {
   const cases = [
     { name: 'stale managed block', agents: managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup context progress') },
     { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n' }
@@ -3302,11 +3302,13 @@ test('SessionStart notice offers a refresh for older or broken repository blocks
       writeFile(path.join(root, 'AGENTS.md'), fixture.agents);
       const direct = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot });
       assert.equal(direct.status, 'needs-attention');
-      assert.equal(direct.direction, 'older');
+      // No newer Toolkit is known here, so which side is newer is unknown: the note says "differ".
+      assert.equal(direct.direction, 'differs');
       const message = formatAgentRulesPreflight(direct);
       assert.equal(message.split('\n').length, 1);
       assert.doesNotMatch(message, NEVER_HALTING);
-      assert.match(message, /\(AGENTS\.md\) are older than the running Toolkit/);
+      assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
+      assert.doesNotMatch(message, /are older/);
       assert.match(message, /refresh them with repository-agent-rules when convenient/);
       assert.match(message, /No files were changed/);
 
@@ -3328,6 +3330,30 @@ test('SessionStart notice offers a refresh for older or broken repository blocks
       assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
     });
   }
+});
+
+test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, ledger swap progress'));
+  const home = tmpRoot();
+  const hub = path.join(home, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion, auto_sync_enabled: true, targets: {} });
+  const hook = () => run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    cwd: root, env: isolatedHomeEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
+  });
+  const first = hook();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stdout.split('\n').filter((line) => line.startsWith('Toolkit note:')).length, 1);
+  // The auto-sync hook rewrites the snapshot directory; the ledger sits beside it.
+  assert.equal(fs.existsSync(path.join(hub, 'agent-rules-notices.json')), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(hub), 'agent-rules-notices.json')), true);
+  for (let session = 2; session <= 3; session += 1) {
+    const again = hook();
+    assert.equal(again.status, 0, again.stderr);
+    assert.doesNotMatch(again.stdout, /Toolkit note:/, `session ${session}`);
+  }
+  assert.equal(readJson(path.join(hub, 'state.json')).auto_sync_enabled, true);
 });
 
 

@@ -1638,9 +1638,10 @@ function newestKnownToolkitVersion(state) {
 }
 
 // Direction is 'newer' when the repository rules may come from a newer Toolkit than
-// the running copy (repository rules stay authoritative), 'older' when the repository
-// can be refreshed from the running Toolkit, and 'drift' when a Toolkit source checkout
-// differs from its own canonical templates.
+// the running copy (repository rules stay authoritative), 'differs' when no newer
+// Toolkit is known on this machine (the rules differ from the running Toolkit's
+// templates; which side is newer is unknown), and 'drift' when a Toolkit source
+// checkout differs from its own canonical templates.
 function runAgentRulesPreflight(args, options = {}) {
   if (!args.hook) return { status: 'not-applicable', targetRoot: '', findings: [] };
   const specs = agentRulesPreflightSpecs(args.syncSource);
@@ -1666,7 +1667,7 @@ function runAgentRulesPreflight(args, options = {}) {
   // its own templates: the installed copy is the stale side.
   if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
   if (!findings.length) return { ...result, status: 'ok' };
-  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'older' };
+  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'differs' };
 }
 
 // One neutral line. Never an instruction to halt work or to question the user.
@@ -1679,7 +1680,7 @@ function formatAgentRulesPreflight(result) {
   if (result.direction === 'drift') {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs when convenient. No files were changed.`;
   }
-  return `Toolkit note: this repository's Toolkit rules (${files}) are older than the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
+  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; refresh them with repository-agent-rules when convenient. No files were changed.`;
 }
 
 function agentRulesNoticeKey(result, message) {
@@ -1691,11 +1692,13 @@ function agentRulesNoticeKey(result, message) {
 
 // Remembers which notices were already shown, so a notice appears once per
 // (root, running version, finding digest); resume and compact never replay it.
-// The ledger lives in the Toolkit hub, never in the repository.
+// The ledger sits beside the hub snapshot directory (next to update.lock), never
+// inside it: snapshot writes replace that directory wholesale. It never lives in
+// the repository.
 class AgentRulesNoticeLedger {
   static LIMIT = 200;
   #file;
-  constructor(hubPath) { this.#file = hubPath ? path.join(hubPath, 'agent-rules-notices.json') : ''; }
+  constructor(hubPath) { this.#file = hubPath ? path.join(path.dirname(path.resolve(hubPath)), 'agent-rules-notices.json') : ''; }
 
   #read() {
     try {

@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: C4S7-1Q2C-24EK-EKN7
+Bank reference: 2EH0-MMWD-JZ2K-BY2G
 
 Quick index
 
@@ -126,23 +126,23 @@ Quick index
 
 ### 1.5 Merge rule-refresh PRs when the required checks pass
 
-**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once every required check passes on its exact head. Failed or pending checks, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
+**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once every required check has passed on its exact head and no check there is failing or pending. Any failed or pending check, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
 
-**Current:** Rule-refresh PRs merge automatically once every required check passes on the exact head.
+**Current:** Rule-refresh PRs merge automatically once every required check has passed on the exact head and no check is failing or pending.
 
 **Verification:** verified
 
 **Recommended:** A - Turn on
 
-**Recommended outcome:** Merge rule-refresh pull requests once every required check passes.
+**Recommended outcome:** Merge rule-refresh pull requests once every required check has passed and no check is failing or pending.
 
-**Why:** Refreshed rules reach the default branch without a manual step, while the required checks, branch protection and the refresh-owned-files limit still decide every merge.
+**Why:** Refreshed rules reach the default branch without a manual step, while the checks, branch protection and the refresh-owned-files limit still decide every merge.
 
 **Choices:**
 
-- **A. Turn on** - Merge the rule-refresh pull request after every required check passes on its exact head.
+- **A. Turn on** - Merge the rule-refresh pull request once every required check has passed on its exact head and no check is failing or pending.
 - **B. Turn off** - Stop at the open rule-refresh pull request and report it for you to merge.
-- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once every required check passes on the exact head.
+- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once every required check has passed on the exact head and no check is failing or pending.
 
 **After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
 
@@ -211,8 +211,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `C4S7-1Q2C-24EK-EKN7: all recommended`
-- only your changes, for example: `C4S7-1Q2C-24EK-EKN7: 1.2=B, 3.1=A`
+- `2EH0-MMWD-JZ2K-BY2G: all recommended`
+- only your changes, for example: `2EH0-MMWD-JZ2K-BY2G: 1.2=B, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
