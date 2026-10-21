@@ -421,7 +421,7 @@ function validationWorkflowCheckoutErrors(source) {
   if (checkouts.length !== 1) errors.push('validate job must have exactly one checkout action');
   const checkout = checkouts[0];
   if (!checkout) return errors;
-  if (checkout.uses !== 'actions/checkout@v7') errors.push('checkout must use actions/checkout@v7');
+  if (!/^actions\/checkout@[0-9a-f]{40} # v7\.\d+\.\d+$/.test(checkout.uses)) errors.push('checkout must use actions/checkout v7 pinned to a commit SHA');
   if (checkout.inputs['fetch-depth'] !== '0') errors.push('checkout must fetch full history');
   if (checkout.inputs['persist-credentials'] !== 'false') errors.push('checkout must disable persisted credentials');
   if (checkout.inputs.ref !== undefined) errors.push('checkout must preserve event-ref selection');

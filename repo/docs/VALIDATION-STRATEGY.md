@@ -12,7 +12,9 @@ For this repo, the canonical full validation command is:
 npm run validate:all
 ```
 
-The read-only PR and `main` validation workflow must call that command directly instead of duplicating a partial checklist. `validate:all` is the required CI and `main` merge gate.
+The gate has one list: the `Run validation` step of `.github/workflows/validate.yml`, which runs on every pull request and push to `main`. `npm run validate:all` runs the same commands in the same order from that step (`repo/scripts/run-validation-gate.cjs`), so the local and CI gates cannot drift. The workflow keeps the commands literal because the trusted-CI producer map (`repo/contracts/trusted-ci-repository-protection/candidate-producer-map.n6.json`) binds them; when the step changes, update that map's approved workflow blob in the same change. `validate:all` is the required CI and `main` merge gate.
+
+The whitespace check (`npm run validate:whitespace`, `repo/scripts/check-diff-whitespace.cjs`) compares the whole change with its base: in CI the pull request base or the previous `main` tip (`DIFF_BASE`), locally where the branch left `origin/main`, including uncommitted edits. A plain `git diff --check` sees only uncommitted edits, so on a clean CI checkout it checks nothing.
 
 Do not run `--write` commands in the required validation workflow.
 
