@@ -3,19 +3,30 @@
 // Owns the one Claude Code user setting Toolkit may write for subagent nesting:
 // `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1"` in the Claude Code user settings file.
 // At 1 the main session may start subagents and a subagent may not start another.
-// Toolkit records that it wrote the value. Turning the choice off removes the key only
-// while it still holds the value Toolkit recorded for that same settings file; a value
-// the owner set by hand is never changed or removed.
+// Toolkit records, per Claude Code user settings file, that it wrote the value. Turning the choice off removes
+// the key only while it still holds the value Toolkit recorded for that same settings file; a value the owner
+// set by hand is never changed or removed.
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { canonicalPath } = require('./toolkit-canonical-path.cjs');
 
 const SETTING = 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH';
 const ONE_LAYER = '1';
-const RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v1';
+// Record v2 sits in the control root: { schema, entries: { "<canonical settings path>": { settings_path, value, created_env, created_file } } }.
+const RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v2';
+const LEGACY_RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v1';
 const STATES = Object.freeze({ TOOLKIT: 'toolkit-one-layer', OWNER: 'owner-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
+
+// Pure helpers over the record's entries; the class decides when they are written.
+function entryOf(entries, key) { return Object.hasOwn(entries, key) ? entries[key] : undefined; }
+function withoutEntry(entries, key) {
+  const rest = { ...entries };
+  delete rest[key];
+  return rest;
+}
 
 class ClaudeSubagentDepthSetting {
   #settingsPath; #recordPath;
@@ -44,19 +55,37 @@ class ClaudeSubagentDepthSetting {
     return { text, settings };
   }
 
+  // The ownership record as { entries, legacy }; legacy is true while the file still holds a v1 record.
   #readRecord() {
-    try {
-      const record = JSON.parse(fs.readFileSync(this.#recordPath, 'utf8'));
-      return record?.schema === RECORD_SCHEMA && record.settings_path === this.#settingsPath ? record : null;
-    } catch { return null; }
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(this.#recordPath, 'utf8')); }
+    catch { return { entries: {}, legacy: false }; }
+    if (parsed?.schema === RECORD_SCHEMA) {
+      const entries = parsed.entries && typeof parsed.entries === 'object' && !Array.isArray(parsed.entries) ? parsed.entries : {};
+      return { entries, legacy: false };
+    }
+    // Retained v1 read, as one entry for the settings file it names. Current consumer: records written by
+    // Toolkit 3.1.x; the owner's laptop holds one (value "1", default settings path). Safety reason: without it
+    // Toolkit's existing "1" would read as the owner's value and could never be removed. Removal trigger: R3
+    // legacy removal.
+    if (parsed?.schema === LEGACY_RECORD_SCHEMA && typeof parsed.settings_path === 'string') {
+      const entry = { settings_path: parsed.settings_path, value: parsed.value, created_env: parsed.created_env, created_file: parsed.created_file };
+      return { entries: { [canonicalPath(parsed.settings_path)]: entry }, legacy: true };
+    }
+    return { entries: {}, legacy: false };
   }
 
-  #writeRecord(record) {
+  // No entries left means no record file, so an empty record is never left behind.
+  #saveRecord(entries) {
+    if (Object.keys(entries).length === 0) { fs.rmSync(this.#recordPath, { force: true }); return; }
     fs.mkdirSync(path.dirname(this.#recordPath), { recursive: true });
-    this.#atomicWrite(this.#recordPath, `${JSON.stringify(record, null, 2)}\n`);
+    this.#atomicWrite(this.#recordPath, `${JSON.stringify({ schema: RECORD_SCHEMA, entries }, null, 2)}\n`);
   }
 
-  #removeRecord() { fs.rmSync(this.#recordPath, { force: true }); }
+  // Drops only this settings file's entry; entries for other settings files are never touched.
+  #forgetEntry(key, record) {
+    if (Object.hasOwn(record.entries, key)) this.#saveRecord(withoutEntry(record.entries, key));
+  }
 
   #atomicWrite(file, text) {
     const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
@@ -76,52 +105,83 @@ class ClaudeSubagentDepthSetting {
     this.#atomicWrite(this.#settingsPath, `${JSON.stringify(settings, null, indent)}\n`);
   }
 
-  #stateOf(read, record) {
+  #stateOf(read, entry) {
     if (read.error) return { state: STATES.UNREADABLE, detail: read.error };
     const env = read.settings.env;
     if (!env || !Object.hasOwn(env, SETTING)) return { state: STATES.DEFAULT };
     const value = String(env[SETTING]);
-    return record && record.value === value ? { state: STATES.TOOLKIT, value } : { state: STATES.OWNER, value };
+    return entry?.value === value ? { state: STATES.TOOLKIT, value } : { state: STATES.OWNER, value };
   }
 
   inspect() {
-    return this.#stateOf(this.#readSettings(), this.#readRecord());
+    return this.#stateOf(this.#readSettings(), entryOf(this.#readRecord().entries, canonicalPath(this.#settingsPath)));
   }
 
   // choice: enable | disable | keep. Returns { status, changed, state, value?, detail? }.
+  // Every choice settles this settings file's entry: it is dropped when the key is absent or the owner changed
+  // it, and kept while Toolkit still owns the value.
   apply(choice) {
+    if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported Claude subagent depth choice: ${choice}`);
     const read = this.#readSettings();
+    const key = canonicalPath(this.#settingsPath);
     const record = this.#readRecord();
-    const before = this.#stateOf(read, record);
-    if (choice === 'keep') return { status: 'kept', changed: false, ...before };
-    if (!['enable', 'disable'].includes(choice)) throw new Error(`Unsupported Claude subagent depth choice: ${choice}`);
+    const before = this.#stateOf(read, entryOf(record.entries, key));
+    if (choice === 'keep') {
+      this.#settleKeep(key, record, before.state);
+      return { status: 'kept', changed: false, ...before };
+    }
     if (before.state === STATES.UNREADABLE) return { status: 'held', changed: false, ...before };
-    // A value the owner set by hand stays exactly as it is; any stale Toolkit record goes.
+    // A value the owner set by hand stays exactly as it is; any stale entry for this file goes.
     if (before.state === STATES.OWNER) {
-      if (record) this.#removeRecord();
+      this.#forgetEntry(key, record);
       return { status: 'owner-value-kept', changed: false, ...before };
     }
     if (choice === 'enable') {
       if (before.state === STATES.TOOLKIT) return { status: 'one-layer', changed: false, ...before };
-      const createdFile = read.text === null;
-      const createdEnv = read.settings.env === undefined;
-      const settings = { ...read.settings, env: { ...(read.settings.env || {}), [SETTING]: ONE_LAYER } };
-      this.#writeSettings(read, settings);
-      this.#writeRecord({ schema: RECORD_SCHEMA, settings_path: this.#settingsPath, value: ONE_LAYER, created_env: createdEnv, created_file: createdFile });
+      this.#turnOn(read, key, record);
       return { status: 'one-layer', changed: true, state: STATES.TOOLKIT, value: ONE_LAYER };
     }
     if (before.state === STATES.DEFAULT) {
-      if (record) this.#removeRecord();
+      this.#forgetEntry(key, record);
       return { status: 'claude-default', changed: false, ...before };
     }
-    // Toolkit-owned: remove exactly the key, plus the env object and file only if Toolkit created them.
+    this.#turnOff(read, key, record);
+    return { status: 'claude-default', changed: true, state: STATES.DEFAULT };
+  }
+
+  // keep changes no setting. A valid entry in a v1 record is rewritten as v2; a stale entry is dropped; an
+  // unreadable file leaves the entry alone, because the key cannot be judged.
+  #settleKeep(key, record, state) {
+    if (state === STATES.TOOLKIT) {
+      if (record.legacy) this.#saveRecord(record.entries);
+      return;
+    }
+    if (state !== STATES.UNREADABLE) this.#forgetEntry(key, record);
+  }
+
+  // Intent first: the entry is recorded before the setting is written, so a failed record write leaves the
+  // settings untouched, and a failed settings write takes the entry back out before the error is rethrown.
+  #turnOn(read, key, record) {
+    const entry = { settings_path: this.#settingsPath, value: ONE_LAYER, created_env: read.settings.env === undefined, created_file: read.text === null };
+    const settings = { ...read.settings, env: { ...(read.settings.env || {}), [SETTING]: ONE_LAYER } };
+    this.#saveRecord({ ...record.entries, [key]: entry });
+    try { this.#writeSettings(read, settings); }
+    catch (error) {
+      // The settings error is what the caller needs; if this clean-up also fails, the next apply drops the entry.
+      try { this.#saveRecord(withoutEntry(record.entries, key)); } catch { /* reported through the settings error */ }
+      throw error;
+    }
+  }
+
+  // Toolkit-owned: remove exactly the key, plus the env object and file only if Toolkit created them, then the entry.
+  #turnOff(read, key, record) {
+    const entry = entryOf(record.entries, key);
     const env = { ...read.settings.env };
     delete env[SETTING];
     const settings = { ...read.settings, env };
-    if (record.created_env === true && Object.keys(env).length === 0) delete settings.env;
-    this.#writeSettings(read, record.created_file === true && Object.keys(settings).length === 0 ? null : settings);
-    this.#removeRecord();
-    return { status: 'claude-default', changed: true, state: STATES.DEFAULT };
+    if (entry.created_env === true && Object.keys(env).length === 0) delete settings.env;
+    this.#writeSettings(read, entry.created_file === true && Object.keys(settings).length === 0 ? null : settings);
+    this.#saveRecord(withoutEntry(record.entries, key));
   }
 }
 

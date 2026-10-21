@@ -18,12 +18,23 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { StackRegistrySnapshot, CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
 const { claudeNativeModel } = require('./toolkit-v3-native-helper-adapter.cjs');
-const { roleSpec, roleInstructions } = require('./toolkit-claude-helper-spec.cjs');
+const { ROLES, roleSpec, roleInstructions } = require('./toolkit-claude-helper-spec.cjs');
 
 const MARKER = '<!-- ai-agent-toolkit:generated claude-helper-agent v1 -->';
 const REGISTRY_REL = 'repo/contracts/controller-kernel/stack-registry-v3.json';
 const LEGACY_FILES = Object.freeze(['toolkit-v3-g0-evidence.md', 'toolkit-v3-g1-bounded.md']);
+const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
+const ROLE_KEYS = Object.freeze(Object.keys(ROLES));
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Folder names the installer gives backups: its ISO timestamp with ':' and '.' replaced by '-'.
+const BACKUP_NAME = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
+
+// The one owner of the Claude user agents directory: CLAUDE_CONFIG_DIR, else ~/.claude.
+function claudeUserAgentsDirectory(environment = process.env) {
+  return path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'agents');
+}
+function defaultBackupRoot() { return path.join(os.homedir(), '.ai-agent-toolkit', 'backups', 'claude-helper-agents'); }
 
 class ClaudeHelperAgentRenderer {
   #binding; #reference;
@@ -62,7 +73,7 @@ class ClaudeHelperAgentRenderer {
       '',
       '## Binding',
       `- Rendered from the Toolkit V3 stack registry \`${this.#reference.path}\` (SHA-256 \`${this.#binding.sourceDigest}\`) for the explicitly selected stack \`${selection.profile_id}\`, role ${role}.Subagent (\`${spec.registryRole}\`): ${route.provider} \`${route.model}\` at \`${route.reasoning}\` effort, native model \`${model}\`.`,
-      '- The registry is the only source of this model and effort. If this file and the registry disagree, the registry governs: report the difference and stop. Regenerate with `node repo/scripts/toolkit-claude-helper-agents.cjs`.',
+      '- The registry is the only source of this model and effort. If this file and the registry disagree, the registry governs: report the difference and stop. Run `setup toolkit` to refresh this file.',
       '- This file grants no permission, scope or execution authority. Native permissions, the caller\'s assignment and Toolkit hooks still apply.',
       '',
       roleInstructions(spec),
@@ -75,9 +86,10 @@ class ClaudeHelperAgentRenderer {
 // the registry for the stack it names. Any byte difference, an unknown stack or an
 // unrenderable route is a mismatch; the definition never vouches for itself.
 const STACK_REFERENCE = /explicitly selected stack `([A-Za-z0-9._-]+)`/;
+function stackReference(text) { return STACK_REFERENCE.exec(text)?.[1] || null; }
 function matchesRenderedDefinition(role, text, repositoryRoot) {
   if (typeof text !== 'string') return { matches: false, stack: null };
-  const stack = STACK_REFERENCE.exec(text)?.[1] || null;
+  const stack = stackReference(text);
   if (!stack) return { matches: false, stack: null };
   try { return { matches: ClaudeHelperAgentRenderer.fromRepository(stack, repositoryRoot).render(role).text === text, stack }; }
   catch { return { matches: false, stack }; }
@@ -125,9 +137,140 @@ class AgentDirectoryInstaller {
   }
 }
 
-function parseArgs(argv) {
-  const args = { stack: null, agentsDir: path.join(os.homedir(), '.claude', 'agents'), write: false,
-    backupRoot: path.join(os.homedir(), '.ai-agent-toolkit', 'backups', 'claude-helper-agents') };
+const fileFor = role => `${ROLES[role].name}.md`;
+const publicEntry = ({ file, state, stack }) => ({ file, state, stack });
+const backupTime = name => Date.parse(name.replace(BACKUP_NAME, '$1:$2:$3.$4Z'));
+
+// The first reason the installed helpers cannot be refreshed or trusted, as one plain sentence; '' when none.
+function holdDetail(entries, projects, dir) {
+  const skipped = entries.find(entry => entry.state === 'skip-unmanaged');
+  if (skipped) return `${skipped.file} in ${dir} was not written by Toolkit, so Toolkit will not replace it. Rename or remove it, then run setup toolkit.`;
+  const broken = entries.find(entry => entry.state === 'unrenderable');
+  if (broken && !broken.stack) return `${broken.file} is managed by Toolkit but names no stack, so Toolkit cannot tell which stack it came from. Rename or remove it, then run setup toolkit.`;
+  if (broken && broken.present) return `${broken.file} names stack ${broken.stack}, which the current stack registry cannot render.`;
+  if (broken) return `${broken.file} is missing and the installed helpers name stack ${broken.stack}, which the current stack registry cannot render.`;
+  const orphan = entries.find(entry => entry.state === 'missing' && !entry.stack);
+  if (orphan) return `${orphan.file} is missing, and no installed helper names a stack to render it from. Install the Toolkit helpers for a stack, then run setup toolkit.`;
+  const drifted = projects.find(project => project.state === 'mismatch');
+  if (drifted) return `the project copy ${drifted.file} does not match the selected stack. Toolkit does not change project files; update or remove it.`;
+  return '';
+}
+
+// Owns the user-level helper definitions. Each installed managed file names the stack it was
+// rendered from, so the check renders that stack from the registry at repositoryRoot and compares
+// bytes; no selection is stored. Project copies are compared and reported, never written. Refresh
+// touches user-level files only, and only when they are stale.
+class ClaudeHelperDefinitions {
+  #environment; #repositoryRoot; #backupRoot; #retentionDays; #now;
+  constructor({ environment = process.env, repositoryRoot = TOOLKIT_ROOT, backupRoot = defaultBackupRoot(),
+    retentionDays = 7, now = () => new Date() } = {}) {
+    this.#environment = environment || {};
+    this.#repositoryRoot = repositoryRoot;
+    this.#backupRoot = backupRoot;
+    this.#retentionDays = retentionDays;
+    this.#now = now;
+  }
+
+  // Read-only. `projectDirectories` are agents directories (for example <project>/.claude/agents); the
+  // helper copies inside them are compared and reported, never written.
+  check({ projectDirectories = [] } = {}) {
+    const dir = claudeUserAgentsDirectory(this.#environment);
+    const { entries, projects, status, detail } = this.#assess(dir, projectDirectories);
+    return { status, agents_dir: dir, files: entries.map(publicEntry), project_overrides: projects, detail };
+  }
+
+  // Rewrites the user-level files when they are stale; otherwise writes nothing. Always prunes old backups.
+  refresh() {
+    const dir = claudeUserAgentsDirectory(this.#environment);
+    const { entries, status, detail } = this.#assess(dir, []);
+    const files = entries.map(publicEntry);
+    let result = { status, backup_dir: null, files, detail };
+    if (status === 'stale') {
+      const { backup_dir } = new AgentDirectoryInstaller(dir, entries.map(({ file, rendered }) => ({ file, text: rendered })))
+        .apply(this.#backupRoot);
+      result = { status: 'updated', backup_dir, files, detail: '' };
+    }
+    this.#pruneBackups(result.backup_dir);
+    return result;
+  }
+
+  #assess(dir, projectDirectories) {
+    const entries = this.#userEntries(dir);
+    const projects = this.#projectOverrides(projectDirectories);
+    if (entries.every(entry => !entry.present)) return { entries, projects, status: 'not-installed', detail: '' };
+    const blocked = holdDetail(entries, projects, dir);
+    if (blocked) return { entries, projects, status: 'held', detail: blocked };
+    const legacy = LEGACY_FILES.some(file => fs.existsSync(path.join(dir, file)));
+    if (legacy || entries.some(entry => entry.state === 'update' || entry.state === 'missing')) {
+      return { entries, projects, status: 'stale', detail: `The Toolkit helper definitions in ${dir} are out of date or incomplete. Run setup toolkit to refresh them.` };
+    }
+    return { entries, projects, status: 'current', detail: '' };
+  }
+
+  // One entry per role. `rendered` is the text the file must hold for the stack it names, or null.
+  // A missing file takes the stack named by the other installed managed file.
+  #userEntries(dir) {
+    const installed = Object.fromEntries(ROLE_KEYS.map(role => [role, this.#installed(path.join(dir, fileFor(role)))]));
+    const inheritedStack = role => ROLE_KEYS.filter(other => other !== role).map(other => installed[other])
+      .filter(other => other.managed).map(other => stackReference(other.text)).find(Boolean) || null;
+    return ROLE_KEYS.map(role => {
+      const file = fileFor(role), own = installed[role];
+      if (!own.present) {
+        const stack = inheritedStack(role);
+        const rendered = stack ? this.#render(role, stack) : null;
+        return { role, file, present: false, state: stack && rendered === null ? 'unrenderable' : 'missing', stack, rendered };
+      }
+      if (!own.managed) return { role, file, present: true, state: 'skip-unmanaged', stack: null, rendered: null };
+      const stack = stackReference(own.text);
+      const rendered = stack ? this.#render(role, stack) : null;
+      const state = rendered === null ? 'unrenderable' : rendered === own.text ? 'unchanged' : 'update';
+      return { role, file, present: true, state, stack, rendered };
+    });
+  }
+
+  // Unreadable is treated as not Toolkit's, so it is never replaced.
+  #installed(file) {
+    if (!fs.existsSync(file)) return { present: false, managed: false, text: null };
+    let text = null;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { /* unreadable: left alone */ }
+    return { present: true, managed: text !== null && text.includes(MARKER), text };
+  }
+
+  #render(role, stack) {
+    try { return ClaudeHelperAgentRenderer.fromRepository(stack, this.#repositoryRoot).render(role).text; }
+    catch { return null; } // an unknown or unrenderable stack is reported, never guessed
+  }
+
+  // Each directory holds helper copies to compare. An unreadable or absent copy is skipped, as the policy skips it.
+  #projectOverrides(projectDirectories) {
+    const overrides = [];
+    for (const directory of new Set(projectDirectories.map(item => path.resolve(item)))) {
+      for (const role of ROLE_KEYS) {
+        const file = path.join(directory, fileFor(role));
+        let text;
+        try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+        overrides.push({ file, state: matchesRenderedDefinition(role, text, this.#repositoryRoot).matches ? 'unchanged' : 'mismatch' });
+      }
+    }
+    return overrides;
+  }
+
+  // Deletes only timestamp-named backup folders older than the retention window. Errors surface.
+  #pruneBackups(keep) {
+    let entries;
+    try { entries = fs.readdirSync(this.#backupRoot, { withFileTypes: true }); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    const cutoff = this.#now().getTime() - this.#retentionDays * DAY_MS;
+    for (const entry of entries) {
+      const target = path.join(this.#backupRoot, entry.name);
+      if (!BACKUP_NAME.test(entry.name) || !entry.isDirectory() || target === keep) continue;
+      if (backupTime(entry.name) < cutoff) fs.rmSync(target, { recursive: true, force: true });
+    }
+  }
+}
+
+function parseArgs(argv, environment = process.env) {
+  const args = { stack: null, agentsDir: claudeUserAgentsDirectory(environment), write: false, backupRoot: defaultBackupRoot() };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--stack') args.stack = argv[++i];
     else if (argv[i] === '--agents-dir') args.agentsDir = argv[++i];
@@ -152,4 +295,5 @@ if (require.main === module) {
   try { run(); } catch (error) { process.stderr.write(`${error.code || error.message}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ ClaudeHelperAgentRenderer, AgentDirectoryInstaller, MARKER, matchesRenderedDefinition, run });
+module.exports = Object.freeze({ ClaudeHelperAgentRenderer, ClaudeHelperDefinitions, AgentDirectoryInstaller, MARKER, claudeUserAgentsDirectory,
+  matchesRenderedDefinition, parseArgs, run });

@@ -12,14 +12,15 @@
 // launchers that pass them use the pinned task-session path instead.
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { ROLES } = require('./toolkit-claude-helper-spec.cjs');
+const { samePath } = require('./toolkit-canonical-path.cjs');
 
+// Loaded only when a helper launch is decided, so other hook decisions stay light.
+const helperAgents = () => require('./toolkit-claude-helper-agents.cjs');
 const HELPER_ROLES = Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([role, spec]) => [spec.name, role])));
 const ROUTE_FIELDS = Object.freeze(['model', 'effort', 'reasoning_effort', 'provider', 'model_provider']);
 const TRANSITION_FIELDS = Object.freeze(['resume', 'fork', 'fork_context', 'fork_turns', 'session_id', 'sessionID']);
-const REGENERATE = 'node repo/scripts/toolkit-claude-helper-agents.cjs --stack <stack> --write';
 
 function deny(reason) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: ${reason}` } };
@@ -30,16 +31,20 @@ class ClaudeNamedHelperPolicy {
   constructor({ environment = process.env, toolkitRoot = path.resolve(__dirname, '..', '..'), matchesRenderedDefinition } = {}) {
     this.#environment = environment || {};
     this.#toolkitRoot = toolkitRoot;
-    this.#matches = matchesRenderedDefinition || ((...args) => require('./toolkit-claude-helper-agents.cjs').matchesRenderedDefinition(...args));
+    this.#matches = matchesRenderedDefinition || ((...args) => helperAgents().matchesRenderedDefinition(...args));
   }
 
   #agentDirectories(input, governance) {
     const dirs = [];
     if (typeof input.cwd === 'string' && input.cwd) dirs.push(path.join(path.resolve(input.cwd), '.claude', 'agents'));
     if (governance.root) dirs.push(path.join(governance.root, '.claude', 'agents'));
-    const configDir = this.#environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-    dirs.push(path.join(configDir, 'agents'));
+    dirs.push(helperAgents().claudeUserAgentsDirectory(this.#environment));
     return [...new Set(dirs)];
+  }
+
+  // The command a person runs to install the helpers, with this checkout's absolute root.
+  #generatorCommand() {
+    return `node "${path.resolve(this.#toolkitRoot).replace(/\\/g, '/')}/repo/scripts/toolkit-claude-helper-agents.cjs" --stack <stack> --write`;
   }
 
   // The definition file Claude Code would load for this helper name, or null.
@@ -71,13 +76,12 @@ class ClaudeNamedHelperPolicy {
     if (transition.length) return deny(`helper launches cannot resume or fork a session (${transition.join(', ')}); launch a fresh helper.`);
     if (this.#environment.CLAUDE_CODE_SUBAGENT_MODEL) return deny('CLAUDE_CODE_SUBAGENT_MODEL is set and would override the helper model; unset it to use Toolkit helpers.');
     const loaded = this.#loadedDefinition(requested, input, governance);
-    if (!loaded) return deny(`no ${requested} definition is installed. Install it with ${REGENERATE}.`);
-    const check = this.#matches(role, loaded.text, this.#toolkitRoot);
-    if (!check.matches) {
-      const command = check.stack ? REGENERATE.replace('<stack>', check.stack) : REGENERATE;
-      return deny(`the installed ${requested} definition (${loaded.file}) does not match the one rendered from the selected stack. Regenerate it with ${command}.`);
+    if (!loaded) return deny(`no ${requested} definition is installed. Install the Toolkit helpers with ${this.#generatorCommand()}.`);
+    if (this.#matches(role, loaded.text, this.#toolkitRoot).matches) return {};
+    if (samePath(path.dirname(loaded.file), helperAgents().claudeUserAgentsDirectory(this.#environment))) {
+      return deny(`the installed ${requested} definition (${loaded.file}) does not match the one rendered from the selected stack. Run \`setup toolkit\` to refresh it.`);
     }
-    return {};
+    return deny(`the project copy ${loaded.file} does not match the one rendered from the selected stack. Toolkit does not change project files; update or remove it.`);
   }
 }
 

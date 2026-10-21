@@ -51,11 +51,11 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   assert.equal(profile.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   // The recommended root-only answer also writes only the Toolkit-owned depth key into the temporary Claude settings.
-  assert.match(result.stdout, /One-layer subagent setting this run: changed; Claude Code allows one layer/);
+  assert.match(result.stdout, /One-layer subagent setting this run: changed; Your Claude Code user settings set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 \(set by Toolkit\)\. In Claude Code 2\.1\.217 or later this allows one layer/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8')),
     { env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' } });
   // Root-only with hook activation verified this run: both protections are named.
-  assert.match(result.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 and the installed Toolkit hook, verified this run\)\./);
+  assert.match(result.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1, read by Claude Code 2\.1\.217 or later, and the installed Toolkit hook, verified this run\)\./);
 });
 
 test('broader-native execution reports Claude Code\'s own limit, not a one-layer cap', () => {
@@ -73,7 +73,7 @@ test('broader-native execution reports Claude Code\'s own limit, not a one-layer
   assert.equal(broader.status, 0, broader.stderr || broader.stdout);
   assert.match(broader.stdout, /Selected topology: broader-native/);
   assert.doesNotMatch(broader.stdout, /Normal folders: one layer/);
-  assert.match(broader.stdout, /Normal folders: Claude Code's own limit; Toolkit does not refuse nested launches\. Claude Code's own depth setting is not set; its default allows three layers\./);
+  assert.match(broader.stdout, /Normal folders: Claude Code's own limit; Toolkit does not refuse nested launches\. CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies\./);
   assert.equal(fs.existsSync(settings), false, 'Toolkit-created settings file is removed');
 });
 
@@ -124,7 +124,10 @@ test('keep current resolves a stored direct profile to root-only without probing
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
-  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
+  // Keep leaves the depth setting alone, so the root-only fallback has no native one-layer setting: the install check says so.
+  assert.equal(kept.status, 24, kept.stderr || kept.stdout);
+  assert.match(kept.stdout, /Install check: action required\n/);
+  assert.match(kept.stdout, /Claude Code depth setting: Root-only is selected, but CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings\./);
   assert.match(kept.stdout, /\*\*Selected:\*\* C - Keep current/);
   assert.match(kept.stdout, /Selected topology: root-only/);
   assert.equal(sessions(fake).some((entry) => entry.args.includes('--print')), false);
@@ -150,7 +153,7 @@ test('a kept root-only profile becomes the safe root-only policy once current en
   assert.equal(downgraded.status, 0, downgraded.stderr || downgraded.stdout);
   assert.match(downgraded.stdout, /safe-root-only/i);
   // Hook activation unverified this run: the native setting is named, the hook only conditionally.
-  assert.match(downgraded.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1\)\. The Toolkit hook also refuses nested launches once the plugin is installed and active\./);
+  assert.match(downgraded.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1, read by Claude Code 2\.1\.217 or later\)\. The Toolkit hook also refuses nested launches once the plugin is installed and active\./);
   assert.doesNotMatch(downgraded.stdout, /verified this run/);
   const read = control.readProfile('claude-code', { root: profileRootOf(root) });
   assert.equal(read.supported, false);

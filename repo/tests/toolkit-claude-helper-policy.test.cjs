@@ -1,4 +1,5 @@
 'use strict';
+require('./toolkit-test-temp-guard.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -161,7 +162,7 @@ test('a helper definition that does not byte-match the selected-stack rendering 
   fs.writeFileSync(file, original.replace('effort: xhigh', 'effort: low'));
   const drifted = f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } });
   assert.match(reason(drifted), /does not match the one rendered from the selected stack/);
-  assert.match(reason(drifted), /toolkit-claude-helper-agents\.cjs --stack owner-claude --write/);
+  assert.match(reason(drifted), /\) does not match the one rendered from the selected stack\. Run `setup toolkit` to refresh it\.$/);
   fs.writeFileSync(file, original.replace(/explicitly selected stack `owner-claude`/, 'explicitly selected stack `owner-unknown`'));
   assert.ok(denied(f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })), 'unknown stack');
   fs.writeFileSync(file, original);
@@ -169,9 +170,27 @@ test('a helper definition that does not byte-match the selected-stack rendering 
   // Project agents outrank user agents, so a differing project copy is what Claude Code would load.
   fs.mkdirSync(path.join(f.repo, '.claude', 'agents'), { recursive: true });
   fs.writeFileSync(path.join(f.repo, '.claude', 'agents', 'toolkit-g0-helper.md'), original.replace('maxTurns: 12', 'maxTurns: 99'));
-  assert.match(reason(f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })), /\.claude[\\/]agents[\\/]toolkit-g0-helper\.md\) does not match/);
+  assert.match(reason(f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })), /^Toolkit: the project copy .*[\\/]\.claude[\\/]agents[\\/]toolkit-g0-helper\.md does not match the one rendered from the selected stack\. Toolkit does not change project files; update or remove it\.$/);
   const missing = fixture(t, { install: false });
   assert.match(reason(missing.decide({ tool_input: { subagent_type: 'toolkit-g1-helper' } })), /no toolkit-g1-helper definition is installed/);
+});
+
+test('refusals give one plain next step: the generator by absolute path when nothing is installed, setup toolkit for a stale user copy, and no repo-relative command', t => {
+  const generator = `node "${ROOT.replace(/\\/g, '/')}/repo/scripts/toolkit-claude-helper-agents.cjs" --stack <stack> --write`;
+  const missing = fixture(t, { install: false });
+  assert.equal(reason(missing.decide({ tool_input: { subagent_type: 'toolkit-g1-helper' } })),
+    `Toolkit: no toolkit-g1-helper definition is installed. Install the Toolkit helpers with ${generator}.`);
+  const stale = fixture(t);
+  const userFile = path.join(stale.configDir, 'agents', 'toolkit-g0-helper.md');
+  fs.writeFileSync(userFile, fs.readFileSync(userFile, 'utf8').replace('effort: xhigh', 'effort: low'));
+  assert.equal(reason(stale.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })),
+    `Toolkit: the installed toolkit-g0-helper definition (${userFile}) does not match the one rendered from the selected stack. Run \`setup toolkit\` to refresh it.`);
+  const project = fixture(t);
+  fs.mkdirSync(path.join(project.repo, '.claude', 'agents'), { recursive: true });
+  const projectFile = path.join(project.repo, '.claude', 'agents', 'toolkit-g0-helper.md');
+  fs.writeFileSync(projectFile, fs.readFileSync(path.join(project.configDir, 'agents', 'toolkit-g0-helper.md'), 'utf8').replace('maxTurns: 12', 'maxTurns: 99'));
+  assert.equal(reason(project.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })),
+    `Toolkit: the project copy ${projectFile} does not match the one rendered from the selected stack. Toolkit does not change project files; update or remove it.`);
 });
 
 test('the named-helpers topology is a supported profile that older Toolkit hooks read as deny-all', t => {

@@ -11,6 +11,8 @@ const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
+const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
+const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 // Loaded only on the OpenCode project-install path, so setup's protocol probe and
 // older managed checkouts do not depend on the OpenCode payload module.
 function installOpenCodeProjectPlugin(options) { return require('./toolkit-opencode-project-plugin.cjs').installProjectPlugin(options); }
@@ -23,6 +25,8 @@ const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app
 const SUPPORTED_TARGETS = ['opencode'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
+// Setup finished its steps, but the install check found something a person must fix.
+const SETUP_ACTION_REQUIRED = 24;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v2';
@@ -1036,7 +1040,7 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       }
       if (status === SETUP_PAUSED_FOR_QUESTION_BANK) {
         process.stderr.write('SETUP PAUSED: Managed setup displayed the complete question bank and requires additional approved answers.\n');
-      } else if (status !== 0) {
+      } else if (status !== 0 && status !== SETUP_ACTION_REQUIRED) {
         return reject(new Error(managedFailureMessage('child-failure')));
       }
       resolve(status);
@@ -1758,9 +1762,9 @@ function claudeSubagentDepthChoice(options) {
 }
 
 function claudeSubagentDepthOutcome(depth) {
-  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return 'Claude Code allows one layer: the main session may start subagents; subagents never start another (set by Toolkit).';
-  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `You set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=${depth.value} yourself; Toolkit leaves it unchanged.`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return 'Claude Code\'s own depth setting is not set; its default allows three layers.';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return 'Your Claude Code user settings set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 (set by Toolkit). In Claude Code 2.1.217 or later this allows one layer: the main session may start subagents; subagents never start another. Project, local or managed Claude settings can override it in a folder.';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `You set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=${depth.value} in your Claude Code user settings yourself; Toolkit leaves it unchanged.`;
+  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code\'s own default applies.';
   if (depth?.state === SUBAGENT_DEPTH_STATES.UNREADABLE) return `${depth.detail} Toolkit will not change it.`;
   return 'The Claude Code subagent setting could not be verified; setup will not claim a limit is active.';
 }
@@ -1787,8 +1791,8 @@ function normalFolderOutcomeSummary(delegation, depth) {
   const pending = 'The Toolkit hook also refuses nested launches once the plugin is installed and active.';
   if (nativeOneLayer) {
     return hookVerified
-      ? `${oneLayer} (Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 and the installed Toolkit hook, verified this run).`
-      : `${oneLayer} (Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1). ${pending}`;
+      ? `${oneLayer} (the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1, read by Claude Code 2.1.217 or later, and the installed Toolkit hook, verified this run).`
+      : `${oneLayer} (the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1, read by Claude Code 2.1.217 or later). ${pending}`;
   }
   return hookVerified
     ? `one layer, refused at the installed Toolkit hook (verified this run). ${native}.`
@@ -1986,16 +1990,16 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit G0/G1 leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets Claude Code\'s own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed V3 workers use only the registry-pinned launcher.',
+      whatThisControls: 'How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit G0/G1 leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in your Claude Code user settings (read by Claude Code 2.1.217 or later; project, local or managed settings can override it in a folder) and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed V3 workers use only the registry-pinned launcher.',
       choices: [
-        wizardChoice('root-only', 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.', 'In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds every folder to one layer of subagents; a value you set yourself is kept as it is.'),
+        wizardChoice('root-only', 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.', 'In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds Claude Code 2.1.217 or later to one layer of subagents unless project, local or managed Claude settings override it in a folder; a value you set yourself is kept as it is.'),
         wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code\'s own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${topologyCurrent} Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.`),
       ],
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
         outcome: 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.',
-        reason: 'Root-only is the verified default: Claude Code enforces the one-layer limit itself outside Toolkit repos, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the registry-pinned V3 launcher.',
+        reason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the registry-pinned V3 launcher.',
       },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
@@ -3339,7 +3343,7 @@ function verifyCurrentClaudeNativeEnforcement(args) {
   }
   try {
     const summary = parseJsonFromOutput(result.stdout);
-    return { ...metadata, ...summary, status: summary.enforcement_verified === true ? 'already fresh' : 'needs-review' };
+    return { ...metadata, ...summary, status: 'already fresh' };
   } catch (error) {
     return { ...metadata, status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
   }
@@ -3431,7 +3435,7 @@ function runClaudeNativePluginSetup(args) {
     timeout: budgets.verify
   });
   return {
-    status: 'refreshed',
+    status: summary.current === true ? 'installed this run' : 'install not verified',
     manifest_path: manifestPath,
     expected_version: expectedVersion,
     manifest_version: summary.version || expectedVersion,
@@ -3691,7 +3695,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, audit, questionBank, validationResults }) {
+function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const targets = audit?.targets || {};
@@ -3834,6 +3838,43 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log('');
   console.log('## Validation');
   printValidationSummary(validationResults);
+  if (installCheck) printInstallCheck(installCheck);
+}
+
+const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'restart required', 'action-required': 'action required' });
+
+function printInstallCheck(result) {
+  console.log('');
+  console.log('## Install check');
+  console.log(`Install check: ${INSTALL_CHECK_WORDS[result.status]}`);
+  for (const check of result.checks) console.log(`${check.label}: ${check.summary}`);
+  if (result.actions.length) {
+    console.log(result.status === INSTALL_CHECK_STATUS.ACTION ? 'What to do:' : 'Next step:');
+    result.actions.forEach((action, index) => console.log(`${index + 1}. ${action}`));
+  }
+}
+
+// The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
+// helper definitions, and returns the result the summary and exit code report.
+function runClaudeInstallCheck(args, nativeCache, delegation) {
+  const check = new ToolkitInstallHealthCheck({
+    toolkitRoot: args.repoRoot,
+    expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
+    hubPath: path.join(os.homedir(), '.ai-agent-toolkit', 'current'),
+    helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
+    depthSetting: new ClaudeSubagentDepthSetting(),
+  });
+  const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
+  return check.run({
+    plugin: {
+      installed,
+      current: installed && nativeCache.current === true,
+      running_copy: nativeCache.source_path || '',
+      updated_this_run: nativeCache.updated_this_run === true,
+    },
+    topology: delegation.topology || null,
+    projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
+  });
 }
 
 // One approved setup execution: collects current state and answers, verifies the
@@ -3875,9 +3916,10 @@ class ToolkitSetupExecution {
     const audit = runBridgeAudit(args);
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
+    const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, audit,
-      questionBank: this.#questionBank, validationResults: this.#validationResults });
-    return 0;
+      questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
+    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 
@@ -3946,6 +3988,7 @@ module.exports = {
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
   SETUP_PAUSED_FOR_QUESTION_BANK,
+  SETUP_ACTION_REQUIRED,
   QUESTION_BANK_BEGIN,
   QUESTION_BANK_COMPLETE,
   MANAGED_QUESTION_BANK_PROTOCOL,

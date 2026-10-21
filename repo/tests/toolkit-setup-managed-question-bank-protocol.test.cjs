@@ -243,6 +243,15 @@ function realManagedFixture() {
   return { root, origin, managedPath };
 }
 
+// These synthetic homes never install the Claude Code plugin ("instructions"), so the managed setup
+// finishes every step and its install check truthfully asks for the plugin (exit 24); the
+// delegating parent passes that result through instead of calling it a protocol failure.
+function assertCompletedWithoutClaudePlugin(status, result) {
+  assert.equal(status, core.SETUP_ACTION_REQUIRED, result.stderr || result.stdout);
+  assert.match(result.stdout, /## Install check\nInstall check: action required\nClaude Code plugin: Toolkit \S+ is not installed and current in Claude Code\./);
+  assert.doesNotMatch(result.stderr, /Managed setup failed/);
+}
+
 function runRealManaged(fixture, extraArgs = [], input, options = {}) {
   return run([
     '--execute', '--profile', 'auto-main', '--host', 'claude-code',
@@ -313,7 +322,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
     '--default-update-report-retention-days', '--enable-refresh-pr-auto-merge', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
-  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assertCompletedWithoutClaudePlugin(result.code, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
@@ -384,7 +393,7 @@ test('real complete piped answers show one bank before synthetic-home setup muta
   const fixture = realManagedFixture();
   const input = ['default', 'enable', 'enable', 'default', 'enable', 'root-only', 'instructions', ''].join('\n');
   const result = runRealManaged(fixture, [], input);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assertCompletedWithoutClaudePlugin(result.status, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
@@ -397,7 +406,7 @@ test('real explicit yes-recommended still shows one bank before synthetic-home s
     '--yes-recommended', '--claude-plugin-behavior', 'instructions',
     '--claude-topology', 'root-only',
   ]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assertCompletedWithoutClaudePlugin(result.status, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.match(result.stdout, /--yes-recommended selected/);
