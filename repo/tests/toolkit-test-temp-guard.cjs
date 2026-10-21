@@ -1,11 +1,15 @@
 'use strict';
 
-// Temp isolation for test files that run the Toolkit bridge or setup. Require it before
-// anything else reads the temp folder. It points this test process, and every child that
-// inherits its environment, at a private temp folder, and fails the test file if the real
-// Toolkit update-report folder gains files while the file runs. Reports written there are
-// real: action-required ones open on the owner's screen. The guard never deletes anything
-// in the real folder.
+// Temp and Notepad isolation for test files that run the Toolkit bridge or setup. Require it
+// before anything else reads the temp folder or loads the bridge. It points this test process,
+// and every child that inherits its environment, at a private temp folder, and fails the test
+// file if the real Toolkit update-report folder gains files while the file runs. Reports written
+// there are real: action-required ones open on the owner's screen. The guard never deletes
+// anything in the real folder.
+//
+// It also loads toolkit-test-notepad-preload.cjs here and, through NODE_OPTIONS, in the same
+// children: the bridge's Notepad open of an action-required report gets an inert stand-in, and
+// the test file fails if any other Notepad launch reached the process layer (none opens).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -13,6 +17,7 @@ const path = require('node:path');
 const { after } = require('node:test');
 
 const REAL_REPORT_DIR = path.join(os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
+const NOTEPAD_PRELOAD = path.join(__dirname, 'toolkit-test-notepad-preload.cjs');
 
 function realReportNames() {
   try { return new Set(fs.readdirSync(REAL_REPORT_DIR)); }
@@ -22,18 +27,48 @@ function realReportNames() {
   }
 }
 
+// NODE_OPTIONS splits on spaces outside double quotes and reads a backslash inside them as an escape.
+function preloadOption(file) {
+  const portable = process.platform === 'win32' ? file.replace(/\\/g, '/') : file;
+  return `--require="${portable.replace(/["\\]/g, '\\$&')}"`;
+}
+
 const before = realReportNames();
 const privateTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-test-temp-'));
 for (const name of ['TEMP', 'TMP', 'TMPDIR']) process.env[name] = privateTemp;
 
+const notepadRecord = path.join(privateTemp, 'notepad-launches.jsonl');
+process.env.TOOLKIT_TEST_NOTEPAD_RECORD = notepadRecord;
+const option = preloadOption(NOTEPAD_PRELOAD);
+if (!String(process.env.NODE_OPTIONS || '').includes(option)) {
+  process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, option].filter(Boolean).join(' ');
+}
+require(NOTEPAD_PRELOAD);
+
+function notepadLaunches() {
+  try { return fs.readFileSync(notepadRecord, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)); }
+  catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 after(() => {
   const added = [...realReportNames()].filter(name => !before.has(name));
+  const launches = notepadLaunches();
   fs.rmSync(privateTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  const problems = [];
   if (added.length) {
-    throw new Error(`${added.length} Toolkit update report(s) appeared in the real report folder ${REAL_REPORT_DIR} while this test file ran `
+    problems.push(`${added.length} Toolkit update report(s) appeared in the real report folder ${REAL_REPORT_DIR} while this test file ran `
       + `(${added.slice(0, 3).join(', ')}${added.length > 3 ? ', ...' : ''}). A test ran the bridge or setup with the real temp folder, `
       + 'or a real Toolkit session wrote a report at the same time. Nothing was deleted.');
   }
+  if (launches.length) {
+    problems.push(`${launches.length} Notepad launch(es) reached the process layer while this test file ran and were refused, so no window opened `
+      + `(first: ${launches[0].command.join(' ')}). Only the bridge's spawn('notepad.exe', ...) report open has a test stand-in; `
+      + 'route the open through it or extend toolkit-test-notepad-preload.cjs.');
+  }
+  if (problems.length) throw new Error(problems.join(' '));
 });
 
 module.exports = Object.freeze({ REAL_REPORT_DIR, privateTemp });

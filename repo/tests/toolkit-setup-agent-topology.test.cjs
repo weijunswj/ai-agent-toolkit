@@ -1,4 +1,5 @@
 'use strict';
+require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update reports appear
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
