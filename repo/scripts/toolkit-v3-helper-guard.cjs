@@ -14,8 +14,6 @@ const HOST_ENTRIES = Object.freeze({
   codex_spawn_agent: Object.freeze({ host: 'codex', api_generation: 'PreToolUse', entry: 'spawn_agent' }),
   codex_agent_alias: Object.freeze({ host: 'codex', api_generation: 'PreToolUse', entry: 'Agent' }),
   claude_parent_agent: Object.freeze({ host: 'claude-code', api_generation: 'PreToolUse', entry: 'Agent' }),
-  opencode_v1_task: Object.freeze({ host: 'opencode', api_generation: 'V1', entry: 'tool.execute.before/task' }),
-  opencode_v2_subagent: Object.freeze({ host: 'opencode', api_generation: 'V2', entry: 'ctx.tool.hook(execute.before)/subagent' }),
 });
 
 class GuardError extends Error {

@@ -50,7 +50,7 @@ For normal human setup, keep the journey short:
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
 10. Answer the complete setup wizard before any preference, target, or Codex configuration write. One semantic model drives chat, terminal, piped, flag, plan, JSON, summary, and execution modes, and rejects unexpected extra non-empty piped answers for every host before mutation. The normal Codex capacity recommendation is root agent only. One-helper and custom values are manual memory backstops, never a strict launch profile or launch permission. Effective runtime details, exact keys, root-inclusive capacity arithmetic, backups, and restore commands appear only in a technical proposal. Structurally complete user-owned controls already matching the selected outcome are preserved byte-for-byte without `apply`, editor, backup, replacement, or Toolkit markers; different replaceable controls require one `apply` confirmation. Isolated malformed recognised Toolkit marker material may receive the same explicit proposal/`apply` transaction only when one regular active config, valid UTF-8/TOML, one effective explicit table, canonical Toolkit assignments, exact affected ranges, and no user or structural ambiguity are proven. Marker-only repair preserves compatible user-owned values; unknown/obsolete markers, mixed families, interleaved content, unsupported tables/topology, and stale proposals remain unchanged and fail closed. Unsupported MultiAgentV2 child tables, explicit false or non-boolean V2 enablement, and unknown or unsupported detection make no mutation. Current host paths without verified admission, medium effort, and child-only non-fast enforcement stay root-only. Codex Security never raises normal capacity automatically or relabels a sequential review as official Deep Scan.
 11. The current wizard groups `Updates and reports`, `Computer performance`, and `Other coding apps`. It reports dynamic totals, shows one quick index, numbers resolved questions contiguously, and letters choices deterministically. Non-interactive replies prefix `all recommended` or changed-only input such as `1.2=B, 3.1=D` with the displayed privacy-safe bank reference; this prevents reinterpretation against another host, order, target set, recommendation, or choice bank. A live terminal offers one same-process concise-command stage, with Enter falling back to one-at-a-time questions and invalid input re-prompted. Empty or partial input never means all recommended. The wizard no longer asks ordinary users to select helper counts or capacity. Root-only remains available through topology or explicit Codex compatibility controls; saved Codex values are preserved as restrictive backstops. Technical runtime, raw setting, backup, and restore details appear only when an explicit advanced repair choice requires a proposal.
-12. Add an OpenCode row only when the app is detected or already enabled; it remains opt-in and host-local. Antigravity has no bridge target: use the explicit portable skills copy in [Antigravity 2](#antigravity-2).
+12. The bridge writes into no other app. Antigravity uses the explicit portable skills copy in [Antigravity 2](#antigravity-2).
 13. Meaningful update reports stay enabled by default. Action-required reports open automatically, successful update/refresh/repair/sync reports remain closed, true no-ops create no report, and legacy all-report auto-open state migrates to this failure-only behavior. Toolkit-managed reports/logs older than 7 days are cleaned up best-effort from the Toolkit report/log directory.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
@@ -59,13 +59,13 @@ Codex and Claude Code update Toolkit through their own native plugin systems:
 - Claude Code updates Toolkit through the Claude Code native plugin system using [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json).
 - Codex does not install or update Claude Code.
 - Claude Code does not install or update Codex.
-- OpenCode is an opt-in local bridge target, not a native plugin update target; Antigravity receives portable skills through an explicit copy only.
+- OpenCode is not a Toolkit bridge target; copy skill folders by hand as described below. Antigravity receives portable skills through an explicit copy only.
 
 Detailed plugin verification and bridge command mechanics live in [Toolkit Local Bridge](TOOLKIT-LOCAL-BRIDGE.md).
 
 ### Manual Skill-Folder Copying
 
-Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder into one supported location. It is separate from native plugin setup and bridge target setup.
+Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder into one supported location. It is separate from native plugin setup.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
 2. Copy whole skill folders, not just `SKILL.md`.
@@ -115,7 +115,7 @@ Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Cod
 
 ### OpenCode
 
-Manual whole-skill-folder copying is for installing a specific Toolkit skill. For the opt-in OpenCode bridge target, use [Use The Toolkit Local Bridge](#use-the-toolkit-local-bridge).
+Manual whole-skill-folder copying is the way to install a Toolkit skill for OpenCode; the Toolkit bridge has no OpenCode target.
 
 **Choose any one supported OpenCode skill-folder location:**
 
@@ -132,7 +132,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity 2
 
-Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin, bridge sync target or automatic update; existing `ag2` bridge state is retained only for legacy read, disable and rollback.
+Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin, bridge sync target or automatic update.
 
 Preview the copy into one workspace first:
 
@@ -146,7 +146,7 @@ After explicit approval of that exact write:
 node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
-The copy writes only skill files under `<workspace>/.agents/skills/`. It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync. To stop using retained legacy bridge state, run `node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write`.
+The copy writes only skill files under `<workspace>/.agents/skills/`. It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync.
 
 **Use the portable workspace location for Toolkit skills:**
 
@@ -197,17 +197,11 @@ Enable opt-in repo-backed auto-update from the managed clean Toolkit checkout:
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
 ```
 
-After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the managed checkout as source of truth: they validate the repo and remote, refuse dirty worktrees without stashing or switching, switch the clean managed checkout back to the configured branch if it is on another one, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then sync enabled bridge targets from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:
+After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the managed checkout as source of truth: they validate the repo and remote, refuse dirty worktrees without stashing or switching, switch the clean managed checkout back to the configured branch if it is on another one, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then record the updated hub state from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:
 
 ```powershell
 npm run validate:all
 node --test repo/tests/toolkit-local-bridge.test.cjs
-```
-
-Disable a target without deleting files:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
 
 Disable auto-sync:
@@ -250,10 +244,9 @@ Templates are canonical material. Review them before copying into a consumer rep
 - [n8n agent rules](../../skills/n8n-safety-router/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
 - [n8n local setup](../../skills/n8n-environment-setup/references/n8n/local-setup.md), [production Cloudflare Tunnel self-hosting](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md), and [Hostinger Coolify VPS n8n](../../skills/n8n-environment-setup/references/n8n/hostinger-vps.md) contain the full local dev, local/CGNAT production, and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.
-- [n8n AI-agent platform references](../../skills/n8n-environment-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official n8n MCP setup.
+- n8n work with AI agents uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.
 - [n8n local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/) contain the localhost/ngrok dev Docker Compose, placeholder environment, launcher, and menu files.
 - [n8n production Cloudflare stack templates](../../skills/n8n-environment-setup/templates/.n8n-production-cloudflare/) contain the separate production Docker Compose, placeholder environment, launcher, and menu files for local/CGNAT self-hosting through Cloudflare Tunnel.
-- [n8n MCP config templates](../../skills/n8n-environment-setup/templates/mcp-configs/) contain official instance-level MCP config examples for users intentionally enabling n8n MCP.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [CI/CD templates](../../skills/secure-ci-cd/templates/cicd/) contain CI/CD installer prompts and status templates.
@@ -268,7 +261,6 @@ n8n helper templates may write scoped local outputs after they are copied into a
 
 Use:
 
-- [Codex reference](../../skills/n8n-environment-setup/references/ai-agent-platforms/codex.md)
 - [Codex managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Codex n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
@@ -278,13 +270,12 @@ Use:
 - [Production Cloudflare stack templates](../../skills/n8n-environment-setup/templates/.n8n-production-cloudflare/)
 - [Local n8n setup skill](../../skills/n8n-environment-setup/)
 
-Keep live n8n tokens in user environment variables, not repo files. Codex [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.
+Keep live n8n tokens in user environment variables, not repo files. Codex n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API; that setup is secondary and not part of the beginner local setup path.
 
 ## Claude Code Setup
 
 Use:
 
-- [Claude Code reference](../../skills/n8n-environment-setup/references/ai-agent-platforms/claude-code.md)
 - [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [Claude Code shim template](../../skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
@@ -294,13 +285,12 @@ Use:
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
 - [Production Cloudflare stack templates](../../skills/n8n-environment-setup/templates/.n8n-production-cloudflare/)
 
-Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.
+Claude Code n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API; that setup is secondary and not part of the beginner local setup path.
 
 ## OpenCode Setup
 
 Use:
 
-- [OpenCode reference](../../skills/n8n-environment-setup/references/ai-agent-platforms/opencode.md)
 - [OpenCode managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional OpenCode n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
@@ -309,13 +299,12 @@ Use:
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
 - [Production Cloudflare stack templates](../../skills/n8n-environment-setup/templates/.n8n-production-cloudflare/)
 
-OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
+OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent and not part of the beginner local setup path.
 
 ## Antigravity 2 Setup
 
 Use:
 
-- [Antigravity 2 reference](../../skills/n8n-environment-setup/references/ai-agent-platforms/antigravity.md)
 - [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [Antigravity 2 GEMINI shim template](../../skills/repository-agent-rules/repo-local/GEMINI.shim.template.md)
 - [Antigravity 2 bootstrap template](../../skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md)
@@ -326,7 +315,7 @@ Use:
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
 - [Production Cloudflare stack templates](../../skills/n8n-environment-setup/templates/.n8n-production-cloudflare/)
 
-Antigravity 2 [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
+Antigravity 2 [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent and not part of the beginner local setup path.
 
 ## ChatGPT Web And Claude Web
 
@@ -340,7 +329,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are packaged under [skills/n8n-environment-setup/](../../skills/n8n-environment-setup/) as secondary setup material. They are not a repo-wide MCP surface.
+n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API, with setup guidance in [skills/n8n-environment-setup/](../../skills/n8n-environment-setup/). This is not a repo-wide MCP surface.
 
 ## Optional Design Tool
 

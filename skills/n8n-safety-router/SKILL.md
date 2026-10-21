@@ -47,7 +47,7 @@ If Claude Code or Antigravity shim files are missing, stale, or unmanaged, use `
 ## Boundaries
 
 - This skill owns the full n8n operating ruleset.
-- `n8n-environment-setup` owns installation, environment setup, hosting, tunnels, [official n8n Skills](https://github.com/n8n-io/skills) install notes, official instance-level MCP config, and platform setup notes.
+- `n8n-environment-setup` owns installation, environment setup, hosting, tunnels, [official n8n Skills](https://github.com/n8n-io/skills) install notes, and platform setup notes.
 - `n8n-workflow-transport` owns offline sanitisation, validation, comparison, manual import/export preparation, and safe workflow-file transport preparation.
 - Workflow JSON examples under `repo/tests/fixtures/n8n-workflows/` are test-only evidence, not selectable products or templates for installation.
 

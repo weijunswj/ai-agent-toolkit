@@ -11,7 +11,7 @@ This repo keeps reusable AI-agent material in a direct canonical layout:
 - [repo/](repo/) contains maintenance docs, scripts, tests, provenance, and validation policy.
 - [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain platform-specific native plugin metadata.
 
-Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside [skills/n8n-environment-setup/](skills/n8n-environment-setup/) as secondary n8n setup material.
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API, with setup guidance in [skills/n8n-environment-setup/](skills/n8n-environment-setup/).
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ For normal human setup, keep the journey short:
 7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. Add OpenCode bridge targets only when you ask for that setup and approve the writes. Antigravity receives portable skills only, copied into a workspace by an explicit approved command; there is no native Antigravity plugin or sync.
+10. The bridge writes into no other app; OpenCode is not a Toolkit bridge target. Antigravity receives portable skills only, copied into a workspace by an explicit approved command; there is no native Antigravity plugin or sync.
 
 More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 
@@ -45,7 +45,7 @@ More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit
 | Term | What it means |
 |---|---|
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
-| MCP | Not a repo-wide shipped/generated surface in this repo right now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references live inside n8n Environment Setup as secondary material. |
+| MCP | Not a repo-wide shipped/generated surface in this repo right now. n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API; n8n Environment Setup holds the setup guidance. |
 | Contract | A schema, policy, fixture, template, or reviewed source input under [repo/contracts/](repo/contracts/). |
 | Native plugin metadata | Platform-specific `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
 
@@ -68,9 +68,9 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 |---|---|
 | [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
 | [Controller Bootstrap](skills/controller-bootstrap/) | Explicitly re-enter an already-assigned Toolkit repository controller from trusted CURRENT and exact governance-source evidence; grants no role, authority, or host permission. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity portable skills copying, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, Antigravity portable skills copying, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, official Skills, and instance-level MCP references. |
+| [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, and official n8n Skills setup. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
 | [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD with approval gates, GitHub Actions guidance, and status templates. |
 | [Skill Product Review](skills/skill-product-review/) | Audit third-party agent products and maintain approved source-traceable skills, provenance, templates, and audits. |
@@ -109,7 +109,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under [skills/n8n-environment-setup/](skills/n8n-environment-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
+n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API, with setup guidance in [skills/n8n-environment-setup/](skills/n8n-environment-setup/). This is not a repo-wide MCP surface.
 
 ## Folder Map
 
@@ -156,7 +156,7 @@ git diff --check
 ## Source-of-Truth Contract
 
 `skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
-- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md`, `repo/ARCHITECTURE.md`, and the version-bound current registry: `repo/contracts/controller-kernel/stack-registry-v3.json` for V3, or immutable v2 for historical admissions. The skill is not a policy copy, role assignment, capability, or host permission.
+- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md` and the current registry `repo/contracts/controller-kernel/stack-registry-v3.json`. The skill is not a policy copy, role assignment, capability, or host permission.
 - `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
 - `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
@@ -169,7 +169,7 @@ git diff --check
   - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. n8n work uses the official n8n Skills and the n8n API; `skills/n8n-environment-setup/` holds the setup guidance.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
-- Fresh coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2. The canonical fresh profiles are owner-gpt, owner-claude and owner-mixed-claude-gpt; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one, one and two members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Historical controller-decision v1, IR v1/v2, adapter v1, CURRENT v1 and registry aliases retain their pinned meanings. Existing receipt/CURRENT and programme-state-v5 remain canonical. Source progress does not establish native or installed qualification.
+- Coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2; no other version of these contracts is read. The canonical profiles are owner-gpt and owner-claude; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one and one members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Source progress does not establish native or installed qualification.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

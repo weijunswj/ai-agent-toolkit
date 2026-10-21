@@ -151,4 +151,3 @@ module.exports = {
   SCHEMA, CONTROL_VERSION, TOPOLOGIES, CAPACITY_MODES, DEFAULT_WORKER_COST, MAX_QUEUE, EMERGENCY_WORKER_CEILING,
   profilePath, readProfile, configureProfile, invalidateProfile, validActivationProof,
 };
-

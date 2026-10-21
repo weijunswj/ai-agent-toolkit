@@ -252,20 +252,15 @@ function expectedSourceTemplates(executionPrompt) {
   return {
     [manualTemplatePaths.agents]: fencedTemplate({
       title: 'AGENTS.template.md AI coding agent rules',
-      audience: 'Codex or OpenCode',
+      audience: 'Codex',
       destinationDisplay: '`AGENTS.md`',
       activeNameText: 'it is not named `AGENTS.md`',
-      installSubject: 'generic Codex/OpenCode rules',
+      installSubject: 'generic Codex rules',
       examples: [
         {
           heading: 'Codex global rules example',
           path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
           commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
-        },
-        {
-          heading: 'OpenCode global rules example',
-          path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
-          commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
         }
       ],
       payload: executionPrompt,

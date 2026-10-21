@@ -1153,7 +1153,7 @@
             "reviewers": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 1,
+              "maxItems": 3,
               "items": {
                 "$ref": "#/$defs/reviewer"
               }

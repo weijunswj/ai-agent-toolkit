@@ -11,36 +11,9 @@ truthful PR-review reconciler contract for a repository-scoped task. Ordinary
 GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
 coding agent, and final Web/controller work remains outside this skill.
 
-## Executable-proof human surface
+## Runtime status
 
-For the human-surface executable proof, use only the production `humanSurfaceV2`
-facade from
-`repo/scripts/toolkit-github-program-state-v5.cjs`. It has exactly four
-operations: `readComplete`, `render`, `extendHistory`, and `planMigration`.
-The facade owns complete-read
-validation, whole-body marker classification, canonical and relationship
-validation, source-bound authority, deterministic public serialization,
-additive history, provider-observation comparison, and legacy migration
-planning. A valid `extendHistory` result includes complete parent and child
-`RenderArtifact` values with `read_record` and the full digest set; lifecycle
-actions are derived by `h2ProgrammeAction` and `h2ChildAction`. PR rendering
-must follow the private production flow from a validated immutable
-`PrDescriptorV2` plus validated BOUND authority or null through
-`h2BuildPrPhaseProjection`, `h2ValidatePrPhaseProjection`, and
-`h2BuildPrTypedDocument` before the existing audit and serializer. Provenance,
-not wording or keyword classification, selects exactly the four zones; BOUND
-descriptor text belongs only to the explicitly labelled historical region and
-`next_action_pre_number` is omitted from BOUND public prose and carrier.
-The executable proof matrix at
-`repo/tests/fixtures/github-program-human-surface/root-005-executable-proof-matrix-v1.json`
-requires three independently ordered eight-case families, actual production
-entrypoint receipts, and no aggregate for metadata-only, selective, incomplete,
-duplicate, unknown, failed, mismatched, or tampered receipt sets.
-Do not expose or select parser, codec, marker, graph, authority, history,
-migration, or source-adapter helpers. Existing v5 helpers remain historical
-compatibility internals for accepted frozen v5 bytes; new rendering is human-v2 only.
-Provider writes, PR-number binding, Web finality, Ready, merge, and Programme
-Apply remain outside the facade and require their separate authority boundaries.
+Toolkit 3.3.0 removed the local runtime this skill used to name (the programme-state v5 human surface, the governance review reconciler and their proof fixtures), because no hook, setup step or workflow ran it. Until the skill is rewritten under #421, apply the contract below as a written procedure with the GitHub tools you are authorised to use. Do not invent a replacement runtime or adapter.
 
 ## Scope
 
@@ -52,14 +25,7 @@ membership, and a current-state projection rather than an ever-growing event
 log. Parent Markdown is a managed deterministic block; do not improvise or
 reconstruct a large parent body in model context.
 
-Use the one shared runtime:
-
-```text
-node repo/scripts/toolkit-github-governance-review-reconciler.cjs
-```
-
-The runtime is a local contract/parser/transaction library. A real adapter is
-not included and must not be invented here. Integration adapters must bind
+No runtime ships with this skill (see Runtime status), and a real adapter must not be invented here. Integration adapters must bind
 first-party evidence boundaries for review inventory and terminal proof.
 Review inventory authority comes only from getReviewEvidence and terminal
 compaction authority comes only from getTerminalEvidence. Caller arrays, counts,

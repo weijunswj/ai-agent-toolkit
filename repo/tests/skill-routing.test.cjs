@@ -539,7 +539,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\.claude-plugin\/plugin\.json/);
   assert.match(howToUse, /Codex does not install or update Claude Code/);
   assert.match(howToUse, /Claude Code does not install or update Codex/);
-  assert.match(howToUse, /OpenCode is an opt-in local bridge target, not a native plugin update target; Antigravity receives portable skills through an explicit copy only/);
+  assert.match(howToUse, /OpenCode is not a Toolkit bridge target; copy skill folders by hand as described below. Antigravity receives portable skills through an explicit copy only/);
+  assert.doesNotMatch(howToUse, /--enable-target|--disable-target|--install-opencode-project-plugin/);
   assert.doesNotMatch(howToUse, /Antigravity 2 are opt-in local bridge targets/);
   assert.match(howToUse, /Manual installation means copying a Toolkit-owned `skills\/<skill-name>\/` folder into one supported location/);
   assert.doesNotMatch(howToUseInstallSection, /\[Official n8n Skills\]/);

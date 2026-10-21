@@ -271,8 +271,8 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 ## Toolkit Plugin And Bridge
 
 - Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
-- Bridge sync writes only approved enabled OpenCode targets; explicit project commands install the OpenCode plugin or copy Antigravity skills. Detection is dry-run only; retained AG2 state is legacy read/disable only.
-- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION`, the Codex setup expected version, and current OpenCode native/portable output aligned; Antigravity skills carry source identity without native plugin metadata.
+- The bridge keeps the managed checkout current and records hub state and update reports; it writes into no other app. The explicit project command copies Antigravity portable skills.
+- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION` and the Codex setup expected version aligned; Antigravity skills carry source identity without native plugin metadata.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 - Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout setup script when it exists, with active `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only as bootstrap/fallback.
 
@@ -280,7 +280,7 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 ## Source-of-Truth Contract
 
 `skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
-- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md`, `repo/ARCHITECTURE.md`, and the version-bound current registry: `repo/contracts/controller-kernel/stack-registry-v3.json` for V3, or immutable v2 for historical admissions. The skill is not a policy copy, role assignment, capability, or host permission.
+- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md` and the current registry `repo/contracts/controller-kernel/stack-registry-v3.json`. The skill is not a policy copy, role assignment, capability, or host permission.
 - `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
 - `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
@@ -293,9 +293,9 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
   - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. n8n work uses the official n8n Skills and the n8n API; `skills/n8n-environment-setup/` holds the setup guidance.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
-- Fresh coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2. The canonical fresh profiles are owner-gpt, owner-claude and owner-mixed-claude-gpt; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one, one and two members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Historical controller-decision v1, IR v1/v2, adapter v1, CURRENT v1 and registry aliases retain their pinned meanings. Existing receipt/CURRENT and programme-state-v5 remain canonical. Source progress does not establish native or installed qualification.
+- Coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2; no other version of these contracts is read. The canonical profiles are owner-gpt and owner-claude; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one and one members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Source progress does not establish native or installed qualification.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
 ## Repo-Local Router

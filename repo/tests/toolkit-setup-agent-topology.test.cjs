@@ -105,4 +105,3 @@ test('applying root-only writes the verified profile or the safe root-only polic
     assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);
   });
 });
-

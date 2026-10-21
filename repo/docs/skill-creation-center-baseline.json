@@ -32,7 +32,7 @@
       "source_provenance": "first_party",
       "third_party_audit": "Not applicable; no third-party skill, copied code, provider workflow, or external instruction material is imported.",
       "validation": [
-        "node --test repo/tests/controller-bootstrap.test.cjs repo/tests/controller-bootstrap-compatibility.test.cjs",
+        "node --test repo/tests/controller-bootstrap.test.cjs",
         "node --test repo/tests/skill-routing.test.cjs repo/tests/skill-portability.test.cjs",
         "node repo/scripts/validate-toolkit.cjs"
       ]
@@ -139,7 +139,7 @@
       "third_party_audit": "Not applicable first-party material; no provider documentation, workflow JSON, MCP instruction, third-party skill text, or code is copied.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/skill-routing.test.cjs"
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "local-ai-safety": {
@@ -215,13 +215,13 @@
     "n8n-environment-setup": {
       "public_id": "n8n-environment-setup",
       "public_name": "n8n Environment Setup",
-      "existing_skill_review": "Reviewed n8n-environment-setup against n8n-safety-router, Hostinger/Coolify operations, self-hosted-service-safety, and Windows localhost workflows; no other current product owns the complete local/ngrok, production Cloudflare Tunnel, hosted n8n, backup, launcher, official Skills, and MCP setup references.",
+      "existing_skill_review": "Reviewed n8n-environment-setup against n8n-safety-router, Hostinger/Coolify operations, self-hosted-service-safety, and Windows localhost workflows; no other current product owns the complete local/ngrok, production Cloudflare Tunnel, hosted n8n, backup, launcher and official Skills setup guidance.",
       "native_capability_review": "Docker, Cloudflare, host package managers, and official n8n installers provide mechanics but not the Toolkit's separated dev/production topology, beginner launcher, backup contract, or cross-host setup guidance.",
-      "trigger": "Use when setting up or explaining a safe n8n environment, local Docker stack, dev tunnel, production Cloudflare Tunnel stack, hosted n8n deployment guidance, backups, launchers, official Skills, or instance-level MCP configuration.",
+      "trigger": "Use when setting up or explaining a safe n8n environment, local Docker stack, dev tunnel, production Cloudflare Tunnel stack, hosted n8n deployment guidance, backups, launchers, or official n8n Skills setup.",
       "positive_routing_examples": [
         "Set up the local n8n and Postgres development stack with the guided Windows launcher.",
         "Plan production n8n self-hosting from a CGNAT machine using the separate Cloudflare Tunnel stack.",
-        "Configure the supported official n8n Skills and instance-level MCP path for this development environment."
+        "Configure the supported official n8n Skills and n8n API path for this development environment."
       ],
       "negative_routing_examples": [
         "Design an n8n workflow without changing or explaining its runtime environment.",
@@ -233,9 +233,9 @@
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "retain_current_product",
       "decision_reason": "The environment and operator setup lifecycle is distinct from workflow design, helper transport, and generic self-hosting review.",
-      "unique_value": "Provides separated development and production topologies, guided launchers, backup and restore material, platform-specific official Skills guidance, and instance-level MCP references.",
-      "runtime_footprint": "Large but locally complete setup product with references, Compose templates, PowerShell launchers, backup templates, and MCP examples loaded only when relevant.",
-      "local_assets": "Local and production stack templates, launchers, references, backup scripts, platform guidance, MCP config examples, README, SKILL.md, and metadata.",
+      "unique_value": "Provides separated development and production topologies, guided launchers, backup and restore material, and official n8n Skills guidance; n8n work runs through the official n8n Skills and the n8n API.",
+      "runtime_footprint": "Large but locally complete setup product with references, Compose templates, PowerShell launchers, and backup templates loaded only when relevant.",
+      "local_assets": "Local and production stack templates, launchers, references, backup scripts, README, SKILL.md, and metadata.",
       "output_contract": "Return the selected environment path, prerequisites, exact local templates or commands, safety gates, readiness evidence, backup implications, required non-secret configuration, and remaining manual actions.",
       "anti_bloat_review": "The product retains substantial local assets because copied setup must be self-contained, while workflow, transport, generic host, and live-operation rules remain in companion products.",
       "safety_boundary": "Do not install Docker, start production stacks, change tunnels or DNS, handle credentials, restore backups, deploy, or perform live n8n actions without explicit target-specific approval.",
@@ -496,11 +496,11 @@
       "public_id": "toolkit-setup",
       "public_name": "Toolkit Setup",
       "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; it owns cross-host Toolkit setup, native OpenCode project-plugin setup, OpenCode portable skill sync, and Antigravity portable-skill copying.",
-      "native_capability_review": "Codex and Claude have native plugin managers, OpenCode supports a project-local native Toolkit plugin, and Antigravity supports portable skills copying only; none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
-      "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, native OpenCode project-plugin setup, OpenCode portable skill sync, Antigravity portable skills copying, Windows hook repair, and bridge audit or sync.",
+      "native_capability_review": "Codex and Claude have native plugin managers, and Antigravity supports portable skills copying only; none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
+      "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, Antigravity portable skills copying, Windows hook repair, and bridge audit or sync.",
       "positive_routing_examples": [
         "Set up the AI Agent Toolkit for Codex using the managed checkout flow.",
-        "Audit why a Toolkit bridge target is stale, including its OpenCode project-plugin destination, and preview the safe repair without writing yet.",
+        "Audit why the Toolkit bridge hub state is stale and preview the safe repair without writing yet.",
         "Repair and verify the installed Codex Toolkit plugin cache after a failed native update, then copy the portable Toolkit skills to an Antigravity project."
       ],
       "negative_routing_examples": [
@@ -513,7 +513,7 @@
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "new_product",
       "decision_reason": "One compact setup router is safer and more discoverable than command-specific bridge skills while keeping implementation in shared Toolkit runtime and docs.",
-      "unique_value": "Provides one guarded route for managed checkout setup, native package behavior, downgrade refusal, Windows hook repair, bridge audit, OpenCode project-plugin install, portable-only target copying, and version-aligned validation.",
+      "unique_value": "Provides one guarded route for managed checkout setup, native package behavior, downgrade refusal, Windows hook repair, bridge audit, portable-only Antigravity copying, and version-aligned validation.",
       "runtime_footprint": "Small routing skill with no bundled scripts; implementation and detailed behavior stay in canonical Toolkit setup runtime, contracts, docs, and tests.",
       "local_assets": "Canonical README, SKILL.md, and host metadata only; setup runtime, package contracts, bridge implementation, and validation remain under repo/**.",
       "output_contract": "Return discovered setup state, one consolidated question or preview when required, exact approved operations, version and readback evidence, validation, and any fail-closed blocker.",

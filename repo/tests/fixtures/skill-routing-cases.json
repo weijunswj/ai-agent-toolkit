@@ -258,7 +258,7 @@
     {
       "id": "toolkit-setup-positive",
       "kind": "positive",
-      "prompt": "Refresh toolkit and audit the opt-in OpenCode local bridge state.",
+      "prompt": "Refresh toolkit and audit the local bridge hub state.",
       "expected": ["toolkit-setup"],
       "excluded": []
     },
