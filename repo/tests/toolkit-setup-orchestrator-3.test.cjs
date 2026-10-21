@@ -67,30 +67,18 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
   assert.equal(fs.existsSync(codexConfig(rejectedRoot)), false);
 });
 
-// V3 section 14: Antigravity is portable skills-copy only, so it is no longer a
-// native sync target; the OpenCode target keeps distinct skip and disable actions.
-test('target skip and disable remain distinct and native Antigravity sync is refused', () => {
+// Toolkit 3.3.0 removed the OpenCode and AG2 bridge targets: setup refuses their flags before any write.
+test('setup refuses the removed bridge-target flags before any write', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const first = run([
-    '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
-    '--skip-codex-plugin-auto-refresh', '--skip-target', 'opencode'
-  ], { env: isolatedHomeEnv(root) });
-  assert.equal(first.status, 0, first.stderr || first.stdout);
-  assert.match(first.stdout, /OpenCode action this run: skipped/);
-  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
-  const second = run([
-    '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
-    '--skip-codex-plugin-auto-refresh', '--disable-target', 'opencode'
-  ], { env: isolatedHomeEnv(root) });
-  assert.equal(second.status, 0, second.stderr || second.stdout);
-  assert.match(second.stdout, /OpenCode action this run: disabled/);
-  const ag2 = run([
-    '--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
-    '--skip-codex-plugin-auto-refresh', '--enable-target', 'ag2'
-  ], { env: isolatedHomeEnv(root) });
-  assert.notEqual(ag2.status, 0);
-  assert.match(ag2.stderr + ag2.stdout, /Unsupported target: ag2/);
+  for (const flag of [['--skip-target', 'opencode'], ['--disable-target', 'opencode'], ['--enable-target', 'ag2'],
+    ['--keep-target', 'opencode'], ['--opencode-project-root', root]]) {
+    const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
+      '--skip-codex-plugin-auto-refresh', ...flag], { env: isolatedHomeEnv(root) });
+    assert.notEqual(result.status, 0, flag[0]);
+    assert.match(result.stderr + result.stdout, new RegExp(`Unknown argument: ${flag[0]}`), flag[0]);
+  }
+  assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit', 'current')), false, 'nothing was written');
 });
 
 test('setup docs claim no retired automatic admission and keep honest enforcement disclosure', () => {

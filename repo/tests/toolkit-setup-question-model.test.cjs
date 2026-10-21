@@ -15,7 +15,6 @@ const expectedCodexRows = [
   ['report-retention', 'Report retention'],
   ['refresh-pr-auto-merge', 'Merge rule-refresh PRs when the required checks pass'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
-  ['opencode-integration', 'OpenCode'],
 ];
 
 function assertGeneratedDocumentationEqual(actual, expected) {
@@ -161,7 +160,7 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.match(byId['report-retention'].whatThisControls, /does not modify project files, application logs, or unrelated operational logs/i);
   assert.equal(byId['codex-helper-agents'], undefined);
   assert.match(byId['codex-toolkit-maintenance'].choices.find((choice) => choice.value === 'disable').consequence, /not uninstalled/i);
-  assert.match(byId['opencode-integration'].afterApplying, /managed OpenCode skill folders/i);
+  assert.equal(byId['opencode-integration'], undefined, 'OpenCode is not a Toolkit setup target');
   assert.equal(byId['antigravity-integration'], undefined, 'portable Antigravity copies are not a native setup integration choice');
   const toolkitSetupSkill = fs.readFileSync(path.join(repoRoot, 'skills/toolkit-setup/SKILL.md'), 'utf8');
   assert.match(toolkitSetupSkill, /Antigravity.*portable workspace skills/i);
@@ -192,10 +191,8 @@ test('unknown and unsupported state is honest and never recommends unavailable c
     managed: { currentPath: 'C:\\Synthetic Private\\missing', selectedPath: '', defaultPath: 'C:\\Elsewhere', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: {
       repo_auto_update: {},
-      targets: {
-        opencode: { detected: true },
-        ag2: { detected: false, native_plugin_target_supported: false, portable_project_skills_available: true },
-      },
+      // A Toolkit 3.2 audit still carries target records; setup asks nothing about them.
+      targets: { opencode: { detected: true } },
     },
     runtime: { runtime: 'unknown' },
     delegation: { status: 'unsupported', helper_count: null },
@@ -203,6 +200,7 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   };
   const rows = core.setupQuestionSpecs(args, current);
   for (const row of rows) assert.ok(row.choices.some((choice) => choice.value === row.recommended));
+  assert.equal(rows.some((row) => /opencode/i.test(row.id)), false);
   assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
   assert.equal(rows.some((row) => row.id === 'antigravity-integration'), false);
   assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
@@ -331,11 +329,11 @@ test('quick index, detailed bank, recommendations, and choices share one indexed
 });
 
 test('conditional questions renumber without gaps and change the bound bank identity', () => {
-  const withTargets = allRows();
-  const withoutTargets = withTargets.filter((row) => row.id !== 'opencode-integration');
-  const renumbered = core.withPresentationMetadata(withoutTargets.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
-  assert.notEqual(renumbered[0].presentation.bank_identity, withTargets[0].presentation.bank_identity);
+  const all = allRows();
+  const withoutConditional = all.filter((row) => row.id !== 'refresh-pr-auto-merge');
+  const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
 test('spreadsheet-style choice references are bounded and never wrap', () => {
@@ -355,10 +353,10 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
 
-  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 3.1 = d`, rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.1 = c`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
-  assert.equal(changed.selections.find((selection) => selection.question_ref === '3.1').canonical_value, 'skip');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '2.1').canonical_value, 'keep');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.1').canonical_value, rows[0].recommended);
   core.assertQuestionBankAnswerBinding(changed, rows);
 });
@@ -377,7 +375,7 @@ test('indexed answer parser rejects duplicates, unknowns, malformed modes, and s
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B, 1.2=C`, rows), /repeats question reference/);
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 9.9=A`, rows), /unavailable question/);
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=Z`, rows), /unavailable choice/);
-  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B; 3.1=D`, rows), /malformed separators/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B; 2.1=C`, rows), /malformed separators/);
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: all recommended, 1.2=B`, rows), /mixes or malforms/);
 
   const parsed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B`, rows);
@@ -429,7 +427,7 @@ test('bank reference covers host, order, recommendations and approval-visible se
   const payload = core.questionBankApprovalPayload(rows);
   assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
   assert.equal(payload.host, 'codex');
-  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
 
