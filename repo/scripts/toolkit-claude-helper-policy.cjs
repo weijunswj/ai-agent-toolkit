@@ -53,7 +53,9 @@ class ClaudeNamedHelperPolicy {
   }
 
   decide(input, governance) {
-    if (input.agent_id || input.agent_type) return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
+    // `agent_id` marks a subagent or teammate caller. `agent_type` alone also comes from a
+    // main session started with --agent, which is the lead, not a helper.
+    if (input.agent_id) return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
     if (governance.gate_role === 'G2') return deny('G2 review sessions launch no helpers; do the review in this session.');
     const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {};
     const requested = args.subagent_type;

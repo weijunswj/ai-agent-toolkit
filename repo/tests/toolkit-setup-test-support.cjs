@@ -1,4 +1,5 @@
 'use strict';
+require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update reports appear
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,7 +16,13 @@ function tmpRoot() {
 
 function isolatedHomeEnv(root) {
   const fakeCodex = createFakeCodexAppServer(root);
+  const temp = path.join(root, 'tmp');
+  fs.mkdirSync(temp, { recursive: true });
   return {
+    // Pinned explicitly: run() spreads process.env, so an absent key would inherit a temp folder.
+    TEMP: temp,
+    TMP: temp,
+    TMPDIR: temp,
     PATH: process.env.PATH || '',
     ...(process.platform === 'win32' ? {
       SystemRoot: process.env.SystemRoot || process.env.SYSTEMROOT || process.env.WINDIR || '',
@@ -26,6 +33,9 @@ function isolatedHomeEnv(root) {
     } : {}),
     USERPROFILE: root,
     HOME: root,
+    // Pinned explicitly: an inherited value would otherwise point setup at the real Claude settings.
+    CLAUDE_CONFIG_DIR: path.join(root, '.claude'),
+    AI_AGENT_TOOLKIT_CONTROL_ROOT: path.join(root, '.ai-agent-toolkit', 'agent-control'),
     CODEX_HOME: path.join(root, '.codex'),
     CODEX_TOOLKIT_CODEX_CLI: fakeCodex,
     LOCALAPPDATA: path.join(root, 'local-app-data'),
@@ -104,10 +114,10 @@ function runTestGit(cwd, args) {
 function createMinimalSetupRepo(root, options = {}) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.1.0', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.1.1', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.1.0', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.1.1', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
@@ -126,7 +136,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CODEX_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
-    "const summary = { ok: true, version: '3.1.0', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
+    "const summary = { ok: true, version: '3.1.1', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
     "if (write && process.env.SETUP_FAKE_CODEX_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(41); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",
@@ -144,8 +154,8 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CLAUDE_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
     "const active = process.env.SETUP_FAKE_CLAUDE_ENFORCEMENT !== '0' && process.env.SETUP_FAKE_CLAUDE_TRUST !== '0';",
-    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.1.0', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
-    "const summary = { ok: true, version: '3.1.0', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
+    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.1.1', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
+    "const summary = { ok: true, version: '3.1.1', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
     "if (write && process.env.SETUP_FAKE_CLAUDE_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(42); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",
@@ -198,7 +208,7 @@ function createGitBackedSetupRepo(root, options = {}) {
 
 function createGitBackedRealSetupRepo(root) {
   const result = createGitBackedSetupRepo(root);
-  for (const name of ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'codex-delegation-common.cjs', 'codex-delegation-layout.cjs', 'codex-delegation-state.cjs', 'codex-delegation-backup.cjs', 'codex-delegation-config.cjs', 'toolkit-agent-control.cjs', 'claude-process-launch.cjs', 'setup-claude-toolkit-plugin.cjs']) {
+  for (const name of ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'codex-delegation-common.cjs', 'codex-delegation-layout.cjs', 'codex-delegation-state.cjs', 'codex-delegation-backup.cjs', 'codex-delegation-config.cjs', 'toolkit-agent-control.cjs', 'claude-process-launch.cjs', 'toolkit-claude-subagent-depth.cjs', 'setup-claude-toolkit-plugin.cjs']) {
     writeFile(
       path.join(result.setupRepo, 'repo', 'scripts', name),
       fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')
