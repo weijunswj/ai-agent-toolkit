@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '3.1.1';
+const CONTROL_VERSION = '3.1.2';
 // Host-profile topologies the store reads and writes. CLAUDE_DIRECT is the wire value of
 // the retired Toolkit direct topology: the store rejects it, and it is exported only for
 // the byte-pinned run093 historical proof (see toolkit-agent-control-run093-history.cjs).
