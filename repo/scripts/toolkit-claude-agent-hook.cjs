@@ -14,13 +14,29 @@ const helperPolicy = () => require('./toolkit-claude-helper-policy.cjs');
 const ONE_LAYER_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'deny',
   permissionDecisionReason: "Toolkit: a subagent can't start another agent (one layer only). Do the work in this subagent, or hand it back to the main session." }) });
 
+// Claude Code runs this hook only for the Agent|Task matcher, so input that is not a JSON object,
+// or names no tool, is an agent launch Toolkit cannot check. Governed work refuses it; elsewhere
+// it is left to Claude Code, as any main-session launch is.
+const UNREADABLE_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'deny',
+  permissionDecisionReason: 'Toolkit could not read this agent launch, so it cannot check it; do the work in this session.' }) });
+const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
+
 function readInput() {
-  try { return JSON.parse(fs.readFileSync(0, 'utf8')); }
-  catch { return {}; }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(0, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+// Governed work, or a launcher marker when the shared predicate cannot load or answer.
+function governedOrMarked(cwd, environment = process.env) {
+  try { return governedRepo().governedRepo(cwd || process.cwd(), environment).governed; }
+  catch { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
 }
 
 function decision(input, options = {}) {
   const toolName = String(input.tool_name || input.toolName || '');
+  if (!toolName) return governedOrMarked(input.cwd, options.environment || process.env) ? UNREADABLE_DENIAL : {};
   if (!/^(Agent|Task)$/.test(toolName)) return {};
   const taskPin = options.task_profile_sha256 || process.env.TOOLKIT_CLAUDE_TASK_PROFILE_SHA256;
   if (taskPin) {
@@ -65,17 +81,15 @@ function decision(input, options = {}) {
 const CHECK_FAILED_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'deny',
   permissionDecisionReason: 'Toolkit could not check this helper launch safely; do the work in this session.' }) });
 
-// After a decision failure, refuse only what a working hook could refuse: an Agent/Task call
-// in a governed repository, or with a launcher marker when governance cannot be determined;
-// elsewhere a subagent's Agent/Task call gets the plain one-layer reason, since the profile
-// that could lift it was not read.
+// After a decision failure, refuse only what a working hook could refuse: an Agent/Task call, or
+// one whose tool name is unreadable, in a governed repository, or with a launcher marker when
+// governance cannot be determined; elsewhere a subagent's call gets the plain one-layer reason,
+// since the profile that could lift it was not read.
 function outputAfterFailure(input) {
-  if (!/^(Agent|Task)$/.test(String(input?.tool_name || input?.toolName || ''))) return {};
-  let governed;
-  try { governed = governedRepo().governedRepo(input.cwd).governed; }
-  catch { governed = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'].some(name => Boolean(process.env[name])); }
-  if (governed) return CHECK_FAILED_DENIAL;
-  return input.agent_id ? ONE_LAYER_DENIAL : {};
+  const toolName = String(input?.tool_name || input?.toolName || '');
+  if (toolName && !/^(Agent|Task)$/.test(toolName)) return {};
+  if (governedOrMarked(input?.cwd)) return toolName ? CHECK_FAILED_DENIAL : UNREADABLE_DENIAL;
+  return input?.agent_id ? ONE_LAYER_DENIAL : {};
 }
 
 // Optional qualification evidence: when a launcher sets TOOLKIT_HOOK_DECISION_LOG to an

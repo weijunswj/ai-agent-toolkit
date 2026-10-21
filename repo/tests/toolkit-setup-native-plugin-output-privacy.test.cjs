@@ -39,10 +39,12 @@ test('Claude managed stale refresh captures write JSON and emits only the saniti
     SETUP_FAKE_PRIVATE_REPO: fixture.privateRepo,
     SETUP_FAKE_PRIVATE_CACHE: fixture.privateCache
   }, timeout: 300000 });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  // The fake verifier reports a source folder other than the managed checkout, so the install check stops it.
+  assert.equal(result.status, 24, result.stderr || result.stdout);
+  assert.match(result.stdout, /Claude Code plugin: Claude Code does not run Toolkit from the managed checkout\./);
   assert.match(result.stdout, /Claude native plugin verification: current source identity was not established; approved refresh is required\./);
   assert.match(result.stdout, /Claude plugin manifest path: <managed-toolkit-checkout>/);
-  assert.match(result.stdout, /Claude plugin status: refreshed/);
+  assert.match(result.stdout, /Claude plugin status: installed this run/);
   assert.match(result.stdout, /Claude plugin updated this run: yes/);
   assert.equal(fs.existsSync(path.join(fixture.setupRepo, 'CLAUDE_PLUGIN_REFRESHED')), true);
   assertPrivateHelperOutputAbsent(result, fixture);

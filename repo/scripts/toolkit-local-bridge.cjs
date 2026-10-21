@@ -24,9 +24,10 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs');
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
+const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.1.2';
+const BRIDGE_VERSION = '3.2.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 // Antigravity native/plugin installation is not supported by this source.
@@ -1833,7 +1834,9 @@ function classifyUpdateReport(context) {
   const cacheStatus = context.nativePluginCache?.status || '';
   const repairStatus = context.thirdPartyHookRepair?.status || '';
   const targetStatus = context.targetSyncStatus || '';
-  const actionable = repoStatus === 'validation-failed'
+  const installStatus = context.installCheck?.status || '';
+  const actionable = installStatus === 'action-required'
+    || repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
     || ['stale', 'refresh-failed'].includes(cacheStatus)
@@ -1845,6 +1848,7 @@ function classifyUpdateReport(context) {
     || Boolean(context.repo?.externalAdvanceDetected)
     || cacheStatus === 'refreshed'
     || repairStatus === 'repaired'
+    || (context.installCheck?.checks || []).some((entry) => entry.updated === true)
     || (context.targetSyncs || []).length > 0
     || (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length > 0);
   return {
@@ -1903,7 +1907,8 @@ function warningSuggestion(warning) {
   return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning);
 }
 
-function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, state }) {
+function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installCheck, warning, state }) {
+  if (installCheck?.status === 'action-required') return 'see Install check below';
   if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       return 'Codex auto-refresh is enabled and will retry on the next hook run';
@@ -1932,6 +1937,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
   const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
+  const installCheck = context.installCheck || null;
   const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
   const suggestion = warningSuggestion(warning);
@@ -1947,7 +1953,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     `- Triggered from: ${triggeredFromTldr(args.syncSource)}.`,
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
     `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
-    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, state })}.`,
+    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installCheck, warning, state })}.`,
     '',
     '## Details',
     '',
@@ -2028,8 +2034,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
     } else {
       lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
     }
-  } else if (nativePluginCache.status === 'check-only' && nativePluginCache.manual_action) {
-    lines.push(`- Claude Code native plugin cache: ${nativePluginCache.manual_action}`);
   }
   if (thirdPartyHookRepair.status === 'repaired' || thirdPartyHookRepair.status === 'partial-failed') {
     lines.push(`- Repaired ${inlineCode((thirdPartyHookRepair.repaired || []).length)} supported n8n Skills Codex plugin hook cache(s).`);
@@ -2042,6 +2046,13 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Supported n8n Skills plugin hooks were already Windows-safe, or no supported target was installed.');
   }
   lines.push('- Skipped live n8n systems; not touched.');
+
+  if (installCheck) {
+    lines.push('', '## Install check', '');
+    lines.push(`- Result: ${inlineCode(installCheck.status)}`);
+    for (const entry of installCheck.checks || []) lines.push(`- ${entry.label}: ${entry.summary}`);
+    (installCheck.actions || []).forEach((action, index) => lines.push(`${index + 1}. ${action}`));
+  }
 
   lines.push('', '## Update Report And Log Cleanup', '');
   lines.push(`- directory: ${inlineCode(cleanup.report_log_directory || updateReportDir())}`);
@@ -2057,8 +2068,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   lines.push(`- hook-light validation: ${inlineCode(validationStatus)}`);
   lines.push(`- target sync status: ${inlineCode(targetSyncStatus)}`);
   if (nativePluginCache.status) {
-    const cacheLabel = nativePluginCache.host === 'claude-code' ? 'Claude Code native plugin cache' : 'Codex native plugin cache';
-    lines.push(`- ${cacheLabel}: ${inlineCode(nativePluginCache.status)}`);
+    lines.push(`- Codex native plugin cache: ${inlineCode(nativePluginCache.status)}`);
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   if (thirdPartyHookRepair.status) {
@@ -2122,6 +2132,9 @@ function updateReportSignature({ args, checksum, context }) {
       maxReportFiles: cleanup.max_report_files || DEFAULT_UPDATE_REPORT_MAX_FILES,
       errorCount: cleanup.error_count || 0
     },
+    installCheck: context.installCheck
+      ? { status: context.installCheck.status || '', actions: context.installCheck.actions || [] }
+      : null,
     targetSyncStatus: context.targetSyncStatus || '',
     targetSyncs: targetSyncs.map((sync) => ({
       target: sync.target || '',
@@ -3321,7 +3334,10 @@ function shouldRunRepoAutoUpdate(args, state) {
 
 function downgradeRemediation(syncSource) {
   if (syncSource === 'claude-plugin') {
-    return 'the installed Claude Code plugin cache is stale; run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code. If using the raw native command, run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user`; if it still reports stale, rerun setup so it can reinstall through the supported Claude Code marketplace path';
+    // Claude Code runs the installed copy in place from the managed checkout, so a newer
+    // record comes from another Toolkit copy, such as a test candidate, that ran here.
+    const script = slash(path.join(runtimeClaudePluginRoot(), 'repo', 'scripts', 'toolkit-local-bridge.cjs'));
+    return `a newer Toolkit copy, such as a test candidate, ran a session here and recorded its version. If the installed version ${BRIDGE_VERSION} is the one you want, clear that record once with: node "${script}" --sync-enabled --write --sync-source claude-plugin --force-downgrade. Otherwise run \`setup toolkit\` to install the newer version`;
   }
   if (syncSource === 'codex-plugin') {
     return 'the installed Codex plugin cache is stale; run `setup toolkit` in Codex to refresh it';
@@ -3374,21 +3390,27 @@ function codexNativePluginCacheStatus(args, state) {
   };
 }
 
-function claudeNativePluginCacheStatus(args, state) {
-  if (!args.hook || args.syncSource !== 'claude-plugin') return { status: '' };
-  return {
-    status: 'check-only',
-    host: 'claude-code',
-    plugin_root: runtimeClaudePluginRoot(),
-    repo_path: state.repo_path ? path.resolve(state.repo_path) : '',
-    manual_action: 'If Claude Code reports the Toolkit plugin is stale, missing, disabled, or untrusted, refresh it through Claude Code native plugin flow. Codex does not mutate Claude Code cache.'
-  };
-}
-
 function nativePluginCacheStatus(args, state) {
   if (args.syncSource === 'codex-plugin') return codexNativePluginCacheStatus(args, state);
-  if (args.syncSource === 'claude-plugin') return claudeNativePluginCacheStatus(args, state);
   return { status: '' };
+}
+
+// The installed Claude Code session-start hook checks the install after its maintenance.
+// Claude Code runs Toolkit in place from the managed checkout, so the check runs in a fresh
+// process: after an update it uses the updated code and stack registry on disk.
+function sessionStartInstallCheck(args, hubPath) {
+  if (!args.hook || args.syncSource !== 'claude-plugin') return null;
+  const root = runtimeClaudePluginRoot();
+  const result = runCommand(process.execPath, [path.join(root, 'repo', 'scripts', 'toolkit-install-health.cjs'), '--session-start', '--hub', hubPath], {
+    cwd: root,
+    timeout: 60000
+  });
+  if (result.ok) {
+    try { return JSON.parse(result.stdout.trim().split(/\r?\n/).pop()); }
+    catch { /* reported below */ }
+  }
+  const reason = sanitizeOutputMessage(commandOutput(result)) || 'no result';
+  return { status: 'action-required', checks: [], actions: [`The Toolkit install check could not run (${reason}). Run \`setup toolkit\`.`] };
 }
 
 function isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot) {
@@ -3731,7 +3753,7 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 class RepositoryAutoUpdateOperation {
   #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks;
   #statusState = null; #snapshot = null; #updateResult = null; #plannedTargetSyncs = [];
-  #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = '';
+  #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = ''; #installCheck = null;
 
   constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
     this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#discoveries = discoveries;
@@ -3903,6 +3925,7 @@ class RepositoryAutoUpdateOperation {
           skippedTargets: reportSnapshot.skippedTargets,
           nativePluginCache: this.#nativePluginCache,
           thirdPartyHookRepair: this.#thirdPartyHookRepair,
+          installCheck: this.#installCheck,
           targetSyncStatus: plannedTargetSyncs.length
             ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
             : 'not needed'
@@ -3933,6 +3956,7 @@ class RepositoryAutoUpdateOperation {
     this.#refreshSnapshot();
     const failed = this.#delegateSync();
     if (failed) return failed;
+    this.#installCheck = sessionStartInstallCheck(this.#args, this.#hubPath);
     return this.#finalReport();
   }
 }
@@ -4022,6 +4046,7 @@ class LocalBridgeRun {
       skippedTargets: snapshot.skippedTargets,
       nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
       thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
+      installCheck: sessionStartInstallCheck(args, this.#hubPath),
       targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
     };
   }
@@ -4107,10 +4132,23 @@ class LocalBridgeRun {
     }
   }
 
+  // A Claude Code session started from a Toolkit copy that is not the installed plugin (a
+  // test candidate loaded with --plugin-dir, or an account-synced copy) does no session-start
+  // maintenance and records nothing: the update state and the managed checkout belong to the
+  // installed copy. Claude Code runs the installed copy from its marketplace folder.
+  #uninstalledClaudeCopy(args) {
+    if (!args.hook || args.syncSource !== 'claude-plugin') return false;
+    const root = runtimeClaudePluginRoot();
+    if (new ClaudePluginRegistry().isRunningCopy(root)) return false;
+    console.log(`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`);
+    return true;
+  }
+
   execute() {
     const args = this.#args = parseArgs(this.#argv);
     const isolated = this.#isolatedProjectCommand(args);
     if (isolated) return isolated;
+    if (this.#uninstalledClaudeCopy(args)) return { status: 0, audit: null };
     assertReconciliationCommandArgs(args);
     const hubPath = this.#hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
     const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));

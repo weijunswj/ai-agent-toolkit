@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { ClaudeSubagentDepthSetting, SETTING, STATES } = require('../scripts/toolkit-claude-subagent-depth.cjs');
+const { canonicalPath } = require('../scripts/toolkit-canonical-path.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
 // Every case uses a temporary Claude config directory and control root, never the real ones.
@@ -91,6 +92,89 @@ test('unreadable settings are held unchanged, and keep never writes', t => {
   assert.throws(() => f.setting().apply('maybe'), /Unsupported Claude subagent depth choice/);
 });
 
+function recordOf(f) { return JSON.parse(fs.readFileSync(f.recordPath, 'utf8')); }
+
+test('a control root that cannot hold the ownership record stops turning on before the settings change', t => {
+  for (const text of [undefined, `${JSON.stringify({ model: 'opus' }, null, 2)}\n`]) {
+    const f = fixture(t, text);
+    fs.writeFileSync(f.controlRoot, 'the control root is a file, so no ownership record can be written');
+    assert.throws(() => f.setting().apply('enable'));
+    assert.equal(f.setting().inspect().state, STATES.DEFAULT, 'the owner setting is not written');
+    assert.equal(fs.existsSync(f.settingsPath) ? fs.readFileSync(f.settingsPath, 'utf8') : undefined, text);
+  }
+});
+
+test('two config folders sharing one control root keep separate entries; turning one off leaves the other', t => {
+  const f = fixture(t);
+  const otherDir = path.join(path.dirname(f.configDir), 'claude-second');
+  const other = new ClaudeSubagentDepthSetting({ environment: { CLAUDE_CONFIG_DIR: otherDir, AI_AGENT_TOOLKIT_CONTROL_ROOT: f.controlRoot } });
+  f.setting().apply('enable');
+  other.apply('enable');
+  assert.equal(f.setting().inspect().state, STATES.TOOLKIT);
+  assert.equal(other.inspect().state, STATES.TOOLKIT);
+  assert.equal(Object.keys(recordOf(f).entries).length, 2);
+  assert.equal(f.setting().apply('disable').changed, true);
+  assert.equal(fs.existsSync(f.settingsPath), false, 'the first folder held only Toolkit\'s key');
+  assert.equal(other.inspect().state, STATES.TOOLKIT, 'the second folder keeps its entry');
+  assert.deepEqual(Object.keys(recordOf(f).entries), [canonicalPath(path.join(otherDir, 'settings.json'))]);
+  assert.equal(other.apply('disable').changed, true);
+  assert.equal(fs.existsSync(path.join(otherDir, 'settings.json')), false);
+  assert.equal(fs.existsSync(f.recordPath), false, 'no entries left, so the record file is removed');
+});
+
+test('the same config folder spelled in another case on Windows keeps its ownership', t => {
+  if (process.platform !== 'win32') { t.skip('Windows paths are case-folded'); return; }
+  const f = fixture(t);
+  f.setting().apply('enable');
+  const upper = new ClaudeSubagentDepthSetting({ environment: { CLAUDE_CONFIG_DIR: f.configDir.toUpperCase(), AI_AGENT_TOOLKIT_CONTROL_ROOT: f.controlRoot } });
+  assert.equal(upper.inspect().state, STATES.TOOLKIT);
+  assert.equal(upper.apply('disable').changed, true);
+  assert.equal(fs.existsSync(f.settingsPath), false);
+  assert.equal(fs.existsSync(f.recordPath), false);
+});
+
+test('a manual removal followed by keep drops the stale entry, so an identical later value stays the owner\'s', t => {
+  const f = fixture(t);
+  f.setting().apply('enable');
+  fs.writeFileSync(f.settingsPath, `${JSON.stringify({ env: {} }, null, 2)}\n`);
+  assert.equal(f.setting().apply('keep').changed, false);
+  assert.equal(fs.existsSync(f.recordPath), false, 'stale entry dropped');
+  const manual = `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}\n`;
+  fs.writeFileSync(f.settingsPath, manual);
+  assert.equal(f.setting().inspect().state, STATES.OWNER);
+  assert.equal(f.setting().apply('disable').status, 'owner-value-kept');
+  assert.equal(fs.readFileSync(f.settingsPath, 'utf8'), manual);
+});
+
+test('a Toolkit 3.1 record is read as the one entry for its settings file, rewritten as v2 by keep, and turning off removes what Toolkit created', t => {
+  const f = fixture(t, `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}\n`);
+  fs.mkdirSync(f.controlRoot, { recursive: true });
+  fs.writeFileSync(f.recordPath, `${JSON.stringify({ schema: 'ai-agent-toolkit.claude-subagent-depth.v1', settings_path: f.settingsPath, value: '1', created_env: true, created_file: true })}\n`);
+  assert.equal(f.setting().inspect().state, STATES.TOOLKIT);
+  assert.equal(f.setting().apply('keep').changed, false);
+  assert.deepEqual(recordOf(f), {
+    schema: 'ai-agent-toolkit.claude-subagent-depth.v2',
+    entries: { [canonicalPath(f.settingsPath)]: { settings_path: f.settingsPath, value: '1', created_env: true, created_file: true } },
+  });
+  assert.equal(f.setting().apply('disable').changed, true);
+  assert.equal(fs.existsSync(f.settingsPath), false, 'the file Toolkit created is removed');
+  assert.equal(fs.existsSync(f.recordPath), false);
+});
+
+// The owner's case: setup reruns root-only (enable) over a 3.1.x record while the key is still Toolkit's.
+test('turning on again over a Toolkit 3.1 record rewrites it as v2 without touching the settings', t => {
+  const text = `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}\n`;
+  const f = fixture(t, text);
+  fs.mkdirSync(f.controlRoot, { recursive: true });
+  fs.writeFileSync(f.recordPath, `${JSON.stringify({ schema: 'ai-agent-toolkit.claude-subagent-depth.v1', settings_path: f.settingsPath, value: '1', created_env: true, created_file: true })}\n`);
+  const on = f.setting().apply('enable');
+  assert.equal(on.changed, false);
+  assert.equal(on.state, STATES.TOOLKIT);
+  assert.equal(fs.readFileSync(f.settingsPath, 'utf8'), text);
+  assert.equal(recordOf(f).schema, 'ai-agent-toolkit.claude-subagent-depth.v2');
+  assert.deepEqual(Object.keys(recordOf(f).entries), [canonicalPath(f.settingsPath)]);
+});
+
 const ONE_LAYER_LABEL = 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.';
 
 test('the topology question carries the one-layer depth: root-only sets it, broader-native removes only Toolkit\'s value, keep leaves it', t => {
@@ -104,7 +188,11 @@ test('the topology question carries the one-layer depth: root-only sets it, broa
   assert.equal(topology.choices[0].label, ONE_LAYER_LABEL);
   assert.equal(topology.recommended_outcome, ONE_LAYER_LABEL);
   assert.match(topology.whatThisControls, /the main session may start subagents; subagents never start another/);
-  assert.match(topology.current, /Claude Code's own depth setting is not set; its default allows three layers\. The Toolkit hook refuses nested launches in normal folders once/);
+  assert.match(topology.current, /CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies\. The Toolkit hook refuses nested launches in normal folders once/);
+  // The default depth depends on the Claude Code version and a server-side value, so no layer count is claimed.
+  assert.doesNotMatch(topology.current, /three layers/);
+  assert.match(topology.whatThisControls, /read by Claude Code 2\.1\.217 or later; project, local or managed settings can override it in a folder/);
+  assert.match(topology.recommendation_reason, /the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2\.1\.217 or later to one layer/);
   assert.throws(() => core.parseArgs(['--claude-one-layer-subagents', 'enable']), /Unknown argument/);
 
   // The plan follows the answer: recommended root-only sets the key.

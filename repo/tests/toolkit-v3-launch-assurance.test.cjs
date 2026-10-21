@@ -22,7 +22,8 @@ test('the checked-in launch family record is closed against this checkout and cl
   for (const host of ['claude-code', 'codex', 'opencode', 'dot']) assert.ok(value.paths.some(p => p.host === host && p.in_profile), host);
   for (const p of value.paths) assert.deepEqual(Object.keys(p.invariants).sort(), [...INVARIANT_IDS].sort(), p.id);
   // Only the Claude worker launcher carries a native demonstration. The Claude helper hook's earlier
-  // demonstration is kept in history: the 19 Oct 2026 receipt showed its failure layers proceed natively.
+  // demonstration is kept in history: the 19 Oct 2026 receipt showed its failure layers proceed natively
+  // before onFailure block; with it, only an absent hook still proceeds.
   assert.deepEqual(value.paths.filter(p => p.native_qualification.status === 'DEMONSTRATED').map(p => p.id).sort(),
     ['claude.worker.gate-session-launcher']);
   assert.equal(pathOf(value, 'claude.helper.parent-agent-hook').native_qualification.history[0].status, 'DEMONSTRATED');
@@ -31,6 +32,13 @@ test('the checked-in launch family record is closed against this checkout and cl
     assert.ok(result.guard_failure_layers_not_denied.some(l => l.path === id && l.layer === 'MISSING_OR_DISABLED'), id);
   }
   assert.ok(result.guard_failure_layers_not_denied.some(l => l.path === 'codex.helper.pretooluse-hook' && l.layer === 'HOST_TIMEOUT' && l.outcome === 'PROCEEDS'));
+  // Measured 21 Oct 2026 on Claude Code 2.1.304 and 2.1.306: onFailure block blocks the Agent call when the
+  // hook cannot start, crashes or times out. Only an absent hook (disabled or uninstalled plugin) proceeds.
+  for (const layer of ['PROCESS_START_OR_CRASH', 'HOST_TIMEOUT']) {
+    const claudeLayer = pathOf(value, 'claude.helper.parent-agent-hook').invariants.GUARD_FAILURE.failure_layers.find(l => l.layer === layer);
+    assert.deepEqual([claudeLayer.outcome, claudeLayer.protection], ['DENIED', 'HOST_BLOCKS_ON_FAILURE'], layer);
+  }
+  assert.deepEqual(result.guard_failure_layers_not_denied.filter(l => l.path === 'claude.helper.parent-agent-hook').map(l => l.layer), ['MISSING_OR_DISABLED']);
   assert.ok(result.unqualified.some(u => u.path === 'codex.worker.app-server-adapter' && u.status === 'UNQUALIFIED'));
   assert.ok(result.held.some(h => h.invariant === 'dot.persistent-dispatch:PINNED_ROUTE' && h.hold === 'DOT_DISPATCH_OWNED_BY_501'));
   // The retired Toolkit direct launcher is no longer a launch path, inside or outside the profile.
@@ -95,6 +103,10 @@ test('malformed or overstated records are refused', () => {
     ['the guard credited where the host never runs it', v => {
       const layer = pathOf(v, 'codex.helper.pretooluse-hook').invariants.GUARD_FAILURE.failure_layers.find(l => l.layer === 'HOST_TIMEOUT');
       layer.outcome = 'DENIED'; layer.protection = 'GUARD_DENIES';
+    }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
+    ['a host failure block credited to a hook that never runs', v => {
+      const layer = pathOf(v, 'claude.helper.parent-agent-hook').invariants.GUARD_FAILURE.failure_layers.find(l => l.layer === 'MISSING_OR_DISABLED');
+      layer.outcome = 'DENIED'; layer.protection = 'HOST_BLOCKS_ON_FAILURE';
     }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
     ['a denied layer without protection', v => { pathOf(v, 'opencode.helper.v1-task').invariants.GUARD_FAILURE.failure_layers[0].protection = 'NONE'; }, 'LAUNCH_FAMILY_GUARD_FAILURE_OVERSTATED'],
     ['a hook path without its failure layers', v => { delete pathOf(v, 'codex.helper.pretooluse-hook').invariants.GUARD_FAILURE.failure_layers; }, 'LAUNCH_FAMILY_FAILURE_LAYERS_REQUIRED'],

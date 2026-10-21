@@ -1009,3 +1009,52 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /not a regular file.*toolkit-local-bridge/i);
 });
+
+// Claude Code 2.1.304/2.1.306 run Toolkit in place from the local directory marketplace and pass
+// CLAUDE_PLUGIN_ROOT with forward slashes, so the registry's copy is compared by real, case-folded path.
+test('the registry marketplace folder matches the managed checkout in any path spelling', () => {
+  const commit = 'a'.repeat(40);
+  const spelled = process.platform === 'win32' ? repoRoot.replace(/\\/g, '/').toUpperCase() : `${repoRoot}/`;
+  const install = { id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`, version: expectedVersion(), scope: 'user', enabled: true, installPath: repoRoot };
+  const registryState = {
+    knownMarketplaces: { [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { source: 'directory', path: spelled } } },
+    installedPlugins: { plugins: { [install.id]: [{ scope: 'user', version: expectedVersion(), installPath: spelled, gitCommitSha: commit }] } },
+    repoCommit: commit
+  };
+  const state = setup.evaluateClaudeToolkitPluginState([install], { repoRoot, registryState });
+  assert.deepEqual(state.errors, []);
+  assert.equal(state.ok, true);
+});
+
+test('a plugin list that reports another running folder or folder version is not current', () => {
+  const list = installedList();
+  list.installed[0].readFromFolder = tmpRoot();
+  let state = setup.evaluateClaudeToolkitPluginState(list, { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /runs ai-agent-toolkit@ai-agent-toolkit-local from a folder that is not the managed Toolkit checkout/);
+  const versioned = installedList();
+  versioned.installed[0].readFromFolder = repoRoot;
+  versioned.installed[0].folderVersion = '0.0.1';
+  state = setup.evaluateClaudeToolkitPluginState(versioned, { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /runs ai-agent-toolkit@ai-agent-toolkit-local version 0\.0\.1/);
+});
+
+test('the one Claude plugin registry reader follows CLAUDE_CODE_PLUGIN_CACHE_DIR and needs a directory marketplace plus an install record', () => {
+  const { ClaudePluginRegistry, TOOLKIT_PLUGIN_ID } = require('../scripts/toolkit-claude-plugin-registry.cjs');
+  const root = tmpRoot();
+  const pluginsDir = path.join(root, 'plugin-cache');
+  writeJson(path.join(pluginsDir, 'known_marketplaces.json'), { 'ai-agent-toolkit-local': { source: { source: 'directory', path: repoRoot } } });
+  const registry = (environment) => new ClaudePluginRegistry({ environment, homeDir: root });
+  // Registry files only in the override folder, none under the config folder.
+  assert.equal(registry({ CLAUDE_CONFIG_DIR: path.join(root, 'config') }).toolkitInstall().installed, false);
+  const override = { CLAUDE_CONFIG_DIR: path.join(root, 'config'), CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginsDir };
+  assert.match(registry(override).toolkitInstall().reason, /is not installed in Claude Code/);
+  writeJson(path.join(pluginsDir, 'installed_plugins.json'), { version: 2, plugins: { [TOOLKIT_PLUGIN_ID]: [{ scope: 'user', version: expectedVersion(), installPath: path.join(pluginsDir, 'cache') }] } });
+  assert.equal(registry(override).isRunningCopy(repoRoot), true);
+  assert.equal(registry(override).isRunningCopy(path.join(pluginsDir, 'cache')), false, 'the install cache is not the copy Claude Code runs');
+  writeJson(path.join(pluginsDir, 'known_marketplaces.json'), { 'ai-agent-toolkit-local': { source: { source: 'github', repo: 'weijunswj/ai-agent-toolkit' } } });
+  assert.equal(registry(override).isRunningCopy(repoRoot), false, 'only a local directory marketplace is a Toolkit-managed install');
+  fs.writeFileSync(path.join(pluginsDir, 'known_marketplaces.json'), '{ not json');
+  assert.match(registry(override).toolkitInstall().reason, /could not be read/);
+});

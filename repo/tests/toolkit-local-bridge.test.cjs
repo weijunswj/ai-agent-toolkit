@@ -45,7 +45,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.1.2';
+const expectedBridgeVersion = '3.2.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpRoot() {
@@ -73,6 +73,54 @@ function isolatedHomeEnv(root, extra = {}) {
     UV_PYTHON: '',
     ...extra
   };
+}
+
+// The Claude hook maintains only the installed Toolkit copy: the one Claude Code's plugin
+// registry names. This records `runningRoot` there inside the isolated `root`, in the same
+// shape `claude plugin marketplace add` and `claude plugin install` write.
+function installToolkitCopy(root, runningRoot = repoRoot) {
+  const configDir = path.join(root, '.claude');
+  writeJson(path.join(configDir, 'plugins', 'known_marketplaces.json'), {
+    'ai-agent-toolkit-local': { source: { source: 'directory', path: runningRoot }, installLocation: runningRoot }
+  });
+  writeJson(path.join(configDir, 'plugins', 'installed_plugins.json'), {
+    version: 2,
+    plugins: {
+      'ai-agent-toolkit@ai-agent-toolkit-local': [{
+        scope: 'user',
+        version: expectedBridgeVersion,
+        installPath: path.join(configDir, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion)
+      }]
+    }
+  });
+  return configDir;
+}
+
+// Environment for a Claude hook run in the isolated `root`: its Claude config folder is kept there too,
+// and the running Toolkit copy is this worktree, the one installToolkitCopy records by default.
+function claudeHookEnv(root, extra = {}) {
+  return isolatedHomeEnv(root, { CLAUDE_CONFIG_DIR: path.join(root, '.claude'), CLAUDE_PLUGIN_ROOT: repoRoot, ...extra });
+}
+
+// Runs `fn` with this process's home, Claude config folder and Toolkit control root inside the
+// isolated `root`. An in-process bridge run then reads the isolated plugin registry, and the install
+// check it starts (a child that inherits this environment) reads and prunes only isolated folders.
+function withIsolatedClaudeHome(root, fn) {
+  const isolated = {
+    USERPROFILE: root,
+    HOME: root,
+    CLAUDE_CONFIG_DIR: path.join(root, '.claude'),
+    AI_AGENT_TOOLKIT_CONTROL_ROOT: path.join(root, '.ai-agent-toolkit', 'agent-control')
+  };
+  const original = Object.fromEntries(Object.keys(isolated).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, isolated);
+  try { return fn(); }
+  finally {
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 }
 
 function readJson(filePath) {
@@ -288,7 +336,7 @@ function runFixtureBridge(fixture, args) {
   const originalPluginRoot = process.env.PLUGIN_ROOT;
   if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.pluginRoot;
   try {
-    return runBridge(args);
+    return withIsolatedClaudeHome(fixture.root, () => runBridge(args));
   } finally {
     if (originalPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
     else process.env.PLUGIN_ROOT = originalPluginRoot;
@@ -1190,8 +1238,9 @@ test('same-source downgrade refuses unless forced and forced write changes only 
   assert.match(result.stderr, /Unsupported target/);
 });
 
-test('hook mode downgrade skip exits 0 and prints host remediation on stdout', () => {
+test('hook mode downgrade skip exits 0 and prints the one-step recovery on stdout', () => {
   const root = tmpRoot();
+  installToolkitCopy(root);
   const hub = path.join(root, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), {
     schema_version: 1,
@@ -1204,16 +1253,15 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
 
   const result = run(
     ['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'],
-    { env: isolatedHomeEnv(root) }
+    { env: claudeHookEnv(root) }
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge hook skipped: Refusing downgrade/);
-  assert.match(result.stdout, /setup toolkit --host claude-code/);
-  assert.match(result.stdout, /or `setup toolkit` from Claude Code/);
-  assert.match(result.stdout, /restart Claude Code/);
-  assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
-  assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
-  assert.doesNotMatch(result.stdout, /--force-downgrade/);
+  assert.match(result.stdout, /a newer Toolkit copy, such as a test candidate, ran a session here/);
+  assert.match(result.stdout, /--sync-source claude-plugin --force-downgrade/);
+  assert.match(result.stdout, /Otherwise run `setup toolkit` to install the newer version/);
+  assert.doesNotMatch(result.stdout, /claude plugin update|setup toolkit --host claude-code|restart Claude Code/);
+  assert.doesNotMatch(result.stdout, /explicit manual same-source recovery/);
 });
 
 test('repo same-source downgrade names managed source remediation', () => {
@@ -1371,8 +1419,9 @@ test('malformed and attacker-controlled version maps follow the safe normalizati
     bridge_versions_by_source: { 'claude-plugin': 'not-semver' },
     targets: {}
   });
+  installToolkitCopy(root);
   result = run(['--hub', hub, '--hook', '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(root)
+    env: claudeHookEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /hook skipped: Invalid bridge_versions_by_source\.claude-plugin/);
@@ -2000,9 +2049,10 @@ test('hook mode skips instead of failing when the lock owner is alive', () => {
   });
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
 
+  installToolkitCopy(root);
   const result = run(
     ['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin'],
-    { env: isolatedHomeEnv(root) }
+    { env: claudeHookEnv(root) }
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /held by live process/);
@@ -3083,8 +3133,9 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
     }
   });
 
+  installToolkitCopy(root);
   const result = run(['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(root)
+    env: claudeHookEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
@@ -3195,9 +3246,10 @@ function managedAgentsTemplate() {
 function runSessionStartHook(cwd, home, syncSource = 'codex-plugin') {
   const hub = path.join(home, 'hub', 'current');
   if (!fs.existsSync(path.join(hub, 'state.json'))) writeDisabledHookHub(hub);
+  installToolkitCopy(home);
   return run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', syncSource], {
     cwd,
-    env: isolatedHomeEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
+    env: claudeHookEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
   });
 }
 
@@ -3491,8 +3543,9 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
+  installToolkitCopy(fixture.root);
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
@@ -3502,7 +3555,7 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
   assert.equal(state.last_repo_update_to_commit, fixture.initialCommit);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
@@ -3524,8 +3577,9 @@ test('hook report is generated when repo was already advanced before the hook ru
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
+  installToolkitCopy(fixture.root);
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
@@ -3536,7 +3590,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   assert.equal(currentCommit(fixture.repo), updatedCommit);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
@@ -3573,8 +3627,9 @@ test('hook report includes external repo advance and OpenCode target sync', () =
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
+  installToolkitCopy(fixture.root);
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
@@ -3588,7 +3643,7 @@ test('hook report includes external repo advance and OpenCode target sync', () =
   assert.equal(currentCommit(fixture.repo), updatedCommit);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+    env: claudeHookEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
@@ -3620,7 +3675,8 @@ test('final report relock uses final target enablement for skipped targets and s
 
   let competingWriter = null;
   let capturedReport = null;
-  const result = runBridge([
+  installToolkitCopy(fixture.root);
+  const result = withIsolatedClaudeHome(fixture.root, () => runBridge([
     '--hub', hub,
     '--hook',
     '--sync-enabled',
@@ -3643,7 +3699,7 @@ test('final report relock uses final target enablement for skipped targets and s
     afterFinalReportBuild(details) {
       capturedReport = details;
     }
-  });
+  }));
 
   assert.ok(competingWriter, 'competing writer must change target enablement before the final report lock');
   assert.equal(result.status, 0);
@@ -3692,8 +3748,9 @@ test('hook report is generated when target sync happens without a repo commit ch
     }
   });
 
+  installToolkitCopy(root);
   const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+    env: claudeHookEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   const reportPath = reportPathFromOutput(result.stdout, hub);
@@ -3791,11 +3848,11 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   assert.doesNotMatch(report.text, /run `setup toolkit`/);
 });
 
-test('Claude hook reports host-local manual native cache action and never runs Codex refresh', () => {
+test('Claude hook reports the install check and never runs Codex refresh', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha claude cache source\n' });
-  const claudePluginRoot = path.join(root, 'claude-cache', 'ai-agent-toolkit');
   const hub = path.join(root, 'hub', 'current');
+  installToolkitCopy(root);
 
   let result = run([
     '--hub', hub,
@@ -3812,15 +3869,14 @@ test('Claude hook reports host-local manual native cache action and never runs C
   writeJson(statePath, state);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      CLAUDE_PLUGIN_ROOT: claudePluginRoot
-    })
+    env: claudeHookEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
-  assert.match(report.text, /Claude Code native plugin cache: `check-only`/);
-  assert.match(report.text, /refresh it through Claude Code native plugin flow/);
+  assert.match(report.text, /^## Install check$/m);
+  assert.match(report.text, /- Result: `passed`/);
+  assert.doesNotMatch(report.text, /Claude Code native plugin cache/);
+  assert.doesNotMatch(report.text, /Codex native plugin cache/);
   assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
 });
 
@@ -3947,6 +4003,7 @@ test('hook report records removed stale managed skill folders during target sync
 
 test('active no-target writes persist each source independently without requiring a report', () => {
   const fixture = createActiveNoTargetFixture('codex-plugin');
+  installToolkitCopy(fixture.root);
   let state = readJson(path.join(fixture.hub, 'state.json'));
   assert.deepEqual(state.bridge_versions_by_source, { 'codex-plugin': expectedBridgeVersion });
   state.update_report_enabled = false;
@@ -4053,6 +4110,7 @@ test('active no-target writes persist each source independently without requirin
 
 test('active no-target write persists lazy legacy migration', () => {
   const fixture = createActiveNoTargetFixture('codex-plugin');
+  installToolkitCopy(fixture.root);
   const state = readJson(path.join(fixture.hub, 'state.json'));
   delete state.bridge_versions_by_source;
   state.hub_version = '2.4.3';
@@ -4110,6 +4168,8 @@ test('forced same-source no-target downgrade changes only that source and keeps 
 
 test('disabled hook remains no-write and active lock contention reports an unpersisted skip', () => {
   const fixture = createActiveNoTargetFixture('codex-plugin');
+  installToolkitCopy(fixture.root);
+  const hookEnv = claudeHookEnv(fixture.root, { TEMP: fixture.temp, TMP: fixture.temp });
   let state = readJson(path.join(fixture.hub, 'state.json'));
   state.auto_sync_enabled = false;
   state.repo_auto_update_enabled = false;
@@ -4973,13 +5033,15 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /pull-on-session-start/i);
   assert.match(text, /does not run a GitHub webhook listener or background push daemon/i);
   assert.match(text, /New bridges never use `hub_version` for downgrade enforcement/i);
-  assert.match(text, /old Claude Code cache still uses the legacy global `hub_version` guard/i);
+  assert.match(text, /older Claude Code bridge still uses the legacy global `hub_version` guard/i);
+  // Claude Code runs Toolkit in place from the managed checkout, not from a cache copy.
+  assert.match(text, /Claude Code runs Toolkit in place from the managed checkout/);
   assert.match(text, /selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement/i);
   assert.match(text, /never guesses by directory or version ordering/i);
   assert.match(text, /unknown or malformed layouts fail closed/i);
   assert.doesNotMatch(text, /automatic repair path is generic for third-party/i);
   assert.doesNotMatch(text, /opt-in also permits repair of unsafe hook launchers in installed third-party/i);
-  assert.match(text, /fully resolved on a machine only after every affected native host cache has the fixed bridge/i);
+  assert.match(text, /fully resolved on a machine only after the Codex cache and the managed checkout both have the fixed bridge/i);
   assert.match(text, /Codex: run `setup toolkit` in Codex/i);
   assert.match(text, /Claude Code: run `setup toolkit --host claude-code`/i);
 });
