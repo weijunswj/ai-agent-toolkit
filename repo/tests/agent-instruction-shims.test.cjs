@@ -367,7 +367,7 @@ test('portable rules require the compact host-neutral depth-1 topology contract'
     /Briefly record a substantial-work exception/,
     /G2 reviewers have no helpers/,
     /a launcher without a helper tier field must not block suitable delegation/,
-    /must not spawn or delegate to other subagents/,
+    /Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none/,
     /Mutating sibling subagents require disjoint mutation ownership and scope/,
     /Read-only siblings may investigate genuinely separable questions in parallel/,
     /root or parent remains responsible for integrating and validating every returned result/i,
@@ -812,4 +812,30 @@ test('an authorised in-gate refresh continues with the exact one-time notice ins
   assert.ok(standalone > skill.indexOf(notice));
   assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > standalone);
   assert.match(controller, /continues without a restart-choice question/);
+});
+
+test('a rules refresh is carried to a pull request and merges only under the owner\'s stored setup choice', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const flow = skill.slice(skill.indexOf('**Carry the refresh to a pull request.**'), skill.indexOf('**For a standalone install'));
+  assert.ok(flow.length > 0, 'refresh pull request flow present before the standalone ending');
+  assert.match(flow, /Stage only the files this refresh wrote/);
+  assert.match(flow, /never stage dirty, unrelated or backup files/);
+  assert.match(flow, /Watch every check on the pull request's exact head/);
+  assert.match(flow, /toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/);
+  assert.match(flow, /Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed/);
+  assert.match(flow, /no check has been reported on the exact head by the end of the watch \(checks can register only after the pull request opens, so zero checks never counts as passed\)/);
+  assert.match(flow, /This skill grants no merge authority of its own/);
+  assert.match(flow, /Never set or change that choice yourself; only setup, with the owner's answer, does/);
+  for (const stop of [/stored choice is off, missing or cannot be read/, /any check on the exact head fails, or is still pending when the watch ends/,
+    /review rules or branch protection block the merge/, /any file this refresh does not own/, /no GitHub remote/]) assert.match(flow, stop);
+  assert.doesNotMatch(flow, /a required check fails/, 'stopping is not limited to required checks');
+  assert.match(flow, /Never use an admin bypass, force-push, rewrite history/);
+  assert.doesNotMatch(flow, /standing (owner )?approval/i, 'the skill text carries no approval of its own');
+  // The startup note never pauses work or sends the agent to ask the user.
+  assert.doesNotMatch(skill, /pause and ask|despite the warning/i);
+  assert.match(skill, /The note never pauses the current task/);
+  assert.match(skill, /run this skill only when the user explicitly asks/);
+  assert.match(skill, /after the pull request outcome above \(merged, stopped at the open pull request, or no GitHub remote\), stop and end with this exact format/);
+  assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > skill.indexOf('**Carry the refresh to a pull request.**'));
+  assert.match(skill, /Apart from the refresh pull request above \(a branch, commit, push and pull request of refresh-owned files, a check watch, and a merge only when the owner's stored choice allows it\), it must not push/);
 });

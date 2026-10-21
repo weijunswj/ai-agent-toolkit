@@ -8,11 +8,14 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '3.0.9';
+const CONTROL_VERSION = '3.1.0';
 // Host-profile topologies the store reads and writes. CLAUDE_DIRECT is the wire value of
 // the retired Toolkit direct topology: the store rejects it, and it is exported only for
 // the byte-pinned run093 historical proof (see toolkit-agent-control-run093-history.cjs).
-const SUPPORTED_TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', BROADER_NATIVE: 'broader-native' });
+// NAMED_HELPERS admits only the Toolkit G0/G1 leaf helpers in governed work. Toolkit 2.10.x
+// reads it as an unsupported profile, which it treats as root-only (deny all), so recording
+// it never widens an older installed hook the way broader-native would.
+const SUPPORTED_TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', BROADER_NATIVE: 'broader-native', NAMED_HELPERS: 'toolkit-named-helpers' });
 const TOPOLOGIES = Object.freeze({ ...SUPPORTED_TOPOLOGIES, CLAUDE_DIRECT: 'claude-toolkit-direct' });
 // Every supported profile is root-only capacity; AUTO and MANUAL are retired direct-topology values.
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -66,8 +69,9 @@ function validActivationProof(proof, expected = {}) {
 
 // The stored agent profile for one host. Reads fail closed to a root-only profile;
 // configuration accepts root-only (enforced by the installed native hook, so it needs
-// verified activation bound to the installed plugin bytes) or broader-native (outside
-// Toolkit control); invalidation records a root-only policy with its reason.
+// verified activation bound to the installed plugin bytes), toolkit-named-helpers (the
+// hook's named-helper policy) or broader-native (outside Toolkit control); invalidation
+// records a root-only policy with its reason.
 class HostProfileStore {
   #host; #options;
 
@@ -108,7 +112,7 @@ class HostProfileStore {
       throw new Error('Caller-provided resource evidence cannot configure a production profile.');
     }
     const topology = selected.topology;
-    if (topology === TOPOLOGIES.CLAUDE_DIRECT) throw new Error('The Toolkit direct topology is retired; choose root-only or broader-native.');
+    if (topology === TOPOLOGIES.CLAUDE_DIRECT) throw new Error('The Toolkit direct topology is retired; choose root-only in setup.');
     if (!Object.values(SUPPORTED_TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
     if (selected.capacity_mode !== CAPACITY_MODES.ROOT_ONLY) throw new Error(`Unsupported capacity mode: ${selected.capacity_mode}`);
     const strict = HostProfileStore.#strict(topology);
@@ -121,7 +125,8 @@ class HostProfileStore {
       controller_version: CONTROL_VERSION, enforcement_verified: strict, activation_proof: strict ? selected.activation_proof : null,
       claude_cli: strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null,
       updated_at: new Date().toISOString(),
-      enforcement: strict ? 'native-agent-hook-deny' : 'outside-toolkit-control',
+      enforcement: strict ? 'native-agent-hook-deny'
+        : topology === TOPOLOGIES.NAMED_HELPERS ? 'native-agent-hook-named-helpers' : 'outside-toolkit-control',
     };
     atomicWriteJson(this.path, profile);
     return { ...profile, status: 'configured', supported: true };

@@ -6,6 +6,8 @@ const fs = require('node:fs');
 // handled deny, not a process crash that Claude Code treats as a non-blocking error.
 const control = () => require('./toolkit-agent-control.cjs');
 const nativeAdapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
+const governedRepo = () => require('./toolkit-governed-repo.cjs');
+const helperPolicy = () => require('./toolkit-claude-helper-policy.cjs');
 
 function readInput() {
   try { return JSON.parse(fs.readFileSync(0, 'utf8')); }
@@ -30,6 +32,10 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
+  // Outside Toolkit-governed work the hook has no opinion: ordinary agents run as usual.
+  const environment = options.environment || process.env;
+  const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
+  if (!governance.governed) return {};
   const { readProfile, TOPOLOGIES } = control();
   const profile = readProfile('claude-code', options);
   if (profile.topology === TOPOLOGIES.BROADER_NATIVE) return nativeAdapter().commandDecision(input, 'claude-code', {
@@ -38,8 +44,18 @@ function decision(input, options = {}) {
     helper_identity: process.env.TOOLKIT_NATIVE_HELPER_IDENTITY,
     ...options.native_guard
   });
-  const reason = 'Claude native Agent/Task launches are blocked at this hook. Governed V3 workers use only the registry-pinned launcher through an authorised controller; unqualified profiles remain root-only.';
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+  // Root-only, named-helpers and unconfigured profiles all admit only the Toolkit's own
+  // leaf helpers in governed work.
+  const { ClaudeNamedHelperPolicy } = helperPolicy();
+  return new ClaudeNamedHelperPolicy({ environment, ...options.helper_policy }).decide(input, governance);
+}
+
+// After a decision failure, gate only governed work: an Agent/Task call in a governed
+// repository, or any call when governance cannot be determined but a launcher marker is set.
+function governedAfterFailure(input) {
+  if (!/^(Agent|Task)$/.test(String(input?.tool_name || input?.toolName || ''))) return false;
+  try { return governedRepo().governedRepo(input.cwd).governed; }
+  catch { return ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'].some(name => Boolean(process.env[name])); }
 }
 
 // Optional qualification evidence: when a launcher sets TOOLKIT_HOOK_DECISION_LOG to an
@@ -62,7 +78,9 @@ if (require.main === module) {
     if (input !== null) traceDecision(input, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
   }).catch(() => {
-    const output = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Toolkit could not verify the Claude topology safely; continue root-only.' } };
+    const output = input === null || governedAfterFailure(input)
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Toolkit could not check this helper launch safely; do the work in this session.' } }
+      : {};
     if (input !== null) traceDecision(input, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
   });

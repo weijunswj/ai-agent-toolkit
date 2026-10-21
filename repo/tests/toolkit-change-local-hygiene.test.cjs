@@ -31,10 +31,11 @@ test('generic change-local hygiene law is identical on all owned instruction sur
 });
 
 test('current Claude hook cannot steer an agent to the retired direct launcher', () => {
-  const hook = read('repo/scripts/toolkit-claude-agent-hook.cjs');
+  // The hook delegates its refusals to the named-helper policy; neither may steer to the retired launcher.
+  const hook = read('repo/scripts/toolkit-claude-agent-hook.cjs') + read('repo/scripts/toolkit-claude-helper-policy.cjs');
   assert.doesNotMatch(hook, /Use repo\/scripts\/toolkit-agent-control\.cjs launch/);
-  assert.match(hook, /registry-pinned launcher through an authorised controller/);
-  const stale = hook.replace('registry-pinned launcher through an authorised controller',
+  assert.match(hook, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
+  const stale = hook.replace('allows only the toolkit-g0-helper and toolkit-g1-helper agents',
     'Use repo/scripts/toolkit-agent-control.cjs launch');
   assert.match(stale, /Use repo\/scripts\/toolkit-agent-control\.cjs launch/,
     'mutation demonstrates that the forbidden old steering would be detected');

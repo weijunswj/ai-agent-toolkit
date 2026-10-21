@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.0.9';
+const expectedBridgeVersion = '3.1.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpRoot() {
@@ -292,15 +292,6 @@ function runFixtureBridge(fixture, args) {
     if (originalPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
     else process.env.PLUGIN_ROOT = originalPluginRoot;
   }
-}
-
-function expectedMissingAgentsContext(root) {
-  return [
-    "STOP: Root AGENTS.md is missing. Toolkit repo-local repository-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.",
-    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
-    '- AGENTS.md: required instruction file is missing',
-    'No files were changed by this hook.'
-  ].join('\n');
 }
 
 function quoteCommandPart(value) {
@@ -3192,106 +3183,181 @@ test('agent-rules preflight accepts current managed blocks and ignores literal m
   assert.deepEqual(result.findings, []);
 });
 
-test('agent-rules preflight judges a Toolkit source checkout by its own canonical templates, not an older plugin copy', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  const canonical = fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
-  writeFile(path.join(root, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), canonical);
-  writeFile(path.join(root, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
-  writeFile(path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '99.0.0' }));
-  writeFile(path.join(root, 'AGENTS.md'), canonical);
-  // The installed plugin copy carries an older managed block.
-  const pluginRoot = tmpRoot();
-  writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    canonical.replace('Default to the shortest safe path', 'Default to an older wording of the shortest safe path'));
-  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot });
-  assert.equal(result.status, 'ok');
-  assert.equal(result.reference, 'source-checkout');
-  assert.deepEqual(result.findings, []);
-  const message = formatAgentRulesPreflight(result);
-  assert.doesNotMatch(message, /STOP/);
-  assert.match(message, /older than this source checkout \(99\.0\.0\)/);
-  // A genuinely stale block in the checkout is still reported against its own canonical template.
-  writeFile(path.join(root, 'AGENTS.md'), canonical.replace('Default to the shortest safe path', 'Default to a drifted path'));
-  const stale = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot });
-  assert.equal(stale.status, 'needs-attention');
-  assert.match(formatAgentRulesPreflight(stale), /STOP/);
+const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
+
+function managedAgentsTemplate() {
+  return fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
+}
+
+// Runs the SessionStart hook in `cwd` with a hub outside the repository, so the
+// repository snapshot proves the hook wrote nothing there.
+function runSessionStartHook(cwd, home, syncSource = 'codex-plugin') {
+  const hub = path.join(home, 'hub', 'current');
+  if (!fs.existsSync(path.join(hub, 'state.json'))) writeDisabledHookHub(hub);
+  return run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', syncSource], {
+    cwd,
+    env: isolatedHomeEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
+  });
+}
+
+const DISABLED_LINE = 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n';
+
+test('SessionStart notice is silent outside Toolkit-managed git roots and writes nothing', async (t) => {
+  const cases = {
+    'non-git directory': (root) => writeFile(path.join(root, 'README.md'), '# notes\n'),
+    'git repository without AGENTS.md': (root) => {
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      writeFile(path.join(root, 'packages', 'app', 'README.md'), '# app\n');
+    },
+    'git repository with its own unmanaged AGENTS.md': (root) => {
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      writeFile(path.join(root, 'AGENTS.md'), '# Project rules\n\nUse tabs.\n');
+    }
+  };
+  for (const [name, arrange] of Object.entries(cases)) {
+    await t.test(name, () => {
+      const root = tmpRoot();
+      arrange(root);
+      const cwd = fs.existsSync(path.join(root, 'packages', 'app')) ? path.join(root, 'packages', 'app') : root;
+      const direct = runAgentRulesPreflight({ hook: true, syncSource: 'claude-plugin' }, { targetRoot: cwd, pluginRoot: repoRoot });
+      assert.equal(direct.status, 'not-managed');
+      assert.deepEqual(direct.findings, []);
+      assert.equal(formatAgentRulesPreflight(direct), '');
+
+      const home = tmpRoot();
+      const before = snapshotTree(root);
+      for (const source of ['codex-plugin', 'claude-plugin']) {
+        const result = runSessionStartHook(cwd, home, source);
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, DISABLED_LINE);
+        assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /Toolkit note/);
+        assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, NEVER_HALTING);
+      }
+      assert.deepEqual(snapshotTree(root), before);
+    });
+  }
 });
 
-test('agent-rules preflight refuses to judge a repository with installed templates older than the recorded Toolkit', () => {
+test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {
+  // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v1 -->\nnewer text\n<!-- AI-AGENT-TOOLKIT:x:END Y -->\n');
-  const before = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for newer wording'));
   const state = { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } };
   const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, state });
-  assert.equal(result.status, 'stale-installed-templates');
-  assert.deepEqual(result.findings, []);
-  const message = formatAgentRulesPreflight(result);
-  assert.doesNotMatch(message, /STOP/);
-  assert.match(message, /must not be regenerated from this installed copy/);
-  assert.match(message, /No files were changed by this hook/);
-  assert.equal(fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), before);
-});
-
-test('agent-rules preflight stops loudly when a git repo is missing root AGENTS without writing files', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  const nested = path.join(root, 'packages', 'app');
-  writeFile(path.join(nested, 'README.md'), '# app\n');
-  const before = fs.readdirSync(root).sort();
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'codex-plugin' },
-    { targetRoot: nested, pluginRoot: repoRoot }
-  );
-
   assert.equal(result.status, 'needs-attention');
-  assert.equal(result.targetRoot, root);
-  assert.equal(result.gitRepoDetected, true);
-  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['AGENTS.md:missing']);
+  assert.equal(result.direction, 'newer');
   const message = formatAgentRulesPreflight(result);
-  assert.match(message, /STOP/);
-  assert.match(message, /AGENTS\.md is missing/);
-  assert.match(message, /repo-local repository-agent-rules are not installed/);
-  assert.match(message, /ask the user whether to install\/repair/i);
-  assert.match(message, /proceed without Toolkit repo-local rules/);
-  assert.match(message, /No files were changed by this hook/);
-  assert.deepEqual(fs.readdirSync(root).sort(), before);
-  assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
-  assert.equal(fs.existsSync(path.join(root, 'docs', 'agent-playbooks')), false);
-  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+  assert.equal(message.split('\n').length, 1);
+  assert.doesNotMatch(message, NEVER_HALTING);
+  assert.match(message, /newer Toolkit \(99\.0\.0\) than the running copy/);
+  assert.match(message, /repository rules are authoritative/);
+  assert.match(message, /Refresh Toolkit when convenient/);
+
+  // A Toolkit source checkout newer than the running copy is the same direction, even when current.
+  const checkout = tmpRoot();
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  writeFile(path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), managedAgentsTemplate());
+  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
+  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '99.0.0' }));
+  writeFile(path.join(checkout, 'AGENTS.md'), managedAgentsTemplate());
+  const pluginRoot = tmpRoot();
+  writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    managedAgentsTemplate().replace('Default to the shortest safe path', 'Default to an older wording of the shortest safe path'));
+  const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot });
+  assert.equal(source.reference, 'source-checkout');
+  assert.deepEqual(source.findings, []);
+  assert.equal(source.direction, 'newer');
+  assert.doesNotMatch(formatAgentRulesPreflight(source), NEVER_HALTING);
+
+  // Through the hook: one line on the first session, nothing on the next, no repository writes.
+  const home = tmpRoot();
+  const hub = path.join(home, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion,
+    auto_sync_enabled: false, targets: {}, bridge_versions_by_source: { 'claude-plugin': '99.0.0' } });
+  const before = snapshotTree(root);
+  const first = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    cwd: root, env: isolatedHomeEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
+  });
+  assert.equal(first.status, 0, first.stderr);
+  const notes = first.stdout.split('\n').filter((line) => line.startsWith('Toolkit note:'));
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /newer Toolkit \(99\.0\.0\)/);
+  assert.doesNotMatch(first.stdout, NEVER_HALTING);
+  const second = runSessionStartHook(root, home);
+  assert.equal(second.status, 0, second.stderr);
+  assert.doesNotMatch(second.stdout, /Toolkit note/);
+  assert.deepEqual(snapshotTree(root), before);
 });
 
-test('Codex SessionStart hook puts the exact missing-AGENTS decision instruction on stdout without target-repo writes', () => {
+test('SessionStart notice offers a refresh for differing or broken repository blocks, once per finding, without writing', async (t) => {
+  const cases = [
+    { name: 'stale managed block', agents: managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup context progress') },
+    { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n' }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, () => {
+      const root = tmpRoot();
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      writeFile(path.join(root, 'AGENTS.md'), fixture.agents);
+      const direct = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot });
+      assert.equal(direct.status, 'needs-attention');
+      // No newer Toolkit is known here, so which side is newer is unknown: the note says "differ".
+      assert.equal(direct.direction, 'differs');
+      const message = formatAgentRulesPreflight(direct);
+      assert.equal(message.split('\n').length, 1);
+      assert.doesNotMatch(message, NEVER_HALTING);
+      assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
+      assert.doesNotMatch(message, /are older/);
+      assert.match(message, /refresh them with repository-agent-rules when convenient/);
+      assert.match(message, /No files were changed/);
+
+      const home = tmpRoot();
+      const before = snapshotTree(root);
+      const first = runSessionStartHook(root, home);
+      assert.equal(first.status, 0, first.stderr);
+      assert.equal(first.stdout, `${message}\n${DISABLED_LINE}`);
+      // Resume, compact or a new session with the same finding stays quiet.
+      const again = runSessionStartHook(root, home);
+      assert.equal(again.stdout, DISABLED_LINE);
+      // A changed finding is new and is shown once.
+      fs.appendFileSync(path.join(root, 'AGENTS.md'), '\n<!-- AI-AGENT-TOOLKIT:x:BEGIN EXTRA v1 -->\n');
+      const changed = runSessionStartHook(root, home);
+      assert.match(changed.stdout, /^Toolkit note:/);
+      const after = snapshotTree(root);
+      assert.deepEqual(after.filter((entry) => !entry.startsWith('file:AGENTS.md:')), before.filter((entry) => !entry.startsWith('file:AGENTS.md:')));
+      assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
+      assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+    });
+  }
+});
+
+test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  const nested = path.join(root, 'packages', 'app');
-  writeFile(path.join(nested, 'README.md'), '# app\n');
-  const hub = path.join(root, '.test-home', 'hub', 'current');
-  writeDisabledHookHub(hub);
-  const before = snapshotTree(root);
-
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    cwd: nested,
-    env: isolatedHomeEnv(path.join(root, '.test-home'), {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: repoRoot
-    })
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, ledger swap progress'));
+  const home = tmpRoot();
+  const hub = path.join(home, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion, auto_sync_enabled: true, targets: {} });
+  const hook = () => run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    cwd: root, env: isolatedHomeEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
   });
-
-  const expectedContext = expectedMissingAgentsContext(root);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, `${expectedContext}\nToolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n`);
-  assert.doesNotMatch(result.stderr, /STOP: Root AGENTS\.md is missing/);
-  assert.deepEqual(snapshotTree(root), before);
-  assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
-  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+  const first = hook();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stdout.split('\n').filter((line) => line.startsWith('Toolkit note:')).length, 1);
+  // The auto-sync hook rewrites the snapshot directory; the ledger sits beside it.
+  assert.equal(fs.existsSync(path.join(hub, 'agent-rules-notices.json')), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(hub), 'agent-rules-notices.json')), true);
+  for (let session = 2; session <= 3; session += 1) {
+    const again = hook();
+    assert.equal(again.status, 0, again.stderr);
+    assert.doesNotMatch(again.stdout, /Toolkit note:/, `session ${session}`);
+  }
+  assert.equal(readJson(path.join(hub, 'state.json')).auto_sync_enabled, true);
 });
 
-test('Codex SessionStart hook adds no missing-rule STOP instruction for current AGENTS', () => {
+
+test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const template = fs.readFileSync(
@@ -3315,120 +3381,9 @@ test('Codex SessionStart hook adds no missing-rule STOP instruction for current 
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /STOP: Root AGENTS\.md is missing|repo-local repository-agent-rules are not installed/);
 });
 
-test('agent-rules preflight reports stale managed block content without writing files', () => {
-  const root = tmpRoot();
-  const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
-  writeFile(
-    path.join(root, 'AGENTS.md'),
-    agentsTemplate.replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, unusually loud progress')
-  );
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'codex-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  assert.equal(result.status, 'needs-attention');
-  assert.equal(result.findings.length, 1);
-  assert.equal(result.findings[0].kind, 'stale-block');
-  assert.equal(result.findings[0].file, 'AGENTS.md');
-  const message = formatAgentRulesPreflight(result);
-  assert.match(message, /No files were changed by this hook/);
-  assert.match(message, /repair\/refresh Toolkit repo-local rules now/);
-  assert.match(message, /proceed without current Toolkit repo-local rules/);
-  assert.doesNotMatch(message, /before implementation/);
-  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
-});
-
-test('Codex SessionStart hook puts stale and malformed repair decisions on stdout without automatic repair', async (t) => {
-  const template = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
-  const cases = [
-    {
-      name: 'stale managed block',
-      agents: template.replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup context progress'),
-      finding: /managed block GLOBAL-AGENTS\.MD-TEMPLATE differs from the bundled template/
-    },
-    {
-      name: 'malformed managed block',
-      agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n',
-      finding: /BEGIN marker without matching END/
-    }
-  ];
-
-  for (const fixture of cases) {
-    await t.test(fixture.name, () => {
-      const root = tmpRoot();
-      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-      writeFile(path.join(root, 'AGENTS.md'), fixture.agents);
-      const hub = path.join(root, '.test-home', 'hub', 'current');
-      writeDisabledHookHub(hub);
-      const before = snapshotTree(root);
-
-      const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-        cwd: root,
-        env: isolatedHomeEnv(path.join(root, '.test-home'), {
-          PATH: process.env.PATH,
-          PLUGIN_ROOT: repoRoot
-        })
-      });
-
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /^STOP: Toolkit-managed repo-local instruction blocks are stale or broken\./);
-      assert.match(result.stdout, /Stop before repository work\./);
-      assert.match(result.stdout, /Ask the user whether to repair\/refresh Toolkit repo-local rules now or proceed without current Toolkit repo-local rules\./);
-      assert.match(result.stdout, /Do not repair, refresh, create backups, or write anything without the user's decision\./);
-      assert.match(result.stdout, fixture.finding);
-      assert.match(result.stdout, /No files were changed by this hook\./);
-      assert.deepEqual(snapshotTree(root), before);
-      assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-      assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
-    });
-  }
-});
-
-test('agent-rules preflight keeps broken managed-block warnings as stop-and-ask only', () => {
-  const root = tmpRoot();
-  writeFile(path.join(root, 'AGENTS.md'), [
-    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
-    '# broken managed block',
-    ''
-  ].join('\n'));
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'codex-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  assert.equal(result.status, 'needs-attention');
-  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['AGENTS.md:broken-marker']);
-  const message = formatAgentRulesPreflight(result);
-  assert.match(message, /No files were changed by this hook/);
-  assert.match(message, /Stop before repository work/);
-  assert.match(message, /proceed without current Toolkit repo-local rules/);
-  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
-});
-
-test('agent-rules preflight does not describe a non-git directory as a Git repo missing root AGENTS', () => {
-  const root = tmpRoot();
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'codex-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  const message = formatAgentRulesPreflight(result);
-
-  assert.equal(result.gitRepoDetected, false);
-  assert.equal(result.gitRoot, '');
-  assert.doesNotMatch(message, /this Git repository|Root AGENTS\.md is missing/);
-});
-
 test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
   const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
   writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
   writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
@@ -3439,36 +3394,6 @@ test('agent-rules preflight checks Claude shim content in Claude hook mode', () 
   );
   assert.equal(result.status, 'needs-attention');
   assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['CLAUDE.md:stale-block']);
-});
-
-test('hook mode runs passive agent-rules preflight before bridge no-op return', () => {
-  const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
-  writeFile(
-    path.join(root, 'AGENTS.md'),
-    agentsTemplate.replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup preflight test progress')
-  );
-
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    cwd: root,
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: repoRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit agent-rules preflight/);
-  assert.match(result.stdout, /AGENTS\.md: managed block GLOBAL-AGENTS\.MD-TEMPLATE differs from the bundled template/);
-  assert.match(result.stdout, /repair\/refresh Toolkit repo-local rules now/);
-  assert.match(result.stdout, /proceed without current Toolkit repo-local rules/);
-  assert.doesNotMatch(result.stderr, /Toolkit agent-rules preflight/);
-  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
-  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
-  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
 test('startup hook mode syncs the stale enabled OpenCode target and does not reuse stale repo status', () => {
@@ -5120,10 +5045,15 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
   }
 
+  // repository-agent-rules may read one stored owner choice through the read-only audit
+  // command; that read alone does not make it a bridge setup skill.
+  const READ_ONLY_AUDIT = /`node "<Toolkit plugin root>\/repo\/scripts\/toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/g;
+  const rulesSkill = fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'SKILL.md'), 'utf8');
+  assert.equal((rulesSkill.match(READ_ONLY_AUDIT) || []).length, 1, 'repository-agent-rules reads the bridge only through the read-only audit');
   const bridgeSkillNames = skillNames.filter((skill) => {
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
-    const skillText = fs.readFileSync(skillPath, 'utf8');
+    const skillText = fs.readFileSync(skillPath, 'utf8').replace(READ_ONLY_AUDIT, '');
     return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity portable skills|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
@@ -5505,4 +5435,26 @@ test('Codex plugin hook reconciliation fails closed on unknown n8n layout withou
   assert.deepEqual(fs.readFileSync(envPath), beforeEnv);
   assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), false);
   assert.deepEqual(snapshotTree(historicalRoot), historicalBefore, 'retained supported cache must not be repaired when current is unknown');
+});
+
+test('the rule-refresh PR merge choice defaults off, persists through flags and is readable from a read-only audit', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const env = isolatedHomeEnv(root, { PATH: process.env.PATH });
+  const audit = () => {
+    const result = run(['--hub', hub, '--audit'], { env });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout).refresh_pr_auto_merge_enabled;
+  };
+  assert.equal(audit(), false);
+  assert.equal(run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge'], { env }).status, 0);
+  assert.equal(readJson(path.join(hub, 'state.json')).refresh_pr_auto_merge_enabled, true);
+  const before = snapshotTree(root);
+  assert.equal(audit(), true);
+  assert.deepEqual(snapshotTree(root), before, 'the audit read writes nothing');
+  assert.equal(run(['--hub', hub, '--write', '--disable-refresh-pr-auto-merge'], { env }).status, 0);
+  assert.equal(audit(), false);
+  const conflict = run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge'], { env });
+  assert.notEqual(conflict.status, 0);
+  assert.match(conflict.stderr, /cannot be used together/);
 });

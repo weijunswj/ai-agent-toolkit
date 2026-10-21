@@ -46,7 +46,12 @@ test('root-only and broader-native are the only configurable topologies; the ret
   assert.equal(broader.activation_proof, null);
 
   const refused = root();
-  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), /direct topology is retired/i);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), (error) => {
+    // Names only a choice setup accepts; never the unexposed named-helpers value or broader-native.
+    assert.match(error.message, /direct topology is retired; choose root-only in setup\./i);
+    assert.doesNotMatch(error.message, /toolkit-named-helpers|broader-native/);
+    return true;
+  });
   for (const capacity_mode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
     assert.throws(() => control.configureProfile('claude-code', rootOnly({ capacity_mode }), { root: refused }), /Unsupported capacity mode/);
   }
@@ -180,24 +185,35 @@ test('current consumers never load the retired launcher history, and no launch-c
 test('a Claude hook whose decision modules cannot load still denies Agent and Task as a handled decision', () => {
   // Claude Code treats a hook process error (crash, non-zero exit other than 2) as non-blocking,
   // so a missing or broken module must surface as the hook's own deny, not as a crash.
+  // In governed work (here the Toolkit checkout) a missing decision module denies; without the shared
+  // predicate only a launcher marker gates, so ordinary work is never blocked by a broken install.
   const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const CHECKOUT = path.resolve(__dirname, '..', '..');
   const dir = root();
+  const clean = { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir };
+  for (const key of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']) delete clean[key];
+  const call = (file, input, env = clean) => spawnSync(process.execPath, [file], { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true, env });
   try {
     const copy = path.join(dir, 'toolkit-claude-agent-hook.cjs'); fs.copyFileSync(HOOK, copy);
+    fs.copyFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-governed-repo.cjs'), path.join(dir, 'toolkit-governed-repo.cjs'));
     for (const tool of ['Agent', 'Task']) {
-      const broken = spawnSync(process.execPath, [copy], { input: JSON.stringify({ tool_name: tool, hook_event_name: 'PreToolUse', tool_input: { subagent_type: 'toolkit-g1-helper' } }),
-        encoding: 'utf8', windowsHide: true, env: { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir } });
+      const broken = call(copy, { tool_name: tool, hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: { subagent_type: 'toolkit-g1-helper' } });
       assert.equal(broken.status, 0, broken.stderr);
       const output = JSON.parse(broken.stdout).hookSpecificOutput;
       assert.equal(output.permissionDecision, 'deny', tool);
-      assert.match(output.permissionDecisionReason, /could not verify the Claude topology safely/);
+      assert.match(output.permissionDecisionReason, /could not check this helper launch safely/);
     }
-    // Same boundary, intact modules: the root-only profile decision denies.
-    const intact = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ tool_name: 'Agent', hook_event_name: 'PreToolUse', tool_input: {} }),
-      encoding: 'utf8', windowsHide: true, env: { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir } });
+    // Same boundary, intact modules: the named-helper policy decides.
+    const intact = call(HOOK, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
     assert.equal(intact.status, 0, intact.stderr);
-    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /unqualified profiles remain root-only/);
-    const other = spawnSync(process.execPath, [copy], { input: JSON.stringify({ tool_name: 'Read' }), encoding: 'utf8', windowsHide: true });
+    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
+    const outside = call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
+    assert.deepEqual(JSON.parse(outside.stdout), {}, 'ungoverned work is untouched by a broken install');
+    fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
+    assert.deepEqual(JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
+    const marked = JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).stdout);
+    assert.equal(marked.hookSpecificOutput.permissionDecision, 'deny', 'a launcher marker gates even without the predicate');
+    const other = call(copy, { tool_name: 'Read' });
     assert.deepEqual(JSON.parse(other.stdout), {}, 'other tools are untouched even when modules are missing');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

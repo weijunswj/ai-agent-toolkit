@@ -1,26 +1,22 @@
 #!/usr/bin/env node
 'use strict';
 const fs = require('node:fs');
-const path = require('node:path');
 
 // The decision modules load inside the guarded path, so a missing or broken module
 // denies with the blocking exit status instead of crashing as a non-blocking failure.
 const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
-// Enforcement applies where Toolkit V3 governs helper routing: a launcher-pinned
-// binding, or a Toolkit source checkout that carries the V3 registry. Elsewhere the
-// hook makes no decision, so repositories that have not adopted V3 keep their
-// existing native behaviour.
+// Enforcement applies only inside Toolkit itself: a Toolkit checkout at the nearest git
+// root, or a session a Toolkit launcher started (launcher marker). It uses the predicate
+// shared with the Claude hook with the managed-block test turned off, so repositories that
+// only carry the managed GLOBAL-AGENTS.MD-TEMPLATE block keep native Codex helpers until
+// the Codex lane (#469) adds a named-helper allow-list. Elsewhere the hook makes no
+// decision. Helper depth on Codex stays advisory: PreToolUse carries no caller-agent identity.
+const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 function governed(input, environment = process.env) {
-  if (environment.TOOLKIT_NATIVE_HELPER_BINDING) return true;
-  let current = path.resolve(typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd());
-  for (;;) {
-    if (fs.existsSync(path.join(current, 'repo', 'contracts', 'controller-kernel', 'stack-registry-v3.json'))
-      && fs.existsSync(path.join(current, 'repo', 'docs', 'TOOLKIT-V3.md'))) return true;
-    const parent = path.dirname(current);
-    if (parent === current) return false;
-    current = parent;
-  }
+  try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment, { managedBlock: false }).governed; }
+  // Without the predicate, gate only when a launcher marker says this is governed work.
+  catch { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
 }
 
 // Native hook names: `spawn_agent` (default and multi_agent_v1 namespaces), the
