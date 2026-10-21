@@ -46,7 +46,12 @@ test('root-only and broader-native are the only configurable topologies; the ret
   assert.equal(broader.activation_proof, null);
 
   const refused = root();
-  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), /direct topology is retired/i);
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), (error) => {
+    // Names only a choice setup accepts; never the unexposed named-helpers value or broader-native.
+    assert.match(error.message, /direct topology is retired; choose root-only in setup\./i);
+    assert.doesNotMatch(error.message, /toolkit-named-helpers|broader-native/);
+    return true;
+  });
   for (const capacity_mode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
     assert.throws(() => control.configureProfile('claude-code', rootOnly({ capacity_mode }), { root: refused }), /Unsupported capacity mode/);
   }

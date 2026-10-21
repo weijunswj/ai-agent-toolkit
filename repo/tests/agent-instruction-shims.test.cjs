@@ -822,7 +822,8 @@ test('a rules refresh is carried to a pull request and merges only under the own
   assert.match(flow, /never stage dirty, unrelated or backup files/);
   assert.match(flow, /Watch every check on the pull request's exact head/);
   assert.match(flow, /toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/);
-  assert.match(flow, /Merge only when that field is `true`, every required check has passed on that exact head, and no check on that head is failing or pending/);
+  assert.match(flow, /Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed/);
+  assert.match(flow, /no check has been reported on the exact head by the end of the watch \(checks can register only after the pull request opens, so zero checks never counts as passed\)/);
   assert.match(flow, /This skill grants no merge authority of its own/);
   assert.match(flow, /Never set or change that choice yourself; only setup, with the owner's answer, does/);
   for (const stop of [/stored choice is off, missing or cannot be read/, /any check on the exact head fails, or is still pending when the watch ends/,

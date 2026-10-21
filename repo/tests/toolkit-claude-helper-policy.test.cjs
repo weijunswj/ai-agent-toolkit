@@ -78,6 +78,10 @@ test('in governed work the matching Toolkit helpers are allowed and other launch
   const cases = [
     [{ tool_input: { subagent_type: 'general-purpose' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: general-purpose\)/],
     [{ tool_input: { prompt: 'y' } }, /requested: the default agent/],
+    // Inherited object keys are not helper names.
+    [{ tool_input: { subagent_type: 'constructor' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: constructor\)/],
+    [{ tool_input: { subagent_type: '__proto__' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: __proto__\)/],
+    [{ tool_input: { subagent_type: 'toString' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: toString\)/],
     [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper', tool_input: { subagent_type: 'toolkit-g0-helper' } }, /a helper cannot launch another agent/],
     [{ tool_input: { subagent_type: 'toolkit-g0-helper', model: 'opus' } }, /cannot override model/],
     [{ tool_input: { subagent_type: 'toolkit-g0-helper', effort: 'low' } }, /cannot override effort/],

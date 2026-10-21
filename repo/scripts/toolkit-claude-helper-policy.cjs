@@ -57,7 +57,8 @@ class ClaudeNamedHelperPolicy {
     if (governance.gate_role === 'G2') return deny('G2 review sessions launch no helpers; do the review in this session.');
     const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {};
     const requested = args.subagent_type;
-    const role = typeof requested === 'string' ? HELPER_ROLES[requested] : undefined;
+    // Own keys only: inherited names such as `constructor` or `__proto__` are not helpers.
+    const role = typeof requested === 'string' && Object.hasOwn(HELPER_ROLES, requested) ? HELPER_ROLES[requested] : undefined;
     if (!role) {
       const named = typeof requested === 'string' && requested ? requested : 'the default agent';
       return deny(`this Toolkit-governed repository allows only the toolkit-g0-helper and toolkit-g1-helper agents (requested: ${named}). Do the work in this session, or use one of those helpers.`);

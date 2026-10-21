@@ -536,8 +536,8 @@ test('the rule-refresh PR merge question is recommended on, keeps the stored cho
   assert.equal(row.recommended, 'enable');
   assert.deepEqual(row.choices.map((choice) => choice.label), ['Turn on', 'Turn off', 'Keep current']);
   assert.match(row.whatThisControls, /admin bypass and force-push are never used/);
-  assert.match(row.whatThisControls, /no check there is failing or pending/);
-  assert.match(row.whatThisControls, /Any failed or pending check/);
+  assert.match(row.whatThisControls, /at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed/);
+  assert.match(row.whatThisControls, /No reported checks, any failed or pending check/);
   assert.equal(row.currentState.verification, 'defaulted', 'an unknown stored choice is not claimed as verified');
   assert.match(row.current, /stop at the open PR/);
   for (const [flag, expected] of [['--enable-refresh-pr-auto-merge', '--enable-refresh-pr-auto-merge'], ['--disable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge']]) {

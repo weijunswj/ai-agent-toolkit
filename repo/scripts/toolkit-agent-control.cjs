@@ -112,7 +112,7 @@ class HostProfileStore {
       throw new Error('Caller-provided resource evidence cannot configure a production profile.');
     }
     const topology = selected.topology;
-    if (topology === TOPOLOGIES.CLAUDE_DIRECT) throw new Error('The Toolkit direct topology is retired; choose root-only or toolkit-named-helpers.');
+    if (topology === TOPOLOGIES.CLAUDE_DIRECT) throw new Error('The Toolkit direct topology is retired; choose root-only in setup.');
     if (!Object.values(SUPPORTED_TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
     if (selected.capacity_mode !== CAPACITY_MODES.ROOT_ONLY) throw new Error(`Unsupported capacity mode: ${selected.capacity_mode}`);
     const strict = HostProfileStore.#strict(topology);
