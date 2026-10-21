@@ -495,7 +495,7 @@
     "toolkit-setup": {
       "public_id": "toolkit-setup",
       "public_name": "Toolkit Setup",
-      "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; it owns cross-host Toolkit setup, native OpenCode project-plugin setup, OpenCode portable skill sync, and Antigravity portable-skill copying.",
+      "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; it owns cross-host Toolkit setup and Antigravity portable-skill copying.",
       "native_capability_review": "Codex and Claude have native plugin managers, and Antigravity supports portable skills copying only; none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
       "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, Antigravity portable skills copying, Windows hook repair, and bridge audit or sync.",
       "positive_routing_examples": [

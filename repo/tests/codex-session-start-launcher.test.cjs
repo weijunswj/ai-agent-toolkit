@@ -98,6 +98,12 @@ function captureLauncherWarning(bridge) {
   return lines.join('\n');
 }
 
+test('SessionStart launcher no longer carries the removed stack-selection startup branch', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-codex-session-start.cjs'), 'utf8');
+  assert.doesNotMatch(source, /stack_session|assertCurrentStackSelectionSession|STACK_STARTUP_UNVERIFIED/);
+  assert.equal(require('../scripts/toolkit-stack-selection.cjs').assertCurrentStackSelectionSession, undefined);
+});
+
 test('hook-safe Node launcher converts thrown and returned non-zero outcomes to one visible skip', () => {
   const thrown = captureLauncherWarning({ run() { throw new Error('private path must not escape'); } });
   const returned = captureLauncherWarning({ run() { return { status: 9 }; } });
