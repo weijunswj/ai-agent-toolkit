@@ -54,6 +54,27 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   assert.match(result.stdout, /One-layer subagent setting this run: changed; Claude Code allows one layer/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8')),
     { env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' } });
+  // Root-only with hook activation verified this run: both protections are named.
+  assert.match(result.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 and the installed Toolkit hook, verified this run\)\./);
+});
+
+test('broader-native execution reports Claude Code\'s own limit, not a one-layer cap', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fake = recordingClaude(root);
+  const env = isolatedHomeEnv(root);
+  const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions'];
+  const settings = path.join(root, '.claude', 'settings.json');
+  assert.equal(run([...base, '--claude-topology', 'root-only'], { env, timeout: 300000 }).status, 0);
+  assert.equal(fs.existsSync(settings), true);
+  clearLogs(setupRepo);
+  const broader = run([...base, '--claude-topology', 'broader-native'], { env, timeout: 300000 });
+  assert.equal(broader.status, 0, broader.stderr || broader.stdout);
+  assert.match(broader.stdout, /Selected topology: broader-native/);
+  assert.doesNotMatch(broader.stdout, /Normal folders: one layer/);
+  assert.match(broader.stdout, /Normal folders: Claude Code's own limit; Toolkit does not refuse nested launches\. Claude Code's own depth setting is not set; its default allows three layers\./);
+  assert.equal(fs.existsSync(settings), false, 'Toolkit-created settings file is removed');
 });
 
 test('the retired Toolkit direct topology and capacity flags fail before any setup write', () => {
@@ -128,6 +149,9 @@ test('a kept root-only profile becomes the safe root-only policy once current en
   ], { env: { ...env, SETUP_FAKE_CLAUDE_TRUST: '0' }, timeout: 300000 });
   assert.equal(downgraded.status, 0, downgraded.stderr || downgraded.stdout);
   assert.match(downgraded.stdout, /safe-root-only/i);
+  // Hook activation unverified this run: the native setting is named, the hook only conditionally.
+  assert.match(downgraded.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1\)\. The Toolkit hook also refuses nested launches once the plugin is installed and active\./);
+  assert.doesNotMatch(downgraded.stdout, /verified this run/);
   const read = control.readProfile('claude-code', { root: profileRootOf(root) });
   assert.equal(read.supported, false);
   assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);

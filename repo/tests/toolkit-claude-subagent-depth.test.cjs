@@ -104,7 +104,7 @@ test('the topology question carries the one-layer depth: root-only sets it, broa
   assert.equal(topology.choices[0].label, ONE_LAYER_LABEL);
   assert.equal(topology.recommended_outcome, ONE_LAYER_LABEL);
   assert.match(topology.whatThisControls, /the main session may start subagents; subagents never start another/);
-  assert.match(topology.current, /Claude Code uses its own limit/);
+  assert.match(topology.current, /Claude Code's own depth setting is not set; its default allows three layers\. The Toolkit hook refuses nested launches in normal folders once/);
   assert.throws(() => core.parseArgs(['--claude-one-layer-subagents', 'enable']), /Unknown argument/);
 
   // The plan follows the answer: recommended root-only sets the key.

@@ -1760,9 +1760,39 @@ function claudeSubagentDepthChoice(options) {
 function claudeSubagentDepthOutcome(depth) {
   if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return 'Claude Code allows one layer: the main session may start subagents; subagents never start another (set by Toolkit).';
   if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `You set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=${depth.value} yourself; Toolkit leaves it unchanged.`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return 'Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return 'Claude Code\'s own depth setting is not set; its default allows three layers.';
   if (depth?.state === SUBAGENT_DEPTH_STATES.UNREADABLE) return `${depth.detail} Toolkit will not change it.`;
   return 'The Claude Code subagent setting could not be verified; setup will not claim a limit is active.';
+}
+
+// What the Toolkit hook does in normal folders for a stored topology. Activation is not
+// checked before approval, so this states the rule the installed hook applies.
+function claudeHookNormalFolderOutcome(topology) {
+  return topology === agentControl.TOPOLOGIES.BROADER_NATIVE
+    ? 'The Toolkit hook does not refuse nested launches in normal folders.'
+    : 'The Toolkit hook refuses nested launches in normal folders once this Toolkit version\'s plugin is installed and active.';
+}
+
+// The normal-folder result of this run: the topology actually applied, the depth setting
+// actually in the settings file, and whether the hook's activation was verified this run.
+function normalFolderOutcomeSummary(delegation, depth) {
+  const native = claudeSubagentDepthOutcome(depth).replace(/\.$/, '');
+  if (delegation.topology === agentControl.TOPOLOGIES.BROADER_NATIVE) {
+    return `Claude Code's own limit; Toolkit does not refuse nested launches. ${native}.`;
+  }
+  const nativeOneLayer = depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT
+    || (depth?.state === SUBAGENT_DEPTH_STATES.OWNER && depth.value === '1');
+  const hookVerified = delegation.status === 'configured' && delegation.selected_strict_state_applied === true;
+  const oneLayer = 'one layer; the main session may start subagents; subagents never start another';
+  const pending = 'The Toolkit hook also refuses nested launches once the plugin is installed and active.';
+  if (nativeOneLayer) {
+    return hookVerified
+      ? `${oneLayer} (Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 and the installed Toolkit hook, verified this run).`
+      : `${oneLayer} (Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1). ${pending}`;
+  }
+  return hookVerified
+    ? `one layer, refused at the installed Toolkit hook (verified this run). ${native}.`
+    : `${native}. ${pending}`;
 }
 
 function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
@@ -1949,7 +1979,7 @@ function setupQuestionSpecs(args, current) {
     }));
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
-    const topologyCurrent = `Current topology: ${activeProfile.topology || 'root-only'}. ${claudeSubagentDepthOutcome(current.claudeSubagentDepth)}`;
+    const topologyCurrent = `Current topology: ${activeProfile.topology || 'root-only'}. ${claudeSubagentDepthOutcome(current.claudeSubagentDepth)} ${claudeHookNormalFolderOutcome(activeProfile.topology)}`;
     specs.push(resolvedQuestion({
       id: 'claude-agent-topology',
       key: 'claudeTopology',
@@ -3745,7 +3775,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
-    console.log('Normal folders: one layer; the main session may start subagents; subagents never start another (refused at the installed hook)');
+    console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
   console.log('## Codex native plugin');
