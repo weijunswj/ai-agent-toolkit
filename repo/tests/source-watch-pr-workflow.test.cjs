@@ -51,7 +51,7 @@ test('source-watch PR notifier remains scheduled-only with minimum write permiss
 });
 
 test('source-watch PR notifier runs trusted main code before branch writes', () => {
-  assert.match(workflow, /uses:\s*actions\/checkout@v7/);
+  assert.match(workflow, /uses:\s*actions\/checkout@[0-9a-f]{40} # v7\.\d+\.\d+$/m);
   assert.match(workflow, /^\s*ref:\s*refs\/heads\/main\s*$/m);
   assert.match(workflow, /^\s*fetch-depth:\s*0\s*$/m);
   assert.match(workflow, /^\s*persist-credentials:\s*false\s*$/m);
@@ -94,10 +94,13 @@ test('source-watch helper stages only the report and uses both exact lease forms
   assert.match(helper, /git add -- "\$REPORT_PATH"/);
   assert.match(helper, /staged_files="\$\(git diff --cached --name-only\)"/);
   assert.match(helper, /\[\[ "\$staged_files" != "\$REPORT_PATH" \]\]/);
-  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
-  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.match(helper, /push_review_branch --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
+  assert.match(helper, /push_review_branch --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
   assert.doesNotMatch(helper, /git\s+push\s+origin\s+"HEAD:\$BRANCH"/);
   assert.doesNotMatch(helper, /git\s+push[^\n]*HEAD:main\b/i);
+  // The push token goes only to that one push, through git's environment configuration.
+  assert.match(helper, /GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='http\.https:\/\/github\.com\/\.extraheader' GIT_CONFIG_VALUE_0="\$header"/);
+  assert.doesNotMatch(helper, /remote\s+set-url|x-access-token:\$\{GH_TOKEN\}@/);
 });
 
 test('source-watch helper rejects symlink reports and never sources notification content', () => {

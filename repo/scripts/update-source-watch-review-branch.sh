@@ -161,12 +161,22 @@ if git diff --cached --quiet; then
 fi
 
 git commit -m 'Update active third-party source review report'
-if [[ -n "${GH_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
-  git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-fi
+
+# The token reaches only this one push, through git's environment configuration: it is never
+# written to .git/config, the remote URL or the command line.
+push_review_branch() {
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    local header
+    header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' GIT_CONFIG_VALUE_0="$header" \
+      git push "$@"
+  else
+    git push "$@"
+  fi
+}
 if [[ "$remote_state" == 'present' ]]; then
-  git push --force-with-lease="refs/heads/$BRANCH:$remote_sha" origin "HEAD:$BRANCH"
+  push_review_branch --force-with-lease="refs/heads/$BRANCH:$remote_sha" origin "HEAD:$BRANCH"
 else
-  git push --force-with-lease="refs/heads/$BRANCH:" origin "HEAD:$BRANCH"
+  push_review_branch --force-with-lease="refs/heads/$BRANCH:" origin "HEAD:$BRANCH"
 fi
 write_output 'pushed=true'
