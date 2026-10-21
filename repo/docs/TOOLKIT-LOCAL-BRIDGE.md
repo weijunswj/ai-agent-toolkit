@@ -67,6 +67,7 @@ The hub contains:
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path`, `update_report_enabled`, failure-only opening behavior, `update_report_retention_days`, max retained report count, and last cleanup status. Legacy `update_report_open_enabled=true` is retained only as migration evidence and is normalized to failure-only behavior.
+- Rule-refresh PR merge choice: `refresh_pr_auto_merge_enabled` (default false; set by the setup question "Merge rule-refresh PRs when the required checks pass"). `repository-agent-rules` reads it from read-only `--audit` output and merges its refresh pull request only when it is true and every required check passes on the exact head.
 - Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`. On Codex/Windows, this same opt-in also allows trusted Toolkit startup hooks to reconcile the exactly recognised installed `n8n-skills@n8n-io` hook cache after supported plugin updates.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
@@ -198,6 +199,7 @@ Supported flags:
 - `--disable-update-reports`.
 - `--update-report-retention-days <days>`, default `7`.
 - `--enable-update-report-open` and `--disable-update-report-open` remain compatibility flags; both retain failure-only opening and never restore success-report auto-opening.
+- `--enable-refresh-pr-auto-merge` and `--disable-refresh-pr-auto-merge`.
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.
 - `--force-downgrade`.

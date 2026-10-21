@@ -121,7 +121,24 @@ If this skill creates, modifies, repairs, or backs up `AGENTS.md`, `CLAUDE.md`, 
 
 Reading files does not reload native hooks, tools or permissions; when one of those genuinely changed, reload it only through its supported mechanism and verify the result, or report the exact reload still required. When committing is authorised for the task, validate the refresh-owned files (run the sync check where it exists), commit only those files to the authorised non-main branch, push, and read back the remote ref. Never make an empty commit, stage unrelated or dirty files, include secrets, or regenerate instructions from a stale installed template.
 
-**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, stop immediately and end with this exact format:
+**Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
+
+1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed); never stage dirty, unrelated or backup files.
+2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
+3. Watch the required checks on the pull request's exact head.
+4. Read the owner's stored choice with `node "<Toolkit plugin root>/repo/scripts/toolkit-local-bridge.cjs" --audit` (read-only; field `refresh_pr_auto_merge_enabled`). Merge only when that field is `true` and every required check has passed on that exact head. This skill grants no merge authority of its own; the owner's setup choice "Merge rule-refresh PRs when the required checks pass" is the only source.
+
+Stop at the open pull request and report its link, head and the reason instead of merging when:
+
+- the stored choice is off, missing or cannot be read;
+- a required check fails, or is still pending when the watch ends;
+- review rules or branch protection block the merge;
+- the pull request contains any file this refresh does not own;
+- the repository has no GitHub remote (then leave the refreshed files uncommitted and report them).
+
+Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write.
+
+**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, after the pull request outcome above (merged, stopped at the open pull request, or no GitHub remote), stop and end with this exact format:
 
 **SESSION RESET RECOMMENDED:**
 
@@ -137,7 +154,7 @@ If the user explicitly chooses to continue in the same session, read the updated
 
 ## Boundaries
 
-This bootstrap is for local repo/folder instruction files only. It must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
+This bootstrap is for local repo/folder instruction files only. Apart from the refresh pull request above (a branch, commit, push and pull request of refresh-owned files, a check watch, and a merge only when the owner's stored choice allows it), it must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
 
 Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, repo-local files are the source of truth.
 

@@ -13,6 +13,7 @@ const expectedCodexRows = [
   ['automatic-updates', 'Automatic updates'],
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
+  ['refresh-pr-auto-merge', 'Merge rule-refresh PRs when the required checks pass'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['opencode-integration', 'OpenCode'],
 ];
@@ -293,18 +294,18 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 5);
+  assert.equal(codex[0].presentation.total_visible_question_count, 6);
   assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
-  assert.equal(claude[0].presentation.total_visible_question_count, 6);
+  assert.equal(claude[0].presentation.total_visible_question_count, 7);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1']);
 });
 
 test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
@@ -333,7 +334,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const withTargets = allRows();
   const withoutTargets = withTargets.filter((row) => row.id !== 'opencode-integration');
   const renumbered = core.withPresentationMetadata(withoutTargets.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, withTargets[0].presentation.bank_identity);
 });
 
@@ -394,7 +395,7 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
   assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
-    'update-source', 'update-reports', 'report-retention', 'codex-toolkit-maintenance',
+    'update-source', 'update-reports', 'report-retention', 'refresh-pr-auto-merge', 'codex-toolkit-maintenance',
   ]);
   assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
     'managed-checkout-path', 'report-retention-days',
@@ -489,7 +490,7 @@ test('TTY all recommended and changed-only commands execute after exactly one co
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
-  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
@@ -525,4 +526,23 @@ test('TTY malformed concise input can be corrected and secondary details are col
   assert.equal(retentionJourney.args.updateReportRetentionDays, 14);
   assert.equal(retentionJourney.args.updateReportRetentionDaysExplicit, true);
   assert.equal(retentionJourney.prompts.filter((prompt) => /Report retention duration in days/.test(prompt)).length, 2);
+});
+
+test('the rule-refresh PR merge question is recommended on, keeps the stored choice and passes the bridge flag', () => {
+  const current = stateWithManaged(managedState());
+  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), current).find((spec) => spec.id === 'refresh-pr-auto-merge');
+  assert.equal(row.title, 'Merge rule-refresh PRs when the required checks pass');
+  assert.equal(row.section, 'Updates and reports');
+  assert.equal(row.recommended, 'enable');
+  assert.deepEqual(row.choices.map((choice) => choice.label), ['Turn on', 'Turn off', 'Keep current']);
+  assert.match(row.whatThisControls, /admin bypass and force-push are never used/);
+  assert.equal(row.currentState.verification, 'defaulted', 'an unknown stored choice is not claimed as verified');
+  assert.match(row.current, /stop at the open PR/);
+  for (const [flag, expected] of [['--enable-refresh-pr-auto-merge', '--enable-refresh-pr-auto-merge'], ['--disable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge']]) {
+    const args = core.parseArgs(['--plan', flag]);
+    const plan = JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: args.setupChoices }));
+    assert.ok(plan.includes(expected), flag);
+  }
+  const kept = core.parseArgs(['--plan', '--keep-refresh-pr-auto-merge']);
+  assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('refresh-pr-auto-merge'), false);
 });

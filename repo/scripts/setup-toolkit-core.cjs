@@ -112,6 +112,7 @@ function emptySetupChoices() {
     repoAutoUpdate: '',
     updateReports: '',
     updateReportRetention: '',
+    refreshPrAutoMerge: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
@@ -147,6 +148,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
+    refreshPrAutoMerge: true,
     codexPluginAutoRefresh: true,
     enableTargets: [],
     disableTargets: [],
@@ -249,6 +251,13 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.updateReports = false;
       args.setupChoices.updateReports = 'disable';
     } else if (arg === '--keep-update-reports') args.setupChoices.updateReports = 'keep';
+    else if (arg === '--enable-refresh-pr-auto-merge') {
+      args.refreshPrAutoMerge = true;
+      args.setupChoices.refreshPrAutoMerge = 'enable';
+    } else if (arg === '--disable-refresh-pr-auto-merge') {
+      args.refreshPrAutoMerge = false;
+      args.setupChoices.refreshPrAutoMerge = 'disable';
+    } else if (arg === '--keep-refresh-pr-auto-merge') args.setupChoices.refreshPrAutoMerge = 'keep';
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
       args.updateReportRetentionDaysExplicit = true;
@@ -376,6 +385,7 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
+    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required',
     opencode_sync: targetChoice('opencode')
   };
 }
@@ -393,6 +403,8 @@ function setupPlan(options = {}) {
   const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
+  if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
+  else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(retentionDays));
   }
@@ -593,6 +605,9 @@ function printHelp() {
     '  --enable-update-reports     write meaningful update reports',
     '  --disable-update-reports    disable future meaningful update report writes',
     '  --keep-update-reports       preserve meaningful update report write preference',
+    '  --enable-refresh-pr-auto-merge   merge rule-refresh PRs when the required checks pass',
+    '  --disable-refresh-pr-auto-merge  stop rule-refresh PRs at the open PR',
+    '  --keep-refresh-pr-auto-merge     preserve the rule-refresh PR merge choice',
     '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
     '  --skip-update-report-open   retain failure-only opening; successful reports remain closed',
     '  --keep-update-report-open   compatibility alias; legacy success-report auto-open is not preserved',
@@ -1437,6 +1452,7 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
+  if (key === 'refreshPrAutoMerge') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
@@ -1846,6 +1862,28 @@ function setupQuestionSpecs(args, current) {
       current: retentionCurrent,
       currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
       afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
+    }),
+    resolvedQuestion({
+      id: 'refresh-pr-auto-merge',
+      key: 'refreshPrAutoMerge',
+      section: 'Updates and reports',
+      title: 'Merge rule-refresh PRs when the required checks pass',
+      prompt: 'Rule-refresh PR merge choice',
+      whatThisControls: 'Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once every required check passes on its exact head. Failed or pending checks, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Merge the rule-refresh pull request after every required check passes on its exact head.'),
+        wizardChoice('disable', 'Turn off', 'Stop at the open rule-refresh pull request and report it for you to merge.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.refresh_pr_auto_merge_enabled, 'Rule-refresh PRs merge automatically once every required check passes on the exact head.', 'Rule-refresh PRs stop at the open PR for you to merge.', 'The saved rule-refresh merge choice could not be verified; refresh PRs stop at the open PR.')}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('refreshPrAutoMerge', current, args),
+        outcome: 'Merge rule-refresh pull requests once every required check passes.',
+        reason: 'Refreshed rules reach the default branch without a manual step, while the required checks, branch protection and the refresh-owned-files limit still decide every merge.',
+      },
+      selected: args.setupChoices.refreshPrAutoMerge,
+      current: currentBooleanOutcome(current.audit?.refresh_pr_auto_merge_enabled, 'Rule-refresh PRs merge automatically once every required check passes on the exact head.', 'Rule-refresh PRs stop at the open PR for you to merge.', 'The saved rule-refresh merge choice could not be verified; refresh PRs stop at the open PR.'),
+      currentVerification: typeof current.audit?.refresh_pr_auto_merge_enabled === 'boolean' ? 'verified' : 'defaulted',
+      afterApplying: 'This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.',
     })
   ];
 
@@ -2298,6 +2336,7 @@ function setupQuestionDocumentationSpecs() {
       repo_auto_update: { enabled: true },
       update_report_enabled: true,
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+      refresh_pr_auto_merge_enabled: true,
       codex_plugin_auto_refresh_enabled: true,
       targets: {
         opencode: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
@@ -2374,6 +2413,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
+  else if (key === 'refreshPrAutoMerge') args.setupChoices.refreshPrAutoMerge = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
@@ -2386,6 +2426,7 @@ function choiceForKey(args, key) {
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
+  if (key === 'refreshPrAutoMerge') return args.setupChoices.refreshPrAutoMerge;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
@@ -2672,6 +2713,7 @@ function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
+  if (spec.key === 'refreshPrAutoMerge') return args.refreshPrAutoMerge ? 'enable' : 'disable';
   if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
   return value;
 }
@@ -2908,6 +2950,9 @@ function applySetupChoices(args, current) {
 
   if (choices.updateReports === 'keep') args.updateReports = current.audit?.update_report_enabled !== false;
   else args.updateReports = choices.updateReports === 'enable';
+
+  if (choices.refreshPrAutoMerge === 'keep') args.refreshPrAutoMerge = current.audit?.refresh_pr_auto_merge_enabled === true;
+  else args.refreshPrAutoMerge = choices.refreshPrAutoMerge === 'enable';
 
   args.updateReportOpen = false;
 
@@ -3401,6 +3446,8 @@ function writeBridgePreferences(args) {
   const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
+  if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
+  else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(args.updateReportRetentionDays));
   }
@@ -3675,6 +3722,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
+  console.log(`Rule-refresh PRs merge when required checks pass: ${yesNo(args.refreshPrAutoMerge === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log('Update report/log directory: <Toolkit update-report directory>');

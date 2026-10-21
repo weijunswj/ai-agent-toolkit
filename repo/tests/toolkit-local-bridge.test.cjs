@@ -5019,10 +5019,15 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
   }
 
+  // repository-agent-rules may read one stored owner choice through the read-only audit
+  // command; that read alone does not make it a bridge setup skill.
+  const READ_ONLY_AUDIT = /`node "<Toolkit plugin root>\/repo\/scripts\/toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/g;
+  const rulesSkill = fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'SKILL.md'), 'utf8');
+  assert.equal((rulesSkill.match(READ_ONLY_AUDIT) || []).length, 1, 'repository-agent-rules reads the bridge only through the read-only audit');
   const bridgeSkillNames = skillNames.filter((skill) => {
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
-    const skillText = fs.readFileSync(skillPath, 'utf8');
+    const skillText = fs.readFileSync(skillPath, 'utf8').replace(READ_ONLY_AUDIT, '');
     return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity portable skills|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
@@ -5404,4 +5409,26 @@ test('Codex plugin hook reconciliation fails closed on unknown n8n layout withou
   assert.deepEqual(fs.readFileSync(envPath), beforeEnv);
   assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), false);
   assert.deepEqual(snapshotTree(historicalRoot), historicalBefore, 'retained supported cache must not be repaired when current is unknown');
+});
+
+test('the rule-refresh PR merge choice defaults off, persists through flags and is readable from a read-only audit', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const env = isolatedHomeEnv(root, { PATH: process.env.PATH });
+  const audit = () => {
+    const result = run(['--hub', hub, '--audit'], { env });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout).refresh_pr_auto_merge_enabled;
+  };
+  assert.equal(audit(), false);
+  assert.equal(run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge'], { env }).status, 0);
+  assert.equal(readJson(path.join(hub, 'state.json')).refresh_pr_auto_merge_enabled, true);
+  const before = snapshotTree(root);
+  assert.equal(audit(), true);
+  assert.deepEqual(snapshotTree(root), before, 'the audit read writes nothing');
+  assert.equal(run(['--hub', hub, '--write', '--disable-refresh-pr-auto-merge'], { env }).status, 0);
+  assert.equal(audit(), false);
+  const conflict = run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge'], { env });
+  assert.notEqual(conflict.status, 0);
+  assert.match(conflict.stderr, /cannot be used together/);
 });

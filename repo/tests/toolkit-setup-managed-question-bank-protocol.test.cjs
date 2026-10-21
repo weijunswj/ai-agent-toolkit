@@ -310,7 +310,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
     '--use-default-managed-checkout', '--enable-repo-auto-update', '--enable-update-reports',
-    '--default-update-report-retention-days', '--claude-topology', 'root-only',
+    '--default-update-report-retention-days', '--enable-refresh-pr-auto-merge', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
   assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -382,7 +382,7 @@ test('real partial piped answers still show one complete effective bank before p
 
 test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
   const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', ''].join('\n');
+  const input = ['default', 'enable', 'enable', 'default', 'enable', 'root-only', 'instructions', ''].join('\n');
   const result = runRealManaged(fixture, [], input);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);

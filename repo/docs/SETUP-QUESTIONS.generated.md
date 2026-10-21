@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 6 questions across 3 sections
+Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: WCSY-6QX6-8S53-23DS
+Bank reference: C4S7-1Q2C-24EK-EKN7
 
 Quick index
 
@@ -13,6 +13,7 @@ Quick index
 1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
+1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
 3.1 OpenCode - Recommended: C - Keep current
 
@@ -123,6 +124,32 @@ Quick index
 
 ---
 
+### 1.5 Merge rule-refresh PRs when the required checks pass
+
+**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once every required check passes on its exact head. Failed or pending checks, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
+
+**Current:** Rule-refresh PRs merge automatically once every required check passes on the exact head.
+
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Merge rule-refresh pull requests once every required check passes.
+
+**Why:** Refreshed rules reach the default branch without a manual step, while the required checks, branch protection and the refresh-owned-files limit still decide every merge.
+
+**Choices:**
+
+- **A. Turn on** - Merge the rule-refresh pull request after every required check passes on its exact head.
+- **B. Turn off** - Stop at the open rule-refresh pull request and report it for you to merge.
+- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once every required check passes on the exact head.
+
+**After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
+
+**Selected:** A - Turn on
+
+---
+
 
 ## 2. Computer performance
 
@@ -184,8 +211,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `WCSY-6QX6-8S53-23DS: all recommended`
-- only your changes, for example: `WCSY-6QX6-8S53-23DS: 1.2=B, 3.1=A`
+- `C4S7-1Q2C-24EK-EKN7: all recommended`
+- only your changes, for example: `C4S7-1Q2C-24EK-EKN7: 1.2=B, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
