@@ -72,21 +72,34 @@ test('outside governed work every main-session agent launch is left to Claude Co
   assert.deepEqual(hook.decision({ tool_name: 'Read', cwd: f.repo }, { root: f.controlRoot, environment: f.environment }), {});
 });
 
-test('outside governed work a subagent cannot launch another agent, with the governed plain reason', t => {
+const ONE_LAYER_REASON = "Toolkit: a subagent can't start another agent (one layer only). Do the work in this subagent, or hand it back to the main session.";
+
+test('outside governed work a subagent cannot launch another agent, with a plain one-layer reason', t => {
   const f = fixture(t);
-  const governed = reason(f.decide({ agent_id: 'a1', agent_type: 'toolkit-g1-helper', tool_input: { subagent_type: 'toolkit-g0-helper' } }));
   for (const cwd of [f.plain, f.dir]) {
     for (const tool_name of ['Agent', 'Task']) {
       for (const caller of [{ agent_id: 'a1', agent_type: 'Explore' }, { agent_id: 'a2' }]) {
         const output = f.decide({ cwd, tool_name, ...caller, tool_input: { subagent_type: 'general-purpose', prompt: 'y' } });
         assert.ok(denied(output), `${cwd} ${tool_name} ${JSON.stringify(caller)}`);
-        assert.equal(reason(output), governed);
+        assert.equal(reason(output), ONE_LAYER_REASON);
+        assert.doesNotMatch(reason(output), /G0|G1|helper/);
       }
     }
     // Non-agent tools inside a subagent are untouched.
     assert.deepEqual(f.decide({ cwd, tool_name: 'Read', agent_id: 'a1', agent_type: 'Explore', tool_input: {} }), {});
   }
-  assert.equal(governed, 'Toolkit: a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
+});
+
+test('in governed work a main session started with --agent is the lead; only an agent_id caller is a helper', t => {
+  const f = fixture(t);
+  // agent_type without agent_id: a --agent main session, judged like any lead launch.
+  assert.deepEqual(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});
+  assert.match(reason(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'general-purpose' } })),
+    /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: general-purpose\)/);
+  for (const caller of [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper' }, { agent_id: 'a2' }]) {
+    const output = f.decide({ ...caller, tool_input: { subagent_type: 'toolkit-g0-helper' } });
+    assert.equal(reason(output), 'Toolkit: a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.', JSON.stringify(caller));
+  }
 });
 
 test('in governed work the matching Toolkit helpers are allowed and other launches are refused with a plain reason', t => {

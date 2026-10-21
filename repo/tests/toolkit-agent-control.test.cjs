@@ -188,6 +188,7 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
   // In governed work (here the Toolkit checkout) a missing decision module denies; without the shared
   // predicate only a launcher marker gates, so ordinary work is never blocked by a broken install.
   const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const ONE_LAYER = /^Toolkit: a subagent can't start another agent \(one layer only\)\. Do the work in this subagent, or hand it back to the main session\.$/;
   const CHECKOUT = path.resolve(__dirname, '..', '..');
   const dir = root();
   const clean = { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir };
@@ -211,12 +212,17 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
     assert.deepEqual(JSON.parse(outside.stdout), {}, 'ungoverned work is untouched by a broken install');
     const nested = JSON.parse(call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);
     assert.equal(nested.hookSpecificOutput.permissionDecision, 'deny', 'a subagent launch stays refused when modules are missing');
+    assert.match(nested.hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
     // Intact modules outside governed work: a subagent launch gets the plain one-layer reason.
     const nestedIntact = call(HOOK, { tool_name: 'Task', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} });
     assert.equal(nestedIntact.status, 0, nestedIntact.stderr);
-    assert.match(JSON.parse(nestedIntact.stdout).hookSpecificOutput.permissionDecisionReason, /a helper cannot launch another agent/);
+    assert.match(JSON.parse(nestedIntact.stdout).hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
     fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
     assert.deepEqual(JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
+    // The module-failure path gives a subagent caller the same plain one-layer reason.
+    const failedNested = JSON.parse(call(copy, { tool_name: 'Agent', cwd: dir, agent_id: 'a1', tool_input: {} }).stdout).hookSpecificOutput;
+    assert.equal(failedNested.permissionDecision, 'deny');
+    assert.match(failedNested.permissionDecisionReason, ONE_LAYER);
     const marked = JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).stdout);
     assert.equal(marked.hookSpecificOutput.permissionDecision, 'deny', 'a launcher marker gates even without the predicate');
     const other = call(copy, { tool_name: 'Read' });

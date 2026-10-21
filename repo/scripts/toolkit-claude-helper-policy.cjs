@@ -25,12 +25,6 @@ function deny(reason) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: ${reason}` } };
 }
 
-// The one plain refusal for an agent launched from inside another agent, in governed and
-// ordinary work alike.
-function nestedLaunchDenial() {
-  return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
-}
-
 class ClaudeNamedHelperPolicy {
   #environment; #toolkitRoot; #matches;
   constructor({ environment = process.env, toolkitRoot = path.resolve(__dirname, '..', '..'), matchesRenderedDefinition } = {}) {
@@ -59,7 +53,9 @@ class ClaudeNamedHelperPolicy {
   }
 
   decide(input, governance) {
-    if (input.agent_id || input.agent_type) return nestedLaunchDenial();
+    // `agent_id` marks a subagent or teammate caller. `agent_type` alone also comes from a
+    // main session started with --agent, which is the lead, not a helper.
+    if (input.agent_id) return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
     if (governance.gate_role === 'G2') return deny('G2 review sessions launch no helpers; do the review in this session.');
     const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {};
     const requested = args.subagent_type;
@@ -85,4 +81,4 @@ class ClaudeNamedHelperPolicy {
   }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, nestedLaunchDenial });
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES });
