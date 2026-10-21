@@ -38,12 +38,17 @@ function decision(input, options = {}) {
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
   // Outside Toolkit-governed work only one layer applies: the main session launches any agent
-  // with no decision, and a subagent never launches another. `agent_id` marks a subagent or
-  // teammate caller; `agent_type` alone also appears in a main session started with --agent.
+  // with no decision, and a subagent never launches another unless the owner chose broader
+  // native behaviour. A missing or unreadable profile reads as root-only, so the refusal stays.
+  // `agent_id` marks a subagent or teammate caller; `agent_type` alone also appears in a main
+  // session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
-  if (!governance.governed) return input.agent_id ? ONE_LAYER_DENIAL : {};
   const { readProfile, TOPOLOGIES } = control();
+  if (!governance.governed) {
+    if (!input.agent_id) return {};
+    return readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
+  }
   const profile = readProfile('claude-code', options);
   if (profile.topology === TOPOLOGIES.BROADER_NATIVE) return nativeAdapter().commandDecision(input, 'claude-code', {
     binding_path: process.env.TOOLKIT_NATIVE_HELPER_BINDING,
@@ -62,7 +67,8 @@ const CHECK_FAILED_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ 
 
 // After a decision failure, refuse only what a working hook could refuse: an Agent/Task call
 // in a governed repository, or with a launcher marker when governance cannot be determined;
-// elsewhere a subagent's Agent/Task call gets the plain one-layer reason.
+// elsewhere a subagent's Agent/Task call gets the plain one-layer reason, since the profile
+// that could lift it was not read.
 function outputAfterFailure(input) {
   if (!/^(Agent|Task)$/.test(String(input?.tool_name || input?.toolName || ''))) return {};
   let governed;

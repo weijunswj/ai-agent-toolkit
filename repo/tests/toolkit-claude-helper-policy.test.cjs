@@ -90,6 +90,27 @@ test('outside governed work a subagent cannot launch another agent, with a plain
   }
 });
 
+test('broader native behaviour lifts the normal-folder refusal; a missing or unreadable profile keeps it; governed work is unchanged', async t => {
+  const f = fixture(t);
+  const nested = cwd => f.decide({ cwd, agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'general-purpose' } });
+  // Missing profile: unconfigured reads as root-only, so the one-layer refusal stays.
+  assert.equal(reason(nested(f.plain)), ONE_LAYER_REASON);
+  // Unreadable profile: same fail-safe.
+  const profileFile = control.profilePath('claude-code', { root: f.controlRoot });
+  fs.mkdirSync(path.dirname(profileFile), { recursive: true });
+  fs.writeFileSync(profileFile, '{ not json');
+  assert.equal(reason(nested(f.plain)), ONE_LAYER_REASON);
+  // Broader native: Claude's own defaults outside Toolkit repos, so no decision.
+  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: f.controlRoot });
+  assert.equal(control.readProfile('claude-code', { root: f.controlRoot }).topology, control.TOPOLOGIES.BROADER_NATIVE);
+  for (const cwd of [f.plain, f.dir]) {
+    assert.deepEqual(nested(cwd), {}, cwd);
+    assert.deepEqual(f.decide({ cwd, tool_name: 'Task', agent_id: 'a2', tool_input: {} }), {}, `${cwd} Task`);
+  }
+  // Governed work under broader native still refuses a subagent caller (native adapter path, unchanged).
+  assert.ok(denied(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })));
+});
+
 test('in governed work a main session started with --agent is the lead; only an agent_id caller is a helper', t => {
   const f = fixture(t);
   // agent_type without agent_id: a --agent main session, judged like any lead launch.

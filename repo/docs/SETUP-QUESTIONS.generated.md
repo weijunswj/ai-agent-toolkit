@@ -225,7 +225,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: S8R4-FNYT-6Y10-Q71D
+Bank reference: WQD4-KKK5-RBJF-QSER
 
 Quick index
 
@@ -391,7 +391,7 @@ Quick index
 **Choices:**
 
 - **A. Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.** - In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds every folder to one layer of subagents; a value you set yourself is kept as it is.
-- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Claude Code's own nesting limit applies again: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed and a value you set yourself is kept. The installed Toolkit hook still refuses a subagent that tries to start another in normal folders.
+- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code's own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.
 - **C. Keep current** - Preserve this effective behavior: Current topology: root-only. Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default. Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.
 
 **After applying:** A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.
