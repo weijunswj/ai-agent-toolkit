@@ -40,8 +40,8 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Recommended:\*\* A - Root agent only/);
-  assert.match(result.stdout, /\*\*Selected:\*\* A - Root agent only/);
+  assert.match(result.stdout, /\*\*Recommended:\*\* A - Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
+  assert.match(result.stdout, /\*\*Selected:\*\* A - Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
@@ -50,8 +50,7 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   assert.equal(profile.topology, control.TOPOLOGIES.ROOT_ONLY);
   assert.equal(profile.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);
   assert.equal(fs.existsSync(codexConfig(root)), false);
-  // The recommended one-layer answer writes only the Toolkit-owned key into the temporary Claude settings.
-  assert.match(result.stdout, /\*\*Recommended:\*\* A - Turn on/);
+  // The recommended root-only answer also writes only the Toolkit-owned depth key into the temporary Claude settings.
   assert.match(result.stdout, /One-layer subagent setting this run: changed; Claude Code allows one layer/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8')),
     { env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' } });

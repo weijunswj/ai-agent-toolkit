@@ -223,9 +223,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 9 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: 3YV9-7PH7-Y90Z-B6EB
+Bank reference: S8R4-FNYT-6Y10-Q71D
 
 Quick index
 
@@ -234,8 +234,7 @@ Quick index
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
 1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
-2.1 How should Claude Code use agents? - Recommended: A - Root agent only
-2.2 Limit Claude Code agents to one layer? - Recommended: A - Turn on
+2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 OpenCode - Recommended: C - Keep current
 
@@ -377,53 +376,27 @@ Quick index
 
 ### 2.1 How should Claude Code use agents?
 
-**What this controls:** Whether Claude Code stays root-first, where the installed Toolkit hook admits only the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories and leaves other work unrestricted, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.
+**What this controls:** How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit G0/G1 leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed V3 workers use only the registry-pinned launcher.
 
-**Current:** Current topology: root-only.
-
-**Verification:** verified
-
-**Recommended:** A - Root agent only
-
-**Recommended outcome:** Use the root agent, with only the Toolkit G0/G1 leaf helpers admitted at the installed hook in Toolkit-governed repositories.
-
-**Why:** Root-only is the verified default; governed workers use the registry-pinned V3 launcher.
-
-**Choices:**
-
-- **A. Root agent only** - Use no helper agents other than the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories.
-- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees.
-- **C. Keep current** - Preserve the effective root-only topology when it remains supported; stale, unverifiable or retired state falls back safely to root-only.
-
-**After applying:** A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.
-
-**Selected:** A - Root agent only
-
----
-
-### 2.2 Limit Claude Code agents to one layer?
-
-**What this controls:** Whether Claude Code allows one layer of agents: the main session may start subagents; subagents never start another. Toolkit sets Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting for this and records that it owns that value.
-
-**Current:** Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.
+**Current:** Current topology: root-only. Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 
-**Recommended outcome:** One layer: the main session may start subagents; subagents never start another.
+**Recommended outcome:** Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 
-**Why:** Claude Code enforces the limit itself in every folder, so agents cannot multiply out of sight; the Toolkit hook refuses the same launches as a backstop.
+**Why:** Root-only is the verified default: Claude Code enforces the one-layer limit itself outside Toolkit repos, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the registry-pinned V3 launcher.
 
 **Choices:**
 
-- **A. Turn on** - Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings as a Toolkit-owned value. A value you set yourself is kept as it is.
-- **B. Turn off** - Remove that setting only if Toolkit set it, so Claude Code's own nesting limit applies again; a value you set yourself is kept. The Toolkit hook, when installed, still refuses a subagent that tries to start another.
-- **C. Keep current** - Preserve this effective behavior: Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.
+- **A. Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.** - In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds every folder to one layer of subagents; a value you set yourself is kept as it is.
+- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Claude Code's own nesting limit applies again: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed and a value you set yourself is kept. The installed Toolkit hook still refuses a subagent that tries to start another in normal folders.
+- **C. Keep current** - Preserve this effective behavior: Current topology: root-only. Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default. Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.
 
-**After applying:** This changes only that one key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session for it to take effect. Claude Code 2.1.217 or later reads it; earlier versions ignore it.
+**After applying:** A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.
 
-**Selected:** A - Turn on
+**Selected:** A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 
 ---
 

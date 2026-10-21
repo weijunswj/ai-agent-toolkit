@@ -1,4 +1,5 @@
 'use strict';
+require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update reports appear
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,7 +16,13 @@ function tmpRoot() {
 
 function isolatedHomeEnv(root) {
   const fakeCodex = createFakeCodexAppServer(root);
+  const temp = path.join(root, 'tmp');
+  fs.mkdirSync(temp, { recursive: true });
   return {
+    // Pinned explicitly: run() spreads process.env, so an absent key would inherit a temp folder.
+    TEMP: temp,
+    TMP: temp,
+    TMPDIR: temp,
     PATH: process.env.PATH || '',
     ...(process.platform === 'win32' ? {
       SystemRoot: process.env.SystemRoot || process.env.SYSTEMROOT || process.env.WINDIR || '',

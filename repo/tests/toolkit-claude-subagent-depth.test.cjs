@@ -91,35 +91,51 @@ test('unreadable settings are held unchanged, and keep never writes', t => {
   assert.throws(() => f.setting().apply('maybe'), /Unsupported Claude subagent depth choice/);
 });
 
-test('setup asks the one-layer question for Claude Code only, recommended on, and writes only when answered', t => {
+const ONE_LAYER_LABEL = 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.';
+
+test('the topology question carries the one-layer depth: root-only sets it, broader-native removes only Toolkit\'s value, keep leaves it', t => {
   const claudeState = { ...baseState(), agentProfile: { supported: true, topology: 'root-only' }, claudeSubagentDepth: { state: STATES.DEFAULT } };
   const claude = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), claudeState);
-  const depth = claude.find(row => row.key === 'claudeSubagentDepth');
-  assert.ok(depth);
-  assert.equal(depth.presentation.question_ref, '2.2');
-  assert.equal(depth.recommended, 'enable');
-  assert.deepEqual(depth.choices.map(choice => choice.value), ['enable', 'disable', 'keep']);
-  assert.match(depth.whatThisControls, /the main session may start subagents; subagents never start another/);
-  assert.equal(core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), baseState()).some(row => row.key === 'claudeSubagentDepth'), false);
-  assert.equal(core.parseArgs(['--claude-one-layer-subagents', 'disable']).setupChoices.claudeSubagentDepth, 'disable');
-  assert.equal(core.parseArgs(['--claude-one-layer-subagents=keep']).setupChoices.claudeSubagentDepth, 'keep');
-  assert.throws(() => core.parseArgs(['--claude-one-layer-subagents', 'on']), /Unsupported --claude-one-layer-subagents choice: on/);
+  assert.equal(claude.some(row => /subagent ?depth|one-layer/i.test(row.key) || row.id === 'claude-one-layer-subagents'), false, 'no separate depth question');
+  const topology = claude.find(row => row.key === 'claudeTopology');
+  assert.equal(topology.presentation.question_ref, '2.1');
+  assert.deepEqual(topology.choices.map(choice => choice.value), ['root-only', 'broader-native', 'keep']);
+  assert.equal(topology.recommended, 'root-only');
+  assert.equal(topology.choices[0].label, ONE_LAYER_LABEL);
+  assert.equal(topology.recommended_outcome, ONE_LAYER_LABEL);
+  assert.match(topology.whatThisControls, /the main session may start subagents; subagents never start another/);
+  assert.match(topology.current, /Claude Code uses its own limit/);
+  assert.throws(() => core.parseArgs(['--claude-one-layer-subagents', 'enable']), /Unknown argument/);
 
+  // The plan follows the answer: recommended root-only sets the key.
   const planned = core.plannedQuestionBank(core.parseArgs(['--plan', '--host', 'claude-code', '--yes-recommended']), claudeState);
-  assert.equal(planned.args.setupChoices.claudeSubagentDepth, 'enable');
-  const plan = core.setupPlan({ host: 'claude-code', setupChoices: planned.args.setupChoices });
-  assert.equal(plan.preferences.claude_one_layer_subagents, 'enable');
+  const plan = core.setupPlan(planned.args);
+  assert.equal(plan.preferences.claude_subagent_depth, 'enable');
   assert.ok(plan.steps.find(step => step.id === 'host_delegation_control').commands.some(command => /CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1"/.test(command)));
 
-  // Unanswered or keep: nothing is written.
+  const answered = (topologyAnswer, profile = { supported: true, topology: 'root-only' }) => {
+    const args = core.parseArgs(['--execute', '--host', 'claude-code', ...(topologyAnswer ? ['--claude-topology', topologyAnswer] : [])]);
+    core.resolveClaudeTopology(args, { agentProfile: profile });
+    // A second resolution (as applyHostDelegationControl does) must not change the recorded effect.
+    core.resolveClaudeTopology(args, { agentProfile: profile });
+    return args;
+  };
   const f = fixture(t);
-  const unanswered = core.applyClaudeSubagentDepth(core.parseArgs(['--execute', '--host', 'claude-code']), f.setting());
-  assert.equal(unanswered.changed, false);
-  assert.equal(fs.existsSync(f.settingsPath), false);
-  const answered = core.applyClaudeSubagentDepth(core.parseArgs(['--execute', '--host', 'claude-code', '--claude-one-layer-subagents', 'enable']), f.setting());
-  assert.equal(answered.changed, true);
+  assert.equal(core.applyClaudeSubagentDepth(answered('root-only'), f.setting()).changed, true);
   assert.deepEqual(f.read(), { env: { [SETTING]: '1' } });
+  // keep, including a keep that resolves to root-only for an unsupported profile, changes nothing.
+  assert.equal(core.applyClaudeSubagentDepth(answered('keep', { supported: false, topology: 'root-only' }), f.setting()).changed, false);
+  assert.equal(core.applyClaudeSubagentDepth(answered(''), f.setting()).changed, false);
+  assert.deepEqual(f.read(), { env: { [SETTING]: '1' } });
+  // broader-native removes Toolkit's value.
+  assert.equal(core.applyClaudeSubagentDepth(answered('broader-native'), f.setting()).changed, true);
+  assert.equal(fs.existsSync(f.settingsPath), false);
+  // broader-native keeps an owner value.
+  const g = fixture(t, `${JSON.stringify({ env: { [SETTING]: '2' } })}\n`);
+  assert.equal(core.applyClaudeSubagentDepth(answered('broader-native'), g.setting()).status, 'owner-value-kept');
+  assert.deepEqual(g.read(), { env: { [SETTING]: '2' } });
 });
+
 
 function baseState() {
   return {

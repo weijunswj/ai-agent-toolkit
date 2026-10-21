@@ -117,7 +117,6 @@ function emptySetupChoices() {
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
-    claudeSubagentDepth: '',
     claudePluginBehavior: '',
     targets: { opencode: '' }
   };
@@ -290,11 +289,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       if (!['root-only', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
       args.setupChoices.claudeTopology = choice;
     }
-    else if (arg === '--claude-one-layer-subagents' || arg.startsWith('--claude-one-layer-subagents=')) {
-      const choice = (arg === '--claude-one-layer-subagents' ? next() : arg.slice('--claude-one-layer-subagents='.length)).toLowerCase();
-      if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-one-layer-subagents choice: ${choice}`);
-      args.setupChoices.claudeSubagentDepth = choice;
-    }
     else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
@@ -384,8 +378,8 @@ function preferenceSummary(options) {
     selected_topology: options.host === 'codex'
       ? 'native-unintercepted-root-only'
       : (choices.claudeTopology || 'question-required'),
-    claude_one_layer_subagents: options.host === 'claude-code'
-      ? (choices.claudeSubagentDepth || 'question-required')
+    claude_subagent_depth: options.host === 'claude-code'
+      ? (claudeSubagentDepthChoice(options) || 'question-required')
       : 'not-applicable',
     helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
       ? options.codexHelperCount
@@ -560,8 +554,8 @@ function setupPlan(options = {}) {
           ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
           : (host === 'claude-code' ? [
               ...(choices.claudeTopology !== 'keep' ? ['write only the Claude Code profile under ~/.ai-agent-toolkit/agent-control/profiles/claude-code.json'] : []),
-              ...(choices.claudeSubagentDepth === 'enable' ? ['set the Toolkit-owned env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1" in the Claude Code user settings unless you set that key yourself'] : []),
-              ...(choices.claudeSubagentDepth === 'disable' ? ['remove env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH from the Claude Code user settings only if Toolkit set it'] : []),
+              ...(claudeSubagentDepthChoice(options) === 'enable' ? ['set the Toolkit-owned env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1" in the Claude Code user settings unless you set that key yourself'] : []),
+              ...(claudeSubagentDepthChoice(options) === 'disable' ? ['remove env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH from the Claude Code user settings only if Toolkit set it'] : []),
             ] : [])
       },
       {
@@ -636,9 +630,7 @@ function printHelp() {
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
     '  --claude-topology root-only|broader-native|keep',
-    '                               Claude-only topology; root-only blocks native Agent/Task at the installed hook',
-    '  --claude-one-layer-subagents enable|disable|keep',
-    '                               Claude Code only; set or remove the Toolkit-owned CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 user setting',
+    '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --enable-target opencode enable and sync the approved OpenCode skills target',
@@ -1475,7 +1467,6 @@ function recommendedChoice(key, current, args) {
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
   }
   if (key === 'claudeTopology') return 'root-only';
-  if (key === 'claudeSubagentDepth') return 'enable';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return 'keep';
   return 'keep';
@@ -1724,6 +1715,9 @@ function assertManagedCheckoutChoiceAvailable(args, specs) {
 function resolveClaudeTopology(args, current) {
   const profile = current.agentProfile || agentControl.readProfile('claude-code');
   const choice = args.setupChoices.claudeTopology || 'keep';
+  // Resolution rewrites keep to a concrete topology, so the depth effect is taken from the
+  // first (unresolved) answer only: keep leaves the depth setting as it is.
+  if (!args.claudeSubagentDepthChoice) args.claudeSubagentDepthChoice = SUBAGENT_DEPTH_FOR_TOPOLOGY[choice] || 'keep';
   const kept = profile.supported === true
     && [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.BROADER_NATIVE].includes(profile.topology);
   const topology = choice === 'keep'
@@ -1753,6 +1747,14 @@ function currentManagedSourceOutcome(current, args) {
     return 'The configured update source points at an unexpected remote, so Toolkit will not fetch from it.';
   }
   return 'The configured update source could not be verified safely, so a safe source must be selected.';
+}
+
+// Root-only sets the one-layer depth outside Toolkit repos; broader-native returns to Claude
+// Code's own limit by removing only Toolkit's value; keep changes nothing.
+const SUBAGENT_DEPTH_FOR_TOPOLOGY = Object.freeze({ 'root-only': 'enable', 'broader-native': 'disable', keep: 'keep' });
+
+function claudeSubagentDepthChoice(options) {
+  return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
 }
 
 function claudeSubagentDepthOutcome(depth) {
@@ -1947,49 +1949,28 @@ function setupQuestionSpecs(args, current) {
     }));
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
+    const topologyCurrent = `Current topology: ${activeProfile.topology || 'root-only'}. ${claudeSubagentDepthOutcome(current.claudeSubagentDepth)}`;
     specs.push(resolvedQuestion({
       id: 'claude-agent-topology',
       key: 'claudeTopology',
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'Whether Claude Code stays root-first, where the installed Toolkit hook admits only the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories and leaves other work unrestricted, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.',
+      whatThisControls: 'How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit G0/G1 leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets Claude Code\'s own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed V3 workers use only the registry-pinned launcher.',
       choices: [
-        wizardChoice('root-only', 'Root agent only', 'Use no helper agents other than the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories.'),
-        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees.'),
-        wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale, unverifiable or retired state falls back safely to root-only.`),
+        wizardChoice('root-only', 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.', 'In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds every folder to one layer of subagents; a value you set yourself is kept as it is.'),
+        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Claude Code\'s own nesting limit applies again: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed and a value you set yourself is kept. The installed Toolkit hook still refuses a subagent that tries to start another in normal folders.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${topologyCurrent} Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.`),
       ],
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
-        outcome: 'Use the root agent, with only the Toolkit G0/G1 leaf helpers admitted at the installed hook in Toolkit-governed repositories.',
-        reason: 'Root-only is the verified default; governed workers use the registry-pinned V3 launcher.',
+        outcome: 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.',
+        reason: 'Root-only is the verified default: Claude Code enforces the one-layer limit itself outside Toolkit repos, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the registry-pinned V3 launcher.',
       },
       selected: args.setupChoices.claudeTopology,
-      current: `Current topology: ${activeProfile.topology || 'root-only'}.`,
-      afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
-    }));
-    const depthCurrent = claudeSubagentDepthOutcome(current.claudeSubagentDepth);
-    specs.push(resolvedQuestion({
-      id: 'claude-one-layer-subagents',
-      key: 'claudeSubagentDepth',
-      section: 'Computer performance',
-      title: 'Limit Claude Code agents to one layer?',
-      prompt: 'Claude Code one-layer subagent choice',
-      whatThisControls: 'Whether Claude Code allows one layer of agents: the main session may start subagents; subagents never start another. Toolkit sets Claude Code\'s own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting for this and records that it owns that value.',
-      choices: [
-        wizardChoice('enable', 'Turn on', 'Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings as a Toolkit-owned value. A value you set yourself is kept as it is.'),
-        wizardChoice('disable', 'Turn off', 'Remove that setting only if Toolkit set it, so Claude Code\'s own nesting limit applies again; a value you set yourself is kept. The Toolkit hook, when installed, still refuses a subagent that tries to start another.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${depthCurrent}`),
-      ],
-      recommendation: {
-        value: recommendedChoice('claudeSubagentDepth', current, args),
-        outcome: 'One layer: the main session may start subagents; subagents never start another.',
-        reason: 'Claude Code enforces the limit itself in every folder, so agents cannot multiply out of sight; the Toolkit hook refuses the same launches as a backstop.',
-      },
-      selected: args.setupChoices.claudeSubagentDepth,
-      current: depthCurrent,
+      current: topologyCurrent,
       currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'verified' : 'unverified',
-      afterApplying: 'This changes only that one key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session for it to take effect. Claude Code 2.1.217 or later reads it; earlier versions ignore it.',
+      afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
     }));
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
@@ -2486,7 +2467,6 @@ function assignChoice(args, key, choice) {
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
-  else if (key === 'claudeSubagentDepth') args.setupChoices.claudeSubagentDepth = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
 }
@@ -2500,7 +2480,6 @@ function choiceForKey(args, key) {
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
-  if (key === 'claudeSubagentDepth') return args.setupChoices.claudeSubagentDepth;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
   return '';
@@ -3669,10 +3648,10 @@ function printValidationSummary(validationResults) {
   }
 }
 
-// Applies the answered one-layer choice to the Claude Code user settings. Only an answered
-// enable or disable writes; keep and an unanswered question change nothing.
+// Applies the depth effect of the owner's topology answer to the Claude Code user settings.
+// Root-only writes, broader-native removes only Toolkit's value; keep or no answer changes nothing.
 function applyClaudeSubagentDepth(args, setting = new ClaudeSubagentDepthSetting()) {
-  return setting.apply(args.setupChoices.claudeSubagentDepth || 'keep');
+  return setting.apply(args.claudeSubagentDepthChoice || 'keep');
 }
 
 function subagentDepthOutcomeSummary(result) {
