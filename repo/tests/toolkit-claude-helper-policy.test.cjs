@@ -59,14 +59,34 @@ test('the governed-repo predicate walks to the first .git and needs a managed bl
   assert.equal(governedRepo(ROOT, {}).governed, true, 'the Toolkit checkout');
 });
 
-test('outside governed work every agent launch is left to Claude Code', t => {
+test('outside governed work every main-session agent launch is left to Claude Code', t => {
   const f = fixture(t);
   for (const cwd of [f.plain, f.dir]) {
     for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore', model: 'opus' }]) {
       assert.deepEqual(f.decide({ cwd, tool_input }), {}, `${cwd} ${JSON.stringify(tool_input)}`);
+      assert.deepEqual(f.decide({ cwd, tool_name: 'Task', tool_input }), {}, `${cwd} Task ${JSON.stringify(tool_input)}`);
     }
+    // A main session started with --agent carries agent_type but no agent_id; it is still the main session.
+    assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }), {}, `${cwd} --agent main session`);
   }
   assert.deepEqual(hook.decision({ tool_name: 'Read', cwd: f.repo }, { root: f.controlRoot, environment: f.environment }), {});
+});
+
+test('outside governed work a subagent cannot launch another agent, with the governed plain reason', t => {
+  const f = fixture(t);
+  const governed = reason(f.decide({ agent_id: 'a1', agent_type: 'toolkit-g1-helper', tool_input: { subagent_type: 'toolkit-g0-helper' } }));
+  for (const cwd of [f.plain, f.dir]) {
+    for (const tool_name of ['Agent', 'Task']) {
+      for (const caller of [{ agent_id: 'a1', agent_type: 'Explore' }, { agent_id: 'a2' }]) {
+        const output = f.decide({ cwd, tool_name, ...caller, tool_input: { subagent_type: 'general-purpose', prompt: 'y' } });
+        assert.ok(denied(output), `${cwd} ${tool_name} ${JSON.stringify(caller)}`);
+        assert.equal(reason(output), governed);
+      }
+    }
+    // Non-agent tools inside a subagent are untouched.
+    assert.deepEqual(f.decide({ cwd, tool_name: 'Read', agent_id: 'a1', agent_type: 'Explore', tool_input: {} }), {});
+  }
+  assert.equal(governed, 'Toolkit: a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
 });
 
 test('in governed work the matching Toolkit helpers are allowed and other launches are refused with a plain reason', t => {

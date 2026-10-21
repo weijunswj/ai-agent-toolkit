@@ -32,10 +32,12 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
-  // Outside Toolkit-governed work the hook has no opinion: ordinary agents run as usual.
+  // Outside Toolkit-governed work only one layer applies: the main session launches any agent
+  // with no decision, and a subagent never launches another. `agent_id` marks a subagent or
+  // teammate caller; `agent_type` alone also appears in a main session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
-  if (!governance.governed) return {};
+  if (!governance.governed) return input.agent_id ? helperPolicy().nestedLaunchDenial() : {};
   const { readProfile, TOPOLOGIES } = control();
   const profile = readProfile('claude-code', options);
   if (profile.topology === TOPOLOGIES.BROADER_NATIVE) return nativeAdapter().commandDecision(input, 'claude-code', {
@@ -50,10 +52,12 @@ function decision(input, options = {}) {
   return new ClaudeNamedHelperPolicy({ environment, ...options.helper_policy }).decide(input, governance);
 }
 
-// After a decision failure, gate only governed work: an Agent/Task call in a governed
-// repository, or any call when governance cannot be determined but a launcher marker is set.
-function governedAfterFailure(input) {
+// After a decision failure, refuse only what a working hook could refuse: a subagent's
+// Agent/Task call anywhere, an Agent/Task call in a governed repository, or any call when
+// governance cannot be determined but a launcher marker is set.
+function refuseAfterFailure(input) {
   if (!/^(Agent|Task)$/.test(String(input?.tool_name || input?.toolName || ''))) return false;
+  if (input.agent_id) return true;
   try { return governedRepo().governedRepo(input.cwd).governed; }
   catch { return ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'].some(name => Boolean(process.env[name])); }
 }
@@ -78,7 +82,7 @@ if (require.main === module) {
     if (input !== null) traceDecision(input, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
   }).catch(() => {
-    const output = input === null || governedAfterFailure(input)
+    const output = input === null || refuseAfterFailure(input)
       ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Toolkit could not check this helper launch safely; do the work in this session.' } }
       : {};
     if (input !== null) traceDecision(input, output);

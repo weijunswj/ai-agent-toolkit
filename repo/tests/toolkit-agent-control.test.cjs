@@ -209,6 +209,12 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
     assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
     const outside = call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
     assert.deepEqual(JSON.parse(outside.stdout), {}, 'ungoverned work is untouched by a broken install');
+    const nested = JSON.parse(call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);
+    assert.equal(nested.hookSpecificOutput.permissionDecision, 'deny', 'a subagent launch stays refused when modules are missing');
+    // Intact modules outside governed work: a subagent launch gets the plain one-layer reason.
+    const nestedIntact = call(HOOK, { tool_name: 'Task', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} });
+    assert.equal(nestedIntact.status, 0, nestedIntact.stderr);
+    assert.match(JSON.parse(nestedIntact.stdout).hookSpecificOutput.permissionDecisionReason, /a helper cannot launch another agent/);
     fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
     assert.deepEqual(JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
     const marked = JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).stdout);

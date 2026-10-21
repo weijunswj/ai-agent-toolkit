@@ -218,3 +218,267 @@ Unspecified entries in the changed-only form mean: apply the displayed recommend
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
 Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.
 Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.
+
+# Claude Code setup questions
+
+Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
+
+Toolkit setup choices - 9 questions across 3 sections
+
+Bank reference: 3YV9-7PH7-Y90Z-B6EB
+
+Quick index
+
+1.1 Update source - Recommended: B - Keep the current update source
+1.2 Automatic updates - Recommended: A - Turn on
+1.3 Update reports - Recommended: A - Keep reports
+1.4 Report retention - Recommended: C - Keep current
+1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
+2.1 How should Claude Code use agents? - Recommended: A - Root agent only
+2.2 Limit Claude Code agents to one layer? - Recommended: A - Turn on
+3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
+3.2 OpenCode - Recommended: C - Keep current
+
+
+## 1. Updates and reports
+
+### 1.1 Update source
+
+**What this controls:** Where Toolkit fetches and prepares future updates. A dedicated clean managed copy stays separate from active project repositories, so setup never pulls into or modifies the dirty project checkout you are working in.
+
+**Current:** Toolkit uses the dedicated clean managed copy for updates.
+
+**Verification:** state-derived
+
+**Recommended:** B - Keep the current update source
+
+**Recommended outcome:** Keep using the verified dedicated clean managed copy.
+
+**Why:** Separating update operations from active branches and uncommitted project work makes fetch, verification, and safe activation predictable.
+
+**Choices:**
+
+- **A. Use the dedicated clean update copy** - Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.
+- **B. Keep the current update source** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
+- **C. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
+
+**After applying:** After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.
+
+**Selected:** B - Keep the current update source
+
+---
+
+### 1.2 Automatic updates
+
+**What this controls:** Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.
+
+**Current:** Automatic startup update checks are on.
+
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Turn on clean, verified automatic updates.
+
+**Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
+
+**Choices:**
+
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **B. Turn off** - Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+
+**After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
+
+**Selected:** A - Turn on
+
+---
+
+### 1.3 Update reports
+
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+
+**Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
+
+**Verification:** verified
+
+**Recommended:** A - Keep reports
+
+**Recommended outcome:** Keep meaningful reports; open only reports that require action.
+
+**Why:** A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.
+
+**Choices:**
+
+- **A. Keep reports** - Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.
+- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
+- **C. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+
+**After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
+
+**Selected:** A - Keep reports
+
+---
+
+### 1.4 Report retention
+
+**What this controls:** How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.
+
+**Current:** Toolkit maintenance reports are currently kept for 7 day(s).
+
+**Verification:** verified
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Keep the effective seven-day retention window.
+
+**Why:** Seven days normally preserves enough troubleshooting context while limiting accumulation of maintenance-only reports.
+
+**Choices:**
+
+- **A. 7 days** - Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.
+- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
+- **C. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+
+**After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
+
+**Selected:** C - Keep current
+
+---
+
+### 1.5 Merge rule-refresh PRs when the required checks pass
+
+**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed. No reported checks, any failed or pending check, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
+
+**Current:** Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
+
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Merge rule-refresh pull requests once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
+
+**Why:** Refreshed rules reach the default branch without a manual step, while the checks, branch protection and the refresh-owned-files limit still decide every merge.
+
+**Choices:**
+
+- **A. Turn on** - Merge the rule-refresh pull request once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
+- **B. Turn off** - Stop at the open rule-refresh pull request and report it for you to merge.
+- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
+
+**After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
+
+**Selected:** A - Turn on
+
+---
+
+
+## 2. Computer performance
+
+### 2.1 How should Claude Code use agents?
+
+**What this controls:** Whether Claude Code stays root-first, where the installed Toolkit hook admits only the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories and leaves other work unrestricted, or permits broader native agent behavior. Governed V3 workers use only the registry-pinned launcher; broader native agents remain outside Toolkit control.
+
+**Current:** Current topology: root-only.
+
+**Verification:** verified
+
+**Recommended:** A - Root agent only
+
+**Recommended outcome:** Use the root agent, with only the Toolkit G0/G1 leaf helpers admitted at the installed hook in Toolkit-governed repositories.
+
+**Why:** Root-only is the verified default; governed workers use the registry-pinned V3 launcher.
+
+**Choices:**
+
+- **A. Root agent only** - Use no helper agents other than the Toolkit G0/G1 leaf helpers in Toolkit-governed repositories.
+- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees.
+- **C. Keep current** - Preserve the effective root-only topology when it remains supported; stale, unverifiable or retired state falls back safely to root-only.
+
+**After applying:** A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.
+
+**Selected:** A - Root agent only
+
+---
+
+### 2.2 Limit Claude Code agents to one layer?
+
+**What this controls:** Whether Claude Code allows one layer of agents: the main session may start subagents; subagents never start another. Toolkit sets Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` user setting for this and records that it owns that value.
+
+**Current:** Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.
+
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** One layer: the main session may start subagents; subagents never start another.
+
+**Why:** Claude Code enforces the limit itself in every folder, so agents cannot multiply out of sight; the Toolkit hook refuses the same launches as a backstop.
+
+**Choices:**
+
+- **A. Turn on** - Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings as a Toolkit-owned value. A value you set yourself is kept as it is.
+- **B. Turn off** - Remove that setting only if Toolkit set it, so Claude Code's own nesting limit applies again; a value you set yourself is kept. The Toolkit hook, when installed, still refuses a subagent that tries to start another.
+- **C. Keep current** - Preserve this effective behavior: Claude Code uses its own limit: subagents may start their own subagents, up to three layers by default.
+
+**After applying:** This changes only that one key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session for it to take effect. Claude Code 2.1.217 or later reads it; earlier versions ignore it.
+
+**Selected:** A - Turn on
+
+---
+
+
+## 3. Other coding apps
+
+### 3.1 Keep Toolkit available in Claude Code?
+
+**What this controls:** Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.
+
+**Current:** The Claude Code Toolkit plugin is current.
+
+**Verification:** verified
+
+**Recommended:** A - Install or refresh
+
+**Recommended outcome:** Let Claude Code install or refresh its own Toolkit plugin.
+
+**Why:** Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.
+
+**Choices:**
+
+- **A. Install or refresh** - Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.
+- **B. Show instructions only** - Make no native plugin change and report the manual Claude Code action required.
+- **C. Keep current** - Preserve the currently detected Claude Code plugin behavior and state.
+
+**After applying:** If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.
+
+**Selected:** A - Install or refresh
+
+---
+
+### 3.2 OpenCode
+
+**What this controls:** Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.
+
+**Current:** Toolkit synchronization is enabled and the managed OpenCode files are current.
+
+**Verification:** state-derived
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Keep the current OpenCode integration setting.
+
+**Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
+
+**Choices:**
+
+- **A. Keep synchronized** - Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.
+- **B. Turn off** - Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.
+- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed OpenCode files are current.
+- **D. Skip this time** - Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.
+
+**After applying:** Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.
+
+**Selected:** C - Keep current
+
+---

@@ -50,6 +50,11 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   assert.equal(profile.topology, control.TOPOLOGIES.ROOT_ONLY);
   assert.equal(profile.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);
   assert.equal(fs.existsSync(codexConfig(root)), false);
+  // The recommended one-layer answer writes only the Toolkit-owned key into the temporary Claude settings.
+  assert.match(result.stdout, /\*\*Recommended:\*\* A - Turn on/);
+  assert.match(result.stdout, /One-layer subagent setting this run: changed; Claude Code allows one layer/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8')),
+    { env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' } });
 });
 
 test('the retired Toolkit direct topology and capacity flags fail before any setup write', () => {

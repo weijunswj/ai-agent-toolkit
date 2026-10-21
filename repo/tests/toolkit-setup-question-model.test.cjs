@@ -303,9 +303,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
-  assert.equal(claude[0].presentation.total_visible_question_count, 7);
+  assert.equal(claude[0].presentation.total_visible_question_count, 8);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '2.2', '3.1']);
 });
 
 test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
