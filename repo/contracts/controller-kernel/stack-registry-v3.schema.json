@@ -1,116 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "toolkit.controller.stack-registry.v3",
-  "title": "Pinned current V3 registry and explicit historical snapshots",
-  "anyOf": [
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema",
-        "version",
-        "profiles",
-        "aliases"
-      ],
-      "properties": {
-        "schema": {
-          "const": "toolkit.controller.stack-registry.v3"
-        },
-        "version": {
-          "const": 3
-        },
-        "profiles": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "owner-gpt",
-            "owner-claude",
-            "owner-mixed-claude-gpt"
-          ],
-          "properties": {
-            "owner-gpt": {
-              "$ref": "#/$defs/currentProfile"
-            },
-            "owner-claude": {
-              "$ref": "#/$defs/currentProfile"
-            },
-            "owner-mixed-claude-gpt": {
-              "$ref": "#/$defs/currentProfile"
-            }
-          }
-        },
-        "aliases": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [],
-          "properties": {}
-        }
-      }
+  "title": "Toolkit V3 controller role stack registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "profiles"
+  ],
+  "properties": {
+    "schema": {
+      "const": "toolkit.controller.stack-registry.v3"
     },
-    {
-      "title": "Toolkit V3 controller role stack registry",
+    "version": {
+      "const": 3
+    },
+    "profiles": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schema",
-        "version",
-        "profiles",
-        "aliases"
+        "owner-gpt",
+        "owner-claude"
       ],
       "properties": {
-        "schema": {
-          "const": "toolkit.controller.stack-registry.v3"
+        "owner-gpt": {
+          "$ref": "#/$defs/currentProfile"
         },
-        "version": {
-          "const": 3
-        },
-        "profiles": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "owner-openai-default",
-            "owner-claude",
-            "owner-mixed-claude-gpt"
-          ],
-          "properties": {
-            "owner-openai-default": {
-              "$ref": "#/$defs/profile"
-            },
-            "owner-claude": {
-              "$ref": "#/$defs/profile"
-            },
-            "owner-mixed-claude-gpt": {
-              "$ref": "#/$defs/profile"
-            }
-          }
-        },
-        "aliases": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "owner-openai-continuous-v1",
-            "owner-claude-continuous-v1",
-            "owner-mixed-openai-builder-v1",
-            "owner-mixed-claude-builder-v1"
-          ],
-          "properties": {
-            "owner-openai-continuous-v1": {
-              "const": "owner-openai-default"
-            },
-            "owner-claude-continuous-v1": {
-              "const": "owner-claude"
-            },
-            "owner-mixed-openai-builder-v1": {
-              "const": "owner-mixed-claude-gpt"
-            },
-            "owner-mixed-claude-builder-v1": {
-              "const": "owner-mixed-claude-gpt"
-            }
-          }
+        "owner-claude": {
+          "$ref": "#/$defs/currentProfile"
         }
       }
     }
-  ],
+  },
   "$defs": {
     "route": {
       "type": "object",
@@ -143,61 +65,6 @@
         }
       }
     },
-    "nullableRoute": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/route"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "profile": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "routes"
-      ],
-      "properties": {
-        "routes": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "DISCOVERY",
-            "DISCOVERY_HELPER",
-            "BUILDER",
-            "BUILDER_HELPER",
-            "REVIEW_SCOPE",
-            "REVIEW_EXECUTION",
-            "DESIGN_CHALLENGE"
-          ],
-          "properties": {
-            "DISCOVERY": {
-              "$ref": "#/$defs/route"
-            },
-            "DISCOVERY_HELPER": {
-              "$ref": "#/$defs/route"
-            },
-            "BUILDER": {
-              "$ref": "#/$defs/route"
-            },
-            "BUILDER_HELPER": {
-              "$ref": "#/$defs/route"
-            },
-            "REVIEW_SCOPE": {
-              "$ref": "#/$defs/route"
-            },
-            "REVIEW_EXECUTION": {
-              "$ref": "#/$defs/route"
-            },
-            "DESIGN_CHALLENGE": {
-              "$ref": "#/$defs/nullableRoute"
-            }
-          }
-        }
-      }
-    },
     "reviewer": {
       "type": "object",
       "additionalProperties": false,
@@ -211,7 +78,6 @@
         "reviewer_id": {
           "type": "string",
           "enum": [
-            "astra",
             "sol",
             "opus"
           ]
@@ -277,7 +143,7 @@
         "reviewers": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 3,
+          "maxItems": 1,
           "items": {
             "$ref": "#/$defs/reviewer"
           }

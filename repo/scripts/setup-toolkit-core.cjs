@@ -13,16 +13,12 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
-// Loaded only on the OpenCode project-install path, so setup's protocol probe and
-// older managed checkouts do not depend on the OpenCode payload module.
-function installOpenCodeProjectPlugin(options) { return require('./toolkit-opencode-project-plugin.cjs').installProjectPlugin(options); }
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPERS, RUNTIMES, RESTORE_FLAG } = delegation;
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
-const SUPPORTED_TARGETS = ['opencode'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
 // Setup finished its steps, but the install check found something a person must fix.
@@ -92,13 +88,6 @@ function normalizeRemote(value) {
   return remote.toLowerCase();
 }
 
-function parseTargetList(value) {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 function parsePositiveInteger(value, flagName) {
   const number = Number(value);
   if (!Number.isInteger(number) || number <= 0) throw new Error(`${flagName} requires a positive integer`);
@@ -121,14 +110,8 @@ function emptySetupChoices() {
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
-    claudePluginBehavior: '',
-    targets: { opencode: '' }
+    claudePluginBehavior: ''
   };
-}
-
-function setTargetChoice(args, target, choice) {
-  if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
-  args.setupChoices.targets[target] = choice;
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -144,7 +127,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoBranch: DEFAULT_REPO_BRANCH,
     repoRemote: DEFAULT_REPO_REMOTE,
     host: 'codex',
-    opencodeProjectRoot: '',
     codexCli: '',
     hub: '',
     verifyClaudePlugin: false,
@@ -155,10 +137,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportOpen: false,
     refreshPrAutoMerge: true,
     codexPluginAutoRefresh: true,
-    enableTargets: [],
-    disableTargets: [],
-    skipTargets: [],
-    keepTargets: [],
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
@@ -206,8 +184,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
     else if (arg === '--host') args.host = next();
     else if (arg.startsWith('--host=')) args.host = arg.slice('--host='.length);
-    else if (arg === '--opencode-project-root') args.opencodeProjectRoot = next();
-    else if (arg.startsWith('--opencode-project-root=')) args.opencodeProjectRoot = arg.slice('--opencode-project-root='.length);
     else if (arg === '--codex-cli') args.codexCli = next();
     else if (arg.startsWith('--codex-cli=')) args.codexCli = arg.slice('--codex-cli='.length);
     else if (arg === '--claude-cli') args.claudeCli = next();
@@ -301,46 +277,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       const choice = arg.slice('--claude-plugin-behavior='.length).toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
-    } else if (arg === '--enable-target') {
-      for (const target of parseTargetList(next())) {
-        args.enableTargets.push(target);
-        setTargetChoice(args, target, 'enable-sync');
-      }
-    } else if (arg.startsWith('--enable-target=')) {
-      for (const target of parseTargetList(arg.slice('--enable-target='.length))) {
-        args.enableTargets.push(target);
-        setTargetChoice(args, target, 'enable-sync');
-      }
-    } else if (arg === '--disable-target') {
-      for (const target of parseTargetList(next())) {
-        args.disableTargets.push(target);
-        setTargetChoice(args, target, 'disable');
-      }
-    } else if (arg.startsWith('--disable-target=')) {
-      for (const target of parseTargetList(arg.slice('--disable-target='.length))) {
-        args.disableTargets.push(target);
-        setTargetChoice(args, target, 'disable');
-      }
-    } else if (arg === '--skip-target') {
-      for (const target of parseTargetList(next())) {
-        args.skipTargets.push(target);
-        setTargetChoice(args, target, 'skip');
-      }
-    } else if (arg.startsWith('--skip-target=')) {
-      for (const target of parseTargetList(arg.slice('--skip-target='.length))) {
-        args.skipTargets.push(target);
-        setTargetChoice(args, target, 'skip');
-      }
-    } else if (arg === '--keep-target') {
-      for (const target of parseTargetList(next())) {
-        args.keepTargets.push(target);
-        setTargetChoice(args, target, 'keep');
-      }
-    } else if (arg.startsWith('--keep-target=')) {
-      for (const target of parseTargetList(arg.slice('--keep-target='.length))) {
-        args.keepTargets.push(target);
-        setTargetChoice(args, target, 'keep');
-      }
     } else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -351,16 +287,6 @@ function parseArgs(argv = process.argv.slice(2)) {
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
   args.repoRemote = args.repoRemote || DEFAULT_REPO_REMOTE;
   if (!SUPPORTED_HOSTS.includes(args.host)) throw new Error(`Unsupported host: ${args.host}`);
-  for (const target of args.enableTargets) {
-    if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
-  }
-  for (const target of args.disableTargets) {
-    if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
-  }
-  args.enableTargets = [...new Set(args.enableTargets)];
-  args.disableTargets = [...new Set(args.disableTargets)];
-  args.skipTargets = [...new Set(args.skipTargets)];
-  args.keepTargets = [...new Set(args.keepTargets)];
   return args;
 }
 
@@ -370,7 +296,6 @@ function relNodeCommand(relScript, extraArgs = []) {
 
 function preferenceSummary(options) {
   const choices = options.setupChoices || emptySetupChoices();
-  const targetChoice = (target) => choices.targets?.[target] || 'question-required';
   return {
     repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
@@ -393,8 +318,7 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
-    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required',
-    opencode_sync: targetChoice('opencode')
+    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required'
   };
 }
 
@@ -435,13 +359,6 @@ function setupPlan(options = {}) {
   } else if (choices.repoAutoUpdate === 'disable') {
     repoAutoArgs.push('--disable-repo-auto-update', '--write', ...hubArgs);
   }
-
-  const targetArgs = [];
-  for (const target of options.enableTargets || []) targetArgs.push('--enable-target', target);
-  targetArgs.push('--write', ...hubArgs);
-  const disableTargetArgs = [];
-  for (const target of options.disableTargets || []) disableTargetArgs.push('--disable-target', target);
-  if (disableTargetArgs.length) disableTargetArgs.push('--write', ...hubArgs);
 
   return {
     name: 'setup toolkit',
@@ -534,17 +451,6 @@ function setupPlan(options = {}) {
         ]
       },
       {
-        id: 'approved_target_sync',
-      title: 'Enable only the selected OpenCode target, then sync enabled targets',
-        commands: [
-          ...(disableTargetArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', disableTargetArgs)] : []),
-          ...((options.enableTargets || []).length ? [
-            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', targetArgs),
-            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--sync-enabled', '--write', ...hubArgs])
-          ] : [])
-        ]
-      },
-      {
         id: 'final_bridge_audit',
         title: 'Run and parse the final bridge audit before any Codex config commitment',
         commands: [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--audit', ...hubArgs])]
@@ -564,7 +470,7 @@ function setupPlan(options = {}) {
       },
       {
         id: 'final_summary',
-        title: 'Print the verified final setup summary including cleanup, cache, reports, targets, and restart/trust actions',
+        title: 'Print the verified final setup summary including cleanup, cache, reports, and restart/trust actions',
         commands: []
       }
     ]
@@ -585,8 +491,6 @@ function printHelp() {
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
     '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
-    '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode',
-    '  node repo/scripts/setup-toolkit.cjs --opencode-project-root <absolute-path> [--execute]',
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
@@ -637,42 +541,8 @@ function printHelp() {
     '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
-    '  --enable-target opencode enable and sync the approved OpenCode skills target',
-    '  --disable-target opencode disable target without deleting files',
-    '  --keep-target opencode preserve target state without refresh/sync',
-    '  --skip-target opencode skip target writes for this run',
-    '  --opencode-project-root <absolute-path> install the project-native plugin; preview by default, --execute writes only .opencode/plugins/ai-agent-toolkit.js',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
-}
-
-function assertOpenCodeProjectPluginArgs(args) {
-  const allowed = new Set(['--opencode-project-root', '--plan', '--execute', '--json']);
-  const flags = args.argv.filter((value) => String(value).startsWith('--'))
-    .map((value) => String(value).split('=')[0]);
-  const incompatible = [...new Set(flags.filter((flag) => !allowed.has(flag)))];
-  if (incompatible.length) {
-    throw new Error(`OpenCode project-plugin setup cannot be combined with: ${incompatible.join(', ')}`);
-  }
-  if (flags.filter((flag) => flag === '--opencode-project-root').length !== 1) {
-    throw new Error('OpenCode project-plugin setup requires exactly one --opencode-project-root');
-  }
-  if (!path.isAbsolute(args.opencodeProjectRoot)) {
-    throw new Error('--opencode-project-root must be an absolute path');
-  }
-}
-
-function runOpenCodeProjectPluginSetup(args) {
-  assertOpenCodeProjectPluginArgs(args);
-  const result = installOpenCodeProjectPlugin({
-    projectRoot: args.opencodeProjectRoot,
-    write: args.execute
-  });
-  const payload = { status: 0, project_plugin: result };
-  const output = JSON.stringify(payload, null, 2);
-  if (args.json) process.stdout.write(`${output}\n`);
-  else console.log(output);
-  return payload;
 }
 
 function assertRepoRoot(repoRoot) {
@@ -1103,14 +973,12 @@ function runBridgeAuditReadOnly(args) {
   if (result.status !== 0) {
     return {
       error: (result.stderr || result.stdout || '').trim(),
-      repo_auto_update: {},
-      targets: {}
+      repo_auto_update: {}
     };
   }
   return parseFirstJsonObject(result.stdout) || {
     error: 'bridge audit did not return JSON',
-    repo_auto_update: {},
-    targets: {}
+    repo_auto_update: {}
   };
 }
 
@@ -1371,18 +1239,6 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
   return result;
 }
 
-// Retired with the Toolkit direct topology: setup no longer inspects or probes agent
-// launch capability. This read-only native resource observation remains only because
-// the byte-pinned run093 proof (R093-F5-SETUP-SOURCE-BYPASS) calls it to show that
-// caller fixture evidence never reaches setup. Remove it with that proof.
-function inspectClaudeAgentCapability() {
-  const resourceCapability = agentControl.inspectResourceCapability();
-  return {
-    supported: false, launch_supported: false,
-    resource_counter_supported: resourceCapability.supported, resource_counter_source: resourceCapability.source,
-  };
-}
-
 function inspectClaudeNativePluginStatePreApproval(args) {
   const probeRoot = scriptRootForReadOnlyProbe(args);
   try {
@@ -1472,7 +1328,6 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
-  if (key === 'opencodeTarget') return 'keep';
   return 'keep';
 }
 
@@ -1805,16 +1660,6 @@ function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
   return unknownText;
 }
 
-function targetCurrentOutcome(target, appName) {
-  if (!target || (target.detected !== true && target.enabled !== true)) {
-    return `${appName} integration state could not be verified; setup will not assume that Toolkit is installed there.`;
-  }
-  if (target.enabled === true && target.synced === true) return `Toolkit synchronization is enabled and the managed ${appName} files are current.`;
-  if (target.enabled === true) return `Toolkit synchronization is enabled, but the managed ${appName} files are stale or could not be verified as current.`;
-  if (target.explicitly_disabled === true) return `Toolkit synchronization is turned off for ${appName}; existing files, if any, are left in place.`;
-  return `${appName} was detected, but Toolkit synchronization is not enabled.`;
-}
-
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -1864,7 +1709,7 @@ function setupQuestionSpecs(args, current) {
       whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
       choices: [
         wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.'),
-        wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
+        wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
       ],
       recommendation: {
@@ -1883,7 +1728,7 @@ function setupQuestionSpecs(args, current) {
       section: 'Updates and reports',
       title: 'Update reports',
       prompt: 'Update report choice',
-      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
+      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
       choices: [
         wizardChoice('enable', 'Keep reports', 'Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.'),
         wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
@@ -2022,34 +1867,6 @@ function setupQuestionSpecs(args, current) {
     }));
   }
 
-  if (current.audit?.targets?.opencode?.detected || current.audit?.targets?.opencode?.enabled) {
-    const target = current.audit.targets.opencode;
-    const targetCurrent = targetCurrentOutcome(target, 'OpenCode');
-    specs.push(resolvedQuestion({
-      id: 'opencode-integration',
-      key: 'opencodeTarget',
-      section: 'Other coding apps',
-      title: 'OpenCode',
-      prompt: 'OpenCode Toolkit choice',
-      whatThisControls: "Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.",
-      choices: [
-        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.'),
-        wizardChoice('disable', 'Turn off', 'Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${targetCurrent}`),
-        wizardChoice('skip', 'Skip this time', 'Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.'),
-      ],
-      recommendation: {
-        value: recommendedChoice('opencodeTarget', current, args),
-        outcome: target.enabled ? 'Keep the current OpenCode integration setting.' : 'Keep OpenCode unchanged unless you intentionally enable Toolkit synchronization.',
-        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving current managed behavior.' : 'Detection alone is not consent to write user-level OpenCode files.',
-      },
-      selected: args.setupChoices.targets.opencode,
-      current: targetCurrent,
-      currentVerification: target.detected === true || target.enabled === true ? 'state-derived' : 'unverified',
-      afterApplying: 'Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.',
-      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when OpenCode is detected or Toolkit already has enabled state for it.' },
-    }));
-  }
   return withPresentationMetadata(specs.map((spec) => ({
     ...spec,
     recommended_value: spec.recommended,
@@ -2061,10 +1878,7 @@ function setupQuestionSpecs(args, current) {
 function clonedSetupArgs(args) {
   return {
     ...args,
-    setupChoices: {
-      ...args.setupChoices,
-      targets: { ...args.setupChoices.targets },
-    },
+    setupChoices: { ...args.setupChoices },
   };
 }
 
@@ -2135,7 +1949,7 @@ function renderQuestionBankHeader(specs, markdown = true) {
 }
 
 function changedOnlyExample(specs) {
-  const preferred = ['automatic-updates', 'opencode-integration'];
+  const preferred = ['automatic-updates', 'update-reports'];
   const picked = preferred.map((id) => specs.find((spec) => spec.id === id)).filter(Boolean);
   for (const spec of specs) {
     if (picked.length >= 2) break;
@@ -2415,10 +2229,6 @@ function documentationFixtureState() {
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
       refresh_pr_auto_merge_enabled: true,
       codex_plugin_auto_refresh_enabled: true,
-      targets: {
-        opencode: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
-        ag2: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
-      },
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
@@ -2503,7 +2313,6 @@ function assignChoice(args, key, choice) {
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
-  else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
 }
 
 function choiceForKey(args, key) {
@@ -2516,7 +2325,6 @@ function choiceForKey(args, key) {
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
-  if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
   return '';
 }
 
@@ -2935,7 +2743,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   }
   if (missing.length) {
     console.log('');
-    console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
+    console.log('Answer the remaining setup choices now. Setup will not write preferences before these answers are complete.');
   }
 
   const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails;
@@ -3049,13 +2857,6 @@ function applySetupChoices(args, current) {
     else args.codexPluginAutoRefresh = choices.codexPluginAutoRefresh === 'enable';
   }
 
-  args.enableTargets = [];
-  args.disableTargets = [];
-  for (const target of SUPPORTED_TARGETS) {
-    const choice = choices.targets[target];
-    if (choice === 'enable-sync') args.enableTargets.push(target);
-    if (choice === 'disable') args.disableTargets.push(target);
-  }
   args.repoRoot = path.resolve(args.repoRoot);
 }
 
@@ -3307,8 +3108,8 @@ function verifyClaudeNativePluginMetadata(args) {
   for (const required of ['${CLAUDE_PLUGIN_ROOT}', '--hook', '--sync-enabled', '--write', '--sync-source claude-plugin']) {
     if (!command.includes(required)) throw new Error(`Claude Code SessionStart hook command is missing ${required}`);
   }
-  if (/--enable-target|--disable-target|--force-downgrade/.test(command)) {
-    throw new Error('Claude Code SessionStart hook must not enable, disable, or force-downgrade targets');
+  if (/--force-downgrade/.test(command)) {
+    throw new Error('Claude Code SessionStart hook must not force a downgrade');
   }
   const agentHookCommands = (hooks?.hooks?.PreToolUse || [])
     .filter((entry) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(entry?.matcher || '')))
@@ -3553,22 +3354,6 @@ function writeBridgePreferences(args) {
   }
 }
 
-function runApprovedTargetSync(args) {
-  if (args.disableTargets.length) {
-    const disableArgs = [];
-    for (const target of args.disableTargets) disableArgs.push('--disable-target', target);
-    disableArgs.push('--write');
-    runBridgeWrite(args, `node repo/scripts/toolkit-local-bridge.cjs ${disableArgs.join(' ')}`, disableArgs);
-  }
-  if (args.enableTargets.length) {
-    const enableArgs = [];
-    for (const target of args.enableTargets) enableArgs.push('--enable-target', target);
-    enableArgs.push('--write');
-    runBridgeWrite(args, `node repo/scripts/toolkit-local-bridge.cjs ${enableArgs.join(' ')}`, enableArgs);
-    runBridgeWrite(args, 'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write', ['--sync-enabled', '--write']);
-  }
-}
-
 function runBridgeAudit(args) {
   const result = runCommand('node repo/scripts/toolkit-local-bridge.cjs --audit', process.execPath, bridgeArgs(args, ['--audit']), {
     cwd: args.repoRoot,
@@ -3618,14 +3403,6 @@ function printPlan(plan, asJson) {
   }
 }
 
-function targetChoiceSummary(choice) {
-  if (choice === 'keep') return 'kept';
-  if (choice === 'skip') return 'skipped';
-  if (choice === 'enable-sync') return 'enabled/synced';
-  if (choice === 'disable') return 'disabled';
-  return 'not touched';
-}
-
 function unknown(value) {
   if (value === undefined || value === null || value === '') return 'unknown';
   return value;
@@ -3655,20 +3432,6 @@ function activeWorktreeSummary(args) {
     status: statusForSummary(activeRoot),
     role
   };
-}
-
-function targetActionSummary(choice) {
-  return targetChoiceSummary(choice);
-}
-
-function printTargetSummary(label, target, choice) {
-  console.log(`${label} detected: ${yesNo(target?.detected === true)}`);
-  console.log(`${label} enabled: ${yesNo(target?.enabled === true)}`);
-  console.log(`${label} synced: ${yesNo(target?.synced === true)}`);
-  console.log(`${label} version: ${unknown(target?.synced_version)}`);
-  console.log(`${label} path status: ${target?.path || target?.target_path || target?.sync_path ? 'configured' : 'not configured'}`);
-  console.log(`${label} status: ${unknown(target?.status)}`);
-  console.log(`${label} action this run: ${targetActionSummary(choice)}`);
 }
 
 function printValidationSummary(validationResults) {
@@ -3708,8 +3471,6 @@ function subagentDepthOutcomeSummary(result) {
 function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
-  const targets = audit?.targets || {};
-  const targetChoices = args.setupChoices?.targets || {};
   const active = activeWorktreeSummary(args);
   console.log('');
   console.log('# setup toolkit final summary');
@@ -3740,7 +3501,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
   console.log('Helper-agent capacity questions shown: no');
-  console.log('Preference/target writes before answers: no');
+  console.log('Preference writes before answers: no');
   console.log('');
   if (args.host === 'codex') {
   console.log('## Codex helper agents');
@@ -3838,11 +3599,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');
-  console.log('## Targets');
-  console.log('### OpenCode');
-  printTargetSummary('OpenCode', targets.opencode || {}, targetChoices.opencode);
-  console.log('');
-  console.log('### Antigravity portable skills');
+  console.log('## Antigravity portable skills');
   console.log('No native/plugin lifecycle is managed. The opt-in project copy targets <project>/.agents/skills only.');
   console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
   console.log('');
@@ -3870,7 +3627,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
   const check = new ToolkitInstallHealthCheck({
     toolkitRoot: args.repoRoot,
     expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
-    hubPath: path.join(os.homedir(), '.ai-agent-toolkit', 'current'),
+    hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
     helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
     depthSetting: new ClaudeSubagentDepthSetting(),
   });
@@ -3922,7 +3679,6 @@ class ToolkitSetupExecution {
     const nativeCache = this.#nativePluginSetup();
     runLiteValidation(args, this.#validationResults);
     writeBridgePreferences(args);
-    runApprovedTargetSync(args);
     const audit = runBridgeAudit(args);
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
@@ -3954,9 +3710,6 @@ async function main(argv = process.argv.slice(2)) {
   if (args.help) {
     printHelp();
     return 0;
-  }
-  if (args.opencodeProjectRoot) {
-    return runOpenCodeProjectPluginSetup(args).status;
   }
   if (args.verifyClaudePlugin) {
     runClaudeNativePluginVerify(args);
@@ -4008,7 +3761,6 @@ module.exports = {
   defaultManagedSourcePath,
   codexDelegationConfigState: delegation.codexDelegationConfigState,
   inspectCodexDelegationConfig: delegation.inspectCodexDelegationConfig,
-  inspectClaudeAgentCapability,
   configureCodexDelegation: delegation.configureCodexDelegation,
   applyHostDelegationControl,
   applyClaudeSubagentDepth,

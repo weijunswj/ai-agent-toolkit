@@ -30,6 +30,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const BACKUP_NAME = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 
+// Writes a helper definition through a temporary file in the same folder, so Claude Code never
+// reads a half-written definition.
+function writeFileAtomically(file, text) {
+  const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temp, text, { flag: 'wx' });
+    fs.renameSync(temp, file);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
 // The one owner of the Claude user agents directory: CLAUDE_CONFIG_DIR, else ~/.claude.
 function claudeUserAgentsDirectory(environment = process.env) {
   return path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'agents');
@@ -129,7 +142,7 @@ class AgentDirectoryInstaller {
     fs.mkdirSync(this.#dir, { recursive: true });
     for (const { file, text } of this.#files) {
       const a = actions.find(x => x.file === file);
-      if (a.action === 'create' || a.action === 'update') fs.writeFileSync(path.join(this.#dir, file), text);
+      if (a.action === 'create' || a.action === 'update') writeFileAtomically(path.join(this.#dir, file), text);
     }
     for (const a of actions.filter(x => x.action === 'retire-legacy')) fs.rmSync(path.join(this.#dir, a.file));
     for (const { file, text } of this.#files) if (fs.readFileSync(path.join(this.#dir, file), 'utf8') !== text) fail('HELPER_AGENTS_READBACK_MISMATCH');
@@ -186,8 +199,9 @@ class ClaudeHelperDefinitions {
     const files = entries.map(publicEntry);
     let result = { status, backup_dir: null, files, detail };
     if (status === 'stale') {
-      const { backup_dir } = new AgentDirectoryInstaller(dir, entries.map(({ file, rendered }) => ({ file, text: rendered })))
-        .apply(this.#backupRoot);
+      // A folder holding only the retired definitions has nothing to render; the installer backs them up and removes them.
+      const files = entries.filter(({ rendered }) => rendered !== null).map(({ file, rendered }) => ({ file, text: rendered }));
+      const { backup_dir } = new AgentDirectoryInstaller(dir, files).apply(this.#backupRoot);
       result = { status: 'updated', backup_dir, files, detail: '' };
     }
     this.#pruneBackups(result.backup_dir);
@@ -197,10 +211,13 @@ class ClaudeHelperDefinitions {
   #assess(dir, projectDirectories) {
     const entries = this.#userEntries(dir);
     const projects = this.#projectOverrides(projectDirectories);
-    if (entries.every(entry => !entry.present)) return { entries, projects, status: 'not-installed', detail: '' };
+    const legacy = LEGACY_FILES.some(file => fs.existsSync(path.join(dir, file)));
+    if (entries.every(entry => !entry.present)) {
+      if (!legacy) return { entries, projects, status: 'not-installed', detail: '' };
+      return { entries, projects, status: 'stale', detail: `Retired Toolkit helper definitions remain in ${dir}. Run setup toolkit to remove them.` };
+    }
     const blocked = holdDetail(entries, projects, dir);
     if (blocked) return { entries, projects, status: 'held', detail: blocked };
-    const legacy = LEGACY_FILES.some(file => fs.existsSync(path.join(dir, file)));
     if (legacy || entries.some(entry => entry.state === 'update' || entry.state === 'missing')) {
       return { entries, projects, status: 'stale', detail: `The Toolkit helper definitions in ${dir} are out of date or incomplete. Run setup toolkit to refresh them.` };
     }

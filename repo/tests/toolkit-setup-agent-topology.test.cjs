@@ -70,7 +70,7 @@ test('keep preserves only a supported current topology; stale, unsupported and r
   }
   for (const [name, state] of [
     ['unsupported broader-native', current(false, { topology: 'broader-native', supported: false, status: 'unsupported-root-only' })],
-    ['retired direct', current(true, { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: 'automatic', supported: true, status: 'configured' })],
+    ['retired direct', current(true, { topology: 'claude-toolkit-direct', capacity_mode: 'automatic', supported: true, status: 'configured' })],
     ['unknown topology', current(true, { topology: 'future-topology', supported: true, status: 'configured' })],
   ]) {
     assert.equal(core.resolveClaudeTopology(core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'keep']), state), control.TOPOLOGIES.ROOT_ONLY, name);
@@ -96,7 +96,7 @@ test('applying root-only writes the verified profile or the safe root-only polic
     assert.equal(control.readProfile('claude-code', { root }).supported, true);
   });
   await withControlRoot(async (root) => {
-    const state = current(false, { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: 'automatic', supported: true, status: 'configured' });
+    const state = current(false, { topology: 'claude-toolkit-direct', capacity_mode: 'automatic', supported: true, status: 'configured' });
     const args = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'keep']);
     const applied = await core.applyHostDelegationControl(args, state, state.nativePlugin);
     assert.equal(applied.status, 'safe-root-only');
@@ -106,13 +106,3 @@ test('applying root-only writes the verified profile or the safe root-only polic
   });
 });
 
-test('the retained capability observation launches no Claude command and claims no launch support', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-observational-'));
-  const sentinel = path.join(root, 'session-start-sentinel');
-  const fakeClaude = path.join(root, 'stale-claude.cjs');
-  fs.writeFileSync(fakeClaude, `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'session started');\n`);
-  const capability = core.inspectClaudeAgentCapability({ claudeCli: fakeClaude });
-  assert.equal(capability.launch_supported, false);
-  assert.equal(capability.supported, false);
-  assert.equal(fs.existsSync(sentinel), false);
-});

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 'use strict';
 
 const fs = require('node:fs');
@@ -8,15 +7,13 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '3.2.0';
-// Host-profile topologies the store reads and writes. CLAUDE_DIRECT is the wire value of
-// the retired Toolkit direct topology: the store rejects it, and it is exported only for
-// the byte-pinned run093 historical proof (see toolkit-agent-control-run093-history.cjs).
+const CONTROL_VERSION = '3.3.0';
+// Host-profile topologies the store reads and writes. A stored profile with any other
+// topology, such as the retired Toolkit direct topology, reads as unsupported (root-only).
 // NAMED_HELPERS admits only the Toolkit G0/G1 leaf helpers in governed work. Toolkit 2.10.x
 // reads it as an unsupported profile, which it treats as root-only (deny all), so recording
 // it never widens an older installed hook the way broader-native would.
-const SUPPORTED_TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', BROADER_NATIVE: 'broader-native', NAMED_HELPERS: 'toolkit-named-helpers' });
-const TOPOLOGIES = Object.freeze({ ...SUPPORTED_TOPOLOGIES, CLAUDE_DIRECT: 'claude-toolkit-direct' });
+const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', BROADER_NATIVE: 'broader-native', NAMED_HELPERS: 'toolkit-named-helpers' });
 // Every supported profile is root-only capacity; AUTO and MANUAL are retired direct-topology values.
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
 // Fixed schema-1 profile fields. They are still written so an installed earlier Toolkit
@@ -89,7 +86,7 @@ class HostProfileStore {
     const host = this.#host;
     const raw = readJson(this.path);
     if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
-    const validShape = Object.values(SUPPORTED_TOPOLOGIES).includes(raw.topology) && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY
+    const validShape = Object.values(TOPOLOGIES).includes(raw.topology) && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY
       && raw.manual_maximum === 0 && Number.isSafeInteger(raw.worker_estimate_bytes) && raw.worker_estimate_bytes > 0
       && raw.queue_limit === MAX_QUEUE && raw.reservation_limit === EMERGENCY_WORKER_CEILING;
     const strictValid = !HostProfileStore.#strict(raw.topology) || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
@@ -112,8 +109,7 @@ class HostProfileStore {
       throw new Error('Caller-provided resource evidence cannot configure a production profile.');
     }
     const topology = selected.topology;
-    if (topology === TOPOLOGIES.CLAUDE_DIRECT) throw new Error('The Toolkit direct topology is retired; choose root-only in setup.');
-    if (!Object.values(SUPPORTED_TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
+    if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
     if (selected.capacity_mode !== CAPACITY_MODES.ROOT_ONLY) throw new Error(`Unsupported capacity mode: ${selected.capacity_mode}`);
     const strict = HostProfileStore.#strict(topology);
     if (strict && (selected.enforcement_verified !== true || !validActivationProof(selected.activation_proof))) {
@@ -151,152 +147,8 @@ function readProfile(host = 'claude-code', options = {}) { return new HostProfil
 function configureProfile(host, selected, options = {}) { return new HostProfileStore(host, options).configure(selected); }
 function invalidateProfile(host, reason, options = {}) { return new HostProfileStore(host, options).invalidate(reason); }
 
-function parseCli(argv) {
-  if(argv[0]==='core'&&['inspect','compile','delegation-plan','run','recover','qualify'].includes(argv[1]))argv=['core-'+argv[1],...argv.slice(2)];
-  const parsed = { command: argv[0] || '', root: '', spec: '', input: '', reservation: '', claudeCli: '' };
-  for (let i = 1; i < argv.length; i += 1) {
-    const value = argv[i + 1];
-    if (argv[i] === '--root') { parsed.root = value; i += 1; }
-    else if (argv[i] === '--spec') { parsed.spec = value; i += 1; }
-    else if (argv[i] === '--input') { parsed.input = value; i += 1; }
-    else if (argv[i] === '--reservation') { parsed.reservation = value; i += 1; }
-    else if (argv[i] === '--claude-cli') { parsed.claudeCli = value; i += 1; }
-  }
-  return parsed;
-}
-
-
-async function coreRuntimeCommand(command, adapter, request = {}) {
-  const runtime = require('./toolkit-codex-agent-adapter.cjs');
-  runtime.assertAuthenticCodexAdapter(adapter);
-  const compiler = require('./toolkit-gate-contract-compiler.cjs');
-  request = compiler.trustedJsonCopy(request);
-  if (command === 'core-inspect' && Object.keys(request).length === 0) return adapter.inspect();
-  if (command === 'core-recover' && Object.keys(request).length === 0) return adapter.recover();
-  if (command === 'core-qualify' && ['role','reviewer_id|role'].includes(Object.keys(request).sort().join('|'))) return adapter.qualify(request.role,request.reviewer_id ?? null);
-  if (command === 'core-run' && ['instruction|role','instruction|reviewer_id|role'].includes(Object.keys(request).sort().join('|'))) return adapter.run(request.role,request.instruction,request.reviewer_id ?? null);
-  throw Object.assign(new Error('Toolkit core request held. Reference: CORE_REQUEST_INVALID'),{code:'CORE_REQUEST_INVALID'});
-}
-// The installed launcher constructs this session from already authenticated
-// in-process handles. JSON, environment variables and CLI flags cannot grant
-// a runtime context or replace the captured CURRENT receiver.
-const CORE_COMMAND_SESSIONS = new WeakSet();
-class CoreCommandSession {
-  #adapter; #selection;
-  constructor({ adapter, stack_session }) {
-    require('./toolkit-codex-agent-adapter.cjs').assertAuthenticCodexAdapter(adapter);
-    require('./toolkit-stack-selection.cjs').assertCurrentStackSelectionSession(stack_session);
-    this.#adapter = adapter; this.#selection = stack_session;
-    CORE_COMMAND_SESSIONS.add(this);
-    Object.defineProperty(this, 'execute', {value:(command,request)=>this.#execute(command,request),enumerable:true});
-    Object.freeze(this);
-  }
-  async #execute(command, request = {}) {
-    const value = require('./toolkit-gate-contract-compiler.cjs').trustedJsonCopy(request);
-    const admission = this.#selection.evaluate({event:'admission'});
-    if (admission.state !== 'ADMITTED_SELECTION') return admission;
-    if (admission.selection.profile_id !== this.#adapter.inspect().profile_id
-      || value.role !== undefined && value.role !== admission.binding.role
-      || (value.reviewer_id ?? null) !== admission.binding.reviewer_id) {
-      throw Object.assign(new Error('CORE_STACK_SESSION_BINDING_DRIFT'), {code:'CORE_STACK_SESSION_BINDING_DRIFT'});
-    }
-    return coreRuntimeCommand(command, this.#adapter, value);
-  }
-}
-// Production assembly reuses the existing authority, CURRENT and receipt stores.
-// The caller supplies the already authorised host readers; this function neither
-// discovers credentials nor creates a new permission or configuration channel.
-async function createCoreCommandSession(input) {
-  const keys=['authority_store_options','check_capability','consumer_intent','present_question',
-    'receipt_lease_ms','receipt_store_options','repository_root','source_capture','trusted_authority_readers'];
-  if(!input || typeof input!=='object' || require('node:util').types.isProxy(input)
-    || Object.keys(input).sort().join('|')!==keys.sort().join('|'))throw new Error('CORE_CONTEXT_INPUT_INVALID');
-  const receipt=require('./toolkit-github-program-receipt.cjs'),selection=require('./toolkit-stack-selection.cjs');
-  const intent=require('./toolkit-gate-contract-compiler.cjs').trustedJsonCopy(input.consumer_intent);
-  const store=receipt.createAuthorityPacketStore(input.authority_store_options,input.trusted_authority_readers);
-  const stackSession=new selection.CurrentStackSelectionSession({store,consumer_intent:intent,
-    source_capture:input.source_capture,role:intent.consumer.role,reviewer_id:intent.consumer.reviewer_id??null,
-    present_question:input.present_question,check_capability:input.check_capability});
-  const selected=stackSession.evaluate({event:'admission'});
-  if(selected.state!=='ADMITTED_SELECTION')return selected;
-  const admitted=store.admitSemanticGate(intent,input.trusted_authority_readers);
-  const compiled=store.readControllerDecision(admitted.admission);
-  const receiptStore=receipt.createProgrammeReceiptStore(input.receipt_store_options);
-  const observed=input.trusted_authority_readers;
-  if(typeof observed.readAuthority!=='function'||typeof observed.readStart!=='function')throw new Error('CORE_CONTEXT_READERS_REQUIRED');
-  const authority=await observed.readAuthority({}),start=await observed.readStart({});
-  const session=await receiptStore.startRun({lock:compiled.decision.identity.lock,authority:authority.authority,
-    start,candidate:null,lease_ms:input.receipt_lease_ms,semantic_gate:{store,admission:admitted.admission}},observed);
-  const channel=receipt.createControllerEffectChannel(receiptStore,session,store,admitted.admission);
-  const adapter=require('./toolkit-codex-agent-adapter.cjs').createCodexAdapter(channel,input.repository_root);
-  return new CoreCommandSession({adapter,stack_session:stackSession});
-}
-function coreDataCommand(command, input) {
-  const runtime = require('./toolkit-codex-agent-adapter.cjs');
-  if(command === 'core-delegation-plan') {
-    const compiler = require('./toolkit-gate-contract-compiler.cjs');
-    const value = compiler.trustedJsonCopy(input);
-    if(Object.keys(value).sort().join('|') !== 'decision|delegation') throw new Error('CORE_REQUEST_INVALID');
-    return compiler.planV3Delegation(value.delegation,value.decision);
-  }
-  if(command === 'core-inspect') return runtime.inspect(input);
-  if(command === 'core-compile') {
-    const compiler = require('./toolkit-gate-contract-compiler.cjs');
-    const value = compiler.trustedJsonCopy(input);
-    if(Object.keys(value).sort().join('|') !== 'decision|observations') throw new Error('CORE_REQUEST_INVALID');
-    return compiler.compileControllerDecision(value.decision,value.observations);
-  }
-  throw new Error('CORE_REQUEST_INVALID');
-}
-
-async function main(argv = process.argv.slice(2), dependencies = {}) {
-  const args = parseCli(argv);
-  if (['core-inspect','core-compile','core-delegation-plan'].includes(args.command)) {
-    if(!args.input)throw new Error('CORE_INPUT_REQUIRED');
-    const file=path.resolve(args.input),stat=fs.lstatSync(file);
-    if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)throw new Error('CORE_INPUT_UNSAFE');
-    console.log(JSON.stringify(coreDataCommand(args.command,JSON.parse(fs.readFileSync(file,'utf8'))),null,2));return 0;
-  }
-  if (['core-run','core-recover','core-qualify'].includes(args.command)) {
-    if (dependencies.core_session && CORE_COMMAND_SESSIONS.has(dependencies.core_session)) {
-      let request = {};
-      if (args.input) {
-        const file=path.resolve(args.input),stat=fs.lstatSync(file);
-        if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)throw new Error('CORE_INPUT_UNSAFE');
-        request=JSON.parse(fs.readFileSync(file,'utf8'));
-      }
-      const result=await dependencies.core_session.execute(args.command,request);
-      console.log(JSON.stringify(result,null,2));
-      return ['HOLD','ASK_AND_HOLD'].includes(result?.state)||result?.status==='HOLD'?2:0;
-    }
-    console.log(JSON.stringify({status:'HOLD',code:'CORE_AUTHENTIC_INSTALLED_CONTEXT_REQUIRED',command:args.command}));return 2;
-  }
-  // Historical only: runs the verified run093 fixture worker for the pinned proof.
-  if (args.command === 'supervise') return require('./toolkit-agent-control-run093-history.cjs').supervise(args);
-  throw new Error('Usage: toolkit-agent-control.cjs core inspect|compile|delegation-plan --input <json> | core run|recover|qualify (installed context only)');
-}
-
 module.exports = {
-  createCoreCommandSession, CoreCommandSession, main, coreRuntimeCommand, coreDataCommand,
   SCHEMA, CONTROL_VERSION, TOPOLOGIES, CAPACITY_MODES, DEFAULT_WORKER_COST, MAX_QUEUE, EMERGENCY_WORKER_CEILING,
   profilePath, readProfile, configureProfile, invalidateProfile, validActivationProof,
 };
 
-// Retired direct-launch names read by the byte-pinned run093 historical proof. They are
-// forwarded lazily, so current consumers never load the historical module. The proof
-// also requires this file to define withRepositoryTestResourceInvocation itself.
-function withRepositoryTestResourceInvocation(invocation, root, callback) {
-  return require('./toolkit-agent-control-run093-history.cjs').withRepositoryTestResourceInvocation(invocation, root, callback);
-}
-module.exports.withRepositoryTestResourceInvocation = withRepositoryTestResourceInvocation;
-for (const name of ['RESULTS', 'CHECKER_RESULTS', 'HOSTS', 'ROLES', 'GIB', 'statePath', 'lockPath',
-  'inspectResources', 'inspectResourceCapability', 'validateLaunchSpec',
-  'admissionDecision', 'resourceAdmissionDecision', 'releaseReservation', 'launch', 'checkerWorkflow']) {
-  Object.defineProperty(module.exports, name, {
-    enumerable: true,
-    get: () => require('./toolkit-agent-control-run093-history.cjs')[name],
-  });
-}
-
-// Run after the exports exist: `supervise` loads the history module, which requires this one.
-if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });

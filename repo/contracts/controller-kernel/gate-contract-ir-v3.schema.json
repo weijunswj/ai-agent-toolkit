@@ -566,8 +566,7 @@
             "profile_id": {
               "enum": [
                 "owner-gpt",
-                "owner-claude",
-                "owner-mixed-claude-gpt"
+                "owner-claude"
               ]
             },
             "builder_qualification": {
@@ -1154,7 +1153,7 @@
             "reviewers": {
               "type": "array",
               "minItems": 1,
-              "maxItems": 3,
+              "maxItems": 1,
               "items": {
                 "$ref": "#/$defs/reviewer"
               }
@@ -2590,7 +2589,6 @@
             "reviewer_id": {
               "type": "string",
               "enum": [
-                "astra",
                 "sol",
                 "opus"
               ]

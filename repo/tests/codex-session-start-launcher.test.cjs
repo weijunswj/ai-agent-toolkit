@@ -54,7 +54,6 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
-    'repo/scripts/toolkit-opencode-project-plugin.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',

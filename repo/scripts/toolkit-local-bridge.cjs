@@ -22,24 +22,17 @@ const {
   markOwnedStaging,
   reconcileOwnedStaging
 } = require('./toolkit-staging-generations.cjs');
-const { installProjectPlugin } = require('./toolkit-opencode-project-plugin.cjs');
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
+const { samePath } = require('./toolkit-canonical-path.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.2.0';
+const BRIDGE_VERSION = '3.3.0';
 const STATE_SCHEMA_VERSION = 1;
-const TOOLKIT_NAME = 'ai-agent-toolkit';
-// Antigravity native/plugin installation is not supported by this source.
-// Existing AG2 state is retained below only for read/disable compatibility.
-const SUPPORTED_TARGETS = ['opencode'];
-const LEGACY_DISABLE_ONLY_TARGETS = ['ag2'];
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
-const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
-const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
@@ -66,9 +59,7 @@ const RECONCILIATION_ALLOWED_FLAGS = new Set([
   '--write',
   '--hub',
   '--sync-source',
-  '--force-downgrade',
-  '--opencode-config-dir',
-  '--opencode-target'
+  '--force-downgrade'
 ]);
 
 function slash(value) {
@@ -104,13 +95,6 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function parseListValue(value) {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     argv,
@@ -119,8 +103,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     hook: false,
     syncEnabled: false,
     forceDowngrade: false,
-    enableTargets: [],
-    disableTargets: [],
     enableAutoSync: false,
     disableAutoSync: false,
     enableRepoAutoUpdate: false,
@@ -145,11 +127,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     reconcileStaging: '',
     syncSource: 'repo',
     hub: '',
-    opencodeConfigDir: '',
-    opencodeTarget: '',
-    opencodeCommand: 'opencode',
-    installOpenCodeProjectPlugin: false,
-    opencodeProjectRoot: '',
     copyAntigravitySkills: false,
     antigravityProjectRoot: ''
   };
@@ -194,23 +171,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--suppress-update-report') args.suppressUpdateReport = true;
     else if (arg === '--reconcile-staging') args.reconcileStaging = next();
     else if (arg.startsWith('--reconcile-staging=')) args.reconcileStaging = arg.slice('--reconcile-staging='.length);
-    else if (arg === '--enable-target') args.enableTargets.push(...parseListValue(next()));
-    else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
-    else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
-    else if (arg.startsWith('--disable-target=')) args.disableTargets.push(...parseListValue(arg.slice('--disable-target='.length)));
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--sync-source') args.syncSource = next();
     else if (arg.startsWith('--sync-source=')) args.syncSource = arg.slice('--sync-source='.length);
-    else if (arg === '--opencode-config-dir') args.opencodeConfigDir = next();
-    else if (arg.startsWith('--opencode-config-dir=')) args.opencodeConfigDir = arg.slice('--opencode-config-dir='.length);
-    else if (arg === '--opencode-target') args.opencodeTarget = next();
-    else if (arg.startsWith('--opencode-target=')) args.opencodeTarget = arg.slice('--opencode-target='.length);
-    else if (arg === '--opencode-command') args.opencodeCommand = next();
-    else if (arg.startsWith('--opencode-command=')) args.opencodeCommand = arg.slice('--opencode-command='.length);
-    else if (arg === '--install-opencode-project-plugin') args.installOpenCodeProjectPlugin = true;
-    else if (arg === '--opencode-project-root') args.opencodeProjectRoot = next();
-    else if (arg.startsWith('--opencode-project-root=')) args.opencodeProjectRoot = arg.slice('--opencode-project-root='.length);
     else if (arg === '--copy-antigravity-skills') args.copyAntigravitySkills = true;
     else if (arg === '--antigravity-project-root') args.antigravityProjectRoot = next();
     else if (arg.startsWith('--antigravity-project-root=')) args.antigravityProjectRoot = arg.slice('--antigravity-project-root='.length);
@@ -222,28 +186,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  for (const target of args.enableTargets) {
-    if (!SUPPORTED_TARGETS.includes(target)) {
-      if (LEGACY_DISABLE_ONLY_TARGETS.includes(target)) {
-        throw new Error('AG2 native/plugin target is unsupported; use --copy-antigravity-skills with a workspace path for portable skills only');
-      }
-      throw new Error(`Unsupported target: ${target}`);
-    }
-  }
-  for (const target of args.disableTargets) {
-    if (!SUPPORTED_TARGETS.includes(target) && !LEGACY_DISABLE_ONLY_TARGETS.includes(target)) {
-      throw new Error(`Unsupported target: ${target}`);
-    }
-  }
-  if (args.installOpenCodeProjectPlugin && args.copyAntigravitySkills) {
-    throw new Error('Choose one explicit project setup command at a time');
-  }
-  if (args.installOpenCodeProjectPlugin && !args.opencodeProjectRoot) {
-    throw new Error('--install-opencode-project-plugin requires --opencode-project-root <absolute-path>');
-  }
-  if (args.opencodeProjectRoot && !args.installOpenCodeProjectPlugin) {
-    throw new Error('--opencode-project-root requires --install-opencode-project-plugin');
-  }
   if (args.copyAntigravitySkills && !args.antigravityProjectRoot) {
     throw new Error('--copy-antigravity-skills requires --antigravity-project-root <absolute-path>');
   }
@@ -314,26 +256,17 @@ function printHelp() {
   console.log([
     'Toolkit Local Bridge updater',
     '',
-    'Dry-run is the default. Add --write for local hub or target writes.',
+    'Dry-run is the default. Add --write for local hub writes.',
     '',
     'Common commands:',
     '  node repo/scripts/toolkit-local-bridge.cjs --audit',
-    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode',
-    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write',
-    '  node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path>',
-    '  node repo/scripts/toolkit-local-bridge.cjs --install-opencode-project-plugin --opencode-project-root <absolute-path> --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path>',
     '  node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id>',
     '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> --write',
-    '  node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write',
     '',
     'Options:',
-    '  --enable-target opencode',
-    '  --disable-target opencode|ag2 (AG2 is legacy disable-only)',
-    '  --install-opencode-project-plugin',
-    '  --opencode-project-root <absolute-path>  project destination; preview unless --write',
     '  --copy-antigravity-skills',
     '  --antigravity-project-root <absolute-path> project destination; copies skills only, preview unless --write',
     '  --sync-enabled',
@@ -363,9 +296,7 @@ function printHelp() {
     '                                audit one new-format owned generation; add --write for exact cleanup',
     '  --force-downgrade',
     '  --sync-source repo|codex-plugin|claude-plugin',
-    '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current',
-    '  --opencode-config-dir <path>  test or explicit setup override',
-    '  --opencode-target <path>      test override for the managed OpenCode skills root'
+    '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current'
   ].join('\n'));
 }
 
@@ -804,19 +735,6 @@ function maximumBridgeVersion(existingHubVersion, versionsBySource) {
   return maximum;
 }
 
-function defaultTargetState() {
-  return {
-    enabled: false,
-    explicitly_disabled: false,
-    detected: false,
-    target_path: '',
-    synced_version: '',
-    synced_checksum: '',
-    last_sync: '',
-    skip_reason: 'not enabled'
-  };
-}
-
 function defaultState() {
   return {
     schema_version: STATE_SCHEMA_VERSION,
@@ -845,11 +763,7 @@ function defaultState() {
     codex_plugin_auto_refresh_enabled: false,
     created_at: '',
     updated_at: '',
-    last_sync_source: '',
-    targets: {
-      opencode: defaultTargetState(),
-      ag2: defaultTargetState()
-    }
+    last_sync_source: ''
   };
 }
 
@@ -861,12 +775,8 @@ function normalizedState(raw) {
     raw?.last_sync_source
   );
   state.hub_version = isValidBridgeVersion(raw?.hub_version) ? raw.hub_version : '';
-  state.targets = state.targets && typeof state.targets === 'object' ? state.targets : {};
-  for (const target of SUPPORTED_TARGETS) {
-    state.targets[target] = { ...defaultTargetState(), ...(state.targets[target] || {}) };
-  }
-  // Preserve old AG2 target fields for safe disable-only compatibility.
-  state.targets.ag2 = { ...defaultTargetState(), ...(state.targets.ag2 || {}) };
+  // Toolkit 3.2 and earlier kept OpenCode and AG2 target records here; the next hub write drops them.
+  delete state.targets;
   state.repo_branch = state.repo_branch || DEFAULT_REPO_BRANCH;
   state.repo_remote = state.repo_remote || DEFAULT_REPO_REMOTE;
   state.repo_path = state.repo_path || '';
@@ -920,80 +830,7 @@ function applyRequestedState(state, args) {
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
   if (args.enableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = true;
   if (args.disableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = false;
-  for (const target of args.enableTargets) {
-    next.targets[target].enabled = true;
-    next.targets[target].explicitly_disabled = false;
-  }
-  for (const target of args.disableTargets) {
-    next.targets[target].enabled = false;
-    next.targets[target].explicitly_disabled = true;
-    next.targets[target].skip_reason = 'explicitly disabled';
-  }
   return next;
-}
-
-function discoverOpenCode(args, targetState, hubPath) {
-  const envConfig = args.opencodeConfigDir || process.env.OPENCODE_CONFIG_DIR || '';
-  const homeConfig = path.join(os.homedir(), '.config', 'opencode');
-  const configDir = envConfig || homeConfig;
-  const internalAdapterPath = path.join(hubPath, 'adapters', 'opencode');
-  const persistedState = Boolean(
-    targetState.detected ||
-    targetState.target_path ||
-    targetState.synced_version ||
-    targetState.synced_checksum ||
-    targetState.last_sync
-  );
-  const defaultTarget = path.join(configDir, 'skills');
-  const requestedTarget = args.opencodeTarget || targetState.target_path || defaultTarget;
-  const configuredTarget = normalizeOpenCodeTargetPath(requestedTarget, defaultTarget);
-  const command = commandProbe(args.opencodeCommand, ['--version']);
-  const configExists = fs.existsSync(configDir);
-  const targetExists = fs.existsSync(configuredTarget);
-  const migratedTargetPath = path.resolve(configuredTarget) !== path.resolve(requestedTarget);
-  const explicitlyEnabled = targetState.enabled === true;
-  const detected = command.ok || Boolean(envConfig) || configExists || targetExists || explicitlyEnabled || persistedState;
-  return {
-    target: 'opencode',
-    detected,
-    target_path: configuredTarget,
-    internal_adapter_path: internalAdapterPath,
-    signals: {
-      command_ok: command.ok,
-      command_output: command.output,
-      env_config_dir: Boolean(envConfig),
-      config_dir: configDir,
-      config_dir_exists: configExists,
-      target_exists: targetExists,
-      migrated_target_path: migratedTargetPath,
-      requested_target_path: requestedTarget,
-      persisted_state: persistedState,
-      explicitly_enabled: explicitlyEnabled
-    }
-  };
-}
-
-function normalizeOpenCodeTargetPath(targetPath, defaultTarget) {
-  const raw = String(targetPath || '').trim();
-  if (!raw) return defaultTarget;
-  const resolved = path.resolve(raw);
-  if (
-    path.basename(resolved) === TOOLKIT_NAME &&
-    path.basename(path.dirname(resolved)) === 'skills'
-  ) {
-    return path.dirname(resolved);
-  }
-  return raw;
-}
-
-function readDirectoryNames(dirPath) {
-  try {
-    return fs.readdirSync(dirPath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
 }
 
 function isValidSkillName(name) {
@@ -1067,9 +904,6 @@ function collectToolkitSkills(sourceRoot) {
     if (!isValidSkillName(entry.name)) continue;
     const skillRoot = path.join(skillsRoot, entry.name);
     if (!fs.existsSync(path.join(skillRoot, 'SKILL.md'))) continue;
-    if (entry.name === TOOLKIT_NAME) {
-      throw new Error(`Toolkit repo skills/ contains reserved bridge adapter skill name: ${TOOLKIT_NAME}`);
-    }
     skills[entry.name] = collectFilesRecursively(skillRoot);
   }
   return skills;
@@ -1079,107 +913,25 @@ function textPayload(text) {
   return Buffer.from(text, 'utf8');
 }
 
-function targetManifestPayload(targetName, skillNames) {
-  return textPayload(`${JSON.stringify({
-    managed_by: TARGET_MANIFEST_MARKER,
-    schema_version: 1,
-    target: targetName,
-    architecture_version: ARCHITECTURE_VERSION,
-    bridge_version: BRIDGE_VERSION,
-    managed_skill_names: [...skillNames].sort()
-  }, null, 2)}\n`);
-}
-
 function addSkillToPayload(payload, skillName, files, prefix = 'skills') {
   for (const [relPath, content] of Object.entries(files)) {
     payload[`${prefix}/${skillName}/${relPath}`] = Buffer.isBuffer(content) ? content : textPayload(String(content));
   }
 }
 
-function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state)) {
-  const toolkitSkills = collectToolkitSkills(sourceRoot);
-  const toolkitSkillNames = Object.keys(toolkitSkills).sort();
-  const opencodeSkill = [
-    '---',
-    'name: ai-agent-toolkit',
-    'description: Use when working in OpenCode with the AI Agent Toolkit local bridge. Applies source-first policy, opt-in bridge setup, and audit/sync commands without using Codex or Claude private plugin caches.',
-    '---',
-    '',
-    '# AI Agent Toolkit Bridge',
-    '',
-    'Use this skill when OpenCode needs Toolkit policy, bridge audit, or enabled-target sync guidance.',
-    '',
-    'Core rules:',
-    '',
-    '- Treat AGENTS.md and Toolkit skills/docs as portable policy. Hooks are optional automation only.',
-    '- Do not install or update Codex or Claude Code from OpenCode.',
-    '- Do not read Codex or Claude private plugin cache paths as bridge source.',
-    '- Do not install npm, pip, Python, AG2, OpenCode, or any package by default.',
-    '- Do not mutate project repos by default.',
-    '- Use the Toolkit Local Bridge Hub manifest and state files under the user-local hub.',
-    '',
-    'Useful commands:',
-    '',
-    '```powershell',
-    'node repo/scripts/toolkit-local-bridge.cjs --audit',
-    'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
-    '```',
-    ''
-  ].join('\n');
-
-  const opencodeReadme = [
-    '# AI Agent Toolkit OpenCode Adapter',
-    '',
-    'Generated by the Toolkit Local Bridge Hub after the user explicitly enables the OpenCode target.',
-    '',
-    'This folder is safe to load from the OpenCode global skills directory. It is not source of truth. Update Toolkit through the native Codex or Claude Code plugin package and let the bridge sync enabled targets.',
-    ''
-  ].join('\n');
-
-  const adapterFiles = {
-    'SKILL.md': textPayload(opencodeSkill),
-    'README.md': textPayload(opencodeReadme)
-  };
-  const managedSkillNames = [TOOLKIT_NAME, ...toolkitSkillNames].sort();
-  const opencodePayload = {
-    [TARGET_MANIFEST_FILE]: targetManifestPayload('opencode', managedSkillNames)
-  };
-  // Keep a portable skill payload for explicit project-scoped Antigravity use.
-  // It contains no plugin metadata, bridge adapter, or native-runtime claim.
-  const ag2Payload = {};
-
-  for (const [skillName, files] of Object.entries(toolkitSkills)) {
-    addSkillToPayload(opencodePayload, skillName, files);
-    addSkillToPayload(ag2Payload, skillName, files);
-  }
-  addSkillToPayload(opencodePayload, TOOLKIT_NAME, adapterFiles);
-
-  return {
-    opencode: opencodePayload,
-    ag2: ag2Payload
-  };
+// The Toolkit skill content one hub run reads. Its checksum identifies that source in the hub
+// manifest and in update reports; nothing is copied from it.
+function toolkitSkillPayload(state = {}, sourceRoot = resolveToolkitSourceRoot(state)) {
+  const payload = {};
+  for (const [skillName, files] of Object.entries(collectToolkitSkills(sourceRoot))) addSkillToPayload(payload, skillName, files);
+  return payload;
 }
 
 function payloadBytes(value) {
   return Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
 }
 
-function payloadChecksum(payloads) {
-  const hash = crypto.createHash('sha256');
-  for (const target of Object.keys(payloads).sort()) {
-    for (const rel of Object.keys(payloads[target]).sort()) {
-      hash.update(target);
-      hash.update('\0');
-      hash.update(rel);
-      hash.update('\0');
-      hash.update(payloadBytes(payloads[target][rel]));
-      hash.update('\0');
-    }
-  }
-  return hash.digest('hex');
-}
-
-function filePayloadChecksum(payload) {
+function payloadChecksum(payload) {
   const hash = crypto.createHash('sha256');
   for (const rel of Object.keys(payload).sort()) {
     hash.update(rel);
@@ -1188,80 +940,6 @@ function filePayloadChecksum(payload) {
     hash.update('\0');
   }
   return hash.digest('hex');
-}
-
-function appTargetPayload(targetName, payloads) {
-  if (targetName === 'opencode') {
-    const prefix = 'skills/';
-    return Object.fromEntries(Object.entries(payloads.opencode)
-      .map(([rel, text]) => [rel.startsWith(prefix) ? rel.slice(prefix.length) : rel, text]));
-  }
-  if (targetName === 'ag2') return payloads.ag2;
-  throw new Error(`Unsupported target: ${targetName}`);
-}
-
-function targetSkillNames(targetName, payloads) {
-  const names = new Set();
-  const payload = appTargetPayload(targetName, payloads);
-  for (const rel of Object.keys(payload)) {
-    const normalized = slash(rel);
-    if (targetName === 'ag2') {
-      const match = normalized.match(/^skills\/([^/]+)\//);
-      if (match && isValidSkillName(match[1])) names.add(match[1]);
-      continue;
-    }
-    const first = normalized.split('/')[0];
-    if (first && isValidSkillName(first)) names.add(first);
-  }
-  return [...names].sort();
-}
-
-function readManagedTargetManifest(targetPath) {
-  const manifest = readJsonIfExists(path.join(targetPath, TARGET_MANIFEST_FILE));
-  if (!manifest || manifest.managed_by !== TARGET_MANIFEST_MARKER) return null;
-  return manifest;
-}
-
-function previousManagedSkillNames(targetPath) {
-  const manifest = readManagedTargetManifest(targetPath);
-  if (!manifest || !Array.isArray(manifest.managed_skill_names)) return [];
-  return manifest.managed_skill_names
-    .map((name) => String(name || '').trim())
-    .filter(isValidSkillName)
-    .sort();
-}
-
-function targetHasNoStaleManagedSkills(targetName, targetPath, payloads) {
-  if (!targetPath) return false;
-  const previous = previousManagedSkillNames(targetPath);
-  if (!previous.length) return true;
-  const current = new Set(targetSkillNames(targetName, payloads));
-  return previous.every((name) => current.has(name));
-}
-
-function targetOutputChecksum(targetPath, payload) {
-  if (!targetPath) return '';
-  const actual = {};
-  for (const rel of Object.keys(payload)) {
-    const filePath = path.join(targetPath, rel);
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return '';
-    actual[rel] = fs.readFileSync(filePath);
-  }
-  return filePayloadChecksum(actual);
-}
-
-function targetOutputIsCurrent(targetName, discovery, payloads) {
-  const payload = appTargetPayload(targetName, payloads);
-  return (
-    targetOutputChecksum(discovery.target_path, payload) === filePayloadChecksum(payload) &&
-    targetHasNoStaleManagedSkills(targetName, discovery.target_path, payloads)
-  );
-}
-
-function targetOutputExists(targetName, discovery, payloads) {
-  const payload = appTargetPayload(targetName, payloads);
-  if (!discovery.target_path) return false;
-  return Object.keys(payload).every((rel) => fs.existsSync(path.join(discovery.target_path, rel)));
 }
 
 function pluginRootFromCwd() {
@@ -1728,24 +1406,6 @@ function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
   return result;
 }
 
-function targetDisplayName(targetName) {
-  if (targetName === 'ag2') return 'Antigravity 2';
-  if (targetName === 'opencode') return 'OpenCode';
-  return targetName;
-}
-
-function targetSyncPlan(targetName, discovery, payloads) {
-  const skillNames = targetSkillNames(targetName, payloads);
-  const previousNames = previousManagedSkillNames(discovery.target_path);
-  const current = new Set(skillNames);
-  return {
-    target: targetName,
-    targetPath: discovery.target_path,
-    skillNames,
-    removedSkillNames: previousNames.filter((name) => !current.has(name)).sort((left, right) => left.localeCompare(right))
-  };
-}
-
 function isLegacyDelegatedRepoSync(args) {
   return Boolean(
     args.skipRepoAutoUpdate &&
@@ -1833,7 +1493,6 @@ function classifyUpdateReport(context) {
   const repoStatus = context.repo?.status || '';
   const cacheStatus = context.nativePluginCache?.status || '';
   const repairStatus = context.thirdPartyHookRepair?.status || '';
-  const targetStatus = context.targetSyncStatus || '';
   const installStatus = context.installCheck?.status || '';
   const actionable = installStatus === 'action-required'
     || repoStatus === 'validation-failed'
@@ -1841,16 +1500,13 @@ function classifyUpdateReport(context) {
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
     || ['stale', 'refresh-failed'].includes(cacheStatus)
     || ['repair-failed', 'partial-failed'].includes(repairStatus)
-    || ['failed', 'not confirmed'].includes(targetStatus)
     || Boolean(context.warning);
   const successfulActivity = Boolean(context.repo?.branchSwitchedFrom)
     || repoStatus === 'updated'
     || Boolean(context.repo?.externalAdvanceDetected)
     || cacheStatus === 'refreshed'
     || repairStatus === 'repaired'
-    || (context.installCheck?.checks || []).some((entry) => entry.updated === true)
-    || (context.targetSyncs || []).length > 0
-    || (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length > 0);
+    || (context.installCheck?.checks || []).some((entry) => entry.updated === true);
   return {
     meaningful: actionable || successfulActivity,
     actionable,
@@ -1870,23 +1526,12 @@ function repoTldr(repo, previousCommit, commit, warning) {
   if (repo.status === 'updated') return `updated from ${shortCommit(previousCommit)} to ${shortCommit(commit)}`;
   if (repo.externalAdvanceDetected) return 'already updated before this hook run';
   if (repo.status === 'validation-failed') return `updated to ${shortCommit(commit)}, but validation failed`;
-  if (repo.status === 'sync-delegation-failed') return 'updated, but target sync failed';
+  if (repo.status === 'sync-delegation-failed') return 'updated, but the hub sync from the updated checkout failed';
   if (repo.status === 'skipped' && isDirtyWorkingTreeWarning(warning)) return 'skipped (configured Toolkit source checkout is dirty)';
   if (repo.status === 'skipped') return warning ? `skipped (${warning})` : 'skipped safely';
   if (repo.status === 'up-to-date') return 'already up to date';
   return 'not updated in this run';
 }
-function targetsTldr(targetSyncs, targetSyncStatus) {
-  if (targetSyncs.length) {
-    return targetSyncs
-      .map((sync) => `${targetDisplayName(sync.target)} (${sync.skillNames.length} skills)`)
-      .join(', ')
-      .replace(/^/, 'synced ');
-  }
-  if (targetSyncStatus === 'skipped') return 'sync skipped';
-  return 'nothing to sync';
-}
-
 function branchMismatchSuggestion(warning) {
   return /branch mismatch/i.test(String(warning || ''))
     ? 'switch the Toolkit repo back to `main`, then restart Codex or rerun setup/sync'
@@ -1918,7 +1563,7 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installChec
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
-  if (repo.status === 'sync-delegation-failed') return 'check target sync';
+  if (repo.status === 'sync-delegation-failed') return 'check the hub sync from the updated checkout';
   const suggestion = warningSuggestion(warning);
   if (suggestion) return suggestion;
   if (warning) return `check: ${warning}`;
@@ -1933,8 +1578,6 @@ function triggeredFromTldr(syncSource) {
 
 function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
-  const targetSyncs = context.targetSyncs || [];
-  const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
   const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const installCheck = context.installCheck || null;
@@ -1943,8 +1586,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const suggestion = warningSuggestion(warning);
   const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
   const previousCommit = repo.externalAdvanceFromCommit || repo.fromCommit || 'none';
-  const validationStatus = repo.validationStatus || repo.validation?.status || (repo.status ? 'not run' : 'not run');
-  const targetSyncStatus = context.targetSyncStatus || (targetSyncs.length ? 'synced' : 'not needed');
+  const validationStatus = repo.validationStatus || repo.validation?.status || 'not run';
   const lines = [
     '# AI Agent Toolkit Update',
     '',
@@ -1952,7 +1594,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
     '',
     `- Triggered from: ${triggeredFromTldr(args.syncSource)}.`,
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
-    `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
     `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installCheck, warning, state })}.`,
     '',
     '## Details',
@@ -1976,8 +1617,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
     for (const file of repo.changedFiles) lines.push(`- ${inlineCode(slash(file))}`);
   } else if (repo.externalAdvanceDetected) {
     lines.push('- Local repo was already advanced before this hook run.');
-  } else if (targetSyncs.length && (!repo.fromCommit || repo.fromCommit === repo.toCommit)) {
-    lines.push('- No repo commit change; local bridge target state was stale.');
   } else if (repo.branchSwitchedFrom) {
     lines.push('- No repo commit change; clean branch auto-switch completed.');
   } else if (repo.status && repo.status !== 'updated') {
@@ -2009,21 +1648,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
   }
 
   lines.push('', '## What Has Been Done', '');
-  for (const sync of targetSyncs) {
-    lines.push(`- Synced Toolkit skills to ${targetDisplayName(sync.target)}:`);
-    lines.push(`  ${inlineCode(sync.targetPath)}`);
-    lines.push(`- Copied/updated ${inlineCode(sync.skillNames.length)} Toolkit skills.`);
-    if ((sync.removedSkillNames || []).length) {
-      lines.push('- Removed stale managed skill folders:');
-      for (const name of sync.removedSkillNames) lines.push(`  - ${inlineCode(name)}`);
-    }
-  }
-  for (const target of skippedTargets) {
-    lines.push(`- Skipped ${targetDisplayName(target)} because target is disabled.`);
-  }
-  if (!targetSyncs.length && !skippedTargets.length && repo.status) {
-    lines.push('- No enabled target sync was completed.');
-  }
   if (nativePluginCache.status === 'refreshed') {
     lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
   } else if (nativePluginCache.status === 'refresh-failed') {
@@ -2066,7 +1690,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
   lines.push('', '## Validation', '');
   lines.push(`- repo update status: ${inlineCode(repo.status || 'not run')}`);
   lines.push(`- hook-light validation: ${inlineCode(validationStatus)}`);
-  lines.push(`- target sync status: ${inlineCode(targetSyncStatus)}`);
   if (nativePluginCache.status) {
     lines.push(`- Codex native plugin cache: ${inlineCode(nativePluginCache.status)}`);
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
@@ -2095,8 +1718,6 @@ function updateReportSignature({ args, checksum, context }) {
   const nativePluginCache = context.nativePluginCache || {};
   const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const cleanup = context.cleanup || {};
-  const targetSyncs = context.targetSyncs || [];
-  const skippedTargets = context.skippedTargets || [];
   const payload = {
     syncSource: args.syncSource,
     checksum,
@@ -2134,15 +1755,7 @@ function updateReportSignature({ args, checksum, context }) {
     },
     installCheck: context.installCheck
       ? { status: context.installCheck.status || '', actions: context.installCheck.actions || [] }
-      : null,
-    targetSyncStatus: context.targetSyncStatus || '',
-    targetSyncs: targetSyncs.map((sync) => ({
-      target: sync.target || '',
-      targetPath: sync.targetPath || '',
-      skillNames: sync.skillNames || [],
-      removedSkillNames: sync.removedSkillNames || []
-    })),
-    skippedTargets
+      : null
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
@@ -2310,7 +1923,7 @@ function printUpdateReportLine(args, reportPath) {
   console.log('Toolkit local bridge sync complete.');
 }
 
-function buildManifest({ state, discoveries, checksum, sourceCommit, syncSource, hubPath }) {
+function buildManifest({ checksum, sourceCommit, syncSource, hubPath }) {
   return {
     name: 'ai-agent-toolkit-local-bridge',
     architecture_version: ARCHITECTURE_VERSION,
@@ -2319,21 +1932,7 @@ function buildManifest({ state, discoveries, checksum, sourceCommit, syncSource,
     source_commit: sourceCommit,
     sync_source: syncSource,
     sync_timestamp: timestamp(),
-    hub_path: hubPath,
-    targets: {
-      opencode: {
-        detected: discoveries.opencode.detected,
-        enabled: state.targets.opencode.enabled,
-        explicitly_disabled: state.targets.opencode.explicitly_disabled,
-        target_path: discoveries.opencode.target_path
-      },
-      ag2: {
-        detected: discoveries.ag2.detected,
-        enabled: state.targets.ag2.enabled,
-        explicitly_disabled: state.targets.ag2.explicitly_disabled,
-        target_path: discoveries.ag2.target_path
-      }
-    }
+    hub_path: hubPath
   };
 }
 
@@ -2350,52 +1949,17 @@ function prepareStateForWrite(state, args) {
   return next;
 }
 
-function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = false }) {
+function deriveSnapshotGeneration({ args, state, prepareForWrite = false }) {
   let nextState = normalizedState(state);
   const sourceRoot = resolveToolkitSourceRoot(nextState);
-  const payloads = adapterPayloads(nextState, sourceRoot);
-  const checksum = payloadChecksum(payloads);
-  const discoveries = {
-    opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
-    ag2: {
-      target: 'ag2',
-      detected: false,
-      target_path: '',
-      internal_adapter_path: path.join(hubPath, 'adapters', 'ag2'),
-      ag2_package_detected: false,
-      python_command: '',
-      signals: {
-        native_plugin_target_supported: false,
-        legacy_state_preserved: Boolean(nextState.targets.ag2?.enabled || nextState.targets.ag2?.target_path),
-        portable_project_skills_available: true
-      }
-    }
-  };
-  updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  const plannedTargetSyncs = SUPPORTED_TARGETS
-    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
-    .map((target) => targetSyncPlan(target, discoveries[target], payloads));
-  const skippedTargets = SUPPORTED_TARGETS
-    .filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled);
+  const checksum = payloadChecksum(toolkitSkillPayload(nextState, sourceRoot));
   if (prepareForWrite) nextState = prepareStateForWrite(nextState, args);
   return {
     state: nextState,
     sourceRoot,
     sourceCommit: currentToolkitCommit({ repo_path: sourceRoot }),
-    discoveries,
-    payloads,
-    checksum,
-    plannedTargetSyncs,
-    skippedTargets
+    checksum
   };
-}
-
-function writePayloadTree(rootDir, payload) {
-  for (const [rel, text] of Object.entries(payload)) {
-    const target = path.join(rootDir, rel);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, payloadBytes(text));
-  }
 }
 
 function withOwnedStaging(options, callback) {
@@ -2439,7 +2003,7 @@ function withOwnedStaging(options, callback) {
   }
 }
 
-function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }, testHooks = {}) {
+function writeHubSnapshot({ hubPath, args, state, checksum, sourceCommit }, testHooks = {}) {
   return withOwnedStaging({
     target: hubPath,
     stagePrefix: '.staging-',
@@ -2450,11 +2014,7 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
   }, (stagePath, generation) => {
     if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation });
     if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation });
-    writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
-    writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
     writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
-      state,
-      discoveries,
       checksum,
       sourceCommit,
       syncSource: args.syncSource,
@@ -2474,17 +2034,6 @@ function validateStagedHub(stagePath, checksum) {
   const state = readJsonIfExists(path.join(stagePath, 'state.json'));
   if (!manifest || manifest.checksum !== checksum) throw new Error('staged manifest checksum mismatch');
   if (!state || state.schema_version !== STATE_SCHEMA_VERSION) throw new Error('staged state schema mismatch');
-  if (!fs.existsSync(path.join(stagePath, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'))) {
-    throw new Error('staged OpenCode adapter SKILL.md missing');
-  }
-  const portableSkillsRoot = path.join(stagePath, 'adapters', 'ag2', 'skills');
-  const portableSkills = readDirectoryNames(portableSkillsRoot)
-    .filter((name) => isValidSkillName(name) && fs.existsSync(path.join(portableSkillsRoot, name, 'SKILL.md')));
-  if (!portableSkills.length) throw new Error('staged Antigravity portable skills payload missing');
-  if (fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'plugin.json'))
-    || fs.existsSync(path.join(stagePath, 'adapters', 'ag2', 'installed_version.json'))) {
-    throw new Error('staged Antigravity payload contains unsupported native/plugin metadata');
-  }
 }
 
 // Classify the recorded lock owner without ever signalling it for real.
@@ -3043,152 +2592,9 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
 }
 
-function writeFileAtomically(filePath, content) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
-  fs.writeFileSync(tempPath, payloadBytes(content));
-  fs.renameSync(tempPath, filePath);
-}
-
-function skillBaseRel(targetName, skillName) {
-  if (targetName === 'opencode') return skillName;
-  if (targetName === 'ag2') return path.join('skills', skillName);
-  throw new Error(`Unsupported target: ${targetName}`);
-}
-
-function skillPayloadForTarget(targetName, payload, skillName) {
-  const prefix = slash(skillBaseRel(targetName, skillName));
-  const skillPayload = {};
-  for (const [rel, content] of Object.entries(payload)) {
-    const normalized = slash(rel);
-    if (normalized === prefix) continue;
-    if (!normalized.startsWith(`${prefix}/`)) continue;
-    skillPayload[normalized.slice(prefix.length + 1)] = content;
-  }
-  return skillPayload;
-}
-
-function rootPayloadForTarget(targetName, payload) {
-  const rootPayload = {};
-  for (const [rel, content] of Object.entries(payload)) {
-    const normalized = slash(rel);
-    if (targetName === 'ag2' && normalized.startsWith('skills/')) continue;
-    if (targetName === 'opencode' && isValidSkillName(normalized.split('/')[0]) && normalized.includes('/')) continue;
-    rootPayload[normalized] = content;
-  }
-  return rootPayload;
-}
-
-function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType) {
-  const targetDir = path.join(targetPath, ...slash(baseRel).split('/'));
-  return withOwnedStaging({
-    target: targetDir,
-    stagePrefix: `.${path.basename(targetDir)}.staging-`,
-    operation: 'target-skill-replacement',
-    sourceType
-  }, (staging) => {
-    writePayloadTree(staging, payload);
-    if (!fs.existsSync(path.join(staging, 'SKILL.md'))) {
-      throw new Error(`staged target skill missing SKILL.md: ${staging}`);
-    }
-    replaceDirectoryAtomically(staging, targetDir);
-  });
-}
-
-function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames) {
-  const current = new Set(currentNames);
-  const removed = [];
-  for (const name of previousNames) {
-    if (current.has(name)) continue;
-    const targetDir = path.join(targetPath, ...slash(skillBaseRel(targetName, name)).split('/'));
-    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
-    removed.push(name);
-  }
-  return removed.sort((left, right) => left.localeCompare(right));
-}
-
-function syncTargetPayload(targetName, targetPath, payloads, sourceType) {
-  const payload = appTargetPayload(targetName, payloads);
-  const skillNames = targetSkillNames(targetName, payloads);
-  const previousNames = previousManagedSkillNames(targetPath);
-  fs.mkdirSync(targetPath, { recursive: true });
-
-  for (const skillName of skillNames) {
-    writeSkillPayloadAtomically(
-      targetPath,
-      skillBaseRel(targetName, skillName),
-      skillPayloadForTarget(targetName, payload, skillName),
-      sourceType
-    );
-  }
-
-  const removedSkillNames = removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames);
-
-  for (const [rel, content] of Object.entries(rootPayloadForTarget(targetName, payload))) {
-    writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content);
-  }
-
-  return {
-    target: targetName,
-    targetPath,
-    skillNames,
-    removedSkillNames
-  };
-}
-
-function targetWouldSync(targetName, state, checksum, discovery, payloads) {
-  const target = state.targets[targetName];
-  if (!target.enabled) return false;
-  if (target.explicitly_disabled) return false;
-  const targetCurrent = discovery && payloads ? targetOutputIsCurrent(targetName, discovery, payloads) : true;
-  return target.synced_version !== BRIDGE_VERSION || target.synced_checksum !== checksum || !targetCurrent;
-}
-
-function targetIsSynced(targetName, targetState, checksum, discovery, payloads) {
-  return (
-    targetState.synced_version === BRIDGE_VERSION &&
-    targetState.synced_checksum === checksum &&
-    targetOutputIsCurrent(targetName, discovery, payloads)
-  );
-}
-
-function targetStatus(targetState, discovery, checksum) {
-  if (targetState.explicitly_disabled) return 'disabled';
-  if (targetState.enabled) return 'enabled';
-  if (discovery.detected) return 'detected';
-  return 'not detected';
-}
-
-function updateTargetState(state, targetName, discovery, checksum, synced, skipReason) {
-  const target = state.targets[targetName];
-  target.detected = discovery.detected;
-  target.target_path = discovery.target_path;
-  target.skip_reason = skipReason || '';
-  if (synced) {
-    target.synced_version = BRIDGE_VERSION;
-    target.synced_checksum = checksum;
-    target.last_sync = timestamp();
-  }
-}
-
-function stagingAuditParents(hubPath, discoveries) {
-  const parents = [path.dirname(hubPath)];
-  const opencodeTarget = discoveries?.opencode?.target_path;
-  if (opencodeTarget) parents.push(opencodeTarget);
-  return [...new Set(parents.map((value) => path.resolve(value)))];
-}
-
-function stagingReconciliationParents(args, hubPath, state) {
-  const parents = [path.dirname(hubPath)];
-  const openCodeConfig = args.opencodeConfigDir || process.env.OPENCODE_CONFIG_DIR || path.join(os.homedir(), '.config', 'opencode');
-  const openCodeDefaultTarget = path.join(openCodeConfig, 'skills');
-  const openCodeTarget = normalizeOpenCodeTargetPath(
-    args.opencodeTarget || state.targets.opencode.target_path || openCodeDefaultTarget,
-    openCodeDefaultTarget
-  );
-  parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
-
-  return [...new Set(parents.map((value) => path.resolve(value)))];
+// Owned staging generations live next to the hub.
+function stagingParents(hubPath) {
+  return [path.resolve(path.dirname(hubPath))];
 }
 
 function stagingReconciliationOutput({ args, hubPath, reconciliation }) {
@@ -3212,8 +2618,8 @@ function stagingReconciliationOutput({ args, hubPath, reconciliation }) {
   };
 }
 
-function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
-  const parents = stagingReconciliationParents(args, hubPath, state);
+function runStagingReconciliation({ args, hubPath, testHooks = {} }) {
+  const parents = stagingParents(hubPath);
   if (!args.write) {
     const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
       write: false,
@@ -3248,7 +2654,7 @@ function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
   }
 }
 
-function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
+function buildAudit({ args, hubPath, state, checksum }) {
   const dryRun = !args.write;
   return {
     architecture_version: ARCHITECTURE_VERSION,
@@ -3292,29 +2698,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       error: state.last_repo_update_error
     },
     checksum,
-    staging_generations: auditOwnedStaging(stagingAuditParents(hubPath, discoveries)),
-    targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => {
-      const targetState = state.targets[target];
-      const discovery = discoveries[target];
-      return [target, {
-        status: targetStatus(targetState, discovery, checksum),
-        detected: discovery.detected,
-        enabled: targetState.enabled,
-        explicitly_disabled: targetState.explicitly_disabled,
-        target_path: discovery.target_path,
-        target_exists: targetOutputExists(target, discovery, payloads),
-        internal_adapter_path: discovery.internal_adapter_path,
-        internal_adapter_exists: fs.existsSync(discovery.internal_adapter_path),
-        synced: targetIsSynced(target, targetState, checksum, discovery, payloads),
-        synced_version: targetState.synced_version,
-        synced_at: targetState.last_sync,
-        ag2_package_detected: target === 'ag2' ? discovery.ag2_package_detected : undefined,
-        python_command: target === 'ag2' ? discovery.python_command || '' : undefined,
-        would_write: targetWouldSync(target, state, checksum, discovery, payloads),
-        skip_reason: targetState.enabled ? targetState.skip_reason : 'not enabled',
-        signals: discovery.signals
-      }];
-    }))
+    staging_generations: auditOwnedStaging(stagingParents(hubPath))
   };
 }
 
@@ -3747,17 +3131,16 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 }
 
 // One repository auto-update run: a locked fast-forward update of the managed checkout,
-// a snapshot refresh, delegated target sync from the updated checkout, and the final
+// a snapshot refresh, a hub sync delegated to the updated checkout, and the final
 // update report. Each phase records failures in hub state and its own report; hook
 // runs degrade to a warning instead of failing the host.
 class RepositoryAutoUpdateOperation {
-  #args; #hubPath; #state; #discoveries; #checksum; #payloads; #testHooks;
-  #statusState = null; #snapshot = null; #updateResult = null; #plannedTargetSyncs = [];
+  #args; #hubPath; #state; #checksum; #testHooks;
+  #statusState = null; #snapshot = null; #updateResult = null;
   #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = ''; #installCheck = null;
 
-  constructor({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
-    this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#discoveries = discoveries;
-    this.#checksum = checksum; this.#payloads = payloads; this.#testHooks = testHooks;
+  constructor({ args, hubPath, state, checksum, testHooks = {} }) {
+    this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#checksum = checksum; this.#testHooks = testHooks;
   }
 
   #hubState(fallback) { return normalizedState(readJsonIfExists(path.join(this.#hubPath, 'state.json')) || fallback); }
@@ -3778,7 +3161,7 @@ class RepositoryAutoUpdateOperation {
     const lock = acquireLock(path.dirname(hubPath), args);
     if (!lock.acquired) {
       console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
-      return { status: 0, audit: buildAudit({ args, hubPath, state: this.#state, discoveries: this.#discoveries, checksum: this.#checksum, payloads: this.#payloads }) };
+      return { status: 0, audit: buildAudit({ args, hubPath, state: this.#state, checksum: this.#checksum }) };
     }
     try {
       const state = this.#state = applyRequestedState(normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))), args);
@@ -3820,9 +3203,7 @@ class RepositoryAutoUpdateOperation {
           branchSwitchedFrom: details.branchSwitchedFrom || '',
           error: details.error || error.message
         },
-        skippedTargets: snapshot.skippedTargets,
-        nativePluginCache: nativePluginCacheStatus(args, statusState),
-        targetSyncStatus: 'skipped'
+        nativePluginCache: nativePluginCacheStatus(args, statusState)
       } });
     statusState = report.state;
     if (report.reportPath) {
@@ -3833,7 +3214,7 @@ class RepositoryAutoUpdateOperation {
     return this.#hookSafe(error, snapshot, statusState);
   }
 
-  // Phase 2: re-derive the snapshot from the latest hub state and plan target syncs.
+  // Phase 2: re-derive the snapshot from the latest hub state.
   #refreshSnapshot() {
     const refreshLock = acquireLock(path.dirname(this.#hubPath), this.#args);
     try {
@@ -3842,14 +3223,13 @@ class RepositoryAutoUpdateOperation {
       assertSourceDowngradeAllowed(this.#statusState, this.#args);
       this.#snapshot = this.#snapshotFor(this.#statusState);
       this.#statusState = this.#snapshot.state;
-      this.#plannedTargetSyncs = this.#snapshot.plannedTargetSyncs;
       this.#write(this.#snapshot);
     } finally {
       releaseLock(refreshLock);
     }
   }
 
-  // Phase 3: delegate target sync to the updated checkout; record a failure if it breaks.
+  // Phase 3: delegate the hub sync to the updated checkout; record a failure if it breaks.
   #delegateSync() {
     const args = this.#args, hubPath = this.#hubPath, updateResult = this.#updateResult;
     this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath });
@@ -3880,10 +3260,8 @@ class RepositoryAutoUpdateOperation {
                 validationStatus: updateResult.validation?.status || 'passed',
                 error: error.message
               },
-              skippedTargets: failedSnapshot.skippedTargets,
               nativePluginCache: this.#nativePluginCache,
-              thirdPartyHookRepair: this.#thirdPartyHookRepair,
-              targetSyncStatus: 'failed'
+              thirdPartyHookRepair: this.#thirdPartyHookRepair
             } });
           failedState = report.state;
           if (report.reportPath) {
@@ -3900,12 +3278,11 @@ class RepositoryAutoUpdateOperation {
     }
   }
 
-  // Phase 4: report only target syncs confirmed against the planned checksum.
+  // Phase 4: the final update report.
   #finalReport() {
     const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
-    const plannedTargetSyncs = this.#plannedTargetSyncs, statusState = this.#statusState;
+    const statusState = this.#statusState;
     const finalState = this.#hubState(statusState);
-    const plannedChecksum = this.#snapshot.checksum;
     if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot: this.#snapshot });
     const reportLock = acquireLock(path.dirname(hubPath), args);
     let report = { state: finalState, reportPath: '' };
@@ -3915,20 +3292,11 @@ class RepositoryAutoUpdateOperation {
         assertSourceDowngradeAllowed(latestState, args);
         let reportSnapshot = this.#snapshotFor(latestState);
         const reportState = reportSnapshot.state;
-        const completedTargetSyncs = plannedTargetSyncs.filter(sync => (
-          reportSnapshot.checksum === plannedChecksum &&
-          targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
-        ));
         const reportContext = {
           repo: repoReportContextFromUpdate(reportState, this.#updateResult, this.#previousObservedRepoCommit),
-          targetSyncs: completedTargetSyncs,
-          skippedTargets: reportSnapshot.skippedTargets,
           nativePluginCache: this.#nativePluginCache,
           thirdPartyHookRepair: this.#thirdPartyHookRepair,
-          installCheck: this.#installCheck,
-          targetSyncStatus: plannedTargetSyncs.length
-            ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
-            : 'not needed'
+          installCheck: this.#installCheck
         };
         report = maybeWriteUpdateReport({ args, hubPath, state: reportState, checksum: reportSnapshot.checksum, context: reportContext });
         if (testHooks.afterFinalReportBuild) testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
@@ -3942,7 +3310,7 @@ class RepositoryAutoUpdateOperation {
       releaseLock(reportLock);
     }
     printUpdateReportLine(args, report.reportPath);
-    if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
+    if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date') {
       console.log('Toolkit already up to date.');
     }
     const finalAudit = this.#audit(this.#snapshot, report.state);
@@ -3960,9 +3328,9 @@ class RepositoryAutoUpdateOperation {
     return this.#finalReport();
   }
 }
-function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,discoveries,checksum,payloads,testHooks}).run();}
+function runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,checksum,testHooks}).run();}
 
-function persistActiveNoTargetWrite({
+function persistActiveWrite({
   args,
   hubPath,
   cleanupResult,
@@ -3989,23 +3357,12 @@ function persistActiveNoTargetWrite({
 
     // Source-version persistence is independent of optional report creation.
     writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    const targetSyncs = [];
-    for (const plan of snapshot.plannedTargetSyncs) {
-      const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource));
-      updateTargetState(state, plan.target, snapshot.discoveries[plan.target], snapshot.checksum, true, '');
-    }
-    if (targetSyncs.length) {
-      state.updated_at = timestamp();
-      snapshot = { ...snapshot, state };
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-    }
     const report = maybeWriteUpdateReport({
       args,
       hubPath,
       state,
       checksum: snapshot.checksum,
-      context: buildReportContext(state, snapshot, targetSyncs)
+      context: buildReportContext(state)
     });
     if (report.reportPath) {
       snapshot = { ...snapshot, state: report.state };
@@ -4023,31 +3380,23 @@ class LocalBridgeRun {
   #argv; #testHooks; #args = null; #hubPath = null;
   constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
-  // Project-local install/copy commands that never touch hub state.
+  // The project-local Antigravity skill copy never touches hub state.
   #isolatedProjectCommand(args) {
-    let result = null;
-    if (args.installOpenCodeProjectPlugin) {
-      assertIsolatedProjectCommandArgs(args, '--install-opencode-project-plugin', '--opencode-project-root');
-      result = installProjectPlugin({ projectRoot: args.opencodeProjectRoot, write: args.write });
-    } else if (args.copyAntigravitySkills) {
-      assertIsolatedProjectCommandArgs(args, '--copy-antigravity-skills', '--antigravity-project-root');
-      result = copyPortableSkills({ projectRoot: args.antigravityProjectRoot,
-        sourceSkillsRoot: path.resolve(__dirname, '..', '..', 'skills'), write: args.write });
-    } else return null;
+    if (!args.copyAntigravitySkills) return null;
+    assertIsolatedProjectCommandArgs(args, '--copy-antigravity-skills', '--antigravity-project-root');
+    const result = copyPortableSkills({ projectRoot: args.antigravityProjectRoot,
+      sourceSkillsRoot: path.resolve(__dirname, '..', '..', 'skills'), write: args.write });
     console.log(JSON.stringify(result, null, 2));
     return { status: 0, result };
   }
 
-  #reportContext(state, snapshot, targetSyncs) {
+  #reportContext(state) {
     const args = this.#args;
     return {
       repo: repoReportContextFromState(state, args),
-      targetSyncs,
-      skippedTargets: snapshot.skippedTargets,
       nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
       thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-      installCheck: sessionStartInstallCheck(args, this.#hubPath),
-      targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
+      installCheck: sessionStartInstallCheck(args, this.#hubPath)
     };
   }
 
@@ -4072,25 +3421,24 @@ class LocalBridgeRun {
     return cleanupResult;
   }
 
-  // An active run with no target to write still records its report and state.
-  #persistNoTargetWrite(cleanupResult, snapshot) {
+  // An active hook or sync run records its hub state and update report.
+  #persistActiveWrite(cleanupResult, snapshot) {
     const args = this.#args, hubPath = this.#hubPath;
-    const report = persistActiveNoTargetWrite({ args, hubPath, cleanupResult, testHooks: this.#testHooks,
-      buildReportContext: (state, current, targetSyncs) => this.#reportContext(state, current, targetSyncs) });
-    const { discoveries, payloads, checksum } = report.snapshot || snapshot;
-    const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries, checksum, payloads });
+    const report = persistActiveWrite({ args, hubPath, cleanupResult, testHooks: this.#testHooks,
+      buildReportContext: (state) => this.#reportContext(state) });
+    const { checksum } = report.snapshot || snapshot;
+    const finalAudit = buildAudit({ args, hubPath, state: report.state, checksum });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    else if (!args.hook) console.log('Toolkit local bridge sync complete.');
     return { status: 0, audit: finalAudit };
   }
 
   #hasConfiguredState(existingState) {
     return Boolean(existingState.hub_version || Object.keys(existingState.bridge_versions_by_source || {}).length
-      || existingState.auto_sync_enabled || existingState.repo_auto_update_enabled
-      || SUPPORTED_TARGETS.some(target => existingState.targets[target]?.enabled));
+      || existingState.auto_sync_enabled || existingState.repo_auto_update_enabled);
   }
 
-  // Writes the hub snapshot and every planned target under the hub lock.
+  // Writes the hub snapshot for a settings change under the hub lock.
   #lockedSync(cleanupResult, audit) {
     const args = this.#args, hubPath = this.#hubPath, testHooks = this.#testHooks;
     const lock = acquireLock(path.dirname(hubPath), args);
@@ -4105,24 +3453,15 @@ class LocalBridgeRun {
       state.last_update_report_cleanup = cleanupResult;
       let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
       state = snapshot.state;
-      const { discoveries, payloads, checksum } = snapshot;
+      const { checksum } = snapshot;
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      const targetSyncs = [];
-      for (const plan of snapshot.plannedTargetSyncs) {
-        const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-        targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
-        updateTargetState(state, plan.target, discoveries[plan.target], checksum, true, '');
-      }
-      state.updated_at = timestamp();
-      snapshot = { ...snapshot, state };
-      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
-      const report = maybeWriteUpdateReport({ args, hubPath, state, checksum, context: this.#reportContext(state, snapshot, targetSyncs) });
+      const report = maybeWriteUpdateReport({ args, hubPath, state, checksum, context: this.#reportContext(state) });
       state = report.state;
       if (report.reportPath) {
         snapshot = { ...snapshot, state };
         writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       }
-      const finalAudit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+      const finalAudit = buildAudit({ args, hubPath, state, checksum });
       if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
       else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
       else if (!args.hook) console.log('Toolkit local bridge sync complete.');
@@ -4135,11 +3474,13 @@ class LocalBridgeRun {
   // A Claude Code session started from a Toolkit copy that is not the installed plugin (a
   // test candidate loaded with --plugin-dir, or an account-synced copy) does no session-start
   // maintenance and records nothing: the update state and the managed checkout belong to the
-  // installed copy. Claude Code runs the installed copy from its marketplace folder.
+  // installed copy. Claude Code runs the installed copy from its marketplace folder, which
+  // must also be the managed checkout recorded in the hub state.
   #uninstalledClaudeCopy(args) {
     if (!args.hook || args.syncSource !== 'claude-plugin') return false;
     const root = runtimeClaudePluginRoot();
-    if (new ClaudePluginRegistry().isRunningCopy(root)) return false;
+    const managedCheckout = normalizedState(readJsonIfExists(path.join(args.hub || defaultHubPath(), 'state.json'))).repo_path;
+    if (managedCheckout && samePath(root, managedCheckout) && new ClaudePluginRegistry().isRunningCopy(root)) return false;
     console.log(`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`);
     return true;
   }
@@ -4154,7 +3495,7 @@ class LocalBridgeRun {
     const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
     if (args.reconcileStaging) {
       assertSourceDowngradeAllowed(existingState, args);
-      return runStagingReconciliation({ args, hubPath, state: existingState, testHooks: this.#testHooks });
+      return runStagingReconciliation({ args, hubPath, testHooks: this.#testHooks });
     }
     maybePrintAgentRulesPreflight(args, existingState, hubPath);
     assertSourceDowngradeAllowed(existingState, args);
@@ -4170,28 +3511,27 @@ class LocalBridgeRun {
     if (args.enableRepoAutoUpdate && !requested.repo_path) {
       throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
     }
-    const snapshot = deriveSnapshotGeneration({ args, hubPath, state: requested });
+    const snapshot = deriveSnapshotGeneration({ args, state: requested });
     const state = snapshot.state;
-    const { discoveries, payloads, checksum } = snapshot;
+    const { checksum } = snapshot;
     if (this.#testHooks.afterInitialSnapshotDerivation) this.#testHooks.afterInitialSnapshotDerivation(snapshot);
 
-    const audit = buildAudit({ args, hubPath, state, discoveries, checksum, payloads });
+    const audit = buildAudit({ args, hubPath, state, checksum });
     if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
     if (!args.write) return { status: 0, audit };
     if (shouldRunRepoAutoUpdate(args, state)) {
-      return runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks: this.#testHooks });
+      return runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks: this.#testHooks });
     }
-    const hasTargetSync = SUPPORTED_TARGETS.some(target => targetWouldSync(target, state, checksum, discoveries[target], payloads));
-    const plainSync = args.syncEnabled && !args.enableTargets.length && !args.disableTargets.length && !args.enableAutoSync
-      && !args.disableAutoSync && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate && !hasTargetSync;
+    const plainSync = args.syncEnabled && !args.enableAutoSync && !args.disableAutoSync
+      && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate;
     if (plainSync) {
       if (!this.#hasConfiguredState(existingState)) {
-        if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+        if (!args.hook) console.log('Toolkit local bridge: nothing configured to sync.');
         return { status: 0, audit };
       }
-      return this.#persistNoTargetWrite(cleanupResult, snapshot);
+      return this.#persistActiveWrite(cleanupResult, snapshot);
     }
-    if (args.hook && !hasTargetSync) return this.#persistNoTargetWrite(cleanupResult, snapshot);
+    if (args.hook) return this.#persistActiveWrite(cleanupResult, snapshot);
     return this.#lockedSync(cleanupResult, audit);
   }
 }
@@ -4220,7 +3560,7 @@ module.exports = {
   releaseLock,
   releaseRecoveryMarker,
   run,
-  adapterPayloads,
+  toolkitSkillPayload,
   payloadChecksum,
   compareSemver,
   getRepoValidationLabels,

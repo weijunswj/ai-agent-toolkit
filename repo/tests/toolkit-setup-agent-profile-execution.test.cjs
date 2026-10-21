@@ -115,7 +115,7 @@ test('keep current resolves a stored direct profile to root-only without probing
   const target = control.profilePath('claude-code', { root: profileRootOf(root) });
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, `${JSON.stringify({
-    schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO,
+    schema: control.SCHEMA, host: 'claude-code', topology: 'claude-toolkit-direct', capacity_mode: control.CAPACITY_MODES.AUTO,
     manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST, queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
     controller_version: control.CONTROL_VERSION, enforcement_verified: true, enforcement: 'toolkit-launch-boundary', claude_cli: fake.command,
     resource_counter_verified: true, resource_counter_source: 'proc-meminfo', updated_at: new Date().toISOString(),

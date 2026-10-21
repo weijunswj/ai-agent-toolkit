@@ -1,7 +1,7 @@
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe n8n environment setup: local dev, production Cloudflare Tunnel, Hostinger/Coolify, production backups, stack templates, [official n8n Skills](https://github.com/n8n-io/skills), and instance-level MCP references.
+Instruction-only skill for safe n8n environment setup: local dev, production Cloudflare Tunnel, Hostinger/Coolify, production backups, stack templates, and [official n8n Skills](https://github.com/n8n-io/skills). n8n work uses the official n8n Skills and the n8n API.
 
 ## Start Here
 
@@ -11,11 +11,10 @@ Instruction-only skill for safe n8n environment setup: local dev, production Clo
 | Hostinger Coolify VPS n8n guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
 | Production Cloudflare Tunnel self-hosting guide | [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
-| [Official n8n Skills](https://github.com/n8n-io/skills) and agent routing | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
+| n8n work with AI agents | [Official n8n Skills](https://github.com/n8n-io/skills) and the n8n API |
 | Local stack templates | [templates/.n8n-local/](templates/.n8n-local/) |
 | Production Cloudflare stack templates | [templates/.n8n-production-cloudflare/](templates/.n8n-production-cloudflare/) |
 | Production server backup templates | [templates/production-server-backups/](templates/production-server-backups/) |
-| Official MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 
 Normal skill use does not require the Toolkit repository. Dev webhook testing stays on the local ngrok path. Production uses either the Cloudflare stack or the Linux server backup template with systemd/cron scheduling.
 

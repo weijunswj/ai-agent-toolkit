@@ -475,7 +475,7 @@
     {
       "id": "n8n-environment-positive-3",
       "kind": "positive",
-      "prompt": "Configure the supported official n8n Skills and instance-level MCP path for this development environment.",
+      "prompt": "Configure the supported official n8n Skills and n8n API path for this development environment.",
       "expected": ["n8n-safety-router", "n8n-environment-setup"],
       "excluded": []
     },

@@ -62,22 +62,6 @@ const RETIRED_HELPERS = {
   "repo/scripts/source-watch-advisory-targets.cjs": [
     "optionalString"
   ],
-  "repo/scripts/toolkit-assurance-web-finality.cjs": [
-    "sameReceiptCandidate"
-  ],
-  "repo/scripts/toolkit-evidence-plan-compiler.cjs": [
-    "isLowerHex"
-  ],
-  "repo/scripts/toolkit-github-program-receipt.cjs": [
-    "digestWithoutKeys"
-  ],
-  "repo/scripts/toolkit-github-program-state-v5.cjs": [
-    "keysFrom",
-    "authorityDigest",
-    "h2Array",
-    "h2PrProse",
-    "h2ReadChildUnbound"
-  ],
   "repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs": [
     "isSafeText",
     "isSha"
@@ -100,9 +84,8 @@ test('removed unreferenced helpers do not return in current runtime modules', ()
   assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /PR #513.*is the current V3 proposal continuation/);
 });
 
-// The Toolkit direct (`toolkit-direct`) launcher is retired (Web decision 28). Its
-// reservation machinery survives only in the history module for the pinned run093 proof.
-const HISTORY_MODULE = 'repo/scripts/toolkit-agent-control-run093-history.cjs';
+// The Toolkit direct (`toolkit-direct`) launcher is retired (Web decision 28), and the run093
+// history module that kept its reservation machinery for the reclosure proof is removed (R3).
 const scriptFiles = () => fs.readdirSync(path.join(root, 'repo', 'scripts'))
   .filter((name) => /\.c?js$/.test(name)).map((name) => `repo/scripts/${name}`);
 const RETIRED_SCRIPT_IDENTIFIERS = [
@@ -116,17 +99,13 @@ const RETIRED_DOC_PHRASES = [
   /Direct Toolkit-managed subagents only/, /Fable 5 worker/, /Opus 4\.8 checker/, /AI_AGENT_TOOLKIT_CAPABILITY_PROBE/,
 ];
 function retiredScriptHits(rel, source) {
-  let text = source;
-  // The history module's header names the retired setup choice once to explain itself, and
-  // the profile store defines the retired topology's wire value only to reject it.
-  if (rel === HISTORY_MODULE) text = text.replace('The Toolkit direct (`toolkit-direct`) Claude worker/checker topology is retired', '');
-  if (rel === 'repo/scripts/toolkit-agent-control.cjs') text = text.replace("CLAUDE_DIRECT: 'claude-toolkit-direct'", '');
-  return RETIRED_SCRIPT_IDENTIFIERS.filter((name) => text.includes(name));
+  return RETIRED_SCRIPT_IDENTIFIERS.filter((name) => source.includes(name));
 }
 
 test('retired direct-launcher routes, settings and setup choices do not return to current scripts', () => {
   for (const rel of scriptFiles()) assert.deepEqual(retiredScriptHits(rel, read(rel)), [], rel);
-  for (const rel of scriptFiles().filter((file) => ![HISTORY_MODULE, 'repo/scripts/toolkit-agent-control.cjs'].includes(file))) {
+  assert.equal(fs.existsSync(path.join(root, 'repo', 'scripts', 'toolkit-agent-control-run093-history.cjs')), false);
+  for (const rel of scriptFiles()) {
     const source = read(rel);
     assert.doesNotMatch(source, /toolkit-agent-control-run093-history/, `${rel} must not load the retired launcher history`);
     assert.doesNotMatch(source, /TOPOLOGIES\.CLAUDE_DIRECT/, `${rel} must not select the retired direct topology`);
@@ -135,10 +114,9 @@ test('retired direct-launcher routes, settings and setup choices do not return t
   for (const command of ['launch', 'checker', 'checker-result', 'status']) {
     assert.doesNotMatch(controlSource, new RegExp(`args\\.command === '${command}'`), `retired CLI command ${command}`);
   }
-  assert.doesNotMatch(read('repo/contracts/controller-kernel/launch-family-closure-v1.json'), /LEGACY_OUTSIDE_PROFILE|legacy\.agent-control-direct/);
   // Mutation: a reintroduced identifier is detected.
   assert.deepEqual(retiredScriptHits('repo/scripts/setup-toolkit-core.cjs', "choice === 'toolkit-direct'"), ['toolkit-direct']);
-  assert.deepEqual(retiredScriptHits(HISTORY_MODULE, 'const MODEL_CONTRACT = {};'), ['MODEL_CONTRACT']);
+  assert.deepEqual(retiredScriptHits('repo/scripts/toolkit-agent-control.cjs', 'const MODEL_CONTRACT = {};'), ['MODEL_CONTRACT']);
 });
 
 test('current documentation and skills no longer teach the retired direct launcher', () => {

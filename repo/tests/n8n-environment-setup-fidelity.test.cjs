@@ -40,12 +40,7 @@ test('n8n local setup retains the required local and production templates', () =
     'templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
     'templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
     'templates/production-server-backups/README.md',
-    'templates/production-server-backups/n8n-production-backup.sh.template',
-    'templates/mcp-configs/README.md',
-    'templates/mcp-configs/codex-mcp-config.md',
-    'templates/mcp-configs/claude-mcp-config.md',
-    'templates/mcp-configs/opencode-mcp-config.md',
-    'templates/mcp-configs/antigravity-mcp-config.md'
+    'templates/production-server-backups/n8n-production-backup.sh.template'
   ]) assert.equal(exists(relPath), true, relPath);
 });
 
@@ -54,14 +49,7 @@ test('n8n local setup retains its canonical runtime references and safety bounda
     'references/n8n/README.md',
     'references/n8n/local-setup.md',
     'references/n8n/hostinger-vps.md',
-    'references/n8n/production-cloudflare-tunnel.md',
-    'references/ai-agent-platforms/README.md',
-    'references/ai-agent-platforms/codex.md',
-    'references/ai-agent-platforms/claude-code.md',
-    'references/ai-agent-platforms/opencode.md',
-    'references/ai-agent-platforms/antigravity.md',
-    'references/ai-agent-platforms/chatgpt-web.md',
-    'references/ai-agent-platforms/claude-web.md'
+    'references/n8n/production-cloudflare-tunnel.md'
   ]) {
     const text = read(relPath);
     assert.doesNotMatch(text, legacyTopologyPattern);
@@ -71,6 +59,11 @@ test('n8n local setup retains its canonical runtime references and safety bounda
   const rulesAdapter = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-safety-router', 'adapters', 'AGENTS.n8n-brief.template.md'), 'utf8');
   assert.match(rulesAdapter, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, or production actions without explicit current-turn approval/i);
   assert.match(skill, /Keep tokens, API keys, webhook secrets, tunnel tokens, `.env` values/i);
+});
+
+test('n8n local setup has no per-app MCP config templates or agent-platform pages', () => {
+  assert.equal(exists('templates/mcp-configs'), false);
+  assert.equal(exists('references/ai-agent-platforms'), false);
 });
 
 test('n8n local setup has no retired pack manifest or project-module output', () => {

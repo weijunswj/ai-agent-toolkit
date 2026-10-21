@@ -146,33 +146,17 @@ test('a manual removal followed by keep drops the stale entry, so an identical l
   assert.equal(fs.readFileSync(f.settingsPath, 'utf8'), manual);
 });
 
-test('a Toolkit 3.1 record is read as the one entry for its settings file, rewritten as v2 by keep, and turning off removes what Toolkit created', t => {
-  const f = fixture(t, `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}\n`);
-  fs.mkdirSync(f.controlRoot, { recursive: true });
-  fs.writeFileSync(f.recordPath, `${JSON.stringify({ schema: 'ai-agent-toolkit.claude-subagent-depth.v1', settings_path: f.settingsPath, value: '1', created_env: true, created_file: true })}\n`);
-  assert.equal(f.setting().inspect().state, STATES.TOOLKIT);
-  assert.equal(f.setting().apply('keep').changed, false);
-  assert.deepEqual(recordOf(f), {
-    schema: 'ai-agent-toolkit.claude-subagent-depth.v2',
-    entries: { [canonicalPath(f.settingsPath)]: { settings_path: f.settingsPath, value: '1', created_env: true, created_file: true } },
-  });
-  assert.equal(f.setting().apply('disable').changed, true);
-  assert.equal(fs.existsSync(f.settingsPath), false, 'the file Toolkit created is removed');
-  assert.equal(fs.existsSync(f.recordPath), false);
-});
-
-// The owner's case: setup reruns root-only (enable) over a 3.1.x record while the key is still Toolkit's.
-test('turning on again over a Toolkit 3.1 record rewrites it as v2 without touching the settings', t => {
-  const text = `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}\n`;
+test('a record in a superseded schema is not read, so the value it named reads as an owner value and is never removed', t => {
+  const text = `${JSON.stringify({ env: { [SETTING]: '1' } }, null, 2)}
+`;
   const f = fixture(t, text);
   fs.mkdirSync(f.controlRoot, { recursive: true });
-  fs.writeFileSync(f.recordPath, `${JSON.stringify({ schema: 'ai-agent-toolkit.claude-subagent-depth.v1', settings_path: f.settingsPath, value: '1', created_env: true, created_file: true })}\n`);
-  const on = f.setting().apply('enable');
-  assert.equal(on.changed, false);
-  assert.equal(on.state, STATES.TOOLKIT);
+  const old = `${JSON.stringify({ schema: 'ai-agent-toolkit.claude-subagent-depth.v1', settings_path: f.settingsPath, value: '1', created_env: true, created_file: true })}
+`;
+  fs.writeFileSync(f.recordPath, old);
+  assert.equal(f.setting().inspect().state, STATES.OWNER);
+  assert.equal(f.setting().apply('disable').status, 'owner-value-kept');
   assert.equal(fs.readFileSync(f.settingsPath, 'utf8'), text);
-  assert.equal(recordOf(f).schema, 'ai-agent-toolkit.claude-subagent-depth.v2');
-  assert.deepEqual(Object.keys(recordOf(f).entries), [canonicalPath(f.settingsPath)]);
 });
 
 const ONE_LAYER_LABEL = 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.';
