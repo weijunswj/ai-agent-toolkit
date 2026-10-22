@@ -54,7 +54,6 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
-    'repo/scripts/toolkit-opencode-project-plugin.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',
@@ -98,6 +97,12 @@ function captureLauncherWarning(bridge) {
   }
   return lines.join('\n');
 }
+
+test('SessionStart launcher no longer carries the removed stack-selection startup branch', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-codex-session-start.cjs'), 'utf8');
+  assert.doesNotMatch(source, /stack_session|assertCurrentStackSelectionSession|STACK_STARTUP_UNVERIFIED/);
+  assert.equal(require('../scripts/toolkit-stack-selection.cjs').assertCurrentStackSelectionSession, undefined);
+});
 
 test('hook-safe Node launcher converts thrown and returned non-zero outcomes to one visible skip', () => {
   const thrown = captureLauncherWarning({ run() { throw new Error('private path must not escape'); } });

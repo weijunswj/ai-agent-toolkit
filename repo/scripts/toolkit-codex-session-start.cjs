@@ -47,18 +47,7 @@ function replayBridgeOutput(writes) {
 }
 
 function main(argv = process.argv.slice(2), dependencies = {}) {
-  // SessionStart is the only canonical Codex hook event. Selection recovery is
-  // independent of optional maintenance and never grants inference authority.
-  if (dependencies.stack_session !== undefined) {
-    try {
-      const selection = require('./toolkit-stack-selection.cjs');
-      selection.assertCurrentStackSelectionSession(dependencies.stack_session);
-      const result = dependencies.stack_session.evaluate({event:'startup'});
-      if (result.state !== 'ADMITTED_SELECTION') console.log(JSON.stringify(result));
-    } catch (error) {
-      console.log(JSON.stringify({state:'HOLD',code:error.code || 'STACK_STARTUP_UNVERIFIED',dependent_dispatch:false}));
-    }
-  }
+  // SessionStart is the only canonical Codex hook event.
   try {
     if (JSON.stringify(argv) !== JSON.stringify(HOOK_ARGS)) throw new Error('unexpected hook arguments');
     const pluginRoot = path.resolve(__dirname, '..', '..');

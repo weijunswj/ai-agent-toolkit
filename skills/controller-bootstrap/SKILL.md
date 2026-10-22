@@ -21,10 +21,9 @@ This explicit-only skill guides an already-authorised repository controller thro
 Resolve the accepted Toolkit authority repository, commit, exact path, and Git blob object through the trusted source adapter. Verify exactly one binding for each source:
 
 - `controller`: `repo/CONTROLLER.md`
-- `architecture`: `repo/ARCHITECTURE.md`
-- `stack-registry`: `repo/contracts/controller-kernel/stack-registry-v2.json` for historical v2 admissions, or `repo/contracts/controller-kernel/stack-registry-v3.json` for explicitly admitted continuous profiles. Bind the selected version and exact path; neither source aliases or replaces the other.
+- `stack-registry`: `repo/contracts/controller-kernel/stack-registry-v3.json` for explicitly admitted continuous profiles. Bind the exact path; no other registry version is accepted.
 
-Verify the repository-to-commit-to-path-to-blob relationship and the complete returned bytes against both Git blob SHA-1 and content SHA-256. Controller and registry blobs must match the accepted tuple; Architecture must be independently bound at that same accepted snapshot. Reject missing, duplicate, unknown, truncated, unavailable, or conflicting sources. Never substitute an embedded copy, cached prose, a different provider, or a successful packet parse. Keep source bytes in the authorised retrieval/evidence channel and out of packet prose and logs.
+Verify the repository-to-commit-to-path-to-blob relationship and the complete returned bytes against both Git blob SHA-1 and content SHA-256. Controller and registry blobs must match the accepted tuple. Reject missing, duplicate, unknown, truncated, unavailable, or conflicting sources. Never substitute an embedded copy, cached prose, a different provider, or a successful packet parse. Keep source bytes in the authorised retrieval/evidence channel and out of packet prose and logs.
 
 If any source or trusted-reader result is unavailable or differs, preserve the current binding and history, make no new effect, and return the exact typed failure with a concise human-readable explanation. Do not call a changed policy a product defect without causal evidence.
 

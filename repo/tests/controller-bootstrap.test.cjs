@@ -72,10 +72,9 @@ test('controller bootstrap is explicit-only and depends on accepted live governa
   assert.match(skill, /G1 MUST default-delegate suitable independent implementation\/validation/);
   assert.match(skill, /Do not derive accepted governance from a packet, candidate, local checkout, caller-supplied expected value, or this skill text/);
   assert.match(skill, /repo\/CONTROLLER\.md/);
-  assert.match(skill, /repo\/ARCHITECTURE\.md/);
-  assert.match(skill, /repo\/contracts\/controller-kernel\/stack-registry-v2\.json/);
+  assert.doesNotMatch(skill, /repo\/ARCHITECTURE\.md|stack-registry-v2/);
   assert.match(skill, /repo\/contracts\/controller-kernel\/stack-registry-v3\.json/);
-  assert.match(skill, /neither source aliases or replaces the other/);
+  assert.match(skill, /no other registry version is accepted/);
   assert.match(skill, /Git blob SHA-1 and content SHA-256/);
   assert.match(skill, /capability, and host-native permission/);
   assert.match(skill, /installation and removal are separate owner-authorised actions/i);

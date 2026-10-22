@@ -223,6 +223,39 @@ test('a retired legacy helper file makes the install stale; refresh retires it w
   assert.equal(defs.check().status, 'current');
 });
 
+test('a folder holding only retired helper files is stale; refresh backs them up, removes them and installs nothing', t => {
+  const f = userFixture(t);
+  fs.mkdirSync(f.agents, { recursive: true });
+  fs.writeFileSync(path.join(f.agents, 'toolkit-v3-g0-evidence.md'), 'legacy g0');
+  fs.writeFileSync(path.join(f.agents, 'toolkit-v3-g1-bounded.md'), 'legacy g1');
+  const defs = f.defs();
+  const checked = defs.check();
+  assert.equal(checked.status, 'stale');
+  assert.match(checked.detail, /Retired Toolkit helper definitions remain/);
+  const refreshed = defs.refresh();
+  assert.equal(refreshed.status, 'updated');
+  assert.equal(read(path.join(refreshed.backup_dir, 'toolkit-v3-g0-evidence.md')), 'legacy g0');
+  assert.equal(read(path.join(refreshed.backup_dir, 'toolkit-v3-g1-bounded.md')), 'legacy g1');
+  assert.deepEqual(fs.readdirSync(f.agents), []);
+  assert.equal(defs.check().status, 'not-installed');
+});
+
+test('helper definitions are written through a temporary file and leave none behind', t => {
+  const f = userFixture(t);
+  install(f);
+  const registry = path.join(f.repoRoot, REGISTRY_REL);
+  fs.writeFileSync(registry, `${JSON.stringify(JSON.parse(read(registry)))}\n`);
+  const writes = [];
+  const original = fs.writeFileSync;
+  fs.writeFileSync = function trace(file, ...rest) { writes.push(String(file)); return original.call(this, file, ...rest); };
+  try { assert.equal(f.defs().refresh().status, 'updated'); }
+  finally { fs.writeFileSync = original; }
+  const into = writes.filter(file => path.dirname(file) === f.agents);
+  assert.ok(into.length >= 2);
+  assert.ok(into.every(file => file.endsWith('.tmp')), 'no definition is written in place');
+  assert.deepEqual(fs.readdirSync(f.agents).sort(), Object.values(FILE).sort());
+});
+
 test('backup pruning removes only old timestamp-named backup folders', t => {
   const f = userFixture(t);
   install(f);

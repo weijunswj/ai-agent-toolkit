@@ -566,8 +566,7 @@
             "profile_id": {
               "enum": [
                 "owner-gpt",
-                "owner-claude",
-                "owner-mixed-claude-gpt"
+                "owner-claude"
               ]
             },
             "builder_qualification": {
@@ -2590,7 +2589,6 @@
             "reviewer_id": {
               "type": "string",
               "enum": [
-                "astra",
                 "sol",
                 "opus"
               ]

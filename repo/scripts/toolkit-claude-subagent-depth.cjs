@@ -17,7 +17,6 @@ const SETTING = 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH';
 const ONE_LAYER = '1';
 // Record v2 sits in the control root: { schema, entries: { "<canonical settings path>": { settings_path, value, created_env, created_file } } }.
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v2';
-const LEGACY_RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v1';
 const STATES = Object.freeze({ TOOLKIT: 'toolkit-one-layer', OWNER: 'owner-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
 
 // Pure helpers over the record's entries; the class decides when they are written.
@@ -55,24 +54,16 @@ class ClaudeSubagentDepthSetting {
     return { text, settings };
   }
 
-  // The ownership record as { entries, legacy }; legacy is true while the file still holds a v1 record.
+  // The ownership record as { entries }. A record in any other schema reads as empty.
   #readRecord() {
     let parsed;
     try { parsed = JSON.parse(fs.readFileSync(this.#recordPath, 'utf8')); }
-    catch { return { entries: {}, legacy: false }; }
+    catch { return { entries: {} }; }
     if (parsed?.schema === RECORD_SCHEMA) {
       const entries = parsed.entries && typeof parsed.entries === 'object' && !Array.isArray(parsed.entries) ? parsed.entries : {};
-      return { entries, legacy: false };
+      return { entries };
     }
-    // Retained v1 read, as one entry for the settings file it names. Current consumer: records written by
-    // Toolkit 3.1.x; the owner's laptop holds one (value "1", default settings path). Safety reason: without it
-    // Toolkit's existing "1" would read as the owner's value and could never be removed. Removal trigger: R3
-    // legacy removal.
-    if (parsed?.schema === LEGACY_RECORD_SCHEMA && typeof parsed.settings_path === 'string') {
-      const entry = { settings_path: parsed.settings_path, value: parsed.value, created_env: parsed.created_env, created_file: parsed.created_file };
-      return { entries: { [canonicalPath(parsed.settings_path)]: entry }, legacy: true };
-    }
-    return { entries: {}, legacy: false };
+    return { entries: {} };
   }
 
   // No entries left means no record file, so an empty record is never left behind.
@@ -137,10 +128,7 @@ class ClaudeSubagentDepthSetting {
       return { status: 'owner-value-kept', changed: false, ...before };
     }
     if (choice === 'enable') {
-      if (before.state === STATES.TOOLKIT) {
-        if (record.legacy) this.#saveRecord(record.entries);
-        return { status: 'one-layer', changed: false, ...before };
-      }
+      if (before.state === STATES.TOOLKIT) return { status: 'one-layer', changed: false, ...before };
       this.#turnOn(read, key, record);
       return { status: 'one-layer', changed: true, state: STATES.TOOLKIT, value: ONE_LAYER };
     }
@@ -152,14 +140,10 @@ class ClaudeSubagentDepthSetting {
     return { status: 'claude-default', changed: true, state: STATES.DEFAULT };
   }
 
-  // keep changes no setting. A valid entry in a v1 record is rewritten as v2; a stale entry is dropped; an
-  // unreadable file leaves the entry alone, because the key cannot be judged.
+  // keep changes no setting. A stale entry is dropped; an unreadable file leaves the entry alone, because the
+  // key cannot be judged.
   #settleKeep(key, record, state) {
-    if (state === STATES.TOOLKIT) {
-      if (record.legacy) this.#saveRecord(record.entries);
-      return;
-    }
-    if (state !== STATES.UNREADABLE) this.#forgetEntry(key, record);
+    if (state !== STATES.TOOLKIT && state !== STATES.UNREADABLE) this.#forgetEntry(key, record);
   }
 
   // Intent first: the entry is recorded before the setting is written, so a failed record write leaves the

@@ -138,11 +138,37 @@ test('a session started from an uninstalled Toolkit copy writes no update state 
   assert.equal(reports().length, reportsBefore, 'no update report');
 });
 
+test('a registered copy that is not the managed checkout in the hub state is treated as uninstalled', (t) => {
+  const root = tmpRoot(t);
+  const managed = managedCheckout(root);
+  // Claude Code's registry names this folder, but the hub records a different managed checkout.
+  installToolkit(root, repoRoot);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION,
+    auto_sync_enabled: true, repo_auto_update_enabled: true, repo_path: managed, repo_branch: 'main',
+    bridge_versions_by_source: { 'claude-plugin': BRIDGE_VERSION },
+  });
+  const hubBefore = treeDigest(hub);
+  const headBefore = git(managed, ['rev-parse', 'HEAD']);
+  const result = hook(root, hub, repoRoot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, UNINSTALLED_LINE);
+  assert.equal(treeDigest(hub), hubBefore);
+  assert.equal(git(managed, ['rev-parse', 'HEAD']), headBefore);
+
+  // With no managed checkout recorded at all, nothing is the managed install either.
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true });
+  const unrecorded = hook(root, hub, repoRoot);
+  assert.equal(unrecorded.status, 0, unrecorded.stderr);
+  assert.match(unrecorded.stdout, UNINSTALLED_LINE);
+});
+
 test('the installed copy is recognised in any path spelling and keeps its session-start maintenance', (t) => {
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true });
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
   // Claude Code passes CLAUDE_PLUGIN_ROOT with forward slashes; Windows paths are case-insensitive.
   const spelled = process.platform === 'win32' ? repoRoot.replace(/\\/g, '/').toUpperCase() : repoRoot;
   const result = hook(root, hub, spelled);
@@ -158,7 +184,7 @@ test('a newer recorded version names the likely cause and the one-step recovery'
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
   writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION, auto_sync_enabled: true,
+    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION, auto_sync_enabled: true, repo_path: repoRoot,
     bridge_versions_by_source: { 'claude-plugin': '99.0.0' },
   });
   const before = treeDigest(hub);
@@ -175,7 +201,7 @@ test('session start refreshes a stale Toolkit helper definition and reports it',
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true });
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
   const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', repoRoot);
   const agents = path.join(root, '.claude', 'agents');
   fs.mkdirSync(agents, { recursive: true });
@@ -200,7 +226,7 @@ test('session start reports a newer recorded repo version as action required', (
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
   writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true,
+    schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot,
     bridge_versions_by_source: { repo: '99.0.0' },
   });
   const result = hook(root, hub, repoRoot);
@@ -210,4 +236,71 @@ test('session start reports a newer recorded repo version as action required', (
   assert.match(report, /Action needed: see Install check below/);
   assert.match(report, /Update record: The update record holds a newer version \(repo 99\.0\.0\)/);
   assert.match(report, /--sync-source repo --force-downgrade/);
+});
+
+// A managed checkout that carries the Toolkit runtime Claude Code runs from it, with stand-in
+// validation so the update path stays fast. Fixture data only: no real Toolkit state is read.
+function runnableManagedCheckout(root) {
+  const origin = path.join(root, 'origin.git');
+  const seed = path.join(root, 'seed');
+  const managed = path.join(root, 'managed');
+  git(root, ['init', '--bare', '-b', 'main', origin]);
+  fs.mkdirSync(seed, { recursive: true });
+  git(seed, ['init', '-b', 'main']);
+  git(seed, ['config', 'user.email', 'test@example.invalid']);
+  git(seed, ['config', 'user.name', 'Test']);
+  for (const dir of ['repo/scripts', 'repo/contracts', '.claude-plugin']) {
+    fs.cpSync(path.join(repoRoot, dir), path.join(seed, dir), { recursive: true });
+  }
+  fs.mkdirSync(path.join(seed, 'skills', 'fixture-skill'), { recursive: true });
+  fs.writeFileSync(path.join(seed, 'skills', 'fixture-skill', 'SKILL.md'), '---\nname: fixture-skill\ndescription: Fixture skill\n---\n');
+  fs.writeFileSync(path.join(seed, 'repo', 'scripts', 'validate-toolkit.cjs'), "'use strict';\n");
+  fs.mkdirSync(path.join(seed, 'repo', 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(seed, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'),
+    "'use strict';\nrequire('node:test')('fixture hook-light validation', () => {});\n");
+  git(seed, ['add', '.']);
+  git(seed, ['commit', '-m', 'runnable fixture']);
+  git(seed, ['remote', 'add', 'origin', origin]);
+  git(seed, ['push', 'origin', 'main']);
+  git(root, ['clone', origin, managed]);
+  return { origin, seed, managed };
+}
+
+test('an automatic update that changes the stack registry refreshes the installed helper definitions', (t) => {
+  const root = tmpRoot(t);
+  const { origin, seed, managed } = runnableManagedCheckout(root);
+  installToolkit(root, managed);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION,
+    auto_sync_enabled: true, repo_auto_update_enabled: true, repo_path: managed, repo_branch: 'main', repo_remote: origin,
+    bridge_versions_by_source: { 'claude-plugin': BRIDGE_VERSION },
+  });
+  const agents = path.join(root, '.claude', 'agents');
+  fs.mkdirSync(agents, { recursive: true });
+  for (const role of ['G0', 'G1']) {
+    const { file, text } = ClaudeHelperAgentRenderer.fromRepository('owner-claude', managed).render(role);
+    fs.writeFileSync(path.join(agents, file), text);
+  }
+
+  // Upstream changes the registry bytes (same routes, new digest), so the installed helpers go stale.
+  const registry = path.join(seed, 'repo', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
+  fs.writeFileSync(registry, `${JSON.stringify(JSON.parse(fs.readFileSync(registry, 'utf8')))}\n`);
+  git(seed, ['commit', '-am', 'compact the stack registry']);
+  git(seed, ['push', 'origin', 'main']);
+  const updated = git(seed, ['rev-parse', 'HEAD']);
+
+  const result = spawnSync(process.execPath, [path.join(managed, 'repo', 'scripts', 'toolkit-local-bridge.cjs'),
+    '--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    cwd: root, encoding: 'utf8', timeout: 300000, env: env(root, { CLAUDE_PLUGIN_ROOT: managed }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, UNINSTALLED_LINE);
+  assert.equal(git(managed, ['rev-parse', 'HEAD']), updated, 'the managed checkout was fast-forwarded');
+  for (const role of ['G0', 'G1']) {
+    const { file, text } = ClaudeHelperAgentRenderer.fromRepository('owner-claude', managed).render(role);
+    assert.equal(fs.readFileSync(path.join(agents, file), 'utf8'), text, `${file} rendered from the updated registry`);
+  }
+  const report = reports().find((text) => /Toolkit helpers: updated this run/.test(text) && text.includes(updated));
+  assert.ok(report, 'the update report records the refresh');
 });

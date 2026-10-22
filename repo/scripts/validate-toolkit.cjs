@@ -652,7 +652,6 @@ function validatePluginVersions(errors) {
     if (!match) fail(errors, `${rel} is missing ${name}`);
     else if (match[1] !== version) fail(errors, `${rel} ${name} does not match ${version}`);
   }
-  if (!/version:\s*BRIDGE_VERSION/.test(readText('repo/scripts/toolkit-local-bridge.cjs'))) fail(errors, 'AG2 bridge metadata must use BRIDGE_VERSION');
 }
 
 function validateManagedSurfaces(errors) {
@@ -702,8 +701,7 @@ function validateExecutables(errors) {
     if (ext === '.py' && !entry.relPath.startsWith('skills/frontend-art-direction/tools/design-system-generator/') && !entry.relPath.startsWith('repo/tests/')) {
       fail(errors, `Python file outside approved local-only locations: ${entry.relPath}`);
     }
-    const nativeOpenCodeTemplate = entry.relPath === 'repo/contracts/toolkit-local-bridge/opencode-plugin/ai-agent-toolkit.mjs';
-    if (!nativeOpenCodeTemplate && !executablePrefixes.some((prefix) => entry.relPath.startsWith(prefix))) fail(errors, `Executable file outside approved locations: ${entry.relPath}`);
+    if (!executablePrefixes.some((prefix) => entry.relPath.startsWith(prefix))) fail(errors, `Executable file outside approved locations: ${entry.relPath}`);
   }
 }
 
@@ -736,7 +734,7 @@ function validateContinuousCoreSources(errors) {
     const snapshot=new (require('./toolkit-stack-selection.cjs').StackRegistrySnapshot)({reference:{id:'registry',repository:'validation/toolkit',revision:'explicit-local-source-validation',path:'repo/contracts/controller-kernel/stack-registry-v3.json',content_sha256:require('node:crypto').createHash('sha256').update(registryBytes).digest('hex'),blob_sha1:null},content_base64:registryBytes.toString('base64')});
     const qualification=Object.fromEntries(compiler.CHEAP_QUALIFIERS.map(key=>[key,{status:'UNKNOWN',source:null}]));
     for(const profile of Object.keys(registry.profiles)) compiler.resolveContinuousProfile(profile,qualification,snapshot);
-    for(const file of ['controller-decision-v1.schema.json','controller-decision-v2.schema.json','gate-contract-ir-v2.schema.json','gate-contract-ir-v3.schema.json','codex-host-adapter-v1.schema.json','codex-host-adapter-v2.schema.json']) {
+    for(const file of ['controller-decision-v2.schema.json','gate-contract-ir-v3.schema.json','codex-host-adapter-v2.schema.json']) {
       const schema=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel',file),'utf8'));
       if(schema.additionalProperties!==false||schema.type!=='object')throw new Error('Closed core schema required');
     }

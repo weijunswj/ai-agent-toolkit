@@ -10,7 +10,8 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
-const HISTORY_MODULE = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control-run093-history.cjs');
+// The wire value of the retired Toolkit direct topology, as an older Toolkit stored it.
+const RETIRED_DIRECT = 'claude-toolkit-direct';
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function activationProof(overrides = {}) {
@@ -46,12 +47,7 @@ test('root-only and broader-native are the only configurable topologies; the ret
   assert.equal(broader.activation_proof, null);
 
   const refused = root();
-  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO }), { root: refused }), (error) => {
-    // Names only a choice setup accepts; never the unexposed named-helpers value or broader-native.
-    assert.match(error.message, /direct topology is retired; choose root-only in setup\./i);
-    assert.doesNotMatch(error.message, /toolkit-named-helpers|broader-native/);
-    return true;
-  });
+  assert.throws(() => control.configureProfile('claude-code', rootOnly({ topology: RETIRED_DIRECT, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }), { root: refused }), /Unsupported topology/);
   for (const capacity_mode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
     assert.throws(() => control.configureProfile('claude-code', rootOnly({ capacity_mode }), { root: refused }), /Unsupported capacity mode/);
   }
@@ -67,7 +63,7 @@ test('a stored direct profile, or any corrupted, partial, future or contradictor
     JSON.stringify({ schema: control.SCHEMA, host: 'claude-code' }),
     storedProfile({ schema: control.SCHEMA + 1 }),
     storedProfile({ topology: 'future-topology' }),
-    storedProfile({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }),
+    storedProfile({ topology: RETIRED_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }),
     storedProfile({ capacity_mode: control.CAPACITY_MODES.AUTO }),
     storedProfile({ manual_maximum: 1 }),
     storedProfile({ worker_estimate_bytes: -1 }),
@@ -138,7 +134,7 @@ test('the Claude hook denies native Agent under root-only and retired direct pro
   assert.doesNotMatch(denied.permissionDecisionReason, /toolkit-agent-control|launch-spec|direct/i);
 
   const directRoot = root();
-  writeProfile(directRoot, storedProfile({ topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }));
+  writeProfile(directRoot, storedProfile({ topology: RETIRED_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }));
   assert.equal(hook.decision({ tool_name: 'Agent' }, { root: directRoot }).hookSpecificOutput.permissionDecision, 'deny');
 
   const broaderRoot = root();
@@ -146,40 +142,28 @@ test('the Claude hook denies native Agent under root-only and retired direct pro
   assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: broaderRoot })).hookSpecificOutput.permissionDecision, 'deny');
 });
 
-test('the retired launch, checker, checker-result and status commands fail as usage errors without state', () => {
-  for (const args of [
-    ['launch', '--spec', 'spec.json'],
-    ['checker', '--input', '-'],
-    ['checker-result', '--review-id', `checker-${'a'.repeat(64)}`],
-    ['status'],
-  ]) {
+test('agent control is a profile library: no command runs and nothing is written', () => {
+  for (const args of [['launch', '--spec', 'spec.json'], ['checker', '--input', '-'], ['status'], ['core', 'run'], ['core', 'inspect'], ['supervise']]) {
     const work = root();
     const result = spawnSync(process.execPath, [SCRIPT, ...args, '--root', work], { encoding: 'utf8', windowsHide: true, input: '{}' });
-    assert.equal(result.status, 1, args[0]);
-    assert.match(result.stderr, /FAIL: Usage: toolkit-agent-control\.cjs core/, args[0]);
-    assert.deepEqual(fs.readdirSync(work), [], args[0]);
+    assert.equal(result.status, 0, args.join(' '));
+    assert.equal(result.stdout, '', args.join(' '));
+    assert.deepEqual(fs.readdirSync(work), [], args.join(' '));
   }
-  const held = spawnSync(process.execPath, [SCRIPT, 'core', 'run'], { encoding: 'utf8', windowsHide: true });
-  assert.equal(held.status, 2);
-  assert.equal(JSON.parse(held.stdout).code, 'CORE_AUTHENTIC_INSTALLED_CONTEXT_REQUIRED');
 });
 
-test('current consumers never load the retired launcher history, and no launch-capable API remains exported', () => {
-  const probe = spawnSync(process.execPath, ['-e', [
-    `const c=require(${JSON.stringify(SCRIPT)});`,
-    `require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs'))});`,
-    'c.readProfile("claude-code",{root:process.argv[1]});',
-    `process.stdout.write(String(Object.keys(require.cache).some((f)=>f===${JSON.stringify(HISTORY_MODULE)})));`,
-  ].join(''), root()], { encoding: 'utf8', windowsHide: true });
-  assert.equal(probe.status, 0, probe.stderr);
-  assert.equal(probe.stdout, 'false');
-  for (const name of ['MODEL_CONTRACT', 'claudeInvocation', 'claudeInvocationArgs', 'runValidatedClaude', 'launchWithResourceEnvelope',
+test('no launch-capable, core or retired-history API remains exported', () => {
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control-run093-history.cjs')), false);
+  for (const name of ['main', 'createCoreCommandSession', 'CoreCommandSession', 'coreRuntimeCommand', 'coreDataCommand',
+    'withRepositoryTestResourceInvocation', 'inspectResourceCapability', 'launch', 'checkerWorkflow', 'MODEL_CONTRACT', 'claudeInvocation', 'claudeInvocationArgs', 'runValidatedClaude', 'launchWithResourceEnvelope',
     'admissionDecisionWithResourceEnvelope', 'checkerRequirement', 'checkerLaunchSpec', 'checkerResultStatus', 'readCheckerWorkflowInput',
     'updateReservation', 'updateCheckerReview', 'effectiveClaudeCommand', 'verifyCurrentClaudeEnforcement', 'supervise']) {
     assert.equal(Object.hasOwn(control, name), false, name);
   }
-  assert.equal(Object.hasOwn(require('../scripts/toolkit-github-program-receipt.cjs'), 'launchR093WithAuthenticatedController'), false);
-  assert.equal(Object.hasOwn(require('../scripts/setup-toolkit-core.cjs'), 'probeClaudeAgentCapability'), false);
+  assert.equal(Object.hasOwn(control.TOPOLOGIES, 'CLAUDE_DIRECT'), false);
+  for (const name of ['probeClaudeAgentCapability', 'inspectClaudeAgentCapability']) {
+    assert.equal(Object.hasOwn(require('../scripts/setup-toolkit-core.cjs'), name), false, name);
+  }
 });
 
 test('a Claude Agent hook call whose input cannot be read is refused in governed work and left alone elsewhere', () => {

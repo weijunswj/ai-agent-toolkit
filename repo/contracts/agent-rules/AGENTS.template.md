@@ -7,11 +7,11 @@ Update the canonical contract and run this synchronizer.
 
 # AGENTS.template.md AI coding agent rules
 
-Use this generated template for Codex or OpenCode.
+Use this generated template for Codex.
 
 This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
 
-Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants generic Codex/OpenCode rules installed.
+Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants generic Codex rules installed.
 
 If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -28,21 +28,6 @@ Or create it with PowerShell:
 ```text
 mkdir $HOME\.codex -Force
 notepad $HOME\.codex\AGENTS.md
-```
-
-## OpenCode global rules example
-
-Copy or merge the fenced payload into:
-
-```text
-C:\Users\<your-user>\.config\opencode\AGENTS.md
-```
-
-Or create it with PowerShell:
-
-```text
-mkdir $HOME\.config\opencode -Force
-notepad $HOME\.config\opencode\AGENTS.md
 ```
 
 ---

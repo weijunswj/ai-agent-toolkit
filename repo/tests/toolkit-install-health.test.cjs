@@ -112,6 +112,17 @@ test('setup reports a newer recorded Toolkit version as action required and exit
   assert.match(result.stdout, /What to do:\n1\. If .+ is the version you want, clear the record once with: node ".+" --sync-enabled --write --sync-source claude-plugin --force-downgrade/);
 });
 
+test('the setup install check reads the update record in the hub that --hub names', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const hub = path.join(root, 'candidate-hub', 'current');
+  writeFile(path.join(hub, 'state.json'), JSON.stringify({ bridge_versions_by_source: { 'claude-plugin': '99.0.0' } }));
+  const result = claudeSetup(root, setupRepo, origin, ['--hub', hub]);
+  assert.equal(result.status, 24, result.stderr || result.stdout);
+  assert.match(result.stdout, /Update record: The update record holds a newer version \(claude-plugin 99\.0\.0\)/);
+  assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit', 'current', 'state.json')), false, 'the default hub is not read or written');
+});
+
 test('setup reports root-only with a deeper owner depth value as action required', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);

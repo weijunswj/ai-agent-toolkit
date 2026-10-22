@@ -7,8 +7,6 @@
   "scripts": {
     "validate": "node repo/scripts/validate-toolkit.cjs",
     "validate:toolkit": "npm run validate",
-    "validate:surfaces": "npm run audit:surfaces:check",
-    "validate:fallback-risk": "npm run audit:fallback-risk",
     "validate:whitespace": "node repo/scripts/check-diff-whitespace.cjs",
     "test": "node --test repo/tests/*.test.cjs",
     "audit:source-locks": "node repo/scripts/audit-project-source-locks.cjs",
@@ -18,11 +16,9 @@
     "bridge:audit": "node repo/scripts/toolkit-local-bridge.cjs --audit",
     "watch:sources": "node repo/scripts/watch-project-sources.cjs",
     "check:source-updates": "node repo/scripts/check-project-source-updates.cjs",
-    "test:design": "node repo/scripts/run-design-tests.cjs",
     "test:bridge": "node --test repo/tests/toolkit-local-bridge.test.cjs",
     "validate:all": "node repo/scripts/run-validation-gate.cjs",
-    "safe-source-update": "node repo/scripts/safe-source-update.cjs",
-    "test:core": "node --test --test-concurrency=1 repo/tests/toolkit-core-redesign-contract.test.cjs repo/tests/toolkit-codex-agent-adapter.test.cjs"
+    "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },
   "license": "UNLICENSED",
   "devDependencies": {

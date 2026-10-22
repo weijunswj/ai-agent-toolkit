@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 7 questions across 3 sections
+Toolkit setup choices - 6 questions across 2 sections
 
-Bank reference: 177N-A802-ENH9-RMXM
+Bank reference: T4G5-VVNY-0A2H-P2VS
 
 Quick index
 
@@ -15,7 +15,6 @@ Quick index
 1.4 Report retention - Recommended: C - Keep current
 1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
-3.1 OpenCode - Recommended: C - Keep current
 
 
 ## 1. Updates and reports
@@ -63,7 +62,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
-- **B. Turn off** - Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
 - **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
@@ -74,7 +73,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -179,40 +178,10 @@ Quick index
 
 ---
 
-
-## 3. Other coding apps
-
-### 3.1 OpenCode
-
-**What this controls:** Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.
-
-**Current:** Toolkit synchronization is enabled and the managed OpenCode files are current.
-
-**Verification:** state-derived
-
-**Recommended:** C - Keep current
-
-**Recommended outcome:** Keep the current OpenCode integration setting.
-
-**Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
-
-**Choices:**
-
-- **A. Keep synchronized** - Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.
-- **B. Turn off** - Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.
-- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed OpenCode files are current.
-- **D. Skip this time** - Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.
-
-**After applying:** Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.
-
-**Selected:** C - Keep current
-
----
-
 Reply with the displayed bank reference and either:
 
-- `177N-A802-ENH9-RMXM: all recommended`
-- only your changes, for example: `177N-A802-ENH9-RMXM: 1.2=B, 3.1=A`
+- `T4G5-VVNY-0A2H-P2VS: all recommended`
+- only your changes, for example: `T4G5-VVNY-0A2H-P2VS: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -223,9 +192,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 8 questions across 3 sections
+Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: 0Z97-PDDD-XRWP-Y0ZH
+Bank reference: AMN4-AJPW-TWPQ-VG41
 
 Quick index
 
@@ -236,7 +205,6 @@ Quick index
 1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
-3.2 OpenCode - Recommended: C - Keep current
 
 
 ## 1. Updates and reports
@@ -284,7 +252,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
-- **B. Turn off** - Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
 - **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
@@ -295,7 +263,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -426,32 +394,5 @@ Quick index
 **After applying:** If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.
 
 **Selected:** A - Install or refresh
-
----
-
-### 3.2 OpenCode
-
-**What this controls:** Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.
-
-**Current:** Toolkit synchronization is enabled and the managed OpenCode files are current.
-
-**Verification:** state-derived
-
-**Recommended:** C - Keep current
-
-**Recommended outcome:** Keep the current OpenCode integration setting.
-
-**Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
-
-**Choices:**
-
-- **A. Keep synchronized** - Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.
-- **B. Turn off** - Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.
-- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed OpenCode files are current.
-- **D. Skip this time** - Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.
-
-**After applying:** Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.
-
-**Selected:** C - Keep current
 
 ---

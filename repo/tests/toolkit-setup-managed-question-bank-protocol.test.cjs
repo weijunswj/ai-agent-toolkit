@@ -137,7 +137,7 @@ test('host and user arguments survive delegation exactly once and recursion dept
   createFakeManagedSetupScript(root, { argsLogPath });
   const result = run([
     '--execute', '--profile', 'auto-main', '--host', 'claude-code',
-    '--claude-plugin-behavior', 'instructions', '--skip-target', 'opencode',
+    '--claude-plugin-behavior', 'instructions', '--keep-refresh-pr-auto-merge',
   ], { env: isolatedHomeEnv(root), timeout: 30000 });
   assert.equal(result.status, 23, result.stderr || result.stdout);
   const logged = JSON.parse(fs.readFileSync(argsLogPath, 'utf8'));
@@ -145,7 +145,7 @@ test('host and user arguments survive delegation exactly once and recursion dept
   assert.equal(logged.argv.filter((arg) => arg === 'claude-code').length, 1);
   assert.equal(logged.argv.filter((arg) => arg === '--claude-plugin-behavior').length, 1);
   assert.equal(logged.argv.filter((arg) => arg === 'instructions').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === '--skip-target').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === '--keep-refresh-pr-auto-merge').length, 1);
   assert.equal(logged.depth, '1');
 });
 

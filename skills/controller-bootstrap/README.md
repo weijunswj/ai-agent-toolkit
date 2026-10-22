@@ -8,7 +8,7 @@ Copy the entire `skills/controller-bootstrap/` folder to the target agent's supp
 
 - An explicit controller task and independently established controller/owner binding.
 - A canonical repository identity and current RUN/Lock/CURRENT evidence.
-- Trusted retrieval of the accepted Toolkit Controller, Architecture, and stack-registry sources at one accepted snapshot.
+- Trusted retrieval of the accepted Toolkit Controller and stack-registry sources at one accepted snapshot.
 - Separate authority, execution custody, capability, and host-native permission for each effect.
 
 ## Stops when

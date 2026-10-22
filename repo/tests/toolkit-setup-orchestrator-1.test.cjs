@@ -14,16 +14,7 @@ function displayedBankReference(output) {
   return match[1];
 }
 
-function auditFixture({ targets = false, retentionDays = 7 } = {}) {
-  const target = (name) => ({
-    detected: targets,
-    enabled: targets,
-    synced: targets,
-    status: targets ? 'current' : 'not detected',
-    synced_version: '',
-    path: '',
-    name,
-  });
+function auditFixture({ retentionDays = 7 } = {}) {
   return {
     update_report_enabled: true,
     update_report_open_enabled: false,
@@ -31,7 +22,6 @@ function auditFixture({ targets = false, retentionDays = 7 } = {}) {
     codex_plugin_auto_refresh_enabled: false,
     repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },
     update_report_cleanup: { retention_days: retentionDays, deleted_count: 0, error_count: 0, report_log_directory: 'private-value-never-rendered' },
-    targets: { opencode: target('opencode'), ag2: target('ag2') },
   };
 }
 
@@ -81,7 +71,7 @@ test('plan mode remains read-only and exposes the existing setup journey', () =>
   assert.equal(plan.name, 'setup toolkit');
   assert.deepEqual(plan.steps.map((step) => step.id), [
     'upfront_setup_checklist', 'managed_main_checkout', 'codex_native_plugin_cache',
-    'lite_validation', 'bridge_preferences', 'approved_target_sync',
+    'lite_validation', 'bridge_preferences',
     'final_bridge_audit', 'host_delegation_control', 'final_summary'
   ]);
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false);
@@ -165,7 +155,6 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
       update_report_open_enabled: true,
       update_report_retention_days: 7,
       codex_plugin_auto_refresh_enabled: false,
-      targets: { opencode: { detected: false, enabled: false }, ag2: { detected: false, enabled: false } },
     },
     runtime: { runtime: 'MultiAgentV2' },
     delegation: { status: 'unconfigured', helper_count: null, detail: 'technical detail' },
@@ -290,7 +279,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
   assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --enable-refresh-pr-auto-merge --update-report-retention-days 7 --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
-  assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
+  assert.doesNotMatch(bridgeArgs, /--enable-target|--disable-target/);
 });
 
 test('partial explicit flags reject concise input before writes and accept only the displayed ordered contract', () => {
@@ -493,7 +482,7 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
 });
 
-test('cross-process concise replay fails before mapping across host and conditional target changes', () => {
+test('cross-process concise replay fails before mapping across a host change', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
   const baseArgs = ['--execute', '--repo-remote', origin];
@@ -508,18 +497,6 @@ test('cross-process concise replay fails before mapping across host and conditio
   assert.notEqual(claudeReplay.status, 0);
   assert.match(claudeReplay.stderr, /reference is stale or belongs to a different rendered bank/);
   assert.doesNotMatch(claudeReplay.stderr, /unavailable question|unavailable choice/);
-
-  const withTargets = specsForAudit(auditFixture({ targets: true }));
-  const withoutTargets = specsForAudit(auditFixture({ targets: false }));
-  const withTargetsReference = withTargets[0].presentation.bank_reference;
-  const removedReplay = parseConciseInFreshProcess(withoutTargets, `${withTargetsReference}: 3.1=D`);
-  assert.notEqual(removedReplay.status, 0);
-  assert.match(removedReplay.stderr, /reference is stale or belongs/);
-
-  const withoutTargetsReference = withoutTargets[0].presentation.bank_reference;
-  const addedReplay = parseConciseInFreshProcess(withTargets, `${withoutTargetsReference}: all recommended`);
-  assert.notEqual(addedReplay.status, 0);
-  assert.match(addedReplay.stderr, /reference is stale or belongs/);
 });
 
 test('cross-process concise replay fails when a displayed recommendation changes', () => {

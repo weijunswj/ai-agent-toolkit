@@ -31,8 +31,6 @@ const entryCases = [
   { entry_id: 'codex_spawn_agent', caller_role: 'G0' },
   { entry_id: 'codex_agent_alias', caller_role: 'G1' },
   { entry_id: 'claude_parent_agent', caller_role: 'G0' },
-  { entry_id: 'opencode_v1_task', caller_role: 'G1' },
-  { entry_id: 'opencode_v2_subagent', caller_role: 'G0' },
 ];
 
 function clone(value) {
@@ -202,7 +200,7 @@ test('Toolkit V3 helper guard: all fifteen approved synthetic cases for each exa
           }];
         }
         if (item.id === '06-conflicting-explicit-override-rejects-before-dispatch') {
-          const wrongProfile = { ...fixture.invocation, profile_id: 'owner-mixed-claude-gpt' };
+          const wrongProfile = { ...fixture.invocation, profile_id: fixture.profileId === 'owner-gpt' ? 'owner-claude' : 'owner-gpt' };
           const profileResult = await fixture.guard.invoke(wrongProfile);
           assert.equal(profileResult.code, 'PROFILE_NOT_SELECTED');
           const wrongRevision = { ...fixture.invocation, registry_revision: 'wrong-revision' };
@@ -260,12 +258,12 @@ test('guard requires an explicit host/API generation and constructor-captured ca
     controlled_dispatch: () => ({}),
   }), /explicit supported host entry/);
   assert.throws(() => createHelperRouteGuard({
-    entry_id: 'opencode_v2_subagent',
+    entry_id: 'claude_parent_agent',
     observe_host_state: () => ({}),
   }), /constructor-captured observation and controlled dispatch callbacks/);
 });
 
-test('controlled host fixtures explicitly select a pinned stack; mixed routing requires a different admitted selection', async (t) => {
+test('controlled host fixtures explicitly select a pinned stack; another profile needs its own admitted selection', async () => {
   for (const entryCase of entryCases) {
     const fixture = makeFixture(entryCase);
     const expectedProfile = TEST_PROFILES[HOST_ENTRIES[entryCase.entry_id].host];
@@ -273,33 +271,16 @@ test('controlled host fixtures explicitly select a pinned stack; mixed routing r
     assert.equal(fixture.profileId, expectedProfile);
   }
 
-  const defaultOpenCode = makeFixture(entryCases[3]);
-  const attemptedMixed = {
-    ...defaultOpenCode.invocation,
-    profile_id: 'owner-mixed-claude-gpt',
-  };
-  const rejected = await defaultOpenCode.guard.invoke(attemptedMixed);
+  const claude = makeFixture(entryCases[2]);
+  const rejected = await claude.guard.invoke({ ...claude.invocation, profile_id: 'owner-gpt' });
   assert.equal(rejected.code, 'PROFILE_NOT_SELECTED');
-  assert.equal(defaultOpenCode.dispatchCalls, 0);
+  assert.equal(claude.dispatchCalls, 0);
 
-  const explicitMixed = makeFixture(entryCases[3], { selected_profile_id: 'owner-mixed-claude-gpt' });
-  const allowed = await explicitMixed.guard.invoke(explicitMixed.invocation);
-  assert.equal(explicitMixed.guard.selected_profile_id, 'owner-mixed-claude-gpt');
+  const allowed = await claude.guard.invoke(claude.invocation);
+  assert.equal(claude.guard.selected_profile_id, 'owner-claude');
   assert.equal(allowed.decision, 'ALLOW');
-  assert.deepEqual(allowed.effective_route, {
-    provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh',
-  });
-  assert.equal(explicitMixed.dispatchCalls, 1);
-  t.diagnostic(`explicit mixed selection record: ${JSON.stringify({
-    host: HOST_ENTRIES[entryCases[3].entry_id].host,
-    host_version: 'synthetic-host/1.0 (not native qualification)',
-    profile_id: explicitMixed.profileId,
-    effective_route: explicitMixed.leafRoute,
-    input: explicitMixed.invocation,
-    decision: allowed.decision,
-    code: allowed.code,
-    downstream_result: allowed.downstream_result,
-  })}`);
+  assert.deepEqual(allowed.effective_route, { provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' });
+  assert.equal(claude.dispatchCalls, 1);
 });
 
 test('guard snapshots entry and callbacks; accessor and Proxy options fail without invoking traps', async () => {
@@ -354,8 +335,8 @@ test('guard snapshots entry and callbacks; accessor and Proxy options fail witho
     selection: captured.selection,
   };
   const guard = createHelperRouteGuard(mutableOptions);
-  mutableOptions.entry_id = 'opencode_v2_subagent';
-  mutableOptions.selected_profile_id = 'owner-mixed-claude-gpt';
+  mutableOptions.entry_id = 'claude_parent_agent';
+  mutableOptions.selected_profile_id = 'owner-claude';
   mutableOptions.observe_host_state = () => {
     replacementObservations += 1;
     return { state: 'error' };

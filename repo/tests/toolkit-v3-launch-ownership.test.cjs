@@ -3,9 +3,8 @@
 // Owner record WEB-TK421-D1-MANUAL-VS-AUTOMATED-ROUTE-20261017-08: model and effort follow
 // launch ownership. A human's direct choice for a manually launched first layer is advisory;
 // every automation-launched G0/G1/G2 worker, successor and G0/G1 helper uses the exact pinned
-// route. These controlled regressions exercise the shipped enforcement points (the automated
-// gate launcher, the helper guard and native adapters, and the gate lifecycle). They do not
-// qualify a native host or a persistent controller.
+// route. These controlled regressions exercise the shipped enforcement points (the helper guard
+// and native adapters). They do not qualify a native host.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -15,13 +14,10 @@ const { spawnSync } = require('node:child_process');
 const { capturedStack } = require('./support/captured-stack-fixture.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('../scripts/toolkit-v3-helper-guard.cjs');
 const { createNativeHelperAdapter, resolveClaudeNativeState } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
-const { GateAssignment } = require('../scripts/toolkit-v3-lifecycle.cjs');
-const { GateSessionLauncher } = require('../scripts/toolkit-gate-session-launcher.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const h = s => crypto.createHash('sha256').update(s).digest('hex');
 const clone = value => JSON.parse(JSON.stringify(value));
-const noFiles = () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); };
 
 // Host state the adapter observes for one helper call made from a root session.
 function hostState(entryId, captured, callerRole = 'G1') {
@@ -95,46 +91,6 @@ test('(a) no Toolkit-shipped root entrypoint installs a root model or effort loc
   }
 });
 
-function g(role, requestedBy = 'CONTROLLER') {
-  return GateAssignment.admit({ assignment_id: `dot-${role}`, programme: 421, child: 461, role,
-    acceptance: { mode: 'OBJECTIVE', objective_reference: h('criteria'), owner: 'owner' } })
-    .launch({ session_id: 's1', launch_request_id: 'L1', requested_by: requestedBy }).gate;
-}
-function spawnObserving(calls, observedModel) {
-  return (cmd, args, options) => { calls.push({ args, env: options.env });
-    const id = args[args.indexOf('--session-id') + 1];
-    return { status: 0, stdout: `${JSON.stringify({ type: 'system', subtype: 'init', session_id: id, model: observedModel(args) })}\n${JSON.stringify({ type: 'result', result: 'done', total_cost_usd: 0 })}\n` }; };
-}
-
-test('(b) a manually selected persistent controller dispatches G0/G1 automatically only on the exact pinned route', () => {
-  const captured = capturedStack('owner-claude');
-  // The controller's own route is the owner's choice, visible to the worker only as inherited environment.
-  const controllerEnv = { ANTHROPIC_MODEL: 'claude-haiku-5-5', PATH: process.env.PATH || '' };
-  for (const role of ['G0', 'G1']) {
-    const calls = [];
-    const launcher = new GateSessionLauncher({ captured, role, claude: 'claude', read_file: noFiles,
-      spawn: spawnObserving(calls, args => args[args.indexOf('--model') + 1]) });
-    const pinned = captured.selection.routes[role === 'G0' ? 'DISCOVERY' : 'BUILDER'];
-    const run = launcher.start(g(role), { session_id: 's1', prompt: 'work', cwd: '.', env: controllerEnv });
-    const args = calls[0].args;
-    assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5', '--effort', pinned.reasoning]);
-    assert.equal(run.route_observed, true);
-    assert.equal(run.is_error, false);
-    // The controller cannot hand its own model to an automated worker, and a leaked route is not success.
-    assert.throws(() => launcher.start(g(role), { session_id: 's1', prompt: 'work', cwd: '.', env: controllerEnv, extra_args: ['--model', 'claude-haiku-5-5'] }),
-      e => e.code === 'LAUNCHER_ROUTE_OVERRIDE_REFUSED');
-    const leaked = new GateSessionLauncher({ captured, role, claude: 'claude', read_file: noFiles, spawn: spawnObserving([], () => 'claude-haiku-5-5') })
-      .start(g(role), { session_id: 's1', prompt: 'work', cwd: '.', env: controllerEnv });
-    assert.equal(leaked.route_observed, false);
-    assert.equal(leaked.is_error, true);
-  }
-  // No automated G2 route ships in this Core: the launcher refuses it rather than substituting one,
-  // and a builder can never launch its own G2.
-  assert.throws(() => new GateSessionLauncher({ captured, role: 'G2', read_file: noFiles }), e => e.code === 'LAUNCHER_ROLE_UNSUPPORTED');
-  assert.throws(() => g('G2', 'G1'), e => e.code === 'V3_G2_LAUNCH_BY_BUILDER_REFUSED');
-  assert.equal(g('G2').liveSession.history[0].by, 'CONTROLLER');
-});
-
 test('(c) helpers spawned from a manually selected root stay strictly on their pinned route', async () => {
   for (const [input, environment] of [[{ effort: 'low' }, {}], [{ model: 'claude-opus-5-5' }, {}], [{}, { CLAUDE_CODE_EFFORT_LEVEL: 'low' }],
     [{}, { CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1', CLAUDE_CODE_SUBAGENT_MODEL: 'claude-opus-5-5' }]]) {
@@ -145,17 +101,11 @@ test('(c) helpers spawned from a manually selected root stay strictly on their p
   }
 });
 
-test('(d) the strict inherited-effort refusal applies where the launcher itself automates the dispatch', async () => {
-  const calls = [];
-  const launcher = new GateSessionLauncher({ captured: capturedStack('owner-claude'), role: 'G1', claude: 'claude', read_file: noFiles,
-    spawn: spawnObserving(calls, () => 'claude-opus-5-5') });
-  assert.throws(() => launcher.start(g('G1'), { session_id: 's1', prompt: 'work', cwd: '.', env: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } }),
-    e => e.code === 'LAUNCHER_ENV_EFFORT_OVERRIDE_REFUSED');
-  assert.equal(calls.length, 0);
-  // The same owner-chosen low effort on a manually started root is not refused: its helper is still allowed on the pinned route.
+test('(d) an owner-chosen low effort on a manually started root is not a root lock', async () => {
+  // Its helper is still allowed on the pinned route.
   const root = manualClaudeRoot({ rootModel: 'claude-opus-5-5', rootEffort: 'low' });
   assert.equal((await root.invoke()).decision, 'ALLOW');
-  // The installed root entrypoints never load the automated launcher, so its checks cannot become a root lock.
+  // The installed root entrypoints load no model or effort lock.
   const entries = ['toolkit-claude-agent-hook.cjs', 'toolkit-codex-helper-hook.cjs', 'toolkit-codex-session-start.cjs', 'toolkit-local-bridge.cjs']
     .map(name => path.join(ROOT, 'repo', 'scripts', name));
   const script = 'for (const f of JSON.parse(process.argv[1])) require(f); console.log(JSON.stringify(Object.keys(require.cache)));';
@@ -163,7 +113,7 @@ test('(d) the strict inherited-effort refusal applies where the launcher itself 
   assert.equal(run.status, 0, run.stderr);
   const loaded = JSON.parse(run.stdout);
   assert.ok(loaded.some(file => file.endsWith('toolkit-claude-agent-hook.cjs')), 'positive control: the entrypoints were loaded');
-  assert.equal(loaded.some(file => file.endsWith('toolkit-gate-session-launcher.cjs')), false);
+  assert.equal(loaded.some(file => /gate-session-launcher|toolkit-v3-lifecycle/.test(file)), false);
 });
 
 test('(e) no root route, however chosen, admits helper delegation from G2, a leaf or an absent request', async () => {

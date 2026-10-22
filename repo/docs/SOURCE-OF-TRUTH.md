@@ -38,7 +38,7 @@ Native plugin metadata remains platform-separated:
 
 `repo/source-watch/provenance/**/SOURCE-LOCK.json` owns active third-party provenance: source repo, ref, locked commit, allowlisted files, exact blob pins, attribution requirement, and manual-review update policy. Source-watch is notification-only and must not copy upstream files, update pins, execute upstream code, or treat a notification PR as approval.
 
-Repo-wide MCP is intentionally not shipped or maintained as a generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary setup material.
+Repo-wide MCP is intentionally not shipped or maintained as a generated surface. n8n work uses the official n8n Skills and the n8n API; `skills/n8n-environment-setup/` holds the secondary setup material.
 
 ## Documentation Links
 

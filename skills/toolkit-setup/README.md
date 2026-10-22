@@ -1,7 +1,7 @@
 
 # Toolkit Setup Skill
 
-Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise AI Agent Toolkit plugin setup, local bridge setup, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity portable skills copying, bridge audit, sync, disable, stale bridge state, or bridge troubleshooting requests.
+Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise AI Agent Toolkit plugin setup, local bridge setup, repo-backed Toolkit auto-update, Antigravity portable skills copying, bridge audit, sync, disable, stale bridge state, or bridge troubleshooting requests.
 
 This README is only an install/identity note. Runtime guidance lives in `SKILL.md`, `repo/scripts/setup-toolkit.cjs`, `repo/scripts/toolkit-local-bridge.cjs`, and `repo/docs/TOOLKIT-LOCAL-BRIDGE.md`.
 
@@ -19,6 +19,6 @@ Managed delegation launches the child before waiting for non-TTY stdin EOF. It s
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
-Codex and Claude Code native plugin handling is host-local; OpenCode and Antigravity 2 sync remain explicit opt-ins.
+Codex and Claude Code native plugin handling is host-local; the Antigravity portable skills copy is an explicit opt-in.
 
 It intentionally does not create one skill per bridge command.

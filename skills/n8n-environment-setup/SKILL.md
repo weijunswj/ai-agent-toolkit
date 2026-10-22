@@ -1,12 +1,12 @@
 ---
 name: n8n-environment-setup
-description: Set up or explain safe n8n environments, installation, local development stacks, hosting, tunnels, backups, launchers, official n8n Skills, or instance-level MCP configuration. For workflow files, transport helpers, MCP operations, or live n8n work, first apply n8n-safety-router.
+description: Set up or explain safe n8n environments, installation, local development stacks, hosting, tunnels, backups, launchers, or official n8n Skills setup. For workflow files, transport helpers, MCP operations, or live n8n work, first apply n8n-safety-router.
 ---
 
 
 # n8n Environment Setup
 
-Use this skill when the user needs to set up or explain local n8n, the Docker Compose local dev stack, Compose ngrok dev tunneling, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, production n8n backup templates, the guided launchers/menus, [official n8n Skills](https://github.com/n8n-io/skills) routing, or official instance-level MCP references.
+Use this skill when the user needs to set up or explain local n8n, the Docker Compose local dev stack, Compose ngrok dev tunneling, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, production n8n backup templates, the guided launchers/menus, or [official n8n Skills](https://github.com/n8n-io/skills) routing.
 
 For Hostinger VPS plus Coolify setup or server maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer` first. Return to this skill for n8n-specific deployment guidance after Coolify exists.
 
@@ -14,7 +14,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 
 ## Source And Runtime Material
 
-- Runtime references live inside this copied skill folder under [references/n8n/](references/n8n/), with skills-first agent guidance under [references/ai-agent-platforms/](references/ai-agent-platforms/).
+- Runtime references live inside this copied skill folder under [references/n8n/](references/n8n/).
 - Toolkit provenance and contracts live under `repo/source-watch/provenance/` and `repo/contracts/`; normal use of a copied skill folder must not require the Toolkit repository.
 
 ## Core Rules
@@ -29,13 +29,13 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Use [templates/.n8n-production-cloudflare/](templates/.n8n-production-cloudflare/) for production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.
 - Treat [templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd](templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd) as the production Cloudflare stack entrypoint with the same manual Docker prerequisite guidance and installed-Docker startup preflight as local. Production actions that start or recreate n8n must wait for stable configured-loopback readiness or report a bounded diagnostic timeout; intentional stop/down stays unwaited, and local readiness is distinct from tunnel health.
 - Use [templates/production-server-backups/](templates/production-server-backups/) for Linux server backups on Hostinger/Coolify or company-server n8n deployments. That path uses n8n CLI workflow and credential exports, database backup where applicable, decrypted credential export disabled by default, manifest/log/restore notes, retention cleanup, and systemd timer or cron scheduling.
-- Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, [official n8n Skills](https://github.com/n8n-io/skills) installation notes, and official instance-level MCP references.
+- n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.
 - Use the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin instructions for Codex and Claude Code where plugin hooks are supported. Marketplace registration alone is not installation: before reporting setup complete, verify `n8n-skills@n8n-io` is installed and enabled in the host plugin list, not merely available. On Windows, immediately run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io`, then `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --verify-output`, before approving or trusting hooks. Do not treat a temporary marketplace checkout such as `.tmp\marketplaces\n8n-io\plugins\n8n-skills` as the installed plugin cache.
 - The Windows hook repair wrapper invokes explicit Git Bash only: `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`. It rejects WSL/System32 Bash, including `C:\WINDOWS\system32\bash.exe`.
 - If Codex or Claude Code opens `session-start.sh` on every new chat, the installed plugin still has an unsafe bare `.sh` hook on Windows. Run the repair command above against the installed plugin cache. If repair fails, audit fails, or hook JSON output verification fails, do not approve those hooks; use `npx skills add n8n-io/skills` and keep the target repo cue that loads `using-n8n-skills` before n8n work until the plugin can be repaired or updated.
 - For Antigravity/AG2, install or copy the official upstream n8n skill folders into the Antigravity plugin-scoped skill path, such as `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\<skill-name>\SKILL.md`; verify `using-n8n-skills\SKILL.md` exists there before relying on Antigravity to load it.
 - Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks. Make sure the target repo `AGENTS.md` cues the agent to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, before n8n work.
-- [Official n8n Skills](https://github.com/n8n-io/skills) plus official instance-level MCP setup/config references are secondary and not part of the beginner local setup path.
+- [Official n8n Skills](https://github.com/n8n-io/skills) and the n8n API are secondary and not part of the beginner local setup path.
 - Use `skills/repository-agent-rules` for generic repository agent rules.
 - Use `skills/n8n-safety-router` or [references/n8n-safety-rules.md](references/n8n-safety-rules.md) for the full n8n operating ruleset.
 - Keep tokens, API keys, webhook secrets, tunnel tokens, `.env` values, real domains, account IDs, DNS values, IPs, backups, exports, certs, and private deployment notes out of repo files and chats.
@@ -50,7 +50,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Generic Codex rules template: `skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`
 - n8n rules skill: `skills/n8n-safety-router`
 - n8n rules local reference: [references/n8n-safety-rules.md](references/n8n-safety-rules.md)
-- [Official n8n Skills](https://github.com/n8n-io/skills) and agent guidance: [references/ai-agent-platforms/](references/ai-agent-platforms/)
+- n8n work: [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.
 - Docker Compose local stack: [templates/.n8n-local/docker-compose.yml](templates/.n8n-local/docker-compose.yml)
 - Placeholder environment template: [templates/.n8n-local/.env.example](templates/.n8n-local/.env.example)
 - Guided local stack launcher: [templates/.n8n-local/_n8n-local.cmd](templates/.n8n-local/_n8n-local.cmd)
@@ -63,7 +63,6 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - PowerShell production Cloudflare menu: [templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1](templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1), including production preflight, logs, status, restore-compatible Postgres manual backup zip package, and image update actions.
 - Linux production server backup guide: [templates/production-server-backups/README.md](templates/production-server-backups/README.md)
 - Linux production server backup shell template: [templates/production-server-backups/n8n-production-backup.sh.template](templates/production-server-backups/n8n-production-backup.sh.template)
-- Official instance-level MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Hostinger Coolify VPS n8n reference: [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md)
 - Production self-hosting Cloudflare Tunnel reference: [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md)

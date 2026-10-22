@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.2.0';
+const EXPECTED_TOOLKIT_VERSION = '3.3.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -19,33 +19,15 @@ const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-sourc
 const CODEX_JSON_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const CACHE_FINGERPRINT_PATHS = [
   "repo/contracts/toolkit-local-bridge/version.json",
-  "repo/scripts/toolkit-evidence-plan-compiler.cjs",
-  "repo/scripts/toolkit-opencode-project-plugin.cjs",
   "repo/scripts/toolkit-antigravity-project-skills.cjs",
   "repo/scripts/toolkit-stack-selection.cjs",
   "repo/scripts/toolkit-claude-task-session.cjs",
-  "repo/scripts/toolkit-claude-dispatch-observer.cjs",
   "repo/scripts/toolkit-v3-native-helper-adapter.cjs",
   "repo/scripts/toolkit-v3-helper-guard.cjs",
-  "repo/scripts/toolkit-v3-lifecycle.cjs",
-  "repo/scripts/toolkit-gate-session-launcher.cjs",
-  "repo/scripts/toolkit-programme-publication.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
   "repo/scripts/toolkit-claude-agent-hook.cjs",
-  "repo/scripts/toolkit-opencode-helper-adapter.cjs",
-  "repo/scripts/toolkit-filesystem-cleanup-adapter.cjs",
-  "repo/scripts/toolkit-recoverable-cleanup-windows.ps1",
-  "repo/scripts/toolkit-custody-retention-v3.cjs",
-  "repo/scripts/toolkit-git-current-tree-expiry-adapter.cjs",
-  "repo/scripts/toolkit-codex-agent-adapter.cjs",
   "repo/scripts/toolkit-gate-contract-compiler.cjs",
-  "repo/scripts/toolkit-github-program-receipt.cjs",
-  "repo/scripts/toolkit-execution-loop.cjs",
-  "repo/scripts/toolkit-github-program-state-v5.cjs",
-  "repo/scripts/toolkit-github-governance-review-reconciler.cjs",
-  "repo/scripts/toolkit-assurance-web-finality.cjs",
   "repo/scripts/toolkit-capability-registry.cjs",
-  "repo/scripts/toolkit-programme-surface-v1.cjs",
   "repo/CONTROLLER.md",
   "repo/ARCHITECTURE.md",
   '.codex-plugin/plugin.json',
@@ -72,14 +54,9 @@ const CACHE_FINGERPRINT_PATHS = [
 ];
 const CACHE_FINGERPRINT_DIRS = [
   "repo/contracts/control-plane-kernel",
-  "repo/contracts/bounded-local-execution-loop",
   "repo/contracts/repository-capability-registry",
   "repo/scripts/toolkit-control-plane",
   "repo/contracts/controller-kernel",
-  "repo/contracts/github-program-receipt",
-  "repo/contracts/github-program-reconciler",
-  "repo/contracts/github-governance-review-reconciler",
-  "repo/contracts/independent-assurance-web-finality",
   '.codex-plugin/assets',
   'skills'
 ];

@@ -170,19 +170,7 @@ class ClaudeDialect extends HostDialect {
   }
 }
 
-class OpenCodeDialect extends HostDialect {
-  constructor() {
-    super({ host: 'opencode', provider: null,
-      overrideFields: [['provider', 'provider'], ['model_provider', 'provider'], ['model', 'model'], ['reasoning_effort', 'reasoning'], ['effort', 'reasoning'], ['variant', 'reasoning']] });
-  }
-  supports() { return true; }
-  nativeDefinition(name, route) {
-    return { agent: { [name]: { mode: 'subagent', model: route.provider + '/' + route.model, variant: route.reasoning,
-      options: { reasoningEffort: route.reasoning }, permission: { task: 'deny' }, prompt: HELPER_PROMPT } } };
-  }
-}
-
-const DIALECTS = Object.freeze({ codex: new CodexDialect(), 'claude-code': new ClaudeDialect(), opencode: new OpenCodeDialect() });
+const DIALECTS = Object.freeze({ codex: new CodexDialect(), 'claude-code': new ClaudeDialect() });
 
 // Rendering is separate from admission, native acknowledgement and launch. The
 // same current registry supplies explicit definitions and the enforcing guard.

@@ -9,7 +9,7 @@ Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudfl
 * Add ngrok only when something outside your computer must reach n8n.
 * Keep production Cloudflare Tunnel hosting in the separate Page 3 production stack.
 * Keep this toolkit skills-first: humans and agents use `skills/**` and `repo/**`.
-* [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary. Do not start there.
+* [Official n8n Skills](https://github.com/n8n-io/skills) and the n8n API are secondary. Do not start there.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
 
 ---
@@ -748,17 +748,10 @@ This toolkit is skills-first.
 
 * Humans and agents use the direct `skills/**` and `repo/**` surfaces.
 * Agents use `skills/**` after generated outputs are synced.
-* [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are available as secondary material, not as the beginner setup path.
+* [Official n8n Skills](https://github.com/n8n-io/skills) and the n8n API are available as secondary material, not as the beginner setup path.
 * Use [n8n Safety Router](../../../n8n-safety-router/) before workflow, helper-script, import/export, credential, execution, repo/live sync, or live-instance work.
 
-Use this table only when you want an AI coding agent to work with n8n workflows through the [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP setup:
-
-| Platform | Setup guide | Config template |
-| --- | --- | --- |
-| Codex | [mcp setup - codex.md](../../../../skills/n8n-environment-setup/references/ai-agent-platforms/codex.md) | [codex-mcp-config.md](../../../../skills/n8n-environment-setup/templates/mcp-configs/codex-mcp-config.md) |
-| Claude Code | [mcp setup - claude code.md](../../../../skills/n8n-environment-setup/references/ai-agent-platforms/claude-code.md) | [claude-mcp-config.md](../../../../skills/n8n-environment-setup/templates/mcp-configs/claude-mcp-config.md) |
-| OpenCode | [mcp setup - opencode.md](../../../../skills/n8n-environment-setup/references/ai-agent-platforms/opencode.md) | [opencode-mcp-config.md](../../../../skills/n8n-environment-setup/templates/mcp-configs/opencode-mcp-config.md) |
-| Antigravity | [mcp setup - antigravity.md](../../../../skills/n8n-environment-setup/references/ai-agent-platforms/antigravity.md) | [antigravity-mcp-config.md](../../../../skills/n8n-environment-setup/templates/mcp-configs/antigravity-mcp-config.md) |
+Use the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API when you want an AI coding agent to work with n8n workflows.
 
 ---
 
