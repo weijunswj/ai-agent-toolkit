@@ -57,7 +57,11 @@ function sortedNames(names) {
 
 // The Win32 credential calls, compiled by the built-in Windows PowerShell on each run. The request
 // arrives on stdin as JSON ({ ops: [...] }, values base64) and the answers leave on stdout as JSON.
+// The first line limits command lookup to PowerShell's own modules: with a cold module cache (as
+// under the few variables Codex passes a header helper), looking up Add-Type otherwise scans every
+// module installed on the computer, which took 27 s on a CI host.
 const WINDOWS_SCRIPT = String.raw`
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try {
