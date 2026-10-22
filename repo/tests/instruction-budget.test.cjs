@@ -1,10 +1,11 @@
 'use strict';
 
 // Byte budgets for always-loaded instruction text. Codex reads the whole user-level AGENTS.md
-// (the owner's own sections plus the Toolkit global block) and the repository's AGENTS.md only up
-// to project_doc_max_bytes in total (32 KiB by default; UAT on 22 October 2026 showed the user file
-// counts). Setup raises that limit to 65536, so the budget is checked against the raised limit with
-// a realistic hand-written user section, measured with CRLF line endings for headroom.
+// (the owner's own sections plus the Toolkit global block) and the repository's AGENTS.md up to
+// project_doc_max_bytes (32 KiB by default). Open-source Codex counts only the repository files, but
+// Codex desktop 26.1016 cut the repository rules off where both files together reached 32 KiB (UAT,
+// 22 October 2026). With the owner's yes, setup raises the limit to 65536, so the budget is checked
+// against the raised limit with a realistic hand-written user section, with CRLF for headroom.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,7 +31,7 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
   // The last line of root AGENTS.md must fall inside the bytes Codex reads.
   const lastLine = ROOT_AGENTS.trimEnd().split('\n').pop();
   assert.ok(Buffer.from(combined.replace(/\n/g, '\r\n')).subarray(0, RAISED_LIMIT).toString('utf8').includes(lastLine));
-  // Without the raise it would not fit, which is why setup manages project_doc_max_bytes.
+  // Counted together, it would not fit the default limit, which is why setup offers the raise.
   assert.ok(crlfBytes(combined) > 32 * 1024, 'the default limit alone is too small');
   assert.match(fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-global-rules.cjs'), 'utf8'), /const DOC_LIMIT_TARGET = 65536;/);
 });

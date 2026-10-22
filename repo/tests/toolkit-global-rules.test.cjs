@@ -132,29 +132,6 @@ test('a hand-edited block is reported when restored, in the install check and th
   assert.ok(read(codex).includes('## Precedence And Safety Floor'));
 });
 
-test('the Codex session-start hook writes nothing before setup or with auto-sync off', () => {
-  const { maybeRefreshCodexGlobalRules } = require('../scripts/toolkit-local-bridge.cjs');
-  const hook = { hook: true, syncSource: 'codex-plugin' };
-  for (const state of [null, {}, { hub_version: 1, auto_sync_enabled: false, repo_path: ROOT }]) {
-    const h = home();
-    assert.equal(maybeRefreshCodexGlobalRules(hook, state, h.env), null);
-    assert.equal(fs.existsSync(harnessFile('codex', h.env)), false, JSON.stringify(state));
-  }
-  const h = home();
-  const lines = [];
-  const log = console.log;
-  console.log = (...args) => lines.push(args.join(' '));
-  try { assert.equal(maybeRefreshCodexGlobalRules(hook, { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT }, h.env).status, 'updated'); }
-  finally { console.log = log; }
-  assert.deepEqual(lines, [], 'a routine refresh is silent');
-  assert.equal(fs.existsSync(harnessFile('codex', h.env)), true);
-  assert.match(read(path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml')), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nproject_doc_max_bytes = 65536\n/,
-    'the Codex hook raises the instruction limit with the block');
-  const setupRun = rules(h, { harnesses: ['codex'], manageCodexDocLimit: false }).refresh();
-  assert.equal(setupRun.doc_limit.action, 'reported', 'setup only reports the limit');
-  assert.equal(maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'claude-plugin' }, { hub_version: 1, auto_sync_enabled: true }, h.env), null);
-});
-
 test('a removal holds through Claude Code and Codex session starts until setup installs again', () => {
   const h = home();
   const codex = harnessFile('codex', h.env);
@@ -186,38 +163,175 @@ test('a removal holds through Claude Code and Codex session starts until setup i
   assert.equal(rules(h, { harnesses: ['codex'], respectRemoval: true }).refresh().files[0].action, 'restored');
 });
 
-test('setup raises Codex project_doc_max_bytes inside markers and removal puts the previous value back', () => {
+test('the Codex session-start hook writes nothing before setup or with auto-sync off, and raises the limit only with consent', () => {
+  const { maybeRefreshCodexGlobalRules } = require('../scripts/toolkit-local-bridge.cjs');
+  const hook = { hook: true, syncSource: 'codex-plugin' };
+  for (const state of [null, {}, { hub_version: 1, auto_sync_enabled: false, repo_path: ROOT }]) {
+    const h = home();
+    assert.equal(maybeRefreshCodexGlobalRules(hook, state, h.env), null);
+    assert.equal(fs.existsSync(harnessFile('codex', h.env)), false, JSON.stringify(state));
+  }
+  const h = home();
+  const config = path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml');
+  const capture = (run) => {
+    const lines = [];
+    const log = console.log;
+    console.log = (...args) => lines.push(args.join(' '));
+    try { return { result: run(), lines }; } finally { console.log = log; }
+  };
+  const noConsent = capture(() => maybeRefreshCodexGlobalRules(hook, { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT }, h.env));
+  assert.equal(noConsent.result.status, 'updated');
+  assert.deepEqual(noConsent.lines, [], 'a routine refresh is silent');
+  assert.equal(fs.existsSync(harnessFile('codex', h.env)), true);
+  assert.equal(fs.existsSync(config), false, 'without the setup answer the hook never touches config.toml');
+  assert.equal(noConsent.result.doc_limit.action, 'reported');
+
+  const consent = { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT, codex_doc_limit_enabled: true };
+  const raised = capture(() => maybeRefreshCodexGlobalRules(hook, consent, h.env));
+  assert.equal(raised.result.doc_limit.action, 'raised');
+  assert.equal(raised.lines.length, 1, 'every raise prints one session line');
+  assert.match(raised.lines[0], /Codex project_doc_max_bytes \(~\/\.codex\/config\.toml\): raised to 65536 \(was the default 32768\); --remove puts it back/);
+  assert.match(read(config), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none created=yes\nproject_doc_max_bytes = 65536\n/);
+  const { codexGlobalRulesReportEntry } = require('../scripts/toolkit-local-bridge.cjs');
+  const entry = codexGlobalRulesReportEntry(raised.result);
+  assert.equal(entry.checks[0].updated, true, 'every raise is an update-report entry');
+  assert.match(entry.checks[0].summary, /raised to 65536/);
+  assert.equal(codexGlobalRulesReportEntry(capture(() => maybeRefreshCodexGlobalRules(hook, consent, h.env)).result), null, 'nothing new, no entry');
+  assert.equal(maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'claude-plugin' }, consent, h.env), null);
+});
+
+// The G2 recheck's config.toml corpus (b227d0d): every shape is either raised with every other
+// value intact and an exact restore, or left byte-for-byte alone.
+const CONFIG_SHAPES = {
+  'absent-file': [null, 'raised'],
+  'empty-file': ['', 'raised'],
+  'no-tables-lf': ['model = "x"\n', 'raised'],
+  'no-trailing-newline': ['model = "x"', 'raised'],
+  'key-20000-lf': ['model = "x"\nproject_doc_max_bytes = 20000\n\n[tui]\nx = 1\n', 'raised'],
+  'key-20000-crlf': ['model = "x"\r\nproject_doc_max_bytes = 20000\r\n\r\n[tui]\r\nx = 1\r\n', 'raised'],
+  'key-inline-comment': ['project_doc_max_bytes = 20000 # mine\n[tui]\nx = 1\n', 'raised'],
+  'key-no-spaces': ['project_doc_max_bytes=20000\n', 'raised'],
+  'key-leading-space': ['  project_doc_max_bytes = 20000\n', 'raised'],
+  'key-last-line-no-newline': ['model = "x"\nproject_doc_max_bytes = 20000', 'raised'],
+  'key-underscore-low': ['model = "x"\nproject_doc_max_bytes = 20_000\n[tui]\nx = 1\n', 'skipped'],
+  'key-underscore-high': ['project_doc_max_bytes = 100_000\n', 'unchanged'],
+  'key-hex': ['project_doc_max_bytes = 0x4000\n', 'skipped'],
+  'key-plus-sign': ['project_doc_max_bytes = +20000\n', 'skipped'],
+  'key-double-quoted': ['"project_doc_max_bytes" = 20000\n', 'skipped'],
+  'key-single-quoted': ["'project_doc_max_bytes' = 20000\n", 'skipped'],
+  'key-zero': ['project_doc_max_bytes = 0\n', 'unchanged'],
+  'key-target': ['project_doc_max_bytes = 65536\n', 'unchanged'],
+  'key-high': ['project_doc_max_bytes = 131072\n', 'unchanged'],
+  'key-only-in-table': ['[profiles.work]\nproject_doc_max_bytes = 1000\n', 'skipped'],
+  'key-in-table-and-top-absent': ['model = "x"\n[profiles.work]\nproject_doc_max_bytes = 100000\n', 'skipped'],
+  'bom-key': ['﻿project_doc_max_bytes = 20000\n', 'held'],
+  'bom-no-key': ['﻿model = "x"\n[tui]\nx = 1\n', 'held'],
+  'multiline-string-bracket-line': ['developer_instructions = """\nRead this first:\n[the guide](https://example.invalid)\n"""\nmodel = "x"\n[tui]\nx = 1\n', 'raised'],
+  'multiline-literal-key-text': ["developer_instructions = '''\nproject_doc_max_bytes = 1\n'''\n[tui]\nx = 1\n", 'raised'],
+  'multiline-string-and-key': ["developer_instructions = '''\nproject_doc_max_bytes = 20000\n'''\nproject_doc_max_bytes = 20000\n", 'skipped'],
+  'multiline-array-nested-line': ['notify = [\n  ["a", "b"],\n]\nmodel = "x"\n[tui]\nx = 1\n', 'raised'],
+  'comment-with-bracket': ['# [tui] settings live below\nmodel = "x"\n[tui]\nx = 1\n', 'raised'],
+  'indented-table': ['model = "x"\n  [tui]\n  x = 1\n', 'raised'],
+  'array-of-tables-first': ['[[skills.config]]\nname = "a"\n', 'raised'],
+  'mixed-eol': ['model = "x"\r\nproject_doc_max_bytes = 20000\n[tui]\r\nx = 1\n', 'raised'],
+  'duplicate-key-invalid-input': ['project_doc_max_bytes = 1000\nproject_doc_max_bytes = 2000\n', 'held'],
+  'comment-block-above-table': ['model = "x"\n\n# --- MCP servers ---\n[mcp_servers.a]\ncommand = "x"\n', 'raised'],
+  'commented-out-key': ['# project_doc_max_bytes = 100000\nmodel = "x"\n', 'raised'],
+  'key-then-comment-crlf-spaces': ['project_doc_max_bytes = 20000   # set by me   \r\nmodel = "x"\r\n', 'raised'],
+};
+
+test('config.toml is judged by a TOML parser: each shape is raised exactly, or left alone byte for byte', () => {
+  const { parseTomlDocument } = require('../scripts/codex-delegation-common.cjs');
+  const withoutKey = doc => { const { project_doc_max_bytes: _key, ...rest } = doc.v; return JSON.stringify(rest); };
+  for (const [name, [original, expected]] of Object.entries(CONFIG_SHAPES)) {
+    const h = home();
+    const config = path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml');
+    fs.mkdirSync(path.dirname(config), { recursive: true });
+    if (original !== null) fs.writeFileSync(config, original);
+    const before = original === null ? null : parseTomlDocument(Buffer.from(original));
+    const raise = () => rules(h, { harnesses: ['codex'], codexDocLimit: 'raise' });
+    const run = raise().refresh();
+    assert.equal(run.doc_limit.action, expected, name);
+    if (expected === 'raised') {
+      const after = parseTomlDocument(fs.readFileSync(config));
+      assert.equal(after.ok, true, `${name}: still valid TOML`);
+      assert.deepEqual(after.doc.v.project_doc_max_bytes, { t: 'int', v: '65536' }, `${name}: the key Codex reads`);
+      assert.equal(withoutKey(after.doc), before ? withoutKey(before.doc) : '{}', `${name}: every other value unchanged`);
+      assert.equal(raise().refresh().doc_limit.action, 'unchanged', `${name}: a second run changes nothing`);
+      assert.equal(raise().check().status, 'current', `${name}: --check passes`);
+    } else {
+      assert.equal(original === null ? fs.existsSync(config) : read(config), original === null ? false : original, `${name}: untouched`);
+      assert.equal(run.status === 'held', expected === 'held', name);
+    }
+    rules(h, { harnesses: ['codex'] }).remove();
+    assert.equal(fs.existsSync(config) ? read(config) : null, original, `${name}: --remove restores the exact bytes`);
+  }
+});
+
+test('the Codex limit is raised inside markers that keep the exact original line, and removal puts it back', () => {
   const h = home();
   const codexDir = path.dirname(harnessFile('codex', h.env));
   const config = path.join(codexDir, 'config.toml');
   fs.mkdirSync(codexDir, { recursive: true });
-  const original = 'model = "x"\r\nproject_doc_max_bytes = 20000\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n';
+  const original = 'model = "x"\r\nproject_doc_max_bytes = 20000 # mine\r\n\r\n[desktop]\r\nx = 1\r\n';
   fs.writeFileSync(config, original);
   const repoAgents = path.join(h.root, 'repo-AGENTS.md');
   fs.writeFileSync(repoAgents, 'x'.repeat(14000));
-  const raised = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
+  const raised = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents, codexDocLimit: 'raise' }).refresh();
   assert.equal(raised.doc_limit.action, 'raised');
   assert.equal(raised.doc_limit.previous, '20000');
-  const text = read(config);
-  assert.equal(text, 'model = "x"\r\n# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=20000\r\nproject_doc_max_bytes = 65536\r\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n');
+  const line = Buffer.from('project_doc_max_bytes = 20000 # mine\r\n').toString('base64');
+  assert.equal(read(config), `model = "x"\r\n# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=20000 line=${line}\r\nproject_doc_max_bytes = 65536\r\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\r\n\r\n[desktop]\r\nx = 1\r\n`);
   assert.ok(fs.readFileSync(path.join(raised.backup_dir, 'codex-config.toml')).equals(Buffer.from(original)));
   assert.equal(raised.codex_budget.limit, 65536);
   assert.equal(raised.codex_budget.over, false);
-  assert.ok(describeResult(raised).some(line => line === 'Codex project_doc_max_bytes (~/.codex/config.toml): raised to 65536 (was 20000)'));
-  assert.equal(rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh().doc_limit.action, 'unchanged');
+  assert.ok(describeResult(raised).some(entry => entry === 'Codex project_doc_max_bytes (~/.codex/config.toml): raised to 65536 (was 20000); --remove puts it back'));
 
   const removed = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).remove();
   assert.equal(removed.doc_limit.action, 'restored-previous');
-  assert.equal(read(config), 'model = "x"\r\nproject_doc_max_bytes = 20000\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n');
+  assert.equal(read(config), original, 'the inline comment, spacing and line ending come back exactly');
 
-  // A value already at or above the target is left alone; no key at all is restored to no key.
-  fs.writeFileSync(config, 'project_doc_max_bytes = 131072\n');
-  assert.equal(rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh().doc_limit.action, 'unchanged');
-  fs.writeFileSync(config, '[a]\nb = 1\n');
-  rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
-  assert.match(read(config), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\n/);
-  rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).remove();
-  assert.equal(read(config), '[a]\nb = 1\n');
+  // The owner's no in setup puts a raised value back; a report-only run changes nothing.
+  rules(h, { harnesses: ['codex'], codexDocLimit: 'raise' }).refresh();
+  assert.equal(rules(h, { harnesses: ['codex'] }).refresh().doc_limit.action, 'reported');
+  assert.equal(rules(h, { harnesses: ['codex'], codexDocLimit: 'restore' }).refresh().doc_limit.action, 'restored-previous');
+  assert.equal(read(config), original);
+});
+
+test('an explicit 0 is never overridden and is reported as project docs off', () => {
+  const h = home();
+  const config = path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  fs.writeFileSync(config, 'project_doc_max_bytes = 0\n');
+  const run = rules(h, { harnesses: ['codex'], codexDocLimit: 'raise' }).refresh();
+  assert.equal(run.doc_limit.state, 'off');
+  assert.equal(read(config), 'project_doc_max_bytes = 0\n');
+  const lines = describeResult(run);
+  assert.ok(lines.some(entry => /: 0, so Codex reads no repository AGENTS\.md; Toolkit leaves your choice alone/.test(entry)));
+  assert.ok(!lines.some(entry => /^Codex instructions:/.test(entry)), 'no size line against a limit of 0');
+});
+
+test('--check fails on an unparseable or ineffective config.toml, and broken markers are never guessed at', () => {
+  const h = home();
+  const codex = harnessFile('codex', h.env);
+  const config = path.join(path.dirname(codex), 'config.toml');
+  rules(h, { harnesses: ['codex'], codexDocLimit: 'raise' }).refresh();
+  const valid = read(config);
+  fs.writeFileSync(config, `${valid}project_doc_max_bytes = 1\n`);
+  const invalid = rules(h, { harnesses: ['codex'] }).check();
+  assert.equal(invalid.status, 'held', 'a duplicate key Codex cannot load fails --check');
+  assert.equal(invalid.doc_limit.state, 'invalid');
+  fs.writeFileSync(config, `${valid}[profiles.work]\nproject_doc_max_bytes = 1000\n`);
+  const ineffective = rules(h, { harnesses: ['codex'] }).check();
+  assert.equal(ineffective.status, 'held');
+  assert.equal(ineffective.doc_limit.state, 'ineffective');
+  assert.match(describeResult(ineffective).join('\n'), /not in effect \(project_doc_max_bytes is also set under profiles\.work\)/);
+  fs.writeFileSync(config, '# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nbroken\n');
+  const held = rules(h, { harnesses: ['codex'], codexDocLimit: 'raise' }).refresh();
+  assert.equal(held.status, 'held');
+  assert.equal(held.doc_limit.state, 'broken');
+  assert.equal(read(config), '# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nbroken\n');
+  assert.equal(rules(h, { harnesses: ['codex'] }).remove().doc_limit.action, 'held');
 });
 
 test('the Codex budget counts the whole user file plus the repository rules and warns when over', () => {
@@ -226,17 +340,15 @@ test('the Codex budget counts the whole user file plus the repository rules and 
   const config = path.join(path.dirname(codex), 'config.toml');
   fs.mkdirSync(path.dirname(codex), { recursive: true });
   fs.writeFileSync(codex, `# My own rules\n${'- a hand-written rule line.\n'.repeat(180)}`);
-  fs.writeFileSync(config, '# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nbroken\n');
+  fs.writeFileSync(config, 'model = "x"\n');
   const repoAgents = path.join(h.root, 'repo-AGENTS.md');
   fs.writeFileSync(repoAgents, 'x'.repeat(14000));
-  const held = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
-  assert.equal(held.status, 'held', 'broken markers in config.toml are never guessed at');
-  assert.equal(held.doc_limit.state, 'broken');
-  fs.writeFileSync(config, 'model = "x"\n');
+  rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
+  assert.equal(read(config), 'model = "x"\n', 'without the setup answer the limit is only reported');
   const check = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents, respectRemoval: true }).check();
   assert.equal(check.codex_budget.limit, 32768);
   assert.equal(check.codex_budget.over, true, `${check.codex_budget.total} B with a realistic user section passes the default limit`);
-  assert.ok(describeResult(check).some(line => /^Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ ~\/repo-AGENTS\.md 14000 B = \d+ B of 32768 B; over the limit/.test(line)));
+  assert.ok(describeResult(check).some(line => /^Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ ~\/repo-AGENTS\.md 14000 B = \d+ B of 32768 B; over the limit, so Codex may cut off .*Answer yes to "Raise Codex's instruction limit" in setup toolkit/.test(line)));
 });
 
 test('removal deletes only files Toolkit created and keeps owner files without the block', () => {

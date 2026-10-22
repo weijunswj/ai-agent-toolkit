@@ -38,6 +38,12 @@ test('unknown SUPERSEDES targets and a body at the threshold fail', () => {
   assert.deepEqual(prose.unknown_supersedes, [], 'prose after SUPERSEDES= is not a record reference');
   const sentence = auditDecisionTraces({ body: linked, comments: [person(1, 'INT-TK421-001 SUPERSEDES=INT-TK421-999.')], recordPrefix: PREFIX });
   assert.deepEqual(sentence.unknown_supersedes, [{ id: '1', supersedes: 'INT-TK421-999' }], 'a trailing full stop does not hide a record reference');
+  for (const suffix of ['..', '-draft', '_x', ')']) {
+    const suffixed = auditDecisionTraces({ body: linked, comments: [person(1, `INT-TK421-001 SUPERSEDES=INT-TK421-999${suffix}`)], recordPrefix: PREFIX });
+    assert.deepEqual(suffixed.unknown_supersedes, [{ id: '1', supersedes: 'INT-TK421-999' }], `a "${suffix}" suffix does not hide a record reference`);
+  }
+  const known = auditDecisionTraces({ body: '[x](#issuecomment-1) [y](#issuecomment-2)', comments: [person(1, 'INT-TK421-001'), person(2, 'INT-TK421-002 SUPERSEDES=INT-TK421-001-draft.')], recordPrefix: PREFIX });
+  assert.deepEqual(known.unknown_supersedes, [], 'a known record with a suffix is not reported');
   assert.equal(prose.ok, true);
   const long = auditDecisionTraces({ body: linked.padEnd(100, ' '), comments: [person(1, 'INT-TK421-001')], recordPrefix: PREFIX, threshold: 100 });
   assert.equal(long.over_threshold, true);

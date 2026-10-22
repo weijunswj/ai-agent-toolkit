@@ -89,8 +89,16 @@ function createFakeCodexAppServer(root) {
   return fakeCodex;
 }
 
+// Setup tests written before the Codex instruction limit question answer it with keep (nothing
+// recorded, so config.toml is left alone); tests of that question pass codexDocLimitQuestion: true.
+function withDocLimitAnswer(args, options) {
+  if (options.codexDocLimitQuestion || !args.some((arg) => arg === '--execute' || arg === '--plan')
+    || args.some((arg) => /^--(enable|disable|keep)-codex-doc-limit$/.test(arg))) return args;
+  return [...args, '--keep-codex-doc-limit'];
+}
+
 function run(args, options = {}) {
-  return spawnSync(process.execPath, [script, ...args], {
+  return spawnSync(process.execPath, [script, ...withDocLimitAnswer(args, options)], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
@@ -293,7 +301,7 @@ function createFakeManagedSetupScript(root, options = {}) {
 
 function runWithUnclosedStdin(scriptPath, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
+    const child = spawn(process.execPath, [scriptPath, ...withDocLimitAnswer(args, options)], {
       cwd: options.cwd || repoRoot,
       env: { ...process.env, ...(options.env || {}) },
       stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true

@@ -59,6 +59,7 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/toolkit-canonical-path.cjs',
     'repo/scripts/toolkit-global-rules.cjs',
     'repo/scripts/toolkit-managed-block.cjs',
+    'repo/scripts/codex-delegation-common.cjs',
     'repo/contracts/agent-rules/global-rules.md',
     'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
     'repo/contracts/toolkit-local-bridge/version.json',

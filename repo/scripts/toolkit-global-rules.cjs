@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { blockState, findBlocks, removeBlock, upsertBlock } = require('./toolkit-managed-block.cjs');
+const { parseTomlDocument } = require('./codex-delegation-common.cjs');
 
 const SOURCE = 'repo/contracts/agent-rules/global-rules.md';
 const N8N_SOURCE = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
@@ -194,18 +195,45 @@ class GlobalRulesFile {
   }
 }
 
-// Codex reads the user-level AGENTS.md and the repository's AGENTS.md files only up to
-// project_doc_max_bytes in total (32 KiB by default), so the global block can push repository
-// rules past the limit. Toolkit raises that top-level key in config.toml to 65536 when the
-// effective value is lower, inside its own comment markers that keep the previous value, and puts
-// that value back on removal. Nothing else in config.toml changes.
+// Codex reads the repository's AGENTS.md files only up to project_doc_max_bytes (32 KiB by
+// default). Open-source Codex does not count the user-level AGENTS.md toward it, but Codex desktop
+// 26.1016 cut the repository rules off where the user file plus the repository file reached 32 KiB
+// (owner UAT, 22 October 2026), and raising the limit fixed it. With the owner's setup answer,
+// Toolkit raises the top-level key in config.toml to 65536 inside its own comment markers, and
+// puts the exact previous bytes back on removal.
+//
+// config.toml is only ever judged by a real TOML parser (Python tomllib). Toolkit edits it only in
+// two shapes: the key absent everywhere (the block goes at the very top of the file, which is
+// always top-level), or one plain top-level decimal line it can replace whole. Any other shape is
+// left for the owner. Every candidate is parsed before writing: the key must read 65536 and every
+// other value must be unchanged, or nothing is written.
 const DOC_LIMIT_KEY = 'project_doc_max_bytes';
+const DOC_LIMIT_MODES = Object.freeze(['raise', 'restore', 'report']);
 const DOC_LIMIT_DEFAULT = 32768;
 const DOC_LIMIT_TARGET = 65536;
-const DOC_LIMIT_BEGIN = /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=(\d+|none)\r?$/m;
-const DOC_LIMIT_END = /^# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\r?$/m;
-const TOML_TABLE = /^[ \t]*\[/m;
-const TOP_LEVEL_KEY = /^[ \t]*project_doc_max_bytes[ \t]*=[ \t]*(\d+)[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)/m;
+const DOC_LIMIT_BEGIN = /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=(\d+|none)(?: line=([A-Za-z0-9+/]+=*))?( created=yes)?(\r?\n|$)/gm;
+const DOC_LIMIT_END = /^# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES(\r?\n|$)/gm;
+const DOC_LIMIT_MARKER = /AI-AGENT-TOOLKIT:global-rules:(?:BEGIN|END) PROJECT-DOC-MAX-BYTES/g;
+const PLAIN_KEY_LINE = /^[ \t]*project_doc_max_bytes[ \t]*=[ \t]*([1-9]\d*|0)[ \t]*(?:#[^\r\n]*)?(\r?\n|$)/gm;
+const VALUE_LINE = `${DOC_LIMIT_KEY} = ${DOC_LIMIT_TARGET}`;
+const HELD_LIMIT_STATES = Object.freeze(['broken', 'not-utf8', 'invalid', 'ineffective']);
+
+// Every path below the top level where the key appears (tables, profiles, arrays of tables).
+function nestedKeyPaths(node, trail = []) {
+  if (node.t === 'table') {
+    return Object.entries(node.v).flatMap(([key, child]) => [
+      ...(trail.length && key === DOC_LIMIT_KEY ? [trail.join('.')] : []),
+      ...nestedKeyPaths(child, [...trail, key])]);
+  }
+  if (node.t === 'array') return node.v.flatMap((child, index) => nestedKeyPaths(child, [...trail, String(index)]));
+  return [];
+}
+
+// The parsed document without the top-level key, for comparing two parses.
+function withoutKey(doc) {
+  const { [DOC_LIMIT_KEY]: _ignored, ...rest } = doc.v;
+  return JSON.stringify(rest);
+}
 
 class CodexDocLimit {
   #file; #backupDir;
@@ -213,24 +241,80 @@ class CodexDocLimit {
 
   get file() { return this.#file; }
 
-  // The text before the first [table]: only there is a key top-level.
-  static #topEnd(text) { const match = TOML_TABLE.exec(text); return match ? match.index : text.length; }
-
-  // state: managed | sufficient | low | not-utf8 | broken; limit: the value Codex uses.
-  assess() {
-    const read = readUserFile(this.#file);
-    if (read === null) return { state: 'low', limit: DOC_LIMIT_DEFAULT, previous: null };
-    if (read.text === null) return { state: 'not-utf8', limit: null, previous: null };
-    const text = read.text;
-    const begin = DOC_LIMIT_BEGIN.exec(text);
-    const end = DOC_LIMIT_END.exec(text);
-    if (Boolean(begin) !== Boolean(end) || (begin && end.index < begin.index)) return { state: 'broken', limit: null, previous: null };
-    if (begin) return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: begin[1] };
-    const key = TOP_LEVEL_KEY.exec(text.slice(0, CodexDocLimit.#topEnd(text)));
-    const limit = key ? Number(key[1]) : DOC_LIMIT_DEFAULT;
-    return { state: limit >= DOC_LIMIT_TARGET ? 'sufficient' : 'low', limit, previous: key ? key[1] : 'none' };
+  // Toolkit's marked block, when present and well formed: its span, the bytes it replaced and
+  // whether Toolkit created the file. { error } when the markers are not one intact block.
+  static #block(text) {
+    const begins = [...text.matchAll(DOC_LIMIT_BEGIN)];
+    const ends = [...text.matchAll(DOC_LIMIT_END)];
+    const markers = (text.match(DOC_LIMIT_MARKER) || []).length;
+    if (!markers) return null;
+    if (begins.length !== 1 || ends.length !== 1 || markers !== 2) return { error: 'the Toolkit markers are not one intact pair' };
+    const [begin] = begins; const [end] = ends;
+    const inner = text.slice(begin.index + begin[0].length, end.index);
+    if (end.index < begin.index || inner.replace(/\r?\n$/, '') !== VALUE_LINE) {
+      return { error: `the lines between the Toolkit markers are not exactly "${VALUE_LINE}"` };
+    }
+    return { start: begin.index, end: end.index + end[0].length, previous: begin[1],
+      original: begin[2] ? Buffer.from(begin[2], 'base64').toString('utf8') : '', created: Boolean(begin[3]) };
   }
 
+  // state:
+  //   managed     Toolkit raised it and 65536 is in effect
+  //   sufficient  65536 or more, set by the owner
+  //   off         0: the owner turned project docs off in Codex
+  //   low         below 65536 in a shape Toolkit can raise
+  //   manual      below 65536 (or unknown) in a shape Toolkit does not edit
+  //   invalid     config.toml does not parse as TOML
+  //   ineffective Toolkit's markers are there but 65536 is not what Codex reads
+  //   broken      Toolkit's markers are damaged
+  //   not-utf8    not UTF-8 text
+  //   unverified  no Python 3.11+ with tomllib to read config.toml
+  // limit: the value Codex uses at the top level, when known.
+  assess() {
+    const { doc, line, shape, ...result } = this.#inspect();
+    return result;
+  }
+
+  #inspect() {
+    const read = readUserFile(this.#file);
+    if (read === null) return { state: 'low', limit: DOC_LIMIT_DEFAULT, previous: 'none', shape: 'absent-file' };
+    if (read.text === null) return { state: 'not-utf8', limit: null, detail: 'the file is not UTF-8 text' };
+    const block = CodexDocLimit.#block(read.text);
+    if (block?.error) return { state: 'broken', limit: null, detail: block.error };
+    const parsed = parseTomlDocument(read.bytes);
+    if (!parsed.ok) {
+      return parsed.kind === 'parser-unavailable'
+        ? { state: 'unverified', limit: null, detail: 'no Python 3.11 or later with tomllib to read config.toml safely' }
+        : { state: 'invalid', limit: null, detail: `config.toml does not parse as TOML (${parsed.detail})` };
+    }
+    const nested = nestedKeyPaths(parsed.doc);
+    const top = parsed.doc.v[DOC_LIMIT_KEY];
+    const limit = top?.t === 'int' ? Number(top.v) : top ? null : DOC_LIMIT_DEFAULT;
+    if (block) {
+      if (top?.t !== 'int' || limit !== DOC_LIMIT_TARGET || nested.length) {
+        return { state: 'ineffective', limit, detail: nested.length ? `${DOC_LIMIT_KEY} is also set under ${nested.join(', ')}` : `the top-level ${DOC_LIMIT_KEY} does not read ${DOC_LIMIT_TARGET}` };
+      }
+      return { state: 'managed', limit, previous: block.previous, doc: parsed.doc };
+    }
+    if (nested.length) return { state: 'manual', limit, detail: `${DOC_LIMIT_KEY} is set under ${nested.join(', ')}` };
+    if (top && top.t !== 'int') return { state: 'manual', limit: null, detail: `${DOC_LIMIT_KEY} is not a whole number` };
+    if (limit === 0) return { state: 'off', limit: 0 };
+    if (limit >= DOC_LIMIT_TARGET) return { state: 'sufficient', limit };
+    if (!top) return { state: 'low', limit, previous: 'none', shape: 'insert', doc: parsed.doc };
+    const lines = [...read.text.matchAll(PLAIN_KEY_LINE)].filter(match => Number(match[1]) === limit);
+    if (lines.length !== 1) return { state: 'manual', limit, detail: `${DOC_LIMIT_KEY} is not written as one plain decimal line` };
+    return { state: 'low', limit, previous: String(limit), shape: 'replace', line: lines[0], doc: parsed.doc };
+  }
+
+  // What a run that changes nothing reports: a problem Toolkit cannot fix is held; a shape it does
+  // not edit, or an unreadable config, is skipped and left to the owner.
+  static #idleAction(state) {
+    if (HELD_LIMIT_STATES.includes(state)) return 'held';
+    return ['manual', 'unverified'].includes(state) ? 'skipped' : 'unchanged';
+  }
+
+  // Copies the exact bytes into this run's backup folder, then writes only if the file still holds
+  // what was read.
   #write(original, updated) {
     let backup = null;
     if (original) {
@@ -238,48 +322,65 @@ class CodexDocLimit {
       backup = path.join(this.#backupDir, 'codex-config.toml');
       fs.writeFileSync(backup, original.bytes);
     }
-    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-    writeFileAtomically(this.#file, updated);
-    if (readIfExists(this.#file) !== updated) fail('GLOBAL_RULES_READBACK_MISMATCH', `${this.#file} did not read back as written.`);
+    const now = readUserFile(this.#file);
+    const unchanged = original === null ? now === null : now !== null && now.bytes.equals(original.bytes);
+    if (!unchanged) fail('GLOBAL_RULES_CHANGED_DURING_WRITE', `${this.#file} changed while Toolkit was updating it. Run setup toolkit again.`);
+    if (updated === null) fs.rmSync(this.#file);
+    else {
+      fs.mkdirSync(path.dirname(this.#file), { recursive: true });
+      writeFileAtomically(this.#file, updated);
+      if (readIfExists(this.#file) !== updated) fail('GLOBAL_RULES_READBACK_MISMATCH', `${this.#file} did not read back as written.`);
+    }
     return backup;
   }
 
-  // Raises the limit when it is lower than the target. Returns { action, limit, previous, backup }.
+  // Raises a low limit. Leaves 0, 65536 and above, and every shape it does not edit alone.
   ensure() {
-    const before = this.assess();
-    if (before.state !== 'low') return { ...before, action: ['managed', 'sufficient'].includes(before.state) ? 'unchanged' : 'held' };
+    const before = this.#inspect();
+    if (before.state !== 'low') {
+      const { doc, ...result } = before;
+      return { ...result, action: CodexDocLimit.#idleAction(before.state) };
+    }
     const original = readUserFile(this.#file);
-    let text = original ? original.text : '';
-    const eol = /\r\n/.test(text) ? '\r\n' : '\n';
-    const key = TOP_LEVEL_KEY.exec(text.slice(0, CodexDocLimit.#topEnd(text)));
-    // The block takes the old key's place, or goes just before the first [table].
-    if (key) text = text.slice(0, key.index) + text.slice(key.index + key[0].length);
-    const block = [`# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=${before.previous || 'none'}`,
-      `${DOC_LIMIT_KEY} = ${DOC_LIMIT_TARGET}`, '# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES', ''].join(eol);
-    const at = key ? key.index : CodexDocLimit.#topEnd(text);
-    const head = text.slice(0, at);
-    const separator = head && !/\r?\n$/.test(head) ? eol : '';
-    const updated = `${head}${separator}${block}${text.slice(at)}`;
+    const text = original ? original.text : '';
+    const marker = (span) => [
+      `# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=${before.previous}`
+        + `${span ? ` line=${Buffer.from(span, 'utf8').toString('base64')}` : ''}${original ? '' : ' created=yes'}`,
+      VALUE_LINE, '# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES'];
+    let updated;
+    if (before.shape === 'replace') {
+      const { line } = before;
+      const ending = line[2];
+      updated = text.slice(0, line.index) + marker(line[0]).join(ending || (/\r\n/.test(text) ? '\r\n' : '\n')) + ending + text.slice(line.index + line[0].length);
+    } else {
+      const eol = /\r?\n/.exec(text)?.[0] || '\n';
+      updated = `${marker('').join(eol)}${eol}${text}`;
+    }
+    // Only a candidate that parses, reads 65536 and leaves every other value alone is written.
+    const after = parseTomlDocument(Buffer.from(updated, 'utf8'));
+    const top = after.ok ? after.doc.v[DOC_LIMIT_KEY] : null;
+    const same = after.ok && (before.doc ? withoutKey(before.doc) : '{}') === withoutKey(after.doc);
+    if (!after.ok || top?.t !== 'int' || Number(top.v) !== DOC_LIMIT_TARGET || nestedKeyPaths(after.doc).length || !same) {
+      return { state: 'manual', limit: before.limit, detail: 'a raised config.toml would not read back exactly as intended', action: 'skipped' };
+    }
     const backup = this.#write(original, updated);
-    return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: before.previous || 'none', action: 'raised', backup };
+    return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: before.previous, action: 'raised', backup };
   }
 
-  // Puts the previous value back (or no key at all) and removes Toolkit's markers.
+  // Puts back the exact bytes Toolkit replaced (or nothing), and deletes the file when Toolkit
+  // created it and nothing else is left.
   restore() {
-    const before = this.assess();
-    if (before.state !== 'managed') return { ...before, action: before.state === 'broken' || before.state === 'not-utf8' ? 'held' : 'unchanged' };
-    const original = readUserFile(this.#file);
-    const text = original.text;
-    const begin = DOC_LIMIT_BEGIN.exec(text);
-    const end = DOC_LIMIT_END.exec(text);
-    const eol = /\r\n/.test(text) ? '\r\n' : '\n';
-    const afterEnd = end.index + end[0].length;
-    const stop = afterEnd + (/^\r?\n/.exec(text.slice(afterEnd))?.[0].length || 0);
-    const replacement = before.previous === 'none' ? '' : `${DOC_LIMIT_KEY} = ${before.previous}${eol}`;
-    const updated = text.slice(0, begin.index) + replacement + text.slice(stop);
-    const backup = this.#write(original, updated);
-    const limit = before.previous === 'none' ? DOC_LIMIT_DEFAULT : Number(before.previous);
-    return { state: limit >= DOC_LIMIT_TARGET ? 'sufficient' : 'low', limit, previous: before.previous, action: 'restored-previous', backup };
+    const read = readUserFile(this.#file);
+    if (read === null || read.text === null) return { ...this.assess(), action: 'reported' };
+    const block = CodexDocLimit.#block(read.text);
+    if (!block) return { ...this.assess(), action: 'reported' };
+    if (block.error) return { state: 'broken', limit: null, detail: block.error, action: 'held' };
+    const updated = read.text.slice(0, block.start) + block.original + read.text.slice(block.end);
+    const deleteFile = block.created && updated === '';
+    const backup = this.#write(read, deleteFile ? null : updated);
+    const limit = block.previous === 'none' ? DOC_LIMIT_DEFAULT : Number(block.previous);
+    return { state: limit >= DOC_LIMIT_TARGET ? 'sufficient' : limit === 0 ? 'off' : 'low', limit, previous: block.previous,
+      action: deleteFile ? 'deleted-file' : 'restored-previous', backup };
   }
 }
 
@@ -295,16 +396,18 @@ function nearestGitRoot(start) {
 
 // The set of harness files for one run, with shared backups, ledger and backup pruning.
 class GlobalRules {
-  #files; #home; #backupRoot; #retentionDays; #now; #backupDir; #respectRemoval; #manageDocLimit; #docLimit = null; #repoAgents = null;
+  #files; #home; #backupRoot; #retentionDays; #now; #backupDir; #respectRemoval; #docLimitMode; #docLimit = null; #repoAgents = null;
   // respectRemoval: true for session starts, which leave a file the owner removed the block from
   // alone; false for setup and --write, which reinstall and clear that removal.
+  // codexDocLimit: what refresh does with Codex's project_doc_max_bytes. 'raise' only with the
+  // owner's yes (the setup answer, or an explicit --write); 'restore' after the owner's no; 'report'
+  // (the default) changes nothing. --remove always puts the previous value back.
   constructor({ environment = process.env, toolkitRoot = TOOLKIT_ROOT, harnesses = ['claude-code', 'codex'],
     backupRoot, ledgerFile, retentionDays = 7, now = () => new Date(), respectRemoval = false, repoAgentsFile = null,
-    manageCodexDocLimit = true } = {}) {
+    codexDocLimit = 'report' } = {}) {
     this.#respectRemoval = respectRemoval === true;
-    // Setup never changes ~/.codex/config.toml outside its approved question bank, so it only reports
-    // the Codex limit; the Codex session-start hook and --write raise it.
-    this.#manageDocLimit = manageCodexDocLimit !== false;
+    if (!DOC_LIMIT_MODES.includes(codexDocLimit)) fail('GLOBAL_RULES_ARGUMENT', 'Unknown Codex limit mode: ' + codexDocLimit);
+    this.#docLimitMode = codexDocLimit;
     const env = environment || {};
     this.#home = homeOf(env);
     const toolkitHome = path.join(this.#home, '.ai-agent-toolkit');
@@ -340,20 +443,24 @@ class GlobalRules {
     return this.#summary(files, this.#docLimit ? { ...this.#docLimit.assess(), action: 'checked' } : null);
   }
 
-  // Installs or refreshes each block, and raises Codex's instruction limit unless the owner removed the Codex block.
+  // Installs or refreshes each block, then applies the Codex limit mode. The limit is raised only
+  // while the Codex block is installed.
   refresh() {
     return this.#withPrune(() => {
       const files = this.#files.map(file => file.install({ respectRemoval: this.#respectRemoval }));
       const codex = files.find(file => file.harness === 'codex');
-      const limit = !this.#docLimit ? null : this.#manageDocLimit && codex && !['opted-out', 'held'].includes(codex.action)
-        ? this.#docLimit.ensure() : { ...this.#docLimit.assess(), action: 'reported' };
+      let limit = null;
+      if (this.#docLimit) {
+        if (this.#docLimitMode === 'raise' && codex && !['opted-out', 'held'].includes(codex.action)) limit = this.#docLimit.ensure();
+        else if (this.#docLimitMode === 'restore') limit = this.#docLimit.restore();
+        else limit = { ...this.#docLimit.assess(), action: 'reported' };
+      }
       return [files, limit];
     });
   }
 
   remove() {
-    return this.#withPrune(() => [this.#files.map(file => file.remove()),
-      this.#docLimit ? (this.#manageDocLimit ? this.#docLimit.restore() : { ...this.#docLimit.assess(), action: 'reported' }) : null]);
+    return this.#withPrune(() => [this.#files.map(file => file.remove()), this.#docLimit ? this.#docLimit.restore() : null]);
   }
 
   #withPrune(run) {
@@ -365,8 +472,9 @@ class GlobalRules {
   // status: current (nothing to do), updated (written this run), stale (check only) or held.
   #summary(files, docLimit = null) {
     const held = files.filter(file => file.state === 'broken' || file.state === 'not-utf8');
-    const limitHeld = docLimit && ['broken', 'not-utf8'].includes(docLimit.state);
-    const changed = [...files, ...(docLimit ? [docLimit] : [])].filter(file => !['unchanged', 'checked', 'reported', 'absent', 'held', 'opted-out'].includes(file.action));
+    // A damaged, unparseable or ineffective config.toml holds a run that tried to change it, and fails --check.
+    const limitHeld = docLimit && (docLimit.action === 'held' || (docLimit.action === 'checked' && HELD_LIMIT_STATES.includes(docLimit.state)));
+    const changed = [...files, ...(docLimit ? [docLimit] : [])].filter(file => !['unchanged', 'checked', 'reported', 'skipped', 'absent', 'held', 'opted-out'].includes(file.action));
     const stale = files.filter(file => file.action === 'checked' && file.state !== 'current');
     const status = held.length || limitHeld ? 'held' : changed.length ? 'updated' : stale.length ? 'stale' : 'current';
     const backups = [...new Set([...files, ...(docLimit ? [docLimit] : [])].map(file => file.backup).filter(Boolean).map(file => path.dirname(file)))];
@@ -376,10 +484,10 @@ class GlobalRules {
     return { status, run_id: path.basename(this.#backupDir), files: shown, backup_dir: backups[0] || null,
       backup_display: backups[0] ? this.#display(backups[0]) : null, covered,
       doc_limit: docLimit ? { ...docLimit, display: this.#display(this.#docLimit.file) } : null, codex_budget: this.#codexBudget(docLimit),
-      detail: [...held.map(file => `${this.#display(file.file)}: ${file.detail}`), ...(limitHeld ? [`${this.#display(this.#docLimit.file)}: ${docLimit.state}`] : [])].join('; ') };
+      detail: [...held.map(file => `${this.#display(file.file)}: ${file.detail}`), ...(limitHeld ? [`${this.#display(this.#docLimit.file)}: ${docLimit.detail || docLimit.state}`] : [])].join('; ') };
   }
 
-  // Codex counts the user-level AGENTS.md and the repository's AGENTS.md against one limit.
+  // The user-level AGENTS.md plus the repository's AGENTS.md, against the limit (see CodexDocLimit).
   #codexBudget(docLimit) {
     if (!this.#docLimit || !docLimit || docLimit.limit === null) return null;
     const size = file => { try { return fs.statSync(file).size; } catch { return 0; } };
@@ -426,18 +534,26 @@ function describeResult(result) {
     lines.push(`Your hand-written "${title}" section in ${display || file} repeats the Toolkit global rules; remove it when convenient. Toolkit does not edit it.`);
   }
   const limit = result.doc_limit;
+  const manual = `set ${DOC_LIMIT_KEY} = ${DOC_LIMIT_TARGET} at the top of ~/.codex/config.toml yourself`;
   if (limit) {
     const where = `Codex ${DOC_LIMIT_KEY} (${limit.display})`;
-    if (limit.state === 'broken') lines.push(`${where}: held, the Toolkit markers are broken. Fix or remove them, then run setup toolkit.`);
+    const was = limit.previous === 'none' ? `the default ${DOC_LIMIT_DEFAULT}` : limit.previous;
+    if (limit.action === 'raised') lines.push(`${where}: raised to ${DOC_LIMIT_TARGET} (was ${was}); --remove puts it back`);
+    else if (limit.action === 'restored-previous') lines.push(`${where}: put back to ${was}`);
+    else if (limit.action === 'deleted-file') lines.push(`${where}: put back; Toolkit had created config.toml for it, so the file is deleted`);
+    else if (limit.state === 'broken') lines.push(`${where}: held, ${limit.detail}. Fix or remove the Toolkit lines, then run setup toolkit.`);
     else if (limit.state === 'not-utf8') lines.push(`${where}: held, the file is not UTF-8 text, so Toolkit will not rewrite it.`);
-    else if (limit.action === 'raised') lines.push(`${where}: raised to ${DOC_LIMIT_TARGET} (was ${limit.previous === 'none' ? `the default ${DOC_LIMIT_DEFAULT}` : limit.previous})`);
-    else if (limit.action === 'restored-previous') lines.push(`${where}: put back to ${limit.previous === 'none' ? `the default ${DOC_LIMIT_DEFAULT}` : limit.previous}`);
+    else if (limit.state === 'invalid') lines.push(`${where}: held, ${limit.detail}. Toolkit changed nothing; fix config.toml so Codex can read it.`);
+    else if (limit.state === 'ineffective') lines.push(`${where}: held, the Toolkit-marked ${DOC_LIMIT_TARGET} is not in effect (${limit.detail}). Fix config.toml by hand.`);
+    else if (limit.state === 'manual') lines.push(`${where}: not changed, ${limit.detail}; ${manual} if Codex cuts off repository rules.`);
+    else if (limit.state === 'unverified') lines.push(`${where}: not checked, ${limit.detail}.`);
+    else if (limit.state === 'off') lines.push(`${where}: 0, so Codex reads no repository AGENTS.md; Toolkit leaves your choice alone.`);
   }
   const budget = result.codex_budget;
-  if (budget) {
+  if (budget && budget.limit !== 0) {
     const sizes = `${budget.user_display} ${budget.user} B + ${budget.repo_display} ${budget.repo} B = ${budget.total} B of ${budget.limit} B`;
     lines.push(budget.over
-      ? `Codex instructions: ${sizes}; over the limit, so Codex cuts off the end of the repository's rules until ${DOC_LIMIT_KEY} is raised (the next Codex session start does it, or run toolkit-global-rules.cjs --write --harness codex).`
+      ? `Codex instructions: ${sizes}; over the limit, so Codex may cut off the end of the repository's rules. Answer yes to "Raise Codex's instruction limit" in setup toolkit, or ${manual}.`
       : `Codex instructions: ${sizes}`);
   }
   if (result.backup_dir) lines.push(`Backup: ${result.backup_display || result.backup_dir}`);
@@ -459,7 +575,8 @@ function parseArgs(argv) {
 
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const rules = new GlobalRules({ harnesses: args.harnesses || GlobalRules.setupHarnesses() });
+  // An explicit --write is the owner's own request, so it also raises Codex's limit.
+  const rules = new GlobalRules({ harnesses: args.harnesses || GlobalRules.setupHarnesses(), codexDocLimit: args.mode === 'write' ? 'raise' : 'report' });
   const result = args.mode === 'check' ? rules.check() : args.mode === 'write' ? rules.refresh() : rules.remove();
   for (const line of describeResult(result)) console.log(line);
   return result.status === 'held' || (args.mode === 'check' && result.status === 'stale') ? 1 : 0;
@@ -470,4 +587,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ BLOCK_NAME, SOURCE, HARNESSES, GlobalRules, GlobalRulesFile, globalRulesBlock, harnessFile, describeResult, main });
+module.exports = Object.freeze({ BLOCK_NAME, SOURCE, HARNESSES, DOC_LIMIT_TARGET, GlobalRules, CodexDocLimit, GlobalRulesFile, globalRulesBlock, harnessFile, describeResult, main });

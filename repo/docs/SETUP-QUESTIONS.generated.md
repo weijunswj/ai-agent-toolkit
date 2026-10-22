@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 6 questions across 2 sections
+Toolkit setup choices - 7 questions across 2 sections
 
-Bank reference: T4G5-VVNY-0A2H-P2VS
+Bank reference: ACX5-56M2-K2YE-CDJN
 
 Quick index
 
@@ -14,6 +14,7 @@ Quick index
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
 1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
+1.6 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
 
 
@@ -149,6 +150,32 @@ Quick index
 
 ---
 
+### 1.6 Raise Codex's instruction limit
+
+**What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
+
+**Current:** Toolkit keeps Codex's instruction limit raised.
+
+**Verification:** verified
+
+**Recommended:** A - Raise it
+
+**Recommended outcome:** Raise Codex's instruction limit to 65536.
+
+**Why:** Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.
+
+**Choices:**
+
+- **A. Raise it** - Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.
+- **B. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
+- **C. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
+
+**After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
+
+**Selected:** A - Raise it
+
+---
+
 
 ## 2. Computer performance
 
@@ -180,8 +207,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `T4G5-VVNY-0A2H-P2VS: all recommended`
-- only your changes, for example: `T4G5-VVNY-0A2H-P2VS: 1.2=B, 1.3=B`
+- `ACX5-56M2-K2YE-CDJN: all recommended`
+- only your changes, for example: `ACX5-56M2-K2YE-CDJN: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -192,9 +219,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 7 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: AMN4-AJPW-TWPQ-VG41
+Bank reference: 98ZQ-WT46-8Y41-W0KX
 
 Quick index
 
@@ -203,6 +230,7 @@ Quick index
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
 1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
+1.6 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 
@@ -336,6 +364,32 @@ Quick index
 **After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
 
 **Selected:** A - Turn on
+
+---
+
+### 1.6 Raise Codex's instruction limit
+
+**What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
+
+**Current:** Toolkit keeps Codex's instruction limit raised.
+
+**Verification:** verified
+
+**Recommended:** A - Raise it
+
+**Recommended outcome:** Raise Codex's instruction limit to 65536.
+
+**Why:** Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.
+
+**Choices:**
+
+- **A. Raise it** - Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.
+- **B. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
+- **C. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
+
+**After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
+
+**Selected:** A - Raise it
 
 ---
 
