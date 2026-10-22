@@ -66,7 +66,7 @@ class ToolkitInstallHealthCheck {
       expectedVersion: manifest.version,
       hubPath: hub,
       helperDefinitions: new ClaudeHelperDefinitions({ environment, repositoryRoot: toolkitRoot, retentionDays }),
-      globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays }),
+      globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays, respectRemoval: true }),
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
     });
   }
@@ -143,7 +143,7 @@ class ToolkitInstallHealthCheck {
     const notes = describeGlobalRules(result).join(' ');
     if (result.status === 'held') return this.#check('global-rules', label, STATUS.ACTION, `held: ${notes}`, notes);
     // A write this run (created, added, refreshed or a hand edit restored) is recorded in the update report.
-    if (result.status === 'updated') return { ...this.#check('global-rules', label, STATUS.PASSED, notes), updated: true };
+    if (result.status === 'updated') return { ...this.#check('global-rules', label, STATUS.PASSED, notes), updated: true, run: result.run_id || '' };
     return this.#check('global-rules', label, STATUS.PASSED, notes);
   }
 

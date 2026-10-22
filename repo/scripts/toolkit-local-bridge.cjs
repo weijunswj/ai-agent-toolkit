@@ -1418,7 +1418,7 @@ function maybeRefreshCodexGlobalRules(args, state, environment = process.env) {
   const checkout = state?.repo_path && fs.existsSync(path.join(state.repo_path, 'repo', 'contracts', 'agent-rules', 'global-rules.md'))
     ? state.repo_path : path.resolve(__dirname, '..', '..');
   try {
-    const result = new GlobalRules({ environment, toolkitRoot: checkout, harnesses: ['codex'],
+    const result = new GlobalRules({ environment, toolkitRoot: checkout, harnesses: ['codex'], respectRemoval: true,
       retentionDays: state?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS }).refresh();
     const restored = result.files.some((file) => file.action === 'restored');
     if (result.status === 'held' || restored) console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);
@@ -1783,7 +1783,7 @@ function updateReportSignature({ args, checksum, context }) {
           status: context.installCheck.status || '',
           actions: context.installCheck.actions || [],
           updated: (context.installCheck.checks || []).filter((entry) => entry.updated === true)
-            .map((entry) => ({ id: entry.id || '', summary: entry.summary || '' }))
+            .map((entry) => ({ id: entry.id || '', run: entry.run || '', summary: entry.summary || '' }))
         }
       : null
   };

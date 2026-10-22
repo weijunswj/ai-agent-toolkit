@@ -4055,6 +4055,12 @@ test('each restored hand edit gets its own report, even on the same Toolkit cont
   assert.equal(writes.length, 2);
   assert.match(writes[1], /restored; an edit inside the Toolkit block was replaced/);
   assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, '', 'the same run replayed is still deduplicated');
+
+  // A file recreated after a hand deletion has the same summary each time; its run id still differs.
+  const created = (run) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+    { id: 'global-rules', status: 'passed', updated: true, run, summary: 'Claude Code (~/.claude/CLAUDE.md): created' }] } });
+  assert.equal(invoke(created('2026-10-22T11-00-00-000Z')).reportPath, 'restore-3.md');
+  assert.equal(invoke(created('2026-10-22T12-00-00-000Z')).reportPath, 'restore-4.md');
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {

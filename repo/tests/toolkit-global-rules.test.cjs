@@ -144,6 +144,37 @@ test('the Codex session-start hook writes nothing before setup or with auto-sync
   assert.equal(maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'claude-plugin' }, { hub_version: 1, auto_sync_enabled: true }, h.env), null);
 });
 
+test('a removal holds through Claude Code and Codex session starts until setup installs again', () => {
+  const h = home();
+  const codex = harnessFile('codex', h.env);
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(codex, '# Mine\n');
+  rules(h).refresh();
+  assert.deepEqual(rules(h).remove().files.map(file => file.action), ['deleted-file', 'removed']);
+  const ledger = JSON.parse(read(path.join(h.root, '.ai-agent-toolkit', 'global-rules.json')));
+  assert.deepEqual(Object.keys(ledger.removed).sort(), [harnessFile('claude-code', h.env), codex].map(file => path.resolve(file)).sort(),
+    'the removal is recorded in Toolkit state, not in the rules files');
+
+  // Claude Code session start (the install check) and the Codex session-start hook leave both alone.
+  const { ToolkitInstallHealthCheck } = require('../scripts/toolkit-install-health.cjs');
+  const check = ToolkitInstallHealthCheck.forSessionStart({ environment: h.env, toolkitRoot: ROOT, hubPath: path.join(h.root, 'hub') }).run();
+  const global = check.checks.find(entry => entry.id === 'global-rules');
+  assert.equal(global.status, 'passed');
+  assert.equal(global.updated, undefined, 'nothing written, nothing to report');
+  assert.match(global.summary, /Claude Code \(~\/\.claude\/CLAUDE\.md\): removed by you; run setup toolkit to reinstall/);
+  const { maybeRefreshCodexGlobalRules } = require('../scripts/toolkit-local-bridge.cjs');
+  const codexRun = maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'codex-plugin' }, { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT }, h.env);
+  assert.equal(codexRun.files[0].action, 'opted-out');
+  assert.equal(fs.existsSync(harnessFile('claude-code', h.env)), false, 'the Claude Code file stays deleted');
+  assert.equal(read(codex), '# Mine\n', 'the Codex block stays removed');
+
+  // Setup (or --write) installs again and clears the removal; later session starts refresh as usual.
+  assert.deepEqual(rules(h).refresh().files.map(file => file.action), ['created', 'added']);
+  assert.deepEqual(JSON.parse(read(path.join(h.root, '.ai-agent-toolkit', 'global-rules.json'))).removed, {});
+  fs.writeFileSync(codex, read(codex).replace('## Precedence And Safety Floor', '## Precedence (edited)'));
+  assert.equal(rules(h, { harnesses: ['codex'], respectRemoval: true }).refresh().files[0].action, 'restored');
+});
+
 test('removal deletes only files Toolkit created and keeps owner files without the block', () => {
   const h = home();
   const codex = harnessFile('codex', h.env);

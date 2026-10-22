@@ -9,7 +9,8 @@
 // inside versioned, hashed Toolkit markers (toolkit-managed-block.cjs). Toolkit writes only
 // between its markers: the rest of the file keeps its exact bytes and line endings. Every
 // change is backed up first; a block edited by hand is restored and reported. Removal deletes
-// the block, and deletes the file only when Toolkit created it and nothing else remains.
+// the block, and deletes the file only when Toolkit created it and nothing else remains; it is
+// recorded, so session starts leave that file alone until setup (or --write) installs again.
 // Hand-written sections the block now covers are reported, never edited.
 //
 // Usage: node repo/scripts/toolkit-global-rules.cjs --check|--write|--remove
@@ -90,23 +91,30 @@ function coveredSections(text) {
   return COVERED_SECTIONS.filter(title => new RegExp(`^#{1,6}\\s*${title.replace(/ /g, '\\s+')}\\s*$`, 'mi').test(outside));
 }
 
-// Which files Toolkit created, so removal can delete only those. Kept beside the hub.
-class CreatedFilesLedger {
+// Toolkit-owned state beside the hub (never inside the user's rules files): which files Toolkit
+// created, so removal deletes only those, and which files the owner removed the block from, so
+// session starts leave them alone until setup installs again.
+class GlobalRulesLedger {
   #file;
   constructor(file) { this.#file = file; }
   #read() {
     const text = readIfExists(this.#file);
     const value = text ? JSON.parse(text) : null;
-    return value && value.created && typeof value.created === 'object' ? value.created : {};
+    const map = key => (value && value[key] && typeof value[key] === 'object' ? value[key] : {});
+    return { created: map('created'), removed: map('removed') };
   }
-  created(target) { return Object.hasOwn(this.#read(), path.resolve(target)); }
-  set(target, created) {
+  #has(kind, target) { return Object.hasOwn(this.#read()[kind], path.resolve(target)); }
+  #set(kind, target, on) {
     const entries = this.#read();
-    if (created) entries[path.resolve(target)] = new Date().toISOString();
-    else delete entries[path.resolve(target)];
+    if (on) entries[kind][path.resolve(target)] = new Date().toISOString();
+    else delete entries[kind][path.resolve(target)];
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-    writeFileAtomically(this.#file, `${JSON.stringify({ schema_version: 1, created: entries }, null, 2)}\n`);
+    writeFileAtomically(this.#file, `${JSON.stringify({ schema_version: 1, ...entries }, null, 2)}\n`);
   }
+  created(target) { return this.#has('created', target); }
+  setCreated(target, on) { this.#set('created', target, on); }
+  removed(target) { return this.#has('removed', target); }
+  setRemoved(target, on) { if (this.removed(target) !== on) this.#set('removed', target, on); }
 }
 
 // One harness's user-level file.
@@ -141,7 +149,13 @@ class GlobalRulesFile {
   }
 
   // Writes only when the block is not current. Returns the assessment plus the action taken.
-  install() {
+  // respectRemoval (session starts): a file the owner removed the block from is left alone.
+  // Otherwise (setup, --write) installing clears that removal.
+  install({ respectRemoval = false } = {}) {
+    if (this.#ledger.removed(this.#file)) {
+      if (respectRemoval) return { harness: this.#harness, file: this.#file, state: 'removed-by-owner', covered: [], action: 'opted-out' };
+      this.#ledger.setRemoved(this.#file, false);
+    }
     const before = this.assess();
     if (before.state === 'current') return { ...before, action: 'unchanged' };
     if (before.state === 'broken' || before.state === 'not-utf8') return { ...before, action: 'held' };
@@ -156,21 +170,23 @@ class GlobalRulesFile {
     }
     writeFileAtomically(this.#file, updated);
     if (readIfExists(this.#file) !== updated) fail('GLOBAL_RULES_READBACK_MISMATCH', `${this.#file} did not read back as written.`);
-    if (original === null) this.#ledger.set(this.#file, true);
+    if (original === null) this.#ledger.setCreated(this.#file, true);
     const action = original === null ? 'created' : before.state === 'absent' ? 'added' : before.state === 'tampered' ? 'restored' : 'refreshed';
     return { ...this.assess(), action, backup };
   }
 
+  // Removes the block and records the owner's removal, so session starts do not put it back.
   remove() {
     const before = this.assess();
-    if (before.state === 'missing-file' || before.state === 'absent') return { ...before, action: 'absent' };
     if (before.state === 'broken' || before.state === 'not-utf8') return { ...before, action: 'held' };
+    this.#ledger.setRemoved(this.#file, true);
+    if (before.state === 'missing-file' || before.state === 'absent') return { ...before, action: 'absent' };
     const original = readUserFile(this.#file);
     const backup = this.#backup(original.bytes);
     const remaining = removeBlock(original.text, BLOCK_NAME);
     if (!remaining.trim() && this.#ledger.created(this.#file)) {
       fs.rmSync(this.#file);
-      this.#ledger.set(this.#file, false);
+      this.#ledger.setCreated(this.#file, false);
       return { harness: this.#harness, file: this.#file, state: 'missing-file', covered: [], action: 'deleted-file', backup };
     }
     writeFileAtomically(this.#file, remaining);
@@ -180,9 +196,12 @@ class GlobalRulesFile {
 
 // The set of harness files for one run, with shared backups, ledger and backup pruning.
 class GlobalRules {
-  #files; #home; #backupRoot; #retentionDays; #now; #backupDir;
+  #files; #home; #backupRoot; #retentionDays; #now; #backupDir; #respectRemoval;
+  // respectRemoval: true for session starts, which leave a file the owner removed the block from
+  // alone; false for setup and --write, which reinstall and clear that removal.
   constructor({ environment = process.env, toolkitRoot = TOOLKIT_ROOT, harnesses = ['claude-code', 'codex'],
-    backupRoot, ledgerFile, retentionDays = 7, now = () => new Date() } = {}) {
+    backupRoot, ledgerFile, retentionDays = 7, now = () => new Date(), respectRemoval = false } = {}) {
+    this.#respectRemoval = respectRemoval === true;
     const env = environment || {};
     this.#home = homeOf(env);
     const toolkitHome = path.join(this.#home, '.ai-agent-toolkit');
@@ -190,7 +209,7 @@ class GlobalRules {
     this.#retentionDays = retentionDays;
     this.#now = now;
     this.#backupDir = path.join(this.#backupRoot, now().toISOString().replace(/[:.]/g, '-'));
-    const ledger = new CreatedFilesLedger(ledgerFile || path.join(toolkitHome, 'global-rules.json'));
+    const ledger = new GlobalRulesLedger(ledgerFile || path.join(toolkitHome, 'global-rules.json'));
     let block = null;
     const expected = () => (block ??= globalRulesBlock(toolkitRoot));
     for (const harness of harnesses) if (!HARNESSES.includes(harness)) fail('GLOBAL_RULES_HARNESS_UNKNOWN', `Unknown harness: ${harness}`);
@@ -208,7 +227,7 @@ class GlobalRules {
   }
 
   check() { return this.#summary(this.#files.map(file => ({ ...file.assess(), action: 'checked' }))); }
-  refresh() { return this.#withPrune(() => this.#files.map(file => file.install())); }
+  refresh() { return this.#withPrune(() => this.#files.map(file => file.install({ respectRemoval: this.#respectRemoval }))); }
   remove() { return this.#withPrune(() => this.#files.map(file => file.remove())); }
 
   #withPrune(run) {
@@ -220,13 +239,15 @@ class GlobalRules {
   // status: current (nothing to do), updated (written this run), stale (check only) or held.
   #summary(files) {
     const held = files.filter(file => file.state === 'broken' || file.state === 'not-utf8');
-    const changed = files.filter(file => !['unchanged', 'checked', 'absent', 'held'].includes(file.action));
+    const changed = files.filter(file => !['unchanged', 'checked', 'absent', 'held', 'opted-out'].includes(file.action));
     const stale = files.filter(file => file.action === 'checked' && file.state !== 'current');
     const status = held.length ? 'held' : changed.length ? 'updated' : stale.length ? 'stale' : 'current';
     const backups = [...new Set(files.map(file => file.backup).filter(Boolean).map(file => path.dirname(file)))];
     const covered = files.flatMap(file => file.covered.map(title => ({ file: file.file, display: this.#display(file.file), title })));
     const shown = files.map(file => ({ ...file, display: this.#display(file.file) }));
-    return { status, files: shown, backup_dir: backups[0] || null, backup_display: backups[0] ? this.#display(backups[0]) : null, covered,
+    // run_id names this run (its backup folder), so every write gets its own update-report entry.
+    return { status, run_id: path.basename(this.#backupDir), files: shown, backup_dir: backups[0] || null,
+      backup_display: backups[0] ? this.#display(backups[0]) : null, covered,
       detail: held.map(file => `${this.#display(file.file)}: ${file.detail}`).join('; ') };
   }
 
@@ -258,6 +279,7 @@ function describeResult(result) {
     const where = `${harnessLabel(file.harness)} (${file.display || file.file})`;
     if (file.state === 'broken') return `${where}: held, the Toolkit markers are broken (${file.detail}). Fix or remove them, then run setup toolkit.`;
     if (file.state === 'not-utf8') return `${where}: held, ${file.detail}. Save it as UTF-8, then run setup toolkit.`;
+    if (file.action === 'opted-out') return `${where}: removed by you; run setup toolkit to reinstall`;
     if (file.action === 'restored') return `${where}: restored; an edit inside the Toolkit block was replaced, and the edited copy is in the backup below`;
     if (file.action === 'checked') return `${where}: ${file.state}`;
     return `${where}: ${file.action === 'unchanged' ? 'current' : file.action}`;
