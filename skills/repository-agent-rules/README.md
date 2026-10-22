@@ -5,67 +5,40 @@ Source: skills/repository-agent-rules/README.md
 
 # Repository Agent Rules
 
-Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and tiny platform shims.
+Puts a repository under Toolkit governance, or checks and repairs that, by managing one Toolkit-governed block in its `AGENTS.md` plus tiny host shims. The generic rules every session needs are installed separately by `setup toolkit` into each harness's user-level file; this skill does not write them.
 
-The copied skill folder includes bare repo-local bootstrap payload templates. These files contain the curated-source safety comment plus marker-wrapped destination-file content and are safe to copy wholesale:
+The skill folder carries ready-to-copy templates (a curated-source comment plus the marker-wrapped content):
 
-- [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) is copied or merged into target repo `AGENTS.md`.
-- [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
-- [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Antigravity.
-- [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) is copied to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `safety-gates.md`, and `windows-command-hygiene.md`.
-
-Install only the current target platform shim unless the user explicitly requests all platform shims. Repo-local installs require a selected/open target repo or an explicit target path; standalone/no-workspace chats cannot safely infer where to install repo-local files.
-
-The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the compact fail-closed n8n adapter. The portable playbooks carry expanded optional detail. The Claude and Antigravity-facing templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
-
-Do not install a shim alone. Shims require root `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), before they are useful.
-
-Antigravity workspaces can use a tiny `.agents/rules/00-agent-toolkit-bootstrap.md` bootstrap when the folder also carries root `AGENTS.md`; do not full-import `AGENTS.md` into that bootstrap by default.
-
-The skill is intended to run a cheap local check before coding work in GitHub, GitLab, Bitbucket, local Git, and plain project folders. If the required repo/folder instruction files already have complete, balanced `AI-AGENT-TOOLKIT` managed marker pairs, continue the original task without reading templates or rewriting files.
-
-Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5.5 High. For perfect runtime behaviour, use Codex GPT-5.5 High or an equivalent high-reasoning model.
-
-Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Preserve unmarked user-authored content. If a toolkit-managed block is broken or edited during an explicit install/check/repair/refresh/bootstrap request, use the shared exact repo-local backup/restore contract under `_agent-toolkit-backups/` before replacing the toolkit-owned managed block. Continue recognizing legacy `.agent-toolkit-backups/` content without moving, merging, rewriting, or deleting it. Preview tracked `.gitignore` versus local-only `.git/info/exclude` choices and require exact approval before changing either ignore file.
-
-After installing or refreshing portable playbook docs, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it before reporting completion.
-
-Manual global setup templates live in `repo/contracts/agent-rules/`. The skill folder is copyable and self-contained for repo-local bootstrap use.
-
-## Platform Entry Points
-
-| Platform | Repo-local entry point |
-|---|---|
-| Codex | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
-| OpenCode | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
-| Claude Code | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `CLAUDE.md` from [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md). |
-| Antigravity | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `GEMINI.md` from [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md).<br>3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md). |
-
-Install copied skill folders according to the target platform's supported skill package location.
-
-| Platform | Preferred skill install | Supported skill-folder location |
+| Template | Target | When |
 |---|---|---|
-| Codex | Direct whole-skill-folder install. | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
-| Claude Code | Direct whole-skill-folder install. | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
-| OpenCode | Short manual whole-skill-folder install only. | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
-| Antigravity | Portable skills copy only; no native plugin install. | `<workspace>/.agents/skills/<skill-name>/` |
+| [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) | `AGENTS.md` | Always; the block is the opt-in |
+| [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) | `CLAUDE.md` | Claude Code |
+| [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) | `GEMINI.md` | Antigravity |
+| [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) | `.agents/rules/00-agent-toolkit-bootstrap.md` | Antigravity |
+| [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) | `docs/agent-playbooks/` | The whole folder, so the governed block's links work |
 
-Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
-Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+Install only the current platform's shim unless the user asks for all, and never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required. The Antigravity bootstrap points to `AGENTS.md` and does not import it.
 
-Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo:
+When the required files already carry complete, balanced `AI-AGENT-TOOLKIT` markers, the cheap check stops and the original task continues without reading templates. Explicit install, repair or refresh requests back up anything they replace under `_agent-toolkit-backups/` with the shared restore contract, keep every byte outside the markers, and preview any `.gitignore` or `.git/info/exclude` change for exact approval. Legacy `.agent-toolkit-backups/` content is recognised and left untouched.
 
-1. `AGENTS.md`.
-2. `GEMINI.md`.
-3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+For n8n safety, load [n8n-safety-router](../n8n-safety-router/); the governed block does not carry the full n8n rules.
 
-Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.
+## Installing the skill folder
 
-For n8n-specific workflow and MCP safety rules, install or load [n8n-safety-router](../n8n-safety-router/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
+Copy the whole `skills/repository-agent-rules/` folder, not just `SKILL.md`:
 
-The `SKILL.md` file is a canonical AI-facing surface in this folder. Update the skill directly, then run the retained managed-block checks:
+| Platform | Location (any one) |
+|---|---|
+| Codex | `<repo>/.agents/skills/<skill>/`, `$HOME/.agents/skills/<skill>/` or `/etc/codex/skills/<skill>/` |
+| Claude Code | `<repo>/.claude/skills/<skill>/` or `$HOME/.claude/skills/<skill>/` |
+| Antigravity | `<workspace>/.agents/skills/<skill>/` (portable skills copy only; no native plugin) |
+
+The repository-local outputs above still go into the target repository, not the skill folder.
+
+## Maintaining
+
+`SKILL.md` and this README are edited directly. The templates are generated from `repo/contracts/agent-rules/`; change the source there and run:
 
 ```powershell
-node repo/scripts/sync-agent-instruction-shims.cjs --check
+node repo/scripts/sync-agent-instruction-shims.cjs --write
 ```

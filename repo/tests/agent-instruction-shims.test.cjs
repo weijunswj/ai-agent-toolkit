@@ -1,801 +1,210 @@
 'use strict';
 
+// Contract checks for the two instruction layers and their projections: the global rules source,
+// the Toolkit-governed block (root AGENTS.md and the portable template), the host shims and the
+// portable playbooks. These are instruction checks, not native permission or live-operation tests.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
+const globalPath = 'repo/contracts/agent-rules/global-rules.md';
+const governedPath = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
-const legacyProjectToken = '_' + 'projects';
-const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const legacyAgentRulesMainRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/_main`;
-const legacyAgentRulesCuratedRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/repository-agent-rules`;
-const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
-const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
-const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
-const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
-const repoLocalShimTemplates = [
-  {
-    label: 'Claude Code shim',
-    sourcePath: `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-    publishedPath: `${repoLocalPublishedRoot}/CLAUDE.shim.template.md`,
-    activePath: 'CLAUDE.md',
-    sourceIdentity: `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-    blockName: 'CLAUDE.SHIM',
-    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:END CLAUDE.SHIM -->`
-  },
-  {
-    label: 'Antigravity Gemini shim',
-    sourcePath: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    publishedPath: `${repoLocalPublishedRoot}/GEMINI.shim.template.md`,
-    activePath: 'GEMINI.md',
-    sourceIdentity: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    blockName: 'GEMINI.SHIM',
-    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:END GEMINI.SHIM -->`
-  },
-  {
-    label: 'Antigravity bootstrap',
-    sourcePath: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    publishedPath: `${repoLocalPublishedRoot}/antigravity-bootstrap.template.md`,
-    activePath: '.agents/rules/00-agent-toolkit-bootstrap.md',
-    sourceIdentity: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    blockName: 'ANTIGRAVITY.BOOTSTRAP',
-    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->`
-  }
+const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
+const SHIMS = [
+  { file: 'CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', active: 'CLAUDE.md', heading: '# Claude Code Instructions', importLine: '@AGENTS.md' },
+  { file: 'GEMINI.shim.template.md', name: 'GEMINI.SHIM', active: 'GEMINI.md', heading: '# Gemini Instructions', importLine: '@./AGENTS.md' },
+  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', active: '.agents/rules/00-agent-toolkit-bootstrap.md', heading: '# Agent Toolkit Antigravity Bootstrap' }
 ];
-const expectedN8nBlock = `${n8nBegin}
-## n8n Safety Router Adapter
-
-If the task involves n8n workflows, workflow fixtures, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-safety-router\` before planning or editing.
-If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
-Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-${n8nEnd}`;
-
-const curatedRepoLocalSafetyComment = [
+const safetyComment = [
   '<!--',
   'Curated AI-facing source.',
   'Source: repo/contracts/agent-rules/repo-local',
   'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->',
+  '-->'
 ].join('\n');
-const forbiddenDefaultPromptPhrases = [
-  'GitHub PR Completion Rules',
-  'GITHUB APPROVAL NEEDED',
-  'VERSION CONTROL APPROVAL NEEDED',
-  'REMOTE APPROVAL NEEDED',
-  'LOCAL CHANGE APPROVAL NEEDED',
-  'PR: none yet',
-  'PR lane',
-  'remote source-of-truth',
-  'GitHub PR URL',
-  'Should I push this branch',
-  'create a pull request',
-  'update a pull request'
-];
-const requiredPortablePlaybookFiles = [
-  'INDEX.md',
-  'baseline-workflow.md',
-  'docs-governance.md',
-  'generated-files.md',
-  'git-completion.md',
-  'local-docs.md',
-  'safety-gates.md',
-  'windows-command-hygiene.md'
-];
+const forbiddenDefaultPromptPhrases = ['GitHub PR Completion Rules', 'GITHUB APPROVAL NEEDED', 'VERSION CONTROL APPROVAL NEEDED',
+  'REMOTE APPROVAL NEEDED', 'LOCAL CHANGE APPROVAL NEEDED', 'PR: none yet', 'PR lane', 'remote source-of-truth', 'GitHub PR URL',
+  'Should I push this branch'];
 
 function readText(relPath) {
-  return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
+}
+const exists = relPath => fs.existsSync(path.join(repoRoot, relPath));
+
+function onlyBlock(relPath, name) {
+  const { blocks, errors } = findBlocks(readText(relPath));
+  assert.deepEqual(errors, [], relPath);
+  const found = blocks.filter(block => block.name === name);
+  assert.equal(found.length, 1, `${relPath}: one ${name} block`);
+  return found[0];
 }
 
-function exists(relPath) {
-  return fs.existsSync(path.join(repoRoot, relPath));
+function assertCurrentBlock(relPath, name, source, body) {
+  const block = onlyBlock(relPath, name);
+  assert.equal(block.format, 2, `${relPath}: v2 markers`);
+  assert.equal(block.version, VERSION, `${relPath}: package version`);
+  assert.equal(block.digest, bodyDigest(block.body), `${relPath}: digest matches body`);
+  assert.equal(blockState(block, { source, name, version: VERSION, body }), 'current', relPath);
+  return block;
 }
 
-function markerCount(text, marker) {
-  return text.split(marker).length - 1;
-}
-
-function block(text, begin, end, label) {
-  assert.equal(markerCount(text, begin), 1, `${label} begin marker count`);
-  assert.equal(markerCount(text, end), 1, `${label} end marker count`);
-  const start = text.indexOf(begin);
-  const finish = text.indexOf(end);
-  assert.ok(start < finish, `${label} marker order`);
-  return text.slice(start, finish + end.length);
-}
-
-function generatedPayload(text) {
-  const match = text.match(/\n````````md\n([\s\S]*?)\n````````\n?$/);
-  assert.ok(match, 'template has one trailing 8-backtick Markdown payload fence');
-  return match[1];
-}
-
-function repoLocalPayload(text, label) {
-  const exactPrefix = `${curatedRepoLocalSafetyComment}\n\n`;
-  assert.ok(
-    text.startsWith(exactPrefix),
-    `${label} starts with the exact curated-source safety comment`,
-  );
-  return text.slice(exactPrefix.length);
-}
-
-function assertBareRepoLocalTemplate(text, label) {
-  const payload = repoLocalPayload(text, label);
-
-  assert.equal(generatedNoticeCount(text), 0, `${label} has no generated toolkit notice`);
-  assert.doesNotMatch(text, /Generated from toolkit/, `${label} has no generated notice text`);
-  assert.doesNotMatch(text, /This file is inert/i, `${label} has no inert-template prose`);
-  assert.doesNotMatch(text, /copy or merge the fenced payload/i, `${label} has no fenced-payload install prose`);
-  assert.doesNotMatch(text, /^````````(?:md)?\s*$/m, `${label} has no 8-backtick install payload fence`);
-  assert.doesNotMatch(text, /Or create it with PowerShell/i, `${label} has no README-style PowerShell install example`);
-  assert.doesNotMatch(text, /mkdir -p "<repo>/i, `${label} has no README-style shell install example`);
-  assert.doesNotMatch(text, /cat > "<repo>/i, `${label} has no README-style shell payload example`);
-  assert.doesNotMatch(text, /Set-Content -LiteralPath/i, `${label} has no README-style PowerShell payload example`);
-  assert.doesNotMatch(payload, /Curated AI-facing source/, `${label} contains the curated-source comment only once at the top`);
-}
-function generatedNoticeCount(text) {
-  return (text.match(/Generated from (?:toolkit (?:project source|curated output for AI)|the canonical agent-rule contract)\. Do not edit directly\./g) || []).length;
-}
-
-function assertNoForbiddenDefaultPromptPhrases(text, label) {
-  for (const phrase of forbiddenDefaultPromptPhrases) {
-    assert.doesNotMatch(text, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${label}: ${phrase}`);
+test('the rule sources exist and the superseded sources and templates are gone', () => {
+  for (const relPath of [globalPath, governedPath, n8nAdapterPath, 'repo/contracts/agent-rules/n8n-safety-rules.md',
+    'repo/contracts/agent-rules/toolkit-skill-routing.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`]) {
+    assert.equal(exists(relPath), true, relPath);
   }
-}
-
-function assertMentionsCompletePortablePlaybookSet(text, label) {
-  for (const fileName of requiredPortablePlaybookFiles) {
-    assert.match(text, new RegExp(`\`${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``), `${label}: ${fileName}`);
-  }
-  assert.match(text, /copy(?: or refresh)? every Markdown file/i, `${label}: copy every Markdown file`);
-  assert.match(text, /verify every linked `\*\.md` file exists beside it/i, `${label}: verify linked playbooks`);
-}
-
-function assertImportCount(text, importLine, label) {
-  assert.equal(text.split('\n').filter((line) => line.trim() === importLine).length, 1, label);
-}
-
-function isStructurallyCurrentManagedText(text) {
-  const markerPattern = /<!-- AI-AGENT-TOOLKIT:([^:\n]+):(BEGIN|END) ([^>\n]+?) -->/g;
-  const markers = [...text.matchAll(markerPattern)].map((match) => {
-    const source = match[1];
-    const kind = match[2];
-    const rawLabel = match[3];
-    const beginVersion = kind === 'BEGIN' ? rawLabel.match(/^(.*) v\d+$/) : null;
-    if (kind === 'BEGIN' && !beginVersion) return { invalid: true };
-    return {
-      source,
-      kind,
-      label: kind === 'BEGIN' ? beginVersion[1] : rawLabel
-    };
-  });
-  if (!markers.length || markers.some((marker) => marker.invalid)) return false;
-
-  const stack = [];
-  const counts = new Map();
-  for (const marker of markers) {
-    const key = `${marker.source}:${marker.label}`;
-    const current = counts.get(key) || { begin: 0, end: 0 };
-    if (marker.kind === 'BEGIN') {
-      if (stack.length) return false;
-      current.begin += 1;
-      stack.push(key);
-    } else {
-      if (stack.length !== 1 || stack[0] !== key) return false;
-      current.end += 1;
-      stack.pop();
-    }
-    counts.set(key, current);
-  }
-
-  return stack.length === 0 && [...counts.values()].every((count) => count.begin === 1 && count.end === 1);
-}
-
-test('source structure keeps reusable prompt and adapter partials with no tiny shim partials', () => {
-  const kept = [
-    executionPromptPath,
-    n8nAdapterPath,
-    'repo/contracts/agent-rules/n8n-safety-rules.md',
-    'repo/contracts/agent-rules/toolkit-skill-routing.md'
-  ];
-  for (const relPath of kept) assert.equal(exists(relPath), true, relPath);
-
-  for (const relPath of [
-    `${legacyAgentRulesMainRoot}/_partials/agent-toolkit-managed-block.md`,
-    `${legacyAgentRulesMainRoot}/_partials/agent-toolkit-n8n-adapter-block.md`,
-    `${legacyAgentRulesMainRoot}/_partials/claude-shim.md`,
-    `${legacyAgentRulesMainRoot}/_partials/gemini-shim.md`,
-    `${legacyAgentRulesMainRoot}/_partials/antigravity-bootstrap.md`,
-    `${legacyAgentRulesMainRoot}/_partials/toolkit-root-agent-rules.md`
-  ]) {
+  for (const relPath of ['repo/contracts/agent-rules/ai-coding-agent-execution.md', 'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md', 'repo/contracts/agent-rules/GEMINI.template.md']) {
     assert.equal(exists(relPath), false, relPath);
   }
-  assert.equal(exists(`${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`), true);
-  assert.equal(exists(`${legacyAgentRulesMainRoot}/repo-local/AGENTS.managed.template.md`), false);
 });
 
-test('manual global source templates exist and are generated from execution prompt partial', () => {
-  const prompt = readText(executionPromptPath).trimEnd();
-  assert.match(prompt, /## Git Completion/);
-  assert.match(prompt, /check PR CI\/status before reporting completion/i);
-  assert.match(prompt, /- Push task\/product source to `main`, or push secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes\./);
-  assert.match(prompt, /claim CI passed unless checked/i);
-  assert.doesNotMatch(prompt, /## Pull Request Description/);
-  assert.match(prompt, /opening or updating a pull request/i);
-  for (const relPath of [
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md'
-  ]) {
-    const text = readText(relPath);
-    assert.equal(generatedNoticeCount(text), 1, relPath);
-    assert.equal(generatedPayload(text).trimEnd(), prompt, relPath);
-    assert.match(text, /global rules example/i, relPath);
-    assertNoForbiddenDefaultPromptPhrases(text, relPath);
+test('the governed block reaches root AGENTS.md and both templates unchanged, inside current v2 markers', () => {
+  const governed = readText(governedPath).trimEnd();
+  for (const relPath of ['AGENTS.md', `${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {
+    assertCurrentBlock(relPath, 'TOOLKIT-GOVERNED-RULES', governedPath, governed);
   }
+  const template = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`);
+  assert.equal(readText(`${repoLocalPublishedRoot}/AGENTS.managed.template.md`), template);
+  assert.ok(template.startsWith(`${safetyComment}\n\n`));
+  assert.equal(findBlocks(template).blocks.length, 1, 'the template carries only the governed block');
+  const root = readText('AGENTS.md');
+  assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n<!-- AI-AGENT-TOOLKIT:'));
+  assert.doesNotMatch(root, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|SOURCE-OF-TRUTH-CONTRACT/);
 });
 
-const gitCompletionSurfaces = [
-  executionPromptPath,
-  `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-  `${repoLocalPublishedRoot}/AGENTS.managed.template.md`,
-  'AGENTS.md',
-  'repo/contracts/agent-rules/AGENTS.template.md',
-  'repo/contracts/agent-rules/CLAUDE.template.md',
-  'repo/contracts/agent-rules/GEMINI.template.md'
-];
-
-test('GitHub CI watch guidance reaches every managed agent-rule surface once', () => {
-  const requiredRules = [
-    /gh run watch RUN_ID --repo OWNER\/REPO --interval 60 --exit-status --compact/,
-    /gh pr checks PR --repo OWNER\/REPO --watch --interval 60/,
-    /avoid AI keepalive\/status loops or duplicate watchers/,
-    /Use verified completion events when supported; otherwise use the longest supported blocking wait/,
-    /Automatic wake and zero total Codex\/OpenCode usage are not guaranteed/,
-    /verify the current PR head and every required check; one run may not cover them all/
-  ];
-  for (const relPath of gitCompletionSurfaces) {
-    const section = readText(relPath).match(/## Git Completion\n([\s\S]*?)(?=\n## )/)?.[0];
-    assert.ok(section, `${relPath}: Git Completion section exists`);
-    for (const rule of requiredRules) assert.match(section, rule, relPath);
-    assert.equal(readText(relPath).split('gh run watch RUN_ID').length - 1, 1, `${relPath}: one watcher rule`);
+test('host shims stay tiny, carry current markers and match their templates', () => {
+  for (const shim of SHIMS) {
+    const source = `${repoLocalSourceRoot}/${shim.file}`;
+    const template = readText(source);
+    assert.equal(readText(`${repoLocalPublishedRoot}/${shim.file}`), template);
+    assert.ok(template.startsWith(`${safetyComment}\n\n`));
+    const block = onlyBlock(source, shim.name);
+    assertCurrentBlock(shim.active, shim.name, source, block.body);
+    const active = readText(shim.active);
+    assert.ok(active.includes(shim.heading), shim.active);
+    if (shim.importLine) assert.equal(active.split('\n').filter(line => line.trim() === shim.importLine).length, 1, shim.active);
+    assert.match(active, /Root `AGENTS\.md` is (?:canonical|the canonical repo instruction file)\./);
+    assert.ok(Buffer.byteLength(active) < 1024, `${shim.active} under 1 KB`);
   }
+  assert.doesNotMatch(readText('.agents/rules/00-agent-toolkit-bootstrap.md'), /@\.\.\/\.\.\/AGENTS\.md/);
 });
 
-// These are instruction-contract checks, not native permission or live-operation tests.
-test('Git Completion permits independently authorised private evidence custody within exact limits', () => {
-  const requiredRules = [
-    /Evaluate separately authorised evidence custody only in a distinct repository whose exact identity and private visibility are independently verified\./,
-    /Owner authority must explicitly bind the repository, effect, ref, paths, and content/,
-    /An owner-approved evidence-only ref update, including `main` in that verified private repository, is eligible only within those exact limits/,
-    /with existing evidence preserved and independent readback of the resulting ref and content/
-  ];
-  for (const relPath of gitCompletionSurfaces) {
-    const section = readText(relPath).match(/## Git Completion\n([\s\S]*?)(?=\n## )/)?.[0];
-    assert.ok(section, `${relPath}: Git Completion section exists`);
-    for (const rule of requiredRules) assert.match(section, rule, relPath);
-    assert.doesNotMatch(section, /- Push to `main`,/, `${relPath}: no contradictory blanket gate`);
-  }
+test('the n8n adapter template is generated from its source and stays compact and fail-closed', () => {
+  const body = readText(n8nAdapterPath).trimEnd();
+  const block = assertCurrentBlock('skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md', 'N8N-AGENT-RULES-ADAPTER', n8nAdapterPath, body);
+  assert.ok(Buffer.byteLength(block.body) < 700);
+  assert.match(body, /stop and load `skills\/n8n-safety-router` before planning or editing/i);
+  assert.match(body, /skill or its full rules are unavailable, stop and report the limitation/i);
+  for (const term of [/live n8n/i, /Docker/, /import\/export/, /activation/, /execution/, /publish\/unpublish/, /credential/, /deployment/, /production/]) assert.match(body, term);
 });
 
-for (const [scenario, requiredRule] of [
-  ['task/product source main push', /Task\/product source changes require a non-main branch and PR\. Never push task\/product source to `main`\./],
-  ['wrong or public repository', /Wrong or public repositories, absent authority, and task\/product source adoption relabelled as evidence custody are prohibited\./],
-  ['absent owner authority', /Wrong or public repositories, absent authority, and task\/product source adoption relabelled as evidence custody are prohibited\./],
-  ['repository name or prefix alone', /a repository name or prefix alone grants no authority\./],
-  ['source adoption disguised as custody', /task\/product source adoption relabelled as evidence custody are prohibited\./],
-  ['secrets, credentials or private values', /never overrides explicit native denials or authorises retries of previously denied effects, secrets, credentials, private values/],
-  ['explicit native denial or previously denied effect', /never overrides explicit native denials or authorises retries of previously denied effects/],
-  ['merge, install, deployment or host permission change', /merge, install, deployment, or host permission changes\./]
-]) {
-  test(`Git Completion evidence custody excludes ${scenario}`, () => {
-    for (const relPath of gitCompletionSurfaces) assert.match(readText(relPath), requiredRule, relPath);
-  });
-}
-
-test('direct Toolkit root gate agrees with the managed source-main and custody scope', () => {
-  const rootAgents = readText('AGENTS.md');
-  const directRoot = rootAgents.slice(rootAgents.indexOf('## Hard Safety Gates'));
-  assert.match(directRoot, /- Do not push task\/product source to `main`; Toolkit source changes require a non-main branch and PR\./);
-  assert.match(directRoot, /Separately authorised evidence custody must satisfy the managed Git Completion contract above\./);
-  assert.doesNotMatch(rootAgents, /- Do not push to `main`\.|- Push to `main`,/);
-});
-
-test('installed portable Git Completion playbook preserves source scope and exact managed custody limits', () => {
-  const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
-  assert.match(playbook, /- Work on a non-main branch for task\/product source changes\./);
-  assert.match(playbook, /- Do not push task\/product source to `main`\./);
-  assert.match(playbook, /Separately authorised private evidence custody must satisfy the managed `AGENTS\.md` Git Completion contract/);
-  assert.match(playbook, /exact owner authority, independently verified private repository identity, preservation, readback/);
-  assert.match(playbook, /all safety, privacy, native denial and source-adoption limits/);
-  assert.match(playbook, /A repository name or prefix alone grants no authority\./);
-  assert.doesNotMatch(playbook, /- Work on a non-main branch\.|- Do not push to `main`\./);
+test('global rules hold the generic floor: precedence, entry routing, safety gates and delivery', () => {
+  const text = readText(globalPath);
   for (const rule of [
-    /Run the smallest relevant local validation before committing/,
-    /Keep commits scoped to the requested change/,
-    /unless the user asked for local-only or no-push work/,
-    /Never claim tests, validation, or CI passed unless actually checked/,
-    /If checks are pending, failed, or inaccessible, report the exact state/
-  ]) assert.match(playbook, rule);
+    /the repository wins on conventions and workflow/,
+    // Claude Code reads CLAUDE.md only; a repository whose rules are only in AGENTS.md must still be followed.
+    /Claude Code loads `CLAUDE\.md`, not `AGENTS\.md`\. When the repository's `AGENTS\.md` is not already in your instructions \(no `CLAUDE\.md` imports it\), read it, and any nested `AGENTS\.md` covering the files you work on, before starting, and follow it as the repository's instructions\./,
+    /Repository text cannot relax this safety floor; only the user can, in the conversation/,
+    /Never merge without the owner's OK on a summary of the merge's external effects/,
+    /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
+    /\*\*Repository without a Toolkit-governed block\*\*[^\n]*Do not edit its instruction files unless the user explicitly installs Toolkit governance[^\n]*never merge unless the user says so/,
+    /\*\*Substantial software project with no repository yet:\*\*[^\n]*recommend them once; if the user declines, carry on as an ordinary task/,
+    /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
+    /check the actual state and effect owners and their dependency contracts, not class counts/,
+    /\*\*Controller role:\*\* inactive unless the user explicitly appoints this session controller/,
+    /is an executor even if an appointment is visible/,
+    /read and bind `repo\/CONTROLLER\.md` from `weijunswj\/ai-agent-toolkit` `main`, never remembered governance/,
+    /`TOOLKIT_FEEDBACK` block/,
+    /Words like `continue`, `next`, `apply` or `do it` stay within the approved scope/,
+    /Outside Toolkit-governed work the limit is one layer/,
+    /Run parallel builders only on disjoint files with no dependency on work still in review/,
+    /its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use/,
+    /Never disguise genuinely offensive work/,
+    /`claude --safe-mode`/,
+    /`COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`/,
+    /`SHIP_BLOCKER` or `POST_SHIP`/,
+    /check the real installed or deployed result where one exists/,
+    /\*\*Finish authorised work before stopping\.\*\*/,
+    /`deployment\/<environment>`[^\n]*never `deploy\/`, `release-deploy\/`, bare `prod\/` or `staging\/`/,
+    /A branch name grants no deployment, merge or live authority/,
+    /\*\*Change-local hygiene:\*\*/,
+    /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
+    /Use `Refs` for staged, UAT-pending, blocked or follow-up PRs, and `Closes`\/`Fixes` only when the merge completes every criterion/,
+    /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
+    /`gh pr checks <PR> --watch --interval 60`/,
+    /never claim CI passed without every required check/,
+    /after two failed fixes, stop and report/,
+    /one fully bold sentence/
+  ]) assert.match(text, rule);
+  assert.doesNotMatch(text, /G0 MUST|stack registry|CURRENT admission|weijunswj\/TRANSPORT/, 'governed-only rules stay out of the global layer');
+  for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
 });
 
-test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {
-  const requiredRule = /When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold\./;
-  const portableContextRules = [
-    /## Local Documentation/,
-    /Treat repo-local documentation as active task context, not optional background\./,
-    /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/,
-    /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
-    /minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed\./,
-    /## Documentation Closure/,
-    /Use context-preserving compression, not blind deletion\./,
-    /Keep repo maps pointer-based and current;/,
-    /Words like `continue`, `next`, `apply`, or `do it` (?:only apply to the already-scoped safe task|stay within the approved scope)/
-  ];
-
-  assert.match(readText(executionPromptPath), /## User Action Questions/);
-  for (const relPath of [
-    executionPromptPath,
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
-  ]) {
-    const text = readText(relPath);
-    assert.match(text, requiredRule, relPath);
-    for (const rule of portableContextRules) {
-      assert.match(text, rule, relPath);
-    }
-  }
+test('governed rules hold only Toolkit-governed workflow, records and routes', () => {
+  const text = readText(governedPath);
+  for (const rule of [
+    /This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it/,
+    /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
+    /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/,
+    /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/,
+    /rechecks target corrected boundary families rather than restarting discovery/,
+    /Planned G1 segment completion alone checkpoints and continues in the same session/,
+    /Correction rechecks use fresh contexts for the same selected reviewers/,
+    /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
+    /no helper quota, ceremonial launch or extra owner permission for already-authorised direct work/,
+    /load the `n8n-safety-router` skill before any n8n work/,
+    /Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
+    /\*\*Route proof:\*\* every gate launch pins model and effort explicitly/,
+    /`get_session\(self\)`/,
+    /stops with a report when either is inherited, missing or different from the pinned route/,
+    /Keep one open release PR per lane/,
+    /order work Core, then Hardening, then Later/,
+    /Decision traces:[^\n]*`#issuecomment-<id>`[^\n]*`SUPERSEDES=<record ID>`[^\n]*60,000 characters/,
+    /7-character short SHA[^\n]*full 40-character SHA beside the link as plain code text/,
+    /Takeover: a new controller posts one takeover record on the parent's CURRENT/,
+    /session folders, side-session notes, scratchpads and temp paths are never custody/,
+    /a name or prefix alone grants nothing/,
+    /compact repo map/,
+    /`Authorised context` section outside this block/
+  ]) assert.match(text, rule);
+  assert.doesNotMatch(text, /one pending owner question|persistent controller such as dot|historical v1 records|trusted launcher configuration/);
 });
 
-test('portable rules require the compact host-neutral depth-1 topology contract', () => {
-  const requiredRules = [
-    /## Agent Topology And Delegation/,
-    /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
-    /G0 MUST delegate suitable separable evidence gathering by default/,
-    /G1 MUST delegate suitable independent implementation or validation by default/,
-    /Give each helper isolated context and one minimal self-contained task packet/,
-    /Briefly record a substantial-work exception/,
-    /G2 reviewers have no helpers/,
-    /a launcher without a helper tier field must not block suitable delegation/,
-    /Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none/,
-    /Mutating sibling subagents require disjoint mutation ownership and scope/,
-    /Read-only siblings may investigate genuinely separable questions in parallel/,
-    /root or parent remains responsible for integrating and validating every returned result/i,
-    /Model, reasoning, service tier, and route are launch\/controller metadata/,
-    /do not embed them in portable task prompts as product policy unless a runtime explicitly requires them/
-  ];
-  const staleRules = /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|host profile|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/;
-
-  for (const relPath of [
-    executionPromptPath,
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md'
-  ]) {
-    const text = readText(relPath);
-    const section = text.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '';
-    assert.ok(section, `${relPath}: agent topology policy section exists`);
-    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
-    assert.doesNotMatch(section, staleRules, `${relPath}: stale scheduler or model-route product policy`);
-  }
-
-  const prompt = readText(executionPromptPath);
-  const section = prompt.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '';
-  assert.ok(section, 'agent topology policy section exists');
-  assert.ok(Buffer.byteLength(section, 'utf8') < 7000, 'agent topology policy stays compact instead of becoming a giant orchestration manual');
+test('portable playbooks are complete and keep the governed custody limits', () => {
+  const index = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`);
+  for (const match of index.matchAll(/\]\(([a-z-]+\.md)\)/g)) assert.equal(exists(`${repoLocalPublishedRoot}/docs/agent-playbooks/${match[1]}`), true, match[1]);
+  assert.match(index, /\[Model safety flags\]\(model-safety-flags\.md\)/);
+  const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
+  assert.match(playbook, /- Do not push task\/product source to `main`\./);
+  assert.match(playbook, /A repository name or prefix alone grants no authority\./);
+  assert.doesNotMatch(readText('repo/docs/agent-playbooks/baseline-workflow.md'), /Instruction sources used/i);
 });
 
-test('portable rules define the deployment branch convention without granting live authority', () => {
-  const requiredRules = [
-    /## Deployment Branch Naming/,
-    /primary purpose is deployment or release-state preparation for a named environment uses `deployment\/<environment>`/,
-    /`deployment\/alpha`/,
-    /`deployment\/staging`/,
-    /`deployment\/production`/,
-    /stable lowercase environment slug/,
-    /Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics/,
-    /Do not invent `deploy\/`, `release-deploy\/`, bare `prod\/`, bare `staging\/`, or equivalent ad hoc deployment branch alternatives/,
-    /Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority/
-  ];
-  for (const relPath of [
-    executionPromptPath,
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md'
-  ]) {
-    const text = readText(relPath);
-    const section = text.match(/## Deployment Branch Naming\n([\s\S]*?)(?=\n## )/)?.[0] || '';
-    assert.ok(section, `${relPath}: deployment branch policy section exists`);
-    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
-  }
-});
-
-test('portable rules activate GitHub issue tracking only for the applicable working repository', () => {
-  const requiredRules = [
-    /## GitHub-Backed Project Issue Tracking/,
-    /active Git repo's relevant GitHub remote and same-repo activity/,
-    /Skip loose, non\/local-only, other-forge, and unrelated repos/,
-    /Toolkit's remote never substitutes/,
-    /Skipping is not an error/,
-    /Same-repo issue\/PR metadata sync for requested work is a scoped external-write exception/,
-    /never authorizes merge, deployment, secrets, workflows, or unrelated repos/,
-    /smallest owner; update\/reopen, never duplicate/,
-    /Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs/,
-    /`Closes`\/`Fixes` only if merge completes every criterion/,
-    /review Merge\/Amend\/Reject, findings\/exact-head fixes, threads, CI\/CodeQL, merge, UAT pending\/pass\/fail/,
-    /Verify exact head before resolving/,
-    /programme tracker SHA, version, lane\/gate, PR, review\/UAT, queue/,
-    /Boundedly update canonical bodies; comments hold history/,
-    /Report failed\/blocked writes/,
-    /close only complete issues, keep pending gates open/,
-  ];
-  for (const relPath of [
-    executionPromptPath,
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md',
-  ]) {
-    const text = readText(relPath);
-    for (const rule of requiredRules) assert.match(text, rule, `${relPath}: ${rule}`);
-  }
-});
-
-test('repo-local source and published skill templates are local bootstrap templates', () => {
-  const sourceToPublished = [
-    [
-      `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-      'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    ],
-    [
-      `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-      'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    ],
-    [
-      `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-      'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
-    ],
-    [
-      `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-      'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    ],
-  ];
-
-  for (const [sourcePath, publishedPath] of sourceToPublished) {
-    const sourceText = readText(sourcePath);
-    const publishedText = readText(publishedPath);
-
-    assert.equal(publishedText, sourceText, `${publishedPath} matches curated source`);
-    assertBareRepoLocalTemplate(sourceText, sourcePath);
-    assertBareRepoLocalTemplate(publishedText, publishedPath);
-    assertNoForbiddenDefaultPromptPhrases(repoLocalPayload(publishedText, publishedPath), publishedPath);
-  }
-});
-
-test('repo-local shim templates have structurally current managed marker pairs', () => {
-  for (const template of repoLocalShimTemplates) {
-    for (const relPath of [template.sourcePath, template.publishedPath, template.activePath]) {
-      const text = relPath === template.activePath ? readText(relPath) : repoLocalPayload(readText(relPath), relPath);
-      assert.equal(isStructurallyCurrentManagedText(text), true, `${relPath} has structurally current managed markers`);
-      assert.equal(markerCount(text, template.begin), 1, `${relPath} ${template.blockName} begin marker count`);
-      assert.equal(markerCount(text, template.end), 1, `${relPath} ${template.blockName} end marker count`);
-      const shimBlock = block(text, template.begin, template.end, `${relPath} ${template.blockName}`);
-      assert.match(shimBlock, new RegExp(`${template.sourceIdentity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:BEGIN ${template.blockName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} v1`), relPath);
-      assert.match(shimBlock, new RegExp(`${template.sourceIdentity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:END ${template.blockName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), relPath);
-    }
-  }
-});
-
-test('repo-local shim marker structural check rejects invalid marker states', () => {
-  const template = repoLocalShimTemplates[0];
-  const payload = block(repoLocalPayload(readText(template.sourcePath), template.sourcePath), template.begin, template.end, template.label);
-  const body = payload.replace(template.begin, '').replace(template.end, '');
-  const otherEnd = template.end.replace(template.blockName, 'OTHER.SHIM');
-
-  assert.equal(isStructurallyCurrentManagedText(body), false, 'zero-marker shim is not structurally current');
-  assert.equal(isStructurallyCurrentManagedText(`${template.begin}${body}`), false, 'missing end marker is not structurally current');
-  assert.equal(isStructurallyCurrentManagedText(`${payload}\n${payload}`), false, 'duplicated marker pair is not structurally current');
-  assert.equal(isStructurallyCurrentManagedText(`${template.begin}${body}${otherEnd}`), false, 'unmatched marker pair is not structurally current');
-  assert.equal(isStructurallyCurrentManagedText(`${template.begin}\n${template.begin}${body}${template.end}\n${template.end}`), false, 'nested marker pair is not structurally current');
-  assert.equal(isStructurallyCurrentManagedText(`${template.end}${body}${template.begin}`), false, 'out-of-order marker pair is not structurally current');
-});
-
-test('root AGENTS is directly maintained while repo-local block comes from execution prompt partial', () => {
-  const rootAgents = readText('AGENTS.md');
-  const prompt = readText(executionPromptPath).trimEnd();
-  const n8nAdapter = readText(n8nAdapterPath).trimEnd();
-  const rootToolkit = block(rootAgents, toolkitBegin, toolkitEnd, 'root managed toolkit block')
-    .replace(toolkitBegin, '')
-    .replace(toolkitEnd, '')
-    .trim();
-  const rootN8n = block(rootAgents, n8nBegin, n8nEnd, 'root managed n8n block')
-    .replace(n8nBegin, '')
-    .replace(n8nEnd, '')
-    .trim();
-  const managedPayload = repoLocalPayload(readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`), 'repo-local AGENTS managed template');
-  const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
-    .replace(toolkitBegin, '')
-    .replace(toolkitEnd, '')
-    .trim();
-
-  assert.equal(rootToolkit, prompt);
-  assert.equal(rootN8n, n8nAdapter);
-  assert.doesNotMatch(rootAgents, /toolkit-root-agent-rules\.md/);
-  assert.match(rootAgents, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file/);
-  assert.match(rootAgents, /## Toolkit Root Optimization Mandate/);
-  assert.match(rootAgents, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
-  assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
-  assert.doesNotMatch(rootAgents, /MEMORY\.md|Managed Memory/i);
-  assert.match(rootAgents, /Source-watch is PR-notification-only/i);
-  assert.equal(sourceToolkit, prompt);
-});
-
-test('n8n adapter is compact and fail-closed', () => {
-  for (const [label, text] of [
-    ['repo-local AGENTS managed template', repoLocalPayload(readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`), 'repo-local AGENTS managed template')],
-    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
-  ]) {
-    const n8nBlock = block(text, n8nBegin, n8nEnd, label);
-    assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
-    const inner = n8nBlock.slice(n8nBlock.indexOf(n8nBegin) + n8nBegin.length, n8nBlock.indexOf(n8nEnd)).trim();
-    assert.equal(inner, readText(n8nAdapterPath).trimEnd(), `${label} adapter comes from source partial`);
-    assert.ok(Buffer.byteLength(inner, 'utf8') < 700, `${label} adapter text stays compact`);
-    assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 900, `${label} block stays compact`);
-    assert.match(inner, /stop and load `skills\/n8n-safety-router` before planning or editing/i, label);
-    assert.match(inner, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/i, label);
-    assert.match(inner, /explicit current-turn approval naming the target and allowed operation/i, label);
-    for (const requiredTerm of [
-      /live n8n/i,
-      /Docker/i,
-      /import\/export/i,
-      /sync/i,
-      /activation/i,
-      /execution/i,
-      /publish\/unpublish/i,
-      /credential/i,
-      /deployment/i,
-      /production/i
-    ]) {
-      assert.match(inner, requiredTerm, `${label}: ${requiredTerm}`);
-    }
-    assert.doesNotMatch(inner, /n8n_live|webhook IDs|archive\/delete|Adapter Auto-Check Protocol|Keep workflows inactive/i, label);
-  }
-});
-
-test('root Claude, Gemini, and Antigravity shims stay tiny', () => {
-  const claude = readText('CLAUDE.md');
-  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:BEGIN CLAUDE\.SHIM v1/);
-  assert.match(claude, /^# Claude Code Instructions$/m);
-  assert.match(claude, /Root `AGENTS\.md` is canonical\./);
-  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:END CLAUDE\.SHIM/);
-  assertImportCount(claude, '@AGENTS.md', 'root CLAUDE.md import count');
-  assert.ok(Buffer.byteLength(claude, 'utf8') < 1024, 'root CLAUDE.md under 1KB');
-
-  const gemini = readText('GEMINI.md');
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:BEGIN GEMINI\.SHIM v1/);
-  assert.match(gemini, /^# Gemini Instructions$/m);
-  assert.match(gemini, /Root `AGENTS\.md` is canonical\./);
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:END GEMINI\.SHIM/);
-  assertImportCount(gemini, '@./AGENTS.md', 'root GEMINI.md import count');
-  assert.ok(Buffer.byteLength(gemini, 'utf8') < 1024, 'root GEMINI.md under 1KB');
-
-  const antigravity = readText('.agents/rules/00-agent-toolkit-bootstrap.md');
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:BEGIN ANTIGRAVITY\.BOOTSTRAP v1/);
-  assert.match(antigravity, /^# Agent Toolkit Antigravity Bootstrap$/m);
-  assert.match(antigravity, /Root `AGENTS\.md` is the canonical repo instruction file\./);
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:END ANTIGRAVITY\.BOOTSTRAP/);
-  assert.doesNotMatch(antigravity, /@\.\.\/\.\.\/AGENTS\.md/);
-  assert.ok(Buffer.byteLength(antigravity, 'utf8') < 1024, 'Antigravity bootstrap under 1KB');
-});
-
-test('active and generated default instruction surfaces exclude PR/VCS workflow prompt rules', () => {
-  for (const relPath of [
-    'AGENTS.md',
-    'CLAUDE.md',
-    'GEMINI.md',
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
-    executionPromptPath,
-    n8nAdapterPath,
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-    `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-    `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    'skills/repository-agent-rules/SKILL.md'
-  ]) {
-    assert.equal(exists(relPath), true, relPath);
-    assertNoForbiddenDefaultPromptPhrases(readText(relPath), relPath);
-  }
-});
-
-test('current managed outputs use source-aware markers only', () => {
-  const staleMarkers = [
-    '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
-    '<!-- AI-AGENT-TOOLKIT:END toolkit -->',
-    '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
-    '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->',
-    '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->',
-    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->',
-    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->',
-    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->',
-    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->',
-    '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
-    '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
-  ];
-  for (const relPath of [
-    'AGENTS.md',
-    'README.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
-  ]) {
-    const text = readText(relPath);
-    for (const marker of staleMarkers) assert.equal(text.includes(marker), false, `${relPath}: ${marker}`);
-  }
-});
-
-test('published skill docs focus on repo-local automatic setup', () => {
-  for (const relPath of [
-    'skills/repository-agent-rules/README.md',
-    'skills/repository-agent-rules/SKILL.md',
-    'skills/repository-agent-rules/README.md',
-    'skills/repository-agent-rules/SKILL.md'
-  ]) {
-    const text = readText(relPath);
-    assert.match(text, /repo\/folder-local|repo-local/i, relPath);
-    assert.match(text, /repo\/contracts\/agent-rules\//, relPath);
-    assert.doesNotMatch(text, /C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)|Claude Code global rules example|Antigravity global rules example|Gemini\s+CLI and Antigravity global rules example/, relPath);
-  }
-});
-
-test('root README platform guidance requires AGENTS before platform shims', () => {
-  const text = readText('README.md');
-  const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
-  assert.match(section, /`AGENTS\.md` is the shared managed instruction file inside the target repo/);
-  assert.match(section, /For portable installs, create or merge it from \[repo-local\/AGENTS\.managed\.template\.md\]/);
-  assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
-  assert.match(section, /This section is only for manually copying Toolkit-owned skill folders/);
-  assert.match(section, /\| Platform \| Manual Toolkit-owned skill folder locations \| Active instruction files \| Reference \|/);
-  assert.match(section, /\| Codex \|[^\n]*`<repo>\/\.agents\/skills\/<skill-name>\/`[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(section, /\| OpenCode \|[^\n]*`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(section, /\| Claude Code \|[^\n]*`<repo>\/\.claude\/skills\/<skill-name>\/`[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
-  assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
-  assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
-  assert.match(section, /\| Antigravity 2 \|[^\n]*`<workspace>\/\.agents\/skills\/<skill-name>\/` \(portable copy only; no native plugin\)[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity 2 bootstrap \|/);
-  assert.doesNotMatch(section, /\.gemini\\config\\plugins/);
-  assert.doesNotMatch(section, /Native plugin package via/);
-  assert.doesNotMatch(section, /Opt-in bridge target/);
-  assert.doesNotMatch(section, /\[Official n8n Skills\]/);
-  assert.doesNotMatch(section, /setup n8n plugin|using-n8n-skills|n8n_live/i);
-  assert.doesNotMatch(section, /Repo-local instruction outputs/);
-  assert.doesNotMatch(section, /if using the Gemini shim/);
-  assert.doesNotMatch(section, /if using the Antigravity bootstrap/);
-  assert.doesNotMatch(section, /(?:^|\n)\s*[1-9]\)/);
-  assert.doesNotMatch(section, /and\/or/);
-  assert.doesNotMatch(section, /skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
-  assert.doesNotMatch(section, /start from \[`(?:CLAUDE|GEMINI)\.template\.md`\]/);
-});
-
-test('skill README documents required file sets and shim dependency', () => {
-  for (const relPath of [
-    'skills/repository-agent-rules/README.md',
-    'skills/repository-agent-rules/README.md'
-  ]) {
-    const text = readText(relPath);
-    assert.match(text, /Do not install a shim alone/i, relPath);
-    assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
-    assert.match(text, /repo-local\/docs\/agent-playbooks\//, relPath);
-    assert.match(text, /target repo `docs\/agent-playbooks\/`/, relPath);
-    assertMentionsCompletePortablePlaybookSet(text, relPath);
-    assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
-    assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
-    assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
-    assert.match(text, /shared exact repo-local backup\/restore contract under `_agent-toolkit-backups\/` before replacing the toolkit-owned managed block/i, relPath);
-    assert.match(text, /Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5\.5 High\./, relPath);
-    assert.match(text, /For perfect runtime behaviour, use Codex GPT-5\.5 High or an equivalent high-reasoning model\./, relPath);
-    assert.match(text, /\| Claude Code \| 1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\][^|]*<br>2\. Add `CLAUDE\.md` from \[repo-local\/CLAUDE\.shim\.template\.md\][^|]* \|/i, relPath);
-    assert.doesNotMatch(text, /\| Gemini\s+CLI \|/i, relPath);
-    assert.match(text, /\| Antigravity \| 1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\][^|]*<br>2\. Add `GEMINI\.md` from \[repo-local\/GEMINI\.shim\.template\.md\][^|]*<br>3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` from \[repo-local\/antigravity-bootstrap\.template\.md\][^|]* \|/i, relPath);
-    assert.doesNotMatch(text, /<\/?(?:ol|li)>/i, relPath);
-    assert.doesNotMatch(text, /Never overwrite existing `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/i, relPath);
-    assert.doesNotMatch(text, /produce a merge or diff plan instead/i, relPath);
-    assert.doesNotMatch(text, /if using the Gemini shim/i, relPath);
-    assert.doesNotMatch(text, /if using the Antigravity bootstrap/i, relPath);
-    assert.doesNotMatch(text, /\b[1-9]\)/, relPath);
-    assert.doesNotMatch(text, /and\/or/i, relPath);
-  }
-});
-
-test('n8n local setup README describes automatic repo-local instruction checks', () => {
-  for (const relPath of [
-    'skills/n8n-environment-setup/README.md',
-    'skills/n8n-environment-setup/README.md'
-  ]) {
-    const text = readText(relPath);
-    assert.match(text, /Before repo file edits, automatically check repo-local agent instructions\./, relPath);
-    assert.match(text, /If they are missing, unmanaged, stale, or structurally broken, bootstrap\/repair them first\./, relPath);
-    assert.doesNotMatch(text, /Install \[AI Coding Agent Rules\]\([^)]*\) for generic agent rules/i, relPath);
-    assert.doesNotMatch(text, /use [`']?(?:skills\/)?ai-coding-agent-rules[`']? to check repo-local instructions/i, relPath);
-  }
-});
-
-test('skill instructions add only target platform shims by default', () => {
-  for (const relPath of [
-    'skills/repository-agent-rules/SKILL.md',
-    'skills/repository-agent-rules/SKILL.md'
-  ]) {
-    const text = readText(relPath);
-    assert.match(text, /Check only the required files for the selected platform/i, relPath);
-    assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
-    assert.match(text, /repo-local\/docs\/agent-playbooks\/` -> target repo `docs\/agent-playbooks\/`/, relPath);
-    assert.match(text, /Treat `repo-local\/docs\/agent-playbooks\/` as a folder-level install unit/i, relPath);
-    assert.match(text, /also install or refresh the complete portable playbook doc set under `docs\/agent-playbooks\/` when missing, incomplete, or stale/i, relPath);
-    assertMentionsCompletePortablePlaybookSet(text, relPath);
-    assert.match(text, /install, check, repair, refresh, or bootstrap repo-local agent rules/i, relPath);
-    assert.match(text, /user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions/i, relPath);
-    assert.match(text, /For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check/i, relPath);
-    assert.match(text, /For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check/i, relPath);
-    assert.match(text, /compare toolkit-owned managed block content against the current template content/i, relPath);
-    assert.match(text, /If managed block content differs from the current template, treat it as edited or stale toolkit-owned content/i, relPath);
-    assert.match(text, /### Missing Or Unmanaged Files/, relPath);
-    assert.match(text, /### Broken Or Edited Managed Blocks/, relPath);
-    assert.match(text, /Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned/i, relPath);
-    assert.match(text, /replace edited or stale managed blocks from the current template/i, relPath);
-    assert.match(text, /preserve unmarked user-authored content outside the markers/i, relPath);
-    assert.match(text, /automatically repair the affected repo-local instruction file/i, relPath);
-    assert.match(text, /_agent-toolkit-backups\//, relPath);
-    assert.match(text, /\.agent-toolkit-backups\/.*legacy compatibility/i, relPath);
-    assert.match(text, /require approval bound to that exact preview/i, relPath);
-    assert.match(text, /Backup generations are local repair artifacts/i, relPath);
-    assert.match(text, /do not commit, stage, delete, migrate, or move backup files unless the user explicitly asks/i, relPath);
-    assert.match(text, /If I repaired or backed up an instruction file, the exact previous state and restore metadata were saved under `_agent-toolkit-backups\/` in this project folder\./, relPath);
-    assert.match(text, /Start a new agent session in this folder/i, relPath);
-    assert.match(text, /If a managed block appears manually edited, treat it as toolkit-owned content that needs repair during explicit install, check, repair, refresh, or bootstrap requests/i, relPath);
-    assert.doesNotMatch(text, /repair\/overwrite questions/i, relPath);
-    assert.doesNotMatch(text, /do not guess destructively/i, relPath);
-    assert.doesNotMatch(text, /ask before rewriting/i, relPath);
-    assert.doesNotMatch(text, /The repo has no `CLAUDE\.md`/i, relPath);
-    assert.doesNotMatch(text, /The repo has no `GEMINI\.md`/i, relPath);
-    assert.doesNotMatch(text, /The repo has no `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`/i, relPath);
-  }
-});
-
-test('canonical and generated instruction surfaces carry no user-facing instruction-sources footer requirement', () => {
-  for (const relPath of [
-    executionPromptPath,
-    'AGENTS.md',
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'repo/docs/agent-playbooks/baseline-workflow.md'
-  ]) {
-    assert.doesNotMatch(readText(relPath), /Instruction sources used/i, relPath);
-  }
+test('the repository-agent-rules skill describes the two layers, the opt-in and v2 markers', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const readme = readText('skills/repository-agent-rules/README.md');
+  assert.match(skill, /That block is the opt-in/);
+  assert.match(skill, /Never install or refresh rules in a repository without the block unless the user asks/);
+  assert.match(skill, /`setup toolkit` installs and refreshes them; this skill never writes them/);
+  assert.match(skill, /BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex>/);
+  assert.match(skill, /replaces the older `GLOBAL-AGENTS\.MD-TEMPLATE` and `N8N-AGENT-RULES-ADAPTER` v1 blocks/);
+  assert.match(skill, /Never create shims for platforms out of scope/);
+  for (const file of ['INDEX.md', 'baseline-workflow.md', 'git-completion.md', 'model-safety-flags.md', 'safety-gates.md']) assert.ok(skill.includes(`\`${file}\``), file);
+  assert.match(skill, /verify every playbook `INDEX\.md` links exists/);
+  assert.match(skill, /_agent-toolkit-backups\//);
+  assert.match(skill, /legacy `\.agent-toolkit-backups\/`/);
+  assert.match(skill, /get approval for that exact preview/);
+  assert.doesNotMatch(skill, /heavy global|Manual global setup templates/);
+  assert.match(readme, /never a shim without `AGENTS\.md`/);
+  assert.match(readme, /`setup toolkit` into each harness's user-level file/);
+  assert.doesNotMatch(readme, /OpenCode|Model expectation/);
 });
 
 test('an authorised in-gate refresh continues with the exact one-time notice instead of a restart question', () => {
@@ -807,7 +216,6 @@ test('an authorised in-gate refresh continues with the exact one-time notice ins
   assert.match(skill, /only after the refresh actually succeeded/);
   assert.match(skill, /Reading files does not reload native hooks, tools or permissions/);
   assert.match(skill, /Never make an empty commit, stage unrelated or dirty files/);
-  // The restart question survives only for standalone requests with no task in flight.
   const standalone = skill.indexOf('For a standalone install, repair, refresh, or bootstrap request with no task in flight');
   assert.ok(standalone > skill.indexOf(notice));
   assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > standalone);
@@ -817,25 +225,31 @@ test('an authorised in-gate refresh continues with the exact one-time notice ins
 test('a rules refresh is carried to a pull request and merges only under the owner\'s stored setup choice', () => {
   const skill = readText('skills/repository-agent-rules/SKILL.md');
   const flow = skill.slice(skill.indexOf('**Carry the refresh to a pull request.**'), skill.indexOf('**For a standalone install'));
-  assert.ok(flow.length > 0, 'refresh pull request flow present before the standalone ending');
+  assert.ok(flow.length > 0);
   assert.match(flow, /Stage only the files this refresh wrote/);
   assert.match(flow, /never stage dirty, unrelated or backup files/);
   assert.match(flow, /Watch every check on the pull request's exact head/);
   assert.match(flow, /toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/);
   assert.match(flow, /Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed/);
-  assert.match(flow, /no check has been reported on the exact head by the end of the watch \(checks can register only after the pull request opens, so zero checks never counts as passed\)/);
+  assert.match(flow, /zero checks never counts as passed/);
   assert.match(flow, /This skill grants no merge authority of its own/);
   assert.match(flow, /Never set or change that choice yourself; only setup, with the owner's answer, does/);
   for (const stop of [/stored choice is off, missing or cannot be read/, /any check on the exact head fails, or is still pending when the watch ends/,
     /review rules or branch protection block the merge/, /any file this refresh does not own/, /no GitHub remote/]) assert.match(flow, stop);
-  assert.doesNotMatch(flow, /a required check fails/, 'stopping is not limited to required checks');
-  assert.match(flow, /Never use an admin bypass, force-push, rewrite history/);
-  assert.doesNotMatch(flow, /standing (owner )?approval/i, 'the skill text carries no approval of its own');
-  // The startup note never pauses work or sends the agent to ask the user.
-  assert.doesNotMatch(skill, /pause and ask|despite the warning/i);
-  assert.match(skill, /The note never pauses the current task/);
-  assert.match(skill, /run this skill only when the user explicitly asks/);
-  assert.match(skill, /after the pull request outcome above \(merged, stopped at the open pull request, or no GitHub remote\), stop and end with this exact format/);
-  assert.ok(skill.indexOf('SESSION RESET RECOMMENDED') > skill.indexOf('**Carry the refresh to a pull request.**'));
-  assert.match(skill, /Apart from the refresh pull request above \(a branch, commit, push and pull request of refresh-owned files, a check watch, and a merge only when the owner's stored choice allows it\), it must not push/);
+  assert.match(skill, /Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write/);
+});
+
+test('root README points repository installs at the governed template and the global rules', () => {
+  const text = readText('README.md');
+  const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
+  assert.match(section, /Generic rules reach every session through the global rules that `setup toolkit` installs/);
+  assert.match(section, /\[repo-local\/AGENTS\.managed\.template\.md\]/);
+  assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
+  assert.doesNotMatch(section, /skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+});
+
+test('n8n local setup README describes automatic repo-local instruction checks', () => {
+  const text = readText('skills/n8n-environment-setup/README.md');
+  assert.match(text, /Before repo file edits, automatically check repo-local agent instructions\./);
+  assert.match(text, /If they are missing, unmanaged, stale, or structurally broken, bootstrap\/repair them first\./);
 });

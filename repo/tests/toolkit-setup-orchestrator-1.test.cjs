@@ -110,7 +110,7 @@ test('canonical question specification orders delegation before plugin auto-refr
   };
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
   assert.deepEqual(keys, [
-    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'refreshPrAutoMerge', 'codexPluginAutoRefresh',
+    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'refreshPrAutoMerge', 'codexDocLimit', 'codexPluginAutoRefresh',
   ]);
   assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
 });
@@ -450,9 +450,9 @@ test('explicit textual all recommended approves the exact visible bank', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
   const env = isolatedHomeEnv(root);
-  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const preview = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true, env, input: '' });
   const reference = displayedBankReference(preview.stdout);
-  const result = run(['--execute', '--repo-remote', origin], {
+  const result = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true,
     env,
     input: `${reference}: all recommended\n`,
     timeout: 300000,
@@ -468,9 +468,9 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
   const env = isolatedHomeEnv(root);
-  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const preview = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true, env, input: '' });
   const reference = displayedBankReference(preview.stdout);
-  const result = run(['--execute', '--repo-remote', origin], {
+  const result = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true,
     env,
     input: `${reference}: 1.2=b, 2.1=B\n`,
     timeout: 300000,
@@ -488,9 +488,9 @@ test('cross-process concise replay fails before mapping across a host change', (
   const baseArgs = ['--execute', '--repo-remote', origin];
   const baseEnv = isolatedHomeEnv(root);
 
-  const codexPreview = run(baseArgs, { env: baseEnv, input: '' });
+  const codexPreview = run(baseArgs, { codexDocLimitQuestion: true, env: baseEnv, input: '' });
   const codexReference = displayedBankReference(codexPreview.stdout);
-  const claudeReplay = run([...baseArgs, '--host', 'claude-code'], {
+  const claudeReplay = run([...baseArgs, '--host', 'claude-code'], { codexDocLimitQuestion: true,
     env: baseEnv,
     input: `${codexReference}: 2.1=B\n`,
   });
@@ -513,22 +513,22 @@ test('non-interactive concise input rejects missing malformed and secondary-deta
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const args = ['--execute', '--repo-remote', origin];
   const env = isolatedHomeEnv(root);
-  const preview = run(args, { env, input: '' });
+  const preview = run(args, { codexDocLimitQuestion: true, env, input: '' });
   const reference = displayedBankReference(preview.stdout);
   for (const [input, expected] of [
     ['all recommended\n', /require the displayed bank reference/],
     ['BAD: all recommended\n', /malformed or truncated/],
     [`${reference.slice(0, -1)}: all recommended\n`, /malformed or truncated/],
   ]) {
-    const rejected = run(args, { env, input });
+    const rejected = run(args, { codexDocLimitQuestion: true, env, input });
     assert.notEqual(rejected.status, 0);
     assert.match(rejected.stderr, expected);
   }
-  const plan = run(['--plan', '--json', '--repo-remote', origin], { env });
+  const plan = run(['--plan', '--json', '--repo-remote', origin], { codexDocLimitQuestion: true, env });
   const bank = JSON.parse(plan.stdout).question_bank;
   const retention = bank.find((row) => row.id === 'report-retention');
   const custom = retention.choices.find((choice) => choice.value === 'custom');
-  const secondary = run(args, {
+  const secondary = run(args, { codexDocLimitQuestion: true,
     env,
     input: `${reference}: ${retention.presentation.question_ref}=${custom.presentation_ref}\n`,
   });
@@ -536,7 +536,7 @@ test('non-interactive concise input rejects missing malformed and secondary-deta
   assert.match(secondary.stderr, /requires additional values.*update-report-retention-days/i);
   const updateSource = bank.find((row) => row.id === 'update-source');
   const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
-  const sourceSecondary = run(args, {
+  const sourceSecondary = run(args, { codexDocLimitQuestion: true,
     env,
     input: `${reference}: ${updateSource.presentation.question_ref}=${customSource.presentation_ref}\n`,
   });

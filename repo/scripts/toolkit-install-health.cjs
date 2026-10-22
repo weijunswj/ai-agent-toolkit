@@ -9,8 +9,8 @@
 // A check that could not be completed is action-required, never passed.
 //
 // Checks: the Claude Code plugin (setup only; from the setup verifier's summary), the update
-// record in the Toolkit hub, the Toolkit helper definitions (refreshed when stale), and the
-// Toolkit-owned Claude Code depth setting against the selected topology.
+// record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
+// when stale), and the Toolkit-owned Claude Code depth setting against the selected topology.
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
@@ -20,6 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
+const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
@@ -42,13 +43,14 @@ function readJsonIfExists(file) {
 function slash(value) { return String(value || '').replace(/\\/g, '/'); }
 
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #depth;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth;
 
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, depthSetting }) {
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting }) {
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
     this.#hubPath = hubPath;
     this.#helpers = helperDefinitions;
+    this.#globalRules = globalRules;
     this.#depth = depthSetting;
   }
 
@@ -64,6 +66,7 @@ class ToolkitInstallHealthCheck {
       expectedVersion: manifest.version,
       hubPath: hub,
       helperDefinitions: new ClaudeHelperDefinitions({ environment, repositoryRoot: toolkitRoot, retentionDays }),
+      globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays, respectRemoval: true }),
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
     });
   }
@@ -85,7 +88,7 @@ class ToolkitInstallHealthCheck {
     }
     if (plugin.updated_this_run === true) {
       return this.#check('plugin', label, STATUS.RESTART, `Toolkit ${this.#expectedVersion} was installed this run.`,
-        `Restart Claude Code so it loads Toolkit ${this.#expectedVersion}. After that, each session start rechecks the update record, helper definitions and depth setting, and reports only a problem.`);
+        `Restart Claude Code so it loads Toolkit ${this.#expectedVersion}. After that, each session start rechecks the update record, helper definitions, global rules and depth setting, and reports only a problem.`);
     }
     return this.#check('plugin', label, STATUS.PASSED, `Claude Code runs Toolkit ${this.#expectedVersion} from the managed checkout.`);
   }
@@ -129,6 +132,21 @@ class ToolkitInstallHealthCheck {
     return this.#check('helpers', label, STATUS.PASSED, 'current');
   }
 
+  // The Toolkit global rules block in each harness's user-level file, refreshed when stale.
+  #globalRulesCheck() {
+    const label = 'Global rules';
+    let result;
+    try { result = this.#globalRules.refresh(); }
+    catch (error) {
+      return this.#check('global-rules', label, STATUS.ACTION, `The Toolkit global rules could not be checked: ${error.message}`, 'Run `setup toolkit` again.');
+    }
+    const notes = describeGlobalRules(result).join(' ');
+    if (result.status === 'held') return this.#check('global-rules', label, STATUS.ACTION, `held: ${notes}`, notes);
+    // A write this run (created, added, refreshed or a hand edit restored) is recorded in the update report.
+    if (result.status === 'updated') return { ...this.#check('global-rules', label, STATUS.PASSED, notes), updated: true, run: result.run_id || '' };
+    return this.#check('global-rules', label, STATUS.PASSED, notes);
+  }
+
   // The Toolkit-owned depth setting must match the selected topology.
   #depthSetting(topology) {
     const label = 'Claude Code depth setting';
@@ -162,6 +180,7 @@ class ToolkitInstallHealthCheck {
     if (plugin) checks.push(this.#plugin(plugin));
     checks.push(this.#updateRecord());
     checks.push(this.#helperDefinitions(refreshHelpers, projectDirectories));
+    checks.push(this.#globalRulesCheck());
     if (topology === 'root-only' || topology === 'broader-native') checks.push(this.#depthSetting(topology));
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;

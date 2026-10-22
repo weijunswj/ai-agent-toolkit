@@ -140,17 +140,17 @@ test('backend and app-foundation skills require traceable generic error handling
   }
 });
 
-test('repo-local agent rules keep application error defaults compact', () => {
-  for (const relPath of [
-    'repo/contracts/agent-rules/ai-coding-agent-execution.md',
-    'repo/contracts/agent-rules/AGENTS.template.md',
-    'repo/contracts/agent-rules/CLAUDE.template.md',
-    'repo/contracts/agent-rules/GEMINI.template.md',
-    'AGENTS.md',
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
-  ]) {
-    const text = readText(relPath);
-    assertCompactApplicationErrorBlock(text, relPath);
-    assertFallbackPolicyBlock(text, relPath);
+test('global rules keep application error and fallback defaults compact', () => {
+  const text = readText('repo/contracts/agent-rules/global-rules.md');
+  const errors = text.match(/^- \*\*Errors and privacy:\*\*.*$/m)?.[0] || '';
+  assert.ok(errors && errors.length <= 420, 'the error default stays one compact bullet');
+  assert.match(errors, /user-facing errors are generic with a support-safe reference that matches the server log entry/);
+  assert.match(errors, /Logs hold no prompts, uploads, model outputs, secrets, auth headers or cookies, payment data, private connector data or unneeded personal data/);
+  assert.doesNotMatch(errors, /UNKNOWN_ERROR|INTERNAL_ERROR|ERR_GENERIC|Privacy Policy|Terms of Use/, 'static codes and legal detail stay in skills');
+  const fallbacks = text.match(/^- \*\*Fallbacks:\*\*.*$/m)?.[0] || '';
+  for (const rule of [/fix the real failure path/, /No broad fallbacks, silent compatibility paths, sample-data fallbacks, fake success or catch-and-continue/,
+    /correctness, data or migration safety, or approved compatibility/, /narrow, visible, tested on both paths and documented with a removal condition/,
+    /Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations or failed validation, use fake business data, or silently downgrade production behaviour/]) {
+    assert.match(fallbacks, rule);
   }
 });

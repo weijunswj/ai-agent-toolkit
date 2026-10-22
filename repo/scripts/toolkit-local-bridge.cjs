@@ -25,9 +25,10 @@ const {
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
+const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.3.0';
+const BRIDGE_VERSION = '3.4.0';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -156,6 +157,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--disable-update-reports') args.disableUpdateReports = true;
     else if (arg === '--enable-refresh-pr-auto-merge') args.enableRefreshPrAutoMerge = true;
     else if (arg === '--disable-refresh-pr-auto-merge') args.disableRefreshPrAutoMerge = true;
+    else if (arg === '--enable-codex-doc-limit') args.enableCodexDocLimit = true;
+    else if (arg === '--disable-codex-doc-limit') args.disableCodexDocLimit = true;
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = Number(next());
       args.updateReportRetentionDaysExplicit = true;
@@ -209,6 +212,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (args.enableRefreshPrAutoMerge && args.disableRefreshPrAutoMerge) {
     throw new Error('--enable-refresh-pr-auto-merge and --disable-refresh-pr-auto-merge cannot be used together');
+  }
+  if (args.enableCodexDocLimit && args.disableCodexDocLimit) {
+    throw new Error('--enable-codex-doc-limit and --disable-codex-doc-limit cannot be used together');
   }
   if (args.updateReportRetentionDays && !args.updateReportRetentionDaysExplicit) args.updateReportRetentionDaysExplicit = true;
   if (args.updateReportRetentionDaysExplicit && (!Number.isInteger(args.updateReportRetentionDays) || args.updateReportRetentionDays <= 0)) {
@@ -288,6 +294,8 @@ function printHelp() {
     '  --disable-update-report-open retain failure-only opening; successful reports remain closed',
     '  --enable-refresh-pr-auto-merge  owner choice: merge rule-refresh PRs when the required checks pass',
     '  --disable-refresh-pr-auto-merge stop rule-refresh PRs at the open PR',
+    '  --enable-codex-doc-limit        owner choice: keep Codex project_doc_max_bytes raised to 65536',
+    '  --disable-codex-doc-limit       leave Codex project_doc_max_bytes alone',
     '  --enable-codex-plugin-auto-refresh',
     '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
@@ -755,6 +763,7 @@ function defaultState() {
     last_update_report_signature: '',
     update_report_enabled: true,
     refresh_pr_auto_merge_enabled: false,
+    codex_doc_limit_enabled: false,
     update_report_open_enabled: false,
     update_report_open_behavior: 'action-required-only',
     legacy_update_report_open_migrated: false,
@@ -802,6 +811,8 @@ function normalizedState(raw) {
   // Owner choice read by repository-agent-rules: merge its refresh PR once the required
   // checks pass. Only an explicit true enables it.
   state.refresh_pr_auto_merge_enabled = state.refresh_pr_auto_merge_enabled === true;
+  // Owner choice from setup: keep Codex's project_doc_max_bytes raised. Only an explicit true enables it.
+  state.codex_doc_limit_enabled = state.codex_doc_limit_enabled === true;
   return state;
 }
 
@@ -830,6 +841,8 @@ function applyRequestedState(state, args) {
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
   if (args.enableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = true;
   if (args.disableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = false;
+  if (args.enableCodexDocLimit) next.codex_doc_limit_enabled = true;
+  if (args.disableCodexDocLimit) next.codex_doc_limit_enabled = false;
   return next;
 }
 
@@ -1137,7 +1150,7 @@ function parseManagedMarkerBlocks(text) {
     const source = match[1].trim();
     const action = match[2];
     const rawLabel = match[3].trim();
-    const label = action === 'BEGIN' ? rawLabel.replace(/\s+v\d+$/i, '').trim() : rawLabel;
+    const label = action === 'BEGIN' ? rawLabel.replace(/\s+v\d+(?:\s+toolkit=\S+\s+sha256=[0-9a-f]+)?$/i, '').trim() : rawLabel;
     const key = markerIdentity(source, label);
 
     if (action === 'BEGIN') {
@@ -1404,6 +1417,46 @@ function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
   const message = formatAgentRulesPreflight(result);
   if (message && new AgentRulesNoticeLedger(hubPath).claim(agentRulesNoticeKey(result, message))) console.log(message);
   return result;
+}
+
+// The Codex session-start hook keeps the Toolkit global rules in ~/.codex/AGENTS.md current, rendered
+// from the managed checkout (Claude Code does this in its install check). It runs only after setup
+// configured the bridge with auto-sync on. Silent on a routine refresh; it prints one line when it
+// restored a hand-edited block or could not write, and never stops the session. Setup reports the
+// hand-written sections the block covers.
+function maybeRefreshCodexGlobalRules(args, state, environment = process.env) {
+  if (!args.hook || args.syncSource !== 'codex-plugin') return null;
+  if (!state?.hub_version || state.auto_sync_enabled !== true) return null;
+  const checkout = state?.repo_path && fs.existsSync(path.join(state.repo_path, 'repo', 'contracts', 'agent-rules', 'global-rules.md'))
+    ? state.repo_path : path.resolve(__dirname, '..', '..');
+  try {
+    // Codex's instruction limit is kept raised only after the owner said yes in setup; without that
+    // yes the session start does not read config.toml at all.
+    const result = new GlobalRules({ environment, toolkitRoot: checkout, harnesses: ['codex'], respectRemoval: true,
+      retentionDays: state?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+      codexDocLimit: state.codex_doc_limit_enabled === true ? 'raise' : 'none' }).refresh();
+    const restored = result.files.some((file) => file.action === 'restored');
+    const limitChanged = ['raised', 'restored-previous', 'deleted-file'].includes(result.doc_limit?.action);
+    if (result.status === 'held' || restored || limitChanged) console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);
+    return result;
+  } catch (error) {
+    console.log(`Toolkit global rules could not be refreshed (${sanitizeOutputMessage(error.message)}). Run \`setup toolkit\` in Codex.`);
+    return null;
+  }
+}
+
+// The Codex session-start global rules run as an update-report entry, in the install-check shape
+// the Claude Code session start uses: what the session line reports (a hold, a restored block or a
+// change to Codex's instruction limit) gets its own report.
+function codexGlobalRulesReportEntry(result) {
+  const restored = result?.files?.some((file) => file.action === 'restored');
+  const limitChanged = ['raised', 'restored-previous', 'deleted-file'].includes(result?.doc_limit?.action);
+  if (!result || (result.status !== 'held' && !restored && !limitChanged)) return null;
+  const summary = describeGlobalRules(result).join(' ');
+  if (result.status === 'held') {
+    return { status: 'action-required', checks: [{ id: 'global-rules', label: 'Global rules', status: 'action-required', summary: `held: ${summary}` }], actions: [summary] };
+  }
+  return { status: 'passed', checks: [{ id: 'global-rules', label: 'Global rules', status: 'passed', summary, updated: true, run: result.run_id || '' }], actions: [] };
 }
 
 function isLegacyDelegatedRepoSync(args) {
@@ -1753,8 +1806,15 @@ function updateReportSignature({ args, checksum, context }) {
       maxReportFiles: cleanup.max_report_files || DEFAULT_UPDATE_REPORT_MAX_FILES,
       errorCount: cleanup.error_count || 0
     },
+    // Checks that wrote something this run are part of the signature: each summary names its own
+    // backup folder, so a later restore on the same Toolkit content still gets its own report.
     installCheck: context.installCheck
-      ? { status: context.installCheck.status || '', actions: context.installCheck.actions || [] }
+      ? {
+          status: context.installCheck.status || '',
+          actions: context.installCheck.actions || [],
+          updated: (context.installCheck.checks || []).filter((entry) => entry.updated === true)
+            .map((entry) => ({ id: entry.id || '', run: entry.run || '', summary: entry.summary || '' }))
+        }
       : null
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -2671,6 +2731,7 @@ function buildAudit({ args, hubPath, state, checksum }) {
     auto_sync_enabled: state.auto_sync_enabled,
     update_report_enabled: state.update_report_enabled,
     refresh_pr_auto_merge_enabled: state.refresh_pr_auto_merge_enabled,
+    codex_doc_limit_enabled: state.codex_doc_limit_enabled,
     update_report_open_enabled: state.update_report_open_enabled,
     update_report_open_behavior: state.update_report_open_behavior,
     legacy_update_report_open_migrated: state.legacy_update_report_open_migrated,
@@ -2782,7 +2843,8 @@ function nativePluginCacheStatus(args, state) {
 // The installed Claude Code session-start hook checks the install after its maintenance.
 // Claude Code runs Toolkit in place from the managed checkout, so the check runs in a fresh
 // process: after an update it uses the updated code and stack registry on disk.
-function sessionStartInstallCheck(args, hubPath) {
+function sessionStartInstallCheck(args, hubPath, codexGlobalRules = null) {
+  if (args.hook && args.syncSource === 'codex-plugin') return codexGlobalRulesReportEntry(codexGlobalRules);
   if (!args.hook || args.syncSource !== 'claude-plugin') return null;
   const root = runtimeClaudePluginRoot();
   const result = runCommand(process.execPath, [path.join(root, 'repo', 'scripts', 'toolkit-install-health.cjs'), '--session-start', '--hub', hubPath], {
@@ -3139,8 +3201,10 @@ class RepositoryAutoUpdateOperation {
   #statusState = null; #snapshot = null; #updateResult = null;
   #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = ''; #installCheck = null;
 
-  constructor({ args, hubPath, state, checksum, testHooks = {} }) {
+  #codexGlobalRules;
+  constructor({ args, hubPath, state, checksum, testHooks = {}, codexGlobalRules = null }) {
     this.#args = args; this.#hubPath = hubPath; this.#state = state; this.#checksum = checksum; this.#testHooks = testHooks;
+    this.#codexGlobalRules = codexGlobalRules;
   }
 
   #hubState(fallback) { return normalizedState(readJsonIfExists(path.join(this.#hubPath, 'state.json')) || fallback); }
@@ -3324,11 +3388,11 @@ class RepositoryAutoUpdateOperation {
     this.#refreshSnapshot();
     const failed = this.#delegateSync();
     if (failed) return failed;
-    this.#installCheck = sessionStartInstallCheck(this.#args, this.#hubPath);
+    this.#installCheck = sessionStartInstallCheck(this.#args, this.#hubPath, this.#codexGlobalRules);
     return this.#finalReport();
   }
 }
-function runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks = {} }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,checksum,testHooks}).run();}
+function runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks = {}, codexGlobalRules = null }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,checksum,testHooks,codexGlobalRules}).run();}
 
 function persistActiveWrite({
   args,
@@ -3377,7 +3441,7 @@ function persistActiveWrite({
 // One bridge invocation: isolated project commands, hook no-ops, audit, the
 // repository auto-update path, active no-target bookkeeping and the locked target sync.
 class LocalBridgeRun {
-  #argv; #testHooks; #args = null; #hubPath = null;
+  #argv; #testHooks; #args = null; #hubPath = null; #codexGlobalRules = null;
   constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
   // The project-local Antigravity skill copy never touches hub state.
@@ -3396,7 +3460,7 @@ class LocalBridgeRun {
       repo: repoReportContextFromState(state, args),
       nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
       thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-      installCheck: sessionStartInstallCheck(args, this.#hubPath)
+      installCheck: sessionStartInstallCheck(args, this.#hubPath, this.#codexGlobalRules)
     };
   }
 
@@ -3505,6 +3569,7 @@ class LocalBridgeRun {
       }
       return { status: 0, audit: null };
     }
+    this.#codexGlobalRules = maybeRefreshCodexGlobalRules(args, existingState);
 
     const requested = applyRequestedState(existingState, args);
     const cleanupResult = this.#cleanupReports(requested);
@@ -3520,7 +3585,7 @@ class LocalBridgeRun {
     if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
     if (!args.write) return { status: 0, audit };
     if (shouldRunRepoAutoUpdate(args, state)) {
-      return runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks: this.#testHooks });
+      return runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks: this.#testHooks, codexGlobalRules: this.#codexGlobalRules });
     }
     const plainSync = args.syncEnabled && !args.enableAutoSync && !args.disableAutoSync
       && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate;
@@ -3575,6 +3640,8 @@ module.exports = {
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
+  maybeRefreshCodexGlobalRules,
+  codexGlobalRulesReportEntry,
   discoverCodexPluginHookRoots,
   repairThirdPartyCodexPluginHooks
 };

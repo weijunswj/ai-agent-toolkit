@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {capturedStack}=require('./support/captured-stack-fixture.cjs');
 const {CapturedStackBinding}=require('../scripts/toolkit-stack-selection.cjs');
 const root=path.resolve(__dirname,'../..'),document=fs.readFileSync(path.join(root,'repo/CONTROLLER.md'),'utf8');
-function current(text){const start=text.indexOf('## Current V3 operating procedure');assert.ok(start>=0,'current authority section required');assert.equal(text.includes('## Historical compatibility reference'),false,'the pre-V3 history is removed');return text.slice(start);}
+function current(text){assert.equal(text.includes('## Historical compatibility reference'),false,'the pre-V3 history is removed');return text;}
 
 test('current procedure resolves all concrete routes solely from captured registry and CURRENT',()=>{
  const body=current(document);assert.match(body,/canonical \[V3 stack registry\]\(contracts\/controller-kernel\/stack-registry-v3\.json\)/);assert.match(body,/exact captured registry revision and pinned CURRENT selection/);assert.match(body,/sole source of concrete model, effort and required reviewer choices/);
@@ -21,13 +21,13 @@ test('current complete independent review law applies to the actual selected 1\/
 });
 
 test('native verification preserves exact supported configuration and scoped historical overrides',()=>{
- const body=current(document);assert.match(body,/verify the supported actual route and exact effective configuration before consequential effects/);assert.match(body,/No unavailable route authorises a model\/effort\/provider fallback/);assert.match(body,/Admitted historical qualification overrides retain their exact scoped authority and immutable inputs/);assert.match(body,/Source tests.*cannot establish native qualification/);assert.doesNotMatch(body,/selected native qualification bindings are/);
+ const body=current(document);assert.match(body,/verify the supported actual route and exact effective configuration before consequential effects/i);assert.match(body,/read back before consequential work, is the route proof/);assert.match(body,/post one takeover record on the parent's CURRENT/);assert.match(body,/No unavailable route authorises a model\/effort\/provider fallback/);assert.match(body,/Admitted historical qualification overrides retain their exact scoped authority and immutable inputs/);assert.match(body,/Source tests.*cannot establish native qualification/);assert.doesNotMatch(body,/selected native qualification bindings are/);
 });
 
 test('actual bootstrap consumer references exact Controller and version-bound registry sources',()=>{
  const skill=fs.readFileSync(path.join(root,'skills/controller-bootstrap/SKILL.md'),'utf8');assert.match(skill,/`controller`: `repo\/CONTROLLER\.md`/);assert.match(skill,/stack-registry-v3\.json.*explicitly admitted continuous profiles/s);assert.match(skill,/complete returned bytes against both Git blob SHA-1 and content SHA-256/);assert.match(skill,/must not self-verify root admission/);
 });
 
-test('the Architecture copy has the same current registry and complete review law, and the bootstrap no longer pins it',()=>{
- const architecture=fs.readFileSync(path.join(root,'repo/ARCHITECTURE.md'),'utf8'),body=current(architecture);assert.match(body,/sole source of concrete model, effort and required reviewer choices/);assert.match(body,/Every selected required reviewer gets the identical complete candidate, scope and evidence/);assert.doesNotMatch(body,/use two fresh independent peers|uses two independent Opus|selected native qualification bindings are/);const registry=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json')));for(const p of Object.values(registry.profiles))for(const r of [...Object.values(p.routes),...p.reviewers])if(r)assert.equal(body.includes(r.model),false);const skill=fs.readFileSync(path.join(root,'skills/controller-bootstrap/SKILL.md'),'utf8');assert.doesNotMatch(skill,/ARCHITECTURE.md/);
+test('the Architecture file is a pointer-only map, and the bootstrap no longer pins it',()=>{
+ const architecture=fs.readFileSync(path.join(root,'repo/ARCHITECTURE.md'),'utf8');assert.match(architecture,/^# Toolkit Repository Map/);assert.doesNotMatch(architecture,/sole source of concrete model|Every selected required reviewer|selected native qualification bindings are/);const registry=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json')));for(const p of Object.values(registry.profiles))for(const r of [...Object.values(p.routes),...p.reviewers])if(r)assert.equal(architecture.includes(r.model),false);const skill=fs.readFileSync(path.join(root,'skills/controller-bootstrap/SKILL.md'),'utf8');assert.doesNotMatch(skill,/ARCHITECTURE.md/);
 });

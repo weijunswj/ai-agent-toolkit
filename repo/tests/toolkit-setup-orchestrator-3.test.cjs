@@ -113,18 +113,21 @@ test('setup docs claim no retired automatic admission and keep honest enforcemen
 
 test('generated Codex and Claude instruction surfaces preserve the compact host-neutral topology policy', () => {
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
+  const global = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/global-rules.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
-    /G0 MUST delegate suitable separable evidence gathering by default/,
-    /G1 MUST delegate suitable independent implementation or validation by default/,
-    /isolated context and one minimal self-contained task packet/,
-    /Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none/,
-    /Mutating sibling subagents require disjoint mutation ownership and scope/,
-    /Read-only siblings may investigate genuinely separable questions in parallel/,
-    /Model, reasoning, service tier, and route are launch\/controller metadata/,
+    /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
+    /Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
+    /Keep model, effort, tier and route out of portable task prompts unless a runtime requires them/,
   ]) assert.match(agents, pattern);
-  assert.doesNotMatch(agents.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '', /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
+  for (const pattern of [
+    /root session owns integration, validation, conflict resolution and final judgement/,
+    /isolated context and one minimal self-contained task/,
+    /Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel/,
+  ]) assert.match(global, pattern);
+  for (const text of [agents, global]) {
+    assert.doesNotMatch(text, /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
+  }
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);

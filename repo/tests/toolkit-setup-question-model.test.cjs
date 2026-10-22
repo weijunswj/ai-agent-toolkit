@@ -14,6 +14,7 @@ const expectedCodexRows = [
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
   ['refresh-pr-auto-merge', 'Merge rule-refresh PRs when the required checks pass'],
+  ['codex-instruction-limit', "Raise Codex's instruction limit"],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
 ];
 
@@ -292,18 +293,18 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 6);
+  assert.equal(codex[0].presentation.total_visible_question_count, 7);
   assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
-  assert.equal(claude[0].presentation.total_visible_question_count, 7);
+  assert.equal(claude[0].presentation.total_visible_question_count, 8);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1', '3.1']);
 });
 
 test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
@@ -332,7 +333,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'refresh-pr-auto-merge');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -393,7 +394,7 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
   assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
-    'update-source', 'update-reports', 'report-retention', 'refresh-pr-auto-merge', 'codex-toolkit-maintenance',
+    'update-source', 'update-reports', 'report-retention', 'refresh-pr-auto-merge', 'codex-instruction-limit', 'codex-toolkit-maintenance',
   ]);
   assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
     'managed-checkout-path', 'report-retention-days',
@@ -488,7 +489,7 @@ test('TTY all recommended and changed-only commands execute after exactly one co
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
-  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
@@ -545,4 +546,24 @@ test('the rule-refresh PR merge question is recommended on, keeps the stored cho
   }
   const kept = core.parseArgs(['--plan', '--keep-refresh-pr-auto-merge']);
   assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('refresh-pr-auto-merge'), false);
+});
+
+test('the Codex instruction limit question is recommended on, explains the edit and passes the bridge flag', () => {
+  const current = stateWithManaged(managedState());
+  for (const host of ['codex', 'claude-code']) {
+    const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', host]), current).find((spec) => spec.id === 'codex-instruction-limit');
+    assert.equal(row.section, 'Updates and reports', host);
+    assert.equal(row.recommended, 'enable');
+    assert.deepEqual(row.choices.map((choice) => choice.label), ['Raise it', 'Leave it', 'Keep current']);
+    assert.match(row.whatThisControls, /never changes 0 \(project docs off\) or a value of 65536 or more/);
+    assert.match(row.whatThisControls, /--remove` puts the previous value back/);
+    assert.equal(row.currentState.verification, 'defaulted');
+    assert.match(row.current, /No choice is recorded, so Toolkit leaves Codex's instruction limit alone/);
+  }
+  for (const flag of ['--enable-codex-doc-limit', '--disable-codex-doc-limit']) {
+    const args = core.parseArgs(['--plan', flag]);
+    assert.ok(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: args.setupChoices })).includes(flag), flag);
+  }
+  const kept = core.parseArgs(['--plan', '--keep-codex-doc-limit']);
+  assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('codex-doc-limit'), false);
 });

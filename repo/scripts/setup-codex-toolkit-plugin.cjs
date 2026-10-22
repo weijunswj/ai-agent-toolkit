@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.3.0';
+const EXPECTED_TOOLKIT_VERSION = '3.4.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -49,6 +49,10 @@ const CACHE_FINGERPRINT_PATHS = [
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
   'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/toolkit-global-rules.cjs',
+  'repo/scripts/toolkit-managed-block.cjs',
+  'repo/contracts/agent-rules/global-rules.md',
+  'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
   'repo/scripts/toolkit-staging-generations.cjs',
   'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
 ];

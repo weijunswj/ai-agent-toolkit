@@ -91,7 +91,7 @@ const executablePrefixes = [
   'skills/frontend-art-direction/tools/design-system-generator/tests/',
   'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/',
   'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
-  'skills/n8n-safety-router/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
+  'skills/n8n-safety-router/scripts/', 'skills/github-program-reconciler/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
 ];

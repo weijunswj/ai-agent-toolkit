@@ -1,358 +1,77 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
-# AI Coding Agent Rules
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=90d4441b6f1f -->
+# Toolkit-Governed Repository Rules
 
-You are an execution-first coding agent. Inspect local context, make the smallest safe change, validate, and report clearly. Optimize for correctness, safety, useful progress, low context use, and honest validation.
+This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it. Generic rules come from the Toolkit global rules in the harness's user-level file. If they are not in your context (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor.
 
-## Instruction Priority
+## Gates
 
-Follow instructions in this order:
+Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G2 starts after the working result and the owner's actual UAT acceptance, in fresh independent contexts. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants, and rechecks target corrected boundary families rather than restarting discovery.
 
-1. Current user request.
-2. Root `AGENTS.md`, including repo-specific appendices.
-3. Repo-local playbooks or docs referenced by `AGENTS.md`.
-4. Local README files, docs, scripts, tests, and documented validation commands.
-5. Relevant installed skills, plugins, or local references when they clearly match the task.
-6. General best practice.
+Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a required model, effort or harness switch, runtime or environment replacement, activated instruction or profile revision or executor replacement, and after genuine session loss or forced compaction at a safe boundary. Planned G1 segment completion alone checkpoints and continues in the same session. Verify custody and stop the old writer before a controller relaunch; the successor continues the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first. Keep functional, UAT, review, custody, integration, publication, Core and parent states distinct. These rules do not claim the detailed native host matrix is implemented or qualified.
 
-If instructions conflict, follow the higher-priority source and report material conflicts when they affect the work.
+## Delegation And Routes
 
-## Working Modes
+G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Exceptions (trivial or inseparable work, overhead above benefit, tightly coupled reasoning, an unavailable exact route, a real authority or safety boundary) are recorded briefly; there is no helper quota, ceremonial launch or extra owner permission for already-authorised direct work. Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none.
 
-- Answer mode: answer advice, explanation, review, comparison, or planning requests without editing files.
-- Plan mode: for broad, ambiguous, architectural, or risky tasks, inspect enough context to make a repo-specific plan before editing.
-- Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
-- Safety-gated mode: before a gated action, verify that an applicable approval covers the exact action and that required host-native permission is available. Preserve an unchanged, unexpired, unrevoked approval only for the same still-pending action; seek fresh approval or host confirmation for a changed action, revoked or expired approval, uncovered additional work, or a native control that requires it.
+Models and effort come only from an explicitly selected stack registry revision pinned in the controller decision and CURRENT admission, never inferred from the host, provider, alias or newest bundled registry; a newer registry needs explicit adoption and never changes an active run. Keep qualification overrides separate from production selection, and each stack's lead and helper bindings independent. Model and effort follow launch ownership: a human's own choice for an agent they open directly (including a G2 chat) is advisory, not a blocker, and is recorded as the actual route, never labelled the recommended one. Every automation-launched G0/G1/G2 worker or successor, even as root of its own session, and every G0/G1 helper gets the exact pinned route for its role and member, with no fallback or weaker effort. A root label is not a human override, and no model lock goes into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
 
-## Agent Topology And Delegation
+**Route proof:** every gate launch pins model and effort explicitly. Before consequential work, the launched session reads its own model and effort from session metadata (for example `get_session(self)`) and stops with a report when either is inherited, missing or different from the pinned route, on every launch path including Claude Projects thread starts. Service tier is the controller's concern (future launches use Standard). Keep model, effort, tier and route out of portable task prompts unless a runtime requires them.
 
-The root or parent executor owns integration, validation, conflict resolution, and final judgment.
+## Delivery
 
-G0 MUST delegate suitable separable evidence gathering by default. G1 MUST delegate suitable independent implementation or validation by default. The strong lead owns reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Give each helper isolated context and one minimal self-contained task packet. Exceptions are trivial or inseparable work, overhead exceeding benefit, tightly coupled reasoning or integration, a genuinely unavailable exact model/effort route, or a real authority or safety boundary. Briefly record a substantial-work exception; no helper quota, ceremonial launch or extra owner permission applies to already-authorised direct work.
+- Agree a release plan up front: releases, lanes and order. Keep one open release PR per lane; work outside the plan states its reason.
+- Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Core, then Hardening, then Later.
+- Keep tests fast: targeted local runs, CI as the full gate, and sharding or caching only when coverage is unchanged.
+- Keep a recoverable packet: exact source or delta, scope and authority, current results and evidence, environment, unresolved effects and denials, verified custody, and one next action. A continuation loads the current packet and changed instructions, not the full history.
+- G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding. Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
+- Every governed repository keeps a current compact repo map (parts, entry points, sources of truth, ownership, recorded commit), updated in the change that moves what it describes.
 
-Only a G0 or G1 lead may launch helpers. Helpers never launch, delegate to or request another agent, and G2 reviewers have none. In normal folders (work that is not Toolkit-governed) the limit is one layer: the main session may start subagents; subagents never start another. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
+## Records And Evidence
 
-The root or parent remains responsible for integrating and validating every returned result. Bind model and effort through the actual trusted launcher. Preserve each selected stack's previous G0 helper binding independently from its strong lead. G2 reviewers have no helpers. Service tier is a controller/launcher concern; apply the latest owner tier selection (Standard for future launches under the 12 October no-Priority instruction). Workers and helpers need no tier introspection or receipt, and a launcher without a helper tier field must not block suitable delegation. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
+- Programme tracking: keep the parent issue's tracker current (SHA, version, lane and gate, PR, review and UAT state, queue, completed, deferred and superseded work) and record start, PR head, review verdicts, findings and exact-head fixes, CI, merge, UAT result, remediation and completion. Keep pending gates open after merge.
+- Decision traces: the programme issue body is the canonical record. Link every non-bot comment from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), one line per record ID; a record that replaces another adds `SUPERSEDES=<record ID>`. Before the body passes 60,000 characters (GitHub's limit is 65,536), move older index lines into an index comment linked from the body, so every record stays one hop away. The `github-program-reconciler` trace audit fails on any unlinked comment.
+- SHAs: link files and commits with the 7-character short SHA (longer if GitHub reports it ambiguous) and write the full 40-character SHA beside the link as plain code text.
+- Takeover: a new controller posts one takeover record on the parent's CURRENT before acting (its identity, the bound commit and `CONTROLLER.md` blob, evidence that the previous writer stopped, the next action) and reads it back.
+- Custody: session folders, side-session notes, scratchpads and temp paths are never custody. Packets, plans and reviews reach the selected private evidence store with a manifest and read-back before a record cites them; archive old sessions only after that read-back.
+- Evidence store writes are allowed only in a separate repository whose identity and private visibility are verified, within owner authority that names the repository, effect, ref, paths and content (a name or prefix alone grants nothing). An approved evidence-only update, including its `main`, preserves existing evidence and is read back. Never relabel task source as evidence or retry a denied effect.
 
-## Deployment Branch Naming
+## Repository Setup
 
-A branch whose primary purpose is deployment or release-state preparation for a named environment uses `deployment/<environment>`.
+- If the repository does legitimate security-sensitive work, describe it in an `Authorised context` section outside this block: who owns the code, that the work is development and defensive testing of the repository's own software, and that nothing targets third-party systems.
+- If the playbook index is missing during an instruction install, repair or refresh, report that it needs installing.
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:END TOOLKIT-GOVERNED-RULES -->
 
-Examples:
+## This Repository
 
-- `deployment/alpha`
-- `deployment/staging`
-- `deployment/production`
+This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Portable installs use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md). Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
 
-Use a stable lowercase environment slug. Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics.
+- **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the portable index), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
+- **Programme:** for [programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421), follow [Toolkit V3](repo/docs/TOOLKIT-V3.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
 
-Do not invent `deploy/`, `release-deploy/`, bare `prod/`, bare `staging/`, or equivalent ad hoc deployment branch alternatives. Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority.
+## Safety
 
-## Local Documentation
+- Toolkit source changes go through a non-main branch and PR. Evidence custody follows the governed block above.
+- Never commit secrets, private values, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, runtime-only files, product code, customer data or business workflow JSON.
+- Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation.
+- Never weaken tests, validation, schemas, guardrails, attribution, generated-output ownership or approval gates to pass a check, and never claim CI passed without checking it.
 
-Treat repo-local documentation as active task context, not optional background.
+## Sources, Markers And Packaging
 
-Default portable playbook index: [Portable playbook index](docs/agent-playbooks/INDEX.md) (`docs/agent-playbooks/INDEX.md`).
-
-Before planning or editing, read root `AGENTS.md`, then the portable index when present. Classify the task and read only its smallest matching playbook set; otherwise continue baseline-only.
-
-Do not recursively read playbooks. If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs. For agent-instruction installation/repair/refresh, report that the index needs installation or refresh. Read the smallest relevant docs for generated files, publishing, migrations, setup, operations, security, CI/CD, deployment, data/schema, API contracts, tests, or documented workflows.
-
-Use any repo docs index, architecture/source-of-truth guide, or contributor guide to target reading. For navigation-heavy tasks, consult an existing repo map first. Keep repo maps pointer-based and current; create one only when it fits convention and saves future context.
-
-## Safety Gates
-
-Explicit approval bound to the exact action is required before actions that may:
-
-- Mutate a live or external system.
-- Modify credentials, secrets, auth, tokens, private keys, or environment values.
-- Deploy, publish, activate, deactivate, import, export, sync, restart, or expose services.
-- Run Docker or external-service actions outside a clearly safe local/test context.
-- Touch customer/private data or private business data.
-- Delete, overwrite, archive, or run destructive commands.
-- Remove validation, tests, safety checks, or guardrails.
-- Rewrite git history.
-
-Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
-
-Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
-
-## Application Error, Logging, And Privacy Defaults
-
-When touching app behavior, use generic user-facing errors with a support-safe traceable reference, the same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
-
-## Fallback Policy
-
-Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
-
-## Shipping Law
-
-Default coding governance is `G0 Discovery -> G1 Builder, including UAT -> G2 Review`, unless the user chooses another workflow. G0 and G1 have the same strong lead binding. One builder owns the whole approved outcome across ordinary corrections, useful checkpoints and fresh sessions; do not require mini-child admissions or new permission for ordinary in-scope fixes. G2 starts after the builder's working result and actual owner UAT acceptance, using fresh independent contexts. The selected registry stack fixes the complete reviewer set; do not add a peer, duplicate a member or add a closing panel automatically. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants, and rechecks target corrected boundary families rather than restarting discovery.
-
-Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
-
-Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
-
-Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
-
-Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. Keep a recoverable packet with exact source/delta, applicable scope and authority, current results/evidence, environment, unresolved effects and denials, verified private custody and one next action. An unchanged continuation loads the current packet and changed relevant instructions, not the full history. Source-only checks, fixtures, silence and CI do not establish owner UAT or installed acceptance. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
-
-**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises bypassing a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.
-
-For adopted Toolkit V3 work, fresh executor contexts are mandatory between G0 and G1, for initial G2, for a required model/effort/harness switch, runtime/environment replacement, activated instruction/profile revision or executor replacement, and after genuine session loss or forced compaction at a safe boundary. Planned G1 segment completion alone checkpoints and continues in the same session. Verify custody and stop the old writer before supported controller relaunch; continue the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family correction recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first. Correct helper routing and pre-inference wrong-route prevention require separate trusted proofs. Local disposable copies can be eligible immediately after verified custody, consumer retrieval and ownership/dependency checks; current v2 stored temporary bulk expires 21 days after verified transfer, with explicit pins/holds, while historical v1 records keep their 30-day legacy clock. Keep functional/UAT/review/custody/integration/publication/Core/parent states distinct. The canonical Toolkit V3 contract supplies the detailed native host matrix and acceptance cases; these instructions do not claim those cases are implemented or qualified.
-
-## User Action Questions
-
-When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
-
-## Object Ownership And Stack Selection
-
-Use object-oriented ownership by default when implementing stateful application, runtime, controller, resource, persistence, or effectful workflow behavior. Give each owner a cohesive responsibility, explicit constructor dependencies, and methods that enforce its invariants and effect ordering. Compose owners through narrow interfaces; do not hide mutable state in unrelated module globals or add classes that merely forward to the old implementation. Preserve public behavior, approvals, independent readback, concurrency controls, and recovery semantics during refactoring.
-
-Pure transformations, immutable data definitions, predicates, and stateless protocol adapters may remain functions when an object would provide no ownership benefit. Record the specific boundary and reason when reviewing a consequential exception. Preserve generated-source relationships and third-party licenses and provenance; do not refactor generated or third-party outputs as though they were canonical Toolkit source. Planning, builder validation, and independent review must check the actual state/effect owners and their dependency contracts, not class counts.
-
-For adopted Toolkit V3 execution, automation-launched agents take models and effort only through an explicitly selected central stack registry revision whose actual source bytes are pinned in the repository's controller decision and CURRENT admission. Never infer a stack from the host, provider, event, alias, or bundled latest registry. Keep bounded task qualification overrides separate from production selection. A newer registry is available for explicit adoption; it does not change an active run's captured routes. Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
-
-A missing stack selection creates one pending owner question and holds dependent execution. Recover that same question after startup, resume, compaction, or prompt recovery. Hook presentation failure does not release the independent launcher hold. Independent already-authorised work may continue. Resolve every reviewer by REVIEW and its reviewer identity from the pinned complete roster; every member independently reviews the full accepted scope. Acceptance requires the whole selected roster, qualified routes, independent fresh contexts, exact candidate and coverage, verified evidence, and no unresolved blocking finding. Do not split scope/execution, duplicate a member, or substitute a majority verdict.
-
-## Scope Control
-
-Before editing, inspect target files and identify the smallest validation. Avoid broad scans unless targeted evidence is insufficient. Read relevant docs before changing a documented workflow, setup, policy, plan, status note, or operations area.
-
-Keep the diff narrow, maintainable, and in style. Avoid unrelated refactors and never weaken validation, schemas, guardrails, approvals, safety, or error handling just to pass.
-
-Use this minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed.
-
-**Change-local hygiene (all Toolkit-managed software repositories).** In each authorised implementation, refactor or correction, inspect affected direct, indirect, dynamic, generated, test, documentation and external consumers. Remove superseded code, routes, exports, settings, dependencies, fallbacks and references in the same change, rather than leaving dead compatibility layers. Retain a compatibility or migration path only with a verified current consumer, safety/recovery reason, named owner, removal trigger and focused regression; never discard active or UNKNOWN recovery effects. Record concise changed-path removal/retention evidence with normal tests and CI. This is part of existing implementation and review, not another gate, reviewer, unrelated whole-tree audit or retrospective mutation authority.
-
-Put persistent status/reports/plans/handoffs and operations/setup/CI/deployment/safety/troubleshooting notes under an existing documented path. Do not create root `STATUS.md`, `REPORT.md`, or `PLAN.md` unless required.
-
-After editing, run the smallest validation first, repair targeted failures, rerun, and review the diff for unrelated changes.
-
-## Human-readable Deliverables
-
-**Mandatory for new or materially changed human-facing work:** Name and explain what a person must use, operate, review or maintain in plain, accurate language suited to the intended audience. Applies to app screens, forms, field labels, dashboards, notifications, alerts, errors, instructions, exported documents, scripts' operator output, diagrams and automated workflows. Prefer concise business-purpose names and clear action/condition labels over internal release or programme labels such as `V3`, `N5`, run IDs and implementation history. The established `G0`, `G1` and `G2` gate names are legitimate when the reader needs those gate identities.
-
-For operational artefacts, make it possible to understand **what it is for, what starts it, its inputs, major decisions/actions, outputs or side effects, failure and recovery path, and who should act**. Explain real behaviour, not imagined success. Use stable machine keys/schema IDs for technical interoperability rather than exposing them as user-facing titles. Keep descriptions near the artefact (UI help, workflow canvas notes or maintained companion instructions), short enough to scan, with deeper technical details disclosed separately.
-
-For n8n, use a business-purpose workflow name and descriptive major node names; annotate the trigger, stages, inputs, outputs, error/duplicate/retry handling and manual recovery with supported sticky notes or a maintained equivalent. Preserve node IDs, expression references, connections, credentials and execution behaviour during renames. Existing live workflow changes require their separate instance/operation-specific approval. A tool's lack of a native description field is not permission to invent one.
-
-During the existing G1 validation and UAT, inspect the actual user/operator-facing surface and include enough evidence to establish clarity as well as correctness. The existing G2 review assesses relevant ambiguity; unsafe or materially misleading text is a real finding, not an optional cosmetic preference. No new gate or blanket whole-repository rename follows from unrelated work. Machine protocol strings, historical receipts, frozen evidence and current migration bindings remain unchanged unless their exact consumers and safe transition have been proven. Every retained exception to this section must name its current consumer, owner, present necessity and removal condition, and is removed in the change that meets that condition; "historical" or "legacy" alone does not justify an unclear live default.
-
-## Documentation Closure
-
-For broad docs/audit/planning/readiness/source-of-truth work, merge durable findings into the smallest canonical home; do not create root status/report/plan files unless required.
-
-Use context-preserving compression, not blind deletion. Preserve decisions, validation, risks, provenance, source links, ownership, and generated-surface notes; retire stale chatter/handoffs. Keep auditability, licensing, security, and maintenance detail. Report whether docs were consolidated, retained, archived, deleted, or unchanged.
-
-## Generated Files
-
-When a file says it is generated, do not edit it directly unless the user explicitly asks for generated output only or the local manifest declares it as directly maintained.
-
-Find and edit the source, template, schema, generator, or source data first. Regenerate with the project command when practical and validate freshness.
-
-Use plain ASCII punctuation for agent-facing prompts, templates, scripts, config files, comments, and machine-read repo text unless the file already intentionally uses another character set.
-
-## GitHub-Backed Project Issue Tracking
-
-Activate only for the active Git repo's relevant GitHub remote and same-repo activity. Skip loose, non/local-only, other-forge, and unrelated repos; Toolkit's remote never substitutes. Skipping is not an error.
-
-Same-repo issue/PR metadata sync for requested work is a scoped external-write exception. It never authorizes merge, deployment, secrets, workflows, or unrelated repos.
-
-Find the smallest owner; update/reopen, never duplicate. Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs; `Closes`/`Fixes` only if merge completes every criterion.
-
-Sync start, PR/head, review Merge/Amend/Reject, findings/exact-head fixes, threads, CI/CodeQL, merge, UAT pending/pass/fail, remediation, and completion. Verify exact head before resolving. Keep programme tracker SHA, version, lane/gate, PR, review/UAT, queue, and completed/deferred/superseded work current.
-
-Boundedly update canonical bodies; comments hold history. Report failed/blocked writes. After merge, close only complete issues, keep pending gates open, and advance.
-
-## Git Completion
-
-Git Completion is the scoped exception for version-control publication after requested edits. Unless asked for local-only/no-push work, validate, commit to a non-main branch, push, and open or update the PR.
-
-Task/product source changes require a non-main branch and PR. Never push task/product source to `main`.
-
-Evaluate separately authorised evidence custody only in a distinct repository whose exact identity and private visibility are independently verified. Owner authority must explicitly bind the repository, effect, ref, paths, and content; a repository name or prefix alone grants no authority. An owner-approved evidence-only ref update, including `main` in that verified private repository, is eligible only within those exact limits, with existing evidence preserved and independent readback of the resulting ref and content. Wrong or public repositories, absent authority, and task/product source adoption relabelled as evidence custody are prohibited. This rule never overrides explicit native denials or authorises retries of previously denied effects, secrets, credentials, private values, merge, install, deployment, or host permission changes.
-
-Before pushing:
-
-- Run the smallest relevant local validation.
-- Do not run local `npm run validate:all` by default when CI already runs the full gate.
-- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive, known CI-failure, or insufficiently covered changes.
-
-When opening or updating a pull request:
-
-- Align the PR body with the full base-to-head diff, including scope, safety, validation, generated-output status, and user-facing behavior.
-- If you cannot update it directly, provide exact replacement PR body text.
-
-After pushing:
-
-- Check PR CI/status before reporting completion. If green, report completion; if pending, say it is unverified or wait when practical.
-- For GitHub CI, bind the intended repository, PR, and exact head. Prefer one tracked `gh run watch RUN_ID --repo OWNER/REPO --interval 60 --exit-status --compact` for a verified run, or `gh pr checks PR --repo OWNER/REPO --watch --interval 60` for the full PR check set.
-- Let `gh` handle polling. Suppress repetitive output, retain the watcher's terminal result, and avoid AI keepalive/status loops or duplicate watchers. Use verified completion events when supported; otherwise use the longest supported blocking wait with minimal re-entry. Respect deadlines, cancellation, disconnects, and permissions. Automatic wake and zero total Codex/OpenCode usage are not guaranteed; launch, interpretation, and timeout re-entry can consume usage.
-- Before claiming CI passed, verify the current PR head and every required check; one run may not cover them all.
-- If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
-- After two failed fix attempts, stop and report the blocker.
-- If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
-
-Never:
-
-- Push task/product source to `main`, or push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
-- Claim CI passed unless checked.
-- Hide failing, pending, or inaccessible CI.
-
-## Validation
-
-Use documented validation. If absent, run the smallest relevant check: docs lint, JSON/schema parse, focused script/test, parser/repair fixture, or generated diff.
-
-Hygiene: separate resolvers/tests; avoid `pip install --dry-run --ignore-installed`; use `python -m unittest discover -s tests`; after interrupts check orphaned package/test/server processes.
-
-If validation is skipped, state why.
-
-## Communication
-
-For long tasks, update briefly at meaningful checkpoints; do not narrate commands.
-
-Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
-
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
-## n8n Safety Router Adapter
-
-If the task involves n8n workflows, workflow fixtures, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-safety-router` before planning or editing.
-If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
-Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
-
-This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md).
-
-Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file. Keep portable templates and shims under `skills/repository-agent-rules/` and their canonical contract inputs under `repo/contracts/agent-rules/`.
-
-This repo is the canonical reusable AI Agent Toolkit.
-
-## Toolkit V3 programme routing
-
-For this repository's [programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421), consult [Toolkit V3 directive](repo/docs/TOOLKIT-V3.md) when adopting V3, then load the applicable role and changed instructions when continuing. Apply its explicit scoped supersession and recoverable transition procedure. This is Toolkit repository guidance; other repositories retain their existing bindings. Preparation does not establish runtime implementation, installed qualification or native permission.
-
-## Toolkit Root Optimization Mandate
-
-Keep this root file slim, useful, and fast to load. Optimize for low token burn, efficient agent orientation, predictable setup/update behavior, quiet validation, and no performance drift.
-
-Do not add hooks, docs, scripts, rules, features, or examples merely because they are comprehensive or interesting. Put detailed guidance in routed playbooks or source-of-truth docs, prefer targeted changed-file checks during normal work, and keep root text focused on decisions agents must load every time.
-
-## Toolkit Repo Routing
-
-Before planning or editing, read [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`). It replaces the portable default index here.
-
-Use this order:
-
-1. Follow the current user request and this file.
-2. Read `repo/docs/agent-playbooks/INDEX.md`.
-3. Classify the task using the index.
-4. Read only the smallest matching playbook set.
-5. If no special playbook matches, continue baseline-only.
-
-Do not load every playbook by default. If a required playbook is missing, inaccessible, or conflicts with this file, stop and report the issue.
-
-
-## Hard Safety Gates
-
-- Do not push task/product source to `main`; Toolkit source changes require a non-main branch and PR. Separately authorised evidence custody must satisfy the managed Git Completion contract above.
-- Do not commit secrets, credentials, tokens, private keys, `.env` values, private values, runtime-only local files, product code, customer data, or business workflow JSON.
-- Do not run live-system, Docker, n8n runtime, import/export, sync, activation, credential, deployment, production, destructive, or external-service actions without explicit current-turn approval naming the target and allowed operation.
-- Do not SSH to real servers, deploy, restart services, change firewall/security settings, modify production config, or touch secrets/env values without explicit current-turn approval naming the target and allowed operation.
-- Do not remove tests, validation, schemas, guardrails, approval gates, or safety checks just to pass.
-- Do not claim CI passed unless it was checked.
-
-## Source Of Truth
-
-The managed Source-of-Truth Contract below is the detailed active contract. Source-watch is PR-notification-only. It is maintained from `repo/contracts/source-of-truth-contract.md`; keep its markers intact and edit the source when that managed block needs changes.
-
-## Toolkit Plugin And Bridge
-
-- Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
-- The bridge keeps the managed checkout current and records hub state and update reports; it writes into no other app. The explicit project command copies Antigravity portable skills.
-- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION` and the Codex setup expected version aligned; Antigravity skills carry source identity without native plugin metadata.
-- Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
-- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout setup script when it exists, with active `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only as bootstrap/fallback.
-
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
-## Source-of-Truth Contract
-
-`skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
-- `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an already-assigned Toolkit repository controller. Its live governance dependency is the independently accepted `weijunswj/ai-agent-toolkit` snapshot of `repo/CONTROLLER.md` and the current registry `repo/contracts/controller-kernel/stack-registry-v3.json`. The skill is not a policy copy, role assignment, capability, or host permission.
-- `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
-- `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
-- `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
-- `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
-- Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
-- The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
-- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
-  - `skills/n8n-safety-router/n8n-safety-rules.md`
-  - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
-  - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
-- This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
-- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. n8n work uses the official n8n Skills and the n8n API; `skills/n8n-environment-setup/` holds the setup guidance.
-- All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
-- Coordinated Core decisions use closed controller-decision v2, the explicitly captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2; no other version of these contracts is read. The canonical profiles are owner-gpt and owner-claude; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one and one members, with no additional peer. Missing selection produces one pending question in existing CURRENT and a separate launcher HOLD. Source progress does not establish native or installed qualification.
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
-
-## Repo-Local Router
-
-- Use this root file as the router for this toolkit repo only; use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md) for portable installs.
-- Keep managed marker blocks intact. If a marked block needs content changes, edit the source path named in the marker and run the matching sync/check command.
-- For AI-agent instruction changes, read [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md) and [repo/docs/SOURCE-OF-TRUTH.md](repo/docs/SOURCE-OF-TRUTH.md).
-- For canonical skills, contracts, or native plugin surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
-- For provenance and third-party source work, read [repo/docs/RETIRED-SOURCE-PROVENANCE.md](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [repo/docs/THIRD-PARTY-SOURCE-NOTES.md](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), and the project standard.
-- For generated-output writeback or privileged workflow changes, read [repo/docs/WRITE-SAFETY-MODEL.md](repo/docs/WRITE-SAFETY-MODEL.md) and [repo/docs/SAFE-UPDATES.md](repo/docs/SAFE-UPDATES.md).
-- For cleanup, deletion, retirement, or human usage/docs/navigation changes, read [repo/docs/CLEANUP-POLICY.md](repo/docs/CLEANUP-POLICY.md), retired-source provenance when applicable, [repo/docs/HOW-TO-USE.md](repo/docs/HOW-TO-USE.md), and [README.md](README.md).
-
-## Managed Marker Rules
-
-Use managed markers for source-owned inserted sections:
-
-`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`
-`<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`
-
-Change managed sections from the source file or generator, then run sync/check.
-
-## Repo-Local Safety
-
-- Respect the source-of-truth contract above: update canonical `skills/**`, `repo/contracts/**`, `repo/scripts/**`, or `repo/docs/**` surfaces directly.
-- Do not create a second project/publisher tree or treat generated output as a separate source of truth.
-- Keep reviewed third-party provenance under `repo/source-watch/provenance/**` and do not update it through source-watch notification jobs.
-- Do not copy this toolkit root `AGENTS.md` into other repos.
-- Do not introduce credentials, credential exports, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, product code, customer data, or business workflow JSON.
-- Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions without explicit current-turn approval naming the target and allowed operation.
-- Do not weaken validation, schemas, guardrails, attribution, generated-output ownership, or local-only safety constraints just to make a check pass.
+- Edit canonical surfaces directly (`skills/**`, `repo/contracts/**`, `repo/scripts/**`, `repo/docs/**`); no second publisher tree, and generated output is never a separate source. Before changing skills, contracts, scripts, provenance or synchronizers, read the [Source-of-Truth Contract](repo/contracts/source-of-truth-contract.md) (also synced into the README).
+- Toolkit inserts use versioned, hashed markers (`repo/scripts/toolkit-managed-block.cjs`): `<!-- AI-AGENT-TOOLKIT:<source>:BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex> -->` ... `<!-- AI-AGENT-TOOLKIT:<source>:END <NAME> -->`. Edit the named source, then run its sync (`node repo/scripts/sync-agent-instruction-shims.cjs --write`, `node repo/scripts/sync-repo-doc-contract.cjs --write`).
+- Native plugin updates are host-local (`.codex-plugin/` for Codex, `.claude-plugin/` for Claude Code). The bridge keeps the managed checkout current and records hub state and update reports; setup also installs the global rules (`repo/scripts/toolkit-global-rules.cjs`). Antigravity gets a portable skills copy only. Hooks are optional; policy lives in docs, validators and the [Bridge doc](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
+- Every commit that changes plugin-packaged content, setup, the bridge, skills, adapters or native plugin metadata bumps the Toolkit version in the same commit, keeping `repo/contracts/toolkit-local-bridge/version.json`, native plugin inputs and metadata, `BRIDGE_VERSION` and the Codex setup expected version aligned.
+- Setup or refresh: follow [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout's setup script when it exists, and `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only to bootstrap.
 
 ## Skill Creation Center
 
-This repo is the canonical skill creation and conversion center.
+Before adding a skill, adapter, template or contract, check the existing `skills/**`, the README skill tables, the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) and the skill-routing source. Extend an existing skill when its trigger, safety boundary, assets and validation fit without bloating it; create a new one only for a distinct trigger, domain, safety boundary, provenance need, asset set or validation path. Third-party skills or agent material go through `skill-product-review` first; nothing is copied, installed, run or adapted until its `allow` or `constrain` verdict covers that scope, and approved adaptations keep licence, attribution, provenance, source locks and validation. Keep reviewed provenance under `repo/source-watch/provenance/**`; source-watch jobs never update it. Prefer safety, provenance and usefulness over more surface area.
 
-Before adding a new skill, adapter, template, or contract, inspect the existing `skills/**` surfaces, README skill tables, Skill Safety Matrix, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, local assets, and validation path without making that skill bloated or ambiguous.
+## Validation And PRs
 
-Create a new skill or contract surface only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, local assets, or validation path.
-
-Use [`repo/docs/SKILL-SAFETY-MATRIX.md`](repo/docs/SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
-
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `skill-product-review` first. Do not copy, import, install, execute, or adapt third-party material until its `allow` or `constrain` verdict permits the named scope. Approved Toolkit adaptations are authored directly at canonical `skills/**` and `repo/**` paths with licence, attribution, provenance, source-lock, and validation requirements preserved.
-
-Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
-
-## Validation And PR Updates
-
-- Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
-- Never run local `npm run validate:all` in this toolkit repo. CI owns the full validation gate; use targeted local checks for touched scripts, docs, generated surfaces, or managed instruction files.
-- If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
-- For already-authorised GitHub reads and writes, use only authenticated task-scoped escalated `gh` in a supported shell execution mode permitted by the actual host. Verify the intended authenticated account, repository and exact operation scope before execution. Before creating or updating PRs or issues, verify the active account with:
-
-```powershell
-gh auth status
-gh api user --jq .login
-```
-
-- If that route is unavailable or not permitted, hold the affected operation. Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations.
-
-- Before final reporting after a push, update the existing PR body when the cumulative diff, safety notes, validation, generated-output status, or user-facing behaviour changed.
+- Run targeted checks for touched scripts, docs, generated surfaces and instruction files. Never run `npm run validate:all` locally here; CI owns the full gate.
+- If a generated-output or contract check fails on unrelated stale files, report it instead of widening the PR.
+- Use authenticated `gh` for authorised GitHub work. Before creating or updating PRs or issues, confirm the account with `gh auth status` and `gh api user --jq .login`; if that route is unavailable, hold the operation. Authentication grants no task authority.
+- After a push, update the PR body when the diff, safety notes, validation, generated output or user-facing behaviour changed.

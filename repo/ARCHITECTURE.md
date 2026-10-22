@@ -1,53 +1,52 @@
-# Toolkit Architecture
+# Toolkit Repository Map
 
-## Current V3 operating procedure
+A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Shipping Law is the default coding governance: **G0 Discovery -> G1 Builder, including UAT -> G2 Review**. The complete direction is [Toolkit V3](docs/TOOLKIT-V3.md). A repository becomes governed only through its applicable owner direction; this source does not grant native permissions or adopt V3 in unrelated repositories. Historical numeric roles retain their recorded meaning and cannot masquerade as new G2 assurance.
+Last reviewed against `main` `5950f2c9e85a710bf9c6a6b509b2bb1940d72549`.
 
-### Scope and ownership
+## Parts
 
-Bind one canonical repository, programme, release and existing outcome child. The controller owns material owner decisions, conflicting authority/writers, review routing and finality. One strong builder owns the complete agreed Core through integration, meaningful validation, UAT readiness and ordinary in-scope corrections. No mandatory mini-child dispatch, extra architecture admission for an ordinary fix, duplicated closing panel, or automatic extra review applies.
+| Part | Path | Owns |
+|---|---|---|
+| Skills | `skills/` | The copyable product: one folder per skill, edited directly |
+| Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, governed-repository rules, n8n safety rules, skill routing |
+| Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template and host shims, projected into `skills/repository-agent-rules/repo-local/` |
+| Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
+| Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
+| Scripts | `repo/scripts/` | Setup, bridge, hooks, synchronizers, audits and validators |
+| Tests | `repo/tests/` | Focused contract and runtime tests (`node --test repo/tests/*.test.cjs`) |
+| Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
+| Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
+| Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
+| CI | `.github/workflows/` | `validate.yml` is the full gate |
 
-Preserve existing Core, Hardening and Later commitments and their owners. The parent is the current index, ordered CORE -> HARDENING -> LATER and then milestone order. Child checkpoints carry detailed acceptance, current candidate, evidence, blockers and the literal next action. Classification alone does not complete or waive work. Parent completion is separate from Core acceptance.
+## Entry points
 
-### Roles and delegation
+| Entry | Path |
+|---|---|
+| Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` |
+| Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
+| Install check | `repo/scripts/toolkit-install-health.cjs` |
+| Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
+| Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
+| Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
+| Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
+| Full validation list | `repo/scripts/run-validation-gate.cjs` |
+| Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 
-Resolve G0's DISCOVERY and DISCOVERY_HELPER roles and G1's BUILDER and BUILDER_HELPER roles from the canonical [V3 stack registry](contracts/controller-kernel/stack-registry-v3.json), using the exact captured registry revision and pinned CURRENT selection. This registry is the sole source of concrete model, effort and required reviewer choices; do not copy another authoritative model table, infer a helper from its lead, or use a default/fallback selection. G0 MUST delegate suitable separable evidence gathering by default; G1 MUST delegate suitable independent implementation or validation by default. The selected lead owns reasoning, architecture, contradiction resolution, decisive proof, integration, UAT readiness and final quality. Preserve the selected stack's independently specified lead/helper bindings.
+## Sources of truth
 
-Helpers are leaves. No nested delegation, scope approval, final acceptance or reviewer dispatch. Exceptions are trivial/inseparable work, overhead exceeding benefit, tightly coupled reasoning/integration, genuinely unavailable exact model/effort route, or a real authority/safety boundary. Briefly record substantial-work exceptions; no quota or ceremonial helper launches. No additional owner permission is needed for already-authorised direct work.
+| Subject | Source |
+|---|---|
+| Controller procedure | `repo/CONTROLLER.md` |
+| Programme direction | `repo/docs/TOOLKIT-V3.md` |
+| Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
+| Governed-repository rules | `repo/contracts/agent-rules/toolkit-governed-rules.md` |
+| Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
+| Source ownership | `repo/contracts/source-of-truth-contract.md` |
+| Package version | `repo/contracts/toolkit-local-bridge/version.json` |
+| Release notes | `repo/docs/CHANGELOG.md` |
 
-Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
+## Ownership
 
-For automation-launched agents, trusted launcher configuration establishes actual model and effort. Service tier is a controller/launcher concern: the later owner instruction stops Priority across all repositories and future launches use Standard. Do not claim it changes this active inference session. Workers/helpers need no tier awareness, introspection or receipt. Missing helper tier controls must not block suitable delegation. Preserve real model availability, topology, resource and native permission limits.
-
-G2 begins after builder readiness and actual owner UAT acceptance. Resolve the entire required reviewers set from the same pinned CURRENT selection and canonical V3 registry. Every selected required reviewer gets the identical complete candidate, scope and evidence and independently reviews the complete agreed acceptance surface, including scope, implementation correctness, execution evidence, authority, privacy and recovery. Do not split scope-only and execution-only assignments, enforce a fixed reviewer count, omit a required member, or copy another Claude review as independent evidence. Each required reviewer uses its own fresh independent context; G2 has no helpers. A conditional design challenge resolves the separate DESIGN_CHALLENGE role from that same selected registry only when a real unresolved consequential design risk warrants it; it neither replaces a required reviewer nor becomes a routine extra role.
-
-### Current packet and refresh
-
-Initial adoption understands the full direction once. Continuation consumes one current packet and applicable changed instructions. Bind exact contract/registry/source revisions; check lightweight identities and refresh affected sections on actual change. No full bootstrap/history reread for unchanged routine work. A fresh chat, controller or harness continues the same scope and consumed history.
-
-Every substantive return includes programme/release/child/role; exact branch/commit/tree or recoverable delta; applicable scope and authority; what works/failed/remains and owner acceptance; evidence and verified private custody; host/profile/version; writer and pending/unknown effect state; genuine denials; and one next action. Keep large source/logs in their proper stores, not recursively embedded in packets. Missing capabilities hold their dependent effects while independent authorised work continues.
-
-### Authority and consequential effects
-
-Standing authority records owner/provenance, repository/destination, purpose, permitted operations/effects, privacy boundaries, expiry/revocation and cleanup. Compose it through the host's supported native controls. Prose, model self-report, packet syntax, custody or a working API cannot grant native permission. Preserve system requirements, secrets, real denials and unknown outcomes across fresh sessions. Never replay an uncertain effect before independent reconciliation or switch routes to evade a denial.
-
-Construct and test source in isolation. Before loading permission-controlling candidate instructions into an isolated native profile, check exact source, effects, authority and rollback at that boundary. Root retains owner UAT acceptance, fresh G2 routing, merge and installed promotion where assigned. Source tests, fixture replay, CI, copied files and silence cannot establish native qualification, user acceptance or installed readiness.
-
-### Evidence, progress and finish
-
-Executors publish concise authorised progress and screened private evidence directly. Use fresh expected-head/conditional writes, minimal intended edits, unrelated-content preservation and independent readback. Keep conflict or unknown publication outcome in the packet. Transport failure is not an implementation defect and does not reset history or consume a correction merely to republish unchanged bytes.
-
-**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises bypassing a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.
-
-Reuse the user-selected private evidence store; a private `TRANSPORT-*` Git repository is only the recommended default when no store was previously selected, and Toolkit #421 keeps its selected repository. Independently verify that store's exact identity, privacy and access and a consumer's retrieval of the immutable artifacts through its own backend, and hold any capability that backend cannot yet provide. Keep referenced acceptance and unresolved evidence pinned. Local disposable copies are eligible immediately after verified custody/consumer retrieval and ownership/dependency checks. Current v2 stored temporary owned bulk expires 21 days after its immutable verified transfer; the clock never restarts, and explicit pins, holds and active consumers only delay eligibility. Historical v1 records keep their read-only 30-day legacy clock. Register each retained resource with its purpose, owner, running-versus-preserved need, release condition and supported reassessment trigger. Cleanup never deletes the sole copy, user data, active/UAT resources or unresolved evidence and never implies history erasure.
-
-Native coverage is Codex, Claude Code and OpenCode with real selected paths. Antigravity is portable skills-copy only. Qualify actual entry, exact route/effort, permission composition, harmless routine operations, private transfer/recovery, fresh consumer, cancellation/EOF/stdout/stderr/exit/privacy and Windows behaviour. Keep source/cache/profile/version aligned and preserve rollback. Unavailable exact host routes remain outstanding; no silent substitution or synthetic host pass.
-
-G2 classifies concrete findings against agreed acceptance: current ship blocker, Hardening, Later/optional, or unsupported/duplicate. Return the coherent blocker set to the builder. G2 stays adversarial on every reachable path inside the release brief's frozen supported host/environment matrix and agreed invariants: a plausible supported-path violation or critical absent proof blocks, an unsupported or newly proposed environment goes to owner classification instead of expanding Core, and a demonstrated boundary family is inventoried and corrected once, so the fresh recheck targets the corrected families, cumulative diff and dependent invariants. Recheck affected integration and user behaviour; do not restart all gates merely because a line changed. After authorised integration/activation, read back the same reviewed payload in a fresh installed session. Only complete verified outcomes close; later commitments retain their owners.
-
-### Final execution clarification
-
-For adopted Toolkit V3 work, fresh executor contexts are mandatory between G0 and G1, for initial G2, for a required model/effort/harness switch, runtime/environment replacement, activated instruction/profile revision or executor replacement, and after genuine session loss or forced compaction at a safe boundary. Planned G1 segment completion alone checkpoints and continues in the same session. Verify custody and stop the old writer before supported controller relaunch; continue the same approved assignment without another scope approval. A new SHA alone does not invalidate UAT: supply impact evidence and let the controller record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED. Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family correction recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first. Correct helper routing and pre-inference wrong-route prevention require separate trusted proofs. Local disposable copies can be eligible immediately after verified custody, consumer retrieval and ownership/dependency checks; current v2 stored temporary bulk expires 21 days after verified transfer, with explicit pins/holds, while historical v1 records keep their 30-day legacy clock. Keep functional/UAT/review/custody/integration/publication/Core/parent states distinct. The canonical Toolkit V3 contract supplies the detailed native host matrix and acceptance cases; these instructions do not claim those cases are implemented or qualified.
-
-Resolve native model/effort routes from the same captured registry revision and pinned CURRENT selection, then verify the supported actual route and exact effective configuration before consequential effects. No unavailable route authorises a model/effort/provider fallback. Effective native configuration plus acknowledgement can prove launch configuration when backend identity is not exposed; record that limit honestly. Admitted historical qualification overrides retain their exact scoped authority and immutable inputs; this current procedure does not silently rebind them. G2 reviews the complete selected required set on identical complete candidate/scope/evidence, preserving independence and rechecking actual changed coverage.
+The repository owner approves merges, releases and live effects. The appointed controller owns programme records and review routing ([programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421)); builders own their admitted change through UAT readiness.

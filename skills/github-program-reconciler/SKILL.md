@@ -13,7 +13,13 @@ coding agent, and final Web/controller work remains outside this skill.
 
 ## Runtime status
 
-Toolkit 3.3.0 removed the local runtime this skill used to name (the programme-state v5 human surface, the governance review reconciler and their proof fixtures), because no hook, setup step or workflow ran it. Until the skill is rewritten under #421, apply the contract below as a written procedure with the GitHub tools you are authorised to use. Do not invent a replacement runtime or adapter.
+Apply the contract below as a written procedure with the GitHub tools you are authorised to use; do not invent a replacement reconciler runtime or adapter. The one bundled tool is the read-only decision-trace audit (see Decision traces).
+
+## Decision traces
+
+The programme issue body is the canonical record: every non-bot comment must be linked from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), directly or through an index comment the body links (one hop). Records that replace others carry `SUPERSEDES=<record ID>`. Keep the body under 60,000 characters (GitHub's limit is 65,536) by moving older index lines into an index comment marked `<!-- decision-trace-index -->`.
+
+Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`; a record ID is the prefix plus digits). It reads the issue through `gh`, fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
 
 ## Scope
 
@@ -47,10 +53,6 @@ drift, unverified body limits, and incomplete reconciliation fail closed.
   override it. Require enabled `repository.governance` consent; repository-capability consent does not
   widen task scope, delegation, GitHub authority, provider/live access, Web
   authority, review mutation, Ready, or merge.
-- The bounded execution component owns execution/workspace/run/terminal evidence with exactly five
-  durable contracts and no finality authority.
-- The independent-assurance component owns assurance and Web-finality handoff. Reuse its six
-  materiality predicates and exclusion rules; do not add an independent assurance contract.
 - The user remains the source of repository governance authority; an executor
   acts only within the user's explicitly assigned repository and operation
   scope. Do not create a generic independent web-controller authority class.
@@ -80,8 +82,8 @@ Preserve these six reconciliation invariants:
   recomputed finding/Deferred Finding digests. The first-party review evidence
   adapter supplies the arrays, pagination facts, authoritative counts, flags,
   and binding digest; caller values are equality assertions only. Fresh
-  Deferred-Finding evidence is canonically normalized through independent assurance and derives
-  materiality and evidence/root digests at every revalidation ingress.
+  Deferred-Finding evidence is re-derived at every revalidation, with its
+  materiality and evidence/root digests recomputed.
 - **Transaction ownership:** use one module/process owner registry for `repository+parent`; injected
   maps cannot bypass it and every terminal path releases ownership.
 - **Evidence-gated compaction:** permit terminal compaction only with complete server-authoritative,
@@ -132,7 +134,7 @@ Ready, merge, or claim Web finality. The current programme Web/user controller
 owns factual closure, review-thread mutation, final disposition, Web
 acceptance, Ready, merge, canonical verification, cleanup, and queue finality.
 
-Materiality uses independent assurance predicates. A finding is not final merely because an
+Materiality follows the controller's finding classes against agreed acceptance (ship blocker, Hardening, Later/optional, unsupported/duplicate). A finding is not final merely because an
 executor calls it blocking. A truthful disposition needs factual closing
 evidence, exact-head/canonical identity, validation, readback, and a
 controller-owned reference.
@@ -143,7 +145,7 @@ An initial nonblocking finding goes in the parent-managed Deferred Findings
 register. It is an index/provenance/revalidation record, not a second queue,
 task checkbox, or automatic backlog issue. Keep public-safe evidence sufficient
 to revalidate the same component/boundary. Every revalidation requires fresh
-finding evidence, canonical independent assurance normalization, and recomputed materiality,
+finding evidence and recomputed materiality,
 evidence, and root digests. Caller materiality and digest values are equality
 assertions only; material findings cannot be disposed as nonmaterial and retain
 promotion authority. Preserve the root digest, source PR/thread/head when
@@ -181,8 +183,8 @@ are in scope. Do not copy or revive PR #310 or #318 implementation machinery.
 ## Safety and output
 
 Do not access providers or live systems, create workflows or MCP tools, mutate
-review state, publish, mark Ready, merge, change the control-plane, repository-capability,
-execution or assurance contracts, propagate repository instruction changes,
+review state, publish, mark Ready, merge, change the control-plane or
+repository-capability contracts, propagate repository instruction changes,
 modify repository memory/governance policy, or perform work outside this
 skill's supported reconciliation intents. Reject raw secrets, private paths,
 private connector data, raw code blobs, credentials, and unredacted runtime

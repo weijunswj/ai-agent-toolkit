@@ -15,11 +15,10 @@ const lfRead = (relative) => rawRead(relative).replace(/^\uFEFF/, '').replace(/\
 const windowsRead = (relative) => `\uFEFF${lfRead(relative).replace(/\n/g, '\r\n')}`;
 const readers = { checkout: rawRead, lf: lfRead, windows: windowsRead };
 
-const RULE_COPIES = Object.freeze([
+// The governed block (and its projections) carries the gate-specific half of the rule.
+const GOVERNED_COPIES = Object.freeze([
+  'repo/contracts/agent-rules/toolkit-governed-rules.md',
   'AGENTS.md',
-  'repo/contracts/agent-rules/AGENTS.template.md',
-  'repo/contracts/agent-rules/CLAUDE.template.md',
-  'repo/contracts/agent-rules/GEMINI.template.md',
   'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
   'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
 ]);
@@ -162,22 +161,22 @@ const publishedSkills = () => fs.readdirSync(path.join(root, 'skills'))
 const executableNodes = (workflow) => workflow.nodes.filter((node) => node.type !== STICKY_NOTE && !/trigger/i.test(node.type));
 
 function checkDefaultRules(load) {
-  const source = normalise(load('repo/contracts/agent-rules/ai-coding-agent-execution.md'));
-  const law = source.split('## Human-readable Deliverables\n')[1]?.split('\n## ')[0] || '';
-  assert.match(law, /Mandatory for new or materially changed human-facing work/);
-  for (const item of ['forms', 'dashboards', 'errors', 'n8n', 'G1 validation', 'G2 review', 'historical receipts', 'V3', 'N5']) assert.ok(law.includes(item), item);
-  assert.match(law, /G0.*G1.*G2.*legitimate/);
-  assert.match(law, /retained exception .* current consumer, owner, present necessity and removal condition/);
-  for (const file of RULE_COPIES) {
+  const source = normalise(load('repo/contracts/agent-rules/global-rules.md'));
+  const law = source.split('## Human-readable Work\n')[1]?.split('\n## ')[0] || '';
+  assert.match(law, /New or changed human-facing work/);
+  for (const item of ['labels', 'errors', 'documents', 'n8n', 'historical receipts', 'not internal programme, release or run labels', 'misleading text is a real defect']) assert.ok(law.includes(item), item);
+  assert.match(law, /retained unclear label names its consumer, owner, need and removal condition/);
+  for (const file of GOVERNED_COPIES) {
     const copy = normalise(load(file));
-    assert.equal(copy.split('## Human-readable Deliverables\n').length, 2, file);
-    assert.ok(copy.includes(law), file);
+    assert.match(copy, /G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding/, file);
+    assert.match(copy, /Gate names `G0`, `G1` and `G2` are fine where the reader needs them/, file);
   }
 }
 
 function checkController(load) {
   const controller = normalise(load('repo/CONTROLLER.md'));
-  const active = controller.split('## Current V3 operating procedure')[1]?.split('## Historical compatibility reference')[0] || '';
+  assert.equal(controller.includes('## Historical compatibility reference'), false);
+  const active = controller;
   assert.match(active, /### Human-readable product and operational text/);
   assert.match(active, /n8n include a meaningful workflow name/);
   assert.match(active, /G0.*G1.*G2.*remain valid/);
@@ -210,11 +209,11 @@ for (const [label, load] of Object.entries(readers)) {
 }
 
 test('raw Windows input breaks unnormalised extraction, which the shared normaliser repairs', () => {
-  const windows = windowsRead('repo/contracts/agent-rules/ai-coding-agent-execution.md');
-  assert.equal(windows.split('## Human-readable Deliverables\n').length, 1);
+  const windows = windowsRead('repo/contracts/agent-rules/global-rules.md');
+  assert.equal(windows.split('## Human-readable Work\n').length, 1);
   assert.notEqual(windowsRead('skills/n8n-safety-router/n8n-safety-rules.md'), lfRead('skills/n8n-safety-router/n8n-safety-rules.md'));
   assert.throws(() => JSON.parse(windowsRead(N8N_FIXTURES[0])));
-  assert.equal(normalise(windows), lfRead('repo/contracts/agent-rules/ai-coding-agent-execution.md'));
+  assert.equal(normalise(windows), lfRead('repo/contracts/agent-rules/global-rules.md'));
 });
 
 test('skill frontmatter rejects unexplained programme labels and keeps gate names and explained codes', () => {

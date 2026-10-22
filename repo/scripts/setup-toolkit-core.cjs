@@ -13,6 +13,7 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -107,6 +108,7 @@ function emptySetupChoices() {
     updateReports: '',
     updateReportRetention: '',
     refreshPrAutoMerge: '',
+    codexDocLimit: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
@@ -136,7 +138,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
     refreshPrAutoMerge: true,
+    codexDocLimit: true,
+    codexDocLimitMode: '',
     codexPluginAutoRefresh: true,
+    antigravityGlobalRules: false,
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
@@ -239,6 +244,14 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.refreshPrAutoMerge = false;
       args.setupChoices.refreshPrAutoMerge = 'disable';
     } else if (arg === '--keep-refresh-pr-auto-merge') args.setupChoices.refreshPrAutoMerge = 'keep';
+    else if (arg === '--enable-codex-doc-limit') {
+      args.codexDocLimit = true;
+      args.setupChoices.codexDocLimit = 'enable';
+    } else if (arg === '--disable-codex-doc-limit') {
+      args.codexDocLimit = false;
+      args.setupChoices.codexDocLimit = 'disable';
+    } else if (arg === '--keep-codex-doc-limit') args.setupChoices.codexDocLimit = 'keep';
+    else if (arg === '--antigravity-global-rules') args.antigravityGlobalRules = true;
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
       args.updateReportRetentionDaysExplicit = true;
@@ -318,7 +331,8 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
-    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required'
+    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required',
+    raise_codex_instruction_limit: choices.codexDocLimit || 'question-required'
   };
 }
 
@@ -337,6 +351,8 @@ function setupPlan(options = {}) {
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
   if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
   else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
+  if (choices.codexDocLimit === 'enable') reportArgs.push('--enable-codex-doc-limit');
+  else if (choices.codexDocLimit === 'disable') reportArgs.push('--disable-codex-doc-limit');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(retentionDays));
   }
@@ -522,6 +538,10 @@ function printHelp() {
     '  --enable-refresh-pr-auto-merge   merge rule-refresh PRs when the required checks pass',
     '  --disable-refresh-pr-auto-merge  stop rule-refresh PRs at the open PR',
     '  --keep-refresh-pr-auto-merge     preserve the rule-refresh PR merge choice',
+    '  --enable-codex-doc-limit    raise Codex project_doc_max_bytes to 65536 and keep it raised',
+    '  --disable-codex-doc-limit   leave Codex project_doc_max_bytes alone; put back a value Toolkit raised',
+    '  --keep-codex-doc-limit      preserve the Codex instruction limit choice',
+    '  --antigravity-global-rules   also install the Toolkit global rules in ~/.gemini/GEMINI.md',
     '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
     '  --skip-update-report-open   retain failure-only opening; successful reports remain closed',
     '  --keep-update-report-open   compatibility alias; legacy success-report auto-open is not preserved',
@@ -1320,6 +1340,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'refreshPrAutoMerge') return 'enable';
+  if (key === 'codexDocLimit') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
@@ -1789,7 +1810,29 @@ function setupQuestionSpecs(args, current) {
       current: currentBooleanOutcome(current.audit?.refresh_pr_auto_merge_enabled, 'Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.', 'Rule-refresh PRs stop at the open PR for you to merge.', 'The saved rule-refresh merge choice could not be verified; refresh PRs stop at the open PR.'),
       currentVerification: typeof current.audit?.refresh_pr_auto_merge_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.',
-    })
+    }),
+    resolvedQuestion({
+      id: 'codex-instruction-limit',
+      key: 'codexDocLimit',
+      section: 'Updates and reports',
+      title: "Raise Codex's instruction limit",
+      prompt: 'Codex instruction limit choice',
+      whatThisControls: "Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.",
+      choices: [
+        wizardChoice('enable', 'Raise it', 'Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.'),
+        wizardChoice('disable', 'Leave it', 'Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('codexDocLimit', current, args),
+        outcome: "Raise Codex's instruction limit to 65536.",
+        reason: 'Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.',
+      },
+      selected: args.setupChoices.codexDocLimit,
+      current: currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone."),
+      currentVerification: typeof current.audit?.codex_doc_limit_enabled === 'boolean' ? 'verified' : 'defaulted',
+      afterApplying: 'This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.',
+    }),
   ];
 
   if (args.host === 'codex') {
@@ -2228,6 +2271,7 @@ function documentationFixtureState() {
       update_report_enabled: true,
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
       refresh_pr_auto_merge_enabled: true,
+      codex_doc_limit_enabled: true,
       codex_plugin_auto_refresh_enabled: true,
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
@@ -2309,6 +2353,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'refreshPrAutoMerge') args.setupChoices.refreshPrAutoMerge = choice;
+  else if (key === 'codexDocLimit') args.setupChoices.codexDocLimit = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
@@ -2321,6 +2366,7 @@ function choiceForKey(args, key) {
   if (key === 'updateReports') return args.setupChoices.updateReports;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'refreshPrAutoMerge') return args.setupChoices.refreshPrAutoMerge;
+  if (key === 'codexDocLimit') return args.setupChoices.codexDocLimit;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
@@ -2607,6 +2653,7 @@ function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
   if (spec.key === 'refreshPrAutoMerge') return args.refreshPrAutoMerge ? 'enable' : 'disable';
+  if (spec.key === 'codexDocLimit') return args.codexDocLimit ? 'enable' : 'disable';
   if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
   return value;
 }
@@ -2846,6 +2893,11 @@ function applySetupChoices(args, current) {
 
   if (choices.refreshPrAutoMerge === 'keep') args.refreshPrAutoMerge = current.audit?.refresh_pr_auto_merge_enabled === true;
   else args.refreshPrAutoMerge = choices.refreshPrAutoMerge === 'enable';
+
+  // Raise Codex's limit only on a yes (or a kept yes); a no puts back a value Toolkit raised.
+  if (choices.codexDocLimit === 'keep') args.codexDocLimit = current.audit?.codex_doc_limit_enabled === true;
+  else args.codexDocLimit = choices.codexDocLimit === 'enable';
+  args.codexDocLimitMode = choices.codexDocLimit === 'disable' ? 'restore' : args.codexDocLimit ? 'raise' : 'report';
 
   args.updateReportOpen = false;
 
@@ -3334,6 +3386,8 @@ function writeBridgePreferences(args) {
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
   if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
   else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
+  if (choices.codexDocLimit === 'enable') reportArgs.push('--enable-codex-doc-limit');
+  else if (choices.codexDocLimit === 'disable') reportArgs.push('--disable-codex-doc-limit');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(args.updateReportRetentionDays));
   }
@@ -3593,6 +3647,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
   console.log(`Rule-refresh PRs merge when required checks pass: ${yesNo(args.refreshPrAutoMerge === true)}`);
+  console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log('Update report/log directory: <Toolkit update-report directory>');
@@ -3621,6 +3676,25 @@ function printInstallCheck(result) {
   }
 }
 
+// The Toolkit global rules for every harness setup manages, rendered from the managed checkout.
+// Codex's instruction limit follows the owner's answer to the setup question.
+function setupGlobalRules(args) {
+  return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report' });
+}
+
+// Codex setup has no install check, so it installs and reports the global rules directly.
+function runCodexGlobalRules(args) {
+  let result;
+  try { result = setupGlobalRules(args).refresh(); }
+  catch (error) { result = { status: 'held', files: [], covered: [], backup_dir: null, detail: error.message }; }
+  console.log('');
+  console.log('## Global rules');
+  const lines = describeGlobalRules(result);
+  for (const line of lines.length ? lines : [`held: ${result.detail}`]) console.log(line);
+  return result;
+}
+
 // The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
 // helper definitions, and returns the result the summary and exit code report.
 function runClaudeInstallCheck(args, nativeCache, delegation) {
@@ -3629,6 +3703,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
     hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
     helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
+    globalRules: setupGlobalRules(args),
     depthSetting: new ClaudeSubagentDepthSetting(),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
@@ -3685,7 +3760,8 @@ class ToolkitSetupExecution {
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION ? SETUP_ACTION_REQUIRED : 0;
+    const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
+    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 

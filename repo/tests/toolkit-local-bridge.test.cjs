@@ -46,7 +46,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.3.0';
+const expectedBridgeVersion = '3.4.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpRoot() {
@@ -235,6 +235,8 @@ const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
   'repo/contracts/toolkit-local-bridge/version.json',
   'repo/scripts/toolkit-gate-contract-compiler.cjs',
   'repo/scripts/toolkit-capability-registry.cjs',
+  'repo/contracts/agent-rules/global-rules.md',
+  'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
   'repo/CONTROLLER.md',
   'repo/ARCHITECTURE.md',
 ]);
@@ -2848,7 +2850,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for newer wording'));
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in newer wording'));
   const state = { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } };
   const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, state });
   assert.equal(result.status, 'needs-attention');
@@ -2869,7 +2871,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   writeFile(path.join(checkout, 'AGENTS.md'), managedAgentsTemplate());
   const pluginRoot = tmpRoot();
   writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    managedAgentsTemplate().replace('Default to the shortest safe path', 'Default to an older wording of the shortest safe path'));
+    managedAgentsTemplate().replace('Finish fast', 'Finish in an older wording'));
   const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot });
   assert.equal(source.reference, 'source-checkout');
   assert.deepEqual(source.findings, []);
@@ -2898,8 +2900,8 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
 
 test('SessionStart notice offers a refresh for differing or broken repository blocks, once per finding, without writing', async (t) => {
   const cases = [
-    { name: 'stale managed block', agents: managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup context progress') },
-    { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n' }
+    { name: 'stale managed block', agents: managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in edited wording') },
+    { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=000000000000 -->\n# broken\n' }
   ];
   for (const fixture of cases) {
     await t.test(fixture.name, () => {
@@ -2941,7 +2943,7 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
 test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, ledger swap progress'));
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in ledger swap wording'));
   const home = tmpRoot();
   const hub = path.join(home, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion, auto_sync_enabled: true, targets: {} });
@@ -4028,6 +4030,37 @@ test('central report classification opens only actionable reports', () => {
   assert.deepEqual(opens, ['fixture-2.md']);
   invoke(base);
   assert.equal(writes.length, 2);
+});
+
+test('each restored hand edit gets its own report, even on the same Toolkit content', () => {
+  const restored = (folder) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+    { id: 'helpers', status: 'passed', summary: 'current' },
+    { id: 'global-rules', status: 'passed', updated: true,
+      summary: `Claude Code (~/.claude/CLAUDE.md): restored; an edit inside the Toolkit block was replaced, and the edited copy is in the backup below Backup: ~/.ai-agent-toolkit/backups/global-rules/${folder}` }
+  ] } });
+  const writes = [];
+  let state = { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 };
+  const invoke = (context) => {
+    const result = maybeWriteUpdateReport({
+      args: { hook: true, repoUpdateNow: false, openUpdateReport: false, suppressUpdateReport: false, syncSource: 'claude-plugin' },
+      hubPath: 'unused', state, checksum: 'same-content', context,
+      writeReport(markdown) { writes.push(markdown); return `restore-${writes.length}.md`; },
+      openReport() { return { ok: true }; },
+    });
+    state = result.state;
+    return result;
+  };
+  assert.equal(invoke(restored('2026-10-22T09-00-00-000Z')).reportPath, 'restore-1.md');
+  assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, 'restore-2.md', 'a second restore is not hidden by the first report signature');
+  assert.equal(writes.length, 2);
+  assert.match(writes[1], /restored; an edit inside the Toolkit block was replaced/);
+  assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, '', 'the same run replayed is still deduplicated');
+
+  // A file recreated after a hand deletion has the same summary each time; its run id still differs.
+  const created = (run) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+    { id: 'global-rules', status: 'passed', updated: true, run, summary: 'Claude Code (~/.claude/CLAUDE.md): created' }] } });
+  assert.equal(invoke(created('2026-10-22T11-00-00-000Z')).reportPath, 'restore-3.md');
+  assert.equal(invoke(created('2026-10-22T12-00-00-000Z')).reportPath, 'restore-4.md');
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {

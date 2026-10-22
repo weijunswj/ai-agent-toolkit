@@ -33,6 +33,18 @@ function preloadOption(file) {
   return `--require="${portable.replace(/["\\]/g, '\\$&')}"`;
 }
 
+// The real user-level instruction files the global rules installer owns a block in. The preload
+// refuses writes to them, so a test that forgets to isolate its home cannot change them.
+if (!process.env.TOOLKIT_TEST_PROTECTED_FILES) {
+  const home = os.homedir();
+  process.env.TOOLKIT_TEST_PROTECTED_FILES = JSON.stringify([
+    path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'CLAUDE.md'),
+    path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'AGENTS.md'),
+    path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'config.toml'),
+    path.join(home, '.gemini', 'GEMINI.md'),
+  ]);
+}
+
 const before = realReportNames();
 const privateTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-test-temp-'));
 for (const name of ['TEMP', 'TMP', 'TMPDIR']) process.env[name] = privateTemp;

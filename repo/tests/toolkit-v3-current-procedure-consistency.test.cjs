@@ -23,97 +23,69 @@ function section(text, number) {
   return next === -1 ? remainder : remainder.slice(0, next + 1);
 }
 
-// CONTROLLER.md and ARCHITECTURE.md hold only the current operating procedure; R3 removed
-// their pre-V3 historical blocks.
+// CONTROLLER.md holds only the current operating procedure (R3 removed its pre-V3 history); the
+// governed rules block holds the executor procedure and is projected unchanged into root AGENTS.md
+// and both portable templates (the projection itself is checked by agent-instruction-shims).
 function current(text) {
   assert.equal(text.includes('## Historical compatibility reference'), false, 'the pre-V3 history is removed');
   return text;
 }
-function lineStarting(text, prefix) {
-  const lines = text.split('\n').filter(line => line.startsWith(prefix));
-  assert.equal(lines.length, 1, `exactly one current line starts with: ${prefix}`);
-  return lines[0];
-}
 
-const EXECUTION_SURFACES = ['repo/contracts/agent-rules/ai-coding-agent-execution.md', 'AGENTS.md',
-  'repo/contracts/agent-rules/AGENTS.template.md', 'repo/contracts/agent-rules/CLAUDE.template.md',
-  'repo/contracts/agent-rules/GEMINI.template.md', 'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-  'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'];
+const GOVERNED_SURFACES = ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'AGENTS.md',
+  'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md', 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'];
 const RENEWAL_SURFACES = ['skills/controller-bootstrap/SKILL.md'];
-// R3 removed retired dot, OpenCode and v1-clock wording from CONTROLLER.md and the V3 directive only.
-// The portable rule surfaces and ARCHITECTURE.md keep the earlier wording until R4a rewrites them,
-// so they are compared with each other and CONTROLLER.md is checked against its own R3 wording.
-const UNCHANGED_UNTIL_R4A = ['repo/ARCHITECTURE.md', ...EXECUTION_SURFACES];
 
 function surfaces() {
-  const value = { 'repo/CONTROLLER.md': current(read('repo/CONTROLLER.md')), 'repo/ARCHITECTURE.md': current(read('repo/ARCHITECTURE.md')) };
-  for (const rel of [...EXECUTION_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
+  const value = { 'repo/CONTROLLER.md': current(read('repo/CONTROLLER.md')) };
+  for (const rel of [...GOVERNED_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
   return value;
 }
 
 function currentOperatingContract(texts) {
-  const procedures = ['repo/CONTROLLER.md', ...UNCHANGED_UNTIL_R4A];
-  for (const rel of procedures) {
+  for (const rel of GOVERNED_SURFACES) {
     const text = texts[rel];
     assert.match(text, /Planned G1 segment completion alone checkpoints and continues in the same session/, rel);
     assert.match(text, /Correction rechecks use fresh contexts for the same selected reviewers/, rel);
+    assert.match(text, /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/, rel);
+    assert.match(text, /rechecks target corrected boundary families rather than restarting discovery/, rel);
+    assert.match(text, /no added peer, duplicate or automatic closing panel/, rel);
   }
-  for (const rel of UNCHANGED_UNTIL_R4A) {
-    assert.match(texts[rel], /current v2 stored temporary bulk expires 21 days after verified transfer/, rel);
-    assert.match(texts[rel], /historical v1 records keep their 30-day legacy clock/, rel);
-  }
-  assert.match(texts['repo/CONTROLLER.md'], /stored temporary bulk expires 21 days after verified transfer, with explicit pins\/holds\./);
-  assert.doesNotMatch(texts['repo/CONTROLLER.md'], /v1 records|legacy clock/);
+  const controller = texts['repo/CONTROLLER.md'];
+  assert.match(controller, /Stored temporary owned bulk expires 21 days after its immutable verified transfer/);
+  assert.match(controller, /fresh-context and family-closure rules are in the governed block/);
+  assert.match(controller, /G2 stays adversarial on every reachable path inside the release brief's frozen supported host\/environment matrix/);
+  assert.match(controller, /a private `TRANSPORT-\*` Git repository is only the recommended default when no store was previously selected/);
   for (const rel of RENEWAL_SURFACES) {
     assert.match(texts[rel], /Planned G1 segment completion checkpoints and continues in the same session/, rel);
     assert.match(texts[rel], /fresh-context correction rechecks for the same selected reviewers/, rel);
   }
-  for (const rel of [...procedures, ...RENEWAL_SURFACES]) {
-    const text = texts[rel];
+  for (const [rel, text] of Object.entries(texts)) {
     assert.doesNotMatch(text, /each planned G1 segment/i, rel);
     assert.doesNotMatch(text, /segment completion and newly activated instruction\/profile versions require a fresh executor/, rel);
-    assert.doesNotMatch(text, /30 days after the latest required consumer/, rel);
+    assert.doesNotMatch(text, /30 days after the latest required consumer|v1 records|legacy clock/, rel);
     assert.doesNotMatch(text, /Reuse independent G2 reviewers|reviewer reuse/, rel);
     assert.doesNotMatch(text, /complementary peers?/, rel);
-  }
-  // One wording: the portable rules repeat ARCHITECTURE's paragraphs until R4a, and CONTROLLER keeps
-  // the paragraphs R3 did not change.
-  const controller = texts['repo/CONTROLLER.md'];
-  const architecture = texts['repo/ARCHITECTURE.md'];
-  // Storage is user-selected; a private TRANSPORT-* Git repository is only the default recommendation.
-  for (const rel of ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md']) {
-    assert.doesNotMatch(texts[rel], /agreed private TRANSPORT store/, rel);
-    assert.match(texts[rel], /a private `TRANSPORT-\*` Git repository is only the recommended default when no store was previously selected/, rel);
+    assert.doesNotMatch(text, /agreed private TRANSPORT store/, rel);
   }
   assert.match(read('repo/docs/TOOLKIT-V3.md'), /selection of another supported private backend takes precedence over that recommendation/);
   assert.match(read('repo/docs/TOOLKIT-V3.md'), /Git current-tree expiry is the adapter for a Git store, not a universal storage interface/);
   assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /TRANSPORT repo retaining the small index/);
-  assert.equal(lineStarting(architecture, 'G2 classifies concrete findings against agreed acceptance:'), lineStarting(controller, 'G2 classifies concrete findings against agreed acceptance:'));
-  for (const rel of EXECUTION_SURFACES) {
-    assert.equal(lineStarting(texts[rel], 'For adopted Toolkit V3 work, '), lineStarting(architecture, 'For adopted Toolkit V3 work, '), rel);
-    assert.match(texts[rel], /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/, rel);
-    assert.match(texts[rel], /rechecks target corrected boundary families rather than restarting discovery/, rel);
-  }
-  for (const rel of ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md']) {
-    assert.match(texts[rel], /G2 stays adversarial on every reachable path inside the release brief's frozen supported host\/environment matrix/, rel);
-  }
 }
 
-test('current V3 procedure is one wording across CONTROLLER, ARCHITECTURE and every generated instruction surface', () => {
+test('current procedure is one wording across CONTROLLER, the governed block and its projections', () => {
   const texts = surfaces();
   currentOperatingContract(texts);
   const mutations = [
-    ['repo/contracts/agent-rules/AGENTS.template.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
+    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
       'Mandatory fresh executor contexts follow each planned G1 segment.'],
-    ['repo/ARCHITECTURE.md', 'current v2 stored temporary bulk expires 21 days after verified transfer',
+    ['repo/CONTROLLER.md', 'Stored temporary owned bulk expires 21 days after its immutable verified transfer',
       'remote temporary bulk uses 30 days after the latest required consumer'],
     ['AGENTS.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
       'Reuse independent G2 reviewers for corrections'],
-    ['repo/contracts/agent-rules/ai-coding-agent-execution.md', 'do not add a peer, duplicate a member or add a closing panel automatically',
+    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'no added peer, duplicate or automatic closing panel',
       'broad changes may require two complementary peers'],
     ['skills/controller-bootstrap/SKILL.md', 'Planned G1 segment completion checkpoints and continues in the same session',
-      'Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor'],
-    ['repo/CONTROLLER.md', 'Correction rechecks use fresh contexts for the same selected reviewers', 'Reuse independent G2 reviewers for corrections']
+      'Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor']
   ];
   for (const [rel, before, after] of mutations) {
     assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
@@ -132,7 +104,7 @@ function reviewerCardinalityContract(text, registry) {
 test('documented reviewer cardinalities are derived from the pinned registry', () => {
   const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
   assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1]);
-  for (const rel of ['repo/contracts/source-of-truth-contract.md', 'AGENTS.md', 'README.md']) reviewerCardinalityContract(read(rel), registry);
+  for (const rel of ['repo/contracts/source-of-truth-contract.md', 'README.md']) reviewerCardinalityContract(read(rel), registry);
   const stale = read('repo/contracts/source-of-truth-contract.md').replace('currently contain one and one members', 'currently contain two and one members');
   assert.throws(() => reviewerCardinalityContract(stale, registry));
   const grown = structuredClone(registry); grown.profiles['owner-gpt'].reviewers.push({ reviewer_id: 'extra' });
@@ -239,27 +211,29 @@ test('present surfaces document only the portable Antigravity route that the bri
   assert.throws(() => antigravityPortableContract({ ...texts, '.claude-plugin/plugin.json': JSON.stringify(keyword) }, parseArgs));
 });
 
-// Owner records 08 (launch ownership) and 10 (finish before stopping), 17 October 2026: each is one
-// exact wording on every current surface, placed in the sections that govern it.
-const LAUNCH_OWNERSHIP = "Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a persistent controller such as dot or a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.";
-const FINISH_BEFORE_STOP = '**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises bypassing a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.';
+// Owner records 08 (launch ownership) and 10 (finish before stopping), 17 October 2026, as compressed
+// in 3.4.0: each keeps its meaning on every current surface, in the sections that govern it.
+const FINISH_BEFORE_STOP = '**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.';
 const V3_DOC = 'repo/docs/TOOLKIT-V3.md';
-const LAUNCH_OWNERSHIP_R3 = LAUNCH_OWNERSHIP.replace('including a persistent controller such as dot or a directly opened G2 chat', 'including a directly opened G2 chat');
-const LAUNCH_SURFACES = ['repo/ARCHITECTURE.md', ...EXECUTION_SURFACES, ...RENEWAL_SURFACES];
-const LAUNCH_SURFACES_R3 = ['repo/CONTROLLER.md', V3_DOC];
-const FINISH_SURFACES = ['repo/CONTROLLER.md', 'repo/ARCHITECTURE.md', ...EXECUTION_SURFACES, V3_DOC];
+const GLOBAL = 'repo/contracts/agent-rules/global-rules.md';
+const LAUNCH_OWNERSHIP_V3 = "Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.";
+const LAUNCH_CLAUSES = [/Model and effort follow launch ownership/, /advisory, not a blocker/, /never labelled the recommended one/,
+  /Every automation-launched G0\/G1\/G2 worker or successor/, /every G0\/G1 helper/, /(?:with no|without) fallback or weaker effort/,
+  /A root label is not a human override/, /Native permissions, independence, reviewer obligations and delegation limits still apply/];
+const LAUNCH_SURFACES = [...GOVERNED_SURFACES, ...RENEWAL_SURFACES];
+const FINISH_SURFACES = ['repo/CONTROLLER.md', V3_DOC];
 
 function ownerLawContract(texts) {
-  for (const rel of LAUNCH_SURFACES) assert.ok(texts[rel].includes(LAUNCH_OWNERSHIP), `${rel}: launch ownership`);
-  for (const rel of LAUNCH_SURFACES_R3) assert.ok(texts[rel].includes(LAUNCH_OWNERSHIP_R3), `${rel}: launch ownership (R3 wording)`);
+  for (const rel of LAUNCH_SURFACES) for (const clause of LAUNCH_CLAUSES) assert.match(texts[rel], clause, `${rel}: launch ownership ${clause}`);
+  assert.ok(texts[V3_DOC].includes(LAUNCH_OWNERSHIP_V3), 'V3 directive keeps the full launch-ownership wording');
   for (const rel of FINISH_SURFACES) assert.ok(texts[rel].includes(FINISH_BEFORE_STOP), `${rel}: finish before stopping`);
-  for (const rel of EXECUTION_SURFACES) {
-    const shipping = texts[rel].match(/## Shipping Law\n([\s\S]*?)(?=\n## )/)?.[0] || '';
-    assert.ok(shipping.includes(FINISH_BEFORE_STOP), `${rel}: finish-before-stop sits in Shipping Law`);
-    assert.match(texts[rel], /For adopted Toolkit V3 execution, automation-launched agents take models and effort only through an explicitly selected central stack registry revision/, rel);
-  }
+  const shipping = texts[GLOBAL].match(/## Shipping\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+  assert.match(shipping, /\*\*Finish authorised work before stopping\.\*\*/, 'finish-before-stop sits in the global Shipping section');
+  for (const clause of [/is not a finish/, /holds only the steps that depend on it/, /report the exact hold and next action/,
+    /never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work/]) assert.match(shipping, clause);
+  for (const rel of GOVERNED_SURFACES) assert.match(texts[rel], /Models and effort come only from an explicitly selected stack registry revision/, rel);
   const v3 = texts[V3_DOC];
-  assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP_R3));
+  assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP_V3));
   assert.ok(section(v3, 6).includes(FINISH_BEFORE_STOP));
   assert.match(section(v3, 7), /It is not a terminal outcome; section 6's finish-before-stop rule continues the next dependency-ready authorised step/);
   assert.match(section(v3, 8), /When the owner manually opens a G2 chat and selects its model and effort, that choice is authoritative for that first layer/);
@@ -269,19 +243,19 @@ function ownerLawContract(texts) {
   assert.match(section(v3, 18), /Missing, duplicate, stale or wrong-route automated returns cannot complete the set; an owner's manually selected reviewer model and effort are recorded as actual/);
   assert.match(section(v3, 18), /a genuine HOLD blocks only its dependent steps/);
   assert.match(section(v3, 19), /through a launcher that enforces the exact pinned-stack route for the role, not a prompt that merely names it/);
-  assert.match(texts['repo/CONTROLLER.md'], /For automation-launched agents, trusted launcher configuration establishes actual model and effort/);
+  assert.match(texts['repo/CONTROLLER.md'], /Launch every gate with model and effort pinned explicitly/);
 }
 
-test('launch ownership and finish-before-stop are one wording on every current surface', () => {
-  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC) };
+test('launch ownership and finish-before-stop keep their meaning on every current surface', () => {
+  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [GLOBAL]: read(GLOBAL) };
   ownerLawContract(texts);
   for (const [rel, before, after] of [
-    ['repo/CONTROLLER.md', 'is advisory relative to the stack and is not itself a blocker', 'must equal the stack recommendation'],
-    ['AGENTS.md', 'progress note is not a terminal outcome', 'progress note is a terminal outcome'],
+    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'is advisory, not a blocker', 'must equal the stack recommendation'],
+    [GLOBAL, 'progress note is not a finish', 'progress note is a finish'],
     [V3_DOC, 'holds only its dependent steps', 'stops all work'],
     [V3_DOC, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
     ['skills/controller-bootstrap/SKILL.md', 'without fallback or weaker effort', 'with the controller choosing the effort'],
-    ['repo/contracts/agent-rules/GEMINI.template.md', 'automation-launched agents take models and effort', 'choose models and effort']
+    ['AGENTS.md', 'Models and effort come only from an explicitly selected stack registry revision', 'Models and effort come from any registry']
   ]) {
     assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
     assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);

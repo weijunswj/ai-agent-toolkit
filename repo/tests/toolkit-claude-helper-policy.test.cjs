@@ -169,7 +169,7 @@ test('a helper definition that does not byte-match the selected-stack rendering 
   assert.deepEqual(f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } }), {});
   // Project agents outrank user agents, so a differing project copy is what Claude Code would load.
   fs.mkdirSync(path.join(f.repo, '.claude', 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(f.repo, '.claude', 'agents', 'toolkit-g0-helper.md'), original.replace('maxTurns: 12', 'maxTurns: 99'));
+  fs.writeFileSync(path.join(f.repo, '.claude', 'agents', 'toolkit-g0-helper.md'), original.replace('maxTurns: 50', 'maxTurns: 99'));
   assert.match(reason(f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })), /^Toolkit: the project copy .*[\\/]\.claude[\\/]agents[\\/]toolkit-g0-helper\.md does not match the one rendered from the selected stack\. Toolkit does not change project files; update or remove it\.$/);
   const missing = fixture(t, { install: false });
   assert.match(reason(missing.decide({ tool_input: { subagent_type: 'toolkit-g1-helper' } })), /no toolkit-g1-helper definition is installed/);
@@ -188,7 +188,7 @@ test('refusals give one plain next step: the generator by absolute path when not
   const project = fixture(t);
   fs.mkdirSync(path.join(project.repo, '.claude', 'agents'), { recursive: true });
   const projectFile = path.join(project.repo, '.claude', 'agents', 'toolkit-g0-helper.md');
-  fs.writeFileSync(projectFile, fs.readFileSync(path.join(project.configDir, 'agents', 'toolkit-g0-helper.md'), 'utf8').replace('maxTurns: 12', 'maxTurns: 99'));
+  fs.writeFileSync(projectFile, fs.readFileSync(path.join(project.configDir, 'agents', 'toolkit-g0-helper.md'), 'utf8').replace('maxTurns: 50', 'maxTurns: 99'));
   assert.equal(reason(project.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } })),
     `Toolkit: the project copy ${projectFile} does not match the one rendered from the selected stack. Toolkit does not change project files; update or remove it.`);
 });

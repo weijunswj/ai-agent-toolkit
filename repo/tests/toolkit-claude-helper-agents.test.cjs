@@ -196,7 +196,7 @@ test('a project copy that differs is reported and never written; refresh ignores
   const project = path.join(f.base, 'project'), projectAgents = path.join(project, '.claude', 'agents');
   fs.mkdirSync(projectAgents, { recursive: true });
   const drifted = path.join(projectAgents, FILE.G0), matching = path.join(projectAgents, FILE.G1);
-  fs.writeFileSync(drifted, read(path.join(f.agents, FILE.G0)).replace('maxTurns: 12', 'maxTurns: 99'));
+  fs.writeFileSync(drifted, read(path.join(f.agents, FILE.G0)).replace('maxTurns: 50', 'maxTurns: 99'));
   fs.writeFileSync(matching, read(path.join(f.agents, FILE.G1)));
   const driftedBefore = read(drifted);
   const defs = f.defs();

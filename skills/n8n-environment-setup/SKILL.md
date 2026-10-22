@@ -47,7 +47,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 
 ## Common Outputs
 
-- Generic Codex rules template: `skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`
+- Generic agent rules: the Toolkit global rules that `setup toolkit` installs; governed-repository template: `skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`
 - n8n rules skill: `skills/n8n-safety-router`
 - n8n rules local reference: [references/n8n-safety-rules.md](references/n8n-safety-rules.md)
 - n8n work: [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.

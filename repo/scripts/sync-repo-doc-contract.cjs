@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 
+// Writes (--write) or checks the Source-of-Truth Contract block in README.md from
+// repo/contracts/source-of-truth-contract.md, inside versioned, hashed Toolkit markers.
+
 const fs = require('node:fs');
 const path = require('node:path');
+const { findBlocks, renderBlock } = require('./toolkit-managed-block.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -16,25 +20,9 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const partialPath = 'repo/contracts/source-of-truth-contract.md';
-const targets = ['README.md', 'AGENTS.md'];
-const projectId = 'repo-methodology.context-preserving-ai-publisher';
-const beginMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
-const endMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
-const markerPairs = [
-  { begin: beginMarker, end: endMarker },
-  {
-    begin: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->'
-  },
-  {
-    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN source-of-truth-contract v1 -->`,
-    end: `<!-- ai-agent-toolkit:${projectId}:END source-of-truth-contract -->`
-  },
-  {
-    begin: '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
-    end: '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
-  }
-];
+const versionPath = 'repo/contracts/toolkit-local-bridge/version.json';
+const targets = ['README.md'];
+const BLOCK_NAME = 'SOURCE-OF-TRUTH-CONTRACT';
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 
 function resolveRel(relPath) {
@@ -42,7 +30,7 @@ function resolveRel(relPath) {
 }
 
 function normalize(text) {
-  return text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  return text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
 }
 
 function readText(relPath, errors, label) {
@@ -54,57 +42,32 @@ function readText(relPath, errors, label) {
   return normalize(fs.readFileSync(full, 'utf8'));
 }
 
-function markerCount(text, marker) {
-  return text.split(marker).length - 1;
-}
-
-function expectedBlock(partial) {
-  return `${beginMarker}\n${partial.trimEnd()}\n${endMarker}`;
-}
-
-function replaceBlock(relPath, text, partial, errors) {
-  const matches = markerPairs
-    .map((pair) => ({
-      ...pair,
-      beginCount: markerCount(text, pair.begin),
-      endCount: markerCount(text, pair.end)
-    }))
-    .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
-  if (matches.length === 0) {
-    errors.push(`Missing source-of-truth contract markers: ${relPath}`);
+function replaceBlock(relPath, text, block, errors) {
+  const { blocks, errors: markerErrors } = findBlocks(text);
+  if (markerErrors.length) {
+    errors.push(`Malformed Toolkit markers in ${relPath}: ${markerErrors[0]}`);
     return null;
   }
-
-  const completeMatches = matches.filter((pair) =>
-    pair.beginCount === 1 && pair.endCount === 1 && text.indexOf(pair.begin) < text.indexOf(pair.end)
-  );
-  if (completeMatches.length !== 1) {
-    errors.push(`Duplicate source-of-truth contract markers: ${relPath}`);
+  const found = blocks.filter(entry => entry.name === BLOCK_NAME);
+  if (found.length !== 1) {
+    errors.push(found.length ? `Duplicate source-of-truth contract markers: ${relPath}` : `Missing source-of-truth contract markers: ${relPath}`);
     return null;
   }
-
-  const { begin, end } = completeMatches[0];
-  const start = text.indexOf(begin);
-  const endIndex = text.indexOf(end);
-  if (start > endIndex) {
-    errors.push(`Source-of-truth contract markers out of order: ${relPath}`);
-    return null;
-  }
-
-  const blockEnd = endIndex + end.length;
-  return `${text.slice(0, start)}${expectedBlock(partial)}${text.slice(blockEnd)}`.replace(/\n*$/, '\n');
+  return `${text.slice(0, found[0].start)}${renderBlock(block)}${text.slice(found[0].end)}`.replace(/\n*$/, '\n');
 }
 
 function validateAndSync(options = {}) {
   const runMode = options.mode || mode;
   const errors = [];
   const partial = readText(partialPath, errors, 'partial');
-  if (partial === null) return { errors };
+  const versionText = readText(versionPath, errors, 'version');
+  if (partial === null || versionText === null) return { errors };
+  const block = { source: partialPath, name: BLOCK_NAME, version: JSON.parse(versionText).version, body: partial };
 
   for (const target of targets) {
     const current = readText(target, errors, 'target');
     if (current === null) continue;
-    const expected = replaceBlock(target, current, partial, errors);
+    const expected = replaceBlock(target, current, block, errors);
     if (expected === null) continue;
 
     if (runMode === 'write') {

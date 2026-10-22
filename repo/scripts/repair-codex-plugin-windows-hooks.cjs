@@ -47,6 +47,23 @@ const N8N_SKILLS_COMPATIBILITY = Object.freeze({
   repaired_sha256: Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '216c491b96fe6656396e1df4fc12291647f42689e54b291153fc765d41d94fd9',
+    'hooks/session-start.sh': 'd49418623b8af82791457493484793fcaae8be6e3f96464e8e3598bc8f13e1d7',
+    'hooks/pre-tool-use/_emit.sh': 'efdde5dbc2867c25d91adf28e336c42d1ed7c5cac85dadf36a3a84504436d695',
+    'hooks/pre-tool-use/create-workflow.sh': '884e9c6b823d9d40e7bfdb77d625f0ba486c81fe5155b8882c2f959aad2bab62',
+    'hooks/pre-tool-use/execute-workflow.sh': '3212e10f40420ee364caf23cfe7e9a2a4b3c0a6501e0dc932ba53be2de2fb0d9',
+    'hooks/pre-tool-use/get-node.sh': '4f68352123ded0d58dbc7545f88e98886ea0d873689354a0ab438c2d537ce700',
+    'hooks/pre-tool-use/test-workflow.sh': '7b92b089b6af30300c6e0131bcfa72af1acb6b8e7ca773ac0d3d11d904860fdb',
+    'hooks/pre-tool-use/update-workflow.sh': 'a7a7d1c5be93bb47f7e75e684198957b43b9f1a3515f1f2a462a560ed1b6efe4',
+    'hooks/pre-tool-use/validate-workflow.sh': '0b32c21a6a549f051594e18b065b9c62187c1b472ef726bdc7b36a6b202933ca',
+    'hooks/post-tool-use/validate-workflow.sh': 'c6aab6ca5acec3344c3b6215fc42d5a6fdf0ba1de36071fe285d2736a7615aa3',
+    'hooks/run-hook.ps1': 'ca721972f6a7f972f828b0481ae0f19a08e057fe986a1f17dc081b759e9b666f',
+    'skills/using-n8n-skills-official/SKILL.md': 'b19218c759d5a3538e0e11182adb3a38b50712e4f4c1822fa80834aa25fe9c09'
+  }),
+  // Files repaired by Toolkit 3.3 and earlier, before python3 ran isolated. A plugin in exactly this
+  // state is repaired again (only -I is added). Remove with the n8n Skills 1.0.1 contract.
+  previous_repaired_sha256: Object.freeze({
+    '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
+    'hooks/hooks.json': '216c491b96fe6656396e1df4fc12291647f42689e54b291153fc765d41d94fd9',
     'hooks/session-start.sh': '92ff280ea75c5c3ca0bd2e97b295f45a3433cc8f33e522b1563c3ff32b0e8610',
     'hooks/pre-tool-use/_emit.sh': '32171e8339ed8800d1ae336f1a34c6069302a737f436c88f3c76a8e0ccec29ec',
     'hooks/pre-tool-use/create-workflow.sh': '884e9c6b823d9d40e7bfdb77d625f0ba486c81fe5155b8882c2f959aad2bab62',
@@ -516,6 +533,9 @@ function classifyN8nSkillsCompatibility(pluginRoot) {
   if (fingerprintsMatch(pluginRoot, N8N_SKILLS_COMPATIBILITY.repaired_sha256)) {
     return { ...base, status: 'healthy', version };
   }
+  if (fingerprintsMatch(pluginRoot, N8N_SKILLS_COMPATIBILITY.previous_repaired_sha256)) {
+    return { ...base, status: 'repair-required', version, reason: 'repaired before python3 ran isolated' };
+  }
   return {
     ...base,
     status: 'malformed',
@@ -580,7 +600,7 @@ function patchPreEmitText(text) {
       'elif command -v jq >/dev/null 2>&1; then',
       '  SESSION_ID="$(echo "${INPUT}" | jq -r \'.session_id // empty\' 2>/dev/null)"',
       'elif command -v python3 >/dev/null 2>&1; then',
-      '  SESSION_ID="$(echo "${INPUT}" | python3 -c \'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""))\' 2>/dev/null)"',
+      '  SESSION_ID="$(echo "${INPUT}" | python3 -I -c \'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""))\' 2>/dev/null)"',
       'else',
       '  exit 0',
       'fi'
@@ -675,7 +695,7 @@ function patchPostValidateText(text) {
       '  elif command -v jq >/dev/null 2>&1; then',
       '    jq -n --arg ctx "$1" \'{ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: $ctx } }\'',
       '  elif command -v python3 >/dev/null 2>&1; then',
-      '    python3 -c \'',
+      '    python3 -I -c \'',
       'import json, sys',
       'ctx = sys.stdin.read()',
       'print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":ctx}}))',
@@ -707,6 +727,12 @@ function patchPostValidateText(text) {
   return next;
 }
 
+// Every python3 -c in a patched hook runs isolated (-I), so a json.py in the folder the coding app
+// was opened in is never imported. Applied to new and already-repaired files alike.
+function isolatePython(text) {
+  return text.replace(/\bpython3 -c\b/g, 'python3 -I -c');
+}
+
 function patchFile(pluginRoot, relPath, transform, actions, options, required = true) {
   const filePath = path.join(pluginRoot, ...relPath.split('/'));
   if (!fs.existsSync(filePath)) {
@@ -714,7 +740,7 @@ function patchFile(pluginRoot, relPath, transform, actions, options, required = 
     return;
   }
   const before = fs.readFileSync(filePath, 'utf8');
-  const after = transform(before);
+  const after = isolatePython(transform(before));
   if (after === before) return;
   actions.push(`patch ${relPath}`);
   if (options.write) fs.writeFileSync(filePath, after, 'utf8');

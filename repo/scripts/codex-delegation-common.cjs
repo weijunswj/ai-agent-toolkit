@@ -80,6 +80,30 @@ print(json.dumps({
 }, sort_keys=True))
 `;
 
+const PYTHON_TOML_DOCUMENT = String.raw`
+import json, sys, tomllib
+raw = sys.stdin.buffer.read()
+try:
+    text = raw.decode('utf-8')
+except UnicodeDecodeError as exc:
+    print(json.dumps({'ok': False, 'kind': 'encoding', 'detail': str(exc)}))
+    raise SystemExit(0)
+try:
+    parsed = tomllib.loads(text)
+except Exception as exc:
+    print(json.dumps({'ok': False, 'kind': 'parse', 'detail': str(exc)}))
+    raise SystemExit(0)
+def plain(value):
+    if type(value) is dict:
+        return {'t': 'table', 'v': {key: plain(item) for key, item in value.items()}}
+    if type(value) is list:
+        return {'t': 'array', 'v': [plain(item) for item in value]}
+    if type(value) in (str, bool):
+        return {'t': type(value).__name__, 'v': value}
+    return {'t': type(value).__name__, 'v': repr(value)}
+print(json.dumps({'ok': True, 'doc': plain(parsed)}, sort_keys=True))
+`;
+
 function helpersToTotalThreads(helperCount) {
   if (!Number.isSafeInteger(helperCount) || helperCount < 0) throw new Error('Helper count must be a non-negative integer.');
   return helperCount + 1;
@@ -127,18 +151,23 @@ function pythonCandidates() {
   });
 }
 
-function parseTomlStructurally(bytes) {
+// Runs a tomllib script over the given bytes with the first usable Python 3.11+ and returns its
+// JSON result, cached by script and input digest. Python runs isolated (-I: neither the working
+// folder nor the script folder on sys.path, no PYTHON* variables, no user site) from this Toolkit
+// folder, so a json.py or tomllib.py in the folder a coding app was opened in is never imported.
+function runTomlScript(script, bytes) {
   const input = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || '');
-  const cacheKey = sha256(input);
+  const cacheKey = `${sha256(Buffer.from(script))}:${sha256(input)}`;
   if (TOML_PARSE_CACHE.has(cacheKey)) return JSON.parse(JSON.stringify(TOML_PARSE_CACHE.get(cacheKey)));
   const failures = [];
   for (const candidate of pythonCandidates()) {
-    const result = spawnSync(candidate.command, [...candidate.args, '-c', PYTHON_TOML_INSPECT], {
+    const result = spawnSync(candidate.command, [...candidate.args, '-I', '-c', script], {
+      cwd: __dirname,
       input,
       encoding: 'utf8',
       windowsHide: true,
       timeout: 10000,
-      maxBuffer: 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024,
     });
     if (result.error && result.error.code === 'ENOENT') continue;
     if (result.error) {
@@ -165,6 +194,16 @@ function parseTomlStructurally(bytes) {
   };
 }
 
+function parseTomlStructurally(bytes) {
+  return runTomlScript(PYTHON_TOML_INSPECT, bytes);
+}
+
+// The whole parsed document as { ok, doc }, where every value is { t: type, v: value } and scalars
+// other than strings and booleans are kept as their exact Python repr, so two parses compare exactly.
+function parseTomlDocument(bytes) {
+  return runTomlScript(PYTHON_TOML_DOCUMENT, bytes);
+}
+
 module.exports = {
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
@@ -188,6 +227,7 @@ module.exports = {
   codexConfigPath,
   backupRoot,
   parseTomlStructurally,
+  parseTomlDocument,
   helpersToTotalThreads,
   totalThreadsToHelpers,
 };
