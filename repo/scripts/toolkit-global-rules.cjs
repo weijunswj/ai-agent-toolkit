@@ -208,7 +208,7 @@ class GlobalRulesFile {
 // left for the owner. Every candidate is parsed before writing: the key must read 65536 and every
 // other value must be unchanged, or nothing is written.
 const DOC_LIMIT_KEY = 'project_doc_max_bytes';
-const DOC_LIMIT_MODES = Object.freeze(['raise', 'restore', 'report']);
+const DOC_LIMIT_MODES = Object.freeze(['raise', 'restore', 'report', 'none']);
 const DOC_LIMIT_DEFAULT = 32768;
 const DOC_LIMIT_TARGET = 65536;
 const DOC_LIMIT_BEGIN = /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=(\d+|none)(?: line=([A-Za-z0-9+/]+=*))?( created=yes)?(\r?\n|$)/gm;
@@ -254,6 +254,8 @@ class CodexDocLimit {
     if (end.index < begin.index || inner.replace(/\r?\n$/, '') !== VALUE_LINE) {
       return { error: `the lines between the Toolkit markers are not exactly "${VALUE_LINE}"` };
     }
+    // A replaced value is only restorable from its recorded line; never guess one.
+    if (begin[1] !== 'none' && !begin[2]) return { error: 'the Toolkit marker does not record the line it replaced' };
     return { start: begin.index, end: end.index + end[0].length, previous: begin[1],
       original: begin[2] ? Buffer.from(begin[2], 'base64').toString('utf8') : '', created: Boolean(begin[3]) };
   }
@@ -401,7 +403,8 @@ class GlobalRules {
   // alone; false for setup and --write, which reinstall and clear that removal.
   // codexDocLimit: what refresh does with Codex's project_doc_max_bytes. 'raise' only with the
   // owner's yes (the setup answer, or an explicit --write); 'restore' after the owner's no; 'report'
-  // (the default) changes nothing. --remove always puts the previous value back.
+  // (the default) changes nothing; 'none' (a session start without a yes) does not read config.toml
+  // at all. --remove always puts the previous value back.
   constructor({ environment = process.env, toolkitRoot = TOOLKIT_ROOT, harnesses = ['claude-code', 'codex'],
     backupRoot, ledgerFile, retentionDays = 7, now = () => new Date(), respectRemoval = false, repoAgentsFile = null,
     codexDocLimit = 'report' } = {}) {
@@ -450,7 +453,7 @@ class GlobalRules {
       const files = this.#files.map(file => file.install({ respectRemoval: this.#respectRemoval }));
       const codex = files.find(file => file.harness === 'codex');
       let limit = null;
-      if (this.#docLimit) {
+      if (this.#docLimit && this.#docLimitMode !== 'none') {
         if (this.#docLimitMode === 'raise' && codex && !['opted-out', 'held'].includes(codex.action)) limit = this.#docLimit.ensure();
         else if (this.#docLimitMode === 'restore') limit = this.#docLimit.restore();
         else limit = { ...this.#docLimit.assess(), action: 'reported' };

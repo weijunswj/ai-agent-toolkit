@@ -184,7 +184,7 @@ test('the Codex session-start hook writes nothing before setup or with auto-sync
   assert.deepEqual(noConsent.lines, [], 'a routine refresh is silent');
   assert.equal(fs.existsSync(harnessFile('codex', h.env)), true);
   assert.equal(fs.existsSync(config), false, 'without the setup answer the hook never touches config.toml');
-  assert.equal(noConsent.result.doc_limit.action, 'reported');
+  assert.equal(noConsent.result.doc_limit, null, 'without a yes the session start does not even read config.toml');
 
   const consent = { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT, codex_doc_limit_enabled: true };
   const raised = capture(() => maybeRefreshCodexGlobalRules(hook, consent, h.env));
@@ -382,4 +382,34 @@ test('the global block is the global rules source plus the n8n adapter, at the p
   assert.equal(EXPECTED.name, BLOCK_NAME);
   assert.ok(EXPECTED.body.startsWith('# Toolkit Global Rules'));
   assert.ok(EXPECTED.body.endsWith(read(path.join(ROOT, 'repo/contracts/agent-rules/n8n-safety-router-adapter.md')).replace(/\r\n/g, '\n').trimEnd()));
+});
+
+test('the config.toml check never imports Python modules from the opened folder or PYTHONPATH', () => {
+  const { spawnSync } = require('node:child_process');
+  const opened = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-opened-folder-'));
+  const marker = path.join(opened, 'planted-ran.txt');
+  const plant = `open(${JSON.stringify(marker)}, 'a').write('ran\\n')\n`;
+  fs.writeFileSync(path.join(opened, 'json.py'), plant);
+  fs.writeFileSync(path.join(opened, 'tomllib.py'), plant);
+  const common = path.join(ROOT, 'repo', 'scripts', 'codex-delegation-common.cjs');
+  const probe = `const c = require(${JSON.stringify(common)}); process.stdout.write(JSON.stringify(c.parseTomlDocument(Buffer.from('a = 1\\n'))));`;
+  const run = spawnSync(process.execPath, ['-e', probe], { cwd: opened, encoding: 'utf8', env: { ...process.env, PYTHONPATH: opened } });
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  const { parseTomlDocument } = require('../scripts/codex-delegation-common.cjs');
+  if (parseTomlDocument(Buffer.from('b = 2\n')).kind === 'parser-unavailable') return;
+  assert.equal(parsed.ok, true, `the real tomllib parses: ${JSON.stringify(parsed)}`);
+  assert.deepEqual(parsed.doc.v.a, { t: 'int', v: '1' });
+  assert.equal(fs.existsSync(marker), false, 'neither planted module ran');
+});
+
+test('a Toolkit marker that replaced a value without recording the line is held, never guessed', () => {
+  const h = home();
+  const config = path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  const text = '# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=20000\nproject_doc_max_bytes = 65536\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\n';
+  fs.writeFileSync(config, text);
+  assert.equal(rules(h, { harnesses: ['codex'] }).check().doc_limit.state, 'broken');
+  assert.equal(rules(h, { harnesses: ['codex'] }).remove().doc_limit.action, 'held');
+  assert.equal(read(config), text);
 });

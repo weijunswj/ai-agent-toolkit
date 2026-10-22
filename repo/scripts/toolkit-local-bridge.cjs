@@ -1430,10 +1430,11 @@ function maybeRefreshCodexGlobalRules(args, state, environment = process.env) {
   const checkout = state?.repo_path && fs.existsSync(path.join(state.repo_path, 'repo', 'contracts', 'agent-rules', 'global-rules.md'))
     ? state.repo_path : path.resolve(__dirname, '..', '..');
   try {
-    // Codex's instruction limit is kept raised only after the owner said yes in setup.
+    // Codex's instruction limit is kept raised only after the owner said yes in setup; without that
+    // yes the session start does not read config.toml at all.
     const result = new GlobalRules({ environment, toolkitRoot: checkout, harnesses: ['codex'], respectRemoval: true,
       retentionDays: state?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
-      codexDocLimit: state.codex_doc_limit_enabled === true ? 'raise' : 'report' }).refresh();
+      codexDocLimit: state.codex_doc_limit_enabled === true ? 'raise' : 'none' }).refresh();
     const restored = result.files.some((file) => file.action === 'restored');
     const limitChanged = ['raised', 'restored-previous', 'deleted-file'].includes(result.doc_limit?.action);
     if (result.status === 'held' || restored || limitChanged) console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);

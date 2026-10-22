@@ -152,14 +152,17 @@ function pythonCandidates() {
 }
 
 // Runs a tomllib script over the given bytes with the first usable Python 3.11+ and returns its
-// JSON result, cached by script and input digest.
+// JSON result, cached by script and input digest. Python runs isolated (-I: neither the working
+// folder nor the script folder on sys.path, no PYTHON* variables, no user site) from this Toolkit
+// folder, so a json.py or tomllib.py in the folder a coding app was opened in is never imported.
 function runTomlScript(script, bytes) {
   const input = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || '');
   const cacheKey = `${sha256(Buffer.from(script))}:${sha256(input)}`;
   if (TOML_PARSE_CACHE.has(cacheKey)) return JSON.parse(JSON.stringify(TOML_PARSE_CACHE.get(cacheKey)));
   const failures = [];
   for (const candidate of pythonCandidates()) {
-    const result = spawnSync(candidate.command, [...candidate.args, '-c', script], {
+    const result = spawnSync(candidate.command, [...candidate.args, '-I', '-c', script], {
+      cwd: __dirname,
       input,
       encoding: 'utf8',
       windowsHide: true,

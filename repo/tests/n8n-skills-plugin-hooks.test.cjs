@@ -853,6 +853,8 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
     const text = fs.readFileSync(path.join(pluginRoot, ...relPath.split('/')), 'utf8');
     assert.match(text, /AI-AGENT-TOOLKIT:N8N-NODE-FALLBACK/);
     assert.match(text, /JSON\.stringify/);
+    // A json.py in the folder Codex was opened in must never be imported by the python3 fallback.
+    assert.doesNotMatch(text, /python3 -c/, `${relPath}: every python3 fallback runs isolated`);
   }
 
   const unique = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1092,4 +1094,25 @@ test('source-watch records the authoritative n8n Skills compatibility baseline w
   assert.equal(target.baseline_sha, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
   assert.match(target.recommendation, /must not mutate installed caches/i);
   assert.match(target.remaining_work, /#248/);
+});
+
+test('an n8n-skills plugin repaired before python3 ran isolated is repaired again to the isolated form', () => {
+  const pluginRoot = copySupportedFixture();
+  assert.equal(reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }).status, 'repaired');
+  // Turn the isolated python3 fallbacks back into the form Toolkit 3.3 and earlier wrote.
+  const patched = ['hooks/session-start.sh', 'hooks/pre-tool-use/_emit.sh', 'hooks/post-tool-use/validate-workflow.sh'];
+  for (const relPath of patched) {
+    const file = path.join(pluginRoot, ...relPath.split('/'));
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/python3 -I -c/g, 'python3 -c'));
+  }
+  const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, N8N_SKILLS_COMPATIBILITY.previous_repaired_sha256);
+  assert.deepEqual(fingerprints, { ...N8N_SKILLS_COMPATIBILITY.previous_repaired_sha256 }, 'this is exactly the earlier repaired state');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'repair-required');
+  const again = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(again.status, 'repaired');
+  assert.deepEqual(again.actions, patched.map((relPath) => `patch ${relPath}`), 'only the three python3 files change');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  for (const relPath of patched) {
+    assert.doesNotMatch(fs.readFileSync(path.join(pluginRoot, ...relPath.split('/')), 'utf8'), /python3 -c/, relPath);
+  }
 });
