@@ -9,7 +9,7 @@ const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 // Enforcement applies only inside Toolkit itself: a Toolkit checkout at the nearest git
 // root, or a session a Toolkit launcher started (launcher marker). It uses the predicate
 // shared with the Claude hook with the managed-block test turned off, so repositories that
-// only carry the managed GLOBAL-AGENTS.MD-TEMPLATE block keep native Codex helpers until
+// only carry the Toolkit-governed rules block keep native Codex helpers until
 // the Codex lane (#469) adds a named-helper allow-list. Elsewhere the hook makes no
 // decision. Helper depth on Codex stays advisory: PreToolUse carries no caller-agent identity.
 const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];

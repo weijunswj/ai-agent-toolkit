@@ -13,6 +13,20 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 5. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
 6. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
 
+## Match: Model Safety Flags
+
+Triggers: a session or subagent switched to a fallback model by a safety classifier, or always-loaded wording that may trigger false safety flags.
+
+Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/model-safety-flags.md`.
+
+## Docs By Task
+
+- Agent-instruction changes: `repo/docs/FOR_AI_AGENTS.md` and `repo/docs/SOURCE-OF-TRUTH.md`.
+- Skills, contracts or native plugin surfaces: also `repo/docs/PROJECT-MODULE-STANDARD.md` and `repo/docs/SURFACE-FIDELITY-AUDIT.md`.
+- Provenance or third-party source work: `repo/docs/RETIRED-SOURCE-PROVENANCE.md` and `repo/docs/THIRD-PARTY-SOURCE-NOTES.md`.
+- Generated-output writeback or privileged workflows: `repo/docs/WRITE-SAFETY-MODEL.md` and `repo/docs/SAFE-UPDATES.md`.
+- Cleanup, retirement or human usage docs: `repo/docs/CLEANUP-POLICY.md`, `repo/docs/HOW-TO-USE.md` and `README.md`.
+
 ## Always-Active Baseline
 
 For a normal small code or docs task with no special match, do not read `baseline-workflow.md` by default. Continue baseline-only.

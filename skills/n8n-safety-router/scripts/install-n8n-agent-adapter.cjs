@@ -4,8 +4,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const beginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
-const endMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+// The Toolkit managed adapter block, in any marker format version: v2 BEGIN lines carry the
+// Toolkit version and a body digest (`... v2 toolkit=<version> sha256=<12 hex> -->`).
+const beginLine = /^<!-- AI-AGENT-TOOLKIT:\S+:BEGIN N8N-AGENT-RULES-ADAPTER v\d+(?: [^\n]*)? -->$/gm;
+const endLine = /^<!-- AI-AGENT-TOOLKIT:\S+:END N8N-AGENT-RULES-ADAPTER -->$/gm;
 const standaloneBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
 const standaloneEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 
@@ -172,34 +174,27 @@ function detectN8nInvolvement(root) {
   return [...new Set(hits)];
 }
 
-function adapterBlock(adapterFile) {
-  const template = normalizeNewlines(fs.readFileSync(adapterFile, 'utf8'));
-  const start = template.indexOf(beginMarker);
-  const finish = template.indexOf(endMarker);
-  if (start === -1 || finish === -1 || finish < start) {
-    throw new Error(`Adapter template is missing managed markers: ${adapterFile}`);
-  }
-  return template.slice(start, finish + endMarker.length).trimEnd();
+// Start offsets of every line matching pattern, and the offset just past each match.
+function markerMatches(text, pattern) {
+  return [...text.matchAll(pattern)].map(match => ({ start: match.index, end: match.index + match[0].length }));
 }
 
-function markerIndexes(text, marker) {
-  const positions = [];
-  let index = text.indexOf(marker);
-  while (index !== -1) {
-    positions.push(index);
-    index = text.indexOf(marker, index + marker.length);
+function adapterBlock(adapterFile) {
+  const template = normalizeNewlines(fs.readFileSync(adapterFile, 'utf8'));
+  const [start] = markerMatches(template, beginLine);
+  const [finish] = markerMatches(template, endLine);
+  if (!start || !finish || finish.start < start.start) {
+    throw new Error(`Adapter template is missing managed markers: ${adapterFile}`);
   }
-  return positions;
+  return template.slice(start.start, finish.end).trimEnd();
 }
 
 function replaceManagedBlock(existing, block, activeFile = 'active instruction file') {
   const normalized = normalizeNewlines(existing);
-  const starts = markerIndexes(normalized, beginMarker);
-  const finishes = markerIndexes(normalized, endMarker);
-  const standaloneStarts = markerIndexes(normalized, standaloneBeginMarker);
-  const standaloneFinishes = markerIndexes(normalized, standaloneEndMarker);
+  const starts = markerMatches(normalized, beginLine);
+  const finishes = markerMatches(normalized, endLine);
 
-  if (standaloneStarts.length > 0 || standaloneFinishes.length > 0) {
+  if (normalized.includes(standaloneBeginMarker) || normalized.includes(standaloneEndMarker)) {
     throw new Error(`Unsupported standalone n8n adapter markers in ${activeFile}. Use the canonical AI-AGENT-TOOLKIT managed adapter block.`);
   }
   if (starts.length === 0 && finishes.length === 0) {
@@ -210,11 +205,11 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
   }
   const [start] = starts;
   const [finish] = finishes;
-  if (finish < start) {
+  if (finish.start < start.start) {
     throw new Error(`Malformed managed adapter markers in ${activeFile}`);
   }
-  const before = normalized.slice(0, start).trimEnd();
-  const after = normalized.slice(finish + endMarker.length).trimStart();
+  const before = normalized.slice(0, start.start).trimEnd();
+  const after = normalized.slice(finish.end).trimStart();
   return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
 }
 

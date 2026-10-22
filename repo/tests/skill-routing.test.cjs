@@ -616,19 +616,19 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
-  assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
+  assert.match(readme, /A repository opts into Toolkit governance with the governed block in its `AGENTS\.md`/);
   assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
   assert.match(readme, /\(skills\/n8n-safety-router\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
-  assert.match(aiRulesReadme, /\| Platform \| Repo-local entry point \|/);
-  assert.match(aiRulesReadme, /\| Claude Code \| 1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\]\(repo-local\/AGENTS\.managed\.template\.md\)\.<br>2\. Add `CLAUDE\.md` from \[repo-local\/CLAUDE\.shim\.template\.md\]\(repo-local\/CLAUDE\.shim\.template\.md\)\. \|/);
-  assert.match(aiRulesReadme, /\| Antigravity \| 1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\]\(repo-local\/AGENTS\.managed\.template\.md\)\.<br>2\. Add `GEMINI\.md` from \[repo-local\/GEMINI\.shim\.template\.md\]\(repo-local\/GEMINI\.shim\.template\.md\)\.<br>3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` from \[repo-local\/antigravity-bootstrap\.template\.md\]\(repo-local\/antigravity-bootstrap\.template\.md\)\. \|/);
-  assert.match(aiRulesReadme, /\| Platform \| Preferred skill install \| Supported skill-folder location \|/);
-  assert.match(aiRulesReadme, /\| Codex \| Direct whole-skill-folder install\. \| \*\*Choose any one supported Codex skill-folder location:\*\*<br>- `<repo>\/\.agents\/skills\/<skill-name>\/`/);
-  assert.match(aiRulesReadme, /\| OpenCode \| Short manual whole-skill-folder install only\. \| \*\*Choose any one supported OpenCode skill-folder location:\*\*<br>- `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
+  assert.match(aiRulesReadme, /\| Template \| Target \| When \|/);
+  assert.match(aiRulesReadme, /\| \[repo-local\/AGENTS\.managed\.template\.md\]\(repo-local\/AGENTS\.managed\.template\.md\) \| `AGENTS\.md` \| Always; the block is the opt-in \|/);
+  assert.match(aiRulesReadme, /\| \[repo-local\/CLAUDE\.shim\.template\.md\]\(repo-local\/CLAUDE\.shim\.template\.md\) \| `CLAUDE\.md` \| Claude Code \|/);
+  assert.match(aiRulesReadme, /\| \[repo-local\/antigravity-bootstrap\.template\.md\]\(repo-local\/antigravity-bootstrap\.template\.md\) \| `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` \| Antigravity \|/);
+  assert.match(aiRulesReadme, /\| Codex \| `<repo>\/\.agents\/skills\/<skill>\/`/);
+  assert.match(aiRulesReadme, /\| Antigravity \| `<workspace>\/\.agents\/skills\/<skill>\/` \(portable skills copy only; no native plugin\) \|/);
 
   const installDocs = [howToUse, readme].join('\n');
   assert.match(installDocs, /\.codex-plugin\/plugin\.json/);

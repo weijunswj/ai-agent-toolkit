@@ -5,6 +5,9 @@
 // test environment. Only guarded test runs load it, including the hook-light test that setup and
 // repo auto-update run as validation; the bridge and setup code are unchanged.
 //
+// It also refuses writes to the real user-level instruction files named by
+// TOOLKIT_TEST_PROTECTED_FILES, so the global rules installer can never touch them in a test.
+//
 // On Windows the bridge opens each action-required update report with spawn('notepad.exe', ...).
 // Here that call gets an inert stand-in child, so no window opens. Any other Notepad start that
 // reaches Node's process layer (exec, execFile, a shell command line, the sync variants, or a
@@ -14,6 +17,7 @@
 const childProcess = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const path = require('node:path');
 
 const RECORD_VARIABLE = 'TOOLKIT_TEST_NOTEPAD_RECORD';
 if (!process.env[RECORD_VARIABLE]) throw new Error(`toolkit-test-notepad-preload.cjs needs ${RECORD_VARIABLE}; load it through toolkit-test-temp-guard.cjs.`);
@@ -69,6 +73,29 @@ for (const name of ['spawnSync', 'execFileSync']) {
     return original.apply(this, arguments);
   };
 }
+// The temp guard names the real user-level instruction files; a test must never write them.
+const protectedFiles = new Set(JSON.parse(process.env.TOOLKIT_TEST_PROTECTED_FILES || '[]')
+  .map(file => path.resolve(file).toLowerCase()));
+function refuseProtected(target) {
+  if (typeof target === 'string' && protectedFiles.has(path.resolve(target).toLowerCase())) {
+    throw new Error(`Toolkit test guard refused a write to the real instruction file ${target}; isolate the test's home.`);
+  }
+}
+for (const name of ['writeFileSync', 'appendFileSync', 'rmSync', 'unlinkSync']) {
+  const original = fs[name];
+  fs[name] = function guardedWrite(target, ...rest) {
+    refuseProtected(target);
+    return original.call(this, target, ...rest);
+  };
+}
+for (const name of ['renameSync', 'copyFileSync']) {
+  const original = fs[name];
+  fs[name] = function guardedMove(from, to, ...rest) {
+    refuseProtected(to);
+    return original.call(this, from, to, ...rest);
+  };
+}
+
 const execSync = childProcess.execSync;
 childProcess.execSync = function execSyncWithoutNotepad(command, ...rest) {
   if (startsNotepad(command, [], true)) refuse(command, []);

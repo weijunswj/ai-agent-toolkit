@@ -9,7 +9,12 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const syncScriptPath = path.join(repoRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs');
-const beginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
+// The installer copies the versioned, hashed block from its generated template; a v1 block in a
+// target is still recognised and replaced.
+const adapterTemplateLines = fs.readFileSync(path.join(repoRoot, 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md'), 'utf8')
+  .replace(/\r\n/g, '\n').split('\n');
+const beginMarker = adapterTemplateLines.find(line => line.includes(':BEGIN N8N-AGENT-RULES-ADAPTER v2 '));
+const v1BeginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
 const endMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
 const n8nDerivativePaths = [
   'skills/n8n-safety-router/n8n-safety-rules.md',
@@ -510,6 +515,18 @@ test('adapter installer replaces a single managed adapter block', () => {
   assert.doesNotMatch(installed, /old adapter block/);
   assert.equal(markerCount(installed, beginMarker), 1);
   assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer replaces a v1 managed adapter block with the current versioned block', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-v1-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, `# Existing AGENTS\n\n${v1BeginMarker}\nold adapter block\n${endMarker}\n`);
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.doesNotMatch(installed, /old adapter block| v1 -->/);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.match(beginMarker, /BEGIN N8N-AGENT-RULES-ADAPTER v2 toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->$/);
 });
 
 test('adapter installer appends managed adapter block when no markers exist', () => {

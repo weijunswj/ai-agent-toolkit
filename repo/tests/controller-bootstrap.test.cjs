@@ -13,7 +13,9 @@ test('controller bootstrap documents full re-entry, custody, actor, feedback, an
   const qualification = fs.readFileSync(path.join(skillRoot, 'references/qualification.md'), 'utf8');
 
   for (const requirement of [
-    'Initial V3 adoption reads the complete direction once',
+    'Initial adoption reads the complete direction once',
+    "post one takeover record on the parent's CURRENT",
+    "Route proof is the launched session's own metadata",
     'Unchanged continuation loads the current packet',
     'refresh only applicable changed or conflicting instructions',
     'controller actor and stable provider/host actor identifier',

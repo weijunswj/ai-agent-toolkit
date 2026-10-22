@@ -13,6 +13,7 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -137,6 +138,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportOpen: false,
     refreshPrAutoMerge: true,
     codexPluginAutoRefresh: true,
+    antigravityGlobalRules: false,
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
@@ -239,6 +241,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.refreshPrAutoMerge = false;
       args.setupChoices.refreshPrAutoMerge = 'disable';
     } else if (arg === '--keep-refresh-pr-auto-merge') args.setupChoices.refreshPrAutoMerge = 'keep';
+    else if (arg === '--antigravity-global-rules') args.antigravityGlobalRules = true;
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
       args.updateReportRetentionDaysExplicit = true;
@@ -522,6 +525,7 @@ function printHelp() {
     '  --enable-refresh-pr-auto-merge   merge rule-refresh PRs when the required checks pass',
     '  --disable-refresh-pr-auto-merge  stop rule-refresh PRs at the open PR',
     '  --keep-refresh-pr-auto-merge     preserve the rule-refresh PR merge choice',
+    '  --antigravity-global-rules   also install the Toolkit global rules in ~/.gemini/GEMINI.md',
     '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
     '  --skip-update-report-open   retain failure-only opening; successful reports remain closed',
     '  --keep-update-report-open   compatibility alias; legacy success-report auto-open is not preserved',
@@ -3621,6 +3625,24 @@ function printInstallCheck(result) {
   }
 }
 
+// The Toolkit global rules for every harness setup manages, rendered from the managed checkout.
+function setupGlobalRules(args) {
+  return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }) });
+}
+
+// Codex setup has no install check, so it installs and reports the global rules directly.
+function runCodexGlobalRules(args) {
+  let result;
+  try { result = setupGlobalRules(args).refresh(); }
+  catch (error) { result = { status: 'held', files: [], covered: [], backup_dir: null, detail: error.message }; }
+  console.log('');
+  console.log('## Global rules');
+  const lines = describeGlobalRules(result);
+  for (const line of lines.length ? lines : [`held: ${result.detail}`]) console.log(line);
+  return result;
+}
+
 // The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
 // helper definitions, and returns the result the summary and exit code report.
 function runClaudeInstallCheck(args, nativeCache, delegation) {
@@ -3629,6 +3651,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
     hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
     helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
+    globalRules: setupGlobalRules(args),
     depthSetting: new ClaudeSubagentDepthSetting(),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
@@ -3685,7 +3708,8 @@ class ToolkitSetupExecution {
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION ? SETUP_ACTION_REQUIRED : 0;
+    const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
+    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 

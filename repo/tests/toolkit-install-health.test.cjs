@@ -16,7 +16,10 @@ const {
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
 
-function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-one-layer', value: '1' }, recorded = null } = {}) {
+const CURRENT_GLOBAL_RULES = Object.freeze({ status: 'current', files: [], covered: [], backup_dir: null, detail: '' });
+const fakeGlobalRules = (result = CURRENT_GLOBAL_RULES) => ({ refresh: () => { if (result instanceof Error) throw result; return result; } });
+
+function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-one-layer', value: '1' }, recorded = null, globalRules = CURRENT_GLOBAL_RULES } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const hubPath = path.join(root, 'hub');
@@ -25,8 +28,26 @@ function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-on
     refresh: () => { if (helpers instanceof Error) throw helpers; return helpers; },
     check: () => ({ status: 'current', project_overrides: [], detail: '' }),
   };
-  return new ToolkitInstallHealthCheck({ toolkitRoot: root, expectedVersion: VERSION, hubPath, helperDefinitions, depthSetting: { inspect: () => depth } });
+  return new ToolkitInstallHealthCheck({ toolkitRoot: root, expectedVersion: VERSION, hubPath, helperDefinitions,
+    globalRules: fakeGlobalRules(globalRules), depthSetting: { inspect: () => depth } });
 }
+
+test('the global rules check passes when current or updated, reports covered sections, and holds on broken markers', (t) => {
+  const file = path.join(os.tmpdir(), 'AGENTS.md');
+  const updated = unit(t, { globalRules: { status: 'updated', backup_dir: os.tmpdir(), detail: '',
+    files: [{ harness: 'codex', file, state: 'current', action: 'refreshed' }], covered: [{ file, title: 'Toolkit Controller Bootstrap' }] } })
+    .run({ topology: 'root-only' });
+  assert.equal(updated.status, STATUS.PASSED);
+  assert.match(byId(updated, 'global-rules').summary, /Codex \(.*AGENTS\.md\): refreshed/);
+  assert.match(byId(updated, 'global-rules').summary, /hand-written "Toolkit Controller Bootstrap" section .* Toolkit does not edit it/);
+  const held = unit(t, { globalRules: { status: 'held', backup_dir: null, covered: [], detail: 'broken',
+    files: [{ harness: 'claude-code', file, state: 'broken', detail: 'BEGIN GLOBAL-RULES without END', action: 'held' }] } }).run({ topology: 'root-only' });
+  assert.equal(held.status, STATUS.ACTION);
+  assert.match(held.actions.join(' '), /Toolkit markers are broken \(BEGIN GLOBAL-RULES without END\)/);
+  const failed = unit(t, { globalRules: new Error('source missing') }).run({ topology: 'root-only' });
+  assert.equal(failed.status, STATUS.ACTION);
+  assert.match(byId(failed, 'global-rules').summary, /could not be checked: source missing/);
+});
 
 const plugin = (root, extra = {}) => ({ installed: true, current: true, running_copy: root, updated_this_run: false, ...extra });
 const byId = (result, id) => result.checks.find((entry) => entry.id === id);
@@ -35,7 +56,7 @@ test('everything current passes with no actions', (t) => {
   const passed = unit(t).run({ topology: 'root-only' });
   assert.equal(passed.status, STATUS.PASSED);
   assert.deepEqual(passed.actions, []);
-  assert.deepEqual(passed.checks.map((entry) => entry.id), ['update-record', 'helpers', 'depth']);
+  assert.deepEqual(passed.checks.map((entry) => entry.id), ['update-record', 'helpers', 'global-rules', 'depth']);
 });
 
 test('the plugin check follows the setup facts and the copy Claude Code runs', (t) => {
@@ -53,7 +74,7 @@ test('a same-run install is restart-required, not passed and not action-required
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const check = new ToolkitInstallHealthCheck({ toolkitRoot: root, expectedVersion: VERSION, hubPath: path.join(root, 'hub'),
-    helperDefinitions: { refresh: () => ({ status: 'not-installed' }), check: () => ({ project_overrides: [] }) },
+    helperDefinitions: { refresh: () => ({ status: 'not-installed' }), check: () => ({ project_overrides: [] }) }, globalRules: fakeGlobalRules(),
     depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) } });
   const result = check.run({ plugin: plugin(root, { updated_this_run: true }), topology: 'root-only' });
   assert.equal(result.status, STATUS.RESTART);
@@ -138,7 +159,10 @@ test('a clean Claude setup passes the install check and exits 0', () => {
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = claudeSetup(root, setupRepo, origin);
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(.+CLAUDE\.md\): created Codex \(.+AGENTS\.md\): created\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  for (const file of [path.join(root, '.claude', 'CLAUDE.md'), path.join(root, '.codex', 'AGENTS.md')]) {
+    assert.match(fs.readFileSync(file, 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /, file);
+  }
 });
 
 test('a same-run plugin install reports its facts and restart required, never a bare refreshed', () => {
@@ -150,7 +174,7 @@ test('a same-run plugin install reports its facts and restart required, never a 
   assert.match(result.stdout, /Claude plugin status: installed this run/);
   assert.doesNotMatch(result.stdout, /Claude plugin status: refreshed/);
   assert.match(result.stdout, /Install check: restart required\n/);
-  assert.match(result.stdout, /Next step:\n1\. Restart Claude Code so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions and depth setting, and reports only a problem\./);
+  assert.match(result.stdout, /Next step:\n1\. Restart Claude Code so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions, global rules and depth setting, and reports only a problem\./);
 });
 
 test('setup refreshes Toolkit helper definitions made stale by a stack registry change', () => {

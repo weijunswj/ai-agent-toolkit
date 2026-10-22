@@ -25,9 +25,10 @@ const {
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
+const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.3.0';
+const BRIDGE_VERSION = '3.4.0';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -1137,7 +1138,7 @@ function parseManagedMarkerBlocks(text) {
     const source = match[1].trim();
     const action = match[2];
     const rawLabel = match[3].trim();
-    const label = action === 'BEGIN' ? rawLabel.replace(/\s+v\d+$/i, '').trim() : rawLabel;
+    const label = action === 'BEGIN' ? rawLabel.replace(/\s+v\d+(?:\s+toolkit=\S+\s+sha256=[0-9a-f]+)?$/i, '').trim() : rawLabel;
     const key = markerIdentity(source, label);
 
     if (action === 'BEGIN') {
@@ -1404,6 +1405,25 @@ function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
   const message = formatAgentRulesPreflight(result);
   if (message && new AgentRulesNoticeLedger(hubPath).claim(agentRulesNoticeKey(result, message))) console.log(message);
   return result;
+}
+
+// The Codex session-start hook keeps the Toolkit global rules in ~/.codex/AGENTS.md current, rendered
+// from the managed checkout (Claude Code does this in its install check). Silent unless it cannot
+// write (broken markers or an error): then it prints one note and never stops the session. Setup
+// reports refreshes and the hand-written sections the block covers.
+function maybeRefreshCodexGlobalRules(args, state) {
+  if (!args.hook || args.syncSource !== 'codex-plugin') return null;
+  const checkout = state?.repo_path && fs.existsSync(path.join(state.repo_path, 'repo', 'contracts', 'agent-rules', 'global-rules.md'))
+    ? state.repo_path : path.resolve(__dirname, '..', '..');
+  try {
+    const result = new GlobalRules({ toolkitRoot: checkout, harnesses: ['codex'],
+      retentionDays: state?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS }).refresh();
+    if (result.status === 'held') console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);
+    return result;
+  } catch (error) {
+    console.log(`Toolkit global rules could not be refreshed (${sanitizeOutputMessage(error.message)}). Run \`setup toolkit\` in Codex.`);
+    return null;
+  }
 }
 
 function isLegacyDelegatedRepoSync(args) {
@@ -3498,6 +3518,7 @@ class LocalBridgeRun {
       return runStagingReconciliation({ args, hubPath, testHooks: this.#testHooks });
     }
     maybePrintAgentRulesPreflight(args, existingState, hubPath);
+    maybeRefreshCodexGlobalRules(args, existingState);
     assertSourceDowngradeAllowed(existingState, args);
     if (isHookNoop(args, existingState)) {
       if (existingState?.hub_version && !existingState.auto_sync_enabled) {

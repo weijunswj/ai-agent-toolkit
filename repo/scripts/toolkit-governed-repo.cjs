@@ -7,7 +7,9 @@
 // Governed when any of these holds:
 //   - a launcher marker is present in the hook environment (a Toolkit launcher started
 //     this session for a gate, a pinned task profile or a pinned helper binding);
-//   - the nearest git root's AGENTS.md carries the managed GLOBAL-AGENTS.MD-TEMPLATE block;
+//   - the nearest git root's AGENTS.md carries the TOOLKIT-GOVERNED-RULES block, or the
+//     GLOBAL-AGENTS.MD-TEMPLATE block it replaces (kept while governed repositories still carry
+//     it; remove once each has taken its 3.4.0 rules refresh);
 //   - the nearest git root is a Toolkit source checkout.
 // The managed-block test can be turned off (`managedBlock: false`) for a host whose
 // helper policy is only qualified inside Toolkit itself: Codex keeps native helpers in
@@ -21,7 +23,7 @@ const path = require('node:path');
 
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-const GOVERNED_BLOCK = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v\d+ -->\r?$/m;
+const GOVERNED_BLOCK = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (?:TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
 // Stable files every Toolkit checkout carries; documentation paths are not used.
 const CHECKOUT_FILES = Object.freeze([
   ['repo', 'contracts', 'toolkit-local-bridge', 'version.json'],

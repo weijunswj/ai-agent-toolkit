@@ -1,11 +1,5 @@
 # GitHub Program Reconciler
 
-Explicit-only skill for the shipped Toolkit governance and review-reconciliation contract: deterministic
-parent/direct-child governance, bounded large-parent mutation, truthful PR
-review inventory and finding disposition evidence, and parent-managed Deferred
-Findings. It preserves the shipped control-plane, repository-capability, execution,
-assurance and user-authority boundaries and never owns
-review-thread mutation, Ready, merge, Web finality, providers, workflows, or
-MCP.
+Explicit-only skill for Toolkit programme governance on GitHub: deterministic parent and direct-child state, bounded large-parent updates, truthful PR-review inventory and finding-disposition evidence, parent-managed Deferred Findings, and the decision-trace audit (`scripts/decision-trace-audit.cjs`, read-only). It keeps the control-plane, repository-capability and user-authority boundaries and never owns review-thread mutation, Ready, merge, Web finality, providers, workflows or MCP.
 
-This skill is directly canonical. Toolkit 3.3.0 removed the local runtime it used to name, because nothing ran it; until the skill is rewritten under #421, apply its contract as a written procedure and do not invent a replacement runtime.
+The skill is directly canonical. Apart from the trace audit it is a written procedure: do not invent a reconciler runtime.

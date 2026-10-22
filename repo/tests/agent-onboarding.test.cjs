@@ -24,12 +24,11 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(readme, /\| Review skill safety \| Use the \[Skill Safety Matrix\]/);
   assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
 
-  assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
-  assert.match(agents, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file\./);
-  assert.match(agents, /## Toolkit Root Optimization Mandate/);
-  assert.match(agents, /Do not add hooks, docs, scripts, rules, features, or examples merely because they are comprehensive or interesting\./);
-  assert.match(agents, /Portable repo installs must use \[`skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
-  assert.match(agents, /Setup\/refresh: use \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run the managed checkout setup script when it exists/);
+  assert.match(agents, /This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository\./);
+  assert.match(agents, /Keep this file short: it loads in every session here/);
+  assert.match(agents, /add nothing merely for completeness/);
+  assert.match(agents, /Portable installs use \[`skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
+  assert.match(agents, /Setup or refresh: follow \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run the managed checkout's setup script when it exists/);
 });
 
 test('agent onboarding path keeps source-of-truth and validation anchors visible', () => {
@@ -37,10 +36,12 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   const sourceOfTruth = readText('repo/docs/SOURCE-OF-TRUTH.md');
   const validation = readText('repo/docs/VALIDATION-STRATEGY.md');
 
-  assert.match(agents, /`repo\/contracts\/\*\*` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs\./);
-  assert.match(agents, /`repo\/source-watch\/provenance\/\*\*\/SOURCE-LOCK\.json` contains only active third-party attribution pins\./);
-  assert.match(agents, /The toolkit maintains one direct canonical tree\. New Toolkit skills are created at `skills\/\*\*` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo\/\*\*` paths\./);
-  assert.match(agents, /`skills\/\*\*` is the canonical copyable AI-agent product surface\./);
+  const contract = readText('repo/contracts/source-of-truth-contract.md');
+  assert.match(agents, /read the \[Source-of-Truth Contract\]\(repo\/contracts\/source-of-truth-contract\.md\)/);
+  assert.match(contract, /`repo\/contracts\/\*\*` holds the machine contracts \(schemas, policies, fixtures, templates, agent-rule sources\)/);
+  assert.match(contract, /`repo\/source-watch\/provenance\/\*\*\/SOURCE-LOCK\.json` holds only active third-party pins/);
+  assert.match(contract, /One direct canonical tree: new skills go under `skills\/\*\*` after Skill Creation Center review, everything else under `repo\/\*\*`\./);
+  assert.match(contract, /`skills\/\*\*` is the canonical copyable product surface/);
 
   assert.match(sourceOfTruth, /Direct canonical content lives in `skills\/\*\*` and `repo\/\*\*`; there is no second project or publisher tree\./);
   assert.match(sourceOfTruth, /Active third-party provenance under `repo\/source-watch\/provenance\/\*\*`\./);

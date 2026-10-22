@@ -8,7 +8,7 @@
 const ROLES = Object.freeze({
   G0: Object.freeze({
     name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit V3 G0 evidence helper',
-    tools: ['Read', 'Glob', 'Grep'], disallowed: ['Agent', 'Task', 'Bash', 'PowerShell', 'Write', 'Edit', 'NotebookEdit'], maxTurns: 12,
+    tools: ['Read', 'Glob', 'Grep'], disallowed: ['Agent', 'Task', 'Bash', 'PowerShell', 'Write', 'Edit', 'NotebookEdit'], maxTurns: 50,
     description: 'Leaf read-only evidence helper for the Toolkit V3 G0.Subagent role. Use when a G0 or G1 lead assigns bounded, separable evidence gathering: source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance. Never for implementation, tests, decisions or delegation.',
     scope: [
       'Permitted: the assigned, bounded, read-only evidence question, within the named read scope.',
@@ -20,7 +20,7 @@ const ROLES = Object.freeze({
   }),
   G1: Object.freeze({
     name: 'toolkit-g1-helper', registryRole: 'BUILDER_HELPER', title: 'Toolkit V3 G1 bounded helper',
-    tools: ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'], disallowed: ['Agent', 'Task'], maxTurns: 16,
+    tools: ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'], disallowed: ['Agent', 'Task'], maxTurns: 60,
     description: 'Leaf bounded implementation or validation helper for the Toolkit V3 G1.Subagent role. Use when the G1 lead assigns independent, separable implementation or testing within explicitly named files and commands. The lead integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
     scope: [
       'Permitted: the assigned implementation or test work, inside the named write scope and command allowlist.',

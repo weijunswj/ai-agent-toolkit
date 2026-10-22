@@ -39,7 +39,7 @@ Use installed skills only when they clearly match the task and improve correctne
 
 | Skill | Use when the task involves |
 | --- | --- |
-| `repository-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
+| `repository-agent-rules` | The Toolkit-governed `AGENTS.md` block and `CLAUDE.md`, `GEMINI.md` and Antigravity shims for an opted-in repository. |
 | `controller-bootstrap` | Explicitly re-enter an already-assigned Toolkit repository controller after context loss or handover, using trusted CURRENT and exact Controller/Architecture/registry source evidence; ordinary coding, setup, and GitHub programme reconciliation remain separate. |
 | `toolkit-setup` | AI Agent Toolkit plugin setup or refresh, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, Antigravity portable skills copying, bridge audit, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
 | `n8n-safety-router` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |

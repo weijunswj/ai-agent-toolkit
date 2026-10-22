@@ -258,6 +258,10 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
     ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
     ["repo/contracts/toolkit-local-bridge/version.json",true],
+    ["repo/scripts/toolkit-global-rules.cjs",false],
+    ["repo/scripts/toolkit-managed-block.cjs",false],
+    ["repo/contracts/agent-rules/global-rules.md",false],
+    ["repo/contracts/agent-rules/n8n-safety-router-adapter.md",false],
     ["repo/CONTROLLER.md",false],
     ["repo/ARCHITECTURE.md",false],
   ];

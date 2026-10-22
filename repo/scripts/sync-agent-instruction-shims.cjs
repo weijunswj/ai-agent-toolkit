@@ -1,8 +1,20 @@
 #!/usr/bin/env node
 'use strict';
 
+// Projects the canonical agent-rule sources into every instruction surface this repository owns,
+// writing them (--write) or checking them (default), and reports every error in one run:
+//   - the governed rules (repo/contracts/agent-rules/toolkit-governed-rules.md) into the portable
+//     managed AGENTS template and this repository's root AGENTS.md;
+//   - the CLAUDE, GEMINI and Antigravity shim templates, whose source is the body between their
+//     own markers, into their portable copies and this repository's root shims;
+//   - the n8n safety rules into the three portable n8n skill derivatives, and the n8n adapter into
+//     the n8n-safety-router adapter template.
+// Every block uses the versioned, hashed marker format of toolkit-managed-block.cjs. The global
+// rules are not projected here: setup installs them into each harness's user-level file.
+
 const fs = require('node:fs');
 const path = require('node:path');
+const { findBlocks, renderBlock } = require('./toolkit-managed-block.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -18,74 +30,39 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 
-const sourceId = 'repo.agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
-const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
-const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
+const governedPath = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
+const globalPath = 'repo/contracts/agent-rules/global-rules.md';
+const versionPath = 'repo/contracts/toolkit-local-bridge/version.json';
 const n8nRulesPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
 const n8nDerivativePaths = Object.freeze([
   'skills/n8n-safety-router/n8n-safety-rules.md',
   'skills/n8n-environment-setup/references/n8n-safety-rules.md',
   'skills/n8n-workflow-transport/references/n8n-safety-rules.md'
 ]);
-const manualTemplatePaths = {
-  agents: 'repo/contracts/agent-rules/AGENTS.template.md',
-  claude: 'repo/contracts/agent-rules/CLAUDE.template.md',
-  gemini: 'repo/contracts/agent-rules/GEMINI.template.md'
-};
-const repoLocalTemplatePaths = {
-  managedAgents: 'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-  claude: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md',
-  gemini: 'repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md',
-  antigravity: 'repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md'
-};
-const legacyProjectToken = '_' + 'projects';
-const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const legacyRepoLocalSourceRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/repository-agent-rules/repo-local`;
+const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
+const n8nAdapterTemplatePath = 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md';
+const templateRoot = 'repo/contracts/agent-rules/repo-local';
+const publishedRoot = 'skills/repository-agent-rules/repo-local';
+const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
+// The block names the governed block replaces in root AGENTS.md.
+const ROOT_REPLACED_BLOCKS = Object.freeze([GOVERNED_BLOCK]);
+// Shim templates: file, block name and the root file each one is projected into.
+const SHIMS = Object.freeze([
+  { file: 'CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', target: 'CLAUDE.md' },
+  { file: 'GEMINI.shim.template.md', name: 'GEMINI.SHIM', target: 'GEMINI.md' },
+  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', target: '.agents/rules/00-agent-toolkit-bootstrap.md' }
+]);
+const MANAGED_TEMPLATE = 'AGENTS.managed.template.md';
+const ROOT_HEADING = '# AI Agent Toolkit Repo Rules';
 
-const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
-const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
-const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
-const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
-const toolkitMarkerPairs = [
-  { begin: toolkitBegin, end: toolkitEnd },
-  {
-    begin: `<!-- ai-agent-toolkit:${sourceId}:BEGIN ai-coding-agent-execution v1 -->`,
-    end: `<!-- ai-agent-toolkit:${sourceId}:END ai-coding-agent-execution -->`
-  },
-  {
-    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:END toolkit -->'
-  }
-];
-const n8nMarkerPairs = [
-  { begin: n8nBegin, end: n8nEnd },
-  {
-    begin: `<!-- ai-agent-toolkit:${sourceId}:BEGIN n8n-adapter v1 -->`,
-    end: `<!-- ai-agent-toolkit:${sourceId}:END n8n-adapter -->`
-  },
-  {
-    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->'
-  },
-  {
-    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->'
-  }
-];
-
-function repoLocalMarkerPairs(fileName, blockName) {
-  const sourcePath = repoLocalTemplatePaths[fileName];
-  const paths = [sourcePath, `${legacyRepoLocalSourceRoot}/${path.posix.basename(sourcePath)}`];
-  return paths.map((sourcePath) => ({
-    begin: `<!-- AI-AGENT-TOOLKIT:${sourcePath}:BEGIN ${blockName} v1 -->`,
-    end: `<!-- AI-AGENT-TOOLKIT:${sourcePath}:END ${blockName} -->`
-  }));
-}
-
-const claudeShimMarkerPairs = repoLocalMarkerPairs('claude', 'CLAUDE.SHIM');
-const geminiShimMarkerPairs = repoLocalMarkerPairs('gemini', 'GEMINI.SHIM');
-const antigravityBootstrapMarkerPairs = repoLocalMarkerPairs('antigravity', 'ANTIGRAVITY.BOOTSTRAP');
+const safetyComment = [
+  '<!--',
+  'Curated AI-facing source.',
+  'Source: repo/contracts/agent-rules/repo-local',
+  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+  '-->'
+].join('\n');
 
 function normalizeWorkspaceRel(value) {
   return path.posix.normalize(String(value).replace(/\\/g, '/'));
@@ -139,88 +116,13 @@ function safeWorkspacePath(relPath, label, options = {}) {
 }
 
 function normalize(text) {
-  return text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-}
-
-function readRequired(relPath, errors) {
-  let full;
-  try {
-    full = safeWorkspacePath(relPath, `agent instruction source ${relPath}`);
-  } catch (error) {
-    errors.push(`${error.message}. Run ${fixCommand}.`);
-    return null;
-  }
-  return normalize(fs.readFileSync(full, 'utf8')).trimEnd();
+  return text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
 }
 
 function readOptional(relPath) {
   const full = safeWorkspacePath(relPath, `agent instruction file ${relPath}`, { allowMissing: true });
   if (!fs.existsSync(full)) return '';
   return normalize(fs.readFileSync(full, 'utf8'));
-}
-
-function generatedNotice(sourcePaths) {
-  return [
-    '<!--',
-    'Generated from the canonical agent-rule contract. Do not edit directly.',
-    `Source set: ${sourceId}`,
-    ...sourcePaths.map((sourcePath) => `Source: ${sourcePath}`),
-    'Update the canonical contract and run this synchronizer.',
-    '-->',
-    ''
-  ].join('\n');
-}
-
-function fencedTemplate({ title, audience, destinationDisplay, activeNameText, installSubject, examples, payload, sourcePaths }) {
-  const body = [
-    generatedNotice(sourcePaths),
-    `# ${title}`,
-    '',
-    `Use this generated template for ${audience}.`,
-    '',
-    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${activeNameText}.`,
-    '',
-    `Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${installSubject} installed.`,
-    '',
-    `If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`
-  ];
-
-  for (const example of examples) {
-    body.push('');
-    body.push(`## ${example.heading}`);
-    body.push('');
-    body.push('Copy or merge the fenced payload into:');
-    body.push('');
-    body.push('```text');
-    body.push(example.path);
-    body.push('```');
-    body.push('');
-    body.push('Or create it with PowerShell:');
-    body.push('');
-    body.push('```text');
-    for (const command of example.commands) body.push(command);
-    body.push('```');
-  }
-
-  body.push('');
-  body.push('---');
-  body.push('');
-  body.push('````````md');
-  body.push(payload.trimEnd());
-  body.push('````````');
-  return `${body.join('\n').trimEnd()}\n`;
-}
-
-function managedPayload(executionPrompt, n8nAdapter) {
-  return [
-    toolkitBegin,
-    executionPrompt.trimEnd(),
-    toolkitEnd,
-    '',
-    n8nBegin,
-    n8nAdapter.trimEnd(),
-    n8nEnd
-  ].join('\n');
 }
 
 function n8nCrossSkillHeader() {
@@ -238,343 +140,129 @@ function n8nCrossSkillHeader() {
   ].join('\n');
 }
 
-function expectedN8nDerivatives(n8nRules) {
-  const body = `${n8nRules.trimEnd()}\n`;
-  return {
-    [n8nDerivativePaths[0]]: body,
-    [n8nDerivativePaths[1]]: `${n8nCrossSkillHeader()}${body}`,
-    [n8nDerivativePaths[2]]: `${n8nCrossSkillHeader()}${body}`
-  };
-}
-
-function expectedSourceTemplates(executionPrompt) {
-  const sourcePaths = [executionPromptPath];
-  return {
-    [manualTemplatePaths.agents]: fencedTemplate({
-      title: 'AGENTS.template.md AI coding agent rules',
-      audience: 'Codex',
-      destinationDisplay: '`AGENTS.md`',
-      activeNameText: 'it is not named `AGENTS.md`',
-      installSubject: 'generic Codex rules',
-      examples: [
-        {
-          heading: 'Codex global rules example',
-          path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
-          commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
-        }
-      ],
-      payload: executionPrompt,
-      sourcePaths
-    }),
-    [manualTemplatePaths.claude]: fencedTemplate({
-      title: 'CLAUDE.template.md AI coding agent rules',
-      audience: 'Claude Code',
-      destinationDisplay: '`CLAUDE.md`',
-      activeNameText: 'it is not named `CLAUDE.md`',
-      installSubject: 'generic Claude Code rules',
-      examples: [
-        {
-          heading: 'Claude Code global rules example',
-          path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
-          commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
-        }
-      ],
-      payload: executionPrompt,
-      sourcePaths
-    }),
-    [manualTemplatePaths.gemini]: fencedTemplate({
-      title: 'GEMINI.template.md AI coding agent rules',
-      audience: 'Antigravity',
-      destinationDisplay: '`GEMINI.md`',
-      activeNameText: 'it is not named `GEMINI.md`',
-      installSubject: 'generic Antigravity rules',
-      examples: [
-        {
-          heading: 'Antigravity global rules example',
-          path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
-          commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
-        }
-      ],
-      payload: executionPrompt,
-      sourcePaths
-    })
-  };
-}
-
-function markerCount(text, marker) {
-  return text.split(marker).length - 1;
-}
-
-const repoLocalSafetyComment = [
-  '<!--',
-  'Curated AI-facing source.',
-  'Source: repo/contracts/agent-rules/repo-local',
-  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->'
-].join('\n');
-
-const repoLocalWrapperPatterns = [
-  { pattern: /Generated from toolkit/i, description: 'generated toolkit notice' },
-  { pattern: /This file is inert/i, description: 'inert template prose' },
-  { pattern: /copy or merge the fenced payload/i, description: 'fenced-payload install prose' },
-  { pattern: /^````````md$/m, description: 'opening 8-backtick payload fence' },
-  { pattern: /^````````$/m, description: 'closing 8-backtick payload fence' },
-  { pattern: /^## Repo-local /m, description: 'README-style repo-local install heading' },
-  { pattern: /<repo>\\/i, description: 'README-style destination example' },
-  { pattern: /Or create it with PowerShell/i, description: 'README-style PowerShell install prose' }
-];
-
-function readBareRepoLocalTemplate(relPath, errors) {
-  const text = readRequired(relPath, errors);
-  if (text === null) return null;
-  const safetyPrefix = `${repoLocalSafetyComment}\n\n`;
-  if (!text.startsWith(safetyPrefix)) {
-    errors.push(`Repo-local install template must start with the exact curated-source safety comment: ${relPath}. Run ${fixCommand}.`);
-  }
-  const payload = text.startsWith(safetyPrefix) ? text.slice(safetyPrefix.length) : text;
-  for (const { pattern, description } of repoLocalWrapperPatterns) {
-    if (pattern.test(payload)) {
-      errors.push(`Repo-local install template must be a bare copy-ready payload without ${description}: ${relPath}. Run ${fixCommand}.`);
-    }
-  }
-  if (/Curated AI-facing source|Review rule:/i.test(payload)) {
-    errors.push(`Repo-local install template must not duplicate curated-source comments in the payload body: ${relPath}. Run ${fixCommand}.`);
-  }
-  return payload;
-}
-
-function extractManagedBlock(relPath, text, begin, end, errors) {
-  const beginCount = markerCount(text, begin);
-  const endCount = markerCount(text, end);
-  if (beginCount !== 1 || endCount !== 1) {
-    errors.push(`Malformed managed agent instruction source markers in ${relPath}. Run ${fixCommand}.`);
-    return null;
-  }
-  const start = text.indexOf(begin);
-  const finish = text.indexOf(end);
-  if (start > finish) {
-    errors.push(`Managed agent instruction source markers out of order in ${relPath}. Run ${fixCommand}.`);
-    return null;
-  }
-  return text.slice(start, finish + end.length).trimEnd();
-}
-
-function stripManagedBlock(relPath, text, begin, end, errors) {
-  const beginCount = markerCount(text, begin);
-  const endCount = markerCount(text, end);
-  if (beginCount === 0 && endCount === 0) return text;
-  if (beginCount !== 1 || endCount !== 1) {
-    errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
-    return null;
-  }
-  const start = text.indexOf(begin);
-  const finish = text.indexOf(end);
-  if (start > finish) {
-    errors.push(`Managed agent instruction markers out of order in ${relPath}. Run ${fixCommand}.`);
-    return null;
-  }
-  return `${text.slice(0, start)}${text.slice(finish + end.length)}`;
-}
-
-function stripManagedBlockAny(relPath, text, markerPairs, errors) {
-  const matches = markerPairs
-    .map((pair) => ({
-      ...pair,
-      beginCount: markerCount(text, pair.begin),
-      endCount: markerCount(text, pair.end)
-    }))
-    .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
-  if (matches.length === 0) return text;
-
-  const malformedMatches = matches.filter((pair) =>
-    pair.beginCount !== 1 || pair.endCount !== 1 || text.indexOf(pair.begin) >= text.indexOf(pair.end)
-  );
-  if (malformedMatches.length > 0) {
-    errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
-    return null;
-  }
-
-  return matches.reduce(
-    (current, pair) => stripManagedBlock(relPath, current, pair.begin, pair.end, errors),
-    text
-  );
-}
-
-function stripN8nManagedBlock(relPath, text, errors) {
-  return stripManagedBlockAny(relPath, text, n8nMarkerPairs, errors);
-}
-
-function removeSupersededGitHubPrSection(text) {
-  const heading = '## GitHub PR Completion Rules';
-  const start = text.indexOf(`\n${heading}\n`);
-  const sectionStart = start === -1 && text.startsWith(`${heading}\n`) ? 0 : start;
-  if (sectionStart === -1) return text;
-
-  const headingStart = sectionStart === 0 ? 0 : sectionStart + 1;
-  const contentStart = headingStart + heading.length + 1;
-  const nextSection = text.indexOf('\n## ', contentStart);
-  const sectionEnd = nextSection === -1 ? text.length : nextSection;
-  return `${text.slice(0, headingStart)}${text.slice(sectionEnd)}`.replace(/\n{3,}/g, '\n\n');
-}
-
-function removeExactLine(text, exactLine) {
-  return text
-    .split('\n')
-    .filter((line) => line.trim() !== exactLine)
-    .join('\n');
-}
-
-function removeLeadingHeading(text, heading) {
-  let trimmed = text.trimStart();
-  while (trimmed.startsWith(`${heading}\n`)) {
-    trimmed = trimmed.slice(heading.length).replace(/^\n+/, '');
-  }
-  return trimmed;
-}
-
-function normalizeRepoIntroHeading(text) {
-  return text.replace(
-    /^# This repo is the canonical reusable AI Agent Toolkit\.$/m,
-    'This repo is the canonical reusable AI Agent Toolkit.'
-  );
-}
-
-function rootAgentsExpected(current, source, errors) {
-  let body = stripManagedBlockAny('AGENTS.md', current, toolkitMarkerPairs, errors);
-  if (body === null) return null;
-  body = stripN8nManagedBlock('AGENTS.md', body, errors);
-  if (body === null) return null;
-  body = removeSupersededGitHubPrSection(body).trimStart();
-  body = removeLeadingHeading(body, '# Existing user / repo content below');
-  body = normalizeRepoIntroHeading(body);
-
-  const heading = '# AI Agent Toolkit Repo Rules';
-  const normalizedBody = body.trimStart();
-  if (normalizedBody.startsWith(`${heading}\n`)) {
-    const rest = normalizedBody.slice(heading.length).replace(/^\n+/, '').trimEnd();
-    return rest
-      ? `${heading}\n\n${source.root}\n\n${rest}\n`
-      : `${heading}\n\n${source.root}\n`;
-  }
-
-  return normalizedBody
-    ? `${source.root}\n\n${normalizedBody.trimEnd()}\n`
-    : `${source.root}\n`;
-}
-
-function shimBody(sourceText, options) {
-  let body = sourceText;
-  if (options.importLine) body = removeExactLine(body, options.importLine);
-  if (options.heading) body = removeLeadingHeading(body, options.heading);
-  return body.trim();
-}
-
-function shimExpected(relPath, current, sourceText, options, errors) {
-  let body = stripManagedBlockAny(relPath, current, options.markerPairs || toolkitMarkerPairs, errors);
-  if (body === null) return null;
-  if (options.importLine) body = removeExactLine(body, options.importLine);
-  if (options.heading) body = removeLeadingHeading(body, options.heading);
-  body = body.trim();
-  const expectedBody = shimBody(sourceText, options);
-  while (expectedBody && (body === expectedBody || body.startsWith(`${expectedBody}\n`))) {
-    body = body.slice(expectedBody.length).trim();
-  }
-  return body ? `${sourceText}\n\n${body}\n` : `${sourceText}\n`;
-}
-
-function writeOrCheck(relPath, expected, errors, runMode, label = 'managed agent instruction file') {
-  if (expected === null) return;
-  const current = readOptional(relPath);
-  if (runMode === 'write') {
-    const full = safeWorkspacePath(relPath, `agent instruction output ${relPath}`, { allowMissing: true });
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, expected, 'utf8');
-    return;
-  }
-  if (current !== expected) {
-    errors.push(`Stale ${label}: ${relPath}. Run ${fixCommand}.`);
-  }
-}
-
-// Projects the canonical execution rules and n8n adapter into every owned instruction
-// surface, either writing them or checking them, and collects all errors in one run.
+// Writes or checks one projected file and collects every error of the run.
 class InstructionProjectionOperation {
-  #mode; #errors = [];
+  #mode; #errors = []; #version = null;
   constructor(options = {}) { this.#mode = options.mode || mode; }
 
-  #project(relPath, expected, label) { writeOrCheck(relPath, expected, this.#errors, this.#mode, label); }
+  #fail(message) { this.#errors.push(`${message} Run ${fixCommand}.`); }
 
-  #readCanonicalInputs() {
-    const executionPrompt = readRequired(executionPromptPath, this.#errors);
-    const n8nAdapter = readRequired(n8nAdapterPath, this.#errors);
-    const n8nRules = readRequired(n8nRulesPath, this.#errors);
-    return executionPrompt === null || n8nAdapter === null || n8nRules === null ? null : { executionPrompt, n8nAdapter, n8nRules };
-  }
-
-  #readRepoLocalTemplates() {
-    const templates = {
-      managedAgents: readBareRepoLocalTemplate(repoLocalTemplatePaths.managedAgents, this.#errors),
-      claude: readBareRepoLocalTemplate(repoLocalTemplatePaths.claude, this.#errors),
-      gemini: readBareRepoLocalTemplate(repoLocalTemplatePaths.gemini, this.#errors),
-      antigravity: readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, this.#errors),
-    };
-    return Object.values(templates).some(value => value === null) ? null : templates;
-  }
-
-  #managedSource({ executionPrompt, n8nAdapter }, templates) {
-    const errors = this.#errors;
-    const source = {
-      root: managedPayload(executionPrompt, n8nAdapter),
-      toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, templates.managedAgents, toolkitBegin, toolkitEnd, errors),
-      n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, templates.managedAgents, n8nBegin, n8nEnd, errors),
-      claude: templates.claude,
-      gemini: templates.gemini,
-      antigravity: templates.antigravity
-    };
-    if (Object.values(source).some(value => value === null)) return null;
-    if (templates.managedAgents.trimEnd() !== source.root.trimEnd()) {
-      errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
+  #readRequired(relPath) {
+    try {
+      return normalize(fs.readFileSync(safeWorkspacePath(relPath, `agent instruction source ${relPath}`), 'utf8')).trimEnd();
+    } catch (error) {
+      this.#fail(`${error.message}.`);
       return null;
     }
-    return source;
   }
 
-  // Portable instruction payloads consume the same reviewed canonical inputs.
-  // Keep this bounded to the four owned templates; no generic skill sync.
-  #publishPortableTemplates() {
-    for (const sourcePath of [repoLocalTemplatePaths.managedAgents, repoLocalTemplatePaths.claude, repoLocalTemplatePaths.gemini, repoLocalTemplatePaths.antigravity]) {
-      const publishedPath = sourcePath.replace('repo/contracts/agent-rules/repo-local/', 'skills/repository-agent-rules/repo-local/');
-      this.#project(publishedPath, readRequired(sourcePath, this.#errors) + '\n', 'portable instruction template');
+  #project(relPath, expected, label = 'managed agent instruction file') {
+    if (expected === null) return;
+    if (this.#mode === 'write') {
+      const full = safeWorkspacePath(relPath, `agent instruction output ${relPath}`, { allowMissing: true });
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, expected, 'utf8');
+      return;
     }
+    if (readOptional(relPath) !== expected) this.#fail(`Stale ${label}: ${relPath}.`);
   }
 
-  #projectRootShims(source) {
-    const errors = this.#errors;
-    this.#project('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors));
-    this.#project('CLAUDE.md', shimExpected('CLAUDE.md', readOptional('CLAUDE.md'), source.claude, {
-      heading: '# Claude Code Instructions', importLine: '@AGENTS.md', markerPairs: claudeShimMarkerPairs }, errors));
-    this.#project('GEMINI.md', shimExpected('GEMINI.md', readOptional('GEMINI.md'), source.gemini, {
-      heading: '# Gemini Instructions', importLine: '@./AGENTS.md', markerPairs: geminiShimMarkerPairs }, errors));
-    this.#project('.agents/rules/00-agent-toolkit-bootstrap.md', shimExpected('.agents/rules/00-agent-toolkit-bootstrap.md',
-      readOptional('.agents/rules/00-agent-toolkit-bootstrap.md'), source.antigravity,
-      { heading: '# Agent Toolkit Antigravity Bootstrap', markerPairs: antigravityBootstrapMarkerPairs }, errors));
+  #blocksOf(relPath, text) {
+    const { blocks, errors } = findBlocks(text);
+    if (errors.length) {
+      this.#fail(`Malformed managed agent instruction markers in ${relPath} (${errors[0]}).`);
+      return null;
+    }
+    return blocks;
+  }
+
+  // Removes the named blocks and returns what is left, trimmed.
+  #outside(relPath, text, names) {
+    const blocks = this.#blocksOf(relPath, text);
+    if (!blocks) return null;
+    let rest = text;
+    for (const block of [...blocks].reverse()) if (names.includes(block.name)) rest = rest.slice(0, block.start) + rest.slice(block.end);
+    return rest.trim();
+  }
+
+  #block(source, name, body) { return renderBlock({ source, name, version: this.#version, body }); }
+
+  #templateText(block) { return `${safetyComment}\n\n${block}\n`; }
+
+  // A shim template's own body, read from between its markers.
+  #shimBody(shim) {
+    const relPath = `${templateRoot}/${shim.file}`;
+    const text = this.#readRequired(relPath);
+    if (text === null) return null;
+    const blocks = this.#blocksOf(relPath, text);
+    if (!blocks) return null;
+    const own = blocks.find(block => block.name === shim.name);
+    if (!own || blocks.length !== 1) {
+      this.#fail(`Shim template ${relPath} must hold exactly one ${shim.name} block.`);
+      return null;
+    }
+    return own.body;
+  }
+
+  #projectN8n() {
+    const rules = this.#readRequired(n8nRulesPath);
+    if (rules === null) return;
+    const body = `${rules}\n`;
+    this.#project(n8nDerivativePaths[0], body, 'n8n safety derivative');
+    for (const relPath of n8nDerivativePaths.slice(1)) this.#project(relPath, `${n8nCrossSkillHeader()}${body}`, 'n8n safety derivative');
+  }
+
+  #projectN8nAdapter() {
+    const body = this.#readRequired(n8nAdapterPath);
+    if (body === null) return;
+    const notice = ['<!--', `Generated from ${n8nAdapterPath}. Do not edit directly.`, `Repair: ${fixCommand}`, '-->'].join('\n');
+    const block = this.#block(n8nAdapterPath, 'N8N-AGENT-RULES-ADAPTER', body);
+    this.#project(n8nAdapterTemplatePath, `${notice}\n\n${block}\n`, 'n8n adapter template');
+  }
+
+  #projectTemplate(file, text) {
+    this.#project(`${templateRoot}/${file}`, text, 'repo-local instruction template');
+    this.#project(`${publishedRoot}/${file}`, text, 'portable instruction template');
+  }
+
+  #projectRootAgents(governedBlock) {
+    const current = readOptional('AGENTS.md');
+    let rest = this.#outside('AGENTS.md', current, ROOT_REPLACED_BLOCKS);
+    if (rest === null) return;
+    if (rest.startsWith(`${ROOT_HEADING}\n`) || rest === ROOT_HEADING) rest = rest.slice(ROOT_HEADING.length).trim();
+    this.#project('AGENTS.md', `${ROOT_HEADING}\n\n${governedBlock}\n${rest ? `\n${rest}\n` : ''}`);
+  }
+
+  #projectShim(shim, block) {
+    const rest = this.#outside(shim.target, readOptional(shim.target), [shim.name]);
+    if (rest === null) return;
+    this.#project(shim.target, `${block}\n${rest ? `\n${rest}\n` : ''}`);
   }
 
   run() {
-    const inputs = this.#readCanonicalInputs();
-    if (!inputs) return { errors: this.#errors };
-    for (const [relPath, expected] of Object.entries(expectedN8nDerivatives(inputs.n8nRules))) this.#project(relPath, expected, 'n8n safety derivative');
-    for (const [relPath, expected] of Object.entries(expectedSourceTemplates(inputs.executionPrompt))) this.#project(relPath, expected, 'agent instruction source template');
-    const templates = this.#readRepoLocalTemplates();
-    if (!templates) return { errors: this.#errors };
-    const source = this.#managedSource(inputs, templates);
-    if (!source) return { errors: this.#errors };
-    this.#publishPortableTemplates();
-    this.#projectRootShims(source);
+    const versionText = this.#readRequired(versionPath);
+    this.#version = versionText === null ? null : JSON.parse(versionText).version;
+    const governed = this.#readRequired(governedPath);
+    this.#readRequired(globalPath);
+    this.#projectN8n();
+    if (governed === null || !this.#version) return { errors: this.#errors };
+
+    this.#projectN8nAdapter();
+    const governedBlock = this.#block(governedPath, GOVERNED_BLOCK, governed);
+    this.#projectTemplate(MANAGED_TEMPLATE, this.#templateText(governedBlock));
+    this.#projectRootAgents(governedBlock);
+    for (const shim of SHIMS) {
+      const body = this.#shimBody(shim);
+      if (body === null) continue;
+      const block = this.#block(`${templateRoot}/${shim.file}`, shim.name, body);
+      this.#projectTemplate(shim.file, this.#templateText(block));
+      this.#projectShim(shim, block);
+    }
     return { errors: this.#errors };
   }
 }
-function validateAndSync(options = {}) {return new InstructionProjectionOperation(options).run();}
+
+function validateAndSync(options = {}) { return new InstructionProjectionOperation(options).run(); }
 
 if (require.main === module) {
   const { errors } = validateAndSync();

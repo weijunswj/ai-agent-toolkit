@@ -1,23 +1,20 @@
 # Repo-Local Agent Instructions Playbook
 
-Use this for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, repo-local templates, shims, or `repository-agent-rules`.
+Use this for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, global rules, repo-local templates, shims, or `repository-agent-rules`.
 
-## Source Model
+## Source model
 
-- Root toolkit instructions are repo-specific.
-- Root `AGENTS.md` keeps managed execution and n8n blocks from `repository-agent-rules`, then appends toolkit-specific root rules directly in root `AGENTS.md`.
-- Portable repo-local templates under `skills/repository-agent-rules/repo-local/` must stay self-contained.
-- Portable and managed execution-block source-owned instruction content lives under `repo/contracts/agent-rules/`.
-- `skills/repository-agent-rules/` contains the complete portable skill and repo-local payload templates.
+- `repo/contracts/agent-rules/global-rules.md`: generic rules for every session, installed by setup into each harness's user-level file (`repo/scripts/toolkit-global-rules.cjs`). Keep it short; it loads everywhere.
+- `repo/contracts/agent-rules/toolkit-governed-rules.md`: the Toolkit-governed block. It opens this repository's root `AGENTS.md`, followed by the Toolkit-only rules written directly in that file, and is the portable template `skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`.
+- Shim and bootstrap templates under `repo/contracts/agent-rules/repo-local/` are their own source (the body between their markers) and are projected into the skill folder and the root shims.
+- Byte budgets: the global block and root `AGENTS.md` together stay under Codex's 32 KiB project-doc limit with CRLF line endings (`repo/tests/instruction-budget.test.cjs`).
 
-Update the canonical contract first. Then run the retained synchronizer checks.
+Edit the source, run `node repo/scripts/sync-agent-instruction-shims.cjs --write`, then the check.
 
-## Managed Markers
+## Markers
 
-Keep `AI-AGENT-TOOLKIT` marker pairs intact. If marker-owned content changes, edit the source named in the marker or the generator that owns it.
+Every Toolkit insert uses `repo/scripts/toolkit-managed-block.cjs` markers (`BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex>`). Keep pairs intact and edit the source named in the marker. Portable templates must not depend on Toolkit-only paths such as `repo/docs/agent-playbooks/`, `repo/scripts/` or source-watch records.
 
-Portable repo-local templates must not depend on toolkit-only paths such as `repo/docs/agent-playbooks/`, `repo/scripts/`, or source-watch records.
+## Session reset
 
-## Session Reset
-
-When `repository-agent-rules` installs or repairs active repo-local instructions in a consumer repo, preserve its session-reset prompt and backup behavior.
+When `repository-agent-rules` installs or repairs instructions in a consumer repo, keep its session-reset prompt and backup behaviour.
