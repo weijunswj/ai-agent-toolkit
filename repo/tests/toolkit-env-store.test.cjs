@@ -17,7 +17,8 @@ const {
 
 const STORE_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'toolkit-env-store.cjs');
 // The variables Codex leaves for an MCP header helper on Windows (its core list).
-const CODEX_WINDOWS_CORE = ['PATH', 'PATHEXT', 'COMSPEC', 'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMFILES', 'PROGRAMDATA', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP'];
+// (codex-rs/protocol/src/shell_environment.rs WINDOWS_CORE_ENV_VARS at rust-v0.163.0)
+const CODEX_WINDOWS_CORE = ['PATH', 'PATHEXT', 'SHELL', 'COMSPEC', 'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMW6432', 'PROGRAMDATA', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'TMPDIR', 'POWERSHELL', 'PWSH'];
 
 function dummy() { return `dummy-${crypto.randomBytes(9).toString('hex')}`; }
 
@@ -31,11 +32,14 @@ function recordingSpawn(calls) {
 
 function exercise(store, calls) {
   const one = dummy();
-  const two = `ünïcode ${dummy()}`;
-  store.writeAll(new Map([['X1_TEST_STORE_ONE', one], ['X1_TEST_STORE_TWO', two]]));
-  const back = store.readAll(['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO', 'X1_TEST_STORE_ABSENT']);
+  const two = `ünïcode "quoted" back\\slash ${dummy()}`;
+  const three = `two\nlines ${dummy()}`;
+  store.writeAll(new Map([['X1_TEST_STORE_ONE', one], ['X1_TEST_STORE_TWO', two], ['X1_TEST_STORE_THREE', three]]));
+  const back = store.readAll(['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO', 'X1_TEST_STORE_THREE', 'X1_TEST_STORE_ABSENT']);
   assert.equal(back.get('X1_TEST_STORE_ONE'), one);
   assert.equal(back.get('X1_TEST_STORE_TWO'), two);
+  assert.equal(back.get('X1_TEST_STORE_THREE'), three);
+  assert.equal(store.remove('X1_TEST_STORE_THREE'), true);
   assert.equal(back.has('X1_TEST_STORE_ABSENT'), false);
   assert.deepEqual(store.list(), ['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO']);
   const longest = 'x'.repeat(2560);
@@ -47,7 +51,7 @@ function exercise(store, calls) {
   assert.equal(store.read('X1_TEST_STORE_ONE'), undefined);
   assert.deepEqual(store.list(), []);
   for (const call of calls) {
-    assert.ok(!call.includes(one) && !call.includes(two.slice(10)), 'a value was passed as an argument');
+    assert.ok(!call.includes(one.slice(6)) && !call.includes(three.slice(10)), 'a value was passed as an argument');
     assert.ok(!call.includes(Buffer.from(one).toString('hex')), 'a value was passed as an argument (hex)');
   }
 }
@@ -76,7 +80,11 @@ test('Windows Credential Manager works with only the variables Codex gives a hea
   fs.writeFileSync(script, `const { WindowsCredentialStore } = require(${JSON.stringify(STORE_SCRIPT)});\nprocess.stdout.write(new WindowsCredentialStore({ prefix: ${JSON.stringify(prefix)} }).read('X1_TEST_STORE_CORE') === ${JSON.stringify(value)} ? 'same' : 'different');\n`);
   const env = {};
   for (const name of CODEX_WINDOWS_CORE) if (process.env[name]) env[name] = process.env[name];
-  const result = spawnSync(process.execPath, [script], { env, encoding: 'utf8', timeout: 10000 });
+  // Codex allows its helper 10 seconds; the time is reported, since shared CI hosts are slower
+  // than a desktop. The check here is that the store works with only these variables.
+  const started = Date.now();
+  const result = spawnSync(process.execPath, [script], { env, encoding: 'utf8', timeout: 60000 });
+  t.diagnostic(`read with only Codex's variables took ${Date.now() - started} ms`);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'same');
 });

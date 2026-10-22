@@ -455,14 +455,14 @@ class ToolkitEnv {
     const missing = names.filter((name) => !values.has(name));
     if (missing.length) throw new EnvError(`Not in the Toolkit env store: ${missing.join(', ')}.`);
     let parts;
-    try { parts = processLaunch.commandSpawnParts(command, args, { label: 'Program', platform: this.#platform }); }
-    catch { throw new EnvError(`${command} was not found.`); }
+    try { parts = processLaunch.directSpawnParts(command, args, { label: 'Program', platform: this.#platform }); }
+    catch (error) { throw new EnvError(/command script/.test(error.message) ? error.message : `${command} was not found.`); }
     return new Promise((resolve) => {
       const child = this.#spawnChild(parts.command, parts.args, {
         env: { ...process.env, ...Object.fromEntries(values) },
         stdio,
         windowsHide: true,
-        windowsVerbatimArguments: parts.windowsVerbatimArguments,
+        shell: false,
       });
       child.once('error', () => resolve(127));
       child.once('close', (code) => resolve(code === null ? 1 : code));

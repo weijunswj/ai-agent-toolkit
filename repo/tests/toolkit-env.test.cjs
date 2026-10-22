@@ -26,7 +26,9 @@ const TOML_AVAILABLE = parseTomlDocument(Buffer.from('a = 1\n')).ok === true;
 function sentinel() { return `dummy-${crypto.randomBytes(9).toString('hex')}`; }
 
 function tempHome(t) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-test-'));
+  // The real path: CI temp folders are short 8.3 names (Windows) or behind a link (macOS), and the
+  // Codex config backup refuses a config reached through either.
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-test-')));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   return home;
 }
@@ -569,4 +571,37 @@ test('install check: silent until used, then reports missing keys, drift and the
     envHealth: quiet.env,
   }).run({});
   assert.equal(none.checks.some((item) => item.id === 'env'), false);
+});
+
+test('programs start without a shell: npm shims run what they wrap, other command scripts are refused', { skip: process.platform !== 'win32' && 'Windows only' }, (t) => {
+  const { directSpawnParts } = require('../scripts/claude-process-launch.cjs');
+  const home = tempHome(t);
+  const bin = path.join(home, 'npm bin');
+  const tool = path.join(bin, 'node_modules', 'some-tool', 'cli.js');
+  const native = path.join(bin, 'node_modules', '@scope', 'native', 'bin', 'native.exe');
+  fs.mkdirSync(path.dirname(tool), { recursive: true });
+  fs.mkdirSync(path.dirname(native), { recursive: true });
+  fs.writeFileSync(tool, '');
+  fs.writeFileSync(native, '');
+  fs.writeFileSync(path.join(bin, 'some-tool.cmd'), '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\some-tool\\cli.js" %*\r\n');
+  fs.writeFileSync(path.join(bin, 'native.cmd'), '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\node_modules\\@scope\\native\\bin\\native.exe"   %*\r\n');
+  fs.writeFileSync(path.join(bin, 'other.cmd'), '@echo off\r\nset\r\n');
+  const env = { PATH: bin, PATHEXT: '.COM;.EXE;.BAT;.CMD' };
+  assert.deepEqual(directSpawnParts('some-tool', ['--flag', 'a b'], { env }), { command: process.execPath, args: [tool, '--flag', 'a b'] });
+  assert.deepEqual(directSpawnParts('native', ['x'], { env }), { command: native, args: ['x'] });
+  assert.throws(() => directSpawnParts('other', [], { env }), /not a standard npm shim, so it cannot be started without cmd\.exe/);
+});
+
+test('macOS writes go on stdin as one escaped word, hex only for control characters, and stop at the line limit', () => {
+  const { MacKeychainStore } = require('../scripts/toolkit-env-store.cjs');
+  const calls = [];
+  const spawn = (command, args, options) => { calls.push({ args, input: options.input }); return { status: 0, stdout: '', stderr: '' }; };
+  const store = new MacKeychainStore({ keychain: '/tmp/test.keychain-db', spawn });
+  const quoted = `say "hi" \\ ${sentinel()}`;
+  store.writeAll(new Map([['X1_TEST_STORE_ONE', quoted], ['X1_TEST_STORE_TWO', 'line\nbreak']]));
+  assert.deepEqual(calls.map((call) => call.args), [['-i'], ['-i']]);
+  assert.equal(calls[0].input, `add-generic-password -U -s ai-agent-toolkit/env -a X1_TEST_STORE_ONE -w "${quoted.replace(/["\\]/g, '\\$&')}" /tmp/test.keychain-db\n`);
+  assert.equal(calls[1].input, `add-generic-password -U -s ai-agent-toolkit/env -a X1_TEST_STORE_TWO -X ${Buffer.from('line\nbreak').toString('hex')} /tmp/test.keychain-db\n`);
+  store.writeAll(new Map([['X1_TEST_STORE_LONG', 'x'.repeat(2560)]]));
+  assert.throws(() => store.writeAll(new Map([['X1_TEST_STORE_LONG', `${'\u0001'}${'x'.repeat(2559)}`]])), /too long for the macOS Keychain/);
 });

@@ -83,12 +83,9 @@ function escapeWindowsCommand(value) {
   return String(value).replace(WINDOWS_SHELL_META, '^$1');
 }
 
-// How to start a program found on PATH (or by absolute path) with these arguments, including
-// Windows .cmd/.bat shims, which only run through cmd.exe. options.label names it in errors.
-function commandSpawnParts(executable, args = [], options = {}) {
+function claudeSpawnParts(executable, args = [], options = {}) {
   const platform = options.platform || process.platform;
-  const label = options.label || 'Claude CLI';
-  const validated = validateExecutable(executable, platform, label);
+  const validated = validateExecutable(executable, platform);
   const command = assertExecutableAvailable(validated, options);
   const extension = path.extname(command).toLowerCase();
   if (['.js', '.cjs', '.mjs'].includes(extension)) {
@@ -98,7 +95,7 @@ function commandSpawnParts(executable, args = [], options = {}) {
     return { command, args: [...args], shell: false, windowsVerbatimArguments: false, raw_executable: command };
   }
   if (extension && !['.cmd', '.bat'].includes(extension)) {
-    throw new Error(`Unsupported Windows ${label} executable type: ${extension}`);
+    throw new Error(`Unsupported Windows Claude CLI executable type: ${extension}`);
   }
   const commandLine = [escapeWindowsCommand(command), ...args.map((arg) => quoteWindowsArgument(arg, true))].join(' ');
   return {
@@ -110,8 +107,40 @@ function commandSpawnParts(executable, args = [], options = {}) {
   };
 }
 
-function claudeSpawnParts(executable, args = [], options = {}) {
-  return commandSpawnParts(executable, args, { ...options, label: 'Claude CLI' });
+// The program a Windows npm command shim (cmd-shim format) starts, so it can run without cmd.exe:
+// a native .exe it calls, or node with the package's script. null when the shim is not one.
+function npmShimTarget(shim) {
+  let text;
+  try { text = fs.readFileSync(shim, 'utf8'); } catch { return null; }
+  const line = text.split(/\r?\n/).reverse().find((entry) => /%\*\s*$/.test(entry));
+  if (!line) return null;
+  const quoted = [...line.matchAll(/"([^"]*)"/g)].map((match) => match[1]);
+  const base = path.dirname(shim);
+  const local = (value) => (/^%dp0%\\/i.test(value) ? path.join(base, value.slice(6)) : null);
+  if (quoted[0] === '%_prog%' && quoted[1]) {
+    const script = local(quoted[1]);
+    const bundledNode = path.join(base, 'node.exe');
+    return script ? { command: fs.existsSync(bundledNode) ? bundledNode : process.execPath, prefix: [script] } : null;
+  }
+  const program = quoted[0] && local(quoted[0]);
+  return program && path.extname(program).toLowerCase() === '.exe' ? { command: program, prefix: [] } : null;
 }
 
-module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, commandSpawnParts, resolveClaudeCommandInput, validateExecutable };
+// How to start a program found on PATH (or by absolute path) directly, with no shell: .exe and
+// POSIX programs as they are, scripts through this Node.js, and Windows npm command shims through
+// the program they wrap. Other Windows command scripts are refused. options.label names it in errors.
+function directSpawnParts(executable, args = [], options = {}) {
+  const platform = options.platform || process.platform;
+  const label = options.label || 'Program';
+  const command = assertExecutableAvailable(validateExecutable(executable, platform, label), { ...options, label });
+  const extension = path.extname(command).toLowerCase();
+  if (['.js', '.cjs', '.mjs'].includes(extension)) return { command: process.execPath, args: [command, ...args] };
+  if (platform !== 'win32' || extension === '.exe' || extension === '.com') return { command, args: [...args] };
+  const target = ['.cmd', '.bat'].includes(extension) ? npmShimTarget(command) : null;
+  if (!target || !fs.existsSync(target.command) || !target.prefix.every((file) => fs.existsSync(file))) {
+    throw new Error(`${label} ${path.basename(command)} is a Windows command script that is not a standard npm shim, so it cannot be started without cmd.exe.`);
+  }
+  return { command: target.command, args: [...target.prefix, ...args] };
+}
+
+module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, directSpawnParts, resolveClaudeCommandInput, validateExecutable };

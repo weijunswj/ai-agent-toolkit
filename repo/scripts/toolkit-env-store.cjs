@@ -157,6 +157,7 @@ public static class ToolkitEnvCredentials {
 `;
 
 const WIN32_NOT_FOUND = 1168;
+const MAC_INTERACTIVE_LINE_BYTES = 4096;
 const WIN32_TOO_LONG = 1783;
 
 class WindowsCredentialStore {
@@ -307,7 +308,16 @@ class MacKeychainStore {
   writeAll(entries) {
     const list = [...entries].map(([name, value]) => [assertName(name), assertValue(name, value)]);
     for (const [name, value] of list) {
-      const command = ['add-generic-password', '-U', '-s', this.#service, '-a', name, '-X', Buffer.from(value, 'utf8').toString('hex'), ...this.#keychainArgs()].join(' ');
+      // `security -i` reads one line into a 4096-byte buffer (newline and end byte included) and
+      // splits it like a shell: a printable value goes as one double-quoted, backslash-escaped
+      // word (-w), anything with control characters as hex (-X), which is twice as long.
+      const word = /[\u0000-\u001f\u007f]/.test(value)
+        ? ['-X', Buffer.from(value, 'utf8').toString('hex')]
+        : ['-w', `"${value.replace(/["\\]/g, '\\$&')}"`];
+      const command = ['add-generic-password', '-U', '-s', this.#service, '-a', name, ...word, ...this.#keychainArgs()].join(' ');
+      if (Buffer.byteLength(command, 'utf8') + 1 >= MAC_INTERACTIVE_LINE_BYTES) {
+        throw new EnvStoreError(`${name}: value too long for the macOS Keychain (its command line holds 4096 bytes).`, 'value-too-long');
+      }
       const result = this.#call(['-i'], `${command}\n`);
       if (result.status !== 0 || /\S/.test(String(result.stderr || ''))) throw new EnvStoreError(`The macOS Keychain could not save ${name}.`, 'backend-failed');
     }

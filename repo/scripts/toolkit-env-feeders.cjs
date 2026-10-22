@@ -114,8 +114,8 @@ class ClaudeCodeFeeder {
   }
 
   #claude(args) {
-    const parts = processLaunch.claudeSpawnParts(this.#claudeCommand, args);
-    const result = this.#spawn(parts.command, parts.args, { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: parts.windowsVerbatimArguments, timeout: 60000 });
+    const parts = processLaunch.directSpawnParts(this.#claudeCommand, args, { label: 'The claude command' });
+    const result = this.#spawn(parts.command, parts.args, { encoding: 'utf8', windowsHide: true, shell: false, timeout: 60000 });
     if (result.error || result.status !== 0) throw new FeederError(`The claude command failed (${args.slice(0, 2).join(' ')}).`);
   }
 

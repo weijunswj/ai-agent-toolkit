@@ -16,7 +16,7 @@ node ~/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs st
 | macOS | Login Keychain, service `ai-agent-toolkit/env`, account `<NAME>` | Keychain Access |
 | Linux | Secret Service (GNOME Keyring, KWallet) through `secret-tool` | Your keyring app |
 
-Toolkit uses only tools that come with the operating system. A Linux session without a desktop keyring stops with a message; there is no fallback file. One value can be up to 2560 bytes (the Windows limit, used everywhere).
+Toolkit uses only tools that come with the operating system. A Linux session without a desktop keyring stops with a message; there is no fallback file. One value can be up to 2560 bytes (the Windows limit, used everywhere); on macOS a value with line breaks or other control characters can be about 2000 bytes, because the Keychain tool reads it as hex on one line.
 
 Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MCP_TOKEN`: upper case letters, digits and underscores, at least three parts. Names starting with `CODEX_` are refused because Codex reserves them.
 
@@ -28,7 +28,7 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | Change or add keys | `edit`, then `apply` | Notepad (or your default editor) opens a private file listing every key as `NAME=<unchanged>`. Type new values over `<unchanged>` or add `NAME=value` lines, save and close, then say "done" (or run `apply`). It prints `changed:` and `added:` lines and deletes the file. A blank value or a deleted line changes nothing. An edit file left unsaved for 30 minutes is deleted by the next command. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it in your own terminal. |
 | Remove a key | `remove NAME` | Asks a yes/no that names the key first. |
-| Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and commands that would print the environment. |
+| Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and commands that would print the environment. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
 ## Connecting an app
 
