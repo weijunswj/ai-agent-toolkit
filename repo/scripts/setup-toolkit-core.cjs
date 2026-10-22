@@ -13,6 +13,7 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
@@ -3705,6 +3706,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
     globalRules: setupGlobalRules(args),
     depthSetting: new ClaudeSubagentDepthSetting(),
+    envHealth: ToolkitEnv.forUser(),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
   return check.run({

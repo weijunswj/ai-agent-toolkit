@@ -69,6 +69,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
 | [Controller Bootstrap](skills/controller-bootstrap/) | Explicitly re-enter an already-assigned Toolkit repository controller from trusted CURRENT and exact governance-source evidence; grants no role, authority, or host permission. |
 | [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, Antigravity portable skills copying, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Env](skills/toolkit-env/) | See, add, change, rotate, or remove your API keys and tokens, and connect Claude Code or Codex MCP entries to them, with values kept in the computer's credential store and out of chat. |
 | [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, and official n8n Skills setup. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
@@ -152,7 +153,7 @@ git diff --check
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.4.0 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.5.0 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

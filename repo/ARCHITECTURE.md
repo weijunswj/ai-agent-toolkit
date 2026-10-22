@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `5950f2c9e85a710bf9c6a6b509b2bb1940d72549`.
+Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
 
 ## Parts
 
@@ -18,7 +18,7 @@ Last reviewed against `main` `5950f2c9e85a710bf9c6a6b509b2bb1940d72549`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate |
+| CI | `.github/workflows/` | `validate.yml` is the full gate; `env-store.yml` runs the env store tests on Windows and macOS |
 
 ## Entry points
 
@@ -27,6 +27,7 @@ Last reviewed against `main` `5950f2c9e85a710bf9c6a6b509b2bb1940d72549`.
 | Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
 | Install check | `repo/scripts/toolkit-install-health.cjs` |
+| Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |

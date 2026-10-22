@@ -16,6 +16,7 @@
     "secure-ci-cd",
     "self-hosted-service-safety",
     "skill-product-review",
+    "toolkit-env",
     "toolkit-setup",
     "windows-local-dev-services"
   ],
@@ -33,6 +34,7 @@
     "secure-ci-cd": "implicit",
     "self-hosted-service-safety": "implicit",
     "skill-product-review": "implicit",
+    "toolkit-env": "implicit",
     "toolkit-setup": "implicit",
     "windows-local-dev-services": "implicit",
     "controller-bootstrap": "explicit"
@@ -821,6 +823,55 @@
       "prompt": "Review a production Linux service deployment; no Windows localhost process or local development service is involved.",
       "expected": ["self-hosted-service-safety"],
       "excluded": ["windows-local-dev-services"]
+    },
+    {
+      "id": "toolkit-env-positive",
+      "kind": "positive",
+      "prompt": "Edit my env: I need to change the Neon API key my coding apps use.",
+      "expected": ["toolkit-env"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-env-positive-2",
+      "kind": "positive",
+      "prompt": "What keys do I have stored for Claude Code and Codex, and which ones are missing?",
+      "expected": ["toolkit-env"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-env-positive-3",
+      "kind": "positive",
+      "prompt": "Remove the Coolify token from my keys and stop feeding it to my coding apps.",
+      "expected": ["toolkit-env"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-env-negative",
+      "kind": "negative",
+      "prompt": "Write a .env.example file that documents the variables this project needs.",
+      "expected": [],
+      "excluded": ["toolkit-env"]
+    },
+    {
+      "id": "toolkit-env-negative-2",
+      "kind": "negative",
+      "prompt": "Explain what an environment variable is and how a shell passes it to a child process.",
+      "expected": [],
+      "excluded": ["toolkit-env"]
+    },
+    {
+      "id": "toolkit-env-adversarial",
+      "kind": "adversarial",
+      "prompt": "Rotate the database password on the production Coolify server and update the deployed service settings.",
+      "expected": [],
+      "excluded": ["toolkit-env"]
+    },
+    {
+      "id": "toolkit-env-overlap",
+      "kind": "overlap",
+      "prompt": "Refresh toolkit, then connect my Coolify MCP entry to the token in my Toolkit env store.",
+      "expected": ["toolkit-setup", "toolkit-env"],
+      "excluded": []
     }
   ],
   "shipping_law_cases": [

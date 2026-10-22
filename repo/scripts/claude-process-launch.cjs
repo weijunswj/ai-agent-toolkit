@@ -22,18 +22,18 @@ function resolveClaudeCommandInput(options = {}) {
   return claudeCommandCandidates(options)[0];
 }
 
-function validateExecutable(value, platform = process.platform) {
+function validateExecutable(value, platform = process.platform, label = 'Claude CLI') {
   const command = String(value || '');
   if (!command || command !== command.trim() || /[\0\r\n"]/.test(command)) {
-    throw new Error('Claude CLI executable is empty, ambiguous, or contains unsafe characters.');
+    throw new Error(`${label} executable is empty, ambiguous, or contains unsafe characters.`);
   }
   const pathLike = /[\\/]/.test(command);
   if (!pathLike && !/^[A-Za-z0-9_.-]+$/.test(command)) {
-    throw new Error('Bare Claude CLI executable names may contain only letters, digits, dot, underscore, and hyphen.');
+    throw new Error(`Bare ${label} executable names may contain only letters, digits, dot, underscore, and hyphen.`);
   }
   const absolute = platform === 'win32' ? path.win32.isAbsolute(command) : path.posix.isAbsolute(command);
   if (pathLike && !absolute) {
-    throw new Error('An explicit Claude CLI path must be absolute.');
+    throw new Error(`An explicit ${label} path must be absolute.`);
   }
   return command;
 }
@@ -54,7 +54,8 @@ function executableCandidates(command, options = {}) {
 
 function assertExecutableAvailable(value, options = {}) {
   const platform = options.platform || process.platform;
-  const command = validateExecutable(value, platform);
+  const label = options.label || 'Claude CLI';
+  const command = validateExecutable(value, platform, label);
   const candidates = executableCandidates(command, options);
   for (const candidate of candidates) {
     try {
@@ -67,7 +68,7 @@ function assertExecutableAvailable(value, options = {}) {
       return !/[\\/]/.test(command) ? candidate : command;
     } catch {}
   }
-  throw new Error('Claude CLI executable is not available.');
+  throw new Error(`${label} executable is not available.`);
 }
 
 function quoteWindowsArgument(value, doubleEscapeMeta = false) {
@@ -82,9 +83,12 @@ function escapeWindowsCommand(value) {
   return String(value).replace(WINDOWS_SHELL_META, '^$1');
 }
 
-function claudeSpawnParts(executable, args = [], options = {}) {
+// How to start a program found on PATH (or by absolute path) with these arguments, including
+// Windows .cmd/.bat shims, which only run through cmd.exe. options.label names it in errors.
+function commandSpawnParts(executable, args = [], options = {}) {
   const platform = options.platform || process.platform;
-  const validated = validateExecutable(executable, platform);
+  const label = options.label || 'Claude CLI';
+  const validated = validateExecutable(executable, platform, label);
   const command = assertExecutableAvailable(validated, options);
   const extension = path.extname(command).toLowerCase();
   if (['.js', '.cjs', '.mjs'].includes(extension)) {
@@ -94,7 +98,7 @@ function claudeSpawnParts(executable, args = [], options = {}) {
     return { command, args: [...args], shell: false, windowsVerbatimArguments: false, raw_executable: command };
   }
   if (extension && !['.cmd', '.bat'].includes(extension)) {
-    throw new Error(`Unsupported Windows Claude CLI executable type: ${extension}`);
+    throw new Error(`Unsupported Windows ${label} executable type: ${extension}`);
   }
   const commandLine = [escapeWindowsCommand(command), ...args.map((arg) => quoteWindowsArgument(arg, true))].join(' ');
   return {
@@ -106,4 +110,8 @@ function claudeSpawnParts(executable, args = [], options = {}) {
   };
 }
 
-module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, resolveClaudeCommandInput, validateExecutable };
+function claudeSpawnParts(executable, args = [], options = {}) {
+  return commandSpawnParts(executable, args, { ...options, label: 'Claude CLI' });
+}
+
+module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, commandSpawnParts, resolveClaudeCommandInput, validateExecutable };

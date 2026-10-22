@@ -28,7 +28,7 @@ Decide the context before planning:
 
 ## Working Modes
 
-Answer, review and plan without editing files. For broad, ambiguous, architectural or risky work, make a repository-specific plan before editing. Otherwise inspect, make the narrow change, validate and report.
+Answer, review and plan without editing files. For broad, ambiguous, architectural or risky work, make a repository-specific plan before editing.
 
 ## Safety Gates
 
@@ -51,7 +51,7 @@ The root session owns integration, validation, conflict resolution and final jud
 
 ## Tool Preference
 
-For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade; offer to remove unused ones.
+For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade; offer to remove unused ones. For the user's API keys and tokens, use the `toolkit-env` skill; never ask for or repeat a value in chat.
 
 ## Model Safety Flags
 
@@ -65,7 +65,7 @@ Before shipping, complete the applicable minimum floor: core functionality and c
 
 Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the floor block. Polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup and low-confidence risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify either way. Shipping bias never overrides approvals, safety gates, privacy, required validation or finality. Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before handing work to the user for acceptance, check the real installed or deployed result where one exists.
 
-**Finish authorised work before stopping.** Carry every dependency-ready safe step of authorised work to the actual deliverable in one run where practical (implementation, targeted tests, CI, authorised publication with conflict controls, readback), then report once instead of asking whether to continue. A plan, green test, commit, draft PR, helper return, checkpoint, upload, CI watcher start or progress note is not a finish. A genuine user decision, new scope or spend, missing permission, credential or route, unknown external effect, incomplete CI or pending independent review holds only the steps that depend on it; continue the rest and report the exact hold and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work.
+**Finish authorised work before stopping.** Carry every dependency-ready safe step to the actual deliverable in one run where practical (implementation, targeted tests, CI, authorised publication with conflict controls, readback), then report once instead of asking whether to continue. A plan, green test, commit, draft PR, helper return, checkpoint, upload, CI watcher start or progress note is not a finish. A genuine user decision, new scope or spend, missing permission, credential or route, unknown external effect, incomplete CI or pending independent review holds only the steps that depend on it; continue the rest and report the exact hold and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work.
 
 ## Engineering Defaults
 

@@ -15,16 +15,17 @@
     "skills/secure-ci-cd",
     "skills/self-hosted-service-safety",
     "skills/skill-product-review",
+    "skills/toolkit-env",
     "skills/toolkit-setup",
     "skills/windows-local-dev-services"
   ],
-  "skill_count": 16,
+  "skill_count": 17,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {
     "codex": {
       "name": "ai-agent-toolkit",
-      "version": "3.4.0",
+      "version": "3.5.0",
       "required_files": [
         {
           "path": ".codex-plugin/plugin.json",
@@ -46,7 +47,7 @@
     },
     "claude": {
       "name": "ai-agent-toolkit",
-      "version": "3.4.0",
+      "version": "3.5.0",
       "required_files": [
         {
           "path": ".claude-plugin/plugin.json",
