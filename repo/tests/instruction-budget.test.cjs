@@ -29,7 +29,7 @@ test('the global block and root AGENTS.md fit the Codex limit together, with CRL
 });
 
 test('each block stays inside its own budget', () => {
-  assert.ok(crlfBytes(GLOBAL) <= 17000, `global block ${crlfBytes(GLOBAL)} bytes`);
+  assert.ok(crlfBytes(GLOBAL) <= 17500, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 9500, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');

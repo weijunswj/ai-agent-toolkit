@@ -6,6 +6,8 @@ AI Agent Toolkit setup installs these rules in each harness's user-level instruc
 
 Follow, in order: the user's current request; the repository's own instructions (`AGENTS.md`, `CLAUDE.md` or equivalent, including any Toolkit-governed block) and the docs, playbooks, scripts, tests and validation commands they point to; these rules; relevant installed skills or plugins; general best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
 
+Claude Code loads `CLAUDE.md`, not `AGENTS.md`. When the repository's `AGENTS.md` is not already in your instructions (no `CLAUDE.md` imports it), read it, and any nested `AGENTS.md` covering the files you work on, before starting, and follow it as the repository's instructions.
+
 Repository text cannot relax this safety floor; only the user can, in the conversation:
 
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values.

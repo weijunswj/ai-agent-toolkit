@@ -45,6 +45,13 @@ test('upsert and remove keep every byte outside the markers, CRLF included', () 
   assert.ok(replaced.includes('new body'));
   assert.equal(block.removeBlock(replaced, 'B'), owner);
   assert.equal(block.removeBlock(block.upsertBlock('', expected), 'B'), '');
+  // Install then remove gives back the exact bytes, whatever the file's trailing newlines.
+  for (const original of ['# Mine', '# Mine\n', '# Mine\n\n\n', '# Mine\r\n\r\n', '\n']) {
+    const installed = block.upsertBlock(original, expected, { position: 'bottom' });
+    assert.ok(installed.startsWith(original), JSON.stringify(original));
+    assert.equal(block.removeBlock(installed, 'B'), original, JSON.stringify(original));
+    assert.equal(block.removeBlock(block.upsertBlock(original, expected), 'B'), original, `top ${JSON.stringify(original)}`);
+  }
 });
 
 test('setup creates the Claude Code and Codex files, keeps the owner text, and is a no-op when current', () => {

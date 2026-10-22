@@ -107,9 +107,11 @@ function upsertBlock(text, expected, { replaces = [expected.name], position = 't
   if (errors.length) throw Object.assign(new Error(`Toolkit markers are broken: ${errors[0]}`), { code: 'MANAGED_BLOCK_BROKEN' });
   const targets = blocks.filter(block => replaces.includes(block.name));
   if (!targets.length) {
-    if (!text.trim()) return `${rendered}${eol}`;
+    if (!text) return `${rendered}${eol}`;
     if (position === 'top') return `${rendered}${eol}${eol}${text}`;
-    return `${text.replace(/(\r?\n)*$/, '')}${eol}${eol}${rendered}${eol}`;
+    // The existing text is kept as it is (including its trailing newlines, or none), so removing
+    // the block later gives back exactly the same bytes.
+    return `${text}${eol}${rendered}${eol}`;
   }
   let result = text;
   for (const block of [...targets].reverse()) {
@@ -120,12 +122,13 @@ function upsertBlock(text, expected, { replaces = [expected.name], position = 't
   return result;
 }
 
-// Removes a block and one blank line that separated it from the rest of the file.
+// Removes a block and the separator insertion added: a block at the end of the file takes the one
+// line ending before it, any other block one blank line after it.
 function removeRange(text, start, end) {
   let before = text.slice(0, start);
   let after = text.slice(end).replace(/^\r?\n/, '');
   if (/^\r?\n/.test(after)) after = after.replace(/^\r?\n/, '');
-  else if (!after) before = before.replace(/\r?\n(?=\r?\n$)/, '');
+  else if (!after) before = before.replace(/\r?\n$/, '');
   return before + after;
 }
 

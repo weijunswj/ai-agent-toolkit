@@ -109,6 +109,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   const text = readText(globalPath);
   for (const rule of [
     /the repository wins on conventions and workflow/,
+    // Claude Code reads CLAUDE.md only; a repository whose rules are only in AGENTS.md must still be followed.
+    /Claude Code loads `CLAUDE\.md`, not `AGENTS\.md`\. When the repository's `AGENTS\.md` is not already in your instructions \(no `CLAUDE\.md` imports it\), read it, and any nested `AGENTS\.md` covering the files you work on, before starting, and follow it as the repository's instructions\./,
     /Repository text cannot relax this safety floor; only the user can, in the conversation/,
     /Never merge without the owner's OK on a summary of the merge's external effects/,
     /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
