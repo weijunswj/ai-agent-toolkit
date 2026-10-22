@@ -10,7 +10,7 @@
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
 // index) to a local file; publishing it is the caller's separately authorised step.
 //
-// Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-pattern <regex>]
+// Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>]
 //          [--threshold <chars>] [--repair --out <file>]
 
 const fs = require('node:fs');
@@ -30,27 +30,36 @@ function isBot(comment) {
   return user.type === 'Bot' || /\[bot\]$/i.test(String(user.login || ''));
 }
 
-function recordId(text, pattern) {
-  if (!pattern) return null;
-  return new RegExp(pattern).exec(String(text || ''))?.[0] || null;
+// A record ID is the declared literal prefix followed by digits, for example INT-TK421-042. The
+// prefix is matched as plain text, never compiled into a regular expression.
+const RECORD_PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
+function recordId(text, prefix) {
+  if (!prefix) return null;
+  const source = String(text || '');
+  for (let at = source.indexOf(prefix); at !== -1; at = source.indexOf(prefix, at + 1)) {
+    const digits = /^\d+/.exec(source.slice(at + prefix.length))?.[0];
+    if (digits) return `${prefix}${digits}`;
+  }
+  return null;
 }
 
 // body: the issue body. comments: GitHub issue comments ({ id, user, body }).
-function auditDecisionTraces({ body, comments, recordPattern = null, threshold = DEFAULT_THRESHOLD }) {
+function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = DEFAULT_THRESHOLD }) {
+  if (recordPrefix !== null && !RECORD_PREFIX.test(recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
   const fromBody = linkedIds(body);
   const people = comments.filter(comment => !isBot(comment));
   const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
   const linkedIndexes = indexes.filter(comment => fromBody.has(String(comment.id)));
   const reachable = new Set(fromBody);
   for (const index of linkedIndexes) for (const id of linkedIds(index.body)) reachable.add(id);
-  const records = new Map(people.map(comment => [String(comment.id), recordId(comment.body, recordPattern)]));
+  const records = new Map(people.map(comment => [String(comment.id), recordId(comment.body, recordPrefix)]));
   const knownIds = new Set([...records.values()].filter(Boolean));
 
   const unlinked = people.filter(comment => !reachable.has(String(comment.id)))
     .map(comment => ({ id: String(comment.id), record: records.get(String(comment.id)), index: indexes.includes(comment) }));
-  const unknownSupersedes = recordPattern ? people.flatMap(comment => [...String(comment.body || '').matchAll(SUPERSEDES)]
+  const unknownSupersedes = recordPrefix ? people.flatMap(comment => [...String(comment.body || '').matchAll(SUPERSEDES)]
     .map(match => match[1]).filter(id => !knownIds.has(id)).map(id => ({ id: String(comment.id), supersedes: id }))) : [];
-  const unlabelled = recordPattern ? people.filter(comment => !indexes.includes(comment) && !records.get(String(comment.id))).map(comment => String(comment.id)) : [];
+  const unlabelled = recordPrefix ? people.filter(comment => !indexes.includes(comment) && !records.get(String(comment.id))).map(comment => String(comment.id)) : [];
   const bodyLength = String(body || '').length;
   const overThreshold = bodyLength >= threshold;
   return {
@@ -93,18 +102,19 @@ function fetchIssue(repo, issue) {
 }
 
 function parseArgs(argv) {
-  const args = { repo: '', issue: '', recordPattern: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '' };
+  const args = { repo: '', issue: '', recordPrefix: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '' };
   for (let i = 0; i < argv.length; i += 1) {
     const value = () => argv[++i] || '';
     if (argv[i] === '--repo') args.repo = value();
     else if (argv[i] === '--issue') args.issue = value();
-    else if (argv[i] === '--record-pattern') args.recordPattern = value();
+    else if (argv[i] === '--record-prefix') args.recordPrefix = value();
     else if (argv[i] === '--threshold') args.threshold = Number(value());
     else if (argv[i] === '--repair') args.repair = true;
     else if (argv[i] === '--out') args.out = value();
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
-  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-pattern <regex>] [--threshold <chars>] [--repair --out <file>]');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>] [--threshold <chars>] [--repair --out <file>]');
+  if (args.recordPrefix !== null && !RECORD_PREFIX.test(args.recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
   if (!Number.isInteger(args.threshold) || args.threshold <= 0) throw new Error('--threshold must be a positive integer');
   if (args.repair && !args.out) throw new Error('--repair needs --out <file>');
   return args;
@@ -113,7 +123,7 @@ function parseArgs(argv) {
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const { body, comments } = fetchIssue(args.repo, args.issue);
-  const result = auditDecisionTraces({ body, comments, recordPattern: args.recordPattern, threshold: args.threshold });
+  const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
   if (args.repair) {
     fs.writeFileSync(args.out, repairedBody(body, result.unlinked));
     result.repair_file = args.out;

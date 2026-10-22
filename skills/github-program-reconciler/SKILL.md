@@ -19,7 +19,7 @@ Apply the contract below as a written procedure with the GitHub tools you are au
 
 The programme issue body is the canonical record: every non-bot comment must be linked from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), directly or through an index comment the body links (one hop). Records that replace others carry `SUPERSEDES=<record ID>`. Keep the body under 60,000 characters (GitHub's limit is 65,536) by moving older index lines into an index comment marked `<!-- decision-trace-index -->`.
 
-Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-pattern '<regex>'` (for Toolkit #421: `INT-TK421-[0-9]{3}`). It reads the issue through `gh`, fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
+Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`; a record ID is the prefix plus digits). It reads the issue through `gh`, fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
 
 ## Scope
 
