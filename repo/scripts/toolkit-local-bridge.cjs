@@ -1776,8 +1776,15 @@ function updateReportSignature({ args, checksum, context }) {
       maxReportFiles: cleanup.max_report_files || DEFAULT_UPDATE_REPORT_MAX_FILES,
       errorCount: cleanup.error_count || 0
     },
+    // Checks that wrote something this run are part of the signature: each summary names its own
+    // backup folder, so a later restore on the same Toolkit content still gets its own report.
     installCheck: context.installCheck
-      ? { status: context.installCheck.status || '', actions: context.installCheck.actions || [] }
+      ? {
+          status: context.installCheck.status || '',
+          actions: context.installCheck.actions || [],
+          updated: (context.installCheck.checks || []).filter((entry) => entry.updated === true)
+            .map((entry) => ({ id: entry.id || '', summary: entry.summary || '' }))
+        }
       : null
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');

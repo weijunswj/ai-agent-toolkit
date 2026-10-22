@@ -4032,6 +4032,31 @@ test('central report classification opens only actionable reports', () => {
   assert.equal(writes.length, 2);
 });
 
+test('each restored hand edit gets its own report, even on the same Toolkit content', () => {
+  const restored = (folder) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+    { id: 'helpers', status: 'passed', summary: 'current' },
+    { id: 'global-rules', status: 'passed', updated: true,
+      summary: `Claude Code (~/.claude/CLAUDE.md): restored; an edit inside the Toolkit block was replaced, and the edited copy is in the backup below Backup: ~/.ai-agent-toolkit/backups/global-rules/${folder}` }
+  ] } });
+  const writes = [];
+  let state = { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 };
+  const invoke = (context) => {
+    const result = maybeWriteUpdateReport({
+      args: { hook: true, repoUpdateNow: false, openUpdateReport: false, suppressUpdateReport: false, syncSource: 'claude-plugin' },
+      hubPath: 'unused', state, checksum: 'same-content', context,
+      writeReport(markdown) { writes.push(markdown); return `restore-${writes.length}.md`; },
+      openReport() { return { ok: true }; },
+    });
+    state = result.state;
+    return result;
+  };
+  assert.equal(invoke(restored('2026-10-22T09-00-00-000Z')).reportPath, 'restore-1.md');
+  assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, 'restore-2.md', 'a second restore is not hidden by the first report signature');
+  assert.equal(writes.length, 2);
+  assert.match(writes[1], /restored; an edit inside the Toolkit block was replaced/);
+  assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, '', 'the same run replayed is still deduplicated');
+});
+
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
   const root = tmpRoot();
   const reportDir = path.join(root, 'reports');

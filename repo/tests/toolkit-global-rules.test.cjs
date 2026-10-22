@@ -91,7 +91,7 @@ test('a file that is not UTF-8 is held and never rewritten; UTF-8 with a BOM rou
   const h = home();
   const codex = harnessFile('codex', h.env);
   fs.mkdirSync(path.dirname(codex), { recursive: true });
-  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('# Mine é\r\n', 'utf16le')]);
+  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('# Mine \u00e9\r\n', 'utf16le')]);
   fs.writeFileSync(codex, utf16);
   const held = rules(h, { harnesses: ['codex'] }).refresh();
   assert.equal(held.status, 'held');
@@ -100,7 +100,7 @@ test('a file that is not UTF-8 is held and never rewritten; UTF-8 with a BOM rou
   assert.ok(fs.readFileSync(codex).equals(utf16), 'the file keeps its exact bytes');
   assert.equal(rules(h, { harnesses: ['codex'] }).remove().files[0].action, 'held');
 
-  const bom = Buffer.from('﻿# Mine é\r\nkeep\r\n', 'utf8');
+  const bom = Buffer.from('\ufeff# Mine \u00e9\r\nkeep\r\n', 'utf8');
   fs.writeFileSync(codex, bom);
   const added = rules(h, { harnesses: ['codex'] }).refresh();
   assert.equal(added.files[0].action, 'added');
