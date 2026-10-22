@@ -148,6 +148,10 @@ test('the Codex session-start hook writes nothing before setup or with auto-sync
   finally { console.log = log; }
   assert.deepEqual(lines, [], 'a routine refresh is silent');
   assert.equal(fs.existsSync(harnessFile('codex', h.env)), true);
+  assert.match(read(path.join(path.dirname(harnessFile('codex', h.env)), 'config.toml')), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nproject_doc_max_bytes = 65536\n/,
+    'the Codex hook raises the instruction limit with the block');
+  const setupRun = rules(h, { harnesses: ['codex'], manageCodexDocLimit: false }).refresh();
+  assert.equal(setupRun.doc_limit.action, 'reported', 'setup only reports the limit');
   assert.equal(maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'claude-plugin' }, { hub_version: 1, auto_sync_enabled: true }, h.env), null);
 });
 
@@ -180,6 +184,59 @@ test('a removal holds through Claude Code and Codex session starts until setup i
   assert.deepEqual(JSON.parse(read(path.join(h.root, '.ai-agent-toolkit', 'global-rules.json'))).removed, {});
   fs.writeFileSync(codex, read(codex).replace('## Precedence And Safety Floor', '## Precedence (edited)'));
   assert.equal(rules(h, { harnesses: ['codex'], respectRemoval: true }).refresh().files[0].action, 'restored');
+});
+
+test('setup raises Codex project_doc_max_bytes inside markers and removal puts the previous value back', () => {
+  const h = home();
+  const codexDir = path.dirname(harnessFile('codex', h.env));
+  const config = path.join(codexDir, 'config.toml');
+  fs.mkdirSync(codexDir, { recursive: true });
+  const original = 'model = "x"\r\nproject_doc_max_bytes = 20000\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n';
+  fs.writeFileSync(config, original);
+  const repoAgents = path.join(h.root, 'repo-AGENTS.md');
+  fs.writeFileSync(repoAgents, 'x'.repeat(14000));
+  const raised = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
+  assert.equal(raised.doc_limit.action, 'raised');
+  assert.equal(raised.doc_limit.previous, '20000');
+  const text = read(config);
+  assert.equal(text, 'model = "x"\r\n# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=20000\r\nproject_doc_max_bytes = 65536\r\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n');
+  assert.ok(fs.readFileSync(path.join(raised.backup_dir, 'codex-config.toml')).equals(Buffer.from(original)));
+  assert.equal(raised.codex_budget.limit, 65536);
+  assert.equal(raised.codex_budget.over, false);
+  assert.ok(describeResult(raised).some(line => line === 'Codex project_doc_max_bytes (~/.codex/config.toml): raised to 65536 (was 20000)'));
+  assert.equal(rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh().doc_limit.action, 'unchanged');
+
+  const removed = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).remove();
+  assert.equal(removed.doc_limit.action, 'restored-previous');
+  assert.equal(read(config), 'model = "x"\r\nproject_doc_max_bytes = 20000\r\n\r\n[desktop]\r\nproject_doc_max_bytes = 1 # inside a table: not top-level\r\n');
+
+  // A value already at or above the target is left alone; no key at all is restored to no key.
+  fs.writeFileSync(config, 'project_doc_max_bytes = 131072\n');
+  assert.equal(rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh().doc_limit.action, 'unchanged');
+  fs.writeFileSync(config, '[a]\nb = 1\n');
+  rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
+  assert.match(read(config), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\n/);
+  rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).remove();
+  assert.equal(read(config), '[a]\nb = 1\n');
+});
+
+test('the Codex budget counts the whole user file plus the repository rules and warns when over', () => {
+  const h = home();
+  const codex = harnessFile('codex', h.env);
+  const config = path.join(path.dirname(codex), 'config.toml');
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(codex, `# My own rules\n${'- a hand-written rule line.\n'.repeat(180)}`);
+  fs.writeFileSync(config, '# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none\nbroken\n');
+  const repoAgents = path.join(h.root, 'repo-AGENTS.md');
+  fs.writeFileSync(repoAgents, 'x'.repeat(14000));
+  const held = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents }).refresh();
+  assert.equal(held.status, 'held', 'broken markers in config.toml are never guessed at');
+  assert.equal(held.doc_limit.state, 'broken');
+  fs.writeFileSync(config, 'model = "x"\n');
+  const check = rules(h, { harnesses: ['codex'], repoAgentsFile: repoAgents, respectRemoval: true }).check();
+  assert.equal(check.codex_budget.limit, 32768);
+  assert.equal(check.codex_budget.over, true, `${check.codex_budget.total} B with a realistic user section passes the default limit`);
+  assert.ok(describeResult(check).some(line => /^Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ ~\/repo-AGENTS\.md 14000 B = \d+ B of 32768 B; over the limit/.test(line)));
 });
 
 test('removal deletes only files Toolkit created and keeps owner files without the block', () => {

@@ -3628,7 +3628,7 @@ function printInstallCheck(result) {
 // The Toolkit global rules for every harness setup manages, rendered from the managed checkout.
 function setupGlobalRules(args) {
   return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
-    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }) });
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), manageCodexDocLimit: false });
 }
 
 // Codex setup has no install check, so it installs and reports the global rules directly.

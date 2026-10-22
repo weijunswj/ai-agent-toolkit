@@ -1,9 +1,10 @@
 'use strict';
 
-// Byte budgets for always-loaded instruction text. Codex reads instruction files only up to
-// project_doc_max_bytes (32 KiB by default) and its docs do not say whether the global file counts,
-// so the global block plus this repository's root AGENTS.md must fit together, measured with CRLF
-// line endings (a Windows checkout) to keep headroom.
+// Byte budgets for always-loaded instruction text. Codex reads the whole user-level AGENTS.md
+// (the owner's own sections plus the Toolkit global block) and the repository's AGENTS.md only up
+// to project_doc_max_bytes in total (32 KiB by default; UAT on 22 October 2026 showed the user file
+// counts). Setup raises that limit to 65536, so the budget is checked against the raised limit with
+// a realistic hand-written user section, measured with CRLF line endings for headroom.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,24 +13,30 @@ const { renderBlock } = require('../scripts/toolkit-managed-block.cjs');
 const { globalRulesBlock } = require('../scripts/toolkit-global-rules.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const CODEX_LIMIT = 32 * 1024;
+const RAISED_LIMIT = 64 * 1024;
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 const crlfBytes = text => Buffer.byteLength(text.replace(/\n/g, '\r\n'));
 
 const GLOBAL = renderBlock(globalRulesBlock(ROOT));
 const ROOT_AGENTS = read('AGENTS.md');
 const GOVERNED = read('repo/contracts/agent-rules/toolkit-governed-rules.md');
+// A hand-written user section about the size of the owner's own ~/.codex/AGENTS.md (4,924 bytes).
+const USER_SECTION = `# My rules\n${'- A hand-written preference line of a typical length here.\n'.repeat(85)}`;
 
-test('the global block and root AGENTS.md fit the Codex limit together, with CRLF', () => {
-  const combined = `${GLOBAL}\n\n${ROOT_AGENTS}`;
-  assert.ok(crlfBytes(combined) < CODEX_LIMIT, `combined ${crlfBytes(combined)} bytes`);
-  // The last line of root AGENTS.md must fall inside the first 32 KiB a host would read.
+test('a realistic user file, the global block and root AGENTS.md fit the raised Codex limit, with CRLF', () => {
+  assert.ok(crlfBytes(USER_SECTION) >= 4900, 'the user section is realistic');
+  const combined = `${USER_SECTION}\n${GLOBAL}\n\n${ROOT_AGENTS}`;
+  assert.ok(crlfBytes(combined) < RAISED_LIMIT, `combined ${crlfBytes(combined)} bytes`);
+  // The last line of root AGENTS.md must fall inside the bytes Codex reads.
   const lastLine = ROOT_AGENTS.trimEnd().split('\n').pop();
-  assert.ok(Buffer.from(combined.replace(/\n/g, '\r\n')).subarray(0, CODEX_LIMIT).toString('utf8').includes(lastLine));
+  assert.ok(Buffer.from(combined.replace(/\n/g, '\r\n')).subarray(0, RAISED_LIMIT).toString('utf8').includes(lastLine));
+  // Without the raise it would not fit, which is why setup manages project_doc_max_bytes.
+  assert.ok(crlfBytes(combined) > 32 * 1024, 'the default limit alone is too small');
+  assert.match(fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-global-rules.cjs'), 'utf8'), /const DOC_LIMIT_TARGET = 65536;/);
 });
 
 test('each block stays inside its own budget', () => {
-  assert.ok(crlfBytes(GLOBAL) <= 17500, `global block ${crlfBytes(GLOBAL)} bytes`);
+  assert.ok(crlfBytes(GLOBAL) <= 16500, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 9500, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');

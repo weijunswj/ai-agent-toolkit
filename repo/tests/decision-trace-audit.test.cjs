@@ -36,6 +36,8 @@ test('unknown SUPERSEDES targets and a body at the threshold fail', () => {
   assert.deepEqual(auditDecisionTraces({ body: linked, comments, recordPrefix: PREFIX }).unknown_supersedes, [{ id: '1', supersedes: 'INT-TK421-999' }]);
   const prose = auditDecisionTraces({ body: linked, comments: [person(1, 'INT-TK421-001\nSUPERSEDES=the auto-refresh allowance')], recordPrefix: PREFIX });
   assert.deepEqual(prose.unknown_supersedes, [], 'prose after SUPERSEDES= is not a record reference');
+  const sentence = auditDecisionTraces({ body: linked, comments: [person(1, 'INT-TK421-001 SUPERSEDES=INT-TK421-999.')], recordPrefix: PREFIX });
+  assert.deepEqual(sentence.unknown_supersedes, [{ id: '1', supersedes: 'INT-TK421-999' }], 'a trailing full stop does not hide a record reference');
   assert.equal(prose.ok, true);
   const long = auditDecisionTraces({ body: linked.padEnd(100, ' '), comments: [person(1, 'INT-TK421-001')], recordPrefix: PREFIX, threshold: 100 });
   assert.equal(long.over_threshold, true);

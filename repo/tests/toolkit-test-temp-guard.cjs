@@ -40,6 +40,7 @@ if (!process.env.TOOLKIT_TEST_PROTECTED_FILES) {
   process.env.TOOLKIT_TEST_PROTECTED_FILES = JSON.stringify([
     path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'CLAUDE.md'),
     path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'AGENTS.md'),
+    path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'config.toml'),
     path.join(home, '.gemini', 'GEMINI.md'),
   ]);
 }

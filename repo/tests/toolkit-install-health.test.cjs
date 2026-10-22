@@ -160,10 +160,12 @@ test('a clean Claude setup passes the install check and exits 0', () => {
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = claudeSetup(root, setupRepo, origin);
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(.+CLAUDE\.md\): created Codex \(.+AGENTS\.md\): created\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created Codex \(~\/\.codex\/AGENTS\.md\): created Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ \S+ \d+ B = \d+ B of 32768 B\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
   for (const file of [path.join(root, '.claude', 'CLAUDE.md'), path.join(root, '.codex', 'AGENTS.md')]) {
     assert.match(fs.readFileSync(file, 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /, file);
   }
+  // Setup changes ~/.codex/config.toml only through its approved question bank; the limit is raised by the Codex hook.
+  assert.doesNotMatch(fs.existsSync(path.join(root, '.codex', 'config.toml')) ? fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8') : '', /PROJECT-DOC-MAX-BYTES/);
 });
 
 test('a same-run plugin install reports its facts and restart required, never a bare refreshed', () => {

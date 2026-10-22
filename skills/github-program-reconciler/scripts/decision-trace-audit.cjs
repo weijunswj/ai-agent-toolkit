@@ -60,7 +60,7 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   // Only a SUPERSEDES= value that is a record ID (the prefix plus digits) is a reference to check;
   // prose such as "SUPERSEDES=the auto-refresh allowance" is left alone.
   const unknownSupersedes = recordPrefix ? people.flatMap(comment => [...String(comment.body || '').matchAll(SUPERSEDES)]
-    .map(match => match[1]).filter(id => recordId(id, recordPrefix) === id && !knownIds.has(id))
+    .map(match => match[1].replace(/[._-]+$/, '')).filter(id => recordId(id, recordPrefix) === id && !knownIds.has(id))
     .map(id => ({ id: String(comment.id), supersedes: id }))) : [];
   const unlabelled = recordPrefix ? people.filter(comment => !indexes.includes(comment) && !records.get(String(comment.id))).map(comment => String(comment.id)) : [];
   const bodyLength = String(body || '').length;
