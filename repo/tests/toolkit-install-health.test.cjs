@@ -38,6 +38,7 @@ test('the global rules check passes when current or updated, reports covered sec
     files: [{ harness: 'codex', file, state: 'current', action: 'refreshed' }], covered: [{ file, title: 'Toolkit Controller Bootstrap' }] } })
     .run({ topology: 'root-only' });
   assert.equal(updated.status, STATUS.PASSED);
+  assert.equal(byId(updated, 'global-rules').updated, true, 'a write this run goes into the update report');
   assert.match(byId(updated, 'global-rules').summary, /Codex \(.*AGENTS\.md\): refreshed/);
   assert.match(byId(updated, 'global-rules').summary, /hand-written "Toolkit Controller Bootstrap" section .* Toolkit does not edit it/);
   const held = unit(t, { globalRules: { status: 'held', backup_dir: null, covered: [], detail: 'broken',

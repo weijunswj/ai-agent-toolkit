@@ -142,6 +142,8 @@ class ToolkitInstallHealthCheck {
     }
     const notes = describeGlobalRules(result).join(' ');
     if (result.status === 'held') return this.#check('global-rules', label, STATUS.ACTION, `held: ${notes}`, notes);
+    // A write this run (created, added, refreshed or a hand edit restored) is recorded in the update report.
+    if (result.status === 'updated') return { ...this.#check('global-rules', label, STATUS.PASSED, notes), updated: true };
     return this.#check('global-rules', label, STATUS.PASSED, notes);
   }
 

@@ -1408,17 +1408,20 @@ function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
 }
 
 // The Codex session-start hook keeps the Toolkit global rules in ~/.codex/AGENTS.md current, rendered
-// from the managed checkout (Claude Code does this in its install check). Silent unless it cannot
-// write (broken markers or an error): then it prints one note and never stops the session. Setup
-// reports refreshes and the hand-written sections the block covers.
-function maybeRefreshCodexGlobalRules(args, state) {
+// from the managed checkout (Claude Code does this in its install check). It runs only after setup
+// configured the bridge with auto-sync on. Silent on a routine refresh; it prints one line when it
+// restored a hand-edited block or could not write, and never stops the session. Setup reports the
+// hand-written sections the block covers.
+function maybeRefreshCodexGlobalRules(args, state, environment = process.env) {
   if (!args.hook || args.syncSource !== 'codex-plugin') return null;
+  if (!state?.hub_version || state.auto_sync_enabled !== true) return null;
   const checkout = state?.repo_path && fs.existsSync(path.join(state.repo_path, 'repo', 'contracts', 'agent-rules', 'global-rules.md'))
     ? state.repo_path : path.resolve(__dirname, '..', '..');
   try {
-    const result = new GlobalRules({ toolkitRoot: checkout, harnesses: ['codex'],
+    const result = new GlobalRules({ environment, toolkitRoot: checkout, harnesses: ['codex'],
       retentionDays: state?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS }).refresh();
-    if (result.status === 'held') console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);
+    const restored = result.files.some((file) => file.action === 'restored');
+    if (result.status === 'held' || restored) console.log(`Toolkit global rules: ${describeGlobalRules(result).join(' ')}`);
     return result;
   } catch (error) {
     console.log(`Toolkit global rules could not be refreshed (${sanitizeOutputMessage(error.message)}). Run \`setup toolkit\` in Codex.`);
@@ -3518,7 +3521,6 @@ class LocalBridgeRun {
       return runStagingReconciliation({ args, hubPath, testHooks: this.#testHooks });
     }
     maybePrintAgentRulesPreflight(args, existingState, hubPath);
-    maybeRefreshCodexGlobalRules(args, existingState);
     assertSourceDowngradeAllowed(existingState, args);
     if (isHookNoop(args, existingState)) {
       if (existingState?.hub_version && !existingState.auto_sync_enabled) {
@@ -3526,6 +3528,7 @@ class LocalBridgeRun {
       }
       return { status: 0, audit: null };
     }
+    maybeRefreshCodexGlobalRules(args, existingState);
 
     const requested = applyRequestedState(existingState, args);
     const cleanupResult = this.#cleanupReports(requested);
@@ -3596,6 +3599,7 @@ module.exports = {
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
+  maybeRefreshCodexGlobalRules,
   discoverCodexPluginHookRoots,
   repairThirdPartyCodexPluginHooks
 };

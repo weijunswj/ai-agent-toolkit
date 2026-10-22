@@ -87,6 +87,63 @@ test('a hand-edited block is restored with a backup; broken markers hold instead
   assert.equal(read(codex), broken, 'nothing is written on broken markers');
 });
 
+test('a file that is not UTF-8 is held and never rewritten; UTF-8 with a BOM round-trips and backs up byte-exact', () => {
+  const h = home();
+  const codex = harnessFile('codex', h.env);
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('# Mine é\r\n', 'utf16le')]);
+  fs.writeFileSync(codex, utf16);
+  const held = rules(h, { harnesses: ['codex'] }).refresh();
+  assert.equal(held.status, 'held');
+  assert.equal(held.files[0].state, 'not-utf8');
+  assert.match(describeResult(held)[0], /held, the file is not UTF-8 text .* Save it as UTF-8/);
+  assert.ok(fs.readFileSync(codex).equals(utf16), 'the file keeps its exact bytes');
+  assert.equal(rules(h, { harnesses: ['codex'] }).remove().files[0].action, 'held');
+
+  const bom = Buffer.from('﻿# Mine é\r\nkeep\r\n', 'utf8');
+  fs.writeFileSync(codex, bom);
+  const added = rules(h, { harnesses: ['codex'] }).refresh();
+  assert.equal(added.files[0].action, 'added');
+  assert.ok(fs.readFileSync(codex).subarray(0, bom.length).equals(bom), 'the owner bytes, BOM included, stay the prefix');
+  assert.ok(fs.readFileSync(path.join(added.backup_dir, 'codex-AGENTS.md')).equals(bom), 'the backup holds the exact original bytes');
+});
+
+test('a hand-edited block is reported when restored, in the install check and the Codex session-start hook', () => {
+  const h = home();
+  rules(h, { harnesses: ['codex'] }).refresh();
+  const codex = harnessFile('codex', h.env);
+  fs.writeFileSync(codex, read(codex).replace('## Precedence And Safety Floor', '## Precedence (edited)'));
+  const { maybeRefreshCodexGlobalRules } = require('../scripts/toolkit-local-bridge.cjs');
+  const state = { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT };
+  const lines = [];
+  const log = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try { maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'codex-plugin' }, state, h.env); }
+  finally { console.log = log; }
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^Toolkit global rules: Codex \(~\/\.codex\/AGENTS\.md\): restored; an edit inside the Toolkit block was replaced.*Backup: ~\/\.ai-agent-toolkit\/backups\/global-rules\//);
+  assert.ok(read(codex).includes('## Precedence And Safety Floor'));
+});
+
+test('the Codex session-start hook writes nothing before setup or with auto-sync off', () => {
+  const { maybeRefreshCodexGlobalRules } = require('../scripts/toolkit-local-bridge.cjs');
+  const hook = { hook: true, syncSource: 'codex-plugin' };
+  for (const state of [null, {}, { hub_version: 1, auto_sync_enabled: false, repo_path: ROOT }]) {
+    const h = home();
+    assert.equal(maybeRefreshCodexGlobalRules(hook, state, h.env), null);
+    assert.equal(fs.existsSync(harnessFile('codex', h.env)), false, JSON.stringify(state));
+  }
+  const h = home();
+  const lines = [];
+  const log = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try { assert.equal(maybeRefreshCodexGlobalRules(hook, { hub_version: 1, auto_sync_enabled: true, repo_path: ROOT }, h.env).status, 'updated'); }
+  finally { console.log = log; }
+  assert.deepEqual(lines, [], 'a routine refresh is silent');
+  assert.equal(fs.existsSync(harnessFile('codex', h.env)), true);
+  assert.equal(maybeRefreshCodexGlobalRules({ hook: true, syncSource: 'claude-plugin' }, { hub_version: 1, auto_sync_enabled: true }, h.env), null);
+});
+
 test('removal deletes only files Toolkit created and keeps owner files without the block', () => {
   const h = home();
   const codex = harnessFile('codex', h.env);

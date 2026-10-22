@@ -43,6 +43,7 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['## Safety Gates', GLOBAL],
     ['## Human-readable Work', GLOBAL],
     ['n8n-safety-router', GLOBAL],
+    ['load the `n8n-safety-router` skill before any n8n work', GOVERNED],
     ['G0 Discovery -> G1 Builder, including UAT -> G2 Review', ROOT_AGENTS],
     ['Route proof', ROOT_AGENTS],
     ['Decision traces', ROOT_AGENTS],

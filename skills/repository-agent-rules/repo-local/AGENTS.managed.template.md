@@ -4,10 +4,10 @@ Source: repo/contracts/agent-rules/repo-local
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=e2ca7c2a90c4 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=3f39c5f03054 -->
 # Toolkit-Governed Repository Rules
 
-This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it. Generic rules come from the Toolkit global rules in the harness's user-level file. If they are not in your context (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor.
+This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it. Generic rules come from the Toolkit global rules in the harness's user-level file. If they are not in your context (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor.
 
 ## Gates
 
@@ -17,7 +17,7 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 
 ## Delegation And Routes
 
-G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Exceptions (trivial or inseparable work, overhead above benefit, tightly coupled reasoning, an unavailable exact route, a real authority or safety boundary) are recorded briefly; there is no helper quota or ceremonial launch. Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none.
+G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Exceptions (trivial or inseparable work, overhead above benefit, tightly coupled reasoning, an unavailable exact route, a real authority or safety boundary) are recorded briefly; there is no helper quota, ceremonial launch or extra owner permission for already-authorised direct work. Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none.
 
 Models and effort come only from an explicitly selected stack registry revision pinned in the controller decision and CURRENT admission, never inferred from the host, provider, alias or newest bundled registry; a newer registry needs explicit adoption and never changes an active run. Keep qualification overrides separate from production selection, and each stack's lead and helper bindings independent. Model and effort follow launch ownership: a human's own choice for an agent they open directly (including a G2 chat) is advisory, not a blocker, and is recorded as the actual route, never labelled the recommended one. Every automation-launched G0/G1/G2 worker or successor, even as root of its own session, and every G0/G1 helper gets the exact pinned route for its role and member, with no fallback or weaker effort. A root label is not a human override, and no model lock goes into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
 

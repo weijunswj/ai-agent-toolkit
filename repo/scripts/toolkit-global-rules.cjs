@@ -59,6 +59,18 @@ function readIfExists(file) {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
+// A user-level file as its exact bytes and, when they are valid UTF-8, its text (a BOM is kept as
+// U+FEFF, so writing the text back reproduces the bytes). Text is null for any other encoding,
+// such as UTF-16 from Windows PowerShell: Toolkit then never rewrites the file.
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+function readUserFile(file) {
+  let bytes;
+  try { bytes = fs.readFileSync(file); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  try { return { bytes, text: STRICT_UTF8.decode(bytes) }; }
+  catch { return { bytes, text: null }; }
+}
+
 function writeFileAtomically(file, text) {
   const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
@@ -108,32 +120,40 @@ class GlobalRulesFile {
   get harness() { return this.#harness; }
   get file() { return this.#file; }
 
-  // state: missing-file | absent | current | stale | tampered | broken
+  // state: missing-file | absent | current | stale | tampered | broken | not-utf8
   assess() {
-    const text = readIfExists(this.#file);
+    const read = readUserFile(this.#file);
     const base = { harness: this.#harness, file: this.#file };
-    if (text === null) return { ...base, state: 'missing-file', covered: [] };
-    const { blocks, errors } = findBlocks(text);
+    if (read === null) return { ...base, state: 'missing-file', covered: [] };
+    if (read.text === null) return { ...base, state: 'not-utf8', detail: 'the file is not UTF-8 text (for example UTF-16), so Toolkit will not rewrite it', covered: [] };
+    const { blocks, errors } = findBlocks(read.text);
     if (errors.length) return { ...base, state: 'broken', detail: errors[0], covered: [] };
     const found = blocks.find(block => block.name === BLOCK_NAME);
-    return { ...base, state: blockState(found, this.#expected()), covered: coveredSections(text) };
+    return { ...base, state: blockState(found, this.#expected()), covered: coveredSections(read.text) };
+  }
+
+  // Copies the exact current bytes into this run's backup folder.
+  #backup(bytes) {
+    fs.mkdirSync(this.#backupDir, { recursive: true });
+    const backup = path.join(this.#backupDir, `${this.#harness}-${path.basename(this.#file)}`);
+    fs.writeFileSync(backup, bytes);
+    return backup;
   }
 
   // Writes only when the block is not current. Returns the assessment plus the action taken.
   install() {
     const before = this.assess();
     if (before.state === 'current') return { ...before, action: 'unchanged' };
-    if (before.state === 'broken') return { ...before, action: 'held' };
-    const original = readIfExists(this.#file);
-    const updated = upsertBlock(original || '', this.#expected(), { position: 'bottom' });
-    let backup = null;
-    if (original !== null) {
-      fs.mkdirSync(this.#backupDir, { recursive: true });
-      backup = path.join(this.#backupDir, `${this.#harness}-${path.basename(this.#file)}`);
-      fs.writeFileSync(backup, original);
-    }
+    if (before.state === 'broken' || before.state === 'not-utf8') return { ...before, action: 'held' };
+    const original = readUserFile(this.#file);
+    const updated = upsertBlock(original ? original.text : '', this.#expected(), { position: 'bottom' });
+    const backup = original ? this.#backup(original.bytes) : null;
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-    if (readIfExists(this.#file) !== original) fail('GLOBAL_RULES_CHANGED_DURING_WRITE', `${this.#file} changed while Toolkit was updating it. Run setup toolkit again.`);
+    const now = readUserFile(this.#file);
+    const unchanged = original === null ? now === null : now !== null && now.bytes.equals(original.bytes);
+    if (!unchanged) {
+      fail('GLOBAL_RULES_CHANGED_DURING_WRITE', `${this.#file} changed while Toolkit was updating it. Run setup toolkit again.`);
+    }
     writeFileAtomically(this.#file, updated);
     if (readIfExists(this.#file) !== updated) fail('GLOBAL_RULES_READBACK_MISMATCH', `${this.#file} did not read back as written.`);
     if (original === null) this.#ledger.set(this.#file, true);
@@ -144,12 +164,10 @@ class GlobalRulesFile {
   remove() {
     const before = this.assess();
     if (before.state === 'missing-file' || before.state === 'absent') return { ...before, action: 'absent' };
-    if (before.state === 'broken') return { ...before, action: 'held' };
-    const original = readIfExists(this.#file);
-    fs.mkdirSync(this.#backupDir, { recursive: true });
-    const backup = path.join(this.#backupDir, `${this.#harness}-${path.basename(this.#file)}`);
-    fs.writeFileSync(backup, original);
-    const remaining = removeBlock(original, BLOCK_NAME);
+    if (before.state === 'broken' || before.state === 'not-utf8') return { ...before, action: 'held' };
+    const original = readUserFile(this.#file);
+    const backup = this.#backup(original.bytes);
+    const remaining = removeBlock(original.text, BLOCK_NAME);
     if (!remaining.trim() && this.#ledger.created(this.#file)) {
       fs.rmSync(this.#file);
       this.#ledger.set(this.#file, false);
@@ -201,7 +219,7 @@ class GlobalRules {
 
   // status: current (nothing to do), updated (written this run), stale (check only) or held.
   #summary(files) {
-    const held = files.filter(file => file.state === 'broken');
+    const held = files.filter(file => file.state === 'broken' || file.state === 'not-utf8');
     const changed = files.filter(file => !['unchanged', 'checked', 'absent', 'held'].includes(file.action));
     const stale = files.filter(file => file.action === 'checked' && file.state !== 'current');
     const status = held.length ? 'held' : changed.length ? 'updated' : stale.length ? 'stale' : 'current';
@@ -239,6 +257,8 @@ function describeResult(result) {
   const lines = result.files.map(file => {
     const where = `${harnessLabel(file.harness)} (${file.display || file.file})`;
     if (file.state === 'broken') return `${where}: held, the Toolkit markers are broken (${file.detail}). Fix or remove them, then run setup toolkit.`;
+    if (file.state === 'not-utf8') return `${where}: held, ${file.detail}. Save it as UTF-8, then run setup toolkit.`;
+    if (file.action === 'restored') return `${where}: restored; an edit inside the Toolkit block was replaced, and the edited copy is in the backup below`;
     if (file.action === 'checked') return `${where}: ${file.state}`;
     return `${where}: ${file.action === 'unchanged' ? 'current' : file.action}`;
   });
