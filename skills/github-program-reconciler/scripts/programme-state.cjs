@@ -76,6 +76,9 @@ const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
 const NAV_BLOCK_NAME = 'NAV';
+const CURRENT_BLOCK_NAME = 'CURRENT';
+// How many queued tasks the CURRENT summary names under "Next up".
+const NEXT_UP_LIMIT = 5;
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
 const TEXT_LIMIT = 200;
@@ -998,6 +1001,43 @@ function renderTraceBlockBody(number, trace) {
   return lines.join('\n');
 }
 
+// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
+function ownerWait(child) {
+  if (!child) return null;
+  if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'your decision';
+  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat.state)) return `your UAT${child.pr.number ? ` on PR #${child.pr.number}` : ''}`;
+  if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
+  return null;
+}
+
+// The generated CURRENT summary: what is in progress, what waits on the owner, and the next queued
+// tasks, from the same documents and order as the Programme Graph.
+function renderCurrentBlockBody(parent, children, issues = new Map()) {
+  const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
+  const name = ({ outcome }) => `${taskName(outcome, issues.get(outcome.issue))} (#${outcome.issue})`;
+  const active = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS');
+  const waiting = active.filter(row => ownerWait(row.child));
+  const working = active.filter(row => !ownerWait(row.child)).map(row => {
+    const parts = [row.child.gate.role, row.child.pr.number ? `PR #${row.child.pr.number}` : null].filter(Boolean).join(', ');
+    return `- ${name(row)}${parts ? `: ${parts}` : ''}${row.child.next_action ? `; next: ${publicText(row.child.next_action)}` : ''}`;
+  });
+  const queued = rows.filter(row => statusText(row.outcome, row.child) === 'QUEUED').slice(0, NEXT_UP_LIMIT).map(row => `- ${name(row)}`);
+  const list = items => (items.length ? items : ['- None.']);
+  return [
+    '<!-- programme-current -->',
+    `_Generated from the programme state (revision ${parent.revision}); hand-written notes follow this summary._`,
+    '',
+    '**In progress**',
+    ...list(working),
+    '',
+    '**Waiting on you**',
+    ...list(waiting.map(row => `- ${name(row)}: ${ownerWait(row.child)}`)),
+    '',
+    '**Next up**',
+    ...list(queued),
+  ].join('\n');
+}
+
 // The links that open a task page or PR: the programme parent, any expected parents in between,
 // the task, then its PR. GitHub turns each #n into a link.
 function renderNavBlockBody(chain, pr) {
@@ -1091,6 +1131,23 @@ function upsertTraceBlock(text, rendered) {
   if (found) return source.slice(0, found.start) + block + source.slice(found.end);
   const before = source.replace(/\s+$/, '');
   return `${before ? `${before}${eol}${eol}` : ''}${block}${eol}`;
+}
+
+// The body with the CURRENT summary written: replaced in place, else added right under the heading
+// of the named status section (else under the first title, else at the top).
+function upsertCurrentBlock(text, rendered, sectionName) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const block = rendered.split('\n').join(eol);
+  const { block: found, error } = findStateBlock(source, CURRENT_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
+  const all = headings(source);
+  const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
+  const at = heading ? heading.end : 0;
+  const before = source.slice(0, at).replace(/\s+$/, '');
+  const after = source.slice(at).replace(/^\s+/, '');
+  return `${before ? `${before}${eol}${eol}` : ''}${block}${after ? `${eol}${eol}${after}` : eol}`;
 }
 
 // The body with the links block first: replaced in place, else added at the very top.
@@ -1870,12 +1927,13 @@ class Reconciler {
   // The body with the state block and the comment trace written. When it would reach the threshold,
   // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
   // measured with a link to that comment in their place.
-  projectBody(number, source, stateBody, comments, version, navBody = null) {
+  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null) {
     const trace = traceEntries(comments, this.binding.record_prefix);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries);
       const withState = upsertStateBlock(source, renderBlock(stateBody, version), this.placementFor(number));
-      const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
+      const withCurrent = currentBody ? upsertCurrentBlock(withState.body, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : withState.body;
+      const withNav = navBody ? upsertNavBlock(withCurrent, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withCurrent;
       return { body: upsertTraceBlock(withNav, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
     };
     const full = build(trace);
@@ -1925,6 +1983,10 @@ class Reconciler {
       const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
       if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
       const navBody = this.navFor(parent, number, children);
+      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues) : null;
+      const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
+      if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
+      const currentCurrent = !currentBody || (Boolean(summary.block) && normalizeBlockBody(summary.block.body) === normalizeBlockBody(currentBody) && !summary.block.tampered);
       const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
       this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
       const comments = observed.comments.get(number) || [];
@@ -1934,17 +1996,18 @@ class Reconciler {
       const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix));
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // A current body at or over the threshold still moves its largest tag lists out.
-      if (current && !move && traceCurrent && navCurrent && issue.body.length < this.threshold) continue;
+      if (current && !move && traceCurrent && navCurrent && currentCurrent && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
-      const projected = this.projectBody(number, issue.body, body, comments, version, navBody);
+      if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
+      const projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody);
       if (projected.body.length >= this.threshold) {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
         continue;
       }
       for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, lines: part.lines });
-      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}) },
+      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, body, updated_at: issue.updated_at });
     }
   }
@@ -1969,7 +2032,8 @@ class Reconciler {
           const trace = issue && target.trace ? findStateBlock(issue.body, TRACE_BLOCK_NAME).block : undefined;
           const nav = issue && target.nav ? findStateBlock(issue.body, NAV_BLOCK_NAME).block : undefined;
           done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered && (!target.trace || (trace && blockDigest(trace.body) === target.trace))
-            && (!target.nav || (nav && blockDigest(nav.body) === target.nav))) : null;
+            && (!target.nav || (nav && blockDigest(nav.body) === target.nav))
+            && (!target.current || Boolean(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block && blockDigest(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block.body) === target.current))) : null;
         } else if (effect.kind === 'replace_pr_nav') {
           const page = this.reader.issue(target.pr);
           const nav = page ? findStateBlock(page.body, NAV_BLOCK_NAME).block : undefined;
@@ -2215,9 +2279,10 @@ class Reconciler {
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         let next;
         const navBody = this.navFor(parentDoc, number, docs);
-        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody); }
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
+        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody, currentBody); }
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}) } };
+        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
         if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
           hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
@@ -2336,6 +2401,6 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch,
-  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, originSlug, bindRepository,
 });

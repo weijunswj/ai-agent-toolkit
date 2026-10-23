@@ -134,7 +134,8 @@ test('the graph replaces the hand-kept index once, moves a top block below the s
   reconciler().run({ apply: true });
   const page = github.issues.get(421).body;
   assert.equal(page.includes('Programme index'), false, 'the hand-kept index is replaced');
-  assert.ok(page.startsWith('# Programme\n\n## CURRENT\n\nLive now.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN'), 'status first, then the graph');
+  assert.ok(page.startsWith('# Programme\n\n## CURRENT\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT'), 'the generated summary opens the status section');
+  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\nLive now.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'hand-written notes follow it, then the graph');
   assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'the comment trace closes the page');
   assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n'));
   assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n<!-- programme-nav -->\n\*\*Path:\*\* #421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n# C2 title\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE/, 'a task page opens with its links, then the title, then its status block');
@@ -142,7 +143,7 @@ test('the graph replaces the hand-kept index once, moves a top block below the s
 
   // A block someone moved back to the top is planned as a move, not a content change.
   const end = page.indexOf('-->', page.indexOf(':END STATE')) + 3;
-  const block = page.slice(page.indexOf('<!-- AI-AGENT-TOOLKIT'), end);
+  const block = page.slice(page.lastIndexOf('<!--', page.indexOf(':BEGIN STATE')), end);
   github.issues.get(421).body = `${block}\n\n${page.replace(`${block}\n\n`, '')}`;
   const dry = reconciler().run();
   assert.deepEqual(dry.effects.map(effect => effect.text), ["Move the state block in #421's body"]);
@@ -177,11 +178,11 @@ test('every body lists every comment on its issue, with supersession marked and 
 test('a trace that would overflow the body moves whole into one index comment, then new comments list directly again', () => {
   const { github, reconciler } = setup();
   reconciler().run({ apply: true });
-  const limit = github.issues.get(423).body.length + 600;
+  const limit = Math.max(github.issues.get(421).body.length + 100, github.issues.get(423).body.length + 600);
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
-  const early = [1, 2, 3, 4, 5].map(n => comment(github, 423, `INT-TK421-02${n} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
+  const early = Array.from({ length: 16 }, (unused, n) => comment(github, 423, `INT-TK421-2${String(n).padStart(2, '0')} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
   const dry = run(false);
-  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Other comments\" comment trace (5 line(s)) into a new index comment"));
+  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Other comments\" comment trace (16 line(s)) into a new index comment"));
   const applied = run(true);
   assert.deepEqual(applied.holds, []);
   const comments = github.commentsOf(423);

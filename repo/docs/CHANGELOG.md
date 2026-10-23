@@ -18,6 +18,10 @@
 - **Host contract:** `repo/docs/HOST-CONTRACT.md` and its JSON twin record what custody needs from Claude Code and Codex: session identity, the turn-end hook rules, completion modes, duplicate-launch and handover checks, and honest limits.
 - **Clearer messages:** next actions addressed to the controller name `--controller`; a write without a session says it needs this session's own ID; an unsupported store kind names the supported one; whitespace-only values are refused.
 
+## Unreleased (generated CURRENT)
+
+- **CURRENT writes itself.** The parent's status section opens with a generated summary from the programme state: what is in progress (gate, PR, next action), what waits on the owner (a decision, a UAT or a blocker) and the next five queued tasks. Hand-written notes below it are kept as they are.
+
 ## Unreleased (programme page: tags, retired and links)
 
 - **Comment traces by tag.** A comment's tag is its first line when its second line is `---`. Each page lists every comment per tag, with untagged comments under "Other comments"; tags are never combined. On overflow, tag lists move out largest first, each into its own index comment that carries the tag. The parent's list and a task's list stay separate.
