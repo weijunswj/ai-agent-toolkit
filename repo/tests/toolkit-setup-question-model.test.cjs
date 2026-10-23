@@ -114,16 +114,23 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   const generated = core.renderSetupQuestionDocumentation(rows);
   const generatedFile = fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8');
   assertGeneratedDocumentationEqual(generatedFile, core.renderSetupQuestionDocumentation());
+  // The bank (markdown and terminal) is compact: title, what is true now, the recommended choice and
+  // its effect, and every choice label. The full text lives in the generated reference and --explain.
   for (const row of rows) {
     for (const output of [markdown, terminal, generated]) {
-      assert.match(output, new RegExp(row.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.ok(output.includes(row.whatThisControls));
-      assert.ok(output.includes(row.recommendation.reason));
-      for (const choice of row.choices) assert.ok(output.includes(choice.consequence));
+      assert.ok(output.includes(row.title), row.id);
+      assert.ok(output.includes(row.current), row.id);
+      assert.ok(output.includes(row.recommended_outcome), row.id);
+      for (const choice of row.choices) assert.ok(output.includes(`${choice.presentation_ref}. ${choice.label}`), `${row.id} ${choice.value}`);
     }
+    assert.ok(generated.includes(row.whatThisControls));
+    assert.ok(generated.includes(row.recommendation.reason));
+    for (const choice of row.choices) assert.ok(generated.includes(choice.consequence));
   }
-  assert.match(markdown, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
-  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nVerification:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  A\. /);
+  assert.doesNotMatch(markdown, /\*\*What this controls:\*\*/);
+  assert.match(markdown, /^\| # \| Question \| Now \| Recommended \| Other choices \|$/m);
+  assert.match(terminal, /\n1\.1 [^\n]+\n  Now: [^\n]+\n  Recommended: [A-Z]\. /);
+  assert.match(generated, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
   const plan = core.setupPlan({ host: 'codex', setupChoices: core.parseArgs(['--plan']).setupChoices, questionBank: rows });
   assert.deepEqual(plan.question_bank, rows);
   const json = JSON.parse(JSON.stringify(plan));
@@ -307,19 +314,22 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1', '3.2']);
 });
 
-test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
+test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
   const rows = allRows();
   const rendered = core.renderSetupQuestionBank(rows);
-  const quickIndex = rendered.slice(rendered.indexOf('Quick index'), rendered.indexOf('Review every visible choice'));
+  const detailed = core.renderSetupQuestionDocumentation(rows, rows);
+  assert.equal(rendered.includes('### '), false, 'the bank shows the compact table, not the full text');
+  assert.match(rendered, /For the full text of a question, say "explain 1\.5"/);
   const references = rows.map((row) => row.presentation.question_ref);
   assert.equal(new Set(references).size, rows.length);
   let previousIndex = -1;
   for (const row of rows) {
-    const quickLine = `${row.presentation.question_ref} ${row.title} - Recommended: ${row.presentation.recommended_choice_ref}`;
-    const quickPosition = quickIndex.indexOf(quickLine);
-    assert.ok(quickPosition > previousIndex, row.id);
-    previousIndex = quickPosition;
-    assert.match(rendered, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title}`));
+    const tableLine = `| ${row.presentation.question_ref} | ${row.title} | `;
+    const tablePosition = rendered.indexOf(tableLine);
+    assert.ok(tablePosition > previousIndex, row.id);
+    previousIndex = tablePosition;
+    assert.ok(rendered.includes(`${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}: `), row.id);
+    assert.match(detailed, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title.replace(/[?]/g, '\\?')}`));
     assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
     assert.equal(
       row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
@@ -554,4 +564,15 @@ test('the Codex instruction limit question is recommended on, explains the edit 
   }
   const kept = core.parseArgs(['--plan', '--keep-codex-doc-limit']);
   assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('codex-doc-limit'), false);
+});
+
+test('explain shows the full text of one question, numbered as in the whole bank', () => {
+  const rows = allRows();
+  const text = core.renderQuestionRows(rows, '1.2');
+  assert.match(text, /^## 1\. Updates and reports\n\n### 1\.2 Automatic updates\n/);
+  assert.match(text, /\*\*What this controls:\*\*/);
+  assert.equal((text.match(/^### /gm) || []).length, 1);
+  assert.equal(core.renderQuestionRows(rows, '9.9'), '');
+  assert.equal(core.parseArgs(['--explain', '1.2']).explain, '1.2');
+  assert.equal(core.parseArgs(['--explain=1.2']).plan, true);
 });

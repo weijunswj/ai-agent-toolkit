@@ -2,7 +2,8 @@
 
 ## 3.7.0 (setup and hooks)
 
-- **Claude Projects controller skill 2026-10-23.8:** another project edits the uploaded copy only at your request. Upload the new file to claude.ai after this merges.
+- **Compact question bank** (#486). The bank is one table per section: each row shows what is true now, the recommended choice and its effect, and the other choices. Say "explain 1.5" (or run setup with `--explain 1.5`) for the full text of one question; the reference document keeps the full text. A new test checks that no question, default, "all recommended" answer or flag can turn on any merge.
+- **Claude Projects controller skill 2026-10-23.9:** another project edits the uploaded copy only at your request, and project setup now also creates a recurring hourly stalled-work nudge (read-only, reports to the coordinator, pings you only when something needs you). The nudge reviews every open thread and is the only place threads get resolved. It replaces the one-shot active-work reminder. Upload the new file to claude.ai after this merges.
 - **Commands you paste work in PowerShell.** Printed and documented `node` commands use `"$env:USERPROFILE\..."` instead of the cmd-only `"%USERPROFILE%\..."`.
 - **Antigravity copy question is back** (#472). When Antigravity is installed, setup asks "Copy Toolkit's skills into Antigravity?" (opt-in). Choosing it copies the portable skills into `~/.gemini/config/skills` and keeps Toolkit's copies current; a later answer removes only Toolkit's copies. The per-workspace bridge copy stays.
 - **Windows only in setup.** Setup stops before any step on a computer that is not Windows (Linux runs only as a CI build machine), and `toolkit env` loses the Linux key store. The install check builds the key store only when it needs it, so it skips `toolkit env` on a computer without one (#532).

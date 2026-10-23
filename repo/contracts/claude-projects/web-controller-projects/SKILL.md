@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.8
+Version: 2026-10-23.9
 
 This is a reusable framework for running Toolkit-governed repos through Claude Projects. Toolkit governance always applies on top of it. Project-specific facts, such as repos, devices, lanes and pending work, belong in each project's memory, not here.
 
@@ -114,19 +114,20 @@ Save progress to project memory after each step, so an interrupted setup resumes
    - Have a read-only thread read the repo's `ARCHITECTURE.md` map, the current-state record and the programme index, and compare the map's recorded commit with the default branch.
    - If the map is missing or materially stale, start a bounded G0 to create or refresh it before you plan anything.
    - Then list the pending work and what waits on the user.
-8. **Goal and check-in.**
+8. **Goal, check-in and nudge.**
    - Set the project goal to the parent programme.
    - Pick a morning check-in time in the user's time zone, tell them, and set up the check-in exactly as in **Recurring tasks** below.
+   - Set up the **Hourly nudge** (below) the same way, by default.
 9. **Confirm it works.** Show the user each item as it passes:
    - one thread result relayed into the project chat with its link;
    - one decision card answered;
-   - a test check-in: the check-in thread runs once now and reports to you, and the user confirms they see the task in the project's Scheduled tasks panel. Setup does not wait for the next morning.
-10. **Done.** Post one line: setup complete, skill Version, bound `CONTROLLER.md` SHA, device and folder, check-in time, where the recurring task lives, and the next work item.
+   - a test check-in and a test nudge: each thread runs its task once now and reports to you, and the user confirms they see both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run.
+10. **Done.** Post one line: setup complete, skill Version, bound `CONTROLLER.md` SHA, device and folder, check-in time, that the hourly nudge is on, where the recurring tasks live, and the next work item.
 
 ## Keep moving
 - **Never end a turn idle with work pending.** You act only when something wakes you (a user message, a thread, a PR event or a scheduled check-in). Before ending any turn, start every next step that does not need the user: records, briefs, cloud checks, the next release's planning.
 - **Check what a wait really depends on.** Only an approval, a credential, a typed device line, UAT or an unreachable setting truly waits on the user. Never park independent work behind one of those.
-- **Always leave a wake queued.** If anything is still pending when you end a turn, make sure something will wake you: a running thread, a subscribed PR, or a reminder armed with `send_later` (default 60-120 minutes). Never rely on the user writing to resume work.
+- **Always leave a wake queued.** If anything is still pending when you end a turn, make sure something will wake you: a running thread, a subscribed PR, or the hourly nudge (check it is armed). Never rely on the user writing to resume work.
 
 ## Threads
 - Start a new thread for every new topic or Toolkit packet. Send follow-ups on the same topic to that topic's thread. Never pile unrelated work into one thread.
@@ -136,7 +137,7 @@ Save progress to project memory after each step, so an interrupted setup resumes
 - **A task the user adds to a repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Before telling the user to do anything, check whether you, a worker or a thread you can start could do it. Ask the user only for what truly needs their hands: an approval, a credential, a typed line in a local rc thread, or a setting no tool reaches.
 - **End finished local Remote Control sessions straight away.** The moment a thread's work is done or superseded (result relayed, nothing left for it to do), end its Remote Control session. Idle finished sessions keep running on the user's device and clutter their session list.
-- **Resolve only after an idle window.** Resolve a thread, and each of the coordinator's own posts, only once it has been idle for the project's resolve window (default 3 days with no activity) and nothing still waits on it. Never resolve a post right after posting: the user sees it arrive already resolved. Every coordinator post shows in the user's Threads panel until resolved, so the daily check-in sweeps them. Record the window in project memory if the user sets a different one.
+- **Resolve only in the hourly nudge.** Threads and the coordinator's own posts are resolved in one place: the hourly nudge pass (below). Never resolve a thread when its task completes or a post right after posting: the user sees it arrive already resolved. Every coordinator post shows in the user's Threads panel until resolved. Record a different idle window in project memory if the user sets one (default 3 days).
 - For a follow-up review round, message the existing reviewer thread (even if resolved) instead of starting a new one. If an idle finished thread is reused for a new topic, rename it first.
 
 ## Pull requests and CI
@@ -171,16 +172,28 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 ## Daily check-in
 - Threads and the user wake the coordinator, but outside activity doesn't: other controllers' comments, new issues, or people replying by email. So every project runs a daily weekday check-in, at a morning time in the user's time zone that you pick and tell them.
 - Set it up exactly as in **Recurring tasks** above. Its firing runs in the dedicated check-in thread (which has the project's repo access), does the read-only checks below, and reports to the coordinator.
-- **Active-work check-in.** While a release or any controller-driven work is in progress, also arm a short self check-in every 1-2 hours with `send_later`. Each firing advances whatever does not need the user, nudges stuck threads, and re-arms itself until nothing is pending. Stop it when the work is idle or waits only on the user, and say so in project memory.
 - Each daily firing:
   1. Loads this skill and project memory. State the skill Version you loaded.
   2. Compare your loaded skill Version with the Version the check-in thread loaded. If the thread's is newer, have it return the full current SKILL.md, follow it from now on, save the Version to project memory, and mention the update in one line of the check-in summary. Never wait for a restart.
-  3. Nudges stuck threads, ends any finished local Remote Control sessions that were missed, and resolves threads and coordinator posts that have been idle past the resolve window with nothing waiting on them.
+  3. Confirms the hourly nudge is armed and ran within the last hour, and re-arms it if not.
   4. Has the check-in thread check the parent issue and the lane's issues for outside activity since the last check-in.
   5. Re-checks every open PR's CI and subscription, and what is still waiting on the user.
   6. Posts only if something changed, something is stuck, or the user's answer has been waiting over a day.
   7. Confirms the next run is armed.
 - Stop it when the user asks.
+
+## Hourly nudge
+- Every project also runs an hourly stalled-work nudge, set up at project setup exactly as in **Recurring tasks**, in its own "Hourly nudge" thread. It must be a recurring routine: one-shot self-reminders have died silently, and nothing then woke the coordinator.
+- It fires every hour at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 * * * *`), and it is read-only.
+- Each firing reviews every open thread and the coordinator's open posts. That includes project-chat posts that became threads (a top-level post with replies, from the coordinator or the user): the app shows them as threads, but the thread list does not return them, so also page through the project chat with small page limits (large pages overflow). It lists:
+  1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
+  2. threads with an unkept promise (a reply that said it would do or report something that has not happened);
+  3. resolve candidates, each with its reason: finished or merged, superseded, or idle past the resolve window with nothing waiting on it;
+  4. local Remote Control sessions whose work is finished but which are still running;
+  5. open pull requests with their CI state;
+  6. open items in project memory.
+- It reports to the coordinator only. The coordinator double-checks each resolve candidate, then resolves it, ends the finished sessions, nudges or reroutes the stuck threads, and pings the user only when something needs them.
+- This is the only resolve pass. Stop it only when the user asks, and record that in project memory.
 
 ## Where work runs
 - **Hybrid by default.** Use local Remote Control on the user's device only for work that needs it:

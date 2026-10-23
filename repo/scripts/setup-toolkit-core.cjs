@@ -147,6 +147,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     codexDocLimitMode: '',
     codexPluginAutoRefresh: true,
     antigravityGlobalRules: false,
+    explain: '',
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
@@ -159,6 +160,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
     if (arg === '--plan') args.plan = true;
+    else if (arg === '--explain') { args.explain = next(); args.plan = true; }
+    else if (arg.startsWith('--explain=')) { args.explain = arg.slice('--explain='.length); args.plan = true; }
     else if (arg === '--execute') args.execute = true;
     else if (arg === '--json') args.json = true;
     else if (arg === '--auto-main') args.autoMain = true;
@@ -560,6 +563,7 @@ function printHelp() {
     '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
+    '  --explain <ref>              print the full text of one setup question, for example --explain 1.5',
     '  --claude-settings enable|disable|keep',
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
@@ -2020,11 +2024,13 @@ function plannedQuestionBank(args, current) {
   };
 }
 
-function renderQuestionRows(specs) {
+// The full text of each question; `onlyRef` limits it to one question, numbered as in the whole bank.
+function renderQuestionRows(specs, onlyRef = '') {
   specs = ensurePresentationMetadata(specs);
   const lines = [];
   let section = '';
   for (const spec of specs) {
+    if (onlyRef && spec.presentation.question_ref !== onlyRef) continue;
     if (spec.section !== section) {
       if (lines.length) lines.push('');
       section = spec.section;
@@ -2057,12 +2063,51 @@ function renderQuestionRows(specs) {
   return lines.join('\n').trimEnd();
 }
 
-function renderQuestionBankHeader(specs, markdown = true) {
+// Table cells hold one line: pipes are escaped and line breaks become spaces.
+const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+
+// The bank as one compact table: the question, what is true now, the recommended choice and its
+// effect, and the other choices. The full text of a question is shown only on request.
+function renderCompactQuestionTable(specs, markdown = true) {
+  specs = ensurePresentationMetadata(specs);
+  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}: ${spec.recommended_outcome}`;
+  const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
+  const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
+  const lines = [];
+  let section = '';
+  for (const spec of specs) {
+    if (spec.section !== section) {
+      section = spec.section;
+      const heading = `${spec.presentation.section_index}. ${section}`;
+      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Now | Recommended | Other choices |', '|---|---|---|---|---|');
+      else lines.push('', heading, '='.repeat(heading.length));
+    }
+    if (!markdown) {
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Now: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
+      const rest = others(spec);
+      if (rest.length) lines.push(`  Other choices: ${rest.join('; ')}`);
+      if (spec.selected) lines.push(`  Selected: ${selected(spec)}`);
+      continue;
+    }
+    const rest = others(spec).map(tableCell).join('<br>') || '-';
+    const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
+    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
+  }
+  return lines;
+}
+
+const EXPLAIN_HINT = 'For the full text of a question, say "explain 1.5" (or run setup with --explain 1.5).';
+
+// The bank's heading and reference; the reference documentation also lists a quick index (the bank's
+// own table already shows every question).
+function renderQuestionBankHeader(specs, markdown = true, quickIndex = true) {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
   const heading = `Toolkit setup choices - ${questionCount} questions across ${sectionCount} sections`;
   const bankReference = specs[0]?.presentation.bank_reference || '';
-  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, '', 'Quick index', ''];
+  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, ''];
+  if (!quickIndex) return lines;
+  lines.push('Quick index', '');
   for (const spec of specs) {
     lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
   }
@@ -2266,36 +2311,12 @@ function renderSetupQuestionBankTerminal(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
   const lines = [
     QUESTION_BANK_BEGIN,
-    ...renderQuestionBankHeader(specs, false),
+    ...renderQuestionBankHeader(specs, false, false),
     'Review every visible choice before setup writes anything.',
+    ...renderCompactQuestionTable(specs, false),
+    '',
+    EXPLAIN_HINT,
   ];
-  let section = '';
-  for (const spec of specs) {
-    if (spec.section !== section) {
-      section = spec.section;
-      const heading = `${spec.presentation.section_index}. ${section}`;
-      lines.push('', heading, '='.repeat(heading.length));
-    }
-    lines.push('', `${spec.presentation.question_ref} ${spec.title}`, '', `What this controls: ${spec.whatThisControls}`, '');
-    lines.push(`Current: ${spec.current}`);
-    lines.push('');
-    lines.push(`Verification: ${spec.currentState?.verification || 'unverified'}`);
-    lines.push('');
-    lines.push(`Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
-    lines.push('');
-    lines.push(`Recommended outcome: ${spec.recommended_outcome}`);
-    lines.push('');
-    lines.push(`Why: ${spec.recommendation_reason}`);
-    lines.push('');
-    lines.push('Choices:');
-    for (const choice of spec.choices) lines.push(`  ${choice.presentation_ref}. ${choice.label} - ${choice.consequence}`);
-    if (spec.afterApplying) lines.push('', `After applying: ${spec.afterApplying}`);
-    const selectedValue = spec.selected || spec.empty_input || '';
-    lines.push('');
-    lines.push(`Selected: ${selectedValue
-      ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
-      : '(answer required)'}`);
-  }
   const guideMode = options.answerMode
     || (options.conciseCommands === false ? 'tty-one-at-a-time' : 'tty');
   lines.push('', ...renderAnswerGuide(specs, false, guideMode), '', QUESTION_BANK_COMPLETE, '');
@@ -2306,10 +2327,12 @@ function renderSetupQuestionBank(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
   return [
     QUESTION_BANK_BEGIN,
-    ...renderQuestionBankHeader(specs, true),
+    ...renderQuestionBankHeader(specs, true, false),
     'Review every visible choice before setup writes anything.',
     '',
-    renderQuestionRows(specs),
+    ...renderCompactQuestionTable(specs, true),
+    '',
+    EXPLAIN_HINT,
     '',
     ...renderAnswerGuide(specs, true, options.answerMode || 'non-tty', options),
     QUESTION_BANK_COMPLETE,
@@ -3920,6 +3943,12 @@ async function main(argv = process.argv.slice(2), options = {}) {
     const current = await collectCurrentState(args);
     args.codexRuntime = current.runtime.runtime;
     const planned = plannedQuestionBank(args, current);
+    if (args.explain) {
+      const text = renderQuestionRows(planned.specs, args.explain);
+      if (!text) throw new Error(`No setup question ${args.explain} in this bank.`);
+      console.log(text);
+      return 0;
+    }
     printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);
     return 0;
   }
@@ -3980,6 +4009,7 @@ module.exports = {
   answerSetupQuestionBank,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
+  renderQuestionRows,
   resolveClaudeTopology,
   renderSetupQuestionBankTerminal,
   renderSetupQuestionDocumentation,
