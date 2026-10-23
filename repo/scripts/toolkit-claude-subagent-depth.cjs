@@ -21,6 +21,10 @@ const ONE_LAYER = '1';
 // Record v2 sits in the control root: { schema, entries: { "<canonical settings path>": { settings_path, value, created_env, created_file } } }.
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v2';
 const STATES = Object.freeze({ TOOLKIT: 'toolkit-one-layer', OWNER: 'owner-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
+// Two setup runs at once could each read the record and lose the other's entry, so apply holds a
+// lock file beside the record. A lock older than this is left over from a run that died.
+const LOCK_STALE_MS = 60 * 1000;
+const LOCK_WAIT_MS = 5 * 1000;
 
 // Pure helpers over the record's entries; the class decides when they are written.
 function entryOf(entries, key) { return Object.hasOwn(entries, key) ? entries[key] : undefined; }
@@ -31,9 +35,10 @@ function withoutEntry(entries, key) {
 }
 
 class ClaudeSubagentDepthSetting {
-  #settingsPath; #recordPath; #settingsWriter;
+  #settingsPath; #recordPath; #settingsWriter; #lockWaitMs;
 
-  constructor({ environment = process.env, controlRoot, settingsWriteOptions } = {}) {
+  constructor({ environment = process.env, controlRoot, settingsWriteOptions, lockWaitMs = LOCK_WAIT_MS } = {}) {
+    this.#lockWaitMs = lockWaitMs;
     const configDir = environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
     const root = controlRoot || environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control');
     this.#settingsPath = path.resolve(configDir, 'settings.json');
@@ -117,6 +122,31 @@ class ClaudeSubagentDepthSetting {
   // it, and kept while Toolkit still owns the value.
   apply(choice) {
     if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported Claude subagent depth choice: ${choice}`);
+    return this.#withRecordLock(() => this.#applyLocked(choice));
+  }
+
+  // Runs work while holding the record's lock file, created exclusively. Waits briefly for another run,
+  // takes over a stale lock, and otherwise fails with a plain reason, changing nothing.
+  #withRecordLock(work) {
+    const lock = `${this.#recordPath}.lock`;
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    const deadline = Date.now() + this.#lockWaitMs;
+    for (;;) {
+      try { fs.writeFileSync(lock, `${process.pid}\n`, { flag: 'wx' }); break; }
+      catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        let age = 0;
+        try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
+        if (age > LOCK_STALE_MS) { fs.rmSync(lock, { force: true }); continue; }
+        if (Date.now() >= deadline) throw new Error('Another Toolkit setup run is changing the Claude Code depth setting; wait for it to finish, then run setup again.');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      }
+    }
+    try { return work(); }
+    finally { fs.rmSync(lock, { force: true }); }
+  }
+
+  #applyLocked(choice) {
     const read = this.#readSettings();
     const key = canonicalPath(this.#settingsPath);
     const record = this.#readRecord();
@@ -176,4 +206,4 @@ class ClaudeSubagentDepthSetting {
   }
 }
 
-module.exports = Object.freeze({ ClaudeSubagentDepthSetting, SETTING, ONE_LAYER, STATES });
+module.exports = Object.freeze({ ClaudeSubagentDepthSetting, SETTING, ONE_LAYER, STATES, LOCK_STALE_MS });

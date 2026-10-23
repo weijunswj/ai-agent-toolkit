@@ -4,7 +4,8 @@
   "identity_contract": {
     "id": "toolkit.repository-identity.v1",
     "remote_contract": "toolkit.control-plane.remote-identity.v1",
-    "key": "sha256(canonicalSerialize(identity_contract, remote_contract, canonical_remote))",
+    "key": "sha256(canonicalSerialize(identity_contract, remote_contract, normalized_remote)); normalized_remote is https://<host><path> with scheme, user, port, a trailing slash and a trailing .git dropped, and github.com paths lowercased",
+    "legacy_keys": "the same digest over the earlier canonical_remote forms is read when the normalized key has no entry and those keys agree; new decisions are written under the normalized key",
     "persisted_fields": ["repository_id"],
     "forbidden_identity_inputs": ["local_path", "worktree_path", "raw_remote", "remote_userinfo"]
   },

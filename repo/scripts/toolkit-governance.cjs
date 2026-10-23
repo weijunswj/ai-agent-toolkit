@@ -11,6 +11,8 @@
 //   reopen      changes nothing: says what was decided and which command changes it
 //   check       read-only conformance report; exit 0 conformant, 1 drift or pending, 2 error
 //   catalogue   the skills offered in this repository's state
+//   migrate     one pass over the repositories in --root folders (default: this folder): one
+//               list, one typed yes, then an offer to add missing no-force-push rulesets
 //
 // `--json` prints the machine-readable result instead. `check --offline` skips the one network
 // read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable` and `decline` write, only
@@ -19,6 +21,7 @@
 // decision. Enabling records consent only: the governed block and the programme binding still
 // arrive in the repository through a pull request you approve.
 
+const path = require('node:path');
 const readline = require('node:readline');
 
 const registry = require('./toolkit-capability-registry.cjs');
@@ -26,17 +29,22 @@ const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
+const { GovernanceMigration, MigrationError } = require('./toolkit-governance-migration.cjs');
+
+const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
-const COMMANDS = Object.freeze(['status', 'enable', 'decline', 'reopen', 'check', 'catalogue']);
-const USAGE = `Usage: toolkit governance <${COMMANDS.join('|')}> [--json] [--offline]\n`;
+const COMMANDS = Object.freeze(['status', 'enable', 'decline', 'reopen', 'check', 'catalogue', 'migrate']);
+const USAGE = `Usage: ${governance.governanceCommand('<status|enable|decline|reopen|catalogue> [--json]')}\n`
+  + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
+  + `       ${governance.governanceCommand('migrate [--root <folder>]...')}\n`;
 
 const RULES_TEXT = Object.freeze({
   ENABLED: 'Global rules plus the Toolkit governed rules (gates, records and evidence custody).',
   ENABLED_INCOMPLETE: 'Global rules, coding gates, subagents and portable skills. The governed rules start once the governed block and the programme binding are both in the repository.',
   DECLINED: 'Global rules only. A governed block in AGENTS.md is not followed.',
   PORTABLE: 'Global rules only.',
-  UNKNOWN: 'Nothing yet: decide with `toolkit governance enable` or `toolkit governance decline`.',
+  UNKNOWN: `Nothing yet: decide with ${CMD('enable')} or ${CMD('decline')}.`,
 });
 
 class GovernanceCliError extends Error {
@@ -48,12 +56,12 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
-  // terminal. `registryOptions` ({ registryPath, testOnly: true }) and `rulesetReader` are only
-  // for tests.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null } = {}) {
+  // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader` and
+  // `rulesetCreator` are only for tests.
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -61,6 +69,7 @@ class ToolkitGovernanceCli {
     this.#cwd = cwd;
     this.#registryOptions = registryOptions;
     this.#rulesetReader = rulesetReader;
+    this.#rulesetCreator = rulesetCreator;
   }
 
   async main(argv) {
@@ -69,18 +78,31 @@ class ToolkitGovernanceCli {
     const offline = args.includes('--offline');
     const rest = args.filter(arg => arg !== '--json' && arg !== '--offline');
     const command = rest[0];
-    if (!COMMANDS.includes(command) || rest.length !== 1 || (offline && command !== 'check')) {
+    const roots = [];
+    if (command === 'migrate') {
+      for (let index = 1; index < rest.length; index += 2) {
+        if (rest[index] !== '--root' || !rest[index + 1]) { this.#stderr.write(USAGE); return 2; }
+        roots.push(path.resolve(this.#cwd, rest[index + 1]));
+      }
+    }
+    if (!COMMANDS.includes(command) || (command !== 'migrate' && rest.length !== 1) || (offline && command !== 'check') || (json && command === 'migrate')) {
       this.#stderr.write(USAGE);
       return 2;
     }
     try {
+      if (command === 'migrate') {
+        return await new GovernanceMigration({
+          stdout: this.#stdout, ask: this.#ask, interactive: this.#interactive, registryOptions: this.#registryOptions,
+          rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator,
+        }).run(roots.length ? roots : [this.#cwd]);
+      }
       if (command === 'status') return this.#status(json);
       if (command === 'check') return this.#check(json, offline);
       if (command === 'catalogue') return this.#catalogue(json);
       if (command === 'reopen') return this.#reopen(json);
       return await this.#decide(command, json);
     } catch (error) {
-      if (error instanceof GovernanceCliError) {
+      if (error instanceof GovernanceCliError || error instanceof MigrationError) {
         this.#stderr.write(`${error.message}\n`);
         return error.exitCode;
       }
@@ -119,7 +141,7 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     const skills = catalogue.catalogueForState(state);
     const lines = [`Skills offered in this repository (${label(state)}):`];
-    if (skills.length === 0) lines.push('- none until you decide with `toolkit governance enable` or `toolkit governance decline`');
+    if (skills.length === 0) lines.push(`- none until you decide with ${CMD('enable')} or ${CMD('decline')}`);
     for (const entry of skills) lines.push(`- ${entry.skill}${entry.tier === 'governed' ? ' (governed)' : ''}`);
     this.#print(json, { state: state.state, materials_complete: state.materials_complete, skills }, lines);
     return 0;
@@ -129,10 +151,10 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
     const lines = state.state === 'DECLINED'
-      ? ['Nothing changed. You declined Toolkit governance for this repository, so Toolkit does not ask about it.', 'To turn it on, run `toolkit governance enable`. To keep it off, do nothing.']
+      ? ['Nothing changed. You declined Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
       : [`Nothing changed. This repository is ${label(state)}, so there is no declined decision to reopen.`, state.state === 'ENABLED'
-        ? 'To turn governance off, run `toolkit governance decline`.'
-        : 'To decide, run `toolkit governance enable` or `toolkit governance decline`.'];
+        ? `To turn governance off, run ${CMD('decline')}.`
+        : `To decide, run ${CMD('enable')} or ${CMD('decline')}.`];
     this.#print(json, { state: state.state, writes: 0 }, lines);
     return 0;
   }
@@ -159,7 +181,7 @@ class ToolkitGovernanceCli {
     }
     const question = command === 'enable'
       ? `Turn on Toolkit governance for ${before.root}?\nToolkit's governed rules apply once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nType yes to confirm: `
-      : `Decline Toolkit governance for ${before.root}?\nOnly the global rules will apply here, and Toolkit will not ask again unless you run \`toolkit governance enable\`.\nType yes to confirm: `;
+      : `Decline Toolkit governance for ${before.root}?\nOnly the global rules will apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
     const answer = String(await this.#ask(question) || '').trim().toLowerCase();
     if (answer !== 'yes') {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
@@ -171,7 +193,7 @@ class ToolkitGovernanceCli {
     try {
       after = gate.writeGovernanceDecision(this.#cwd, command, { registryOptions: this.#registryOptions }).state;
     } catch (error) {
-      throw new GovernanceCliError(`Your decision could not be recorded and read back (${error && error.code ? error.code : 'UNEXPECTED'}). Run \`toolkit governance check\`.`);
+      throw new GovernanceCliError(`Your decision could not be recorded and read back (${error && error.code ? error.code : 'UNEXPECTED'}). Run ${CMD('check')}.`);
     }
     this.#print(json, after, [`Recorded. ${describe(after).join('\n')}`]);
     return 0;

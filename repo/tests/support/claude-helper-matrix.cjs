@@ -171,7 +171,7 @@ const HOOK_CASES = [
 // How every other row is proved. Hook rows above are listed by the test, not here.
 const OTHER_ROWS = Object.freeze({
   A9: { proof: 'config', note: 'The Agent|Task hook is registered with onFailure "block", so Claude Code blocks the launch when the hook times out or fails (hooks docs).' },
-  A10: { proof: 'waits', on: 'install check status work after the lane split', note: 'Install check and SessionStart say "not enforced" when the plugin is disabled or uninstalled.' },
+  A10: { proof: 'other-test', file: 'repo/tests/toolkit-install-health.test.cjs', note: 'Setup\'s install check reports a missing, disabled or stale plugin as action required and says its hooks are not enforced. A disabled plugin runs no SessionStart hook, so only setup can report it.' },
   A16: { proof: 'live', note: 'No helper requested: no Agent call and no hook decision in the run record.' },
   A19: { proof: 'other-host', note: 'Codex managed-block repositories.' },
   A20: { proof: 'other-host', note: 'Codex Windows launcher exit codes.' },
