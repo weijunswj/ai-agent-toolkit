@@ -23,7 +23,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.9.0';
+const BRIDGE_VERSION = '3.9.1';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -1601,18 +1601,23 @@ function isDirtyWorkingTreeWarning(warning) {
   return /dirty working tree/i.test(String(warning || ''));
 }
 
-function dirtyWorkingTreeSuggestion(warning) {
-  return isDirtyWorkingTreeWarning(warning)
-    ? 'finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates'
-    : '';
+// A dirty source checkout blocks every later update too, so say where it is and that nothing
+// retries past it, instead of promising a retry that cannot succeed.
+function dirtyWorkingTreeSuggestion(warning, repoPath = '') {
+  if (!isDirtyWorkingTreeWarning(warning)) return '';
+  const where = repoPath ? ` (${inlineCode(repoPath)})` : '';
+  return `the configured Toolkit source checkout${where} has uncommitted changes, so startup updates stay skipped until it is clean: commit or stash them there, or run \`setup toolkit\` to use a dedicated clean \`main\` checkout`;
 }
 
-function warningSuggestion(warning) {
-  return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning);
+function warningSuggestion(warning, repoPath = '') {
+  return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning, repoPath);
 }
 
 function actionTldr({ repo, nativePluginCache, installCheck, warning, state }) {
   if (installCheck?.status === 'action-required') return 'see Install check below';
+  // A dirty source outranks a stale plugin cache: the cache refresh cannot pick up an update the
+  // skipped source never received.
+  if (isDirtyWorkingTreeWarning(warning)) return dirtyWorkingTreeSuggestion(warning, state.repo_path);
   if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
       return 'Codex auto-refresh is enabled and will retry on the next hook run';
@@ -1622,7 +1627,7 @@ function actionTldr({ repo, nativePluginCache, installCheck, warning, state }) {
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check the hub sync from the updated checkout';
-  const suggestion = warningSuggestion(warning);
+  const suggestion = warningSuggestion(warning, state.repo_path);
   if (suggestion) return suggestion;
   if (warning) return `check: ${warning}`;
   return 'none';
@@ -1640,7 +1645,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const installCheck = context.installCheck || null;
   const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
-  const suggestion = warningSuggestion(warning);
+  const suggestion = warningSuggestion(warning, state.repo_path);
   const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
   const previousCommit = repo.externalAdvanceFromCommit || repo.fromCommit || 'none';
   const validationStatus = repo.validationStatus || repo.validation?.status || 'not run';

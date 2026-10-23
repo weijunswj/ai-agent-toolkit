@@ -37,11 +37,11 @@ function setup({ initialiseParent = true } = {}) {
   github.addIssue(421, { body: '## CURRENT\n' });
   for (const outcome of CATALOGUE) github.addIssue(outcome.issue, { body: `Body of ${outcome.issue}` });
   let clock = 0;
-  const store = new state.StateStore({ transport: github, store: binding.store, now: () => `T${clock += 1}`, toolkitVersion: '3.9.0' });
+  const store = new state.StateStore({ transport: github, store: binding.store, now: () => `T${clock += 1}`, toolkitVersion: '3.9.1' });
   if (initialiseParent) store.write('parent', 421, state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes: CATALOGUE }), controller, {}), { sha: null, previous: null });
   const reconciler = (who = controller) => new state.Reconciler({
     store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
-    mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer: who, toolkitVersion: '3.9.0',
+    mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer: who, toolkitVersion: '3.9.1',
   });
   const parentDoc = () => store.read('parent', 421).doc;
   const claimAsBuilder = () => store.mutate('child', 423, { writer: builder, authorise: false, create: () => state.newChild({ repository, outcome: CATALOGUE[0] }), change: doc => state.claimDocument(doc, builder, { role: 'G1' }) });
@@ -197,7 +197,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
             let error = null;
             const argv = [...args, '--session', role.session, ...(flagged && isWrite ? ['--controller'] : []), ...(json ? ['--json'] : [])];
             const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
-              toolkitVersion: '3.9.0', environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write: text => { output += text; } } };
+              toolkitVersion: '3.9.1', environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write: text => { output += text; } } };
             try { cli.main(argv, deps); } catch (caught) { error = caught; output += `${caught.code}: ${caught.message}`; }
             const label = `${scenario.name} / ${role.session} / ${argv.join(' ')}`;
             cases += 1;
@@ -235,7 +235,7 @@ test('a stopped controller is told to stop and report, never to take the parent 
   });
   const messages = [];
   try { reconciler(controller).run({ apply: true }); } catch (error) { messages.push(error.message); }
-  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.0', stdout: { write() {} } };
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.1', stdout: { write() {} } };
   for (const args of [['claim', '--parent'], ['reconcile', '--apply'], ['update-parent', '--patch', __filename]]) {
     try { cli.main([...args, '--session', controller.session, '--controller'], deps); } catch (error) { messages.push(error.message); }
   }
@@ -252,7 +252,7 @@ test('the controller can reopen an accepted gate for a correction, and acceptanc
   const run = args => {
     let output = '';
     cli.main([...args, '--session', controller.session, '--controller', '--json'], { transport: github, binding, originUrl: 'https://github.com/acme/app.git',
-      repoRoot: __dirname, toolkitVersion: '3.9.0', stdout: { write: text => { output += text; } } });
+      repoRoot: __dirname, toolkitVersion: '3.9.1', stdout: { write: text => { output += text; } } });
     return JSON.parse(output);
   };
   const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-reopen-'));
@@ -302,7 +302,7 @@ test('the close list shows evidence at an older head as STALE_HEAD', () => {
 test('sessions come from --session only, every --issue is 1 or more, and a dry run after an interrupted pass asks the controller to apply', () => {
   const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
   const { github, store, binding, reconciler } = setup();
-  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.0',
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.1',
     environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write() {} } };
   assert.throws(() => cli.main(['reconcile', '--apply', '--controller'], deps), { code: 'WRITER_UNKNOWN' }, 'an inherited session never writes');
   assert.throws(() => cli.parseArgs(['reconcile', '--apply', '--controller', '--session', '']), { code: 'USAGE' });

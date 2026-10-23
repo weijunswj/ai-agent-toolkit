@@ -177,12 +177,12 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
     assert.match(freeText[0], /&lt;!&lt;!---- injected --!&gt;/);
     assert.match(freeText[0], /step \\\\\\\| with pipe and newline/, 'backslash and pipe are both escaped');
   }
-  assert.equal(state.findStateBlock(state.renderBlock(childBody, '3.9.0')).error, undefined, 'free text cannot close the block early');
-  const rendered = state.renderBlock(childBody, '3.9.0');
+  assert.equal(state.findStateBlock(state.renderBlock(childBody, '3.9.1')).error, undefined, 'free text cannot close the block early');
+  const rendered = state.renderBlock(childBody, '3.9.1');
   const { blocks, errors } = managedBlock.findBlocks(rendered);
   assert.deepEqual(errors, []);
   assert.equal(blocks.length, 1);
-  assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.0', body: childBody }), 'current');
+  assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
 test('parent rows sort by class, then order and issue, including nested children and the parentless tail', () => {
@@ -212,18 +212,18 @@ test('a state block is replaced without touching the bytes around it', () => {
   const before = 'Intro line\r\nwith CRLF\r\n\r\n';
   const after = '\r\n\r\n## Notes\r\nkept as is\r\n';
   const original = `${before}${state.renderBlock('old body', '3.8.0').split('\n').join('\r\n')}${after}`;
-  const { body } = state.upsertStateBlock(original, state.renderBlock('new body', '3.9.0'));
+  const { body } = state.upsertStateBlock(original, state.renderBlock('new body', '3.9.1'));
   const found = state.findStateBlock(body).block;
   assert.equal(body.slice(0, found.start), before);
   assert.equal(body.slice(found.end), after);
   assert.equal(found.body, 'new body');
   assert.equal(found.tampered, false);
-  const inserted = state.upsertStateBlock('Hand text', state.renderBlock('x', '3.9.0')).body;
+  const inserted = state.upsertStateBlock('Hand text', state.renderBlock('x', '3.9.1')).body;
   assert.ok(inserted.endsWith('\n\nHand text'));
-  const twice = `${state.renderBlock('a', '3.9.0')}\n${state.renderBlock('b', '3.9.0')}`;
+  const twice = `${state.renderBlock('a', '3.9.1')}\n${state.renderBlock('b', '3.9.1')}`;
   assert.match(state.findStateBlock(twice).error, /duplicate/);
-  assert.throws(() => state.upsertStateBlock(twice, state.renderBlock('c', '3.9.0')), { code: 'MANAGED_BLOCK_BROKEN' });
-  const edited = state.renderBlock('original', '3.9.0').replace('\noriginal\n', '\nedited\n');
+  assert.throws(() => state.upsertStateBlock(twice, state.renderBlock('c', '3.9.1')), { code: 'MANAGED_BLOCK_BROKEN' });
+  const edited = state.renderBlock('original', '3.9.1').replace('\noriginal\n', '\nedited\n');
   assert.equal(state.findStateBlock(edited).block.tampered, true);
 });
 

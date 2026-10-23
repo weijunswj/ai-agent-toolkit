@@ -11,9 +11,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { HostJsonConfigWrite } = require('./host-json-config-write.cjs');
 const { canonicalPath } = require('./toolkit-canonical-path.cjs');
 
 const SETTING = 'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH';
+// https://code.claude.com/docs/en/sub-agents#let-subagents-spawn-their-own-subagents
+// (2026-10-23) documents 1 as disabling nested subagents.
 const ONE_LAYER = '1';
 // Record v2 sits in the control root: { schema, entries: { "<canonical settings path>": { settings_path, value, created_env, created_file } } }.
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-subagent-depth.v2';
@@ -28,12 +31,13 @@ function withoutEntry(entries, key) {
 }
 
 class ClaudeSubagentDepthSetting {
-  #settingsPath; #recordPath;
+  #settingsPath; #recordPath; #settingsWriter;
 
-  constructor({ environment = process.env, controlRoot } = {}) {
+  constructor({ environment = process.env, controlRoot, settingsWriteOptions } = {}) {
     const configDir = environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
     const root = controlRoot || environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control');
     this.#settingsPath = path.resolve(configDir, 'settings.json');
+    this.#settingsWriter = new HostJsonConfigWrite(this.#settingsPath, path.join(path.resolve(root), 'backups', 'claude-settings'), settingsWriteOptions);
     this.#recordPath = path.join(path.resolve(root), 'claude-subagent-depth.json');
   }
 
@@ -90,10 +94,10 @@ class ClaudeSubagentDepthSetting {
   #writeSettings(read, settings) {
     const current = fs.existsSync(this.#settingsPath) ? fs.readFileSync(this.#settingsPath, 'utf8') : null;
     if (current !== read.text) throw new Error('The Claude Code user settings file changed while setup was running; run setup again.');
-    if (settings === null) { fs.rmSync(this.#settingsPath, { force: true }); return; }
+    if (settings === null) { this.#settingsWriter.run(read.text, null); return; }
     const indent = read.text?.match(/^\{\r?\n(\s+)"/)?.[1] || 2;
     fs.mkdirSync(path.dirname(this.#settingsPath), { recursive: true });
-    this.#atomicWrite(this.#settingsPath, `${JSON.stringify(settings, null, indent)}\n`);
+    this.#settingsWriter.run(read.text, `${JSON.stringify(settings, null, indent)}\n`);
   }
 
   #stateOf(read, entry) {

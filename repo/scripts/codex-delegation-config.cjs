@@ -4,8 +4,6 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const readline = require('node:readline');
-const { spawn, spawnSync } = require('node:child_process');
 const {
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
@@ -45,10 +43,13 @@ const {
   assertSnapshotCurrent,
   createCodexConfigBackup,
   restoreCodexDelegationBackup,
+  rollbackCodexDelegationBackup,
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '3.9.0';
+const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+
+const { appServerCandidates, runAppServerRequest } = require('./codex-app-server.cjs');
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -252,6 +253,7 @@ function approvalFailureResult(runtime, configPath, status, technicalDetail) {
 function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const helperCount = options.helperCount ?? CODEX_V2_RAM_SAFE_HELPERS;
+  if (runtime === RUNTIMES.V1) assertV1HelperCount(helperCount);
   let snapshot;
   try {
     snapshot = captureCodexConfigSnapshot(configPath);
@@ -319,7 +321,7 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     preserve_compatible_user_values: preserveUserValues,
     proposal_digest: approvalBinding.proposal_digest,
     approval_binding: approvalBinding,
-    requires_user_confirmation: Boolean(repairIdentity || state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
+    requires_user_confirmation: Boolean(state.status === 'repair-required' || repairIdentity || state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
       : `The proposal allows ${helperCount} direct helper(s) and keeps nested helper spawning blocked at depth 1.`,
@@ -363,21 +365,6 @@ function previewCodexDelegationRemoval(configPath = codexConfigPath(), options =
   };
 }
 
-function codexCommandParts(command, args) {
-  if (/\.(?:cjs|mjs|js)$/i.test(command)) return { command: process.execPath, args: [command, ...args] };
-  return { command, args };
-}
-
-function appServerCandidates(explicit = '', codexHome = '') {
-  return [...new Set([
-    explicit,
-    process.env.CODEX_TOOLKIT_CODEX_CLI,
-    process.env.CODEX_CLI_PATH,
-    codexHome ? path.join(codexHome, 'plugins', '.plugin-appserver', process.platform === 'win32' ? 'codex.exe' : 'codex') : '',
-    'codex',
-  ].filter(Boolean))];
-}
-
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -401,83 +388,6 @@ async function cleanupTemporaryEditorDirectory(root, options = {}) {
   error.cleanupPath = root;
   error.cause = lastError;
   throw error;
-}
-
-function terminateChildTree(child) {
-  if (!child.pid) return;
-  if (process.platform === 'win32') {
-    // By full path: Windows looks for a bare program name in the working folder first.
-    const taskkill = path.win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
-    spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], {
-      windowsHide: true,
-      timeout: 10000,
-      stdio: 'ignore',
-    });
-  } else if (!child.killed) {
-    child.kill('SIGTERM');
-  }
-}
-
-// One bounded process and its protocol/shutdown state belong to one request.
-// The constructor captures the existing command/config; it starts no process.
-class AppServerRequest {
-  #command; #codexHome; #request; #options;
-  #child; #reader; #stderr=''; #response; #settled=false;
-  #requestTimer=null; #shutdownTimer=null; #forceTimer=null; #pendingError=null;
-  #resolve; #reject;
-  constructor(command,codexHome,request,options={}) {
-    this.#command=command;this.#codexHome=codexHome;this.#request=request;this.#options=options;
-  }
-  run() {
-    return new Promise((resolve,reject)=>{
-      this.#resolve=resolve;this.#reject=reject;
-      const parts=codexCommandParts(this.#command,['app-server','--listen','stdio://']);
-      this.#child=spawn(parts.command,parts.args,{
-        env:{...process.env,CODEX_HOME:this.#codexHome},cwd:this.#options.cwd,
-        stdio:['pipe','pipe','pipe'],windowsHide:true});
-      this.#reader=readline.createInterface({input:this.#child.stdout});
-      this.#requestTimer=setTimeout(()=>this.#shutdown(new Error(`${this.#command} app-server ${this.#request.method} timed out`)),this.#options.timeoutMs||15000);
-      this.#child.stderr.on('data',chunk=>{this.#stderr+=chunk;});
-      this.#child.on('error',error=>this.#settle(error));
-      this.#child.on('close',code=>{
-        if(this.#pendingError)this.#settle(this.#pendingError);
-        else if(this.#response!==undefined)this.#settle();
-        else this.#settle(new Error(`${this.#command} app-server exited ${code}: ${this.#stderr.trim()}`));
-      });
-      this.#reader.on('line',line=>this.#receive(line));
-      this.#child.stdin.write(JSON.stringify({method:'initialize',id:1,params:{
-        clientInfo:{name:'ai_agent_toolkit',title:'AI Agent Toolkit',version:TOOLKIT_CLIENT_VERSION},
-        capabilities:{experimentalApi:true}}})+'\n');
-    });
-  }
-  #settle(error) {
-    if(this.#settled)return;this.#settled=true;
-    clearTimeout(this.#requestTimer);if(this.#shutdownTimer)clearTimeout(this.#shutdownTimer);
-    if(this.#forceTimer)clearTimeout(this.#forceTimer);this.#reader.close();
-    if(error)this.#reject(error);else this.#resolve(this.#response);
-  }
-  #shutdown(error=null) {
-    if(this.#shutdownTimer||this.#forceTimer||this.#settled)return;
-    this.#pendingError=error;try{this.#child.stdin.end();}catch{}
-    this.#shutdownTimer=setTimeout(()=>{
-      terminateChildTree(this.#child);
-      this.#forceTimer=setTimeout(()=>this.#settle(this.#pendingError||new Error(`${this.#command} app-server did not exit after bounded process-tree termination`)),this.#options.forceExitTimeoutMs||2000);
-    },this.#options.closeTimeoutMs||2000);
-  }
-  #receive(line) {
-    let message;try{message=JSON.parse(line);}catch{return;}
-    if(message.id===1){
-      if(message.error){this.#shutdown(new Error(`app-server initialize failed: ${message.error.message||JSON.stringify(message.error)}`));return;}
-      this.#child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');
-      this.#child.stdin.write(JSON.stringify({...this.#request,id:2})+'\n');
-    }else if(message.id===2){
-      if(message.error){this.#shutdown(new Error(`${this.#request.method} failed: ${message.error.message||JSON.stringify(message.error)}`));return;}
-      this.#response=message.result;this.#shutdown();
-    }
-  }
-}
-function runAppServerRequest(command,codexHome,request,options={}) {
-  return new AppServerRequest(command,codexHome,request,options).run();
 }
 
 async function inspectCodexMultiAgentRuntime(options = {}) {
@@ -518,6 +428,17 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
       failures.push(`${command}: ${cleanError(error)}`);
     }
   }
+  // A historical Toolkit zero cap can prevent app-server startup before feature
+  // detection. Probe a repaired COPY only, never infer the runtime from the block
+  // or rewrite the active home. The normal approved proposal still owns repair.
+  if (!options.repairProbe && failures.some((failure) => failure.includes('agents.max_concurrent_threads_per_session must be at least 1'))) {
+    const configPath = path.join(codexHome, 'config.toml');
+    const broken = inspectCodexDelegationConfig(configPath, RUNTIMES.V1);
+    if (broken.status === 'repair-required' && broken.ownership === 'toolkit-managed-v1' && broken.helper_count === 0) {
+      const detected = await new CodexRuntimeRepairProbe(broken, options).run();
+      if (detected) return detected;
+    }
+  }
   return {
     runtime: RUNTIMES.UNKNOWN,
     detector: 'Codex app-server experimentalFeature/list unavailable',
@@ -527,8 +448,35 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
   };
 }
 
+class CodexRuntimeRepairProbe {
+  #broken; #options;
+  constructor(broken, options) { this.#broken = broken; this.#options = options; }
+  async run() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-repair-probe-'));
+    try {
+      const repaired = removeManagedBlockBytes(this.#broken);
+      fs.writeFileSync(path.join(root, 'config.toml'), repaired, { mode: 0o600 });
+      const detected = await inspectCodexMultiAgentRuntime({ ...this.#options, codexHome: root, repairProbe: true });
+      if (detected.runtime !== RUNTIMES.V1) return null;
+      return {
+        ...detected,
+        detector: `${detected.detector}; isolated repair probe`,
+        detail: 'The active config.toml has a Toolkit-owned zero helper cap that Codex refuses. V1 was detected using a repaired temporary copy. Setup must propose and approve the active-file repair.',
+      };
+    } finally { await cleanupTemporaryEditorDirectory(root); }
+  }
+}
+
+function assertV1HelperCount(helperCount) {
+  // https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23):
+  // max_threads aliases the spawned-helper cap, excluding the primary thread.
+  // Codex CLI 0.164.0 validates: agents.max_concurrent_threads_per_session must be at least 1.
+  if (!Number.isSafeInteger(helperCount) || helperCount < 1) throw new Error('Codex cannot limit helpers to zero; choose one helper or a custom number of at least 1. Setup wrote nothing.');
+}
+
 function configEdits(runtime, helperCount) {
   if (runtime === RUNTIMES.V2) {
+    // Preserve the existing V2 helpersToTotalThreads formula; these V1 sources do not confirm V2 semantics.
     return [
       { keyPath: 'features.multi_agent_v2.enabled', value: true, mergeStrategy: 'upsert' },
       { keyPath: 'features.multi_agent_v2.max_concurrent_threads_per_session', value: helpersToTotalThreads(helperCount), mergeStrategy: 'upsert' },
@@ -537,6 +485,7 @@ function configEdits(runtime, helperCount) {
     ];
   }
   if (runtime === RUNTIMES.V1) {
+    assertV1HelperCount(helperCount);
     return [
       { keyPath: 'agents.max_threads', value: helperCount, mergeStrategy: 'upsert' },
       { keyPath: 'agents.max_depth', value: CODEX_AGENT_MAX_DEPTH, mergeStrategy: 'upsert' },
@@ -789,7 +738,7 @@ function initialStateFromSnapshot(snapshot, configPath, runtime) {
 }
 
 function concurrentEditResult(current, error) {
-  return { ...current, status: 'conflicting', changed: false, detail: `Codex helper capacity was not written because the target changed concurrently: ${cleanError(error)}` };
+  return { ...current, status: 'conflicting', changed: false, detail: 'config.toml changed on disk after setup read it. Codex or another program may have rewritten it. Setup wrote nothing. Close Codex, then run setup again.' };
 }
 
 function quotePowerShellArgument(value) {
@@ -835,18 +784,21 @@ class CodexConfigCommit {
     const writeResult = writeRegularFileAtomically(configPath, proposedBytes, backup.existed ? backup.original_mode : 0o600, { expectedSnapshot: initialSnapshot, afterReplace: options.afterReplace });
     this.#wrote = writeResult.committed;
     const verified = verify();
+    const loadCheck = new CodexConfigLoadCheck(options.loadCheckOptions || options).verify({ configPath, snapshot: initialSnapshot, backupPath: backup.backup_path, replacementBytes: proposedBytes });
     if (typeof options.afterWrite === 'function') options.afterWrite({ configPath, backup, verified });
     return {
       ...verified,
+      load_check: loadCheck,
+      detail: `${verified.detail || ''} ${loadCheck.detail}`,
       changed: true,
       backup_metadata_path: backup.metadata_path,
       restore_commands: restoreCommands(backup.metadata_path, options.setupScriptPath),
     };
   } catch (error) {
     const replacementCommitted = this.#wrote || error.atomicReplacementCommitted === true;
-    if (!replacementCommitted && /changed while the isolated proposal|changed concurrently/.test(cleanError(error))) return concurrentEditResult(initial, error);
-    if (replacementCommitted) {
-      try { restoreCodexDelegationBackup(backup.metadata_path, { configPath, backupRoot: options.backupRoot }); }
+    if (!replacementCommitted && /changed on disk after setup read it|changed while the isolated proposal|changed concurrently/.test(cleanError(error))) return concurrentEditResult(initial, error);
+    if (replacementCommitted && !error.configRestored && error.code !== 'CODEX_CONFIG_ROLLBACK_FAILED') {
+      try { rollbackCodexDelegationBackup(backup.metadata_path, { configPath, backupRoot: options.backupRoot }); }
       catch (restoreError) {
         const combined = new Error(`Codex helper-capacity configuration failed and exact restoration also failed: ${cleanError(restoreError)}`);
         combined.cause = error;
@@ -865,6 +817,7 @@ function commitProposal(configPath,initialSnapshot,initial,proposedBytes,verify,
 async function configureCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const helperCount = options.helperCount ?? CODEX_V2_RAM_SAFE_HELPERS;
+  if (runtime === RUNTIMES.V1) assertV1HelperCount(helperCount);
   if (!Number.isSafeInteger(helperCount) || helperCount < 0) throw new Error('Helper count must be a non-negative integer.');
   let initialSnapshot;
   const approvedProposal = options.approvedProposal || null;
@@ -893,7 +846,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   }
   if (![RUNTIMES.V2, RUNTIMES.V1].includes(runtime)) return { ...initial, changed: false };
   if (initial.status === 'repair-required' && !approvedProposal) {
-    return { ...initial, status: 'approval-required', changed: false, detail: 'Malformed historical Toolkit marker repair requires an exact technical proposal and explicit `apply` approval.' };
+    return { ...initial, status: 'approval-required', changed: false, detail: 'Repairing the Toolkit-owned config requires an exact technical proposal and explicit `apply` approval.' };
   }
   const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
   const preserveUserValues = initial.repair?.mode === 'markers-only-preserve-user-values'
@@ -905,7 +858,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     const expectedKeys = preserveUserValues ? [] : proposalAffectedKeys(initial, runtime);
     if (approvedProposal.proposal_sha256 !== hashApprovalValue(expectedBlock)
       || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(expectedKeys)
-      || JSON.stringify(approvedProposal.repair_identity || null) !== JSON.stringify(initial.status === 'repair-required' ? initial.repair : null)) {
+      || JSON.stringify(approvedProposal.repair_identity || null) !== JSON.stringify(initial.status === 'repair-required' ? (initial.repair || null) : null)) {
       return approvalFailureResult(runtime, configPath, 'approval-invalid', 'Approved Codex proposal identity does not match the approved snapshot.');
     }
   }
@@ -1103,6 +1056,8 @@ module.exports = {
   previewCodexDelegationRemoval,
   cleanupTemporaryEditorDirectory,
   editWithCodexAppServer,
+  appServerCandidates,
+  runAppServerRequest,
   quotePowerShellArgument,
   canReplaceUserOwnedRuntimeControls,
   restoreCommands,

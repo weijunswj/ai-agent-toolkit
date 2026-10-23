@@ -68,6 +68,7 @@ function createFakeCodexAppServer(root) {
     "rl.on('line', (line) => {",
     "  const message = JSON.parse(line);",
     "  if (message.method === 'initialize') process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');",
+    "  if (message.method === 'config/read') process.stdout.write(JSON.stringify({ id: message.id, result: { config: {} } }) + '\\n');",
     "  if (message.method === 'config/batchWrite') {",
     "    const target = path.join(process.env.CODEX_HOME, 'config.toml');",
     "    const text = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';",
@@ -170,8 +171,8 @@ test('explicitly approved V1 replacement changes only supported legacy controls'
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
 });
 
-test('matching user-owned V1 controls are byte-preserving no-ops for one helper and root-only', async () => {
-  for (const helperCount of [1, 0]) {
+test('matching user-owned V1 controls are byte-preserving no-ops for one helper', async () => {
+  for (const helperCount of [1]) {
     const filePath = configPath();
     const original = `[agents]\n# user owned\nmax_threads = ${helperCount}\nmax_depth = 1\n`;
     writeConfig(filePath, original);

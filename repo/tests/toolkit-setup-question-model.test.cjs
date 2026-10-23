@@ -14,6 +14,7 @@ const expectedCodexRows = [
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
   ['codex-instruction-limit', "Raise Codex's instruction limit"],
+  ['codex-helper-capacity', 'Codex helper capacity'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
 ];
@@ -130,6 +131,10 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   assert.doesNotMatch(markdown, /\*\*What this controls:\*\*/);
   assert.match(markdown, /^\| # \| Question \| Now \| Recommended \| Other choices \|$/m);
   assert.match(terminal, /\n1\.1 [^\n]+\n  Now: [^\n]+\n  Recommended: [A-Z]\. /);
+  // Alternatives read one per line in both forms, never joined with semicolons.
+  assert.match(terminal, /\n  Other choices:\n    [A-Z]\. [^\n]+\n/);
+  assert.doesNotMatch(terminal, /Other choices: .*; /);
+  assert.match(markdown, /\| [A-Z]\. [^|]+<br>[A-Z]\. [^|]+ \|$/m);
   assert.match(generated, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
   const plan = core.setupPlan({ host: 'codex', setupChoices: core.parseArgs(['--plan']).setupChoices, questionBank: rows });
   assert.deepEqual(plan.question_bank, rows);
@@ -176,21 +181,17 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.doesNotMatch(toolkitSetupSkill, /Antigravity native plugin install|Antigravity 2 sync/i);
 });
 
-test('legacy migration stays advanced while ordinary setup and authoritative guidance omit helper capacity', () => {
-  const args = core.parseArgs(['--plan', '--host', 'codex']);
-  const current = stateWithManaged(managedState());
-  current.runtime = { runtime: 'multi-agent-v2' };
-  current.delegation = { status: 'migration-required', helper_count: 1 };
-  const rows = core.setupQuestionSpecs(args, current);
-  assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
-  const rendered = `${core.renderSetupQuestionBank(rows)}\n${core.renderSetupQuestionBankTerminal(rows)}`;
-  assert.doesNotMatch(rendered, /\bmigrate\b|PR #237|helper-agent quantit/i);
-
-  const skill = fs.readFileSync(path.join(repoRoot, 'skills/toolkit-setup/SKILL.md'), 'utf8');
-  assert.doesNotMatch(skill, /exception is a visible `migrate` choice/i);
-  assert.match(skill, /advanced compatibility\/repair operation/i);
-  assert.match(skill, /ordinary setup preserves that state without adding a helper-capacity row/i);
+test('Codex helper question recommends one helper and makes zero unavailable on V1', () => {
+  for (const runtime of ['MultiAgentV1', 'MultiAgentV2']) {
+    const args = core.parseArgs(['--plan', '--host', 'codex']);
+    const current = stateWithManaged(managedState());
+    current.runtime = { runtime };
+    current.delegation = { status: 'unconfigured' };
+    const row = core.setupQuestionSpecs(args, current).find(row => row.id === 'codex-helper-capacity');
+    assert.equal(row.recommended, 'one-helper');
+    assert.equal(row.choices.some(choice => choice.value === 'root-only'), runtime === 'MultiAgentV2');
+    if (runtime === 'MultiAgentV1') assert.match(row.whatThisControls, /Codex cannot limit helpers to zero/);
+  }
 });
 
 test('unknown and unsupported state is honest and never recommends unavailable choices', () => {
@@ -211,7 +212,7 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   assert.equal(rows.some((row) => /opencode/i.test(row.id)), false);
   assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
   assert.equal(rows.some((row) => row.id === 'antigravity-integration'), false);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  assert.equal(args.setupChoices.codexHelperCapacity, '');
   const output = `${core.renderSetupQuestionBank(rows)}\n${JSON.stringify(rows)}`;
   assert.doesNotMatch(output, /Synthetic Private|C:\\|USERPROFILE|CODEX_HOME|GH_TOKEN|GITHUB_TOKEN/);
 });
@@ -300,9 +301,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 6);
+  assert.equal(codex[0].presentation.total_visible_question_count, 7);
   assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '2.2']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
@@ -343,7 +344,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -364,10 +365,10 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
 
-  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.1 = c`, rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = c`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
-  assert.equal(changed.selections.find((selection) => selection.question_ref === '2.1').canonical_value, 'keep');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'keep');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.1').canonical_value, rows[0].recommended);
   core.assertQuestionBankAnswerBinding(changed, rows);
 });
@@ -404,12 +405,12 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
   assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
-    'update-source', 'update-reports', 'report-retention', 'codex-instruction-limit', 'codex-toolkit-maintenance',
+    'update-source', 'update-reports', 'report-retention', 'codex-instruction-limit', 'codex-helper-capacity', 'codex-toolkit-maintenance',
   ]);
   assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
-    'managed-checkout-path', 'report-retention-days',
+    'managed-checkout-path', 'report-retention-days', 'codex-helper-count', 'codex-helper-risk-approval',
   ]);
-  assert.deepEqual(plan.details.map((entry) => entry.order), [1, 2]);
+  assert.deepEqual(plan.details.map((entry) => entry.order), [1, 2, 3, 4]);
   assert.equal(plan.details[0].question_ref, '1.1');
   assert.equal(plan.details[0].activation_choice_ref, rows.find((row) => row.id === 'update-source').choices.find((choice) => choice.value === 'custom').presentation_ref);
   assert.equal(plan.details[1].question_ref, '1.4');
@@ -499,7 +500,7 @@ test('TTY all recommended and changed-only commands execute after exactly one co
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
-  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'keep', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
@@ -508,6 +509,18 @@ test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', 
   assert.equal(journey.args.setupChoices.managedCheckout, 'default');
   assert.equal(journey.args.setupChoices.repoAutoUpdate, 'disable');
   assert.equal(journey.remaining.length, 0);
+});
+
+test('TTY one-at-a-time "all recommended" applies the recommendation to that question and the rest', async () => {
+  const enters = await runInjectedTTY(['', ...Array(20).fill('')]);
+  const rest = await runInjectedTTY(['', 'A', 'disable', 'All Recommended']);
+  assert.equal(rest.remaining.length, 0);
+  assert.match(rest.prompts[1], /1\.1 Update source .*"all recommended" for the rest/);
+  assert.equal(rest.prompts.length, 4, 'no question is asked after "all recommended"');
+  assert.equal(rest.args.setupChoices.repoAutoUpdate, 'disable');
+  for (const [key, value] of Object.entries(enters.args.setupChoices)) {
+    if (key !== 'repoAutoUpdate') assert.equal(rest.args.setupChoices[key], value, key);
+  }
 });
 
 test('TTY malformed concise input can be corrected and secondary details are collected', async () => {
