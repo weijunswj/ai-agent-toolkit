@@ -10,6 +10,10 @@
 - **Host contract:** `repo/docs/HOST-CONTRACT.md` and its JSON twin record what custody needs from Claude Code and Codex: session identity, the turn-end hook rules, completion modes, duplicate-launch and handover checks, and honest limits.
 - **Clearer messages:** next actions addressed to the controller name `--controller`; a write without a session says it needs this session's own ID; an unsupported store kind names the supported one; whitespace-only values are refused.
 
+## Unreleased (claude.ai account copy check)
+
+- **The Claude Code install check reports a stale claude.ai account copy of Toolkit.** The Claude desktop app runs the copy from your claude.ai account, and only claude.ai updates it (from main). Setup and each Claude Code session start now read that copy's version from the app's local plugin folder and, when it is older than the Toolkit on this computer, say so with the fix: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, or remove that marketplace and add it again. Read only: Toolkit never changes the account copy, reports no ids or paths, and the notice blocks nothing.
+
 ## Unreleased (programme page and state read-back)
 
 - **The Programme Graph replaces the hand-kept Programme index.** It sits below the status section (the binding's new `projection`: `replace_section` "Programme index", `after_section` "CURRENT"), and child status blocks move under the title and the current-direction note. A block at the very top moves once.
