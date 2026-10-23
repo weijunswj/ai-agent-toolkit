@@ -8,59 +8,17 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const zlib = require('node:zlib');
 const { pathToFileURL } = require('node:url');
-
-const repoRoot = path.resolve(__dirname, '..', '..');
-const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
-const legacyProjectToken = '_' + 'projects';
-const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const publisherReferencePaths = [];
-const currentSkillIds = [
-  'codex-ssh-hostinger-coolify-setup-maintainer',
-  'controller-bootstrap',
-  'frontend-art-direction',
-  'github-program-reconciler',
-  'local-ai-safety',
-  'managed-app-foundation-review',
-  'n8n-environment-setup',
-  'n8n-safety-router',
-  'n8n-workflow-transport',
-  'release-readiness-audit',
-  'repository-agent-rules',
-  'secure-ci-cd',
-  'self-hosted-service-safety',
-  'skill-product-review',
-  'toolkit-env',
-  'toolkit-setup',
-  'windows-local-dev-services'
-];
-const skillCreationOperationalFreeTextFields = [
-  'existing_skill_review',
-  'native_capability_review',
-  'trigger',
-  'invocation_mode_reason',
-  'decision_reason',
-  'unique_value',
-  'runtime_footprint',
-  'local_assets',
-  'output_contract',
-  'anti_bloat_review',
-  'overlap_boundary',
-  'safety_boundary',
-  'third_party_audit',
-  'canonical_ownership'
-];
-const sharedRetiredOperationVariants = [
-  'Current Toolkit conversions use project modules and published skills.',
-  'Current Toolkit conversions use project modules and generated skills.',
-  'Current Toolkit conversions use a project module and published skills.',
-  'Current Toolkit conversions use project modules and a published skill.',
-  'Published skills for current Toolkit conversions are maintained from project modules.',
-  'Generated skills for this Toolkit are maintained through project modules.'
-];
-
-function readText(relPath, root = repoRoot) {
-  return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-}
+const {
+  repoRoot,
+  validateScript,
+  legacyProjectToken,
+  legacyCuratedToken,
+  publisherReferencePaths,
+  currentSkillIds,
+  skillCreationOperationalFreeTextFields,
+  readText,
+  copyRepo,
+} = require('./validate-toolkit-test-support.cjs');
 
 const ORACLE_SOURCE_PATH = 'repo/tests/toolkit-authority-packet-test-support.cjs';
 const ORACLE_SOURCE_BLOB = '11daf32ac5a6ddf1a2bdab0d2acbf6fdb8ff40da';
@@ -372,16 +330,29 @@ function parseWorkflowScalar(value) {
   return String(value || '').trim().replace(/^'(.*)'$/, '$1');
 }
 
-function parseValidationWorkflowSteps(source) {
+function workflowJobNames(source) {
+  const lines = source.replace(/\r\n/g, '\n').split('\n');
+  const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  if (jobsIndex === -1) return [];
+  const names = [];
+  for (const line of lines.slice(jobsIndex + 1)) {
+    if (/^\S/.test(line)) break;
+    const match = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
+    if (match) names.push(match[1]);
+  }
+  return names;
+}
+
+function parseValidationWorkflowSteps(source, jobName = 'validate') {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
   if (jobsIndex === -1) return { steps: [], errors: ['missing jobs section'] };
-  const jobIndex = lines.findIndex((line, index) => index > jobsIndex && /^  validate:\s*$/.test(line));
-  if (jobIndex === -1) return { steps: [], errors: ['missing validate job'] };
+  const jobIndex = lines.findIndex((line, index) => index > jobsIndex && line.trimEnd() === `  ${jobName}:`);
+  if (jobIndex === -1) return { steps: [], errors: [`missing ${jobName} job`] };
   const nextJobIndex = lines.findIndex((line, index) => index > jobIndex && /^  [A-Za-z0-9_-]+:\s*$/.test(line));
   const jobEnd = nextJobIndex === -1 ? lines.length : nextJobIndex;
   const stepsIndex = lines.findIndex((line, index) => index > jobIndex && index < jobEnd && /^    steps:\s*$/.test(line));
-  if (stepsIndex === -1) return { steps: [], errors: ['missing validate job steps'] };
+  if (stepsIndex === -1) return { steps: [], errors: [`missing ${jobName} job steps`] };
   const stepStartIndexes = [];
   for (let index = stepsIndex + 1; index < jobEnd; index += 1) {
     if (/^      -(?:\s|$)/.test(lines[index])) stepStartIndexes.push(index);
@@ -414,12 +385,21 @@ function parseValidationWorkflowSteps(source) {
   return { steps, errors: [] };
 }
 
+// Every job of the validation workflow (test shards and the validate job) checks out the event's
+// full history before its validation floor.
 function validationWorkflowCheckoutErrors(source) {
-  const parsed = parseValidationWorkflowSteps(source);
+  const names = workflowJobNames(source);
+  if (!names.length) return ['missing jobs section'];
+  if (!names.includes('validate')) return ['missing validate job'];
+  return names.flatMap((name) => jobCheckoutErrors(source, name).map((error) => `${name}: ${error}`));
+}
+
+function jobCheckoutErrors(source, jobName) {
+  const parsed = parseValidationWorkflowSteps(source, jobName);
   if (parsed.errors.length) return parsed.errors;
   const errors = [];
   const checkouts = parsed.steps.filter((step) => /^actions\/checkout@/.test(step.uses));
-  if (checkouts.length !== 1) errors.push('validate job must have exactly one checkout action');
+  if (checkouts.length !== 1) errors.push('job must have exactly one checkout action');
   const checkout = checkouts[0];
   if (!checkout) return errors;
   if (!/^actions\/checkout@[0-9a-f]{40} # v7\.\d+\.\d+$/.test(checkout.uses)) errors.push('checkout must use actions/checkout v7 pinned to a commit SHA');
@@ -430,7 +410,7 @@ function validationWorkflowCheckoutErrors(source) {
   if (checkout.fields['continue-on-error'] === 'true') errors.push('checkout acquisition must not ignore failure');
   const validationIndex = parsed.steps.findIndex((step) => (
     step.source.includes('node repo/scripts/validate-toolkit.cjs') ||
-    step.source.includes('node --test repo/tests/*.test.cjs') ||
+    step.source.includes('node repo/scripts/run-tests.cjs') ||
     step.source.includes('npm run validate:all') ||
     step.source.includes('npm run validate:toolkit')
   ));
@@ -603,87 +583,6 @@ function fixtureBlobHash(context, cwd, bytes) {
   return result.stdout.trim();
 }
 
-function copyRepo() {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
-  fs.cpSync(repoRoot, target, {
-    recursive: true,
-    filter(source) {
-      const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
-      return !(
-        rel === '.git' || rel.startsWith('.git/') ||
-        rel === 'node_modules' || rel.startsWith('node_modules/') ||
-        rel === '.tmp' || rel.startsWith('.tmp/') ||
-        rel === '.n8n-local' || rel.startsWith('.n8n-local/') ||
-        rel === '.n8n-workflow-backups' || rel.startsWith('.n8n-workflow-backups/') ||
-        rel === '_dist' || rel.startsWith('_dist/')
-      );
-    }
-  });
-  return target;
-}
-
-function runValidate(cwd) {
-  return spawnSync(process.execPath, [validateScript], { cwd, encoding: 'utf8' });
-}
-
-function addCurrentSkill(cwd, skillName) {
-  const skillDir = path.join(cwd, 'skills', skillName);
-  fs.mkdirSync(skillDir, { recursive: true });
-  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: ${skillName}\ndescription: Fixture current skill for gate testing.\n---\n\n# Fixture\n`, 'utf8');
-  fs.writeFileSync(path.join(skillDir, 'README.md'), `# ${skillName}\n`, 'utf8');
-}
-
-function insertBefore(filePath, marker, content) {
-  const text = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(text.includes(marker), `${filePath} must contain ${marker}`);
-  fs.writeFileSync(filePath, text.replace(marker, `${content}${marker}`), 'utf8');
-}
-
-function addSkillToCatalogs(cwd, skillName) {
-  insertBefore(
-    path.join(cwd, 'repo', 'contracts', 'agent-rules', 'toolkit-skill-routing.md'),
-    '\n## Routing Maintenance',
-    `| \`${skillName}\` | Fixture route used to prove current-skill gate enforcement. |\n`
-  );
-
-  insertBefore(
-    path.join(cwd, 'README.md'),
-    '\nHow risky each skill is',
-    `| [${skillName}](skills/${skillName}/) | Fixture catalog entry used to prove current-skill gate enforcement. |\n`
-  );
-
-  const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
-  const matrix = fs.readFileSync(matrixPath, 'utf8').replace(/\r\n/g, '\n');
-  const sourceRow = matrix.split('\n').find((line) => line.startsWith('| [managed-app-foundation-review]'));
-  assert.ok(sourceRow, 'skill safety matrix fixture source row');
-  const fixtureRow = sourceRow
-    .replace('[managed-app-foundation-review](../../skills/managed-app-foundation-review/)', `[${skillName}](../../skills/${skillName}/)`)
-    .replace('managed-app-foundation-review', skillName);
-  insertBefore(matrixPath, '\n## Packaging', `${fixtureRow}\n`);
-  insertBefore(matrixPath, '\n## Description Review Notes', `| [${skillName}](../../skills/${skillName}/) | portable | Yes | Yes | Yes |\n`);
-}
-
-function updateBaseline(cwd, mutate) {
-  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
-  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
-  mutate(baseline);
-  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
-}
-
-function updateMigrationLedger(cwd, mutate) {
-  const ledgerPath = path.join(cwd, 'repo', 'contracts', 'skill-product-migration-ledger.json');
-  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
-  mutate(ledger);
-  fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
-}
-
-function updateTopologyPolicy(cwd, mutate) {
-  const policyPath = path.join(cwd, 'repo', 'contracts', 'topology-scope-policy.json');
-  const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
-  mutate(policy);
-  fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
-}
-
 test('direct canonical topology validates without retired project or MCP surfaces', () => {
   const validator = require(validateScript);
   assert.equal(fs.existsSync(path.join(repoRoot, legacyProjectToken)), false);
@@ -750,84 +649,6 @@ test('validation command parser accepts quoted canonical targets and ordinary op
   assert.equal(validator.validationCommandTargetFinding(command), null);
 });
 
-test('validator rejects noncanonical or missing validation targets in copied workspaces', () => {
-  const cases = [
-    ['missing canonical target', 'node --test repo/tests/does-not-exist.test.cjs', /missing current target/],
-    ['Windows backslash target', String.raw`node --test repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/],
-    ['dot-prefixed target', 'node --test ./repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
-    ['repeated separator target', 'node --test repo//tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
-    ['traversal target', 'node --test repo/tests/../tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
-    ['absolute POSIX target', 'node --test /repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
-    ['Windows drive target', String.raw`node --test C:\repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/]
-  ];
-
-  for (const [label, command, expected] of cases) {
-    const cwd = copyRepo();
-    try {
-      updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-program-reconciler'].validation.push(command);
-      });
-      const result = runValidate(cwd);
-      assert.notEqual(result.status, 0, label);
-      assert.match(result.stderr, expected, label);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
-test('validator rejects a cross-class normalized policy alias collision', () => {
-  const cwd = copyRepo();
-  try {
-    updateTopologyPolicy(cwd, (policy) => {
-      policy.standalone_identity_definitions[2].aliases.push('project_module');
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('Skill Creation and published-surface consumers share the retired topology atom detector', () => {
-  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
-  for (const variant of sharedRetiredOperationVariants) {
-    assert.ok(audit.detectRetiredTopologyAtoms(variant).length > 0, variant);
-  }
-
-  for (const variant of sharedRetiredOperationVariants) {
-    const cwd = copyRepo();
-    try {
-      updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-program-reconciler'].existing_skill_review += ` ${variant}`;
-      });
-      const result = runValidate(cwd);
-      assert.notEqual(result.status, 0, variant);
-      assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.existing_skill_review/, variant);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
-test('validator rejects the shared retired operation in every applicable operational free-text field', () => {
-  const injection = 'Current Toolkit conversions use project modules and published skills.';
-  for (const field of skillCreationOperationalFreeTextFields) {
-    const cwd = copyRepo();
-    try {
-      updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-program-reconciler'][field] += ` ${injection}`;
-      });
-      const result = runValidate(cwd);
-      assert.notEqual(result.status, 0, field);
-      assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-program-reconciler\\.${field}`), field);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
 test('Skill Creation retains exactly the fourteen operational free-text fields', () => {
   assert.deepEqual(skillCreationOperationalFreeTextFields, [
     'existing_skill_review',
@@ -848,56 +669,6 @@ test('Skill Creation retains exactly the fourteen operational free-text fields',
   assert.equal(skillCreationOperationalFreeTextFields.length, 14);
 });
 
-test('validator rejects shared retired-operation variants in validation commands', () => {
-  for (const variant of sharedRetiredOperationVariants) {
-    const cwd = copyRepo();
-    try {
-      updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-program-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
-      });
-      const result = runValidate(cwd);
-      assert.notEqual(result.status, 0, variant);
-      assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.validation command/, variant);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
-test('Skill Creation operational evidence does not exempt historical retired-operation wording', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'].overlap_boundary += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.overlap_boundary/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('closed Skill Creation enum fields remain enum-validated', () => {
-  for (const [field, expected] of [
-    ['decision', /decision must be retain_current_product or new_product/],
-    ['source_provenance', /source_provenance is invalid/]
-  ]) {
-    const cwd = copyRepo();
-    try {
-      updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-program-reconciler'][field] = sharedRetiredOperationVariants[0];
-      });
-      const result = runValidate(cwd);
-      assert.notEqual(result.status, 0, field);
-      assert.match(result.stderr, expected, field);
-      assert.doesNotMatch(result.stderr, new RegExp(`skill_creation_review\\.github-program-reconciler\\.${field} .*retired`, 'i'), field);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
 test('validator and surface audit keep the publisher reference allowlist empty', () => {
   const validator = require(validateScript);
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
@@ -914,384 +685,8 @@ test('source locks are discovered only from canonical source-watch provenance', 
   assert.ok(result.locks.every((relPath) => relPath.startsWith('repo/source-watch/provenance/')));
 });
 
-test('validator rejects a legacy project tree in a copied workspace', () => {
-  const cwd = copyRepo();
-  fs.mkdirSync(path.join(cwd, legacyProjectToken), { recursive: true });
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, new RegExp(`Legacy ${legacyProjectToken}/ tree must not exist`));
-});
-
-test('validator rejects retired skills and pack manifests', () => {
-  const cwd = copyRepo();
-  const retiredSkill = path.join(cwd, 'skills', 'knowledge-index-updater');
-  fs.mkdirSync(retiredSkill, { recursive: true });
-  fs.writeFileSync(path.join(retiredSkill, 'SKILL.md'), '---\nname: knowledge-index-updater\ndescription: retired fixture\n---\n', 'utf8');
-  fs.writeFileSync(path.join(retiredSkill, 'README.md'), '# retired\n', 'utf8');
-  const packDir = path.join(cwd, 'skills', 'fixture', 'packs', 'old');
-  fs.mkdirSync(packDir, { recursive: true });
-  fs.writeFileSync(path.join(packDir, 'pack.json'), '{}\n', 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Retired skill surface is present/);
-  assert.match(result.stderr, /Pack manifests are not supported/);
-});
-
-test('validator rejects legacy publisher references in canonical files', () => {
-  const cwd = copyRepo();
-  const target = path.join(cwd, 'repo', 'contracts', 'legacy-reference-fixture.md');
-  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /references the retired project\/publisher topology/);
-});
-
-test('validator rejects legacy publisher references in ordinary canonical skills', () => {
-  const cwd = copyRepo();
-  const target = path.join(cwd, 'skills', 'n8n-environment-setup', 'references', 'legacy-reference-fixture.md');
-  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /references the retired project\/publisher topology/);
-});
-
-test('validator rejects legacy references in a non-allowlisted publisher file', () => {
-  const cwd = copyRepo();
-  const target = path.join(cwd, 'skills', 'skill-product-review', 'references', 'legacy-fixture.md');
-  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /references the retired project\/publisher topology/);
-});
-
-test('validator rejects a deleted sync command in current review validation evidence', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'].validation.push('node repo/scripts/sync-toolkit-projects.cjs --check');
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired-sync-toolkit-projects-command/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects current canonical ownership using a project _main source', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['local-ai-safety'].canonical_ownership += ` Active source: ${legacyProjectToken}/local/_main/SKILL.md.`;
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired-projects-source-root/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects curated deterministic publication claims in current ownership evidence', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['managed-app-foundation-review'].canonical_ownership += ` Current workflow publishes ${legacyCuratedToken} through generated deterministic publication.`;
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired-curated-output-root/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects a retired source-to-surface claim without direct-canonical ownership', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['toolkit-setup'].canonical_ownership = 'context-preserving-ai-publisher source-to-surface publisher workflow for the current skill.';
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /must state direct-canonical maintenance/);
-    assert.match(result.stderr, /retired-source-to-surface/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects a current skill without direct-canonical review evidence', () => {
-  const cwd = copyRepo();
-  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
-  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
-  delete baseline.skill_creation_review['managed-app-foundation-review'];
-  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing skill_creation_review evidence for current skill managed-app-foundation-review/);
-});
-
-test('validator rejects native-creator or manually added current skills without keyed evidence', () => {
-  const cwd = copyRepo();
-  try {
-    addCurrentSkill(cwd, 'fixture-current-skill');
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-current-skill/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator still rejects a catalogued current skill without review evidence', () => {
-  const cwd = copyRepo();
-  try {
-    addCurrentSkill(cwd, 'fixture-catalogued-skill');
-    addSkillToCatalogs(cwd, 'fixture-catalogued-skill');
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-catalogued-skill/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects obsolete grandfathered_skill_ids authority', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.grandfathered_skill_ids = ['zz-exempt-skill']; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /must not contain obsolete or exemption authority field grandfathered_skill_ids/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects obsolete reviewed_skill_ids duplicate authority', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.reviewed_skill_ids = Object.keys(baseline.skill_creation_review); });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /must not contain obsolete or exemption authority field reviewed_skill_ids/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects stale non-current keyed review evidence', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['stale-non-current-skill'] = {
-        ...baseline.skill_creation_review['managed-app-foundation-review'],
-        public_id: 'stale-non-current-skill'
-      };
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /contains stale skill_creation_review evidence for non-current skill stale-non-current-skill/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects a missing required keyed evidence field', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { delete baseline.skill_creation_review['managed-app-foundation-review'].native_capability_review; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /skill_creation_review\.managed-app-foundation-review must contain the complete exact schema-v3 evidence fields/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects empty required keyed evidence', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].trigger = ' '; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /skill_creation_review\.managed-app-foundation-review\.trigger must be a non-empty evidence string/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator requires three positive routing examples', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].positive_routing_examples.length = 2; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /positive_routing_examples must contain at least three non-empty routing examples/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator requires three near-neighbour negative routing examples', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].negative_routing_examples.length = 2; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /negative_routing_examples must contain at least three non-empty routing examples/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator requires overlap or companion boundary evidence', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].overlap_boundary = ''; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /overlap_boundary must be a non-empty evidence string/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects keyed and durable public ID mismatch', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].public_id = 'another-current-product'; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /public_id must equal its keyed product ID/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('valid append-only portfolio migration ledger passes', () => {
-  const validator = require(validateScript);
-  const ledger = JSON.parse(readText('repo/contracts/skill-product-migration-ledger.json'));
-  assert.equal(ledger.lifecycle, 'transitional_until_s2_closure_review');
-  assert.deepEqual(ledger.transitions.map((entry) => entry.transition_id), [
-    'knowledge-index-updater-removal',
-    'skill-product-review-merge',
-    'repository-agent-rules-rename',
-    'github-program-reconciler-rename',
-    'local-ai-safety-rename',
-    'n8n-safety-router-rename',
-    'n8n-environment-setup-rename',
-    'n8n-workflow-transport-rename',
-    'release-readiness-audit-rename',
-    'secure-ci-cd-rename',
-    'frontend-art-direction-rename',
-    'windows-local-dev-services-rename',
-    'n8n-workflow-templates-removal'
-  ]);
-  assert.deepEqual(validator.validate(), []);
-});
-
-test('validator rejects malformed migration ledger structure', () => {
-  const cwd = copyRepo();
-  try {
-    updateMigrationLedger(cwd, (ledger) => { ledger.transitions = {}; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /transitions must be an array/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects duplicate predecessor ownership across migration entries', () => {
-  const cwd = copyRepo();
-  try {
-    updateMigrationLedger(cwd, (ledger) => {
-      ledger.transitions.push({
-        ...ledger.transitions[0],
-        sequence: 2,
-        transition_id: 'duplicate-knowledge-removal'
-      });
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /predecessor knowledge-index-updater is ambiguously claimed/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects unsupported migration disposition', () => {
-  const cwd = copyRepo();
-  try {
-    updateMigrationLedger(cwd, (ledger) => { ledger.transitions[0].disposition = 'split'; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /disposition must be rename, merge, or remove/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects a migration predecessor that is still a current product', () => {
-  const cwd = copyRepo();
-  try {
-    updateMigrationLedger(cwd, (ledger) => { ledger.transitions[0].predecessor_ids = ['managed-app-foundation-review']; });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /historical predecessor managed-app-foundation-review is still a current product/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('migration ledger cannot make an unevidenced current skill valid', () => {
-  const cwd = copyRepo();
-  try {
-    addCurrentSkill(cwd, 'fixture-ledger-only-skill');
-    updateMigrationLedger(cwd, (ledger) => {
-      ledger.transitions.push({
-        sequence: 2,
-        transition_id: 'fixture-ledger-only-removal',
-        predecessor_ids: ['fixture-ledger-only-skill'],
-        successor_ids: [],
-        disposition: 'remove',
-        content_disposition: 'deleted',
-        authority: 'Fixture authority that cannot satisfy current creation evidence.',
-        reason: 'Fixture proves historical migration data is not current-product authority.'
-      });
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-ledger-only-skill/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('validator rejects a special root MEMORY.md surface', () => {
-  const cwd = copyRepo();
-  fs.writeFileSync(path.join(cwd, 'MEMORY.md'), '# fixture\n', 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Unexpected root entry: MEMORY\.md/);
-});
-
-test('validator detects stale plugin package versions', () => {
-  const cwd = copyRepo();
-  const manifestPath = path.join(cwd, '.codex-plugin', 'plugin.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.version = '0.0.0';
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /version does not match/);
-});
-
-test('automatic validation retains the canonical full gate while Validate toolkit is manual-only', () => {
+test('automatic validation keeps the canonical full gate and is the only validation workflow', () => {
   const validate = readText('.github/workflows/validate.yml');
-  const toolkit = readText('.github/workflows/validate-toolkit.yml');
 
   assert.match(validate, /^on:\n  pull_request:\n/m);
   assert.match(validate, /^  push:\n    branches:\n      - main$/m);
@@ -1301,42 +696,32 @@ test('automatic validation retains the canonical full gate while Validate toolki
   assert.match(validate, /node repo\/scripts\/audit-project-source-locks\.cjs/);
   assert.match(validate, /node repo\/scripts\/audit-published-surfaces\.cjs --check/);
   assert.match(validate, /node repo\/scripts\/validate-toolkit\.cjs/);
-  assert.match(validate, /node --test repo\/tests\/\*\.test\.cjs/);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --shard \$\{\{ matrix\.shard \}\} --os linux /);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --shard \$\{\{ matrix\.shard \}\} --os windows /);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --verify-ci /);
   assert.doesNotMatch(validate, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
-
-  assert.doesNotMatch(toolkit, /^  pull_request:$/m);
-  assert.doesNotMatch(toolkit, /^  push:$/m);
-  assert.match(toolkit, /^  workflow_dispatch:$/m);
-  assert.match(toolkit, /node --check repo\/scripts\/validate-toolkit\.cjs/);
-  assert.match(toolkit, /npm run validate:toolkit/);
-  assert.doesNotMatch(toolkit, /node --test repo\/tests\/\*\.test\.cjs|npm test/);
+  // The manual-only duplicate of the validator line was removed; Validate runs it on every change.
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'validate-toolkit.yml')), false);
 });
 
-test('automatic and manual validation workflows fetch full history before their own validation floor', () => {
-  const specs = [
-    { path: '.github/workflows/validate.yml', automatic: true, dispatch: false },
-    { path: '.github/workflows/validate-toolkit.yml', automatic: false, dispatch: true }
-  ];
-  for (const spec of specs) {
-    const source = readText(spec.path);
-    assert.deepEqual(validationWorkflowCheckoutErrors(source), [], spec.path);
-    assert.match(source, /^permissions:\n  contents: read$/m, spec.path + ' read-only permissions');
-    if (spec.automatic) {
-      assert.match(source, /^on:\n  pull_request:\n/m, spec.path + ' pull_request trigger');
-      assert.match(source, /^  push:\n    branches:\n      - main$/m, spec.path + ' main push trigger');
-    } else {
-      assert.doesNotMatch(source, /^  pull_request:$/m, spec.path + ' has no pull_request trigger');
-      assert.doesNotMatch(source, /^  push:$/m, spec.path + ' has no push trigger');
-    }
-    if (spec.dispatch) assert.match(source, /^  workflow_dispatch:$/m, spec.path + ' workflow_dispatch trigger');
-    else assert.doesNotMatch(source, /^  workflow_dispatch:$/m, spec.path + ' retains its existing trigger set');
-  }
+test('every validation job fetches full history before its own validation floor', () => {
+  const relPath = '.github/workflows/validate.yml';
+  const source = readText(relPath);
+  assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
+  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'validate']);
+  assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
+  assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
+  assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');
+  assert.doesNotMatch(source, /^  workflow_dispatch:$/m, relPath + ' retains its existing trigger set');
 });
 
 test('validation workflow checkout regressions reject missing, shallow, misplaced, overridden, or bypassed acquisition', () => {
-  const specs = ['.github/workflows/validate.yml', '.github/workflows/validate-toolkit.yml'];
-  for (const relPath of specs) {
-    const source = readText(relPath);
+  const relPath = '.github/workflows/validate.yml';
+  const full = readText(relPath);
+  // Each mutation is applied to the first job (a test shard) and to the validate job.
+  const split = full.indexOf('\n  validate:\n');
+  const targets = [['first job', '', full], ['validate job', full.slice(0, split), full.slice(split)]];
+  for (const [where, head, source] of targets) {
     const withoutDepth = source.replace(/^          fetch-depth: 0\n/m, '');
     const variants = [
       ['omitted fetch depth', withoutDepth],
@@ -1347,8 +732,8 @@ test('validation workflow checkout regressions reject missing, shallow, misplace
       ['checkout acquisition bypassed', source.replace(/^      - name: Checkout\n[\s\S]*?(?=^      - name: Set up Node)/m, '')]
     ];
     for (const [label, variant] of variants) {
-      assert.ok(variant !== source, relPath + ' variant must mutate source: ' + label);
-      assert.notDeepEqual(validationWorkflowCheckoutErrors(variant), [], relPath + ' must reject ' + label);
+      assert.ok(variant !== source, `${where} variant must mutate source: ${label}`);
+      assert.notDeepEqual(validationWorkflowCheckoutErrors(head + variant), [], `${where} must reject ${label}`);
     }
   }
 });

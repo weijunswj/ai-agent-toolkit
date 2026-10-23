@@ -2,8 +2,9 @@
 
 // Temp and Notepad isolation for test files that run the Toolkit bridge or setup. Require it
 // before anything else reads the temp folder or loads the bridge. It points this test process,
-// and every child that inherits its environment, at a private temp folder, and fails the test
-// file if the real Toolkit update-report folder gains files while the file runs. Reports written
+// and every child that inherits its environment, at a private temp folder, which it removes when
+// the test file finishes. It fails
+// the test file if the real Toolkit update-report folder gains files while the file runs. Reports written
 // there are real: action-required ones open on the owner's screen. The guard never deletes
 // anything in the real folder.
 //
@@ -16,7 +17,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { after } = require('node:test');
 
-const REAL_REPORT_DIR = path.join(os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
+// repo/scripts/run-tests.cjs gives each run its own temp folder (removed when the run finishes)
+// and names the temp root it started with in TOOLKIT_TEST_REAL_TEMP, so the guard still watches
+// the owner's real report folder.
+const REAL_REPORT_DIR = path.join(process.env.TOOLKIT_TEST_REAL_TEMP || os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
 const NOTEPAD_PRELOAD = path.join(__dirname, 'toolkit-test-notepad-preload.cjs');
 
 function realReportNames() {

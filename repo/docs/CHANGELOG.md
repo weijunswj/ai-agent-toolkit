@@ -1,5 +1,15 @@
 # Toolkit Changelog
 
+## 3.8.0 (CI and test speed)
+
+- **Every pull request now runs the tests on Windows too.** The suite runs in shards, two on Linux and four on Windows, side by side. A final `validate` job runs the repository checks and then proves from the shard summaries that each system ran every test file once with no failure; a failed, cancelled or skipped shard fails it. A pull request takes about 2 to 3 minutes; the single Linux job took 3.5 to 4 and never ran the 35 Windows-only tests (#465).
+- **One test runner, locally and in CI.** `npm test` runs every file, `npm run test:changed` runs the files your change affects, and CI runs one shard each. Every run gets its own scratch temp folder, under `%USERPROFILE%\t` for local runs or under the runner's own temp folder in CI, set for every child process, never at a drive root and never an 8.3 short name, and removed when the run finishes, also when tests fail. The next run removes a folder left by an interrupted run once it is more than a day old. The shard list is `repo/contracts/ci/test-shards.json`; a new test file always runs in a shard.
+- **A drift guard** pins the test steps in `validate.yml` and refuses narrowed file lists, test filters, `if: false`, masked exit codes, `continue-on-error`, matrix edits and a final job that does not wait for every shard.
+- **Windows failures fixed by cause**, none skipped: tests that read CRLF checkouts as LF, source-watch tests that handed Git Bash a path it could not use, a launcher test that found the runner's own Docker, and `CLAUDE.md` checked out with CRLF.
+- **Faster:** the validator runs in about half the time (it reads the topology policy once), and the slowest test files are split so they run in parallel, with the same tests.
+- **Removed:** the manual-only `validate-toolkit.yml` and the separate `env-store.yml` workflows; Validate runs both of their checks on every change.
+- **For every repository:** a new `fast-tests-and-sharding.md` playbook, a governed rule that asks for before-and-after measurement and a per-file budget, and a `secure-ci-cd` change that asks for commit-SHA action pins and sharded tests with one aggregate required check. Toolkit's own per-file budget check, `repo/scripts/check-test-durations.cjs`, only reports until a budget is set.
+
 ## 3.7.1 (toolkit env comments)
 
 - **The `toolkit env edit` file keeps accepted comment and section lines.** The env record stores key names without assignment values, accepted comments verbatim and blank lines, and shows them in the same place next time; new keys come after them. `apply` refuses suspicious comments by line number only. Its duplicate-key and value-too-long messages also no longer name the key. `toolkit env remove` drops the name from the layout.

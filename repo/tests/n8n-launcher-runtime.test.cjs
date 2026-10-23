@@ -56,8 +56,13 @@ function prepareLauncherFixture(launcher) {
   return { root, wrapperPath };
 }
 
+// A PowerShell launch can take several seconds to start on a busy CI runner. The timeout bounds a
+// hung launcher; the cleanup waits for a slow child to let go of the folder, so a busy folder does
+// not hide the launcher's own failure.
+const LAUNCH_TIMEOUT_MS = 60000;
+
 function removeLauncherFixture(root) {
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
 }
 
 function assertPrintedDockerWindowsInstallUrl(output, message) {
@@ -78,6 +83,20 @@ function launcherEnv(extraPaths = [], overrides = {}) {
     if (name.toLowerCase() === 'path') delete env[name];
   }
   return { ...env, Path: windowsLauncherPath(extraPaths), ...overrides };
+}
+
+// The Docker-missing scenario needs Docker absent from the launcher PATH. Some machines (GitHub's
+// Windows runners) keep docker.exe in System32, so that scenario leaves out every PATH folder that
+// holds a Docker CLI and starts cmd.exe by its full path, which does not need System32 on PATH.
+const DOCKER_COMMANDS = ['docker.exe', 'docker.cmd', 'docker.bat', 'docker.com', 'docker.ps1', 'docker'];
+const CMD_EXE = process.env.ComSpec || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+
+function dockerFreeLauncherEnv(extraPaths = [], overrides = {}) {
+  const env = launcherEnv(extraPaths, overrides);
+  env.Path = env.Path.split(path.delimiter)
+    .filter((dir) => !DOCKER_COMMANDS.some((name) => fs.existsSync(path.join(dir, name))))
+    .join(path.delimiter);
+  return env;
 }
 
 test('both CMD wrappers remove installer relaunch handling but retain unexpected-failure recovery', () => {
@@ -127,6 +146,16 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
       try {
         const binDir = path.join(root, 'bin');
         fs.mkdirSync(binDir, { recursive: true });
+        const env = dockerFreeLauncherEnv([binDir], {
+          CI: scenario === 'ci' ? 'true' : '',
+          GITHUB_ACTIONS: '',
+          TF_BUILD: '',
+          BUILD_BUILDID: '',
+          N8N_LAUNCHER_TEST_MODE: ''
+        });
+        const pathDirs = env.Path.split(path.delimiter);
+        assert.ok(pathDirs.some((dir) => fs.existsSync(path.join(dir, 'powershell.exe'))), 'the launcher PATH still finds powershell.exe');
+        assert.ok(pathDirs.every((dir) => !DOCKER_COMMANDS.some((name) => fs.existsSync(path.join(dir, name)))), 'no Docker CLI on the launcher PATH');
         const wingetMarker = path.join(root, 'winget-called.txt');
         if (scenario === 'winget-present') {
           writeCmd(path.join(binDir, 'winget.cmd'), [
@@ -135,19 +164,12 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
             'exit /b 91'
           ]);
         }
-        const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
+        const result = spawnSync(CMD_EXE, ['/d', '/c', wrapperPath], {
           cwd: root,
-          env: launcherEnv([binDir], {
-            CI: scenario === 'ci' ? 'true' : '',
-            GITHUB_ACTIONS: '',
-            TF_BUILD: '',
-            BUILD_BUILDID: '',
-            N8N_LAUNCHER_TEST_MODE: '',
-            N8N_WINGET_MARKER: wingetMarker
-          }),
+          env: { ...env, N8N_WINGET_MARKER: wingetMarker },
           input: '\r\n',
           encoding: 'utf8',
-          timeout: 15000
+          timeout: LAUNCH_TIMEOUT_MS
         });
         assert.equal(result.status, 0, `${launcher.id}/${scenario}\n${result.stdout}\n${result.stderr}`);
         assert.match(result.stdout, /Docker CLI was not found/i, scenario);
@@ -194,7 +216,7 @@ test('Docker Compose missing exits both CMD launchers after one Enter without op
         env: launcherEnv([binDir], { N8N_DOCKER_LOG: dockerLog }),
         input: '\r\n',
         encoding: 'utf8',
-        timeout: 15000
+        timeout: LAUNCH_TIMEOUT_MS
       });
       assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Docker CLI exists/i, launcher.id);
@@ -236,7 +258,7 @@ test('Docker ready opens both local and production CMD launcher menus normally',
         env: launcherEnv([binDir], { N8N_DOCKER_LOG: dockerLog }),
         input: '5\r\n\r\n10\r\n',
         encoding: 'utf8',
-        timeout: 15000
+        timeout: LAUNCH_TIMEOUT_MS
       });
       assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Choose an action:/i, launcher.id);

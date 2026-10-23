@@ -217,7 +217,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     id: 'repository-tests',
     owned_path_classes: ['repository-tests'],
     applicability: 'changed repository test layer',
-    command: 'node --test repo/tests/*.test.cjs',
+    command: 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"',
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-test',

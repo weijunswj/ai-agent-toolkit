@@ -39,7 +39,7 @@ node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 node repo/scripts/validate-toolkit.cjs
-node --test repo/tests/*.test.cjs
+npm test
 node repo/scripts/run-design-tests.cjs
 git diff --check
 ```

@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -38,7 +38,8 @@ function toBashPath(filePath) {
   return `/${drive}${rest}`;
 }
 
-function runDailyCheckScenario(scriptRelPath, scenario) {
+// Async so the scenarios can run side by side: each one works in its own mktemp folder.
+async function runDailyCheckScenario(scriptRelPath, scenario) {
   const bash = findBash();
   assert.ok(bash, 'bash is required to validate daily-security-check.sh');
 
@@ -259,50 +260,59 @@ cat "$tmp/stdout.txt"
 cat "$tmp/stderr.txt" >&2
 `;
 
-  const result = spawnSync(bash, ['-l', '-s', '--', toBashPath(path.join(repoRoot, scriptRelPath)), scenario], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    input: command
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(bash, ['-l', '-s', '--', toBashPath(path.join(repoRoot, scriptRelPath)), scenario], { cwd: repoRoot });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+    child.stdin.end(command);
   });
 
   assert.equal(result.status, 0, `${scriptRelPath} ${scenario}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
   return result;
 }
 
-test('daily security check rejects leading-dash BACKUP_PATHS entries without mutation', () => {
-  for (const scriptRelPath of scripts) {
-    runDailyCheckScenario(scriptRelPath, 'unsafe');
-  }
-});
-
-test('daily security check accepts absolute backup directories after canonicalization', () => {
-  for (const scriptRelPath of scripts) {
-    runDailyCheckScenario(scriptRelPath, 'absolute');
-  }
-});
-
-test('daily security check can send Telegram notification without leaking token', () => {
-  for (const scriptRelPath of scripts) {
-    runDailyCheckScenario(scriptRelPath, 'telegram');
-  }
-});
-
-for (const [scenario, title] of [
-  ['journal-placeholder', 'literal journal placeholder is not counted as a record'],
-  ['journal-empty', 'successful empty journal output counts zero records'],
-  ['journal-one', 'one structured journal record counts exactly once'],
-  ['journal-multiple', 'multiple structured journal records count exactly'],
-  ['journal-stderr', 'stderr-only journal diagnostics are visible but never counted'],
-  ['journal-failure', 'non-zero journal query exit is visible and never treated as zero'],
-  ['journal-permission', 'permission-denied journal query is redacted and never treated as zero'],
-  ['journal-malformed', 'malformed structured journal output is unavailable rather than counted'],
-  ['journal-hostile', 'hostile journal detail is sanitised and deterministically bounded'],
-  ['journal-auth-case-insensitive', 'auth summary and detail preserve case-insensitive matching']
-]) {
-  test(title, () => {
-    runDailyCheckScenario(authoritativeDailyCheck, scenario);
+// The scenarios share nothing (each runs in its own temp folder with its own stubs), so they run
+// four at a time; the slow part is the script's many short-lived processes, not waiting.
+test.describe('daily security check scenarios', { concurrency: 4 }, () => {
+  test('daily security check rejects leading-dash BACKUP_PATHS entries without mutation', async () => {
+    for (const scriptRelPath of scripts) {
+      await runDailyCheckScenario(scriptRelPath, 'unsafe');
+    }
   });
-}
+
+  test('daily security check accepts absolute backup directories after canonicalization', async () => {
+    for (const scriptRelPath of scripts) {
+      await runDailyCheckScenario(scriptRelPath, 'absolute');
+    }
+  });
+
+  test('daily security check can send Telegram notification without leaking token', async () => {
+    for (const scriptRelPath of scripts) {
+      await runDailyCheckScenario(scriptRelPath, 'telegram');
+    }
+  });
+
+  for (const [scenario, title] of [
+    ['journal-placeholder', 'literal journal placeholder is not counted as a record'],
+    ['journal-empty', 'successful empty journal output counts zero records'],
+    ['journal-one', 'one structured journal record counts exactly once'],
+    ['journal-multiple', 'multiple structured journal records count exactly'],
+    ['journal-stderr', 'stderr-only journal diagnostics are visible but never counted'],
+    ['journal-failure', 'non-zero journal query exit is visible and never treated as zero'],
+    ['journal-permission', 'permission-denied journal query is redacted and never treated as zero'],
+    ['journal-malformed', 'malformed structured journal output is unavailable rather than counted'],
+    ['journal-hostile', 'hostile journal detail is sanitised and deterministically bounded'],
+    ['journal-auth-case-insensitive', 'auth summary and detail preserve case-insensitive matching']
+  ]) {
+    test(title, async () => {
+      await runDailyCheckScenario(authoritativeDailyCheck, scenario);
+    });
+  }
+});
 
 test('daily security check remains operationally read-only', () => {
   const content = fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck), 'utf8');

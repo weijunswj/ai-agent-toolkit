@@ -127,10 +127,10 @@ function createMinimalSetupRepo(root, options = {}) {
     writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
   }
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.7.1', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.8.0', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.7.1', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.8.0', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
@@ -149,7 +149,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CODEX_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
-    "const summary = { ok: true, version: '3.7.1', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
+    "const summary = { ok: true, version: '3.8.0', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
     "if (write && process.env.SETUP_FAKE_CODEX_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(41); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",
@@ -167,8 +167,8 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CLAUDE_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
     "const active = process.env.SETUP_FAKE_CLAUDE_ENFORCEMENT !== '0' && process.env.SETUP_FAKE_CLAUDE_TRUST !== '0';",
-    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.7.1', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
-    "const summary = { ok: true, version: '3.7.1', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
+    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.8.0', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
+    "const summary = { ok: true, version: '3.8.0', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
     "if (write && process.env.SETUP_FAKE_CLAUDE_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(42); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",
@@ -332,4 +332,48 @@ function backupFiles(root) {
   return fs.readdirSync(location, { recursive: true });
 }
 
-module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles };
+// Question-bank helpers shared by the toolkit-setup-orchestrator test files.
+const core = require('../scripts/setup-toolkit-core.cjs');
+
+function displayedBankReference(output) {
+  const match = String(output || '').match(/Bank reference: ([0-9A-HJKMNP-TV-Z-]+)/);
+  assert.ok(match, output);
+  return match[1];
+}
+
+function auditFixture({ retentionDays = 7 } = {}) {
+  return {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: retentionDays,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },
+    update_report_cleanup: { retention_days: retentionDays, deleted_count: 0, error_count: 0, report_log_directory: 'private-value-never-rendered' },
+  };
+}
+
+function specsForAudit(audit) {
+  return core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit,
+    runtime: { runtime: 'unknown' },
+    delegation: { status: 'unsupported', helper_count: null },
+    nativePlugin: { status: 'unknown' },
+  });
+}
+
+function parseConciseInFreshProcess(specs, input) {
+  const child = spawnSync(process.execPath, ['-e', [
+    `const core = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'))});`,
+    "const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));",
+    'try { core.parseConciseQuestionBankAnswer(payload.input, payload.specs); process.stdout.write("accepted"); }',
+    'catch (error) { process.stderr.write(String(error.message)); process.exitCode = 1; }',
+  ].join('\n')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    input: JSON.stringify({ specs, input }),
+  });
+  return child;
+}
+
+module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };
