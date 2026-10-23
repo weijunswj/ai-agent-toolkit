@@ -18,6 +18,12 @@
 - **Host contract:** `repo/docs/HOST-CONTRACT.md` and its JSON twin record what custody needs from Claude Code and Codex: session identity, the turn-end hook rules, completion modes, duplicate-launch and handover checks, and honest limits.
 - **Clearer messages:** next actions addressed to the controller name `--controller`; a write without a session says it needs this session's own ID; an unsupported store kind names the supported one; whitespace-only values are refused.
 
+## Unreleased (Projects skill and block fixes)
+
+- **Claude Projects controller skill 2026-10-23.18** (re-upload it). Toolkit no longer asks for feedback about Toolkit itself: the project-instructions block, the skill and the global rules drop their `TOOLKIT_FEEDBACK` rules. If you want such feedback, keep the rule in your own instructions, outside the Toolkit markers. The next instructions check reports the block as outdated, and the sync replaces it after your OK.
+- **Sync dedupes and reads the settings itself.** When the block is added or replaced, the coordinator also removes the lines outside the markers that the block now fully covers and trims the repeated part of lines that partly repeat it, in the same change and under the same OK; project-specific text and anything that differs stays. Threads can't read project settings, so the coordinator reads them and runs the check itself or hands a thread the exact text.
+- **Briefs name sibling PRs.** A G0 lists the open sibling PRs it checked for overlap, and the G1 brief requires a re-check against them before building.
+
 ## Unreleased (claude.ai account copy check)
 
 - **The Claude Code install check reports a stale claude.ai account copy of Toolkit.** The Claude desktop app runs the copy from your claude.ai account, and only claude.ai updates it (from main). Setup and each Claude Code session start now read that copy's version from the app's local plugin folder and, when it is older than the Toolkit on this computer, say so with the fix: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, or remove that marketplace and add it again. Read only: Toolkit never changes the account copy, reports no ids or paths, and the notice blocks nothing.
