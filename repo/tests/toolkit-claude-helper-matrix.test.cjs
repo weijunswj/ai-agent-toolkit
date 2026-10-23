@@ -47,3 +47,15 @@ test('the live runner gives a session every tool its helpers list, so no helper 
   }).split(',');
   assert.deepEqual(tools, ['Agent', 'Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write']);
 });
+
+test('installed mode picks the local Toolkit install over a claude.ai account copy', () => {
+  const { pickInstalledPlugin } = require('./qualification/claude-helper-matrix.live.cjs');
+  const local = { id: 'ai-agent-toolkit@ai-agent-toolkit-local', scope: 'user', enabled: true, version: '1.0.0', installPath: '/cache/tk', readFromFolder: '/src/tk' };
+  const synced = { id: 'ai-agent-toolkit@synced', scope: 'synced', enabled: true, version: '0.9.0', installPath: '/synced/tk' };
+  assert.equal(pickInstalledPlugin([synced, local]).root, path.resolve('/src/tk'));
+  assert.equal(pickInstalledPlugin([synced]).root, path.resolve('/synced/tk'));
+  assert.equal(pickInstalledPlugin([{ ...synced, installPath: '' }, local]).root, path.resolve('/src/tk'));
+  assert.throws(() => pickInstalledPlugin([{ ...synced, installPath: '' }]), /ai-agent-toolkit@synced \(synced, no folder\)/);
+  assert.throws(() => pickInstalledPlugin([{ ...local, enabled: false }]), /found: none/);
+  assert.throws(() => pickInstalledPlugin([local, { ...local, id: 'ai-agent-toolkit@other', scope: 'project' }]), /ai-agent-toolkit@other \(project\)/);
+});
