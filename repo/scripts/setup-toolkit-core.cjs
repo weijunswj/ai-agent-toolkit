@@ -3040,6 +3040,22 @@ function applySetupChoices(args, current) {
   args.repoRoot = path.resolve(args.repoRoot);
 }
 
+// Setup that runs from the checkout it just fast-forwarded keeps executing the scripts it loaded
+// before the update. When the update changed setup's own scripts, this run stops before any plugin,
+// settings or config step and asks for one more run, which starts with the updated code.
+function setupSelfUpdateRerun(args, managed) {
+  if (managed.update_action !== 'fast-forwarded' || !samePath(repoRootFromScript(), args.repoRoot)) return null;
+  const changed = runGitCapture(args.repoRoot, ['diff', '--name-only', managed.commit_before, managed.commit_after, '--', 'repo/scripts'],
+    'git diff --name-only (setup scripts)', false, true);
+  if (!changed) return null;
+  return [
+    '## Setup updated itself',
+    `Setup updated its Toolkit copy from ${managed.commit_before.slice(0, 7)} to ${managed.commit_after.slice(0, 7)}, and the update changed setup's own scripts.`,
+    'This run stopped there, before any plugin, settings or config step, so the older setup code changed nothing else.',
+    'Run the same setup command again: it starts with the updated setup and asks the setup questions again.',
+  ].join('\n');
+}
+
 // The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
 // checkout: fast-forward it to the default branch if it is clean and on that branch, else skip with the
 // reason. It never resets, forces, stashes or switches branches.
@@ -3949,6 +3965,11 @@ class ToolkitSetupExecution {
     await this.#collectAndAnswer();
     this.#announcePlan();
     const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const rerun = setupSelfUpdateRerun(args, managed);
+    if (rerun) {
+      console.log(rerun);
+      return SETUP_ACTION_REQUIRED;
+    }
     const localClone = fastForwardLocalClone(args);
     // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
     // Apply only this already-approved repair before invoking that CLI; ordinary

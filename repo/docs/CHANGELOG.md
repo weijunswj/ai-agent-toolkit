@@ -28,6 +28,9 @@
 - **Trace audit and repair.** The decision-trace audit fails on a superseded record left unmarked; reconcile reports `TRACE_STALE`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; `--repair` writes lines in the same shape, plus topic tags from a decision ledger with `--ledger`.
 - **Untracked PRs are flagged.** `PR_UNTRACKED` (report only) names an open PR that says `Refs #n` (or Completes, Closes, Fixes, Resolves) for an open task whose state records no PR or branch.
 - **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first #421 apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
+## Unreleased (setup self-update)
+
+- **Fix: setup no longer runs old code after updating itself.** When setup fast-forwards the Toolkit copy it is running from and the update changes setup's own scripts, it now stops right there, before any plugin, settings or config step, says so under `## Setup updated itself`, and asks for one more run (exit code 24). Before, the rest of the run kept using the scripts it had loaded before the update, so a just-shipped setup message could still read "diagnostics withheld". The setup skill reruns the same command straight away.
 
 ## Unreleased (personal-data guard)
 
