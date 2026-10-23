@@ -752,7 +752,7 @@ function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
 function nextSteps(scope) {
   return [
     '**Next Steps:**',
-    '1. Restart Claude Code if the plugin install changed anything.',
+    '1. Start a new Claude Code session if the plugin install changed anything, and close sessions opened before it.',
     `2. If Claude Code prompts to trust this local marketplace/plugin, approve it (source is this repo, scope ${scope}).`,
     '',
     'Claude Code must not install or update Codex. Codex must not install or update Claude Code.'

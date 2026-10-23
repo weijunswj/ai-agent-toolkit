@@ -79,7 +79,7 @@ test('a same-run install is restart-required, not passed and not action-required
     depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) } });
   const result = check.run({ plugin: plugin(root, { updated_this_run: true }), topology: 'root-only' });
   assert.equal(result.status, STATUS.RESTART);
-  assert.match(result.actions[0], /Restart Claude Code/);
+  assert.match(result.actions[0], /Start a new Claude Code session, and close sessions opened before the update/);
 });
 
 test('a recorded version newer than the install is action-required with the one-time recovery', (t) => {
@@ -168,7 +168,7 @@ test('a clean Claude setup passes the install check and exits 0', () => {
   assert.match(fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8'), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none created=yes\nproject_doc_max_bytes = 65536\n/);
 });
 
-test('a same-run plugin install reports its facts and restart required, never a bare refreshed', () => {
+test('a same-run plugin install reports its facts and new session needed, never a bare refreshed', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended',
@@ -176,8 +176,8 @@ test('a same-run plugin install reports its facts and restart required, never a 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Claude plugin status: installed this run/);
   assert.doesNotMatch(result.stdout, /Claude plugin status: refreshed/);
-  assert.match(result.stdout, /Install check: restart required\n/);
-  assert.match(result.stdout, /Next step:\n1\. Restart Claude Code so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions, global rules and depth setting, and reports only a problem\./);
+  assert.match(result.stdout, /Install check: new session needed\n/);
+  assert.match(result.stdout, /Next step:\n1\. Start a new Claude Code session, and close sessions opened before the update, so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions, global rules and depth setting, and reports only a problem\./);
 });
 
 test('setup refreshes Toolkit helper definitions made stale by a stack registry change', () => {

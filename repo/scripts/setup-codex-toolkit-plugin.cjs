@@ -1441,7 +1441,7 @@ class CodexToolkitWriteTransaction {
 function nextStepsForState(state) {
   return [
     '**Next Steps:**',
-    '1. Restart Codex if the plugin install changed anything.',
+    '1. If the plugin install changed anything, open `/hooks` in the Codex app and trust the updated Toolkit hooks.',
     '2. Open `/hooks` in Codex.',
     `3. Verify the enabled Toolkit \`SessionStart\` hook belongs to the installed \`ai-agent-toolkit\` plugin at version \`${EXPECTED_TOOLKIT_VERSION}\`.`,
     `4. The supported hook normally runs from the installed plugin-cache copy${state.cacheRoot ? ` at \`${state.cacheRoot}\`` : ''}, not the managed Git checkout.`,

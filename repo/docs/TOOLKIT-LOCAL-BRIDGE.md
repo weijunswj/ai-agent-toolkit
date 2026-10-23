@@ -139,7 +139,7 @@ Codex hooks execute the bridge copy in Codex's installed plugin cache. Claude Co
 Required post-merge refresh flows:
 
 - Codex: run `setup toolkit` in Codex.
-- Claude Code: run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code. With automatic updates on, the next session start updates the managed checkout without this step.
+- Claude Code: run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then start a new Claude Code session. With automatic updates on, the next session start updates the managed checkout without this step.
 
 ## Shared Updater
 

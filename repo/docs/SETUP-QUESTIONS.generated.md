@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 6 questions across 2 sections
 
-Bank reference: 4HGK-B3NE-709M-7C4C
+Bank reference: SYCY-J6KR-MC2Q-YWFF
 
 Quick index
 
@@ -172,7 +172,7 @@ Quick index
 - **B. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
 - **C. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
-**After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
+**After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
 **Selected:** A - Turn on
 
@@ -180,8 +180,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `4HGK-B3NE-709M-7C4C: all recommended`
-- only your changes, for example: `4HGK-B3NE-709M-7C4C: 1.2=B, 1.3=B`
+- `SYCY-J6KR-MC2Q-YWFF: all recommended`
+- only your changes, for example: `SYCY-J6KR-MC2Q-YWFF: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -194,7 +194,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: T11S-AJNE-AJNT-1NH7
+Bank reference: ZE14-K0EP-KZNP-ZTVH
 
 Quick index
 
@@ -392,7 +392,7 @@ Quick index
 - **B. Show instructions only** - Make no native plugin change and report the manual Claude Code action required.
 - **C. Keep current** - Preserve the currently detected Claude Code plugin behavior and state.
 
-**After applying:** If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.
+**After applying:** If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.
 
 **Selected:** A - Install or refresh
 

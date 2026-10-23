@@ -1862,7 +1862,7 @@ function setupQuestionSpecs(args, current) {
       selected: args.setupChoices.codexPluginAutoRefresh,
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
       currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
-      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
+      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
     }));
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
@@ -1901,7 +1901,7 @@ function setupQuestionSpecs(args, current) {
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
       current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
-      afterApplying: 'If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.',
+      afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
     specs.push(resolvedQuestion({
       id: 'claude-recommended-settings',
@@ -2921,6 +2921,36 @@ function applySetupChoices(args, current) {
   args.repoRoot = path.resolve(args.repoRoot);
 }
 
+// The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
+// checkout: fast-forward it to the default branch if it is clean and on that branch, else skip with the
+// reason. It never resets, forces, stashes or switches branches.
+function fastForwardLocalClone(args, startFolder = process.cwd()) {
+  const top = runGitCapture(startFolder, ['rev-parse', '--show-toplevel'], 'find the local Toolkit clone', true, true);
+  if (!top) return null;
+  const clone = path.resolve(top);
+  if (samePath(clone, args.repoRoot)) return null;
+  if (!fs.existsSync(path.join(clone, 'repo', 'scripts', 'setup-toolkit.cjs'))) return null;
+  const remote = runGitCapture(clone, ['remote', 'get-url', 'origin'], 'read the local clone remote', true, true);
+  if (!remote || normalizeRemote(remote) !== normalizeRemote(args.repoRemote)) return null;
+  const branch = runGitCapture(clone, ['branch', '--show-current'], 'read the local clone branch', true, true);
+  if (branch !== args.repoBranch) return { status: 'skipped', reason: `your local clone is on ${branch || 'a detached head'}, not ${args.repoBranch}` };
+  if (runGitCapture(clone, ['status', '--porcelain'], 'read the local clone status', true, true)) return { status: 'skipped', reason: 'your local clone has uncommitted changes' };
+  const fetched = runCommand('fetch the local clone', 'git', ['fetch', 'origin', args.repoBranch], { cwd: clone, capture: true, timeout: 120000, allowFailure: true, quiet: true });
+  if (fetched.status !== 0) return { status: 'skipped', reason: 'git fetch failed' };
+  const before = runGitCapture(clone, ['rev-parse', 'HEAD'], 'read the local clone head', true, true);
+  const merged = runCommand('fast-forward the local clone', 'git', ['merge', '--ff-only', `origin/${args.repoBranch}`], { cwd: clone, capture: true, timeout: 120000, allowFailure: true, quiet: true });
+  if (merged.status !== 0) return { status: 'skipped', reason: `your local ${args.repoBranch} has commits that are not on origin, so it cannot fast-forward` };
+  const after = runGitCapture(clone, ['rev-parse', 'HEAD'], 'read the local clone head', true, true);
+  return before === after ? { status: 'current' } : { status: 'fast-forwarded', commit: after };
+}
+
+function localCloneSummary(result) {
+  if (!result) return '';
+  if (result.status === 'fast-forwarded') return `fast-forwarded to ${result.commit.slice(0, 7)}`;
+  if (result.status === 'current') return 'already current';
+  return `not updated: ${result.reason}`;
+}
+
 function activeToolkitWarning(args) {
   const activeRoot = repoRootFromScript();
   if (path.resolve(activeRoot) === path.resolve(args.repoRoot)) return '';
@@ -3529,7 +3559,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3615,6 +3645,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log('');
   }
   if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
+  if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
@@ -3625,7 +3656,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Codex plugin current: ${yesNo(nativeCache.current === true)}`);
     console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
     console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
-    console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Codex: open /hooks and trust the updated Toolkit hooks: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
     console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit SessionStart hook belongs to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
@@ -3642,7 +3673,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
     if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
     console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
-    console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Claude new session needed: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
   } else {
     console.log('Claude plugin status: not checked for this host');
@@ -3670,7 +3701,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   if (installCheck) printInstallCheck(installCheck);
 }
 
-const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'restart required', 'action-required': 'action required' });
+const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'new session needed', 'action-required': 'action required' });
 
 function printInstallCheck(result) {
   console.log('');
@@ -3759,6 +3790,7 @@ class ToolkitSetupExecution {
     await this.#collectAndAnswer();
     this.#announcePlan();
     const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const localClone = fastForwardLocalClone(args);
     const nativeCache = this.#nativePluginSetup();
     runLiteValidation(args, this.#validationResults);
     writeBridgePreferences(args);
@@ -3768,7 +3800,7 @@ class ToolkitSetupExecution {
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     const n8nSkills = installOfficialN8nSkills(args);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
-    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit,
+    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -3841,6 +3873,7 @@ if (require.main === module) {
 
 module.exports = {
   assertSupportedComputer,
+  fastForwardLocalClone,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
