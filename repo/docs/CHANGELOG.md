@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.7.0 (setup and hooks)
+
+- **Windows only in setup.** Setup stops before any step on a computer that is not Windows (Linux runs only as a CI build machine), and `toolkit env` loses the Linux key store. The install check builds the key store only when it needs it, so it skips `toolkit env` on a computer without one (#532).
+- **Recommended Claude Code settings.** New setup question "Use Toolkit's recommended Claude Code settings?" sets four values in `~/.claude/settings.json`: `attribution: false`, `crossSessionInbound: "accept"`, `switchModelsOnFlag: false`, and read `AGENTS.md` as well as `CLAUDE.md`. A value you set yourself is never changed; turning it off removes only what Toolkit set.
+- **No AI attribution.** Claude Code and Codex refuse a `git commit` or `gh pr create`/`edit` that carries a Co-Authored-By trailer naming Claude, a Claude-Session trailer, a claude.ai session link or a "Generated with Claude Code" footer.
+- **Codex hooks on Windows** now use Codex's own `commandWindows`: a full PowerShell path and a `.ps1` launcher, so neither PowerShell nor `cmd.exe` runs a `node` or `powershell` file planted in the folder you open.
+- **Codex refresh report** no longer says "refresh failed" after a successful update across a version change; it says "Codex plugin updated to <version>. It takes effect in your next Codex session."
+- **Removed:** the n8n Skills plugin hook repair (the official n8n skills will ship as plain skill folders), and the rule-refresh PR auto-merge setup question; refresh PRs always stop for you to merge.
+
 ## 3.6.0 (instructions, README and packaging)
 
 - **Windows only.** Toolkit supports Windows 10 and 11 computers. The README says so on its first line, the validator keeps that line there, and setup docs drop the POSIX commands and `$HOME` paths. Linux stays for CI, cloud agent sessions and the remote servers some skills manage (#532).
