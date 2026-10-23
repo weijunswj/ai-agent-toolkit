@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## Unreleased (setup self-update and setup lanes)
+
+- **Fix: setup no longer runs old code after updating itself.** When setup fast-forwards the Toolkit copy it is running from and the update changes setup's own scripts, it now stops right there, before any plugin, settings or config step, says so under `## Setup updated itself`, and asks for one more run (exit code 24). Before, the rest of the run kept using the scripts it had loaded before the update, so a just-shipped setup message could still read "diagnostics withheld". The setup skill reruns the same command straight away.
+
 ## Unreleased (executor checkpoints and host contract)
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.
