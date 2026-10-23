@@ -248,9 +248,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 9 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: T19W-KZ0H-S62J-NF7T
+Bank reference: 8GH0-R43M-S2GS-R08C
 
 Quick index
 
@@ -258,7 +258,6 @@ Quick index
 1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
-1.5 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
@@ -371,32 +370,6 @@ Quick index
 
 ---
 
-### 1.5 Raise Codex's instruction limit
-
-**What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
-
-**Current:** Toolkit keeps Codex's instruction limit raised.
-
-**Verification:** verified
-
-**Recommended:** A - Raise it
-
-**Recommended outcome:** Raise Codex's instruction limit to 65536.
-
-**Why:** Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.
-
-**Choices:**
-
-- **A. Raise it** - Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.
-- **B. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
-- **C. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
-
-**After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
-
-**Selected:** A - Raise it
-
----
-
 
 ## 2. Computer performance
 
@@ -465,7 +438,7 @@ Quick index
 
 **Recommended:** A - Turn on
 
-**Recommended outcome:** Turn on the four recommended Claude Code settings.
+**Recommended outcome:** Set the recommended values that are not set yet; values you set yourself stay as they are.
 
 **Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
 

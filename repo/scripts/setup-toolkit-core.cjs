@@ -307,7 +307,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
-  if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.5');
+  if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.2');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
@@ -344,7 +344,7 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
-    raise_codex_instruction_limit: choices.codexDocLimit || 'question-required'
+    raise_codex_instruction_limit: choices.codexDocLimit || (options.host === 'codex' ? 'question-required' : 'keep')
   };
 }
 
@@ -567,7 +567,7 @@ function printHelp() {
     '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
-    '  --explain <ref>              print the full text of one setup question, for example --explain 1.5',
+    '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
@@ -607,9 +607,17 @@ function runCommand(label, command, args, options = {}) {
   if (result.status !== 0 && !options.allowFailure) {
     const stderr = options.capture ? result.stderr || '' : '';
     const stdout = options.capture ? result.stdout || '' : '';
-    throw new Error(`${label} failed with exit code ${result.status}${stderr || stdout ? `: ${(stderr || stdout).trim()}` : ''}`);
+    throw new Error(`${label} failed with exit code ${result.status}${stderr || stdout ? `: ${(stderr || stdout).trim()}` : ''}${gitFailureHint(command, result.status)}`);
   }
   return result;
+}
+
+// Git exits 128 when it cannot use a repository, which is what a Codex chat sandbox causes: setup
+// writes the managed checkout, ~/.codex and ~/.ai-agent-toolkit, all outside the chat's folder.
+function gitFailureHint(command, status) {
+  return command === 'git' && status === 128
+    ? ' If setup is running inside the Codex sandbox, git cannot use the Toolkit copy there: run setup outside the Codex sandbox (approve running the setup command outside it).'
+    : '';
 }
 
 function recordValidation(validationResults, command, status) {
@@ -1360,7 +1368,7 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
-  if (key === 'claudeSettings') return 'enable';
+  if (key === 'claudeSettings') return claudeSettingsAllSet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -1648,6 +1656,13 @@ const SUBAGENT_DEPTH_FOR_TOPOLOGY = Object.freeze({ 'root-only': 'enable', 'broa
 
 function claudeSubagentDepthChoice(options) {
   return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
+}
+
+// True when every managed Claude Code setting already has a value (yours or Toolkit's).
+function claudeSettingsAllSet(current) {
+  const entries = current?.claudeSettings;
+  return Array.isArray(entries) && entries.length > 0
+    && entries.every((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
 }
 
 // One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
@@ -1991,7 +2006,7 @@ function setupQuestionSpecs(args, current) {
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
-      current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
+      current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : current.nativePlugin.status === 'invalid-source-metadata' ? 'Setup could not read the Claude Code plugin details in the Toolkit copy.' : 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.',
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
     specs.push(resolvedQuestion({
@@ -2006,7 +2021,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
-      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: 'Turn on the four recommended Claude Code settings.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
@@ -2015,7 +2030,7 @@ function setupQuestionSpecs(args, current) {
   }
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
 
-  return withPresentationMetadata(specs.map((spec) => ({
+  return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
     ...spec,
     recommended_value: spec.recommended,
     selected_value: spec.selected,
@@ -2119,7 +2134,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
   return lines;
 }
 
-const EXPLAIN_HINT = 'For the full text of a question, say "explain 1.5" (or run setup with --explain 1.5).';
+const EXPLAIN_HINT = 'For the full text of a question, say "explain 1.2" (or run setup with --explain 1.2).';
 
 // The bank's heading and reference; the reference documentation also lists a quick index (the bank's
 // own table already shows every question).
@@ -3023,7 +3038,8 @@ function applySetupChoices(args, current) {
   else args.updateReports = choices.updateReports === 'enable';
 
   // Raise Codex's limit only on a yes (or a kept yes); a no puts back a value Toolkit raised.
-  if (choices.codexDocLimit === 'keep') args.codexDocLimit = current.audit?.codex_doc_limit_enabled === true;
+  // Only Codex setup asks about Codex's limit; other hosts keep the stored choice.
+  if (choices.codexDocLimit === 'keep' || (!choices.codexDocLimit && args.host !== 'codex')) args.codexDocLimit = current.audit?.codex_doc_limit_enabled === true;
   else args.codexDocLimit = choices.codexDocLimit === 'enable';
   args.codexDocLimitMode = choices.codexDocLimit === 'disable' ? 'restore' : args.codexDocLimit ? 'raise' : 'report';
 
@@ -4035,6 +4051,7 @@ if (require.main === module) {
 
 module.exports = {
   assertSupportedComputer,
+  gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,
   applyAntigravitySkills,

@@ -257,3 +257,12 @@ test('only Codex refusing the file counts as a rejection; other start-up failure
     assert.match(verdict.detail, /not verified/);
   }
 });
+
+test('a git exit 128 tells the user to run setup outside the Codex sandbox; other failures add nothing', () => {
+  const { gitFailureHint } = require('../scripts/setup-toolkit-core.cjs');
+  assert.match(gitFailureHint('git', 128), /run setup outside the Codex sandbox/);
+  assert.equal(gitFailureHint('git', 1), '');
+  assert.equal(gitFailureHint('node', 128), '');
+  const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
+  assert.match(skill, /Run the setup command with escalated permissions \(outside the sandbox\) from the first call/);
+});

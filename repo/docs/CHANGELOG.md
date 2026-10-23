@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## Unreleased (setup fixes)
+
+- **Claude Code setup no longer asks about Codex's instruction limit.** That question is Codex-only now; Claude Code setup keeps whatever choice is stored.
+- **Clearer Claude Code rows.** The plugin row says setup checks the plugin after you answer and installs or refreshes it only if needed. The settings row recommends keeping them when all four are already set, and otherwise sets only the values that are not set yet.
+- **Codex sandbox.** On Codex the setup skill asks up front to run setup outside the sandbox, because setup writes the managed checkout, `~/.codex` and `~/.ai-agent-toolkit`. A git failure with exit code 128 now says to run setup outside the Codex sandbox.
+- The "explain" example in the bank names question 1.2, which every bank has.
+
 ## Unreleased (executor checkpoints and host contract)
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.

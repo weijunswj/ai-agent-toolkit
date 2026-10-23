@@ -381,7 +381,8 @@ test('delegated stdin transport preserves bounded input bytes exactly', () => {
 
 test('real partial piped answers still show one complete effective bank before pausing', () => {
   const fixture = realManagedFixture();
-  const result = runRealManaged(fixture, [], 'default\n');
+  // One flag-resolved visible question puts the bank in line-by-line mode with a Selected row.
+  const result = runRealManaged(fixture, ['--enable-update-reports'], 'default\n');
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
@@ -437,7 +438,7 @@ test('Claude probe timeout cannot silently suppress the real managed bank', () =
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /could not be verified|may need attention|unavailable/i);
+  assert.match(result.stdout, /could not be verified|checks the Claude Code Toolkit plugin after you answer|unavailable/i);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
   assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
 });
