@@ -136,9 +136,12 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   };
 }
 
-// A comment's first heading or line as one short plain line for an index entry.
+// A comment's first heading or line as one short plain line for an index entry. HTML comments go
+// first (across lines, closed or not), then every angle bracket, so no summary can open a comment
+// or tag that hides the rest of the index.
 function commentSummary(text) {
-  const first = String(text || '').split('\n').map(line => line.replace(/<!--.*?-->/g, '').replace(/[#*_`>]/g, '').trim()).find(Boolean) || 'comment';
+  const visible = String(text || '').replace(/<!--[\s\S]*?(?:--!?>|$)/g, '');
+  const first = visible.split('\n').map(line => line.replace(/[<>#*_`]/g, '').trim()).find(Boolean) || 'comment';
   const plain = first.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[[\]|]/g, ' ').replace(/\s+/g, ' ').trim();
   return plain.length > 90 ? `${plain.slice(0, 87)}...` : plain;
 }

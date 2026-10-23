@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { auditDecisionTraces, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+const { auditDecisionTraces, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
 const PREFIX = 'INT-TK421-';
@@ -154,4 +154,12 @@ test('arguments are validated before any GitHub read', () => {
   }
   const mixed = auditDecisionTraces({ body: '[x](#issuecomment-1)', comments: [person(1, 'see INT-TK421-x then INT-TK421-007')], recordPrefix: PREFIX });
   assert.deepEqual(mixed.unlabelled, []);
+});
+
+test('an index summary never carries an HTML comment or tag opener', () => {
+  assert.equal(commentSummary('<!-- record -->\nDecision: keep the table'), 'Decision: keep the table');
+  assert.equal(commentSummary('<!-- spans\ntwo lines -->\nReal line'), 'Real line');
+  assert.equal(commentSummary('<!-- never closed\nhides everything'), 'comment');
+  assert.equal(commentSummary('<!<!---->-- trick'), '!-- trick');
+  for (const text of ['a <!-- b', '<b>bold</b> text', 'x --!> y <!--']) assert.doesNotMatch(commentSummary(text), /[<>]/, text);
 });
