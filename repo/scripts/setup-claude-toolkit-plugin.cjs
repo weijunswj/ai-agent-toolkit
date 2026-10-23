@@ -61,7 +61,9 @@ function pluginId() {
 }
 
 function repoCommit(repoRoot) {
-  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+  let git;
+  try { git = processLaunch.resolvePathExecutable('git'); } catch { return ''; }
+  const result = spawnSync(git, ['-C', repoRoot, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
     timeout: 10000,
     windowsHide: true
@@ -227,14 +229,14 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/contracts/controller-kernel/stack-registry-v3.schema.json', true],
     ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['repo/scripts/toolkit-claude-attribution-hook.cjs', false],
+    ['repo/scripts/toolkit-attribution-guard.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
     ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
     ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
     ["repo/scripts/toolkit-staging-generations.cjs",false],
     ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
-    ["repo/scripts/repair-codex-plugin-windows-hooks.cjs",false],
-    ["repo/scripts/audit-n8n-skills-plugin-hooks.cjs",false],
     ["repo/scripts/setup-toolkit-core.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
     ["repo/scripts/codex-delegation-backup.cjs",false],
@@ -363,6 +365,23 @@ function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
 
 function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
+}
+
+// Turns off another plugin in Claude Code's user scope when it is on there, then reads the list back.
+// Returns true when it turned the plugin off, false when it was not on; throws with the reason.
+function disableUserPlugin(id, options = {}) {
+  const env = Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
+  const resolved = resolveClaudeCommand(options.claudeCli, { env });
+  if (!resolved.command) throw new Error('the Claude Code CLI was not found');
+  const enabled = () => {
+    const list = runClaudeJson(resolved.command, ['plugin', 'list', '--json'], { env });
+    return (Array.isArray(list) ? list : list.installed || []).some((entry) => entry.id === id && entry.scope === 'user' && entry.enabled === true);
+  };
+  if (!enabled()) return false;
+  const result = runClaudeCommand(resolved.command, ['plugin', 'disable', id, '--scope', 'user'], { env });
+  if (result.status !== 0) throw new Error(`claude plugin disable failed: ${commandOutput(result) || `exit ${result.status}`}`);
+  if (enabled()) throw new Error('the plugin still reads as on after claude plugin disable');
+  return true;
 }
 
 function claudeSpawnParts(command, args, options = {}) {
@@ -752,7 +771,7 @@ function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
 function nextSteps(scope) {
   return [
     '**Next Steps:**',
-    '1. Restart Claude Code if the plugin install changed anything.',
+    '1. Start a new Claude Code session if the plugin install changed anything, and close sessions opened before it.',
     `2. If Claude Code prompts to trust this local marketplace/plugin, approve it (source is this repo, scope ${scope}).`,
     '',
     'Claude Code must not install or update Codex. Codex must not install or update Claude Code.'
@@ -961,6 +980,7 @@ module.exports = {
   MARKETPLACE_REL_PATH,
   claudeSpawnParts,
   commandCandidates,
+  disableUserPlugin,
   evaluateClaudeToolkitPluginState,
   mutationDeadlineMs,
   mutationPollMs,

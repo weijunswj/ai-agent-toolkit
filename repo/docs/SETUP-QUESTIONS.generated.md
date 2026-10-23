@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 7 questions across 2 sections
+Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: ACX5-56M2-K2YE-CDJN
+Bank reference: 6WJD-DB4J-A8E6-M4Z4
 
 Quick index
 
@@ -13,9 +13,9 @@ Quick index
 1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
-1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
-1.6 Raise Codex's instruction limit - Recommended: A - Raise it
+1.5 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
+3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -74,7 +74,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -124,33 +124,7 @@ Quick index
 
 ---
 
-### 1.5 Merge rule-refresh PRs when the required checks pass
-
-**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed. No reported checks, any failed or pending check, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
-
-**Current:** Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**Verification:** verified
-
-**Recommended:** A - Turn on
-
-**Recommended outcome:** Merge rule-refresh pull requests once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**Why:** Refreshed rules reach the default branch without a manual step, while the checks, branch protection and the refresh-owned-files limit still decide every merge.
-
-**Choices:**
-
-- **A. Turn on** - Merge the rule-refresh pull request once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-- **B. Turn off** - Stop at the open rule-refresh pull request and report it for you to merge.
-- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
-
-**Selected:** A - Turn on
-
----
-
-### 1.6 Raise Codex's instruction limit
+### 1.5 Raise Codex's instruction limit
 
 **What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
 
@@ -181,7 +155,7 @@ Quick index
 
 ### 2.1 Codex Toolkit maintenance
 
-**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.
+**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.
 
 **Current:** Automatic Codex Toolkit maintenance is on.
 
@@ -195,20 +169,48 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.
-- **B. Turn off** - Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
+- **A. Turn on** - Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.
+- **B. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
 - **C. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
-**After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
+**After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
 **Selected:** A - Turn on
 
 ---
 
+
+## 3. Other coding apps
+
+### 3.1 Copy Toolkit's skills into Antigravity?
+
+**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+
+**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+
+**Verification:** state-derived
+
+**Recommended:** B - Keep current
+
+**Recommended outcome:** Leave Antigravity unchanged.
+
+**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+
+**Choices:**
+
+- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+
+**After applying:** Start a new Antigravity session to load changed skills.
+
+**Selected:** B - Keep current
+
+---
+
 Reply with the displayed bank reference and either:
 
-- `ACX5-56M2-K2YE-CDJN: all recommended`
-- only your changes, for example: `ACX5-56M2-K2YE-CDJN: 1.2=B, 1.3=B`
+- `6WJD-DB4J-A8E6-M4Z4: all recommended`
+- only your changes, for example: `6WJD-DB4J-A8E6-M4Z4: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -219,9 +221,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 8 questions across 3 sections
+Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: 98ZQ-WT46-8Y41-W0KX
+Bank reference: 874A-WVBY-AJ1W-T5R6
 
 Quick index
 
@@ -229,10 +231,11 @@ Quick index
 1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
-1.5 Merge rule-refresh PRs when the required checks pass - Recommended: A - Turn on
-1.6 Raise Codex's instruction limit - Recommended: A - Raise it
+1.5 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
+3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
+3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -291,7 +294,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -341,33 +344,7 @@ Quick index
 
 ---
 
-### 1.5 Merge rule-refresh PRs when the required checks pass
-
-**What this controls:** Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed. No reported checks, any failed or pending check, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.
-
-**Current:** Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**Verification:** verified
-
-**Recommended:** A - Turn on
-
-**Recommended outcome:** Merge rule-refresh pull requests once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**Why:** Refreshed rules reach the default branch without a manual step, while the checks, branch protection and the refresh-owned-files limit still decide every merge.
-
-**Choices:**
-
-- **A. Turn on** - Merge the rule-refresh pull request once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-- **B. Turn off** - Stop at the open rule-refresh pull request and report it for you to merge.
-- **C. Keep current** - Preserve this effective behavior: Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.
-
-**After applying:** This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.
-
-**Selected:** A - Turn on
-
----
-
-### 1.6 Raise Codex's instruction limit
+### 1.5 Raise Codex's instruction limit
 
 **What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
 
@@ -445,8 +422,59 @@ Quick index
 - **B. Show instructions only** - Make no native plugin change and report the manual Claude Code action required.
 - **C. Keep current** - Preserve the currently detected Claude Code plugin behavior and state.
 
-**After applying:** If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.
+**After applying:** If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.
 
 **Selected:** A - Install or refresh
+
+---
+
+### 3.2 Use Toolkit's recommended Claude Code settings?
+
+**What this controls:** Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.
+
+**Current:** The Claude Code user settings have not been read yet.
+
+**Verification:** unverified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Turn on the four recommended Claude Code settings.
+
+**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
+
+**Choices:**
+
+- **A. Turn on** - Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.
+- **B. Turn off** - Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.
+- **C. Keep current** - Preserve this effective behavior: The Claude Code user settings have not been read yet.
+
+**After applying:** Start a new Claude Code session so it reads the changed settings.
+
+**Selected:** A - Turn on
+
+---
+
+### 3.3 Copy Toolkit's skills into Antigravity?
+
+**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+
+**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+
+**Verification:** state-derived
+
+**Recommended:** B - Keep current
+
+**Recommended outcome:** Leave Antigravity unchanged.
+
+**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+
+**Choices:**
+
+- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+
+**After applying:** Start a new Antigravity session to load changed skills.
+
+**Selected:** B - Keep current
 
 ---

@@ -55,7 +55,7 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /run the host-aware orchestrator from the managed checkout when that checkout exists/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/);
   assert.doesNotMatch(readText('repo/docs/FOR_AI_AGENTS.md'), /POSIX|\$HOME\/\.ai-agent-toolkit/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Use `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` from the active repo only as bootstrap\/fallback/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Verification after managed setup must use the managed checkout verifier/);

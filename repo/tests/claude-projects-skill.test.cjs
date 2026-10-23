@@ -21,6 +21,11 @@ test('the Projects controller skill has one source file with a Version line', ()
   assert.doesNotMatch(text, /## Adding work to a repo/);
   assert.doesNotMatch(text, /Toolkit may absorb this framework later/);
   assert.match(text, /Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten/);
+  assert.match(text, /## Hourly nudge\n- Every project also runs an hourly stalled-work nudge, set up at project setup/);
+  assert.match(text, /It must be a recurring routine: one-shot self-reminders have died silently/);
+  assert.match(text, /This is the only resolve pass/);
+  assert.match(text, /\*\*Resolve only in the hourly nudge\.\*\*/);
+  assert.doesNotMatch(text, /Active-work check-in|resolves threads and coordinator posts that have been idle past/);
 });
 
 test('no plugin payload or skills folder reaches the Projects controller skill', () => {

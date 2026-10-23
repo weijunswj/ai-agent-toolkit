@@ -27,18 +27,39 @@ function copyFile(relPath, pluginRoot) {
   fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
 }
 
-function createPluginFixture(root, bridgeText) {
-  const pluginRoot = path.join(root, "plugin root with spaces & brackets [safe] (quoted 'path') $dollar `tick", 'ai-agent-toolkit');
-  copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
-  copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
+function writeSourceHooks(pluginRoot) {
   writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
       SessionStart: [{
         matcher: 'startup|resume|clear|compact',
         hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
+      }],
+      PreToolUse: [{
+        matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
+        hooks: [{ type: 'command', command: setup.sourceHelperHookCommand() }]
       }]
     }
   }, null, 2)}\n`);
+}
+
+// The installed commandWindows for one hook, with ${PLUGIN_ROOT} replaced the way Codex does.
+function installedWindowsCommand(pluginRoot, event = 'SessionStart') {
+  const hooks = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
+  return hooks.hooks[event][0].hooks[0].commandWindows.split('${PLUGIN_ROOT}').join(pluginRoot.split(path.sep).join('/'));
+}
+
+function withoutCurrentFolderGuard(env) {
+  const result = { ...env };
+  for (const key of Object.keys(result)) if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete result[key];
+  return result;
+}
+
+function createPluginFixture(root, bridgeText) {
+  const pluginRoot = path.join(root, "plugin root with spaces & brackets [safe] (quoted 'path')", 'ai-agent-toolkit');
+  copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
+  copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
+  copyFile(setup.HELPER_HOOK_POWERSHELL_REL_PATH, pluginRoot);
+  writeSourceHooks(pluginRoot);
   writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), bridgeText);
   setup.prepareInstalledSessionStart(pluginRoot);
   return pluginRoot;
@@ -51,10 +72,10 @@ function createRealBridgePluginFixture(root) {
     setup.SESSION_START_POWERSHELL_REL_PATH,
     'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/setup-codex-toolkit-plugin.cjs',
-    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
-    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
+    'repo/scripts/toolkit-skill-copies.cjs',
+    'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',
     'repo/scripts/toolkit-global-rules.cjs',
@@ -64,14 +85,7 @@ function createRealBridgePluginFixture(root) {
     'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
     'repo/contracts/toolkit-local-bridge/version.json',
   ]) copyFile(relPath, pluginRoot);
-  writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [{
-        matcher: 'startup|resume|clear|compact',
-        hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
-      }]
-    }
-  }, null, 2)}\n`);
+  writeSourceHooks(pluginRoot);
   setup.prepareInstalledSessionStart(pluginRoot);
   return pluginRoot;
 }
@@ -81,10 +95,10 @@ function runWindowsHook(pluginRoot, input = '', extraEnv = {}) {
     process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows',
     'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
   );
-  const command = setup.windowsSessionStartCommand(powershellPath);
+  const command = installedWindowsCommand(pluginRoot);
   return spawnSync(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', command], {
     cwd: repoRoot,
-    env: { ...process.env, PATH: '', PLUGIN_ROOT: pluginRoot, ...extraEnv },
+    env: { ...process.env, PATH: '', ...extraEnv },
     input,
     encoding: 'utf8',
     timeout: 30000,
@@ -216,11 +230,45 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
   assert.equal(result.stderr, '');
 });
 
-test('Windows installed command uses a direct script-file boundary without nested command text', () => {
-  const command = setup.windowsSessionStartCommand("C:\\Program Files\\Power's $hell `tick\\powershell.exe");
-  assert.equal(command, "& 'C:\\Program Files\\Power''s $hell `tick\\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT/repo/scripts/toolkit-codex-session-start.ps1\"");
-  assert.doesNotMatch(command, /\$\{PLUGIN_ROOT\}|(?:^|\s)-Command(?:\s|$)|&\s*\{/i);
+test('Windows installed commands use a full PowerShell path and -File with no nested command text', () => {
+  const command = setup.windowsSessionStartCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"');
+  assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
+  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"$/);
+  assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
+});
+
+test('Windows hook commands never run a planted node or powershell from the opened folder, under cmd and PowerShell', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const pluginRoot = createPluginFixture(root, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "exports.run = () => { console.log('real session-start; stdin=' + fs.readFileSync(0, 'utf8')); return { status: 0 }; };",
+    '',
+  ].join('\n'));
+  writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs'),
+    "'use strict';\nlet input = '';\nprocess.stdin.on('data', (chunk) => { input += chunk; }).on('end', () => { process.stdout.write(JSON.stringify({ real_helper_hook: true, input: JSON.parse(input) })); });\n");
+  const opened = path.join(root, 'opened folder');
+  for (const name of ['node.bat', 'node.cmd', 'powershell.bat', 'powershell.cmd']) writeFile(path.join(opened, name), '@echo planted>"%~dp0planted-marker.txt"\r\n');
+  const powershellPath = setup.defaultWindowsPowerShellPath();
+  const env = withoutCurrentFolderGuard(process.env);
+  const hookInput = JSON.stringify({ tool_name: 'Agent', tool_input: { note: 'caf\u00e9' } });
+  for (const [shell, exe, args] of [
+    ['cmd', process.env.ComSpec, (command) => ['/C', command]],
+    ['powershell', powershellPath, (command) => ['-NoProfile', '-NonInteractive', '-Command', command]],
+  ]) {
+    const session = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'SessionStart')), { cwd: opened, env, input: '{"source":"startup"}', encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
+    assert.equal(session.status, 0, `${shell}: ${session.stderr}`);
+    assert.match(session.stdout, /real session-start; stdin=\{"source":"startup"\}/, shell);
+    const helper = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'PreToolUse')), { cwd: opened, env, input: hookInput, encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
+    assert.equal(helper.status, 0, `${shell}: ${helper.stderr}`);
+    assert.deepEqual(JSON.parse(helper.stdout), { real_helper_hook: true, input: JSON.parse(hookInput) }, shell);
+  }
+  assert.equal(fs.existsSync(path.join(opened, 'planted-marker.txt')), false, 'no planted file ran');
+  // Control: a bare node under cmd.exe in that folder does run the planted file.
+  spawnSync(process.env.ComSpec, ['/C', 'node -v'], { cwd: opened, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
+  assert.equal(fs.existsSync(path.join(opened, 'planted-marker.txt')), true, 'the control proves the plant would run for a bare name');
 });
 
 test('Codex Desktop Windows host shape reaches the wrapper and Node launcher without file association', { skip: process.platform !== 'win32' }, () => {

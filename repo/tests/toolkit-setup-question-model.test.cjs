@@ -13,9 +13,9 @@ const expectedCodexRows = [
   ['automatic-updates', 'Automatic updates'],
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
-  ['refresh-pr-auto-merge', 'Merge rule-refresh PRs when the required checks pass'],
   ['codex-instruction-limit', "Raise Codex's instruction limit"],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
+  ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
 ];
 
 function assertGeneratedDocumentationEqual(actual, expected) {
@@ -114,16 +114,23 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   const generated = core.renderSetupQuestionDocumentation(rows);
   const generatedFile = fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8');
   assertGeneratedDocumentationEqual(generatedFile, core.renderSetupQuestionDocumentation());
+  // The bank (markdown and terminal) is compact: title, what is true now, the recommended choice and
+  // its effect, and every choice label. The full text lives in the generated reference and --explain.
   for (const row of rows) {
     for (const output of [markdown, terminal, generated]) {
-      assert.match(output, new RegExp(row.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.ok(output.includes(row.whatThisControls));
-      assert.ok(output.includes(row.recommendation.reason));
-      for (const choice of row.choices) assert.ok(output.includes(choice.consequence));
+      assert.ok(output.includes(row.title), row.id);
+      assert.ok(output.includes(row.current), row.id);
+      assert.ok(output.includes(row.recommended_outcome), row.id);
+      for (const choice of row.choices) assert.ok(output.includes(`${choice.presentation_ref}. ${choice.label}`), `${row.id} ${choice.value}`);
     }
+    assert.ok(generated.includes(row.whatThisControls));
+    assert.ok(generated.includes(row.recommendation.reason));
+    for (const choice of row.choices) assert.ok(generated.includes(choice.consequence));
   }
-  assert.match(markdown, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
-  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nVerification:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  A\. /);
+  assert.doesNotMatch(markdown, /\*\*What this controls:\*\*/);
+  assert.match(markdown, /^\| # \| Question \| Now \| Recommended \| Other choices \|$/m);
+  assert.match(terminal, /\n1\.1 [^\n]+\n  Now: [^\n]+\n  Recommended: [A-Z]\. /);
+  assert.match(generated, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
   const plan = core.setupPlan({ host: 'codex', setupChoices: core.parseArgs(['--plan']).setupChoices, questionBank: rows });
   assert.deepEqual(plan.question_bank, rows);
   const json = JSON.parse(JSON.stringify(plan));
@@ -293,9 +300,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 7);
+  assert.equal(codex[0].presentation.total_visible_question_count, 6);
   assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1']);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
@@ -304,22 +311,25 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
   assert.equal(claude[0].presentation.total_visible_question_count, 8);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1', '3.1']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1', '3.2']);
 });
 
-test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
+test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
   const rows = allRows();
   const rendered = core.renderSetupQuestionBank(rows);
-  const quickIndex = rendered.slice(rendered.indexOf('Quick index'), rendered.indexOf('Review every visible choice'));
+  const detailed = core.renderSetupQuestionDocumentation(rows, rows);
+  assert.equal(rendered.includes('### '), false, 'the bank shows the compact table, not the full text');
+  assert.match(rendered, /For the full text of a question, say "explain 1\.5"/);
   const references = rows.map((row) => row.presentation.question_ref);
   assert.equal(new Set(references).size, rows.length);
   let previousIndex = -1;
   for (const row of rows) {
-    const quickLine = `${row.presentation.question_ref} ${row.title} - Recommended: ${row.presentation.recommended_choice_ref}`;
-    const quickPosition = quickIndex.indexOf(quickLine);
-    assert.ok(quickPosition > previousIndex, row.id);
-    previousIndex = quickPosition;
-    assert.match(rendered, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title}`));
+    const tableLine = `| ${row.presentation.question_ref} | ${row.title} | `;
+    const tablePosition = rendered.indexOf(tableLine);
+    assert.ok(tablePosition > previousIndex, row.id);
+    previousIndex = tablePosition;
+    assert.ok(rendered.includes(`${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}: `), row.id);
+    assert.match(detailed, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title.replace(/[?]/g, '\\?')}`));
     assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
     assert.equal(
       row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
@@ -331,9 +341,9 @@ test('quick index, detailed bank, recommendations, and choices share one indexed
 
 test('conditional questions renumber without gaps and change the bound bank identity', () => {
   const all = allRows();
-  const withoutConditional = all.filter((row) => row.id !== 'refresh-pr-auto-merge');
+  const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -394,7 +404,7 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
   assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
-    'update-source', 'update-reports', 'report-retention', 'refresh-pr-auto-merge', 'codex-instruction-limit', 'codex-toolkit-maintenance',
+    'update-source', 'update-reports', 'report-retention', 'codex-instruction-limit', 'codex-toolkit-maintenance',
   ]);
   assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
     'managed-checkout-path', 'report-retention-days',
@@ -428,7 +438,7 @@ test('bank reference covers host, order, recommendations and approval-visible se
   const payload = core.questionBankApprovalPayload(rows);
   assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
   assert.equal(payload.host, 'codex');
-  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance']);
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
 
@@ -489,7 +499,7 @@ test('TTY all recommended and changed-only commands execute after exactly one co
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
-  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
@@ -527,25 +537,13 @@ test('TTY malformed concise input can be corrected and secondary details are col
   assert.equal(retentionJourney.prompts.filter((prompt) => /Report retention duration in days/.test(prompt)).length, 2);
 });
 
-test('the rule-refresh PR merge question is recommended on, keeps the stored choice and passes the bridge flag', () => {
+test('the removed rule-refresh PR merge question and its flags are gone', () => {
   const current = stateWithManaged(managedState());
-  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), current).find((spec) => spec.id === 'refresh-pr-auto-merge');
-  assert.equal(row.title, 'Merge rule-refresh PRs when the required checks pass');
-  assert.equal(row.section, 'Updates and reports');
-  assert.equal(row.recommended, 'enable');
-  assert.deepEqual(row.choices.map((choice) => choice.label), ['Turn on', 'Turn off', 'Keep current']);
-  assert.match(row.whatThisControls, /admin bypass and force-push are never used/);
-  assert.match(row.whatThisControls, /at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed/);
-  assert.match(row.whatThisControls, /No reported checks, any failed or pending check/);
-  assert.equal(row.currentState.verification, 'defaulted', 'an unknown stored choice is not claimed as verified');
-  assert.match(row.current, /stop at the open PR/);
-  for (const [flag, expected] of [['--enable-refresh-pr-auto-merge', '--enable-refresh-pr-auto-merge'], ['--disable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge']]) {
-    const args = core.parseArgs(['--plan', flag]);
-    const plan = JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: args.setupChoices }));
-    assert.ok(plan.includes(expected), flag);
+  const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), current);
+  assert.equal(rows.some((spec) => spec.id === 'refresh-pr-auto-merge' || /rule-refresh/i.test(spec.title)), false);
+  for (const flag of ['--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge', '--keep-refresh-pr-auto-merge']) {
+    assert.throws(() => core.parseArgs(['--plan', flag]), /Unknown|unsupported|argument/i, flag);
   }
-  const kept = core.parseArgs(['--plan', '--keep-refresh-pr-auto-merge']);
-  assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('refresh-pr-auto-merge'), false);
 });
 
 test('the Codex instruction limit question is recommended on, explains the edit and passes the bridge flag', () => {
@@ -566,4 +564,20 @@ test('the Codex instruction limit question is recommended on, explains the edit 
   }
   const kept = core.parseArgs(['--plan', '--keep-codex-doc-limit']);
   assert.equal(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: kept.setupChoices })).includes('codex-doc-limit'), false);
+});
+
+test('explain shows the full text of one question, numbered as in the whole bank', () => {
+  const rows = allRows();
+  const text = core.renderQuestionRows(rows, '1.2');
+  assert.match(text, /^## 1\. Updates and reports\n\n### 1\.2 Automatic updates\n/);
+  assert.match(text, /\*\*What this controls:\*\*/);
+  assert.equal((text.match(/^### /gm) || []).length, 1);
+  assert.equal(core.renderQuestionRows(rows, '9.9'), '');
+  assert.equal(core.parseArgs(['--explain', '1.2']).explain, '1.2');
+  assert.equal(core.parseArgs(['--explain=1.2']).plan, true);
+});
+
+test('an empty --explain is refused', () => {
+  assert.throws(() => core.parseArgs(['--explain']), /--explain needs a question number/);
+  assert.throws(() => core.parseArgs(['--explain=']), /--explain needs a question number/);
 });

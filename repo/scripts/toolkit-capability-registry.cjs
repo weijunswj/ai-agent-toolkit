@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const REGISTRY_SCHEMA = 'toolkit.repository-capability-registry.v2';
 const IDENTITY_CONTRACT = 'toolkit.repository-identity.v1';
@@ -1016,7 +1017,7 @@ function assertNoCallerIdentityOverride(options) {
 function runGit(cwd, args, options = {}) {
   let result;
   try {
-    result = childProcess.spawnSync('git', ['-C', cwd, ...args], {
+    result = childProcess.spawnSync(resolvePathExecutable('git'), ['-C', cwd, ...args], {
       encoding: 'utf8',
       timeout: 3000,
       maxBuffer: 65536,

@@ -636,7 +636,7 @@ test('no-leak: a value typed where a name, command, program or option belongs is
 test('the editor starts by its full path, so a program in the working folder is never picked up', () => {
   const { editorCommand } = require('../scripts/toolkit-env.cjs');
   assert.deepEqual(editorCommand('C:\\x\\f.txt', 'win32', { SystemRoot: 'C:\\Windows' }), ['C:\\Windows\\System32\\notepad.exe', ['C:\\x\\f.txt']]);
-  assert.deepEqual(editorCommand('/x/f.txt', 'linux', {}), ['xdg-open', ['/x/f.txt']]);
+  assert.throws(() => editorCommand('/x/f.txt', 'linux', {}), /supports Windows only; this computer runs linux/);
 });
 
 test('the global rules keep every clause and point keys and tokens at toolkit-env', () => {
@@ -650,10 +650,11 @@ test('the global rules keep every clause and point keys and tokens at toolkit-en
 test('the real wiring takes the home folder from the environment it is given', (t) => {
   const home = tempHome(t);
   const environment = { USERPROFILE: home, HOME: home, SystemRoot: process.env.SystemRoot || 'C:\\Windows' };
-  const env = ToolkitEnv.forUser({ environment, toolkitRoot: ROOT });
+  assert.equal(ToolkitEnv.forUser({ environment, toolkitRoot: ROOT, platform: 'linux' }).health().state, 'skipped', 'no key store on a computer Toolkit does not support');
+  const env = ToolkitEnv.forUser({ environment, toolkitRoot: ROOT, platform: 'win32' });
   assert.equal(env.health().state, 'not-set-up');
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { coolify: { type: 'http', url: 'https://x.example.test', headersHelper: 'node "C:/h/codex-env-bearer.cjs" X1_TEST_COOLIFY_TOKEN' } } }));
-  assert.equal(ToolkitEnv.forUser({ environment, toolkitRoot: ROOT }).health().state, 'action');
+  assert.equal(ToolkitEnv.forUser({ environment, toolkitRoot: ROOT, platform: 'win32' }).health().state, 'action');
 });
 
 test('no-leak: import and retire report a value on its own .env line by line number only', async (t) => {

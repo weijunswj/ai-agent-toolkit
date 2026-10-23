@@ -155,6 +155,23 @@ test('in governed work the matching Toolkit helpers are allowed and other launch
   assert.match(reason(forced), /CLAUDE_CODE_SUBAGENT_MODEL/);
 });
 
+test('a helper file rewritten after the session started is refused until a new session', t => {
+  const f = fixture(t);
+  const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');
+  const transcript = path.join(f.configDir, 'session.jsonl');
+  fs.writeFileSync(transcript, '{}\n');
+  const started = fs.statSync(transcript).birthtimeMs;
+  if (!started) return t.skip('this file system reports no creation time');
+  const input = { transcript_path: transcript, tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } };
+  fs.utimesSync(file, new Date(started - 60000), new Date(started - 60000));
+  assert.deepEqual(f.decide(input), {}, 'a file older than the session is fine');
+  fs.utimesSync(file, new Date(started + 60000), new Date(started + 60000));
+  const output = f.decide(input);
+  assert.ok(denied(output));
+  assert.match(reason(output), /Helper settings changed after this session started\. Start a new session to use them\./);
+  assert.deepEqual(f.decide({ tool_input: input.tool_input }), {}, 'without a transcript the check makes no claim');
+});
+
 test('a helper definition that does not byte-match the selected-stack rendering is refused, including a project override', t => {
   const f = fixture(t);
   const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');

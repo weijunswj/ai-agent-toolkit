@@ -87,19 +87,6 @@ function fixtureBoundaryViolations(boundary, product) {
   return violations;
 }
 
-function assertWindowsHookRecoveryGuidance(text, label) {
-  assert.match(text, /\.sh/, label);
-  assert.match(text, /Windows/i, label);
-  assert.match(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, label);
-  assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, label);
-  assert.match(text, /C:\\WINDOWS\\system32\\bash\.exe/, label);
-  assert.match(text, /C:\\Program Files\\Git\\(?:bin|usr\\bin)\\bash\.exe|Windows Git Bash/i, label);
-  assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, label);
-  assert.match(text, /npx skills add n8n-io\/skills/, label);
-  assert.match(text, /using-n8n-skills/, label);
-  assert.match(text, /repair (?:fails|cannot|failed)|cannot be repaired/i, label);
-}
-
 function isInsideRoot(rootRealPath, realPath) {
   const relative = path.relative(rootRealPath, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -438,25 +425,6 @@ test('toolkit skill routing stays routing-only', () => {
   assert.doesNotMatch(routing, /`\$skill-name`/);
 });
 
-test('narrow n8n plugin repair intents route without capturing workspace or live n8n work', () => {
-  const routing = readText(routingPartial);
-  const source = readText(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'));
-
-  for (const text of [routing, source]) {
-    assert.match(text, /n8n-skills@n8n-io/);
-    assert.match(text, /\.sh hooks? opening|\.sh` hooks opening/i);
-    assert.match(text, /repo-local n8n helper|n8n-workflows\/scripts/i);
-    assert.match(text, /live n8n|Docker|server/i);
-  }
-  assert.match(source, /repair n8n plugin/);
-  assert.match(source, /fix n8n skill hooks/);
-  assert.match(source, /repair the n8n Skills plugin/);
-  assert.match(source, /Claude Code plugin/);
-  assert.match(source, /Toolkit source or canonical skill/);
-  assert.match(source, /smallest numbered choice/);
-  assert.match(source, /Do not load every n8n or MCP skill/);
-});
-
 test('markdown docs use markdown numbered steps instead of HTML or compressed step lists', () => {
   const files = markdownFilesIn(['README.md', 'repo', 'skills']);
 
@@ -529,7 +497,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /For normal human setup, keep the journey short/);
   assert.match(howToUse, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
   assert.match(howToUse, /manually approve the startup hook when Codex prompts/);
-  assert.match(howToUse, /Codex uses `node "%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main`/);
+  assert.match(howToUse, /Codex uses `node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main`/);
   assert.match(howToUse, /Claude Code appends `--host claude-code`/);
   assert.match(howToUse, /active repo only as bootstrap\/fallback|active repo.*bootstrap\/fallback/i);
   assert.match(howToUse, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);
@@ -613,7 +581,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   );
 });
 
-test('n8n environment setup plugin flow stays Windows-safe before hook approval', () => {
+test('root docs link n8n environment setup without marketplace-only plugin install', () => {
   const rootDocs = [
     'README.md',
     'repo/docs/HOW-TO-USE.md'
@@ -624,19 +592,6 @@ test('n8n environment setup plugin flow stays Windows-safe before hook approval'
     assert.match(text, /n8n Environment Setup|skills\/n8n-environment-setup/i, relPath);
     assert.doesNotMatch(text, /codex plugin marketplace add n8n-io\/skills/, relPath);
     assert.doesNotMatch(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
-  }
-
-  const paths = [
-    'skills/n8n-environment-setup/SKILL.md'
-  ];
-
-  for (const relPath of paths) {
-    const text = readText(path.join(repoRoot, relPath));
-    assert.match(text, /bare `?\.sh`? hooks?/i, relPath);
-    assert.match(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
-    assert.match(text, /--verify-output/, relPath);
-    assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, relPath);
-    assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, relPath);
   }
 });
 

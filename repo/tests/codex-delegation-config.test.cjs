@@ -358,7 +358,7 @@ test('injected editor proposal preserves child tables and supports exact backup 
   assert.match(fs.readFileSync(filePath, 'utf8'), /# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
   assert.ok(fs.existsSync(result.backup_metadata_path));
   assert.match(result.restore_commands.powershell, /restore-codex-delegation-backup/);
-  assert.match(result.restore_commands.posix, /restore-codex-delegation-backup/);
+  assert.equal(Object.hasOwn(result.restore_commands, 'posix'), false);
   config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
   assert.deepEqual(fs.readFileSync(filePath), original);
   if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o640);

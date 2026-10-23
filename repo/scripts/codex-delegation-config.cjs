@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '3.6.0';
+const TOOLKIT_CLIENT_VERSION = '3.7.0';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -796,10 +796,6 @@ function quotePowerShellArgument(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function quotePosixArgument(value) {
-  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
-}
-
 function verifiedSetupScriptPath(setupScriptPath = path.join(__dirname, 'setup-toolkit.cjs')) {
   const resolved = path.resolve(setupScriptPath);
   let stat;
@@ -813,7 +809,6 @@ function restoreCommands(metadataPath, setupScriptPath) {
   return {
     setup_script_path: scriptPath,
     powershell: `node ${quotePowerShellArgument(scriptPath)} ${RESTORE_FLAG} ${quotePowerShellArgument(path.resolve(metadataPath))}`,
-    posix: `node ${quotePosixArgument(scriptPath)} ${RESTORE_FLAG} ${quotePosixArgument(path.resolve(metadataPath))}`,
   };
 }
 

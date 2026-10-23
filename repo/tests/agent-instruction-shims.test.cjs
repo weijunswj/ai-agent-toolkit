@@ -237,20 +237,16 @@ test('an authorised in-gate refresh continues with the exact one-time notice ins
   assert.match(controller, /continues without a restart-choice question/);
 });
 
-test('a rules refresh is carried to a pull request and merges only under the owner\'s stored setup choice', () => {
+test('a rules refresh is carried to a pull request and always stops there for the owner', () => {
   const skill = readText('skills/repository-agent-rules/SKILL.md');
   const flow = skill.slice(skill.indexOf('**Carry the refresh to a pull request.**'), skill.indexOf('**For a standalone install'));
   assert.ok(flow.length > 0);
   assert.match(flow, /Stage only the files this refresh wrote/);
   assert.match(flow, /never stage dirty, unrelated or backup files/);
   assert.match(flow, /Watch every check on the pull request's exact head/);
-  assert.match(flow, /toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/);
-  assert.match(flow, /Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed/);
-  assert.match(flow, /zero checks never counts as passed/);
-  assert.match(flow, /This skill grants no merge authority of its own/);
-  assert.match(flow, /Never set or change that choice yourself; only setup, with the owner's answer, does/);
-  for (const stop of [/stored choice is off, missing or cannot be read/, /any check on the exact head fails, or is still pending when the watch ends/,
-    /review rules or branch protection block the merge/, /any file this refresh does not own/, /no GitHub remote/]) assert.match(flow, stop);
+  assert.match(flow, /then stop at the open pull request: report its link, head and check results for the owner to merge\. This skill never merges\./);
+  assert.match(flow, /no GitHub remote/);
+  assert.doesNotMatch(skill, /refresh_pr_auto_merge|Merge only when/);
   assert.match(skill, /Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write/);
 });
 

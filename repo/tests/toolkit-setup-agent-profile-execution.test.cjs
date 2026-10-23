@@ -37,11 +37,11 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   const fake = recordingClaude(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions',
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-settings', 'keep',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Recommended:\*\* A - Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
-  assert.match(result.stdout, /\*\*Selected:\*\* A - Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
+  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.: /);
+  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
@@ -64,7 +64,7 @@ test('broader-native execution reports Claude Code\'s own limit, not a one-layer
   const fake = recordingClaude(root);
   const env = isolatedHomeEnv(root);
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions'];
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-settings', 'keep'];
   const settings = path.join(root, '.claude', 'settings.json');
   assert.equal(run([...base, '--claude-topology', 'root-only'], { env, timeout: 300000 }).status, 0);
   assert.equal(fs.existsSync(settings), true);
@@ -75,6 +75,29 @@ test('broader-native execution reports Claude Code\'s own limit, not a one-layer
   assert.doesNotMatch(broader.stdout, /Normal folders: one layer/);
   assert.match(broader.stdout, /Normal folders: Claude Code's own limit; Toolkit does not refuse nested launches\. CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies\./);
   assert.equal(fs.existsSync(settings), false, 'Toolkit-created settings file is removed');
+});
+
+test('the recommended Claude Code settings are written to the temporary Claude settings and turned off again', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fake = recordingClaude(root);
+  const env = isolatedHomeEnv(root);
+  const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
+  const settingsPath = path.join(root, '.claude', 'settings.json');
+  const on = run(base, { env, timeout: 300000 });
+  assert.equal(on.status, 0, on.stderr || on.stdout);
+  assert.match(on.stdout, /Claude Code settings this run: No AI attribution in commits and pull requests: on \(set by Toolkit\)\./);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), {
+    attribution: false,
+    crossSessionInbound: 'accept',
+    switchModelsOnFlag: false,
+    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } }
+  });
+  clearLogs(setupRepo);
+  const off = run([...base, '--claude-settings', 'disable'], { env, timeout: 300000 });
+  assert.equal(off.status, 0, off.stderr || off.stdout);
+  assert.equal(fs.existsSync(settingsPath), false, 'the file Toolkit created is removed when nothing else is left');
 });
 
 test('the retired Toolkit direct topology and capacity flags fail before any setup write', () => {
@@ -101,7 +124,7 @@ test('a piped toolkit-direct answer is not a topology choice and writes nothing'
   const fake = recordingClaude(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command,
-  ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'enable', 'default', 'enable', 'toolkit-direct', 'instructions', ''].join('\n') });
+  ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
   assert.notEqual(result.status, 0, result.stdout);
   assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: root-only, broader-native, keep/);
   assert.equal(fs.existsSync(control.profilePath('claude-code', { root: profileRootOf(root) })), false);
@@ -128,7 +151,7 @@ test('keep current resolves a stored direct profile to root-only without probing
   assert.equal(kept.status, 24, kept.stderr || kept.stdout);
   assert.match(kept.stdout, /Install check: action required\n/);
   assert.match(kept.stdout, /Claude Code depth setting: Root-only is selected, but CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings\./);
-  assert.match(kept.stdout, /\*\*Selected:\*\* C - Keep current/);
+  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: C\. Keep current/);
   assert.match(kept.stdout, /Selected topology: root-only/);
   assert.equal(sessions(fake).some((entry) => entry.args.includes('--print')), false);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.ROOT_ONLY);
