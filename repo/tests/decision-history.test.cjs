@@ -212,7 +212,7 @@ test('the G0 history step is routed from the rules, both playbook indexes, the P
   assert.ok(fs.existsSync(path.join(root, playbook)));
   assert.match(read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/INDEX.md'), /Before G0 plans a programme child[^\n]*\(decision-trace\.md\)/);
   assert.ok(read('repo/docs/agent-playbooks/INDEX.md').includes(`Read: \`${playbook}\`.`));
-  assert.match(read('repo/contracts/agent-rules/toolkit-governed-rules.md'), /Decision traces:[^\n]*Parent and child traces never mix[^\n]*latest comment wins[^\n]*G0 reads both traces[^\n]*\(decision-trace playbook\)/);
+  assert.match(read('repo/contracts/agent-rules/toolkit-governed-rules.md'), /Decision traces:[^\n]*parent and child traces never mix[^\n]*latest comment wins[^\n]*G0 reads both traces[^\n]*\(decision-trace playbook\)/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Every G0 brief for a programme child says to read the parent's and the child's decision traces first/);
   assert.match(read('repo/CONTROLLER.md'), /live-scope summary \(decision-trace playbook\) is the spec only once the owner confirms it; record that as a `SCOPE-CONFIRMED` comment/);
   const text = read(playbook);
