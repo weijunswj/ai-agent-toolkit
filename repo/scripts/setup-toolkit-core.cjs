@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
+const { runtimeLabel } = require('./codex-delegation-state.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
@@ -486,7 +487,7 @@ function setupPlan(options = {}) {
           ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
           : 'Apply the selected Claude-only topology and admission profile as the final fallible setup operation',
         commands: host === 'codex' && ['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choices.codexHelperCapacity)
-          ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
+          ? [`manage only the Toolkit-owned ${runtimeLabel(options.codexRuntime || RUNTIMES.UNKNOWN)} helper-capacity block in ${delegation.codexConfigPath()}`]
           : (host === 'claude-code' ? [
               ...(choices.claudeTopology !== 'keep' ? ['write only the Claude Code profile under ~/.ai-agent-toolkit/agent-control/profiles/claude-code.json'] : []),
               ...(claudeSubagentDepthChoice(options) === 'enable' ? ['set the Toolkit-owned env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1" in the Claude Code user settings unless you set that key yourself'] : []),
@@ -1058,7 +1059,7 @@ function printDelegationPreview(preview) {
   console.log('');
   console.log('# Codex helper-agent config preview');
   console.log(`Codex config path: ${preview.config_path}`);
-  console.log(`Effective runtime: ${preview.runtime}`);
+  console.log(`Effective runtime: ${runtimeLabel(preview.runtime)}`);
   console.log(`Before semantics: ${preview.before_semantics || preview.detail}`);
   console.log(`After semantics: ${preview.detail}`);
   console.log(`Requested helper agents: ${preview.helper_count}`);
@@ -1095,7 +1096,7 @@ function printDelegationRemovalPreview(preview) {
   console.log('');
   console.log('# Codex helper-limit removal preview');
   console.log(`Codex config path: ${preview.config_path}`);
-  console.log(`Effective runtime: ${preview.runtime}`);
+  console.log(`Effective runtime: ${runtimeLabel(preview.runtime)}`);
   console.log(`Before semantics: ${preview.before_semantics || preview.detail}`);
   console.log(`After semantics: ${preview.detail}`);
   console.log(`Exact affected keys: ${(preview.affected_keys || []).join(', ')}`);
@@ -1149,10 +1150,10 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
     return null;
   }
   if (current.delegation.status === 'migration-required' && choice !== 'migrate') {
-    throw new Error('Selected helper setting remains unapplied. The exact PR #237 legacy setting can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
+    throw new Error('Selected helper setting remains unapplied. The exact old Toolkit helper block can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
   }
   if (choice === 'migrate' && (current.runtime.runtime !== RUNTIMES.V2 || current.delegation.status !== 'migration-required')) {
-    throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed PR #237 legacy setting is available to migrate; choose an ordinary helper setting or `keep`.');
+    throw new Error('Selected helper setting remains unapplied. No exact old Toolkit helper block is available to migrate; choose an ordinary helper setting or `keep`.');
   }
   const helperCount = selectedHelperCount(args, current);
   const previewOptions = {
@@ -2985,7 +2986,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   }
   if (!nonTtyAnswerPlan && args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
-    console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
+    console.log(`- Total Codex V2 (multi_agent_v2) session threads including the main agent: ${args.codexHelperCount + 1}`);
     console.log(`- RAM-risk approval for more than one helper: ${args.codexHelperCount > 1 ? (args.approveHighHelperCapacity ? 'approved' : 'missing') : 'not required'}`);
   }
   return {
@@ -3736,7 +3737,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log('');
   if (args.host === 'codex') {
   console.log('## Codex helper agents');
-  console.log(`Codex helper-agent runtime: ${unknown(current?.runtime?.runtime || delegation.runtime)}`);
+  console.log(`Codex helper-agent runtime: ${unknown(runtimeLabel(current?.runtime?.runtime || delegation.runtime))}`);
   console.log(`Runtime detection: ${unknown(current?.runtime?.detector)}`);
   console.log(`Normal helper capacity: ${Number.isSafeInteger(delegation.helper_count)
     ? `${delegation.helper_count} helper agent${delegation.helper_count === 1 ? '' : 's'}; ${delegation.total_threads || delegation.helper_count + 1} total session threads including the main agent (the root counts toward the total)`
@@ -3758,7 +3759,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Helper-capacity outcome this run: ${delegationOutcomeSummary(args, delegation)}`);
   console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
   if (delegation.load_check) console.log(delegation.load_check.detail);
-  console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
+  console.log(`Old Toolkit helper block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
   console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
   console.log('Codex config path: <Codex user configuration>');

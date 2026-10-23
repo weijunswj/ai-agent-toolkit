@@ -72,7 +72,9 @@ class CodexConfigLoadCheck {
 }
 
 function probeErrorVerdict(error) {
-  return CONFIG_REFUSAL.test(String(error?.message || error || '')) ? { status: 'rejected', detail: screenedHostError(error) } : { status: 'unverified', detail: UNVERIFIED };
+  const message = String(error?.message || error || '');
+  if (/^app-server initialize failed/.test(message)) return { status: 'unverified', detail: UNVERIFIED };
+  return CONFIG_REFUSAL.test(message) ? { status: 'rejected', detail: screenedHostError(error) } : { status: 'unverified', detail: UNVERIFIED };
 }
 
 async function probeAppServer(codexHome, explicit) {
