@@ -136,6 +136,12 @@ function verifySessionStartHook(hooksPath) {
   if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
   }
+  // The turn-end hook is only the programme checkpoint, which never blocks a turn.
+  const stopHooks = (Array.isArray(hooks?.hooks?.Stop) ? hooks.hooks.Stop : []).flatMap((group) => group?.hooks || []);
+  if (stopHooks.length !== 1 || stopHooks[0]?.type !== 'command'
+    || stopHooks[0].command !== 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"') {
+    errors.push('Stop must have exactly one hook, the programme checkpoint through CLAUDE_PLUGIN_ROOT');
+  }
   return errors;
 }
 
@@ -266,6 +272,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/agent-rules/n8n-safety-router-adapter.md",false],
     ["repo/CONTROLLER.md",false],
     ["repo/ARCHITECTURE.md",false],
+    ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
+    ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));

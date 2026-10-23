@@ -37,6 +37,9 @@ function writeSourceHooks(pluginRoot) {
       PreToolUse: [{
         matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
         hooks: [{ type: 'command', command: setup.sourceHelperHookCommand() }]
+      }],
+      Stop: [{
+        hooks: [{ type: 'command', command: setup.sourceCheckpointHookCommand(), timeout: setup.CHECKPOINT_HOOK_TIMEOUT_SECONDS }]
       }]
     }
   }, null, 2)}\n`);
@@ -59,6 +62,7 @@ function createPluginFixture(root, bridgeText) {
   copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
   copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
   copyFile(setup.HELPER_HOOK_POWERSHELL_REL_PATH, pluginRoot);
+  copyFile(setup.CHECKPOINT_HOOK_POWERSHELL_REL_PATH, pluginRoot);
   writeSourceHooks(pluginRoot);
   writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), bridgeText);
   setup.prepareInstalledSessionStart(pluginRoot);
@@ -236,6 +240,7 @@ test('Windows installed commands use a full PowerShell path and -File with no ne
   assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
   assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"$/);
+  assert.match(setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1"$/);
   assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
 });
 
@@ -249,6 +254,10 @@ test('Windows hook commands never run a planted node or powershell from the open
   ].join('\n'));
   writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs'),
     "'use strict';\nlet input = '';\nprocess.stdin.on('data', (chunk) => { input += chunk; }).on('end', () => { process.stdout.write(JSON.stringify({ real_helper_hook: true, input: JSON.parse(input) })); });\n");
+  // The turn-end checkpoint stand-in records its input in a file: the real launcher prints nothing.
+  const checkpointMarker = path.join(root, 'checkpoint-input.txt');
+  writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-programme-checkpoint-hook.cjs'),
+    `'use strict';\nconst fs = require('node:fs');\nfs.appendFileSync(${JSON.stringify(checkpointMarker)}, fs.readFileSync(0, 'utf8') + '\\n');\nprocess.stdout.write('ignored');\nprocess.exitCode = 2;\n`);
   const opened = path.join(root, 'opened folder');
   for (const name of ['node.bat', 'node.cmd', 'powershell.bat', 'powershell.cmd']) writeFile(path.join(opened, name), '@echo planted>"%~dp0planted-marker.txt"\r\n');
   const powershellPath = setup.defaultWindowsPowerShellPath();
@@ -264,7 +273,11 @@ test('Windows hook commands never run a planted node or powershell from the open
     const helper = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'PreToolUse')), { cwd: opened, env, input: hookInput, encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
     assert.equal(helper.status, 0, `${shell}: ${helper.stderr}`);
     assert.deepEqual(JSON.parse(helper.stdout), { real_helper_hook: true, input: JSON.parse(hookInput) }, shell);
+    const stop = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'Stop')), { cwd: opened, env, input: '{"hook_event_name":"Stop"}', encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
+    assert.equal(stop.status, 0, `${shell}: the turn-end launcher never blocks a turn`);
+    assert.equal(stop.stdout, '', `${shell}: the turn-end launcher prints nothing`);
   }
+  assert.equal(fs.readFileSync(checkpointMarker, 'utf8'), '{"hook_event_name":"Stop"}\n{"hook_event_name":"Stop"}\n', 'the checkpoint hook got its input under both shells');
   assert.equal(fs.existsSync(path.join(opened, 'planted-marker.txt')), false, 'no planted file ran');
   // Control: a bare node under cmd.exe in that folder does run the planted file.
   spawnSync(process.env.ComSpec, ['/C', 'node -v'], { cwd: opened, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
