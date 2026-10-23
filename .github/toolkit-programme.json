@@ -1,0 +1,14 @@
+{
+  "schema": "toolkit.programme-binding.v1",
+  "repository": "weijunswj/ai-agent-toolkit",
+  "parent_issue": 421,
+  "record_prefix": "INT-TK421-",
+  "writer_prefix": "INT-TK421-",
+  "store": {
+    "kind": "github",
+    "repository": "weijunswj/TRANSPORT-ai-agent-toolkit",
+    "branch": "main",
+    "path": "state/weijunswj/ai-agent-toolkit/"
+  },
+  "required_checks": ["validate"]
+}

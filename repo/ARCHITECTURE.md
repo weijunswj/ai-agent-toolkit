@@ -34,8 +34,10 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
+| Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
+| Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 
 ## Sources of truth
 
@@ -48,6 +50,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json` |
+| Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership

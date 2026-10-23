@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.programme-state.child.v1",
+  "title": "Programme child state document",
+  "description": "One private document per programme child, kept in the private state store and written with compare-and-swap by skills/github-program-reconciler/scripts/programme-state.cjs. The renderer reads public fields only; private, fence sessions, gate sessions and routes are never rendered.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "issue", "revision", "fence", "lifecycle", "release", "gate", "candidate", "pr", "uat", "review", "blockers", "next_action", "pending_effects", "private"],
+  "properties": {
+    "schema": { "const": "toolkit.programme-state.child.v1" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "issue": { "type": "integer", "minimum": 1 },
+    "revision": { "type": "integer", "minimum": 0, "description": "Increases only when content outside revision, volatile and pending_effects changes." },
+    "fence": { "$ref": "#/$defs/fence" },
+    "lifecycle": { "enum": ["PLANNED", "ACTIVE", "WAITING_OWNER", "HOLD", "DONE", "RETIRED"] },
+    "release": { "type": ["string", "null"], "minLength": 1 },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "state", "session_id", "route", "returns"],
+      "properties": {
+        "role": { "enum": ["G0", "G1", "G2", null] },
+        "state": { "enum": ["ACTIVE", "WAITING_OWNER", "INTERRUPTED", "SUBMITTED", "RETIRED", null] },
+        "session_id": { "type": ["string", "null"], "minLength": 1 },
+        "route": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "model": { "type": ["string", "null"], "minLength": 1 },
+            "effort": { "type": ["string", "null"], "minLength": 1 },
+            "read_back": { "type": ["boolean", "null"] }
+          }
+        },
+        "returns": {
+          "type": "array",
+          "description": "Gate returns, consumed by return_id (never by session).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["return_id", "verdict", "consumed", "epoch"],
+            "properties": {
+              "return_id": { "type": "string", "minLength": 1 },
+              "verdict": { "enum": ["ACCEPT", "REOPEN", null] },
+              "consumed": { "type": "boolean" },
+              "epoch": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch", "head", "tree", "base"],
+      "properties": {
+        "branch": { "type": ["string", "null"], "minLength": 1 },
+        "head": { "$ref": "#/$defs/optionalSha" },
+        "tree": { "$ref": "#/$defs/optionalSha" },
+        "base": { "$ref": "#/$defs/optionalSha" }
+      }
+    },
+    "pr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "state", "head", "checks"],
+      "properties": {
+        "number": { "type": ["integer", "null"], "minimum": 1 },
+        "state": { "enum": ["OPEN", "DRAFT", "MERGED", "CLOSED", null] },
+        "head": { "$ref": "#/$defs/optionalSha" },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "required_total", "required_passed", "at_head"],
+          "properties": {
+            "state": { "enum": ["GREEN", "PENDING", "RED", "UNKNOWN"] },
+            "required_total": { "type": "integer", "minimum": 0 },
+            "required_passed": { "type": "integer", "minimum": 0 },
+            "at_head": { "$ref": "#/$defs/optionalSha" }
+          },
+          "if": { "properties": { "state": { "const": "GREEN" } } },
+          "then": { "properties": { "required_total": { "minimum": 1 }, "at_head": { "$ref": "#/$defs/sha" } } }
+        }
+      }
+    },
+    "uat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "at_head"],
+      "properties": {
+        "state": { "enum": ["NOT_REQUIRED", "PENDING", "PASSED", "UAT_RETAINED", "UAT_PARTIAL_REQUIRED", "UAT_FULL_REQUIRED", null] },
+        "at_head": { "$ref": "#/$defs/optionalSha" }
+      },
+      "if": { "properties": { "state": { "enum": ["PASSED", "UAT_RETAINED", "UAT_PARTIAL_REQUIRED"] } } },
+      "then": { "properties": { "at_head": { "$ref": "#/$defs/sha" } }, "description": "A UAT result that speaks for one head records that head." }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "verdicts"],
+      "properties": {
+        "state": { "enum": ["NOT_STARTED", "IN_REVIEW", "PASSED", "NOT_PASSED", null] },
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reviewer", "head", "verdict"],
+            "properties": {
+              "reviewer": { "type": "string", "minLength": 1 },
+              "head": { "$ref": "#/$defs/sha" },
+              "verdict": { "enum": ["PASSED", "NOT_PASSED"] }
+            }
+          }
+        }
+      },
+      "if": { "properties": { "state": { "enum": ["PASSED", "NOT_PASSED"] } } },
+      "then": { "properties": { "verdicts": { "minItems": 1 } }, "description": "A decided review records at least one verdict with its head." }
+    },
+    "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "next_action": { "type": "string", "minLength": 1, "description": "Exactly one next action." },
+    "pending_effects": { "$ref": "#/$defs/pendingEffects" },
+    "private": { "type": "object", "description": "Local paths, session IDs and anything not public-safe. Never rendered. Secret-shaped values are refused here as everywhere in the document." },
+    "volatile": { "type": "object", "description": "Write timestamps and the writing Toolkit version; outside the digest." }
+  },
+  "$defs": {
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "optionalSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+    "fence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["epoch", "holder_prefix", "holder_session"],
+      "properties": {
+        "epoch": { "type": "integer", "minimum": 0 },
+        "holder_prefix": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9._-]{1,40}$" },
+        "holder_session": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "pendingEffects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["intent_id", "kind", "target", "state"],
+        "properties": {
+          "intent_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["attach", "reparent", "reorder", "replace_block"] },
+          "target": { "type": "object" },
+          "state": { "enum": ["IN_FLIGHT", "DONE", "UNKNOWN"] }
+        }
+      }
+    }
+  }
+}
