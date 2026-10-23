@@ -38,6 +38,7 @@ class FakeGitHub {
 
   addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [] } = {}) {
     const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, comments: [], updated_at: this.tick() };
+    if (state === 'closed') issue.closed_at = this.tick();
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
     return issue;
@@ -70,7 +71,7 @@ class FakeGitHub {
 
   issueJson(issue) {
     return {
-      number: issue.number, id: issue.id, title: issue.title, body: issue.body, state: issue.state, state_reason: null,
+      number: issue.number, id: issue.id, title: issue.title, body: issue.body, state: issue.state, state_reason: null, closed_at: issue.closed_at || null,
       updated_at: issue.updated_at,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
@@ -115,9 +116,10 @@ class FakeGitHub {
       if (method === 'PATCH') { issue.body = body.body; issue.updated_at = this.tick(); }
       return ok(200, this.issueJson(issue));
     }
-    if ((match = /^issues\/(\d+)\/comments$/.exec(rest)) && method === 'GET') {
+    if ((match = /^issues\/(\d+)\/comments$/.exec(rest))) {
       const issue = this.issues.get(Number(match[1]));
       if (!issue) return ok(404, { message: 'Not Found' });
+      if (method === 'POST') return ok(201, this.addComment(issue.number, body.body));
       const page = Number(params.get('page') || 1);
       return ok(200, issue.comments.slice((page - 1) * 100, page * 100));
     }
