@@ -1,7 +1,7 @@
 name: Programme reconcile
 
-# Keeps the programme parent's Programme Graph, each task's status block and every comment trace
-# current without anyone typing the command. Runs on a merge to main, on any change to an issue or
+# Optional. Keeps the programme parent's Programme Graph, each task's status block, links and comment
+# traces current between controller check-ins, without anyone typing the command. Runs on a merge to main, on any change to an issue or
 # its comments by the owner or a collaborator, and by hand.
 #
 # Inputs: the binding (.github/toolkit-programme.json), the secret TOOLKIT_PROGRAMME_TOKEN (writes
