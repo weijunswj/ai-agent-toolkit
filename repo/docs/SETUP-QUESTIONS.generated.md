@@ -192,9 +192,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 7 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: ECJA-SFEV-PBEZ-RE79
+Bank reference: T11S-AJNE-AJNT-1NH7
 
 Quick index
 
@@ -205,6 +205,7 @@ Quick index
 1.5 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
+3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
 
 
 ## 1. Updates and reports
@@ -394,5 +395,31 @@ Quick index
 **After applying:** If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.
 
 **Selected:** A - Install or refresh
+
+---
+
+### 3.2 Use Toolkit's recommended Claude Code settings?
+
+**What this controls:** Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.
+
+**Current:** The Claude Code user settings have not been read yet.
+
+**Verification:** unverified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Turn on the four recommended Claude Code settings.
+
+**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
+
+**Choices:**
+
+- **A. Turn on** - Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.
+- **B. Turn off** - Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.
+- **C. Keep current** - Preserve this effective behavior: The Claude Code user settings have not been read yet.
+
+**After applying:** Start a new Claude Code session so it reads the changed settings.
+
+**Selected:** A - Turn on
 
 ---

@@ -11,6 +11,7 @@ const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
+const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
@@ -112,7 +113,8 @@ function emptySetupChoices() {
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
-    claudePluginBehavior: ''
+    claudePluginBehavior: '',
+    claudeSettings: ''
   };
 }
 
@@ -282,6 +284,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       const choice = arg.slice('--claude-plugin-behavior='.length).toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
+    } else if (arg === '--claude-settings' || arg.startsWith('--claude-settings=')) {
+      const choice = (arg === '--claude-settings' ? next() : arg.slice('--claude-settings='.length)).toLowerCase();
+      if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-settings choice: ${choice}`);
+      args.setupChoices.claudeSettings = choice;
     } else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -547,6 +553,8 @@ function printHelp() {
     '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
+    '  --claude-settings enable|disable|keep',
+    '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
 }
@@ -1286,7 +1294,7 @@ async function collectCurrentState(args) {
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
-    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect() } : {}),
+    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
       : inspectCodexNativePluginState(args)
@@ -1334,6 +1342,7 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
+  if (key === 'claudeSettings') return 'enable';
   return 'keep';
 }
 
@@ -1622,6 +1631,23 @@ function claudeSubagentDepthChoice(options) {
   return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
 }
 
+// One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
+function claudeSettingsOutcome(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return 'The Claude Code user settings have not been read yet.';
+  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return `${entries[0].detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
+  const describe = (entry) => {
+    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (set by Toolkit).`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `${entry.label}: your own value is kept.`;
+    return `${entry.label}: not set.`;
+  };
+  return entries.map(describe).join(' ');
+}
+
+// Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
+function applyClaudeUserSettings(args, settings = new ClaudeUserSettings()) {
+  return settings.apply(args.setupChoices.claudeSettings || 'keep');
+}
+
 function claudeSubagentDepthOutcome(depth) {
   if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return 'Your Claude Code user settings set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 (set by Toolkit). In Claude Code 2.1.217 or later this allows one layer: the main session may start subagents; subagents never start another. Project, local or managed Claude settings can override it in a folder.';
   if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `You set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=${depth.value} in your Claude Code user settings yourself; Toolkit leaves it unchanged.`;
@@ -1870,6 +1896,24 @@ function setupQuestionSpecs(args, current) {
       selected: args.setupChoices.claudePluginBehavior,
       current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
       afterApplying: 'If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.',
+    }));
+    specs.push(resolvedQuestion({
+      id: 'claude-recommended-settings',
+      key: 'claudeSettings',
+      section: 'Other coding apps',
+      title: "Use Toolkit's recommended Claude Code settings?",
+      prompt: 'Claude Code settings choice',
+      whatThisControls: 'Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.'),
+        wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
+      ],
+      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: 'Turn on the four recommended Claude Code settings.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      selected: args.setupChoices.claudeSettings,
+      current: claudeSettingsOutcome(current.claudeSettings),
+      currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
+      afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
   }
 
@@ -2212,6 +2256,7 @@ function setupQuestionClaudeDocumentationSpecs() {
     ...documentationFixtureState(),
     agentProfile: { supported: true, topology: agentControl.TOPOLOGIES.ROOT_ONLY },
     claudeSubagentDepth: { state: SUBAGENT_DEPTH_STATES.DEFAULT },
+    claudeSettings: [],
   };
   return plannedQuestionBank(parseArgs(['--plan', '--host', 'claude-code']), current).specs;
 }
@@ -2319,6 +2364,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
+  else if (key === 'claudeSettings') args.setupChoices.claudeSettings = choice;
 }
 
 function choiceForKey(args, key) {
@@ -2331,6 +2377,7 @@ function choiceForKey(args, key) {
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
+  if (key === 'claudeSettings') return args.setupChoices.claudeSettings;
   return '';
 }
 
@@ -3476,7 +3523,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, claudeSettings, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3558,6 +3605,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${profileOutcomeSummary(delegation)}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
+    if (claudeSettings) console.log(`Claude Code settings this run: ${claudeSettingsOutcome(claudeSettings)}${claudeSettings.some((entry) => entry.changed) ? ' Start a new Claude Code session to use them.' : ''}`);
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
@@ -3711,8 +3759,9 @@ class ToolkitSetupExecution {
     const audit = runBridgeAudit(args);
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
+    const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
-    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, audit,
+    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, claudeSettings, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
