@@ -123,3 +123,63 @@ test('the Codex hook stays inside Toolkit: a managed-block-only repository keeps
     assert.equal(marked.status, 2); assert.match(marked.stderr, /NATIVE_BINDING_REQUIRED/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// The Windows launcher decides alone when Node cannot start: exit 2 with a deny blocks the call on Codex,
+// any other exit lets it run. Runs the real launcher from a plugin-shaped folder without runtime metadata.
+function runBrokenWindowsLauncher(t, input, { runtime } = {}) {
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-launcher-'));
+  t.after(() => fs.rmSync(pluginRoot, { recursive: true, force: true }));
+  const scripts = path.join(pluginRoot, 'repo', 'scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.ps1'), path.join(scripts, 'toolkit-codex-helper-hook.ps1'));
+  fs.copyFileSync(HOOK, path.join(scripts, 'toolkit-codex-helper-hook.cjs'));
+  if (runtime !== undefined) {
+    fs.mkdirSync(path.join(pluginRoot, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, '.codex-plugin', 'session-start-runtime.json'), runtime);
+  }
+  const powershell = path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const r = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(scripts, 'toolkit-codex-helper-hook.ps1')],
+    { input: typeof input === 'string' ? input : JSON.stringify(input), env: { ...process.env, PATH: '' }, encoding: 'utf8', timeout: 30000, windowsHide: true });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, pluginRoot };
+}
+
+test('Windows launcher without Node blocks helper launches and unreadable input with exit 2 and a deny', { skip: process.platform !== 'win32' }, t => {
+  const cases = [
+    { tool_name: 'spawn_agent', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper' } },
+    { tool_name: 'collaborationspawn_agent', cwd: ROOT, tool_input: { task_name: 'leaf', fork_turns: 'none' } },
+    { tool_name: 'Agent', cwd: ROOT, tool_input: {} },
+    'not json',
+  ];
+  for (const input of cases) {
+    const r = runBrokenWindowsLauncher(t, input);
+    assert.equal(r.status, 2, `${JSON.stringify(input)}: ${r.stderr}`);
+    const output = JSON.parse(r.stdout.trim());
+    assert.equal(output.hookSpecificOutput.hookEventName, 'PreToolUse');
+    assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(output.hookSpecificOutput.permissionDecisionReason, /runtime metadata unavailable.*setup toolkit/);
+    assert.match(r.stderr, /Toolkit helper hook could not start \(runtime metadata unavailable\)/);
+    assert.doesNotMatch(r.stdout + r.stderr, new RegExp(r.pluginRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), 'no private path');
+  }
+});
+
+test('Windows launcher without Node blocks only commit and pull request shell commands; other shell commands run', { skip: process.platform !== 'win32' }, t => {
+  for (const command of ['git commit -m "x"', 'git -C repo commit --amend', 'echo a && git commit -F msg.txt', 'gh pr create --body-file b.md', 'gh pr edit 5 --body x', 'GH PR MERGE 5']) {
+    const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } });
+    assert.equal(r.status, 2, command);
+    assert.equal(JSON.parse(r.stdout.trim()).hookSpecificOutput.permissionDecision, 'deny', command);
+  }
+  for (const command of ['git status', 'npm test', 'gh pr view 5', 'ls']) {
+    const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } });
+    assert.equal(r.status, 1, command);
+    assert.equal(r.stdout, '', command);
+    assert.match(r.stderr, /setup toolkit/, command);
+  }
+});
+
+test('Windows launcher treats unreadable, unsupported or relative runtime metadata as a broken install', { skip: process.platform !== 'win32' }, t => {
+  for (const [runtime, reason] of [['{', 'runtime metadata unreadable'], ['{"schema":2,"node_path":"C:\\\\node.exe"}', 'runtime metadata schema is unsupported'], ['{"schema":1,"node_path":"node.exe"}', 'Node path is not absolute']]) {
+    const r = runBrokenWindowsLauncher(t, { tool_name: 'spawn_agent', cwd: ROOT, tool_input: {} }, { runtime });
+    assert.equal(r.status, 2, reason);
+    assert.match(r.stderr, new RegExp(reason), reason);
+  }
+});

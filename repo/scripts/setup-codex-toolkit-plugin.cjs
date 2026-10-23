@@ -18,6 +18,9 @@ const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-st
 const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
 const HELPER_HOOK_REL_PATH = 'repo/scripts/toolkit-codex-helper-hook.cjs';
 const HELPER_HOOK_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-helper-hook.ps1';
+const CHECKPOINT_HOOK_REL_PATH = 'repo/scripts/toolkit-programme-checkpoint-hook.cjs';
+const CHECKPOINT_HOOK_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-programme-checkpoint-hook.ps1';
+const CHECKPOINT_HOOK_TIMEOUT_SECONDS = 30;
 const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
 // Real `codex plugin list --json --available` catalogues exceed spawnSync's 1 MiB default (~3 MiB observed).
 const CODEX_JSON_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
@@ -61,7 +64,9 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/contracts/agent-rules/global-rules.md',
   'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
   'repo/scripts/toolkit-staging-generations.cjs',
-  'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
+  'repo/tests/toolkit-local-bridge-hook-light.test.cjs',
+  'repo/scripts/toolkit-programme-checkpoint-hook.cjs',
+  'repo/scripts/toolkit-programme-checkpoint-hook.ps1',
 ];
 const CACHE_FINGERPRINT_DIRS = [
   "repo/contracts/control-plane-kernel",
@@ -142,11 +147,20 @@ function windowsHelperHookCommand(powershellPath = defaultWindowsPowerShellPath(
   return windowsHookCommand(HELPER_HOOK_POWERSHELL_REL_PATH, powershellPath);
 }
 
-// The installed copy keeps the portable command and adds commandWindows to both Toolkit hooks.
+function sourceCheckpointHookCommand() {
+  return `node "\${PLUGIN_ROOT}/${CHECKPOINT_HOOK_REL_PATH}"`;
+}
+
+function windowsCheckpointHookCommand(powershellPath = defaultWindowsPowerShellPath()) {
+  return windowsHookCommand(CHECKPOINT_HOOK_POWERSHELL_REL_PATH, powershellPath);
+}
+
+// The installed copy keeps the portable command and adds commandWindows to every Toolkit hook.
 function renderInstalledWindowsHooks(hooks, powershellPath) {
   const rendered = structuredClone(hooks);
   rendered.hooks.SessionStart[0].hooks[0].commandWindows = windowsSessionStartCommand(powershellPath);
   rendered.hooks.PreToolUse[0].hooks[0].commandWindows = windowsHelperHookCommand(powershellPath);
+  if (rendered.hooks.Stop?.[0]?.hooks?.[0]) rendered.hooks.Stop[0].hooks[0].commandWindows = windowsCheckpointHookCommand(powershellPath);
   return rendered;
 }
 
@@ -299,20 +313,34 @@ function verifySessionStartHook(hooksPath, options = {}) {
   if (/toolkit-local-bridge\.cjs/.test(command)) errors.push('SessionStart command must not call toolkit-local-bridge.cjs directly');
   const helperHook = hooks?.hooks?.PreToolUse?.[0]?.hooks?.[0];
   if (helperHook?.command !== sourceHelperHookCommand()) errors.push('PreToolUse helper hook must use the exact portable Toolkit command');
+  // The turn-end checkpoint hook: one command, never blocking, with a timeout above its own 20-second deadline.
+  const stop = hooks?.hooks?.Stop;
+  const checkpointHook = stop?.[0]?.hooks?.[0];
+  if (!Array.isArray(stop) || stop.length !== 1 || stop[0]?.hooks?.length !== 1 || checkpointHook?.type !== 'command') {
+    errors.push('Stop must include exactly one checkpoint command hook');
+  } else {
+    if (checkpointHook.command !== sourceCheckpointHookCommand()) errors.push('Stop checkpoint hook must use the exact portable Toolkit command');
+    if (checkpointHook.timeout !== CHECKPOINT_HOOK_TIMEOUT_SECONDS) errors.push(`Stop checkpoint hook timeout must be ${CHECKPOINT_HOOK_TIMEOUT_SECONDS} seconds`);
+    if (stop[0].matcher !== undefined) errors.push('Stop checkpoint hook takes no matcher');
+  }
   const sessionWindows = sessionStart[0]?.hooks?.[0]?.commandWindows;
   const helperWindows = helperHook?.commandWindows;
+  const checkpointWindows = checkpointHook?.commandWindows;
   if (options.windows) {
     let expectedSession = '';
     let expectedHelper = '';
+    let expectedCheckpoint = '';
     try {
       expectedSession = windowsSessionStartCommand(options.powershellPath);
       expectedHelper = windowsHelperHookCommand(options.powershellPath);
+      expectedCheckpoint = windowsCheckpointHookCommand(options.powershellPath);
     } catch (error) {
       errors.push(error.message);
     }
     if (sessionWindows !== expectedSession) errors.push('SessionStart commandWindows must use the exact installed Windows launcher shape');
     if (helperWindows !== expectedHelper) errors.push('PreToolUse helper hook commandWindows must use the exact installed Windows launcher shape');
-  } else if (sessionWindows !== undefined || helperWindows !== undefined) {
+    if (checkpointWindows !== expectedCheckpoint) errors.push('Stop checkpoint hook commandWindows must use the exact installed Windows launcher shape');
+  } else if (sessionWindows !== undefined || helperWindows !== undefined || checkpointWindows !== undefined) {
     errors.push('the source hooks must not carry commandWindows; setup adds it to the installed copy only');
   }
   return errors;
@@ -634,7 +662,7 @@ function verifyLocalMarketplaceConfig(configText, repoRoot) {
 function detectHookTrustStatus() {
   return {
     status: 'verification-unavailable',
-    message: 'Hook trust verification is unavailable from supported non-interactive Codex inspection. Open `/hooks` in Codex, review and trust the current Toolkit `SessionStart` hook. Until it is trusted, Codex skips the hook.'
+    message: 'Hook trust verification is unavailable from supported non-interactive Codex inspection. Open `/hooks` in Codex, review and trust the current Toolkit hooks (`SessionStart`, `PreToolUse` and `Stop`). Codex skips each hook until it is trusted.'
   };
 }
 
@@ -1658,7 +1686,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
 
   const hookTrustStatus = pluginChanged ? 'pending-review' : state.hookTrustStatus;
   const hookTrustMessage = pluginChanged
-    ? 'The exact current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex; the exact current Toolkit `SessionStart` hook must be reviewed and trusted. Codex skips the hook until it is trusted.'
+    ? 'The exact current Toolkit hooks changed and are pending review. Open `/hooks` in Codex and review and trust the current Toolkit hooks (`SessionStart`, `PreToolUse` and `Stop`). Codex skips each hook until it is trusted.'
     : state.hookTrustMessage;
   const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
   const summary = {
@@ -1736,6 +1764,11 @@ module.exports = {
   renderInstalledWindowsHooks,
   sourceHelperHookCommand,
   HELPER_HOOK_POWERSHELL_REL_PATH,
+  CHECKPOINT_HOOK_REL_PATH,
+  CHECKPOINT_HOOK_POWERSHELL_REL_PATH,
+  CHECKPOINT_HOOK_TIMEOUT_SECONDS,
+  sourceCheckpointHookCommand,
+  windowsCheckpointHookCommand,
   formatWindowsAliasFailure,
   isWindowsAppsAliasAccessDenied,
   main
