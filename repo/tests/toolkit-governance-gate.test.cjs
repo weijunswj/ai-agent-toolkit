@@ -107,7 +107,7 @@ test('H-04: the answer is recorded, written into the repository with its gitigno
   assert.equal(record.repository_id, stateOf(ctx, repo).repository_id);
   assert.match(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'), /^\/\.ai-agent-toolkit\/$/m);
   assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER, '.gitignore'), 'utf8').trim().split('\n').pop(), '*');
-  assert.equal(git(repo, ['check-ignore', path.join(repoState.FOLDER, repoState.FILE)]), path.join(repoState.FOLDER, repoState.FILE));
+  assert.equal(git(repo, ['check-ignore', `${repoState.FOLDER}/${repoState.FILE}`]), `${repoState.FOLDER}/${repoState.FILE}`);
   assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '?? .gitignore', 'only the root .gitignore line shows; the state folder never does');
   assert.equal(fs.existsSync(ctx.heldPath), false, 'held prompts are deleted after the replay');
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });

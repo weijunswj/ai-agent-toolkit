@@ -6,13 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  sourceSessionStartCommand,
   sourceHelperHookCommand,
-  sourceCheckpointHookCommand,
   windowsSessionStartCommand,
   windowsHelperHookCommand,
   windowsCheckpointHookCommand,
-  CHECKPOINT_HOOK_TIMEOUT_SECONDS,
   verifyInstalledCacheFreshness
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const {
@@ -40,32 +37,8 @@ function writeCodexPluginRefreshFixture(repoPath) {
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
-  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [
-        {
-          matcher: 'startup|resume|clear|compact',
-          hooks: [
-            {
-              type: 'command',
-              command: sourceSessionStartCommand()
-            }
-          ]
-        }
-      ],
-      PreToolUse: [
-        {
-          matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
-          hooks: [{ type: 'command', command: sourceHelperHookCommand() }]
-        }
-      ],
-      Stop: [
-        {
-          hooks: [{ type: 'command', command: sourceCheckpointHookCommand(), timeout: CHECKPOINT_HOOK_TIMEOUT_SECONDS }]
-        }
-      ]
-    }
-  }, null, 2)}\n`);
+  // The real source hooks, so the fixture keeps up with every hook the plugin ships.
+  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   for (const relPath of [
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
@@ -100,7 +73,9 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "  const hooksPath = path.join(target, '.codex-plugin', 'hooks', 'hooks.json');",
     "  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));",
     `  hooks.hooks.SessionStart[0].hooks[0].commandWindows = ${JSON.stringify(windowsSessionStartCommand())};`,
-    `  hooks.hooks.PreToolUse[0].hooks[0].commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
+    "  for (const group of [...hooks.hooks.PreToolUse, ...hooks.hooks.UserPromptSubmit]) {",
+    `    for (const hook of group.hooks) if (hook.command === ${JSON.stringify(sourceHelperHookCommand())}) hook.commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
+    "  }",
     `  hooks.hooks.Stop[0].hooks[0].commandWindows = ${JSON.stringify(windowsCheckpointHookCommand())};`,
     "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",

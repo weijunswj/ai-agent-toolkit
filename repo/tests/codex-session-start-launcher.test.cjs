@@ -27,22 +27,9 @@ function copyFile(relPath, pluginRoot) {
   fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
 }
 
+// The real source hooks, so the fixture keeps up with every hook the plugin ships.
 function writeSourceHooks(pluginRoot) {
-  writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [{
-        matcher: 'startup|resume|clear|compact',
-        hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
-      }],
-      PreToolUse: [{
-        matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
-        hooks: [{ type: 'command', command: setup.sourceHelperHookCommand() }]
-      }],
-      Stop: [{
-        hooks: [{ type: 'command', command: setup.sourceCheckpointHookCommand(), timeout: setup.CHECKPOINT_HOOK_TIMEOUT_SECONDS }]
-      }]
-    }
-  }, null, 2)}\n`);
+  copyFile('.codex-plugin/hooks/hooks.json', pluginRoot);
 }
 
 // The installed commandWindows for one hook, with ${PLUGIN_ROOT} replaced the way Codex does.
