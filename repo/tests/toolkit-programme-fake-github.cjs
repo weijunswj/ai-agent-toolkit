@@ -4,7 +4,9 @@
 // reconciler makes and copies the behaviour measured against a real sandbox repository on
 // 2026-10-23: sub-issue ids (not numbers), 422 for a second parent without replace_parent or a
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
-// over an existing file, and a new commit even for an identical Contents PUT.
+// over an existing file, and a new commit even for an identical Contents PUT. A Contents GET on a
+// folder lists its files, `commits?path=` gives a file's last commit date, and comments carry their
+// issue URL, author and creation time.
 
 const crypto = require('node:crypto');
 
@@ -28,6 +30,9 @@ class FakeGitHub {
     this.calls = [];
     this.hooks = [];
     this.nextId = 9000;
+    this.fileDates = new Map();
+    this.comments = new Map();
+    this.login = 'owner';
   }
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
@@ -50,6 +55,13 @@ class FakeGitHub {
 
   addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null } = {}) {
     this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch });
+  }
+
+  // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
+  addComment(issue, { body, login = this.login, createdAt = this.tick() } = {}) {
+    const id = 7000000000 + this.comments.size + 1;
+    this.comments.set(id, { id, issue, body, login, created_at: createdAt });
+    return id;
   }
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
@@ -96,9 +108,20 @@ class FakeGitHub {
     if ((match = /^repos\/([^/]+\/[^/]+)\/branches\/(.+)$/.exec(path))) {
       return decodeURIComponent(match[2]) === this.branch ? ok(200, { name: this.branch }) : ok(404, { message: 'Branch not found' });
     }
+    if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
+    if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) {
+      const date = this.fileDates.get(params.get('path'));
+      return ok(200, date ? [{ sha: 'f'.repeat(40), commit: { committer: { date } } }] : []);
+    }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
+    if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && method === 'GET') {
+      const comment = this.comments.get(Number(match[1]));
+      if (!comment) return ok(404, { message: 'Not Found' });
+      return ok(200, { id: comment.id, body: comment.body, created_at: comment.created_at, user: { login: comment.login },
+        issue_url: `https://api.github.com/repos/${this.repository}/issues/${comment.issue}` });
+    }
     if ((match = /^issues\/(\d+)$/.exec(rest))) {
       const issue = this.issues.get(Number(match[1]));
       if (!issue) return ok(404, { message: 'Not Found' });
@@ -151,7 +174,12 @@ class FakeGitHub {
     const file = this.files.get(filePath);
     if (method === 'GET') {
       if (params.get('ref') && params.get('ref') !== this.branch) return ok(404, { message: 'No commit found for the ref' });
-      if (!file) return ok(404, { message: 'Not Found' });
+      if (!file) {
+        const prefix = `${filePath.replace(/\/$/, '')}/`;
+        const entries = [...this.files].filter(([name]) => name.startsWith(prefix) && !name.slice(prefix.length).includes('/'))
+          .map(([name, entry]) => ({ type: 'file', name: name.slice(prefix.length), path: name, sha: entry.sha }));
+        return entries.length ? ok(200, entries) : ok(404, { message: 'Not Found' });
+      }
       return ok(200, { sha: file.sha, encoding: 'base64', content: Buffer.from(file.text, 'utf8').toString('base64') });
     }
     if (method === 'PUT') {
@@ -161,6 +189,7 @@ class FakeGitHub {
       if (!file && body.sha) return ok(404, { message: 'Not Found' });
       const text = Buffer.from(body.content, 'base64').toString('utf8');
       this.files.set(filePath, { text, sha: blobSha(text) });
+      this.fileDates.set(filePath, this.tick());
       this.commits += 1;
       return ok(file ? 200 : 201, { content: { sha: blobSha(text) }, commit: { sha: `c${this.commits}` } });
     }
@@ -171,6 +200,7 @@ class FakeGitHub {
   putFile(filePath, doc) {
     const text = `${JSON.stringify(doc, null, 2)}\n`;
     this.files.set(filePath, { text, sha: blobSha(text) });
+    this.fileDates.set(filePath, this.tick());
     this.commits += 1;
   }
 
@@ -189,4 +219,14 @@ class FakeGitHub {
   }
 }
 
-module.exports = { FakeGitHub, blobSha };
+// A child whose gate the controller assigned and, optionally, whose return it recorded and consumed.
+// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against.
+function gatedChild(state, doc, { role = 'G1', assignment = `${role.toLowerCase()}-a1`, returnId = null, verdict = null, writer = null, parentDoc = null, head = 'c'.repeat(40) } = {}) {
+  let next = state.assignGate(doc, { assignment, role });
+  if (returnId) next = state.recordReturn(next, { returnId, assignment });
+  if (verdict === 'ACCEPT' && role === 'G1') next = state.applyPatch('child', next, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head, verdict: 'PASSED' }] } }, { writer, parentDoc });
+  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head });
+  return next;
+}
+
+module.exports = { FakeGitHub, blobSha, gatedChild };

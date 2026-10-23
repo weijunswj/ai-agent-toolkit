@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.programme-journal.v1",
+  "title": "Executor checkpoint journal",
+  "description": "One private file per executor session and assignment, at journal/issue-<n>/<assignment>--<session hash>.json under the state store path. Only that bound session writes it (its bind command and its turn-end hook). It is evidence, not state: nothing in it changes a gate, lifecycle, UAT, review or acceptance until the controller's reconcile reads it into the child document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "issue", "assignment", "session_hash", "completion_mode", "route", "seq", "checkpoint", "returns", "last_error"],
+  "properties": {
+    "schema": { "const": "toolkit.programme-journal.v1" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "issue": { "type": "integer", "minimum": 1 },
+    "assignment": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$" },
+    "session_hash": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "The first 16 hex characters of the SHA-256 of the host session ID; the ID itself is never stored." },
+    "completion_mode": { "enum": ["native"] },
+    "route": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["model", "effort", "read_back"],
+      "properties": {
+        "model": { "type": ["string", "null"], "minLength": 1 },
+        "effort": { "type": ["string", "null"], "minLength": 1 },
+        "read_back": { "type": "boolean" }
+      }
+    },
+    "seq": { "type": "integer", "minimum": 1, "description": "Increases by one for each write; identical facts write nothing." },
+    "checkpoint": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["branch", "head", "tree", "dirty", "ahead", "behind"],
+      "properties": {
+        "branch": { "type": ["string", "null"], "minLength": 1 },
+        "head": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{40}$" }, { "type": "null" }] },
+        "tree": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{40}$" }, { "type": "null" }] },
+        "dirty": { "type": ["boolean", "null"] },
+        "ahead": { "type": ["integer", "null"], "minimum": 0 },
+        "behind": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "returns": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["return_id", "verdict_requested", "at_head", "next_action", "blockers"],
+        "properties": {
+          "return_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+          "verdict_requested": { "enum": ["ACCEPT", "WAITING_OWNER", null] },
+          "at_head": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{40}$" }, { "type": "null" }] },
+          "next_action": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
+          "blockers": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 } }
+        }
+      }
+    },
+    "last_error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code", "at"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+        "at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "volatile": { "type": "object", "description": "Write timestamp; outside the comparison that decides whether anything changed." }
+  }
+}
