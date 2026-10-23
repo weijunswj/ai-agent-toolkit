@@ -7,7 +7,9 @@
 - **No AI attribution.** Claude Code and Codex refuse a `git commit` or `gh pr create`/`edit` that carries a Co-Authored-By trailer naming Claude, a Claude-Session trailer, a claude.ai session link or a "Generated with Claude Code" footer.
 - **Codex hooks on Windows** now use Codex's own `commandWindows`: a full PowerShell path and a `.ps1` launcher, so neither PowerShell nor `cmd.exe` runs a `node` or `powershell` file planted in the folder you open.
 - **Codex refresh report** no longer says "refresh failed" after a successful update across a version change; it says "Codex plugin updated to <version>. It takes effect in your next Codex session."
-- **Removed:** the n8n Skills plugin hook repair (the official n8n skills will ship as plain skill folders), and the rule-refresh PR auto-merge setup question; refresh PRs always stop for you to merge.
+- **Official n8n skills** ship as plain skill folders: the 15 folders of `n8n-io/skills` at a pinned commit, reviewed (Apache-2.0) and copied unchanged by setup into Claude Code's or Codex's skills folder and Antigravity's when it is installed. Your own copies are never changed; `toolkit-n8n-official-skills.cjs --remove` removes only Toolkit's. No plugin, hook or script comes along.
+- **Helper settings changed mid-session:** a Toolkit helper whose file was rewritten after the session started is refused with "Start a new session to use them."
+- **Removed:** the n8n Skills plugin hook repair, and the rule-refresh PR auto-merge setup question; refresh PRs always stop for you to merge.
 
 ## 3.6.0 (instructions, README and packaging)
 

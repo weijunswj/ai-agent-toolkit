@@ -12,6 +12,7 @@ const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
@@ -1638,6 +1639,14 @@ function claudeSettingsOutcome(entries) {
     return `${entry.label}: not set.`;
   };
   return entries.map(describe).join(' ');
+}
+
+// Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
+// The n8n Skills plugin would load the same skills twice, so the summary says how to turn it off.
+function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host })) {
+  const off = args.host === 'claude-code' ? 'run `claude plugin disable n8n-skills@n8n-io`' : "turn off the n8n-skills plugin in the Codex app's plugin settings";
+  try { return `${n8nSkillsSummary(owner.install())}. If the n8n Skills plugin is installed, ${off} so the skills do not load twice.`; }
+  catch (error) { return `not copied (${error.message}).`; }
 }
 
 // Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
@@ -3520,7 +3529,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, claudeSettings, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3605,6 +3614,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
+  if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
@@ -3756,8 +3766,9 @@ class ToolkitSetupExecution {
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
+    const n8nSkills = installOfficialN8nSkills(args);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
-    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, claudeSettings, audit,
+    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
