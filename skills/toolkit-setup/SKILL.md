@@ -139,4 +139,4 @@ node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 node repo/scripts/validate-toolkit.cjs
 ```
 
-Run `node --test repo/tests/toolkit-local-bridge.test.cjs` when the change affects bridge behavior, hooks, repo auto-update behavior, report cleanup, host-native cache behavior, or before PR/release validation. Run `npm run validate:all` only when broad validation is specifically warranted by the repo rules.
+Run `node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs` when the change affects bridge behavior, hooks, repo auto-update behavior, report cleanup, host-native cache behavior, or before PR/release validation. Run `npm run validate:all` only when broad validation is specifically warranted by the repo rules.

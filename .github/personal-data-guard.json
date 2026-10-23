@@ -1,0 +1,29 @@
+{
+  "schema": "personal-data-guard/v1",
+  "scope": {
+    "file_content": true,
+    "paths": true,
+    "commit_messages": true,
+    "branch_names": true,
+    "pull_request_text": true
+  },
+  "identity": "excluded",
+  "identity_reason": "commit author and committer addresses are the maintainers' chosen GitHub identities",
+  "allow": [
+    {
+      "value": "noreply@anthropic.com",
+      "reason": "public no-reply address that the attribution guard tests must recognise"
+    }
+  ],
+  "not_scanned": [
+    {
+      "path": ".codex-plugin/assets/*.png",
+      "reason": "Toolkit plugin icon artwork; no text or people in the images"
+    },
+    {
+      "path": "repo/contracts/toolkit-local-bridge/codex-plugin/assets/*.png",
+      "reason": "source copies of the same plugin icon artwork"
+    }
+  ],
+  "required_check": "validate"
+}

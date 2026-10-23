@@ -44,7 +44,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [n8n Safety Router](skills/n8n-safety-router/) | The safety rules to load before any n8n work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n locally or on a server, with backups and the official n8n skills. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Clean, check and compare n8n workflow files before an approved import or export. |
-| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD and GitHub Actions. |
+| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD and GitHub Actions; block personal data in commits and pull requests. |
 | [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
 | [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |

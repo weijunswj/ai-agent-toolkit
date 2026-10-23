@@ -45,7 +45,7 @@ For an explicit request, compare the Toolkit-owned blocks with the current templ
 - `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
 - `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
-- `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `fast-tests-and-sharding.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
+- `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `fast-tests-and-sharding.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `privacy-safe-checks.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
 Rules:
 
@@ -64,6 +64,10 @@ Before proposing an ignore-file change, inspect `.gitignore` and Git's resolved 
 
 New backups always use `_agent-toolkit-backups/`. Recognise legacy `.agent-toolkit-backups/` and report it, never select it for new backups, and never move, merge, rename, rewrite or delete any backup content or add a broad backup ignore pattern. Backups are local repair artifacts: report the inspection and restore commands, but never commit, stage, delete or move them unless the user asks.
 
+### Optional personal-data guard
+
+On an install, offer the personal-data guard once; never install it without the owner's yes. On yes, ask whether commit author and committer addresses are scanned, then run `node <toolkit>/skills/secure-ci-cd/scripts/install-personal-data-guard.cjs --repo <repo> --identity <excluded|included> [--identity-reason <text>] --workflow` and report its output, including the hooks folder it used. On a refresh where `.github/personal-data-guard.json` exists, run it with `--check` and, when it reports drift, rerun the install (it keeps the config and any existing hooks). Details: `docs/agent-playbooks/privacy-safe-checks.md`.
+
 ## After a refresh
 
 **Inside an unfinished, already-authorised task or gate** (the refresh is part of that work or its standing authority): read the changed instruction files now and continue the task in this session without asking whether to restart. Show this notice once, in bold, only after the refresh actually succeeded:
@@ -74,7 +78,7 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 **Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
 
-1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed); never stage dirty, unrelated or backup files.
+1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard files it installed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
 3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.
 
@@ -94,4 +98,4 @@ Keep the full reset message and question bolded exactly as shown. Do not continu
 
 ## Boundaries
 
-This skill touches only repo-local instruction files, their backups and the playbook folder. Apart from the refresh pull request above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. After install, the repository's own files are the source of truth for its governed rules.
+This skill touches only repo-local instruction files, their backups and the playbook folder, plus, on the owner's opt-in, the personal-data guard files (`.github/scripts/personal-data-guard.cjs`, `.github/personal-data-guard.json`, `.github/workflows/personal-data-guard.yml`) and the local git hooks the guard installer writes. Apart from the refresh pull request above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. After install, the repository's own files are the source of truth for its governed rules.

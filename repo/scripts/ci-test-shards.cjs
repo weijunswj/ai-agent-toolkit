@@ -223,7 +223,7 @@ const RUNNER = { linux: 'ubuntu-latest', windows: 'windows-latest' };
 const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"';
 const AGGREGATE_HEADER = [
   '  validate:',
-  '    needs: [tests-linux, tests-windows]',
+  '    needs: [tests-linux, tests-windows, personal-data]',
   '    if: ${{ always() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
@@ -284,6 +284,29 @@ function testJobText(system, ids) {
   ].join('\n');
 }
 
+// The exact text of the personal-data job: every commit of the pull request or push, its messages,
+// branch name and pull request text, checked by the personal-data guard. The validate job waits
+// for it, so the existing required check covers it.
+const PERSONAL_DATA_JOB = [
+  '  personal-data:',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 15',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          fetch-depth: 0',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+  '',
+  '      - name: Check for personal data',
+  '        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci',
+].join('\n');
+
 // The jobs of a workflow, keyed by id, each with its text (trailing blank lines dropped).
 function workflowJobs(source) {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
@@ -311,16 +334,18 @@ function workflowErrors(source, manifest) {
   const text = source.replace(/\r\n/g, '\n');
   for (const [pattern, label] of FORBIDDEN) if (pattern.test(text)) errors.push(`validate.yml must not contain ${label}`);
   const jobs = workflowJobs(text);
-  const expected = ['tests-linux', 'tests-windows', 'validate'];
+  const expected = ['tests-linux', 'tests-windows', 'personal-data', 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
     if (job !== undefined && job !== testJobText(system, shardIds(manifest, system))) errors.push(`the tests-${system} job differs from the pinned text for shards ${shardIds(manifest, system).join(', ')}`);
   }
+  const personalData = jobs.get('personal-data');
+  if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
