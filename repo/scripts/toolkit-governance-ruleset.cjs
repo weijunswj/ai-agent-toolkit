@@ -10,7 +10,8 @@
 // Read-only. The default reader asks the GitHub REST API through the signed-in `gh` CLI
 // (GET /repos/{owner}/{repo}/rulesets, then each ruleset by id); when `gh` is missing, signed out
 // or refused, the result is `unverified`, never `present`. Adding the ruleset is a GitHub write
-// that the one-time migration offers and the owner approves per run; nothing here writes.
+// that only `ghRulesetCreator` makes, and only `toolkit governance migrate` calls it, after the
+// owner's typed yes in that run; it needs a local session signed in to GitHub.
 
 const childProcess = require('node:child_process');
 
@@ -36,11 +37,26 @@ function rulesetVerdict(rulesets) {
   return Object.freeze({ status: 'present', reason: null, bypass: noBypass ? 'none' : bypassKnown ? 'allowed' : 'not-visible' });
 }
 
-function ghJson(args, spawn) {
+const RULESET_NAME = 'Toolkit: no force pushes';
+
+// The ruleset Toolkit adds: active, every branch, no exclusions, no bypass, non_fast_forward only.
+function noForcePushRulesetBody() {
+  return {
+    name: RULESET_NAME,
+    target: 'branch',
+    enforcement: 'active',
+    bypass_actors: [],
+    conditions: { ref_name: { include: ['~ALL'], exclude: [] } },
+    rules: [{ type: 'non_fast_forward' }],
+  };
+}
+
+function ghJson(args, spawn, input = null) {
   let result;
   try {
     result = spawn(resolvePathExecutable('gh'), ['api', ...args], {
       encoding: 'utf8', timeout: GH_TIMEOUT_MS, maxBuffer: MAX_OUTPUT, windowsHide: true, shell: false,
+      ...(input === null ? {} : { input }),
     });
   } catch {
     return { ok: false, reason: 'gh-unavailable' };
@@ -69,6 +85,13 @@ function ghRulesetReader(slug, { spawn = childProcess.spawnSync } = {}) {
   return { ok: true, rulesets };
 }
 
+// Creates the ruleset on `slug` ("owner/name"). { ok: true, id } or { ok: false, reason }.
+function ghRulesetCreator(slug, { spawn = childProcess.spawnSync } = {}) {
+  const created = ghJson(['-X', 'POST', `repos/${slug}/rulesets`, '--input', '-'], spawn, JSON.stringify(noForcePushRulesetBody()));
+  if (!created.ok) return created;
+  return created.value && Number.isInteger(created.value.id) ? { ok: true, id: created.value.id } : { ok: false, reason: 'gh-output-invalid' };
+}
+
 // { status: present | missing | not-enforceable | unverified | not-applicable, reason, bypass } for the repository
 // at `root`. `reader(slug)` is injectable for tests.
 function noForcePushRuleset(root, { reader = ghRulesetReader } = {}) {
@@ -85,4 +108,4 @@ function noForcePushRuleset(root, { reader = ghRulesetReader } = {}) {
   return rulesetVerdict(read.rulesets);
 }
 
-module.exports = Object.freeze({ rulesetVerdict, ghRulesetReader, noForcePushRuleset });
+module.exports = Object.freeze({ RULESET_NAME, rulesetVerdict, noForcePushRulesetBody, ghRulesetReader, ghRulesetCreator, noForcePushRuleset });

@@ -132,7 +132,7 @@ test('enable and decline: confirmed, written, read back; repeats write nothing',
   assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
   const reopen = await run(ctx, repo, ['reopen']);
   assert.match(reopen.stdout, /^Nothing changed\. /);
-  assert.match(reopen.stdout, /run `toolkit governance enable`/);
+  assert.match(reopen.stdout, /run `node "[^`]*toolkit-governance\.cjs" enable`/);
   assert.deepEqual(fs.readFileSync(ctx.registryPath), before, 'reopen writes nothing');
 
   const enabled = await run(ctx, repo, ['enable', '--json']);
@@ -268,7 +268,7 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
 });
 
 test('S-10 (new modules): only the state module reads the decision file, AGENTS.md and the binding', () => {
-  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs']) {
+  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-migration.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
   }
@@ -279,6 +279,6 @@ test('usage errors exit 2', async (t) => {
   for (const argv of [[], ['nope'], ['status', 'extra']]) {
     const result = await run(ctx, ctx.root, argv);
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /^Usage: toolkit governance/);
+    assert.match(result.stderr, /^Usage: node "[^"]*toolkit-governance\.cjs" /);
   }
 });

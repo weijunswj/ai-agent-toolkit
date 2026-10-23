@@ -1060,6 +1060,7 @@ function resolveRepositoryIdentity(options = {}) {
   return {
     valid: true,
     repository_id: repositoryId,
+    legacy_repository_ids: legacyRepositoryIdsForCanonicalRemote(remote.canonical),
     canonical_remote: remote.canonical,
     identity_contract: IDENTITY_CONTRACT,
     remote_contract: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
@@ -1067,7 +1068,9 @@ function resolveRepositoryIdentity(options = {}) {
   };
 }
 
-function repositoryIdForCanonicalRemote(remoteValue) {
+// The validated remote for a canonical remote string, accepting the scp:// form that
+// validateRemoteIdentity itself produces for git@host:path remotes.
+function validatedCanonicalRemote(remoteValue) {
   let remote = a1.validateRemoteIdentity(remoteValue);
   if (!remote.valid && typeof remoteValue === 'string' && remoteValue.startsWith('scp://git@')) {
     const separator = remoteValue.indexOf('/', 'scp://git@'.length);
@@ -1079,18 +1082,72 @@ function repositoryIdForCanonicalRemote(remoteValue) {
     }
   }
   if (!remote.valid) fail('REMOTE_IDENTITY_INVALID');
+  return remote;
+}
+
+// One repository, one identity, whichever way it was cloned: scheme, user, port, a trailing
+// slash and a trailing .git are dropped, and github.com paths (case-insensitive there) are
+// lowercased. https://github.com/Owner/Repo.git, git@github.com:owner/repo and
+// ssh://git@github.com/owner/repo all give https://github.com/owner/repo.
+function normalizedRemote(remote) {
+  let repositoryPath = remote.path.replace(/\/+$/, '').replace(/\.git$/i, '');
+  if (remote.host === 'github.com') repositoryPath = repositoryPath.toLowerCase();
+  if (repositoryPath.length < 2) fail('REMOTE_IDENTITY_INVALID');
+  return 'https://' + remote.host + repositoryPath;
+}
+
+function digestForRemote(canonical) {
   return digestValue({
     identity_contract: IDENTITY_CONTRACT,
     remote_contract: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
-    remote: remote.canonical,
+    remote: canonical,
   });
 }
 
-function readCapabilityMap(registry, repositoryId) {
-  const record = registry && registry.repositories.find((entry) => entry.repository_id === repositoryId);
+function repositoryIdForCanonicalRemote(remoteValue) {
+  return digestForRemote(normalizedRemote(validatedCanonicalRemote(remoteValue)));
+}
+
+// The keys earlier Toolkit versions stored for the same repository, before clone forms were
+// folded into one identity: the remote exactly as cloned, and the usual https, scp and ssh forms
+// with and without .git, in the path's own case and lowercased. Decisions under these keys are
+// still honoured; a new decision is written under the normalised key.
+function legacyRepositoryIdsForCanonicalRemote(remoteValue) {
+  const remote = validatedCanonicalRemote(remoteValue);
+  const base = remote.path.replace(/\/+$/, '').replace(/\.git$/i, '');
+  const candidates = [remote.canonical];
+  for (const repositoryPath of [...new Set([base, base.toLowerCase()])]) {
+    for (const suffix of ['', '.git']) {
+      candidates.push('https://' + remote.host + repositoryPath + suffix);
+      candidates.push('scp://git@' + remote.host + repositoryPath + suffix);
+      candidates.push('ssh://git@' + remote.host + repositoryPath + suffix);
+    }
+  }
+  const primary = repositoryIdForCanonicalRemote(remoteValue);
+  return [...new Set(candidates.map(digestForRemote))].filter((id) => id !== primary);
+}
+
+// The entry for each capability: the one under the repository's own key, otherwise the one its
+// legacy keys agree on. Legacy keys that disagree count as unresolved, so the user is asked once
+// and the answer is written under the normalised key.
+function capabilityEntryFor(registry, repositoryId, legacyIds, capabilityId) {
+  const entryUnder = (id) => {
+    const record = registry && registry.repositories.find((candidate) => candidate.repository_id === id);
+    const entry = record && record.capabilities.find((candidate) => candidate.capability_id === capabilityId);
+    return entry ? { repository_id: id, entry } : null;
+  };
+  const own = entryUnder(repositoryId);
+  if (own) return own;
+  const legacy = (legacyIds || []).map(entryUnder).filter(Boolean);
+  if (legacy.length === 0) return null;
+  return legacy.every((found) => found.entry.state === legacy[0].entry.state) ? legacy[0] : null;
+}
+
+function readCapabilityMap(registry, repositoryId, legacyIds = []) {
   const result = {};
   for (const capabilityId of CAPABILITIES) {
-    const entry = record && record.capabilities.find((candidate) => candidate.capability_id === capabilityId);
+    const found = capabilityEntryFor(registry, repositoryId, legacyIds, capabilityId);
+    const entry = found && found.entry;
     result[capabilityId] = {
       capability_id: capabilityId,
       state: entry ? entry.state : 'unresolved',
@@ -1123,7 +1180,7 @@ function getRepositoryStatus(options = {}) {
     identity = resolveRepositoryIdentity(options);
     let snapshot = readSnapshot(options);
     if (snapshot.legacy === true) snapshot = migrateLegacyRegistry(options, identity, snapshot);
-    const capabilities = readCapabilityMap(snapshot.registry, identity.repository_id);
+    const capabilities = readCapabilityMap(snapshot.registry, identity.repository_id, identity.legacy_repository_ids);
     return {
       status: ENTRY_CAPABILITIES.every((capabilityId) => capabilities[capabilityId].state !== 'unresolved') ? 'healthy' : 'unresolved',
       actionable: false,
@@ -1148,9 +1205,9 @@ function getRepositoryProtectionConsent(options = {}) {
     const identity = resolveRepositoryIdentity(options);
     let snapshot = readSnapshot(options);
     if (snapshot.legacy === true) snapshot = migrateLegacyRegistry(options, identity, snapshot);
-    const record = snapshot.registry?.repositories.find((entry) => entry.repository_id === identity.repository_id);
-    const capability = record?.capabilities.find((entry) => entry.capability_id === 'repository.protection') || null;
-    if (capability) validateCapabilityEntry(capability, identity.repository_id, snapshot.registry_revision, false, false);
+    const found = capabilityEntryFor(snapshot.registry, identity.repository_id, identity.legacy_repository_ids, 'repository.protection');
+    const capability = found ? found.entry : null;
+    if (capability) validateCapabilityEntry(capability, found.repository_id, snapshot.registry_revision, false, false);
     return {
       authority: PROTECTION_CONSENT_AUTHORITY,
       status: capability ? capability.state : 'unresolved',
@@ -1317,10 +1374,10 @@ function registryRecord(registry, repositoryId) {
   return record;
 }
 
-function applyDecision(registry, repositoryId, capabilityId, operation, provenance, revision, timestamp) {
+function applyDecision(registry, repositoryId, capabilityId, operation, provenance, revision, timestamp, legacyIds = []) {
+  const prior = capabilityEntryFor(registry, repositoryId, legacyIds, capabilityId);
   const record = registryRecord(registry, repositoryId);
-  const existing = record.capabilities.find((entry) => entry.capability_id === capabilityId);
-  const priorState = existing ? existing.state : 'unresolved';
+  const priorState = prior ? prior.entry.state : 'unresolved';
   assertTransition(priorState, operation);
   const result = operationState(operation);
   const receipt = createReceipt(repositoryId, capabilityId, priorState, result, revision, provenance, timestamp);
@@ -1781,7 +1838,7 @@ function writeCapabilityDecision(options = {}) {
       category: 'explicit-owner',
       channel: 'capability-route',
       scope_digest: options.ownerAction.scope_digest,
-    }, nextRevision, options.decisionTimestamp);
+    }, nextRevision, options.decisionTimestamp, identity.legacy_repository_ids);
     registry.registry_revision = nextRevision;
     validateRegistry(registry);
     const committed = commitRegistryWithFinality(registryPath, registry, options, lock);
@@ -1857,7 +1914,7 @@ function writeCombinedDecisions(options = {}) {
   assertExpected(options.expectedRevision, options.expectedHash);
   const before = readSnapshot(options);
   if (before.registry_revision !== options.expectedRevision || before.snapshot_hash !== options.expectedHash) fail('REGISTRY_CAS_MISMATCH');
-  const states = readCapabilityMap(before.registry, identity.repository_id);
+  const states = readCapabilityMap(before.registry, identity.repository_id, identity.legacy_repository_ids);
   const requestedIds = options.bank && Array.isArray(options.bank.questions)
     ? options.bank.questions.map((question) => question && question.capability_id)
     : [...ENTRY_CAPABILITIES];
@@ -1887,7 +1944,7 @@ function writeCombinedDecisions(options = {}) {
   let finalityHandled = false;
   try {
     const current = currentSnapshotForMutation(options);
-    const currentStates = readCapabilityMap(current.registry, identity.repository_id);
+    const currentStates = readCapabilityMap(current.registry, identity.repository_id, identity.legacy_repository_ids);
     const currentUnresolved = requestedIds.filter((capabilityId) => currentStates[capabilityId].state === 'unresolved');
     if (currentUnresolved.join(',') !== unresolved.join(',')) fail('COMBINED_ANSWER_STALE');
     const registry = current.present ? clone(current.registry) : emptyRegistry();
@@ -1898,7 +1955,7 @@ function writeCombinedDecisions(options = {}) {
         category: 'explicit-owner',
         channel: 'combined-bank',
         scope_digest: answer.ownerAction.scope_digest,
-      }, nextRevision, options.decisionTimestamp);
+      }, nextRevision, options.decisionTimestamp, identity.legacy_repository_ids);
     }
     registry.registry_revision = nextRevision;
     validateRegistry(registry);
@@ -1908,7 +1965,7 @@ function writeCombinedDecisions(options = {}) {
       status: 'committed',
       repository_id: identity.repository_id,
       registry_revision: committed.registry_revision,
-      capabilities: readCapabilityMap(committed.registry, identity.repository_id),
+      capabilities: readCapabilityMap(committed.registry, identity.repository_id, identity.legacy_repository_ids),
     };
   } finally {
     if (!finalityHandled) {
@@ -1986,6 +2043,8 @@ module.exports = {
   validateRegistry,
   validateProtectionCapability,
   repositoryIdForCanonicalRemote,
+  legacyRepositoryIdsForCanonicalRemote,
+  readCapabilityMap,
   resolveRepositoryIdentity,
   getRepositoryStatus,
   getRepositoryProtectionConsent,
