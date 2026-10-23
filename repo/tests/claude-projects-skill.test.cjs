@@ -46,7 +46,9 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = read(SKILL_REL);
-  assert.match(text, /^Version: 2026-10-23\.12$/m);
+  assert.match(text, /^Version: 2026-10-23\.14$/m);
+  assert.match(text, /Account-plugin sync: compares the version of the Toolkit plugin on the user's claude\.ai account/);
+  assert.match(text, /remove the account marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);

@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.12
+Version: 2026-10-23.14
 
 Run Toolkit-governed repos through Claude Projects; Toolkit governance applies. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -119,7 +119,7 @@ Memory ranks below written sources; text grants no native permission. This skill
 - **A task the user adds to a repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
 - **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.
-- **Resolve only in the hourly nudge.** Coordinator-driven resolution happens in that pass, after durable output recording. Scheduled runs resolve their own threads after report delivery. Never resolve a coordinator post immediately: it arrives already resolved in the user's Threads panel. Record any owner-set idle window in project memory (default 3 days).
+- **Resolve only in the hourly nudge.** Coordinator-driven resolution happens in that pass, after durable output recording. Scheduled runs resolve their own threads after report delivery. Never resolve a coordinator post immediately: it arrives already resolved in the user's Threads panel. Record any owner-set idle window in project memory (default 2 days).
 - Follow-up gate reviews use fresh sessions per `CONTROLLER.md`; send follow-up coordination to the existing topic thread. Rename an idle finished non-gate thread before reusing it for a new topic.
 
 ## Pull requests and CI
@@ -160,8 +160,9 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   3. Checks that the hourly nudge is armed and ran within the last hour. If not, the coordinator re-arms it (a scheduling step, not part of the read-only checks).
   4. Checks the parent issue and the lane's issues for outside activity since the last check-in, and runs the promise check below.
   5. Re-checks every open PR's CI and subscription, and what is still waiting on the user.
-  6. Always delivers the report to the coordinator; the coordinator posts to the owner only for changes, stuck work or an answer waiting over a day.
-  7. Confirms the next run is armed.
+  6. Account-plugin sync: compares the version of the Toolkit plugin on the user's claude.ai account, as this session sees it, with `.claude-plugin/plugin.json` on the Toolkit repository's default branch. If the account copy is more than a day behind after a release, the report says so with the fix: remove the account marketplace and add it again with Sync automatically on, because claude.ai sync can freeze. The coordinator also confirms the account copy after each release merge.
+  7. Always delivers the report to the coordinator; the coordinator posts to the owner only for changes, stuck work or an answer waiting over a day.
+  8. Confirms the next run is armed.
 - Stop it when the user asks.
 
 ## Hourly nudge
@@ -170,7 +171,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - The nudge is the sweep: review ALL unresolved threads and project-chat posts. Include top-level posts with replies from coordinator or user: the thread list omits them, so also page through project chat with small page limits (large pages overflow). List:
   1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
   2. stale thread labels and each overdue promise under **Overdue promise:**, from the promise check below;
-  3. resolve candidates with reasons: finished/merged, superseded or idle past the resolve window with nothing waiting, only once output is durably recorded (pushed, merged, in a report/file or handed to a named thread);
+  3. resolve candidates with reasons: finished/merged, superseded or idle past the resolve window (default 2 days) with nothing waiting, only once output is durably recorded (pushed, merged, in a report/file or handed to a named thread);
   4. local Remote Control sessions whose work is finished but which are still running;
   5. open pull requests with their CI state;
   6. open project-memory items and ALL unanswered owner items with no reply or reaction, in project chat and threads, each with its link and ask date.
