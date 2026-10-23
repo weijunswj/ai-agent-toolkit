@@ -1,12 +1,5 @@
 # Toolkit Changelog
 
-## Unreleased (setup fixes)
-
-- **Claude Code setup no longer asks about Codex's instruction limit.** That question is Codex-only now; Claude Code setup keeps whatever choice is stored.
-- **Clearer Claude Code rows.** The plugin row says setup checks the plugin after you answer and installs or refreshes it only if needed. The settings row recommends keeping them when all four are already set, and otherwise sets only the values that are not set yet.
-- **Codex sandbox.** On Codex the setup skill asks up front to run setup outside the sandbox, because setup writes the managed checkout, `~/.codex` and `~/.ai-agent-toolkit`. A git failure with exit code 128 now says to run setup outside the Codex sandbox.
-- The "explain" example in the bank names question 1.2, which every bank has.
-
 ## Unreleased (decision history before planning)
 
 - **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
@@ -64,6 +57,13 @@
 - **No force pushes from agents.** The same hooks refuse `git push --force`, `-f`, `--force-with-lease`, `--mirror` and `+refspec` in governed and guarded repositories and to evidence stores (`TRANSPORT-*` repositories). The personal-data guard's `ci` and `range` modes stop on a shallow clone instead of reading its cut-off history as a rewrite, and `safety-gates.md` says to fetch full history before concluding that history was rewritten.
 - **Rules:** G2 in governed repositories scans every commit, title and body of a pull request for personal data and checks where a computation ran before accepting that data stayed in place.
 - **Names-only key listing proven.** New tests show that a synthetic value stored in Windows Credential Manager never crosses the `toolkit env` listing child's output, including malformed, partial and failing answers.
+
+## Unreleased (setup fixes)
+
+- **Claude Code setup no longer asks about Codex's instruction limit.** That question is Codex-only now; Claude Code setup keeps whatever choice is stored.
+- **Clearer Claude Code rows.** The plugin row says setup checks the plugin after you answer and installs or refreshes it only if needed. The settings row recommends keeping them when all four are already set, and otherwise sets only the values that are not set yet.
+- **Codex sandbox.** On Codex the setup skill asks up front to run setup outside the sandbox, because setup writes the managed checkout, `~/.codex` and `~/.ai-agent-toolkit`. A git failure with exit code 128 now says to run setup outside the Codex sandbox.
+- The "explain" example in the bank names question 1.2, which every bank has.
 
 ## 3.9.1 (controller sweep, promises and the Projects instructions block)
 
