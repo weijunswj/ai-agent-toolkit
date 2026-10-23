@@ -21,14 +21,18 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const SCRIPTS = path.join(ROOT, 'repo', 'scripts');
 const AGENT_HOOK = path.join(SCRIPTS, 'toolkit-claude-agent-hook.cjs');
-const TEMPLATE = path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md');
+const GOVERNANCE_HOOK = path.join(SCRIPTS, 'toolkit-governance-hook.cjs');
+const MODULE_BLOCKER = path.join(__dirname, '..', 'toolkit-test-module-blocker-preload.cjs');
+const { makeGoverned } = require('../toolkit-governed-fixture-support.cjs');
 // Variables that change a helper's route or mark a launcher session; a scratch context starts without them.
 const CLEARED = Object.freeze(['CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE', 'CLAUDE_CODE_EFFORT_LEVEL',
   'TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY',
   'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256', 'TOOLKIT_HOOK_DECISION_LOG', 'AI_AGENT_TOOLKIT_CONTROL_ROOT', 'CLAUDE_CONFIG_DIR']);
 
-// A scratch governed repository, an ungoverned one, a Claude config folder holding the helpers
-// rendered from the selected stack, and an empty Toolkit control root. Nothing outside `base`.
+// A scratch governed repository (ENABLED by its governance state), an ungoverned folder, a declined
+// and an undecided repository, a Claude config folder holding the helpers rendered from the selected
+// stack, a private user home for governance decisions and an empty Toolkit control root. Nothing
+// outside `base`.
 class ClaudeMatrixContext {
   constructor({ stack = 'owner-claude', baseDir = os.tmpdir(), environment = process.env } = {}) {
     const { ClaudeHelperAgentRenderer } = require(path.join(SCRIPTS, 'toolkit-claude-helper-agents.cjs'));
@@ -37,9 +41,16 @@ class ClaudeMatrixContext {
     this.plain = path.join(this.base, 'plain');
     this.configDir = path.join(this.base, 'claude-config');
     this.controlRoot = path.join(this.base, 'control');
+    this.declined = path.join(this.base, 'declined');
+    this.undecided = path.join(this.base, 'undecided');
+    this.home = path.join(this.base, 'home');
     for (const dir of [this.repo, this.plain]) fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
-    fs.writeFileSync(path.join(this.repo, 'AGENTS.md'), fs.readFileSync(TEMPLATE));
+    makeGoverned(this.repo, 'matrix');
+    makeGoverned(this.declined, 'matrix-declined');
+    makeGoverned(this.undecided, 'matrix-undecided');
+    fs.rmSync(path.join(this.undecided, '.github'), { recursive: true });
     fs.writeFileSync(path.join(this.plain, 'AGENTS.md'), '# Project rules\n');
+    this.#decline(this.declined);
     fs.mkdirSync(this.controlRoot);
     this.agentsDir = path.join(this.configDir, 'agents');
     fs.mkdirSync(this.agentsDir, { recursive: true });
@@ -47,8 +58,24 @@ class ClaudeMatrixContext {
     this.definitions = Object.fromEntries(['G0', 'G1'].map(role => [role, renderer.render(role)]));
     this.environment = { ...environment };
     for (const name of CLEARED) delete this.environment[name];
-    Object.assign(this.environment, { CLAUDE_CONFIG_DIR: this.configDir, AI_AGENT_TOOLKIT_CONTROL_ROOT: this.controlRoot });
+    Object.assign(this.environment, { CLAUDE_CONFIG_DIR: this.configDir, AI_AGENT_TOOLKIT_CONTROL_ROOT: this.controlRoot, HOME: this.home, USERPROFILE: this.home });
+    delete this.environment.CLAUDE_CODE_REMOTE;
     this.reset();
+  }
+
+  // Records the user's decline in this context's private registry, as the governance gate would.
+  #decline(repo) {
+    const registry = require(path.join(SCRIPTS, 'toolkit-capability-registry.cjs'));
+    const { execFileSync } = require('node:child_process');
+    execFileSync('git', ['-C', repo, 'init', '--quiet'], { stdio: 'ignore' });
+    const options = { registryPath: path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+    const status = registry.getRepositoryStatus({ cwd: repo, ...options });
+    const capability = 'repository.governance';
+    registry.writeCapabilityDecision({ cwd: repo, ...options, capabilityId: capability, operation: 'decline',
+      ownerAction: { confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation: 'decline',
+        choice_semantic_id: registry.capabilityDecisionSemanticId(capability, 'decline'), contract_digest: registry.CONTRACT_DIGEST,
+        scope_digest: registry.capabilityScopeDigest(status.repository_id, capability, 'decline', 'capability-route') },
+      expectedRevision: status.registry_revision, expectedHash: status.snapshot_hash });
   }
 
   // Puts the rendered helpers back and removes anything a row added.
@@ -65,26 +92,19 @@ class ClaudeMatrixContext {
 }
 
 // Runs the hook command as Claude Code does: a fresh process, the event JSON on stdin.
-function runHook(context, event, { environment = {}, hook = AGENT_HOOK } = {}) {
+// `blocked` names decision modules the test preload makes unloadable; `args` follow the hook file.
+function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [], blocked = null } = {}) {
   const input = { hook_event_name: 'PreToolUse', session_id: 'matrix-session', tool_name: 'Agent', cwd: context.repo, ...event };
   const started = process.hrtime.bigint();
-  const result = spawnSync(process.execPath, [hook], { input: JSON.stringify(input), env: { ...context.environment, ...environment },
-    encoding: 'utf8', timeout: 20000 });
+  const argv = blocked ? ['--require', MODULE_BLOCKER, hook, ...args] : [hook, ...args];
+  const env = { ...context.environment, ...environment, ...(blocked ? { TOOLKIT_TEST_BLOCKED_MODULES: blocked } : {}) };
+  const result = spawnSync(process.execPath, argv, { input: JSON.stringify(input), env, encoding: 'utf8', timeout: 20000 });
   const elapsed_ms = Number(process.hrtime.bigint() - started) / 1e6;
   let output = null;
   try { output = JSON.parse((result.stdout || '').trim() || '{}'); } catch { /* recorded as unreadable below */ }
   const decision = output?.hookSpecificOutput?.permissionDecision;
   return { exit: result.status, elapsed_ms, result: output === null ? 'unreadable' : decision === 'deny' ? 'deny' : decision ? decision : 'pass',
     reason: output?.hookSpecificOutput?.permissionDecisionReason || null, stderr: (result.stderr || '').slice(-400) };
-}
-
-// A copy of the hook whose decision module throws, beside the real governance predicate.
-function brokenHook(context, hook = AGENT_HOOK) {
-  const dir = path.join(context.base, 'broken-hook');
-  fs.mkdirSync(dir, { recursive: true });
-  for (const name of ['toolkit-claude-agent-hook.cjs', 'toolkit-governed-repo.cjs']) fs.copyFileSync(path.join(path.dirname(hook), name), path.join(dir, name));
-  fs.writeFileSync(path.join(dir, 'toolkit-agent-control.cjs'), 'throw new Error("matrix: decision module failed to load");\n');
-  return path.join(dir, 'toolkit-claude-agent-hook.cjs');
 }
 
 const launch = (name, extra = {}) => ({ tool_input: { subagent_type: name, description: 'matrix', prompt: 'Reply OK', ...extra } });
@@ -101,7 +121,8 @@ const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-a
   .configureProfile('claude-code', { topology, capacity_mode: 'root-only' }, { root: c.controlRoot });
 
 // One entry per hook case: [row, case, event, expected, reason pattern, options]. Options: `environment`,
-// `setup(context)`, `cwd(context)`, `brokenHook`, `needsBirthtime`.
+// `setup(context)`, `cwd(context)`, `brokenHook` (the decision module fails to load), `gate` (the
+// governance hook's PreToolUse event runs instead of the agent hook), `needsBirthtime`.
 const HOOK_CASES = [
   ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass'],
   ['A2', 'G1 lead launches toolkit-g1-helper, definition current', launch(G1), 'pass'],
@@ -140,6 +161,11 @@ const HOOK_CASES = [
     { cwd: c => c.plain, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
+  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
+  ['A22', 'DECLINED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined }],
+  ['A22', 'UNKNOWN repository is the hard block: the governance gate refuses the launch', launch(G0), 'deny', /no governance decision yet/,
+    { cwd: c => c.undecided, gate: true }],
+  ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
 ];
 
 // How every other row is proved. Hook rows above are listed by the test, not here.
@@ -149,7 +175,6 @@ const OTHER_ROWS = Object.freeze({
   A16: { proof: 'live', note: 'No helper requested: no Agent call and no hook decision in the run record.' },
   A19: { proof: 'other-host', note: 'Codex managed-block repositories.' },
   A20: { proof: 'other-host', note: 'Codex Windows launcher exit codes.' },
-  A22: { proof: 'waits', on: 'governance states hook wiring (#542, governance builder)', note: 'ENABLED behaves as governed, DECLINED as ungoverned, UNKNOWN is the hard block. The governance builder wires governanceState() into the hook and the predicate, and covers this row.' },
   A23: { proof: 'other-test', file: 'repo/tests/toolkit-claude-attribution-hook.test.cjs', note: 'Attribution hook failure refuses only commit and PR commands.' },
   A24: { proof: 'live', note: 'Launch latency measured before and after; the hook rows also record per-process time.' },
   A25: { proof: 'waits', on: 'checkpoint writer (custody release)', note: 'Stop hook in a bound and an unbound session.' },
@@ -175,7 +200,9 @@ function runHookCase(context, [row, name, event, expected, pattern, options = {}
       for (const { file } of Object.values(context.definitions)) fs.utimesSync(path.join(context.agentsDir, file), later, later);
       input = { ...input, transcript_path: transcript };
     }
-    const observed = runHook(context, input, { environment: options.environment, hook: options.brokenHook ? brokenHook(context, hook) : hook });
+    const observed = runHook(context, input, { environment: options.environment,
+      hook: options.gate ? path.join(path.dirname(hook), path.basename(GOVERNANCE_HOOK)) : hook, args: options.gate ? ['--event', 'PreToolUse'] : [],
+      blocked: options.brokenHook ? 'toolkit-agent-control.cjs' : null });
     const pass = observed.exit === 0 && observed.result === expected && (!pattern || pattern.test(observed.reason || ''));
     return { row, case: name, expected, observed, pass };
   } finally { context.reset(); }
