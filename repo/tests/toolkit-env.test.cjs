@@ -327,6 +327,71 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
   assert.doesNotMatch(moved.stdout + moved.stderr, new RegExp(value));
 });
 
+test('the edit file keeps your comment and section lines in place, and never stores a value', async (t) => {
+  const value = sentinel();
+  const { run, paths, store } = harness(t, { values: { COOLIFY_SWOOSHZ_MCP_TOKEN: value, NEONDB_SWOOSHZ_API_KEY: value, CLOUDFLARE_ACCOUNT_ID: value } });
+  await run('edit');
+  let file = editFile(paths);
+  fs.writeFileSync(file, [
+    ...fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => line.startsWith('#')),
+    '# --- Hosting ---',
+    'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>',
+    '',
+    '# --- Databases (Swooshz team) ---',
+    'NEONDB_SWOOSHZ_API_KEY=<unchanged>',
+    'CLOUDFLARE_ACCOUNT_ID=<unchanged>',
+    '',
+  ].join('\n'));
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  const record = JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+  assert.deepEqual(record.layout, ['# --- Hosting ---', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# --- Databases (Swooshz team) ---', 'NEONDB_SWOOSHZ_API_KEY', 'CLOUDFLARE_ACCOUNT_ID']);
+  assert.doesNotMatch(fs.readFileSync(paths.manifest, 'utf8'), new RegExp(value));
+  // The next edit shows the same layout; a key added since then comes after it.
+  store.writeAll(new Map([['GITHUB_SWOOSHZ_PAT', value]]));
+  await run('edit');
+  file = editFile(paths);
+  const body = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => !line.startsWith('# Toolkit env') && !/^# (To |Leaving|Save|Your own)/.test(line));
+  assert.deepEqual(body.filter(Boolean), ['# --- Hosting ---', 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', '# --- Databases (Swooshz team) ---', 'NEONDB_SWOOSHZ_API_KEY=<unchanged>', 'CLOUDFLARE_ACCOUNT_ID=<unchanged>', 'GITHUB_SWOOSHZ_PAT=<unchanged>']);
+  await run('apply');
+});
+
+test('a comment that looks like a key or token stops apply and is reported by line number only', async (t) => {
+  const value = sentinel();
+  const { run, paths } = harness(t, { values: { COOLIFY_SWOOSHZ_MCP_TOKEN: value } });
+  await run('edit');
+  const file = editFile(paths);
+  for (const comment of [`# OLD_TOKEN=${value}`, '# ghp_0123456789abcdefABCDEF0123456789']) {
+    fs.writeFileSync(file, [comment, 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', ''].join('\n'));
+    const refused = await run('apply');
+    assert.equal(refused.code, 1, comment);
+    assert.match(refused.stderr, /line 1: this comment looks like it may hold a key or token/);
+    assert.doesNotMatch(refused.stdout + refused.stderr, new RegExp(value));
+    assert.doesNotMatch(refused.stdout + refused.stderr, /ghp_/);
+  }
+  assert.equal(fs.existsSync(paths.manifest) && /ghp_|OLD_TOKEN/.test(fs.readFileSync(paths.manifest, 'utf8')), false);
+});
+
+test('remove drops the name from the layout; import and retire keep the .env comments before the file can be deleted', async (t) => {
+  const value = sentinel();
+  const { run, paths, store } = harness(t, { answers: ['yes', 'yes'] });
+  writeCodexEnv(paths, ['# Hosting', `COOLIFY_SWOOSHZ_MCP_TOKEN=${value}`, '', '# Databases', `NEONDB_SWOOSHZ_API_KEY=${value}`, '# key_0123456789abcdefABCDEF012345', ''].join('\n'));
+  const imported = await run('import-codex-env');
+  assert.equal(imported.code, 0, imported.stderr);
+  assert.match(imported.stdout, /kept 2 comment lines and the key order for toolkit env edit/);
+  assert.match(imported.stdout, /not kept as layout, comment line 6/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, ['# Hosting', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# Databases', 'NEONDB_SWOOSHZ_API_KEY']);
+  const retired = await run('retire-codex-env');
+  assert.equal(retired.code, 0, retired.stderr);
+  assert.match(retired.stdout, /Kept your existing toolkit env edit layout/);
+  assert.match(retired.stdout, /last plain copy of these values, and the only copy of 1 comment line\./);
+  assert.ok(store.list().includes('NEONDB_SWOOSHZ_API_KEY'));
+  const removed = await run('remove', 'NEONDB_SWOOSHZ_API_KEY');
+  assert.equal(removed.code, 0, removed.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, ['# Hosting', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# Databases']);
+  assert.doesNotMatch(imported.stdout + retired.stdout + fs.readFileSync(paths.manifest, 'utf8'), new RegExp(value));
+});
+
 // A stand-in for Codex's config/batchWrite on simple tables: removes or sets `key = value` lines.
 function fakeCodexEditor(calls = []) {
   return async (bytes, { edits }) => {

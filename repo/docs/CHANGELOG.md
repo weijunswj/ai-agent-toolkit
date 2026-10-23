@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.7.1 (toolkit env comments)
+
+- **The `toolkit env edit` file keeps your comment and section lines.** They are saved as a names-only layout in the env record (comments, key names and blank lines, never values) and shown in the same place next time; new keys come after them. `apply` refuses a comment that looks like a key or token, reporting it by line number only. `toolkit env remove` drops the name from the layout.
+- **`import-codex-env` and `retire-codex-env` keep the comment lines** from `~/.codex/.env` when Toolkit has no layout yet, so they survive the file being retired. Retire now says when its backup is also the only copy of some comment lines.
+
 ## 3.7.0 (setup and hooks)
 
 - **Compact question bank** (#486). The bank is one table per section: each row shows what is true now, the recommended choice and its effect, and the other choices. Say "explain 1.5" (or run setup with `--explain 1.5`) for the full text of one question; the reference document keeps the full text. A new test checks that no question, default, "all recommended" answer or flag can turn on any merge.
