@@ -1,5 +1,15 @@
 # Toolkit Changelog
 
+## 3.8.0 (CI and test speed)
+
+- **Every pull request now runs the tests on Windows too.** The suite runs in shards, two on Linux and four on Windows, side by side. A final `validate` job runs the repository checks and then proves from the shard summaries that each system ran every test file once with no failure; a failed, cancelled or skipped shard fails it. A pull request takes about 2 to 3 minutes; the single Linux job took 3.5 to 4 and never ran the 35 Windows-only tests (#465).
+- **One test runner, locally and in CI.** `npm test` runs every file, `npm run test:changed` runs the files your change affects, and CI runs one shard each. Every run gets its own temp folder under `%USERPROFILE%\t`, set for every child process, never at a drive root and never an 8.3 short name, and removed afterwards, also when tests fail. The shard list is `repo/contracts/ci/test-shards.json`; a new test file always runs in a shard.
+- **A drift guard** pins the test steps in `validate.yml` and refuses narrowed file lists, test filters, `if: false`, masked exit codes, `continue-on-error`, matrix edits and a final job that does not wait for every shard.
+- **Windows failures fixed by cause**, none skipped: tests that read CRLF checkouts as LF, source-watch tests that handed Git Bash a path it could not use, a launcher test that found the runner's own Docker, and `CLAUDE.md` checked out with CRLF.
+- **Faster:** the validator runs in about half the time (it reads the topology policy once), and the slowest test files are split so they run in parallel, with the same tests.
+- **Removed:** the manual-only `validate-toolkit.yml` and the separate `env-store.yml` workflows; Validate runs both of their checks on every change.
+- **For every repository:** a new `fast-tests-and-sharding.md` playbook, `repo/scripts/check-test-durations.cjs` for per-file time budgets, the governed rule now asks for before-and-after measurement and a per-file budget, and `secure-ci-cd` asks for commit-SHA action pins and sharded tests with one aggregate required check.
+
 ## 3.7.0 (setup and hooks)
 
 - **Review fixes:** every git command setup and the bridge start comes from PATH by full path, so a `git.exe` in the opened folder never runs; the local clone step also works when setup hands off to the managed copy. The attribution check also covers Claude Code's PowerShell tool and `gh pr merge`. A failed settings write leaves no "set by Toolkit" record. The n8n skills go into Antigravity only when you keep Toolkit's skills there, and removing those removes the n8n copies too. Skill copies prune retired skills and never act on a malformed ledger entry.

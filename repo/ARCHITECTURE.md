@@ -19,7 +19,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, then the `validate` job checks and verifies them; `env-store.yml` runs the env store tests on Windows |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager) |
 
 ## Entry points
 
