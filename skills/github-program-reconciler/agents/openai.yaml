@@ -1,11 +1,11 @@
 interface:
   display_name: GitHub Program Reconciler
-  short_description: Govern parent state and truthful review evidence explicitly.
+  short_description: Keep programme state documents and GitHub links in step.
   primary_color: '#1D4ED8'
-  default_prompt: Use $github-program-reconciler only for explicit parent/direct-child governance, bounded reconciliation, truthful PR-review inventory, or Deferred Findings work under the shipped contract; preserve control-plane authority, repository-capability consent and Web finality boundaries.
+  default_prompt: If the repository has .github/toolkit-programme.json, use $github-program-reconciler at significant events (the binding is added; a child issue changes; a merge; a PR opens or its head moves; an issue closes or reopens; outcomes reorder; a release; a controller changes). Any session may run the dry-run reconcile or show and report it. Only the appointed controller writes programme state: it holds the parent document and runs every writing command itself, including gates, returns, UAT, review and completion. Executors (G0, G1, G2) and helpers never write. Every programme.cjs command refuses without the binding; the binding does not change governed issue records. Never close, delete or merge.
 policy:
   products:
     - chatgpt
     - codex
     - atlas
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

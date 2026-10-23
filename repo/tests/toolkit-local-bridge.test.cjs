@@ -41,7 +41,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.8.1';
+const expectedBridgeVersion = '3.9.1';
 
 function tmpRoot() {
   const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));

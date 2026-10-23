@@ -15,6 +15,7 @@
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
+const { resolveExecutable } = require('./resolve-executable.cjs');
 
 const DEFAULT_THRESHOLD = 60000;
 const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
@@ -95,7 +96,7 @@ function repairedBody(body, unlinked) {
 }
 
 function gh(args) {
-  const result = spawnSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(resolveExecutable('gh'), args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
   if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${String(result.stderr || result.error?.message || '').trim()}`);
   return result.stdout;
 }

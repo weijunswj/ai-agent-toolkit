@@ -36,7 +36,9 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Promise check | `repo/scripts/toolkit-promise-check.cjs` ([how to use it](docs/TOOLKIT-PROMISE-CHECK.md)) |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
+| Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+| Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 
 Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scripts/codex-config-load-check.cjs` (Codex effective-load check and rollback) and `repo/scripts/host-json-config-write.cjs` (Claude JSON read-back and rollback); see [host config writes](docs/agent-playbooks/host-config-writes.md).
 
@@ -51,6 +53,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json` |
+| Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership

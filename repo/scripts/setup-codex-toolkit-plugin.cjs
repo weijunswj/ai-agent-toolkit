@@ -13,7 +13,7 @@ const { backupRoot: codexBackupRoot } = require('./codex-delegation-common.cjs')
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.8.1';
+const EXPECTED_TOOLKIT_VERSION = '3.9.1';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
