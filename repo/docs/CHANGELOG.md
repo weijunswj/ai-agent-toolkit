@@ -17,7 +17,7 @@
 - **Every body lists every comment.** A generated comment trace closes each catalogued body: one line per comment with date, record, summary and link, marked `SUPERSEDES=` or "superseded by", under the rule that the body comes first and the latest comment wins. When the body would overflow, the whole list moves into one new index comment and the body keeps its link, repeating as comments grow.
 - **Trace audit and repair.** The decision-trace audit fails on a superseded record left unmarked; reconcile reports `TRACE_STALE`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; `--repair` writes lines in the same shape, plus topic tags from a decision ledger with `--ledger`.
 - **Untracked PRs are flagged.** `PR_UNTRACKED` (report only) names an open PR that says `Refs #n` (or Completes, Closes, Fixes, Resolves) for an open task whose state records no PR or branch.
-- **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first #421 apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
+- **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first programme apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
 
 ## Unreleased (personal-data guard)
 
