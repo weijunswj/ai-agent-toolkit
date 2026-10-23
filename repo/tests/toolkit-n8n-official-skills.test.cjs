@@ -15,7 +15,7 @@ function home(t) {
   return dir;
 }
 
-test('the 15 official skill folders reach this app, and Antigravity only when it is installed', (t) => {
+test('the 15 official skill folders reach this app, and Antigravity only when Toolkit\'s skills are kept there', (t) => {
   const dir = home(t);
   const owner = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir });
   assert.equal(owner.skillNames().length, 15);
@@ -30,8 +30,10 @@ test('the 15 official skill folders reach this app, and Antigravity only when it
   assert.equal(copied.some((p) => /\.(sh|ps1|cmd|bat)$|hooks\.json$|plugin\.json$/.test(p)), false);
   assert.deepEqual(owner.install().copied, [], 'a second run copies nothing');
   fs.mkdirSync(path.join(dir, '.gemini'));
-  assert.deepEqual(owner.targets(), [path.join(dir, '.claude', 'skills'), path.join(dir, '.gemini', 'config', 'skills')]);
-  assert.equal(owner.install().copied.length, 15);
+  assert.deepEqual(owner.targets(), [path.join(dir, '.claude', 'skills')], 'an installed Antigravity alone is not consent');
+  const withAntigravity = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir, antigravity: true });
+  assert.deepEqual(withAntigravity.targets(), [path.join(dir, '.claude', 'skills'), path.join(dir, '.gemini', 'config', 'skills')]);
+  assert.equal(withAntigravity.install().copied.length, 15);
   assert.equal(new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir }).targets()[0], path.join(dir, '.agents', 'skills'));
 });
 
@@ -112,7 +114,7 @@ test('older-name copies in Antigravity older skills folder are reported as loadi
   const older = path.join(dir, '.gemini', 'antigravity', 'skills', 'n8n-expressions');
   fs.mkdirSync(older, { recursive: true });
   fs.writeFileSync(path.join(older, 'SKILL.md'), 'mine\n');
-  const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir }).install();
+  const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir, antigravity: true }).install();
   assert.deepEqual(result.loadTwice, ['n8n-expressions in .gemini/antigravity/skills']);
   assert.match(installSummary(result), /your own older copies also load \(n8n-expressions in ~\/\.gemini\/antigravity\/skills\); delete them yourself/);
   assert.equal(fs.readFileSync(path.join(older, 'SKILL.md'), 'utf8'), 'mine\n');
@@ -124,4 +126,25 @@ test('an older release copy in the app skills folder is reported too', (t) => {
   const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir }).install();
   assert.deepEqual(result.loadTwice, ['using-n8n-skills in .claude/skills']);
   assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'using-n8n-skills')));
+});
+
+test('install removes Toolkit copies of retired skills; a bad ledger entry is never acted on', (t) => {
+  const dir = home(t);
+  const owner = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir });
+  owner.install();
+  const target = path.join(dir, '.agents', 'skills');
+  const ledgerPath = path.join(dir, '.ai-agent-toolkit', 'n8n-official-skills.json');
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  fs.mkdirSync(path.join(target, 'n8n-retired-official'));
+  fs.mkdirSync(path.join(target, 'mine'));
+  ledger.targets[target].push('n8n-retired-official', '', '..', 'a/b');
+  ledger.targets[dir] = ['mine'];
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+  const result = owner.install();
+  assert.deepEqual(result.pruned.map((row) => row.skill), ['n8n-retired-official']);
+  assert.equal(fs.existsSync(path.join(target, 'n8n-retired-official')), false);
+  assert.match(installSummary(result), /removed 1 retired skill copy/);
+  owner.remove();
+  assert.ok(fs.existsSync(target), 'an empty or traversal name never removes the skills folder itself');
+  assert.ok(fs.existsSync(path.join(target, 'mine')), 'a folder outside a skills folder is never removed');
 });

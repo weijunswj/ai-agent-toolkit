@@ -3,7 +3,7 @@
 
 // Copies the official n8n skills (pinned exact copy under repo/contracts/third-party/n8n-io-skills/skills)
 // into an app's own skills folder: Claude Code ~/.claude/skills, Codex ~/.agents/skills, and Antigravity
-// ~/.gemini/config/skills when Antigravity is installed. Only skill files are copied; nothing runs.
+// ~/.gemini/config/skills when the user keeps Toolkit's skills in Antigravity (`antigravity: true`). Only skill files are copied; nothing runs.
 // Toolkit records each folder it created in ~/.ai-agent-toolkit/n8n-official-skills.json and only ever
 // updates or removes those. A folder of the same name that Toolkit did not create (a hand copy) is
 // reported and never changed.
@@ -26,21 +26,20 @@ const ANTIGRAVITY_OLDER = ['.gemini', 'antigravity', 'skills'];
 class OfficialN8nSkills extends ManagedSkillCopies {
   #homeDir;
 
-  constructor({ toolkitRoot, host, homeDir = os.homedir(), controlRoot } = {}) {
+  constructor({ toolkitRoot, host, homeDir = os.homedir(), controlRoot, antigravity = false } = {}) {
     if (!Object.hasOwn(HOST_TARGETS, host)) throw new Error(`Unsupported host for the n8n skills copy: ${host}`);
     super({
       sourceRoot: path.join(toolkitRoot, SOURCE_REL),
       ledgerPath: path.join(controlRoot || path.join(homeDir, '.ai-agent-toolkit'), 'n8n-official-skills.json'),
       ledgerSchema: LEDGER_SCHEMA,
-      // This app's skills folder, plus Antigravity's when Antigravity is installed (~/.gemini exists).
-      targets: () => {
-        const targets = [path.join(homeDir, ...HOST_TARGETS[host])];
-        if (fs.existsSync(path.join(homeDir, '.gemini'))) targets.push(path.join(homeDir, ...ANTIGRAVITY_TARGET));
-        return targets;
-      },
+      // This app's skills folder, plus Antigravity's when the user keeps Toolkit's skills there.
+      targets: () => [path.join(homeDir, ...HOST_TARGETS[host]), ...(antigravity ? [path.join(homeDir, ...ANTIGRAVITY_TARGET)] : [])],
     });
     this.#homeDir = homeDir;
   }
+
+  // Antigravity's skills folder, for removing Toolkit's n8n copies there when the user turns it off.
+  antigravityTarget() { return path.join(this.#homeDir, ...ANTIGRAVITY_TARGET); }
 
   install() {
     return { ...super.install(), loadTwice: this.#loadTwice() };
@@ -82,7 +81,7 @@ function installSummary(result) {
 
 function main(argv = process.argv.slice(2)) {
   const host = argv.includes('--host') ? argv[argv.indexOf('--host') + 1] : 'claude-code';
-  const owner = new OfficialN8nSkills({ toolkitRoot: path.resolve(__dirname, '..', '..'), host });
+  const owner = new OfficialN8nSkills({ toolkitRoot: path.resolve(__dirname, '..', '..'), host, antigravity: argv.includes('--antigravity') });
   if (argv.includes('--remove')) {
     const removed = owner.remove();
     console.log(`Removed ${removed.length} Toolkit copies of the official n8n skills.`);

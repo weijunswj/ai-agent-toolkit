@@ -40,7 +40,10 @@ test('the global copy takes the portable skills only and keeps hand copies', (t)
 test('the setup answer copies, removes or changes nothing', (t) => {
   const dir = home(t);
   const owner = new AntigravityGlobalSkills({ toolkitRoot: repoRoot, homeDir: dir });
-  const answer = (choice) => core.applyAntigravitySkills({ setupChoices: { antigravitySkills: choice } }, owner);
+  const { OfficialN8nSkills } = require('../scripts/toolkit-n8n-official-skills.cjs');
+  const n8n = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir, antigravity: true });
+  n8n.install();
+  const answer = (choice) => core.applyAntigravitySkills({ setupChoices: { antigravitySkills: choice } }, owner, n8n);
   assert.equal(answer(''), '');
   assert.equal(answer('keep'), '');
   assert.equal(owner.hasCopies(), false);
@@ -48,6 +51,8 @@ test('the setup answer copies, removes or changes nothing', (t) => {
   assert.match(answer('copy'), /^\d+ already current\.$/);
   assert.match(answer('remove'), /^removed \d+ Toolkit skill folders\.$/);
   assert.equal(owner.hasCopies(), false);
+  assert.deepEqual(fs.readdirSync(path.join(dir, '.gemini', 'config', 'skills')), [], 'the n8n copies in Antigravity go too');
+  assert.ok(fs.existsSync(path.join(dir, '.agents', 'skills', 'using-n8n-skills-official')), 'the app folder copies stay');
 });
 
 test('the question shows only when Antigravity is installed or Toolkit copies exist, and is opt-in', () => {

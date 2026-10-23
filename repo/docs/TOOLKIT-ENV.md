@@ -4,8 +4,8 @@
 
 You can ask any agent in words ("edit my env", "what keys do I have", "remove the Coolify token"); the `toolkit-env` skill turns that into the commands below. The commands run from the managed Toolkit checkout:
 
-```bash
-node ~/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs status
+```powershell
+node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" status
 ```
 
 ## Where the values live

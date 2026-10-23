@@ -3,7 +3,7 @@
 // Refuses shell commands that would put AI attribution into a commit or a pull request: a
 // Co-Authored-By trailer naming Claude or Anthropic, a Claude-Session trailer, a claude.ai session
 // link, or a "Generated with Claude Code" footer. It looks only at `git commit` and `gh pr create` /
-// `gh pr edit`, in the command text and in a message or body file the command names. Ordinary text
+// `gh pr edit` / `gh pr merge`, in the command text and in a message or body file the command names. Ordinary text
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
 
 const fs = require('node:fs');
@@ -16,9 +16,11 @@ const ATTRIBUTION_PATTERNS = Object.freeze([
   /https?:\/\/claude\.ai\/(?:code\/)?(?:session|chat)[^\s"'`)]*/i,
   /Generated with \[?Claude Code/i
 ]);
-const COMMIT_OR_PR = /\bgit\b[^\n;&|]*\bcommit\b|\bgh\s+pr\s+(?:create|edit)\b/;
-// -F <file>, --file <file>, --file=<file>, --body-file <file>, --body-file=<file>
-const FILE_OPTIONS = /(?:^|\s)(?:-F|--file|--body-file)(?:=|\s+)("[^"]+"|'[^']+'|\S+)/g;
+const COMMIT_OR_PR = /\bgit\b[^\n;&|]*\bcommit\b|\bgh\s+pr\s+(?:create|edit|merge)\b/;
+// -F <file>, -F<file>, --file <file>, --file=<file>, --body-file <file>, --body-file=<file>
+const FILE_OPTIONS = /(?:^|\s)(?:-F(?:=|\s+)?|--file(?:=|\s+)|--body-file(?:=|\s+))("[^"]+"|'[^']+'|[^\s"']+)/g;
+// git -C <dir>: message files are relative to that folder.
+const GIT_DIR_OPTION = /\bgit\s+-C\s+("[^"]+"|'[^']+'|\S+)/;
 const MAX_FILE_BYTES = 1024 * 1024;
 
 function hasAttribution(text) {
@@ -28,10 +30,12 @@ function hasAttribution(text) {
 // The message or body files a command names, resolved against the command's working folder.
 function namedFiles(command, cwd) {
   const files = [];
+  const gitDir = GIT_DIR_OPTION.exec(String(command))?.[1]?.replace(/^["']|["']$/g, '');
+  const base = gitDir ? path.resolve(cwd || process.cwd(), gitDir) : (cwd || process.cwd());
   for (const match of String(command).matchAll(FILE_OPTIONS)) {
     const raw = match[1].replace(/^["']|["']$/g, '');
     if (raw === '-') continue;
-    files.push(path.resolve(cwd || process.cwd(), raw));
+    files.push(path.resolve(base, raw));
   }
   return files;
 }

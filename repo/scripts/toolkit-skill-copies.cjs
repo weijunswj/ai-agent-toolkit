@@ -10,6 +10,12 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const normalized = (buffer) => buffer.toString('utf8').replace(/\r\n/g, '\n');
+const SKILL_FOLDER = /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/;
+
+// A ledger entry Toolkit may act on: a plain skill-folder name inside an absolute `skills` folder.
+function safeEntry(target, name) {
+  return typeof target === 'string' && path.isAbsolute(target) && path.basename(target) === 'skills' && typeof name === 'string' && SKILL_FOLDER.test(name);
+}
 
 function listFiles(root, relative = '') {
   const files = [];
@@ -45,7 +51,12 @@ class ManagedSkillCopies {
   #readLedger() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.#ledgerPath, 'utf8'));
-      if (parsed?.schema === this.#ledgerSchema && parsed.targets && typeof parsed.targets === 'object') return parsed.targets;
+      if (parsed?.schema === this.#ledgerSchema && parsed.targets && typeof parsed.targets === 'object') {
+        // Entries that are not a plain skill folder inside a skills folder are dropped, never acted on.
+        return Object.fromEntries(Object.entries(parsed.targets)
+          .map(([target, names]) => [target, Array.isArray(names) ? names.filter((name) => safeEntry(target, name)) : []])
+          .filter(([target, names]) => safeEntry(target, 'x') && names.length));
+      }
     } catch { /* absent or unreadable reads as empty */ }
     return {};
   }
@@ -87,10 +98,17 @@ class ManagedSkillCopies {
     return rows;
   }
 
-  // Copies missing and stale Toolkit-owned folders; hand copies stay as they are.
+  // Copies missing and stale Toolkit-owned folders and removes Toolkit's copies of skills that are no
+  // longer in the source; hand copies stay as they are.
   install() {
     const ledger = this.#readLedger();
-    const result = { copied: [], current: [], handCopies: [] };
+    const result = { copied: [], current: [], handCopies: [], pruned: [] };
+    const names = new Set(this.skillNames());
+    for (const target of this.targets()) {
+      const stale = (ledger[target] || []).filter((name) => !names.has(name));
+      for (const name of stale) { fs.rmSync(path.join(target, name), { recursive: true, force: true }); result.pruned.push({ target, skill: name }); }
+      if (stale.length) { ledger[target] = ledger[target].filter((name) => names.has(name)); this.#saveLedger(ledger); }
+    }
     for (const row of this.inspect()) {
       if (row.state === 'hand-copy') { result.handCopies.push(row); continue; }
       if (row.state === 'current') { result.current.push(row); continue; }
@@ -109,17 +127,19 @@ class ManagedSkillCopies {
     return result;
   }
 
-  // Removes only the folders Toolkit recorded.
-  remove() {
+  // Removes only the folders Toolkit recorded (in one target, when given).
+  remove(onlyTarget = null) {
     const ledger = this.#readLedger();
     const removed = [];
     for (const [target, names] of Object.entries(ledger)) {
+      if (onlyTarget && target !== onlyTarget) continue;
       for (const skill of names) {
         fs.rmSync(path.join(target, skill), { recursive: true, force: true });
         removed.push({ target, skill });
       }
+      delete ledger[target];
     }
-    this.#saveLedger({});
+    this.#saveLedger(ledger);
     return removed;
   }
 }
@@ -129,6 +149,7 @@ function copySummary(result) {
   const parts = [];
   if (result.copied.length) parts.push(`${result.copied.length} folder copies updated`);
   if (result.current.length) parts.push(`${result.current.length} already current`);
+  if (result.pruned?.length) parts.push(`removed ${result.pruned.length} retired skill cop${result.pruned.length === 1 ? 'y' : 'ies'}`);
   if (result.handCopies.length) {
     const names = [...new Set(result.handCopies.map((row) => row.skill))].join(', ');
     parts.push(`kept your own copies of ${names} (Toolkit never changes them; delete them yourself to let Toolkit manage them)`);
