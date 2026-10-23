@@ -129,8 +129,8 @@ test('Codex hook matcher semantics follow the host: exact pipe lists, unanchored
   const exact=new CodexHookMatcher('spawn_agent|Agent');
   assert.equal(exact.matches('spawn_agent'),true);assert.equal(exact.matches('collaborationspawn_agent'),false);assert.equal(exact.matches('Agentx'),false);
   const shipped=new CodexHookMatcher(JSON.parse(fs.readFileSync(path.join(__dirname,'../../.codex-plugin/hooks/hooks.json'),'utf8')).hooks.PreToolUse[0].matcher);
-  for(const name of ['spawn_agent','Agent','collaborationspawn_agent','multi_agent_v1spawn_agent','teamspawn_agent'])assert.equal(shipped.matches(name),true,name);
-  for(const name of ['spawn_agents','Agents','list_agents','collaborationlist_agents','send_message','exec','Bash'])assert.equal(shipped.matches(name),false,name);
+  for(const name of ['spawn_agent','Agent','collaborationspawn_agent','multi_agent_v1spawn_agent','teamspawn_agent','Bash'])assert.equal(shipped.matches(name),true,name);
+  for(const name of ['spawn_agents','Agents','list_agents','collaborationlist_agents','send_message','exec','Bashx','apply_patch'])assert.equal(shipped.matches(name),false,name);
   assert.equal(new CodexHookMatcher('').matches('anything'),true);assert.equal(new CodexHookMatcher('*').matches('x'),true);
   assert.equal(new CodexHookMatcher('spawn').matches('collaborationspawn_agent'),false);assert.equal(new CodexHookMatcher('spawn.*').matches('collaborationspawn_agent'),true);
 });

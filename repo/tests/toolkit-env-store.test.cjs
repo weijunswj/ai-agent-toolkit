@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
-  LinuxSecretServiceStore, WindowsCredentialStore, storeForPlatform,
+  PlatformStore, WindowsCredentialStore, storeForPlatform,
 } = require('../scripts/toolkit-env-store.cjs');
 
 const STORE_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'toolkit-env-store.cjs');
@@ -89,22 +89,16 @@ test('Windows Credential Manager works with only the variables Codex gives a hea
   assert.equal(result.stdout, 'same');
 });
 
-test('Linux without a keyring stops with a plain message and no fallback file', (t) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-linux-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const store = new LinuxSecretServiceStore({ secretTool: path.join(home, 'no-such-secret-tool') });
-  assert.equal(store.backend, 'Linux Secret Service');
-  for (const action of [() => store.list(), () => store.read('X1_TEST_STORE_ONE'), () => store.writeAll(new Map([['X1_TEST_STORE_ONE', dummy()]]))]) {
-    assert.throws(action, (error) => error.code === 'backend-unavailable' && /no desktop keyring \(Secret Service\).*does not fall back to a plain file/.test(error.message));
+test('only Windows has a store; every other computer stops plainly with no fallback', () => {
+  assert.equal(storeForPlatform('win32').backend, 'Windows Credential Manager');
+  for (const platform of ['linux', 'darwin', 'aix']) {
+    assert.throws(() => storeForPlatform(platform), (error) => error.code === 'backend-unavailable' && new RegExp(`supports Windows only; this computer runs ${platform}\\.`).test(error.message), platform);
   }
-  assert.deepEqual(fs.readdirSync(home), []);
-  const noDbus = new LinuxSecretServiceStore({ spawn: () => ({ status: 1, stdout: '', stderr: 'Cannot autolaunch D-Bus without X11 $DISPLAY' }) });
-  assert.throws(() => noDbus.list(), /no desktop keyring/);
 });
 
-test('each operating system gets exactly its own store', () => {
-  assert.equal(storeForPlatform('win32').backend, 'Windows Credential Manager');
-  assert.equal(storeForPlatform('linux').backend, 'Linux Secret Service');
-  assert.throws(() => storeForPlatform('darwin'), /no store for darwin/);
-  assert.throws(() => storeForPlatform('aix'), /no store for aix/);
+test('the platform store is built on first use and says whether this computer has one', () => {
+  const linux = new PlatformStore({ platform: 'linux' });
+  assert.equal(linux.available(), false);
+  assert.throws(() => linux.list(), /supports Windows only/);
+  assert.equal(new PlatformStore({ platform: 'win32' }).available(), true);
 });

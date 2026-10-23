@@ -6,14 +6,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.6.0';
+const EXPECTED_TOOLKIT_VERSION = '3.7.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
 const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
+const HELPER_HOOK_REL_PATH = 'repo/scripts/toolkit-codex-helper-hook.cjs';
+const HELPER_HOOK_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-helper-hook.ps1';
 const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
 // Real `codex plugin list --json --available` catalogues exceed spawnSync's 1 MiB default (~3 MiB observed).
 const CODEX_JSON_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
@@ -25,6 +28,7 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-v3-native-helper-adapter.cjs",
   "repo/scripts/toolkit-v3-helper-guard.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
+  "repo/scripts/toolkit-attribution-guard.cjs",
   "repo/scripts/toolkit-claude-agent-hook.cjs",
   "repo/scripts/toolkit-gate-contract-compiler.cjs",
   "repo/scripts/toolkit-capability-registry.cjs",
@@ -40,14 +44,13 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
-  'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
   'repo/scripts/repo-ignore-hygiene.cjs',
   'repo/scripts/repo-local-backup.cjs',
-  'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
   'repo/scripts/toolkit-agent-control.cjs',
   'repo/scripts/claude-process-launch.cjs',
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
+  HELPER_HOOK_POWERSHELL_REL_PATH,
   'repo/scripts/toolkit-local-bridge.cjs',
   'repo/scripts/toolkit-global-rules.cjs',
   'repo/scripts/toolkit-managed-block.cjs',
@@ -111,12 +114,47 @@ function defaultWindowsPowerShellPath() {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-function powershellSingleQuoted(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
+function sourceHelperHookCommand() {
+  return `node "\${PLUGIN_ROOT}/${HELPER_HOOK_REL_PATH}"`;
+}
+
+// The Windows-only hook command (Codex's commandWindows). The full powershell.exe path is written without
+// quotes and the script runs through -File, so the same text works in cmd.exe and PowerShell and neither
+// shell looks for node or powershell in the opened folder. Codex replaces ${PLUGIN_ROOT} before the shell
+// sees the command. A PowerShell path with spaces or quotes cannot be written this way, so setup stops.
+function windowsHookCommand(scriptRelPath, powershellPath = defaultWindowsPowerShellPath()) {
+  const value = String(powershellPath);
+  if (!path.win32.isAbsolute(value) || /[\s"'&|<>^%]/.test(value)) {
+    throw new Error(`Toolkit can only write a Windows hook command for a PowerShell path without spaces or special characters: ${value}`);
+  }
+  return `${value} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/${scriptRelPath}"`;
 }
 
 function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  return `& ${powershellSingleQuoted(powershellPath)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/${SESSION_START_POWERSHELL_REL_PATH}"`;
+  return windowsHookCommand(SESSION_START_POWERSHELL_REL_PATH, powershellPath);
+}
+
+function windowsHelperHookCommand(powershellPath = defaultWindowsPowerShellPath()) {
+  return windowsHookCommand(HELPER_HOOK_POWERSHELL_REL_PATH, powershellPath);
+}
+
+// The installed copy keeps the portable command and adds commandWindows to both Toolkit hooks.
+function renderInstalledWindowsHooks(hooks, powershellPath) {
+  const rendered = structuredClone(hooks);
+  rendered.hooks.SessionStart[0].hooks[0].commandWindows = windowsSessionStartCommand(powershellPath);
+  rendered.hooks.PreToolUse[0].hooks[0].commandWindows = windowsHelperHookCommand(powershellPath);
+  return rendered;
+}
+
+// The source shape of the installed hooks: the same file with every commandWindows removed.
+function withoutWindowsCommands(hooks) {
+  const plain = structuredClone(hooks);
+  for (const groups of Object.values(plain.hooks || {})) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      for (const hook of group?.hooks || []) delete hook.commandWindows;
+    }
+  }
+  return plain;
 }
 
 function writeFileAtomically(filePath, bytes) {
@@ -237,7 +275,7 @@ function validateMarketplaceWrapper(marketplace) {
 
 function verifySessionStartHook(hooksPath, options = {}) {
   const errors = [];
-  const hooks = readJson(hooksPath);
+  const hooks = options.hooks || readJson(hooksPath);
   const sessionStart = hooks?.hooks?.SessionStart;
   if (!Array.isArray(sessionStart) || sessionStart.length !== 1) {
     return ['must include a SessionStart hook'];
@@ -253,18 +291,25 @@ function verifySessionStartHook(hooksPath, options = {}) {
   }
   if (commands.length !== 1) errors.push('SessionStart must include exactly one command hook');
   const command = commands[0] || '';
-  const expected = options.windows
-    ? windowsSessionStartCommand(options.powershellPath)
-    : sourceSessionStartCommand();
-  if (command !== expected) errors.push(`SessionStart command must use the exact ${options.windows ? 'installed Windows' : 'portable source'} Toolkit launcher shape`);
-  if (!command.includes(SESSION_START_LAUNCHER_REL_PATH) && !command.includes(SESSION_START_POWERSHELL_REL_PATH)) {
-    errors.push('SessionStart command must call the Toolkit hook-safe launcher');
-  }
+  if (command !== sourceSessionStartCommand()) errors.push('SessionStart command must use the exact portable Toolkit launcher shape');
   if (/toolkit-local-bridge\.cjs/.test(command)) errors.push('SessionStart command must not call toolkit-local-bridge.cjs directly');
-  if (!options.windows) {
-    for (const arg of SESSION_START_ARGS) {
-      if (!command.includes(arg)) errors.push(`SessionStart command must include ${arg}`);
+  const helperHook = hooks?.hooks?.PreToolUse?.[0]?.hooks?.[0];
+  if (helperHook?.command !== sourceHelperHookCommand()) errors.push('PreToolUse helper hook must use the exact portable Toolkit command');
+  const sessionWindows = sessionStart[0]?.hooks?.[0]?.commandWindows;
+  const helperWindows = helperHook?.commandWindows;
+  if (options.windows) {
+    let expectedSession = '';
+    let expectedHelper = '';
+    try {
+      expectedSession = windowsSessionStartCommand(options.powershellPath);
+      expectedHelper = windowsHelperHookCommand(options.powershellPath);
+    } catch (error) {
+      errors.push(error.message);
     }
+    if (sessionWindows !== expectedSession) errors.push('SessionStart commandWindows must use the exact installed Windows launcher shape');
+    if (helperWindows !== expectedHelper) errors.push('PreToolUse helper hook commandWindows must use the exact installed Windows launcher shape');
+  } else if (sessionWindows !== undefined || helperWindows !== undefined) {
+    errors.push('the source hooks must not carry commandWindows; setup adds it to the installed copy only');
   }
   return errors;
 }
@@ -303,6 +348,10 @@ function prepareInstalledSessionStartIfPresent(options = {}) {
 
 function prepareInstalledSessionStart(cacheRoot, options = {}) {
   if (!(options.platform || process.platform).startsWith('win')) return { changed: false };
+  // Codex puts the cache path inside double quotes in commandWindows; $ and ` expand in PowerShell and % in cmd.exe.
+  if (/[$`%"]/.test(path.resolve(cacheRoot))) {
+    throw new Error('The Codex plugin cache path contains $, `, % or ", which a Windows hook command cannot carry safely; move CODEX_HOME to a plain path.');
+  }
   const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
   const nodePath = path.resolve(options.nodePath || process.execPath);
   const powershellPath = path.resolve(options.powershellPath || defaultWindowsPowerShellPath());
@@ -310,14 +359,12 @@ function prepareInstalledSessionStart(cacheRoot, options = {}) {
     const stat = fs.lstatSync(filePath);
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} must be a regular file for Toolkit SessionStart setup.`);
   }
-  const hooks = readJson(hooksPath);
-  const commandHook = hooks?.hooks?.SessionStart?.[0]?.hooks?.[0];
-  const currentCommand = String(commandHook?.command || '');
-  const installedCommand = windowsSessionStartCommand(powershellPath);
-  if (currentCommand !== sourceSessionStartCommand() && currentCommand !== installedCommand) {
-    throw new Error('Installed SessionStart hook does not match a supported Toolkit source or Windows launcher shape.');
+  const plain = withoutWindowsCommands(readJson(hooksPath));
+  const sourceErrors = verifySessionStartHook(null, { hooks: plain });
+  if (sourceErrors.length) {
+    throw new Error(`Installed Toolkit hooks do not match the supported source shape: ${sourceErrors.join('; ')}`);
   }
-  commandHook.command = installedCommand;
+  const hooks = renderInstalledWindowsHooks(plain, powershellPath);
   const hooksBytes = Buffer.from(`${JSON.stringify(hooks, null, 2)}\n`, 'utf8');
   const runtimePath = path.join(cacheRoot, ...SESSION_START_RUNTIME_REL_PATH.split('/'));
   const runtimeBytes = Buffer.from(`${JSON.stringify({ schema: 1, node_path: nodePath }, null, 2)}\n`, 'utf8');
@@ -415,11 +462,9 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
         errors.push(...cacheHookErrors.map((error) => `${pluginId()} cache ${error}`));
       }
       if (!sourceHookErrors.length && !cacheHookErrors.length && fs.existsSync(sourceFile) && fs.existsSync(cacheFile)) {
-        const normalizedCacheHooks = readJson(cacheFile);
-        normalizedCacheHooks.hooks.SessionStart[0].hooks[0].command = sourceSessionStartCommand();
-        const normalizedCacheBytes = Buffer.from(`${JSON.stringify(normalizedCacheHooks, null, 2)}\n`, 'utf8');
+        const normalizedCacheBytes = Buffer.from(`${JSON.stringify(withoutWindowsCommands(readJson(cacheFile)), null, 2)}\n`, 'utf8');
         if (!fs.readFileSync(sourceFile).equals(normalizedCacheBytes)) {
-          errors.push(`${pluginId()} installed plugin cache is stale for repo file after normalizing the Windows SessionStart command: ${relPath}`);
+          errors.push(`${pluginId()} installed plugin cache is stale for repo file after removing the Windows hook commands: ${relPath}`);
         }
       }
       continue;
@@ -749,7 +794,7 @@ function windowsAliasCliCandidate() {
 function isWindowsAppsAliasAccessDenied(command, output) {
   const text = String(output || '');
   return process.platform === 'win32' &&
-    command === 'codex' &&
+    (command === 'codex' || /[\\/]WindowsApps[\\/]codex\.exe$/i.test(command)) &&
     /(access is denied|eperm|eacces)/i.test(text);
 }
 
@@ -821,7 +866,7 @@ function commandCandidates(explicitCommand) {
   if (process.env.CODEX_TOOLKIT_CODEX_CLI) candidates.push(process.env.CODEX_TOOLKIT_CODEX_CLI);
   if (process.env.CODEX_CLI_PATH) candidates.push(process.env.CODEX_CLI_PATH);
   candidates.push(windowsAliasCliCandidate());
-  candidates.push('codex');
+  try { candidates.push(resolvePathExecutable('codex', { label: 'Codex CLI' })); } catch {}
   return [...new Set(candidates.filter(Boolean))];
 }
 
@@ -1397,7 +1442,7 @@ class CodexToolkitWriteTransaction {
 function nextStepsForState(state) {
   return [
     '**Next Steps:**',
-    '1. Restart Codex if the plugin install changed anything.',
+    '1. If the plugin install changed anything, open `/hooks` in the Codex app and trust the updated Toolkit hooks.',
     '2. Open `/hooks` in Codex.',
     `3. Verify the enabled Toolkit \`SessionStart\` hook belongs to the installed \`ai-agent-toolkit\` plugin at version \`${EXPECTED_TOOLKIT_VERSION}\`.`,
     `4. The supported hook normally runs from the installed plugin-cache copy${state.cacheRoot ? ` at \`${state.cacheRoot}\`` : ''}, not the managed Git checkout.`,
@@ -1683,6 +1728,10 @@ module.exports = {
   verifySessionStartHook,
   verifySessionStartRuntime,
   windowsSessionStartCommand,
+  windowsHelperHookCommand,
+  renderInstalledWindowsHooks,
+  sourceHelperHookCommand,
+  HELPER_HOOK_POWERSHELL_REL_PATH,
   formatWindowsAliasFailure,
   isWindowsAppsAliasAccessDenied,
   main

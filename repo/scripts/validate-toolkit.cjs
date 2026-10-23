@@ -725,10 +725,28 @@ function validateLegacyReferences(errors) {
   }
 }
 
+// Exact third-party copies under repo/contracts/third-party/ that an active source lock pins by blob SHA:
+// reference text shipped with a skill, never run by Toolkit.
+function pinnedThirdPartyCopies() {
+  const pinned = new Set();
+  const provenance = path.join(root, 'repo', 'source-watch', 'provenance');
+  if (!fs.existsSync(provenance)) return pinned;
+  for (const dir of fs.readdirSync(provenance)) {
+    const lockPath = path.join(provenance, dir, 'SOURCE-LOCK.json');
+    if (!fs.existsSync(lockPath)) continue;
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    for (const file of lock.files || []) {
+      if (file.mode === 'exact' && file.source_blob_sha && String(file.root_surface_path || '').startsWith('repo/contracts/third-party/')) pinned.add(file.root_surface_path);
+    }
+  }
+  return pinned;
+}
+
 function validateExecutables(errors) {
+  const pinned = pinnedThirdPartyCopies();
   for (const entry of listFiles()) {
     const ext = path.extname(entry.relPath).toLowerCase();
-    if (!executableExtensions.has(ext)) continue;
+    if (!executableExtensions.has(ext) || pinned.has(entry.relPath)) continue;
     if (ext === '.py' && !entry.relPath.startsWith('skills/frontend-art-direction/tools/design-system-generator/') && !entry.relPath.startsWith('repo/tests/')) {
       fail(errors, `Python file outside approved local-only locations: ${entry.relPath}`);
     }

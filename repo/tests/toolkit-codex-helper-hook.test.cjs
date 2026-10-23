@@ -51,7 +51,7 @@ test('inside the V3-governed Toolkit checkout an unbound helper request is block
 // V2 spawn hook `<namespace>spawn_agent`. A hyphenated namespace must reach the hook through
 // both registered matchers and be held unless bound, never admitted as an unrecognised name.
 test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones included, reaches the hook and is held', () => {
-  const { CODEX_SPAWN_MATCHER } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
+  const { CODEX_HELPER_HOOK_MATCHER, CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
   const plugin = JSON.parse(fs.readFileSync(path.join(ROOT, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   const contract = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   for (const tool of ['multi-agentspawn_agent', 'collab-v2spawn_agent', 'Team_Alpha-2spawn_agent', '-spawn_agent']) {
@@ -61,8 +61,9 @@ test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny', tool);
     assert.match(r.stderr, /Toolkit helper held: NATIVE_BINDING_REQUIRED/, tool);
   }
-  // Both registrations carry the single matcher the recogniser is built from.
-  for (const hooks of [plugin, contract]) assert.equal(hooks.hooks.PreToolUse[0].matcher, CODEX_SPAWN_MATCHER);
+  // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus Bash.
+  for (const hooks of [plugin, contract]) assert.equal(hooks.hooks.PreToolUse[0].matcher, CODEX_HELPER_HOOK_MATCHER);
+  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent', 'Bash']) assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches(name), true, name);
 });
 
 test('a drifted pinned binding is blocked wherever it is supplied', () => {

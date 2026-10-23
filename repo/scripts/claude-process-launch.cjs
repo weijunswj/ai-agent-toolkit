@@ -71,6 +71,15 @@ function assertExecutableAvailable(value, options = {}) {
   throw new Error(`${label} executable is not available.`);
 }
 
+// A bare program name such as `git`: on Windows, Node searches the current folder before PATH, so a
+// git.exe planted in the working folder would run. Return the .exe from PATH's absolute folders
+// instead (throws when there is none). Other platforms search PATH only, so the name stays bare.
+function resolvePathExecutable(name, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32') return name;
+  return assertExecutableAvailable(path.extname(name) ? name : `${name}.exe`, { ...options, platform, label: options.label || name });
+}
+
 function quoteWindowsArgument(value, doubleEscapeMeta = false) {
   let argument = String(value);
   argument = argument.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"');
@@ -143,4 +152,4 @@ function directSpawnParts(executable, args = [], options = {}) {
   return { command: target.command, args: [...target.prefix, ...args] };
 }
 
-module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, directSpawnParts, resolveClaudeCommandInput, validateExecutable };
+module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, directSpawnParts, resolveClaudeCommandInput, resolvePathExecutable, validateExecutable };

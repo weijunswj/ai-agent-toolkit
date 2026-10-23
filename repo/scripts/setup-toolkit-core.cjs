@@ -11,6 +11,10 @@ const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
+const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
+const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
+const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
@@ -23,6 +27,8 @@ const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPER
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
+// The folder setup was started from, passed to the managed child for the local clone step.
+const SETUP_START_FOLDER_ENV = 'AI_AGENT_TOOLKIT_SETUP_START_FOLDER';
 // Setup finished its steps, but the install check found something a person must fix.
 const SETUP_ACTION_REQUIRED = 24;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
@@ -108,12 +114,13 @@ function emptySetupChoices() {
     repoAutoUpdate: '',
     updateReports: '',
     updateReportRetention: '',
-    refreshPrAutoMerge: '',
     codexDocLimit: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
     claudeTopology: '',
-    claudePluginBehavior: ''
+    claudePluginBehavior: '',
+    claudeSettings: '',
+    antigravitySkills: ''
   };
 }
 
@@ -138,11 +145,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
-    refreshPrAutoMerge: true,
     codexDocLimit: true,
     codexDocLimitMode: '',
     codexPluginAutoRefresh: true,
     antigravityGlobalRules: false,
+    explain: '',
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
@@ -155,6 +162,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
     if (arg === '--plan') args.plan = true;
+    else if (arg === '--explain') { args.explain = next(); args.plan = true; }
+    else if (arg.startsWith('--explain=')) { args.explain = arg.slice('--explain='.length); args.plan = true; }
     else if (arg === '--execute') args.execute = true;
     else if (arg === '--json') args.json = true;
     else if (arg === '--auto-main') args.autoMain = true;
@@ -238,13 +247,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.updateReports = false;
       args.setupChoices.updateReports = 'disable';
     } else if (arg === '--keep-update-reports') args.setupChoices.updateReports = 'keep';
-    else if (arg === '--enable-refresh-pr-auto-merge') {
-      args.refreshPrAutoMerge = true;
-      args.setupChoices.refreshPrAutoMerge = 'enable';
-    } else if (arg === '--disable-refresh-pr-auto-merge') {
-      args.refreshPrAutoMerge = false;
-      args.setupChoices.refreshPrAutoMerge = 'disable';
-    } else if (arg === '--keep-refresh-pr-auto-merge') args.setupChoices.refreshPrAutoMerge = 'keep';
     else if (arg === '--enable-codex-doc-limit') {
       args.codexDocLimit = true;
       args.setupChoices.codexDocLimit = 'enable';
@@ -291,11 +293,20 @@ function parseArgs(argv = process.argv.slice(2)) {
       const choice = arg.slice('--claude-plugin-behavior='.length).toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
+    } else if (arg === '--claude-settings' || arg.startsWith('--claude-settings=')) {
+      const choice = (arg === '--claude-settings' ? next() : arg.slice('--claude-settings='.length)).toLowerCase();
+      if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-settings choice: ${choice}`);
+      args.setupChoices.claudeSettings = choice;
+    } else if (arg === '--antigravity-skills' || arg.startsWith('--antigravity-skills=')) {
+      const choice = (arg === '--antigravity-skills' ? next() : arg.slice('--antigravity-skills='.length)).toLowerCase();
+      if (!['copy', 'remove', 'keep'].includes(choice)) throw new Error(`Unsupported --antigravity-skills choice: ${choice}`);
+      args.setupChoices.antigravitySkills = choice;
     } else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.5');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
@@ -332,7 +343,6 @@ function preferenceSummary(options) {
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
-    merge_rule_refresh_prs: choices.refreshPrAutoMerge || 'question-required',
     raise_codex_instruction_limit: choices.codexDocLimit || 'question-required'
   };
 }
@@ -350,8 +360,6 @@ function setupPlan(options = {}) {
   const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
-  if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
-  else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
   if (choices.codexDocLimit === 'enable') reportArgs.push('--enable-codex-doc-limit');
   else if (choices.codexDocLimit === 'disable') reportArgs.push('--disable-codex-doc-limit');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
@@ -499,15 +507,14 @@ function printHelp() {
     'AI Agent Toolkit setup orchestrator',
     '',
     'Default mode is --plan. The recommended setup entrypoint is:',
-    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
-    '  node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
+    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
     '',
     'Common commands:',
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
-    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
+    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
@@ -536,9 +543,6 @@ function printHelp() {
     '  --enable-update-reports     write meaningful update reports',
     '  --disable-update-reports    disable future meaningful update report writes',
     '  --keep-update-reports       preserve meaningful update report write preference',
-    '  --enable-refresh-pr-auto-merge   merge rule-refresh PRs when the required checks pass',
-    '  --disable-refresh-pr-auto-merge  stop rule-refresh PRs at the open PR',
-    '  --keep-refresh-pr-auto-merge     preserve the rule-refresh PR merge choice',
     '  --enable-codex-doc-limit    raise Codex project_doc_max_bytes to 65536 and keep it raised',
     '  --disable-codex-doc-limit   leave Codex project_doc_max_bytes alone; put back a value Toolkit raised',
     '  --keep-codex-doc-limit      preserve the Codex instruction limit choice',
@@ -553,7 +557,7 @@ function printHelp() {
     '  --keep-update-report-retention-days',
     '                               preserve current retention days',
     '  --enable-codex-plugin-auto-refresh',
-    '                               let Codex hooks refresh stale Codex Toolkit cache and repair unsafe third-party hooks on Windows',
+    '                               let Codex hooks refresh stale Codex Toolkit cache',
     '  --skip-codex-plugin-auto-refresh',
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
@@ -562,6 +566,10 @@ function printHelp() {
     '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
+    '  --explain <ref>              print the full text of one setup question, for example --explain 1.5',
+    '  --claude-settings enable|disable|keep',
+    '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
+    '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
 }
@@ -585,7 +593,8 @@ function runCommand(label, command, args, options = {}) {
     console.log(`\n==> ${label}`);
     console.log('Command arguments: withheld from routine output; see the named checklist step.');
   }
-  const result = spawnSync(command, args, {
+  // git comes from PATH by full path: Windows would otherwise run a git.exe in the working folder.
+  const result = spawnSync(command === 'git' ? processLaunch.resolvePathExecutable('git') : command, args, {
     cwd: options.cwd,
     env: options.env || process.env,
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -798,6 +807,8 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
         ...process.env,
         [MANAGED_PROTOCOL_ENV]: MANAGED_QUESTION_BANK_PROTOCOL,
         [MANAGED_DELEGATION_DEPTH_ENV]: '1',
+        // The child runs in the managed checkout; it fast-forwards the user's clone from here.
+        [SETUP_START_FOLDER_ENV]: process.env[SETUP_START_FOLDER_ENV] || process.cwd(),
       },
       stdio: [pipeStdin ? 'pipe' : 'inherit', 'pipe', 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -1078,7 +1089,6 @@ function printDelegationPreview(preview) {
   console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
   console.log(`Restore command setup script: ${preview.restore_commands.setup_script_path}`);
   console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
-  console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
 function printDelegationRemovalPreview(preview) {
@@ -1093,7 +1103,6 @@ function printDelegationRemovalPreview(preview) {
   console.log(`Codex backup directory: ${preview.backup_root}`);
   console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
   console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
-  console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
 function selectedHelperCount(args, current) {
@@ -1301,7 +1310,8 @@ async function collectCurrentState(args) {
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
-    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect() } : {}),
+    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
+    antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
       : inspectCodexNativePluginState(args)
@@ -1340,7 +1350,6 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
-  if (key === 'refreshPrAutoMerge') return 'enable';
   if (key === 'codexDocLimit') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
@@ -1350,6 +1359,8 @@ function recommendedChoice(key, current, args) {
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
+  if (key === 'claudeSettings') return 'enable';
+  if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
 
@@ -1638,6 +1649,90 @@ function claudeSubagentDepthChoice(options) {
   return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
 }
 
+// One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
+function claudeSettingsOutcome(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return 'The Claude Code user settings have not been read yet.';
+  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return `${entries[0].detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
+  const describe = (entry) => {
+    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (set by Toolkit).`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `${entry.label}: your own value is kept.`;
+    return `${entry.label}: not set.`;
+  };
+  return entries.map(describe).join(' ');
+}
+
+const N8N_SKILLS_PLUGIN = 'n8n-skills@n8n-io';
+
+// A file-system error names its code only, so no private path reaches the summary.
+const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error.message);
+
+// Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
+// The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
+// plugin is turned off; Codex has no supported switch, so the summary says how.
+function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }),
+  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
+  let summary;
+  try { summary = n8nSkillsSummary(owner.install()); }
+  catch (error) { return `not copied (${copyFailure(error)}).`; }
+  if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
+  try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
+  catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
+}
+
+// Whether Antigravity is installed and whether Toolkit's copies of its skills are already there.
+function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
+  try { return { installed: owner.installed(), copies: owner.hasCopies() }; }
+  catch { return { installed: false, copies: false }; }
+}
+
+function antigravitySkillsOutcome(state) {
+  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder.";
+  return "Toolkit's skills are not in Antigravity's global skills folder.";
+}
+
+function antigravitySkillsQuestion(args, current) {
+  const outcome = antigravitySkillsOutcome(current.antigravity);
+  return resolvedQuestion({
+    id: 'antigravity-skills',
+    key: 'antigravitySkills',
+    section: 'Other coding apps',
+    title: "Copy Toolkit's skills into Antigravity?",
+    prompt: 'Antigravity skills choice',
+    whatThisControls: "Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
+    choices: [
+      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
+      wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
+    ],
+    recommendation: current.antigravity?.copies
+      ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
+      : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
+    selected: args.setupChoices.antigravitySkills,
+    current: outcome,
+    currentVerification: 'state-derived',
+    afterApplying: 'Start a new Antigravity session to load changed skills.',
+  });
+}
+
+// Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
+function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot }),
+  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true })) {
+  const choice = args.setupChoices.antigravitySkills || 'keep';
+  try {
+    if (choice === 'copy') return `${globalCopySummary(owner.install())}.`;
+    if (choice === 'remove') {
+      // Toolkit's n8n skill copies in Antigravity go with them.
+      return `removed ${owner.remove().length + n8n.remove(n8n.antigravityTarget()).length} Toolkit skill folders.`;
+    }
+  } catch (error) { return `not changed (${copyFailure(error)}).`; }
+  return '';
+}
+
+// Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
+function applyClaudeUserSettings(args, settings = new ClaudeUserSettings()) {
+  return settings.apply(args.setupChoices.claudeSettings || 'keep');
+}
+
 function claudeSubagentDepthOutcome(depth) {
   if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return 'Your Claude Code user settings set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 (set by Toolkit). In Claude Code 2.1.217 or later this allows one layer: the main session may start subagents; subagents never start another. Project, local or managed Claude settings can override it in a folder.';
   if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `You set CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=${depth.value} in your Claude Code user settings yourself; Toolkit leaves it unchanged.`;
@@ -1750,7 +1845,7 @@ function setupQuestionSpecs(args, current) {
       section: 'Updates and reports',
       title: 'Update reports',
       prompt: 'Update report choice',
-      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
+      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
       choices: [
         wizardChoice('enable', 'Keep reports', 'Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.'),
         wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
@@ -1789,28 +1884,6 @@ function setupQuestionSpecs(args, current) {
       current: retentionCurrent,
       currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
       afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
-    }),
-    resolvedQuestion({
-      id: 'refresh-pr-auto-merge',
-      key: 'refreshPrAutoMerge',
-      section: 'Updates and reports',
-      title: 'Merge rule-refresh PRs when the required checks pass',
-      prompt: 'Rule-refresh PR merge choice',
-      whatThisControls: 'Whether a rules-refresh pull request (only the files repository-agent-rules wrote, on a new branch of a repository with a GitHub remote) is merged once at least one check has reported on its exact head, every reported check has completed as passed or skipped, and every required check has passed. No reported checks, any failed or pending check, review or branch protection, extra files and missing remotes always stop at the open pull request; admin bypass and force-push are never used.',
-      choices: [
-        wizardChoice('enable', 'Turn on', 'Merge the rule-refresh pull request once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.'),
-        wizardChoice('disable', 'Turn off', 'Stop at the open rule-refresh pull request and report it for you to merge.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.refresh_pr_auto_merge_enabled, 'Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.', 'Rule-refresh PRs stop at the open PR for you to merge.', 'The saved rule-refresh merge choice could not be verified; refresh PRs stop at the open PR.')}`),
-      ],
-      recommendation: {
-        value: recommendedChoice('refreshPrAutoMerge', current, args),
-        outcome: 'Merge rule-refresh pull requests once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.',
-        reason: 'Refreshed rules reach the default branch without a manual step, while the checks, branch protection and the refresh-owned-files limit still decide every merge.',
-      },
-      selected: args.setupChoices.refreshPrAutoMerge,
-      current: currentBooleanOutcome(current.audit?.refresh_pr_auto_merge_enabled, 'Rule-refresh PRs merge automatically once at least one check has reported on the exact head, every reported check has completed as passed or skipped, and every required check has passed.', 'Rule-refresh PRs stop at the open PR for you to merge.', 'The saved rule-refresh merge choice could not be verified; refresh PRs stop at the open PR.'),
-      currentVerification: typeof current.audit?.refresh_pr_auto_merge_enabled === 'boolean' ? 'verified' : 'defaulted',
-      afterApplying: 'This stores your choice in Toolkit state on this computer. The skill reads it with `node repo/scripts/toolkit-local-bridge.cjs --audit` (field `refresh_pr_auto_merge_enabled`); it does not change native host configuration, and no restart is required.',
     }),
     resolvedQuestion({
       id: 'codex-instruction-limit',
@@ -1854,10 +1927,10 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'Codex Toolkit maintenance',
       prompt: 'Codex plugin maintenance choice',
-      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.',
+      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.'),
-        wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
+        wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.'),
+        wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.')}`),
       ],
       recommendation: {
@@ -1868,7 +1941,7 @@ function setupQuestionSpecs(args, current) {
       selected: args.setupChoices.codexPluginAutoRefresh,
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
       currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
-      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
+      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
     }));
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
@@ -1907,9 +1980,28 @@ function setupQuestionSpecs(args, current) {
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
       current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
-      afterApplying: 'If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.',
+      afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
+    }));
+    specs.push(resolvedQuestion({
+      id: 'claude-recommended-settings',
+      key: 'claudeSettings',
+      section: 'Other coding apps',
+      title: "Use Toolkit's recommended Claude Code settings?",
+      prompt: 'Claude Code settings choice',
+      whatThisControls: 'Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.'),
+        wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
+      ],
+      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: 'Turn on the four recommended Claude Code settings.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      selected: args.setupChoices.claudeSettings,
+      current: claudeSettingsOutcome(current.claudeSettings),
+      currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
+      afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
   }
+  if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
 
   return withPresentationMetadata(specs.map((spec) => ({
     ...spec,
@@ -1942,11 +2034,13 @@ function plannedQuestionBank(args, current) {
   };
 }
 
-function renderQuestionRows(specs) {
+// The full text of each question; `onlyRef` limits it to one question, numbered as in the whole bank.
+function renderQuestionRows(specs, onlyRef = '') {
   specs = ensurePresentationMetadata(specs);
   const lines = [];
   let section = '';
   for (const spec of specs) {
+    if (onlyRef && spec.presentation.question_ref !== onlyRef) continue;
     if (spec.section !== section) {
       if (lines.length) lines.push('');
       section = spec.section;
@@ -1979,12 +2073,51 @@ function renderQuestionRows(specs) {
   return lines.join('\n').trimEnd();
 }
 
-function renderQuestionBankHeader(specs, markdown = true) {
+// Table cells hold one line: backslashes and pipes are escaped and line breaks become spaces.
+const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+// The bank as one compact table: the question, what is true now, the recommended choice and its
+// effect, and the other choices. The full text of a question is shown only on request.
+function renderCompactQuestionTable(specs, markdown = true) {
+  specs = ensurePresentationMetadata(specs);
+  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}: ${spec.recommended_outcome}`;
+  const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
+  const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
+  const lines = [];
+  let section = '';
+  for (const spec of specs) {
+    if (spec.section !== section) {
+      section = spec.section;
+      const heading = `${spec.presentation.section_index}. ${section}`;
+      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Now | Recommended | Other choices |', '|---|---|---|---|---|');
+      else lines.push('', heading, '='.repeat(heading.length));
+    }
+    if (!markdown) {
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Now: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
+      const rest = others(spec);
+      if (rest.length) lines.push(`  Other choices: ${rest.join('; ')}`);
+      if (spec.selected) lines.push(`  Selected: ${selected(spec)}`);
+      continue;
+    }
+    const rest = others(spec).map(tableCell).join('<br>') || '-';
+    const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
+    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
+  }
+  return lines;
+}
+
+const EXPLAIN_HINT = 'For the full text of a question, say "explain 1.5" (or run setup with --explain 1.5).';
+
+// The bank's heading and reference; the reference documentation also lists a quick index (the bank's
+// own table already shows every question).
+function renderQuestionBankHeader(specs, markdown = true, quickIndex = true) {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
   const heading = `Toolkit setup choices - ${questionCount} questions across ${sectionCount} sections`;
   const bankReference = specs[0]?.presentation.bank_reference || '';
-  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, '', 'Quick index', ''];
+  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, ''];
+  if (!quickIndex) return lines;
+  lines.push('Quick index', '');
   for (const spec of specs) {
     lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
   }
@@ -2188,36 +2321,12 @@ function renderSetupQuestionBankTerminal(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
   const lines = [
     QUESTION_BANK_BEGIN,
-    ...renderQuestionBankHeader(specs, false),
+    ...renderQuestionBankHeader(specs, false, false),
     'Review every visible choice before setup writes anything.',
+    ...renderCompactQuestionTable(specs, false),
+    '',
+    EXPLAIN_HINT,
   ];
-  let section = '';
-  for (const spec of specs) {
-    if (spec.section !== section) {
-      section = spec.section;
-      const heading = `${spec.presentation.section_index}. ${section}`;
-      lines.push('', heading, '='.repeat(heading.length));
-    }
-    lines.push('', `${spec.presentation.question_ref} ${spec.title}`, '', `What this controls: ${spec.whatThisControls}`, '');
-    lines.push(`Current: ${spec.current}`);
-    lines.push('');
-    lines.push(`Verification: ${spec.currentState?.verification || 'unverified'}`);
-    lines.push('');
-    lines.push(`Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
-    lines.push('');
-    lines.push(`Recommended outcome: ${spec.recommended_outcome}`);
-    lines.push('');
-    lines.push(`Why: ${spec.recommendation_reason}`);
-    lines.push('');
-    lines.push('Choices:');
-    for (const choice of spec.choices) lines.push(`  ${choice.presentation_ref}. ${choice.label} - ${choice.consequence}`);
-    if (spec.afterApplying) lines.push('', `After applying: ${spec.afterApplying}`);
-    const selectedValue = spec.selected || spec.empty_input || '';
-    lines.push('');
-    lines.push(`Selected: ${selectedValue
-      ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
-      : '(answer required)'}`);
-  }
   const guideMode = options.answerMode
     || (options.conciseCommands === false ? 'tty-one-at-a-time' : 'tty');
   lines.push('', ...renderAnswerGuide(specs, false, guideMode), '', QUESTION_BANK_COMPLETE, '');
@@ -2228,10 +2337,12 @@ function renderSetupQuestionBank(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
   return [
     QUESTION_BANK_BEGIN,
-    ...renderQuestionBankHeader(specs, true),
+    ...renderQuestionBankHeader(specs, true, false),
     'Review every visible choice before setup writes anything.',
     '',
-    renderQuestionRows(specs),
+    ...renderCompactQuestionTable(specs, true),
+    '',
+    EXPLAIN_HINT,
     '',
     ...renderAnswerGuide(specs, true, options.answerMode || 'non-tty', options),
     QUESTION_BANK_COMPLETE,
@@ -2250,6 +2361,7 @@ function setupQuestionClaudeDocumentationSpecs() {
     ...documentationFixtureState(),
     agentProfile: { supported: true, topology: agentControl.TOPOLOGIES.ROOT_ONLY },
     claudeSubagentDepth: { state: SUBAGENT_DEPTH_STATES.DEFAULT },
+    claudeSettings: [],
   };
   return plannedQuestionBank(parseArgs(['--plan', '--host', 'claude-code']), current).specs;
 }
@@ -2271,11 +2383,11 @@ function documentationFixtureState() {
       repo_auto_update: { enabled: true },
       update_report_enabled: true,
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
-      refresh_pr_auto_merge_enabled: true,
       codex_doc_limit_enabled: true,
       codex_plugin_auto_refresh_enabled: true,
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
+    antigravity: { installed: true, copies: false },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
     nativePlugin: { status: 'fresh' },
   };
@@ -2353,12 +2465,13 @@ function assignChoice(args, key, choice) {
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
-  else if (key === 'refreshPrAutoMerge') args.setupChoices.refreshPrAutoMerge = choice;
   else if (key === 'codexDocLimit') args.setupChoices.codexDocLimit = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
+  else if (key === 'claudeSettings') args.setupChoices.claudeSettings = choice;
+  else if (key === 'antigravitySkills') args.setupChoices.antigravitySkills = choice;
 }
 
 function choiceForKey(args, key) {
@@ -2366,12 +2479,13 @@ function choiceForKey(args, key) {
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
-  if (key === 'refreshPrAutoMerge') return args.setupChoices.refreshPrAutoMerge;
   if (key === 'codexDocLimit') return args.setupChoices.codexDocLimit;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
+  if (key === 'claudeSettings') return args.setupChoices.claudeSettings;
+  if (key === 'antigravitySkills') return args.setupChoices.antigravitySkills;
   return '';
 }
 
@@ -2653,7 +2767,6 @@ function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
-  if (spec.key === 'refreshPrAutoMerge') return args.refreshPrAutoMerge ? 'enable' : 'disable';
   if (spec.key === 'codexDocLimit') return args.codexDocLimit ? 'enable' : 'disable';
   if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
   return value;
@@ -2892,9 +3005,6 @@ function applySetupChoices(args, current) {
   if (choices.updateReports === 'keep') args.updateReports = current.audit?.update_report_enabled !== false;
   else args.updateReports = choices.updateReports === 'enable';
 
-  if (choices.refreshPrAutoMerge === 'keep') args.refreshPrAutoMerge = current.audit?.refresh_pr_auto_merge_enabled === true;
-  else args.refreshPrAutoMerge = choices.refreshPrAutoMerge === 'enable';
-
   // Raise Codex's limit only on a yes (or a kept yes); a no puts back a value Toolkit raised.
   if (choices.codexDocLimit === 'keep') args.codexDocLimit = current.audit?.codex_doc_limit_enabled === true;
   else args.codexDocLimit = choices.codexDocLimit === 'enable';
@@ -2911,6 +3021,36 @@ function applySetupChoices(args, current) {
   }
 
   args.repoRoot = path.resolve(args.repoRoot);
+}
+
+// The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
+// checkout: fast-forward it to the default branch if it is clean and on that branch, else skip with the
+// reason. It never resets, forces, stashes or switches branches.
+function fastForwardLocalClone(args, startFolder = process.env[SETUP_START_FOLDER_ENV] || process.cwd()) {
+  const top = runGitCapture(startFolder, ['rev-parse', '--show-toplevel'], 'find the local Toolkit clone', true, true);
+  if (!top) return null;
+  const clone = path.resolve(top);
+  if (samePath(clone, args.repoRoot)) return null;
+  if (!fs.existsSync(path.join(clone, 'repo', 'scripts', 'setup-toolkit.cjs'))) return null;
+  const remote = runGitCapture(clone, ['remote', 'get-url', 'origin'], 'read the local clone remote', true, true);
+  if (!remote || normalizeRemote(remote) !== normalizeRemote(args.repoRemote)) return null;
+  const branch = runGitCapture(clone, ['branch', '--show-current'], 'read the local clone branch', true, true);
+  if (branch !== args.repoBranch) return { status: 'skipped', reason: `your local clone is on ${branch || 'a detached head'}, not ${args.repoBranch}` };
+  if (runGitCapture(clone, ['status', '--porcelain'], 'read the local clone status', true, true)) return { status: 'skipped', reason: 'your local clone has uncommitted changes' };
+  const fetched = runCommand('fetch the local clone', 'git', ['fetch', 'origin', args.repoBranch], { cwd: clone, capture: true, timeout: 120000, allowFailure: true, quiet: true });
+  if (fetched.status !== 0) return { status: 'skipped', reason: 'git fetch failed' };
+  const before = runGitCapture(clone, ['rev-parse', 'HEAD'], 'read the local clone head', true, true);
+  const merged = runCommand('fast-forward the local clone', 'git', ['merge', '--ff-only', `origin/${args.repoBranch}`], { cwd: clone, capture: true, timeout: 120000, allowFailure: true, quiet: true });
+  if (merged.status !== 0) return { status: 'skipped', reason: `your local ${args.repoBranch} has commits that are not on origin, so it cannot fast-forward` };
+  const after = runGitCapture(clone, ['rev-parse', 'HEAD'], 'read the local clone head', true, true);
+  return before === after ? { status: 'current' } : { status: 'fast-forwarded', commit: after };
+}
+
+function localCloneSummary(result) {
+  if (!result) return '';
+  if (result.status === 'fast-forwarded') return `fast-forwarded to ${result.commit.slice(0, 7)}`;
+  if (result.status === 'current') return 'already current';
+  return `not updated: ${result.reason}`;
 }
 
 function activeToolkitWarning(args) {
@@ -3385,8 +3525,6 @@ function writeBridgePreferences(args) {
   const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
-  if (choices.refreshPrAutoMerge === 'enable') reportArgs.push('--enable-refresh-pr-auto-merge');
-  else if (choices.refreshPrAutoMerge === 'disable') reportArgs.push('--disable-refresh-pr-auto-merge');
   if (choices.codexDocLimit === 'enable') reportArgs.push('--enable-codex-doc-limit');
   else if (choices.codexDocLimit === 'disable') reportArgs.push('--disable-codex-doc-limit');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
@@ -3523,7 +3661,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, delegation, subagentDepth, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3539,7 +3677,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log('');
   console.log('## Managed main checkout');
   console.log('Managed checkout path: <managed-toolkit-checkout>');
-  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit (Windows) or $HOME/.ai-agent-toolkit/source/ai-agent-toolkit (POSIX)');
+  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit');
   console.log(`Managed checkout branch: ${args.repoBranch}`);
   console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
   console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
@@ -3591,7 +3729,6 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   if (delegation.backup_metadata_path) console.log(`Exact backup metadata: ${delegation.backup_metadata_path}`);
   if (delegation.restore_commands?.setup_script_path) console.log(`Restore command setup script: ${delegation.restore_commands.setup_script_path}`);
   if (delegation.restore_commands?.powershell) console.log(`Exact restore command (PowerShell): ${delegation.restore_commands.powershell}`);
-  if (delegation.restore_commands?.posix) console.log(`Exact restore command (POSIX shell): ${delegation.restore_commands.posix}`);
   console.log('');
   console.log('## Codex Security capacity');
   console.log('Security capacity behavior: normal global capacity is never raised automatically');
@@ -3605,9 +3742,13 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${profileOutcomeSummary(delegation)}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
+    if (claudeSettings) console.log(`Claude Code settings this run: ${claudeSettingsOutcome(claudeSettings)}${claudeSettings.some((entry) => entry.changed) ? ' Start a new Claude Code session to use them.' : ''}`);
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
+  if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
+  if (antigravitySkills) console.log(`Toolkit skills in Antigravity: ${antigravitySkills}\n`);
+  if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
@@ -3618,7 +3759,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Codex plugin current: ${yesNo(nativeCache.current === true)}`);
     console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
     console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
-    console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Codex: open /hooks and trust the updated Toolkit hooks: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
     console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit SessionStart hook belongs to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
@@ -3635,7 +3776,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
     if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
     console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
-    console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Claude new session needed: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
   } else {
     console.log('Claude plugin status: not checked for this host');
@@ -3647,7 +3788,6 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
-  console.log(`Rule-refresh PRs merge when required checks pass: ${yesNo(args.refreshPrAutoMerge === true)}`);
   console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
@@ -3656,7 +3796,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');
   console.log('## Antigravity portable skills');
-  console.log('No native/plugin lifecycle is managed. The opt-in project copy targets <project>/.agents/skills only.');
+  console.log('Setup question "Copy Toolkit\'s skills into Antigravity?" manages the global copy in ~/.gemini/config/skills. For one project only, copy into <project>/.agents/skills:');
   console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
   console.log('');
   console.log('## Validation');
@@ -3664,7 +3804,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   if (installCheck) printInstallCheck(installCheck);
 }
 
-const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'restart required', 'action-required': 'action required' });
+const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'new session needed', 'action-required': 'action required' });
 
 function printInstallCheck(result) {
   console.log('');
@@ -3707,6 +3847,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     globalRules: setupGlobalRules(args),
     depthSetting: new ClaudeSubagentDepthSetting(),
     envHealth: ToolkitEnv.forUser(),
+    syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
   return check.run({
@@ -3753,14 +3894,19 @@ class ToolkitSetupExecution {
     await this.#collectAndAnswer();
     this.#announcePlan();
     const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const localClone = fastForwardLocalClone(args);
     const nativeCache = this.#nativePluginSetup();
     runLiteValidation(args, this.#validationResults);
     writeBridgePreferences(args);
     const audit = runBridgeAudit(args);
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
+    const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
+    // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
+    const antigravitySkills = applyAntigravitySkills(args);
+    const n8nSkills = installOfficialN8nSkills(args);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
-    printFinalSummary({ args, current: this.#current, managed, nativeCache, delegation, subagentDepth, audit,
+    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -3769,7 +3915,15 @@ class ToolkitSetupExecution {
 
 async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
-async function main(argv = process.argv.slice(2)) {
+// Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
+// setup tests run there. Every other platform stops here, before any host install or settings write.
+function assertSupportedComputer({ platform = process.platform, environment = process.env } = {}) {
+  if (platform === 'win32') return;
+  if (platform === 'linux' && environment.CI === 'true') return;
+  throw new Error(`Toolkit setup supports Windows 10 and 11 only; this computer runs ${platform}. macOS and Linux computers are not supported (Linux is used only for CI).`);
+}
+
+async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
     process.stdout.write(`${JSON.stringify(managedProtocolProbe())}\n`);
     return 0;
@@ -3789,6 +3943,7 @@ async function main(argv = process.argv.slice(2)) {
     printHelp();
     return 0;
   }
+  assertSupportedComputer(options);
   if (args.verifyClaudePlugin) {
     runClaudeNativePluginVerify(args);
     return 0;
@@ -3799,6 +3954,12 @@ async function main(argv = process.argv.slice(2)) {
     const current = await collectCurrentState(args);
     args.codexRuntime = current.runtime.runtime;
     const planned = plannedQuestionBank(args, current);
+    if (args.explain) {
+      const text = renderQuestionRows(planned.specs, args.explain);
+      if (!text) throw new Error(`No setup question ${args.explain} in this bank.`);
+      console.log(`Bank reference: ${ensurePresentationMetadata(planned.specs)[0]?.presentation.bank_reference || ''} (${args.host})\n\n${text}`);
+      return 0;
+    }
     printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);
     return 0;
   }
@@ -3823,6 +3984,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertSupportedComputer,
+  installOfficialN8nSkills,
+  applyAntigravitySkills,
+  antigravityState,
+  fastForwardLocalClone,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
@@ -3844,6 +4010,7 @@ module.exports = {
   applyClaudeSubagentDepth,
   parseArgs,
   setupQuestionSpecs,
+  documentationFixtureState,
   withPresentationMetadata,
   buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
@@ -3853,6 +4020,7 @@ module.exports = {
   answerSetupQuestionBank,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
+  renderQuestionRows,
   resolveClaudeTopology,
   renderSetupQuestionBankTerminal,
   renderSetupQuestionDocumentation,

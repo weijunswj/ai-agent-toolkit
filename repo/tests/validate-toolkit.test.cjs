@@ -681,7 +681,7 @@ test('source locks are discovered only from canonical source-watch provenance', 
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs'));
   const result = audit.auditSourceLocks();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.locks.length, 2);
+  assert.equal(result.locks.length, 3);
   assert.ok(result.locks.every((relPath) => relPath.startsWith('repo/source-watch/provenance/')));
 });
 

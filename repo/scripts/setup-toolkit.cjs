@@ -3,8 +3,8 @@
 
 const core = require('./setup-toolkit-core.cjs');
 
-async function main(argv = process.argv.slice(2)) {
-  return core.main(argv);
+async function main(argv = process.argv.slice(2), options = {}) {
+  return core.main(argv, options);
 }
 
 if (require.main === module) {

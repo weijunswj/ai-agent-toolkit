@@ -77,7 +77,12 @@ class ClaudeNamedHelperPolicy {
     if (this.#environment.CLAUDE_CODE_SUBAGENT_MODEL) return deny('CLAUDE_CODE_SUBAGENT_MODEL is set and would override the helper model; unset it to use Toolkit helpers.');
     const loaded = this.#loadedDefinition(requested, input, governance);
     if (!loaded) return deny(`no ${requested} definition is installed. Install the Toolkit helpers with ${this.#generatorCommand()}.`);
-    if (this.#matches(role, loaded.text, this.#toolkitRoot).matches) return {};
+    if (this.#matches(role, loaded.text, this.#toolkitRoot).matches) {
+      // Claude Code reads agent files when a session starts, so a file rewritten since then runs
+      // with the settings this session loaded, not the ones on disk.
+      if (changedSinceSessionStart(loaded.file, input)) return deny('Helper settings changed after this session started. Start a new session to use them.');
+      return {};
+    }
     if (samePath(path.dirname(loaded.file), helperAgents().claudeUserAgentsDirectory(this.#environment))) {
       return deny(`the installed ${requested} definition (${loaded.file}) does not match the one rendered from the selected stack. Run \`setup toolkit\` to refresh it.`);
     }
@@ -85,4 +90,16 @@ class ClaudeNamedHelperPolicy {
   }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES });
+// The session started when its transcript file was created; without a readable creation time
+// (some file systems report none) the check makes no claim.
+function changedSinceSessionStart(file, input) {
+  const transcript = typeof input?.transcript_path === 'string' ? input.transcript_path : '';
+  if (!transcript) return false;
+  try {
+    const started = fs.statSync(transcript).birthtimeMs;
+    if (!started) return false;
+    return fs.statSync(file).mtimeMs > started;
+  } catch { return false; }
+}
+
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart });
