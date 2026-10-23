@@ -25,7 +25,7 @@
 // no git root or no identity is never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
-// existing registry, managed-block and remote-identity modules.
+// existing registry, managed-block, remote-identity and programme-binding modules.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -34,6 +34,7 @@ const path = require('node:path');
 const registry = require('./toolkit-capability-registry.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
 const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plane-kernel.cjs');
+const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
 const STATES = Object.freeze(['ENABLED', 'DECLINED', 'UNKNOWN', 'PORTABLE']);
@@ -207,45 +208,26 @@ function readGovernedBlock(root) {
   return { present: false, marker_errors: errors.length };
 }
 
-const SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
-
-function isPlainObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function onlyKeys(value, allowed) { return Object.keys(value).every(key => allowed.includes(key)); }
-
-// The problems with a parsed binding against toolkit.programme-binding.v1
-// (repo/contracts/programme-state/binding-v1.schema.json), plus the rule that
-// the binding agrees with the origin identity and cannot override it. Empty when valid.
+// The problems with a parsed binding, as the reconciler that consumes it judges them
+// (validateBinding in skills/github-program-reconciler/scripts/programme-state.cjs, schema
+// repo/contracts/programme-state/binding-v1.schema.json), plus the rule that the binding agrees
+// with the origin identity and cannot override it. Empty when valid.
 function bindingProblems(binding, identity) {
-  const problems = [];
-  if (!isPlainObject(binding)) return ['not-an-object'];
-  const required = ['schema', 'repository', 'parent_issue', 'record_prefix', 'writer_prefix', 'store', 'required_checks'];
-  for (const key of required) if (!Object.prototype.hasOwnProperty.call(binding, key)) problems.push(`missing-${key}`);
-  if (!onlyKeys(binding, required)) problems.push('unknown-key');
-  if (binding.schema !== BINDING_SCHEMA) problems.push('schema');
-  if (typeof binding.repository !== 'string' || !SLUG.test(binding.repository)) problems.push('repository');
-  if (!Number.isInteger(binding.parent_issue) || binding.parent_issue < 1) problems.push('parent_issue');
-  if (typeof binding.record_prefix !== 'string' || !PREFIX.test(binding.record_prefix)) problems.push('record_prefix');
-  if (typeof binding.writer_prefix !== 'string' || !PREFIX.test(binding.writer_prefix)) problems.push('writer_prefix');
-  const store = binding.store;
-  const storeKeys = ['kind', 'repository', 'branch', 'path'];
-  if (!isPlainObject(store) || !onlyKeys(store, storeKeys) || !storeKeys.every(key => Object.prototype.hasOwnProperty.call(store, key))
-    || store.kind !== 'github' || typeof store.repository !== 'string' || !SLUG.test(store.repository)
-    || typeof store.branch !== 'string' || store.branch.length === 0
-    || typeof store.path !== 'string' || !/^([A-Za-z0-9_.-]+\/)+$/.test(store.path)) problems.push('store');
-  if (!Array.isArray(binding.required_checks) || !binding.required_checks.every(item => typeof item === 'string' && item.length > 0)) problems.push('required_checks');
-  if (!problems.includes('repository')) {
-    const slug = remoteSlug(identity && identity.remote);
-    if (!slug || slug.toLowerCase() !== binding.repository.toLowerCase()) problems.push('repository-disagrees-with-origin');
+  try {
+    programmeState.validateBinding(binding);
+  } catch (error) {
+    const errors = error && error.details && Array.isArray(error.details.errors) ? error.details.errors : [];
+    return errors.length ? errors.map(String) : ['binding is invalid'];
   }
-  return problems;
+  const slug = remoteSlug(identity && identity.remote);
+  return slug && slug.toLowerCase() === binding.repository.toLowerCase() ? [] : ['repository does not match the origin remote'];
 }
 
 function readBinding(root, identity) {
   const bytes = readSmallFile(path.join(root, ...BINDING_FILE), BINDING_READ_LIMIT, 'BINDING_TOO_LARGE');
   if (!bytes) return { present: false, valid: false, problems: [] };
   let parsed;
-  try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not-json'] }; }
+  try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
   return { present: true, valid: problems.length === 0, problems };
 }

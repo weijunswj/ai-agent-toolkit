@@ -250,24 +250,23 @@ test('binding: schema shape and agreement with the origin identity', (t) => {
   const identity = governance.readIdentity(fakeRepo(ctx.root, 'identity'));
   assert.deepEqual(governance.bindingProblems(validBinding(), identity), []);
   assert.deepEqual(governance.bindingProblems(validBinding({ repository: 'Example-Owner/Example-Repo' }), identity), []);
-  assert.ok(governance.bindingProblems(validBinding({ repository: 'someone/else' }), identity).includes('repository-disagrees-with-origin'));
-  assert.ok(governance.bindingProblems(validBinding({ schema: 'x' }), identity).includes('schema'));
-  assert.ok(governance.bindingProblems(validBinding({ parent_issue: 0 }), identity).includes('parent_issue'));
-  assert.ok(governance.bindingProblems(validBinding({ extra: true }), identity).includes('unknown-key'));
-  assert.ok(governance.bindingProblems(validBinding({ store: { kind: 'drive', repository: 'a/b', branch: 'main', path: 's/' } }), identity).includes('store'));
-  assert.ok(governance.bindingProblems(validBinding({ required_checks: [''] }), identity).includes('required_checks'));
+  const problem = (overrides) => governance.bindingProblems(validBinding(overrides), identity).join('\n');
+  assert.match(problem({ repository: 'someone/else' }), /does not match the origin remote/);
+  assert.match(problem({ schema: 'x' }), /schema must be/);
+  assert.match(problem({ parent_issue: 0 }), /parent_issue/);
+  assert.match(problem({ store: { kind: 'drive', repository: 'a/b', branch: 'main', path: 's/' } }), /store\.kind/);
+  assert.match(problem({ store: { kind: 'github', repository: 'example-owner/example-repo', branch: 'main', path: 's/' } }), /separate repository/);
+  assert.match(problem({ required_checks: [''] }), /required_checks/);
+  assert.deepEqual(governance.bindingProblems(null, identity).length > 0, true);
   const invalid = fakeRepo(ctx.root, 'invalid-binding', { block: true });
   fs.mkdirSync(path.join(invalid, '.github'));
   fs.writeFileSync(path.join(invalid, '.github', 'toolkit-programme.json'), '{not json');
   const result = state(ctx, invalid);
-  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNKNOWN', 'R6', true, ['not-json']]);
-  // The shipped schema, when present in this tree, has the same required keys.
-  const schemaFile = path.join(repoRoot, 'repo', 'contracts', 'programme-state', 'binding-v1.schema.json');
-  if (fs.existsSync(schemaFile)) {
-    const schema = JSON.parse(fs.readFileSync(schemaFile, 'utf8'));
-    assert.deepEqual([...schema.required].sort(), Object.keys(validBinding()).sort());
-    assert.deepEqual([...schema.properties.store.required].sort(), Object.keys(validBinding().store).sort());
-  }
+  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNKNOWN', 'R6', true, ['not valid JSON']]);
+  // This repository's own binding is valid for its own origin.
+  const own = path.join(repoRoot, '.github', 'toolkit-programme.json');
+  const ownIdentity = { remote: { path: '/weijunswj/ai-agent-toolkit.git' } };
+  assert.deepEqual(governance.bindingProblems(JSON.parse(fs.readFileSync(own, 'utf8')), ownIdentity), []);
 });
 
 test('H-09 (unit): unreadable inputs hold inside a repository and never outside one', (t) => {
