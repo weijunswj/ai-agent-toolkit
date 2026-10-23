@@ -5,14 +5,13 @@ description: Use when the user talks about their env, env keys, secrets, API key
 
 # Toolkit Env
 
-`toolkit env` keeps the user's API keys and tokens in this computer's own credential store (Windows Credential Manager or the Linux Secret Service; macOS is not supported) and feeds them to Claude Code and Codex. You run its commands; the user types any value themselves, outside the chat.
+`toolkit env` keeps the user's API keys and tokens in this computer's own credential store (Windows Credential Manager; Toolkit supports Windows computers only) and feeds them to Claude Code and Codex. You run its commands; the user types any value themselves, outside the chat.
 
 ## Run it
 
 Use the managed Toolkit checkout, so connected apps keep working after updates:
 
-- Windows: `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
-- Linux: `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs" <command>`
+- `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
 
 If that file is missing, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
 
@@ -39,7 +38,7 @@ After `edit`, Notepad (or their default editor) opens a private file that lists 
 - If the user pastes a secret into the chat anyway, do not repeat it. Tell them it is now exposed, recommend rotating it at the provider, and offer `edit` to save the new one.
 - Removing a key, connecting or undoing entries, and retiring `~/.codex/.env` change things on the user's computer: do them only after the user's own yes for that exact key or entry.
 - Key names look like `PROVIDER_SOLUTION_PURPOSE` (for example `COOLIFY_SWOOSHZ_MCP_TOKEN`): upper case letters, digits and underscores, at least three parts, never starting with `CODEX_`.
-- Linux without a desktop keyring stops with a message; pass it on. There is no plain-file fallback.
+- On a computer other than Windows it stops with a message; pass it on. There is no plain-file fallback.
 
 ## After a change
 

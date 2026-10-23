@@ -184,7 +184,7 @@ class ToolkitInstallHealthCheck {
     let result;
     try { result = this.#env.health(); }
     catch { return this.#check('env', label, STATUS.ACTION, 'The Toolkit env store and connected entries could not be checked.', 'Run `toolkit env status` to see why.'); }
-    if (result.state === 'not-set-up') return null;
+    if (result.state === 'not-set-up' || result.state === 'skipped') return null;
     if (result.state === 'passed') return this.#check('env', label, STATUS.PASSED, result.summary);
     return this.#check('env', label, STATUS.ACTION, result.summary, result.actions.join(' '));
   }

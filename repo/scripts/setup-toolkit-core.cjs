@@ -494,7 +494,6 @@ function printHelp() {
     '',
     'Default mode is --plan. The recommended setup entrypoint is:',
     '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
-    '  node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
     '',
     'Common commands:',
@@ -1071,7 +1070,6 @@ function printDelegationPreview(preview) {
   console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
   console.log(`Restore command setup script: ${preview.restore_commands.setup_script_path}`);
   console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
-  console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
 function printDelegationRemovalPreview(preview) {
@@ -1086,7 +1084,6 @@ function printDelegationRemovalPreview(preview) {
   console.log(`Codex backup directory: ${preview.backup_root}`);
   console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
   console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
-  console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
 function selectedHelperCount(args, current) {
@@ -3539,7 +3536,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   console.log('');
   console.log('## Managed main checkout');
   console.log('Managed checkout path: <managed-toolkit-checkout>');
-  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit (Windows) or $HOME/.ai-agent-toolkit/source/ai-agent-toolkit (POSIX)');
+  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit');
   console.log(`Managed checkout branch: ${args.repoBranch}`);
   console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
   console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
@@ -3591,7 +3588,6 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, su
   if (delegation.backup_metadata_path) console.log(`Exact backup metadata: ${delegation.backup_metadata_path}`);
   if (delegation.restore_commands?.setup_script_path) console.log(`Restore command setup script: ${delegation.restore_commands.setup_script_path}`);
   if (delegation.restore_commands?.powershell) console.log(`Exact restore command (PowerShell): ${delegation.restore_commands.powershell}`);
-  if (delegation.restore_commands?.posix) console.log(`Exact restore command (POSIX shell): ${delegation.restore_commands.posix}`);
   console.log('');
   console.log('## Codex Security capacity');
   console.log('Security capacity behavior: normal global capacity is never raised automatically');
@@ -3770,7 +3766,15 @@ class ToolkitSetupExecution {
 
 async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
-async function main(argv = process.argv.slice(2)) {
+// Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
+// setup tests run there. Every other platform stops here, before any host install or settings write.
+function assertSupportedComputer({ platform = process.platform, environment = process.env } = {}) {
+  if (platform === 'win32') return;
+  if (platform === 'linux' && environment.CI === 'true') return;
+  throw new Error(`Toolkit setup supports Windows 10 and 11 only; this computer runs ${platform}. macOS and Linux computers are not supported (Linux is used only for CI).`);
+}
+
+async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
     process.stdout.write(`${JSON.stringify(managedProtocolProbe())}\n`);
     return 0;
@@ -3790,6 +3794,7 @@ async function main(argv = process.argv.slice(2)) {
     printHelp();
     return 0;
   }
+  assertSupportedComputer(options);
   if (args.verifyClaudePlugin) {
     runClaudeNativePluginVerify(args);
     return 0;
@@ -3824,6 +3829,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertSupportedComputer,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
