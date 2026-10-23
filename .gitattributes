@@ -41,5 +41,6 @@ skills/frontend-art-direction/tools/design-system-generator/data/** -text whites
 skills/frontend-art-direction/tools/design-system-generator/scripts/core.py -text
 skills/frontend-art-direction/tools/design-system-generator/scripts/design_system.py -text
 
-# Pinned third-party copies are compared by git blob SHA, so their bytes never change.
-repo/contracts/third-party/** -text
+# Pinned third-party copies are compared by git blob SHA, so their bytes never change and the
+# whitespace check skips them.
+repo/contracts/third-party/** -text -whitespace
