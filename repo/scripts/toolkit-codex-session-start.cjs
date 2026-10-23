@@ -46,7 +46,8 @@ function replayBridgeOutput(writes) {
   }
 }
 
-// The hook input Codex pipes in; {} when there is none (a manual run at a terminal).
+// The hook input Codex pipes in; {} when there is none (a manual run at a terminal). Read only after
+// the bridge has run, so the bridge still receives stdin untouched.
 function readHookInput() {
   if (process.stdin.isTTY) return {};
   try {
@@ -66,7 +67,6 @@ function governanceLine(input, dependencies) {
 }
 
 function main(argv = process.argv.slice(2), dependencies = {}) {
-  const input = dependencies.input || {};
   // SessionStart is the only canonical Codex hook event.
   try {
     if (JSON.stringify(argv) !== JSON.stringify(HOOK_ARGS)) throw new Error('unexpected hook arguments');
@@ -82,11 +82,13 @@ function main(argv = process.argv.slice(2), dependencies = {}) {
   } catch {
     console.log(WARNING);
   }
+  let input = {};
+  try { input = dependencies.input || (dependencies.readInput ? dependencies.readInput() : {}); } catch { input = {}; }
   const line = governanceLine(input, dependencies);
   if (line) console.log(line);
   return 0;
 }
 
-if (require.main === module) process.exitCode = main(process.argv.slice(2), { input: readHookInput() });
+if (require.main === module) process.exitCode = main(process.argv.slice(2), { readInput: readHookInput });
 
 module.exports = { HOOK_ARGS, MAX_CAPTURE_BYTES, WARNING, main };
