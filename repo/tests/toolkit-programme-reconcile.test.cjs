@@ -25,7 +25,7 @@ const CATALOGUE = [
   { issue: 499, label: 'R1', class: 'CORE', parent: null, order: 0 },
 ];
 
-function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.0', controller = writer } = {}) {
+function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.0', controller = writer, initialiseParent = true } = {}) {
   const github = new FakeGitHub({ repository, store: 'acme/state-store' });
   const binding = {
     schema: state.SCHEMA.binding, repository, parent_issue: parentIssue, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-',
@@ -43,7 +43,7 @@ function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGU
   let clock = 0;
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => `T${clock += 1}`, toolkitVersion: version });
   const parent = state.claimDocument(state.newParent({ repository, parentIssue, outcomes }), controller, {});
-  store.write('parent', parentIssue, parent, { sha: null, previous: null });
+  if (initialiseParent) store.write('parent', parentIssue, parent, { sha: null, previous: null });
   const reconciler = (who = controller) => new state.Reconciler({
     store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
     mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer: who, toolkitVersion: version,
@@ -354,10 +354,10 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
   assert.equal(github.issues.get(8).state, 'open');
 });
 
-test('the CLI hands the child from G0 to assigned G1 while ctrl retains parent acceptance', () => {
+test('the CLI bootstraps with ctrl, then hands the child from G0 to assigned G1 with controller acceptance', () => {
   const ctrl = { session: 'ctrl', prefix: writer.prefix };
   const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
-  const { github, store, binding } = setup({ parentIssue: 7, outcomes, controller: ctrl, issues: gh => gh.addIssue(8, { parent: 7 }) });
+  const { github, store, binding } = setup({ parentIssue: 7, outcomes, controller: ctrl, initialiseParent: false, issues: gh => gh.addIssue(8, { parent: 7 }) });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-handover-'));
   const output = [];
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
@@ -368,6 +368,16 @@ test('the CLI hands the child from G0 to assigned G1 while ctrl retains parent a
     return JSON.parse(output.join(''));
   };
   try {
+    assert.equal(cli.main(['reconcile', '--session', 'g1'], deps), 1);
+    assert.match(output.join(''), /Controller: resolve PARENT_STATE_MISSING on #7/);
+    const bootstrap = 'No parent state document for #7 yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.';
+    assert.ok(output.join('').includes(bootstrap));
+    assert.throws(() => run(['claim', '--issue', '8', '--role', 'G1'], 'g1'), { code: 'PARENT_STATE_MISSING', message: bootstrap });
+    assert.equal(github.commits, 0);
+    const catalogue = path.join(dir, 'catalogue.json');
+    fs.writeFileSync(catalogue, JSON.stringify({ outcomes }));
+    assert.equal(run(['init-parent', '--catalogue', catalogue, '--apply'], 'ctrl').outcome, 'WRITTEN');
+    assert.equal(store.read('parent', 7).doc.fence.holder_session, 'ctrl');
     run(['claim', '--issue', '8', '--role', 'G0'], 'g0');
     run(['return', '--issue', '8', '--submit', 'g0-r1'], 'g0');
     run(['return', '--issue', '8', '--consume', 'g0-r1', '--verdict', 'ACCEPT'], 'ctrl');
@@ -420,7 +430,9 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);
     assert.match(finding.detail, new RegExp(`${gate} acceptance recorded$`));
-    assert.ok(cli.formatReport(report).includes(`${gate} acceptance recorded`));
+    const line = cli.formatReport(report).split('\n').find(text => text.startsWith('- #8: PR #540'));
+    assert.ok(line.includes(`${gate} acceptance recorded`));
+    assert.equal(line.endsWith('; completion not accepted'), !accepted);
     assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
     assert.equal(github.issues.get(8).state, 'open');
   }
@@ -484,7 +496,7 @@ test('the command line binds identity, refuses writes without a session and prin
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
   assert.equal(cli.main(['reconcile'], deps), 0);
   assert.match(output.join(''), /Planned effects\n1\. /);
-  assert.match(output.join(''), /Next action: Report this plan; only the appointed controller holding the parent document runs reconcile --apply/);
+  assert.match(output.join(''), /Next action: Controller: run reconcile --apply for this plan; other sessions report it/);
   assert.throws(() => cli.main(['reconcile', '--apply'], deps), { code: 'WRITER_UNKNOWN' });
   assert.throws(() => cli.main(['reconcile', '--apply', '--parent-file', 'x.json', '--session', 's'], deps), { code: 'USAGE' });
   assert.throws(() => cli.main(['reconcile'], { ...deps, originUrl: 'https://github.com/acme/other.git' }), { code: 'GH_FAILED' });

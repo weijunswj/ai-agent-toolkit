@@ -43,6 +43,12 @@ function parseArgs(argv) {
     if (!/^\d+$/.test(args.issue)) throw new ProgrammeError('USAGE', '--issue must be an issue number');
     args.issue = Number(args.issue);
   }
+  if (command === 'claim') {
+    if (Boolean(args.parent) === (args.issue !== undefined) || (args.issue !== undefined && (!Number.isSafeInteger(args.issue) || args.issue < 1))) {
+      throw new ProgrammeError('USAGE', 'claim needs exactly one of --parent or --issue <n>, with n >= 1.');
+    }
+    if (args.parent && args.role !== undefined) throw new ProgrammeError('USAGE', '--role cannot be used with --parent.');
+  }
   return args;
 }
 
@@ -96,7 +102,7 @@ function outcomeFor(parentDoc, issue) {
 
 function readParent(context) {
   const { doc } = context.store.read('parent', context.binding.parent_issue);
-  if (!doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue}; create it with init-parent.`);
+  if (!doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.`);
   return doc;
 }
 
@@ -142,7 +148,7 @@ const commands = {
       return { mode: 'dry-run', valid: !errors.length, errors, document: doc };
     }
     const writer = requireWriter(context);
-    if (context.store.read('parent', context.binding.parent_issue).doc) throw new ProgrammeError('STATE_EXISTS', 'The parent state document already exists; use update-parent.');
+    if (context.store.read('parent', context.binding.parent_issue).doc) throw new ProgrammeError('STATE_EXISTS', 'The parent state document already exists. Only the appointed controller runs update-parent.');
     doc.fence = { epoch: 1, holder_prefix: writer.prefix, holder_session: writer.session };
     const result = context.store.write('parent', context.binding.parent_issue, doc, { sha: null, previous: null });
     return writeResult('parent', context.binding.parent_issue, result);
@@ -159,7 +165,7 @@ const commands = {
     const writer = requireWriter(context);
     const route = args.model || args.effort ? { model: args.model || null, effort: args.effort || null, read_back: Boolean(args['route-read-back']) } : null;
     const options = { takeover: Boolean(args.takeover), role: args.role || null, route };
-    if (args.parent || !args.issue) {
+    if (args.parent) {
       const result = context.store.mutate('parent', context.binding.parent_issue, { writer, authorise: false, change: doc => state.claimDocument(doc, writer, options) });
       return writeResult('parent', context.binding.parent_issue, result);
     }
@@ -199,7 +205,7 @@ function formatReport(report) {
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
   if (report.findings.length) lines.push('', 'Findings', ...report.findings.map(finding => `- ${finding.code} #${finding.issue}: ${finding.detail}`));
-  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}`));
+  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));

@@ -373,7 +373,7 @@ function isHolder(doc, writer) {
 function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
   const prefix = doc?.fence?.holder_prefix || 'nobody';
   const epoch = doc?.fence?.epoch ?? 0;
-  if (kind === 'parent') return `appointed controller (${prefix}, epoch ${epoch})`;
+  if (kind === 'parent') return `parent holder (${prefix}, epoch ${epoch})`;
   const gate = doc?.gate?.role || 'unassigned';
   if (doc?.fence?.holder_session && isHolder(parentDoc, { session: doc.fence.holder_session, prefix })) {
     return `appointed controller (${prefix}, gate ${gate}, epoch ${epoch})`;
@@ -381,12 +381,16 @@ function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' 
   return `holder ${prefix} for gate ${gate} (epoch ${epoch})`;
 }
 
+function parentRefusal(doc) {
+  return `The parent document is held by the ${holderDescription(doc)}. Only the appointed controller applies; other sessions dry-run and report to the controller. If you are the appointed controller and another session holds the parent, post your takeover record, then run claim --parent --takeover.`;
+}
+
 function authoriseWrite(kind, doc, parentDoc, writer) {
   if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
     throw new ProgrammeError('WRITER_UNKNOWN', 'Writes need a session (--session or TOOLKIT_PROGRAMME_SESSION) and a record prefix.');
   }
   if (kind === 'parent') {
-    if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', `The parent document is held by the ${holderDescription(doc)}; only that controller applies. Run a dry run and report instead.`);
+    if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', parentRefusal(doc));
     return;
   }
   if (doc && isHolder(doc, writer)) return;
@@ -401,7 +405,7 @@ function claimDocument(doc, writer, { takeover = false, role = null, route = nul
   if (isHolder(next, writer) && !role) return null;
   if (held && !isHolder(next, writer) && !takeover) {
     throw new ProgrammeError('CLAIM_HELD', next.schema === SCHEMA.parent
-      ? `The parent document is held by the ${holderDescription(next)}; only that controller applies. Run a dry run and report instead.`
+      ? parentRefusal(next)
       : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}; take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller.`);
   }
   if (!isHolder(next, writer)) next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
@@ -1217,7 +1221,7 @@ class Reconciler {
       findings.push({ code: 'PROJECTION_STALE', issue: number, detail: block ? (block.tampered ? 'the block was edited by hand' : 'the block differs from the state documents') : 'no state block yet' });
       const length = upsertStateBlock(issue.body, renderBlock(body, this.toolkitVersion || '0.0.0')).body.length;
       if (length >= this.threshold) {
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `the body would reach ${length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body' });
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body' });
         continue;
       }
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body) }, insert: !block, body, updated_at: issue.updated_at });
@@ -1254,7 +1258,7 @@ class Reconciler {
     const holds = [];
     const parentRead = this.loadParent(parentOverride);
     if (!parentRead.doc) {
-      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: 'no parent state document yet; create it with init-parent from an outcome catalogue' }], resolutions: [] };
+      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.` }], resolutions: [] };
     }
     const parent = parentRead.doc;
     if (parent.repository.toLowerCase() !== this.binding.repository.toLowerCase() || parent.parent_issue !== this.binding.parent_issue) {
@@ -1378,11 +1382,12 @@ class Reconciler {
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
       try {
         const desired = effect.doc;
-        const fields = effect.kind === 'create_state' ? null : effect.fields;
+        // A first claim may have created the child after planning. Only PR observations belong
+        // to this pass; keep the gate, lifecycle and fence from the document read at apply time.
+        const fields = effect.kind === 'create_state' ? ['pr'] : effect.fields;
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
-            if (!fields) return { ...desired, revision: doc.revision, fence: doc.fence, pending_effects: doc.pending_effects, private: doc.private };
             for (const key of fields) doc[key] = clone(desired[key]);
             return doc;
           },
@@ -1458,7 +1463,7 @@ class Reconciler {
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
         if (next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
-          hold(effect, 'BODY_TOO_LARGE', `the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
           continue;
         }
         withIntent(effect, owner, number, () => {
@@ -1508,8 +1513,8 @@ class Reconciler {
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
-    report.next_action = report.holds.length ? `Resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
-      : !apply && report.effects.length ? 'Report this plan; only the appointed controller holding the parent document runs reconcile --apply'
+    report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
+      : !apply && report.effects.length ? 'Controller: run reconcile --apply for this plan; other sessions report it'
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     return report;
