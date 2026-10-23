@@ -1355,7 +1355,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
-    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
+    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) && !['migration-required', 'unsupported'].includes(current.delegation?.status) && !/enablement is false or non-boolean/.test(current.delegation?.detail || '') ? 'one-helper' : 'keep';
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
@@ -1910,17 +1910,28 @@ function setupQuestionSpecs(args, current) {
   ];
 
   if (args.host === 'codex') {
-    // Ordinary setup never asks users to choose helper quantities. Existing explicit
-    // or saved state is preserved; otherwise fail closed to root-only until a
-    // Toolkit-controlled launch path proves live memory admission.
-    if (!args.setupChoices.codexHelperCapacity) {
-      const unsafeV2Shape = current.delegation?.layout?.multiAgentV2Tables?.length > 1
-        || current.delegation?.layout?.multiAgentV2Children?.length > 0;
-      args.setupChoices.codexHelperCapacity = unsafeV2Shape
-        || (current.delegation?.status === 'unconfigured' && [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime))
-        ? 'root-only'
-        : 'keep';
-    }
+    const v1 = current.runtime?.runtime === RUNTIMES.V1;
+    if (args.setupChoices.codexHelperCapacity === 'migrate' && current.delegation?.status !== 'migration-required') throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed legacy setting is available to migrate; choose an ordinary helper setting or keep.');
+    if (v1 && (args.setupChoices.codexHelperCapacity === 'root-only' || (args.setupChoices.codexHelperCapacity === 'custom' && args.codexHelperCount !== null && args.codexHelperCount < 1))) throw new Error('Codex cannot limit helpers to zero; choose one helper or a custom number of at least 1. Setup wrote nothing.');
+    specs.push(resolvedQuestion({
+      id: 'codex-helper-capacity', key: 'codexHelperCapacity', section: 'Computer performance',
+      title: 'Codex helper capacity', prompt: 'Codex helper capacity choice',
+      whatThisControls: 'How many helpers the main Codex session can open; helpers cannot start helpers under Toolkit rules. ' + (v1 ? 'Codex cannot limit helpers to zero; choose one helper or a custom number.' : 'Root-only is an explicit opt-out.'),
+      choices: [
+        wizardChoice('one-helper', 'One helper', 'Allow one helper for G0/G1 evidence gathering and validation.'),
+        ...(!v1 ? [wizardChoice('root-only', 'No helpers', 'Explicitly opt out of helpers.')] : []),
+        wizardChoice('custom', 'Choose a number', v1 ? 'Choose a whole helper count of at least 1; more than one needs RAM-risk approval.' : 'Choose a non-negative helper count; more than one needs RAM-risk approval.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${current.delegation?.detail || 'Helper capacity has not been verified.'}`),
+        ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
+        ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
+        wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
+      ],
+      recommendation: { value: recommendedChoice('codexHelperCapacity', current, args), outcome: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'Allow one helper.' : 'Keep the current configuration.', reason: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'G0 and G1 leads need helpers for independent work.' : 'This state needs an explicit compatibility or repair choice before helper settings can change.' },
+      selected: args.setupChoices.codexHelperCapacity,
+      current: current.delegation?.detail || 'Helper capacity has not been verified.',
+      currentVerification: current.runtime?.runtime === RUNTIMES.UNKNOWN ? 'unverified' : 'verified',
+      afterApplying: 'Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.',
+    }));
     specs.push(resolvedQuestion({
       id: 'codex-toolkit-maintenance',
       key: 'codexPluginAutoRefresh',
@@ -2095,7 +2106,8 @@ function renderCompactQuestionTable(specs, markdown = true) {
     if (!markdown) {
       lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Now: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
       const rest = others(spec);
-      if (rest.length) lines.push(`  Other choices: ${rest.join('; ')}`);
+      // One choice per line, so each alternative reads on its own.
+      if (rest.length) lines.push('  Other choices:', ...rest.map((choice) => `    ${choice}`));
       if (spec.selected) lines.push(`  Selected: ${selected(spec)}`);
       continue;
     }
@@ -2173,7 +2185,7 @@ function buildNonTtyAnswerPlan(specs, args) {
       owner_question_id: 'codex-helper-capacity', detail_type: 'codex-helper-count',
       activation_key: 'codexHelperCapacity', activation_value: 'custom',
       supplied: () => args.codexHelperCount !== null,
-      validation_contract: 'non-negative integer helper count',
+      validation_contract: byId.get('codex-helper-capacity')?.choices.some(choice => choice.value === 'root-only') ? 'non-negative integer helper count' : 'positive integer helper count',
       description: 'bounded Codex helper count',
       missing_message: 'Setup question bank requires the custom Codex helper-count detail line.',
     },
@@ -2256,15 +2268,12 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
       markdown ? `- only your changes, for example: \`${example}\`` : `  - only your changes, for example: ${example}`,
       markdown ? '- press Enter to answer questions one at a time' : '  - press Enter to answer questions one at a time',
       '',
-      'Unspecified changed-only entries use the displayed recommendation for this in-memory bank.',
-      'Malformed concise input is rejected and can be corrected before any setup write.',
-      'Choice letters and existing canonical textual values remain supported in one-at-a-time mode.',
+      'Anything you do not list takes its recommendation.',
     ];
   }
   if (mode === 'tty-one-at-a-time') {
     return [
-      'After this complete bank, answer unresolved questions one at a time.',
-      'Displayed choice letters and existing canonical textual values are accepted; invalid input is re-prompted before any setup write.',
+      'Answer each question below: Enter takes its recommendation, and "all recommended" takes it for every remaining question.',
     ];
   }
   if (mode === 'non-tty-line-by-line') {
@@ -2309,10 +2318,7 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
     markdown ? `- \`${bankReference}: all recommended\`` : `  - ${bankReference}: all recommended`,
     markdown ? `- only your changes, for example: \`${bankReference}: ${example}\`` : `  - only your changes, for example: ${bankReference}: ${example}`,
     '',
-    'Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.',
-    'The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.',
-    'Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.',
-    'Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.',
+    'Anything you do not list takes its recommendation.',
   ];
   return lines;
 }
@@ -2647,6 +2653,10 @@ function resolveDisplayedChoiceAnswer(spec, answer) {
   return canonical?.value || normalized.toLowerCase();
 }
 
+// Typed at a one-at-a-time prompt, "all recommended" applies the displayed recommendation to that
+// question and every remaining one. Piped and line-by-line answers keep their exact per-line meaning.
+const ALL_RECOMMENDED_REST = Symbol('all-recommended-rest');
+
 async function promptForChoice(spec, lines, rl) {
   if (lines) {
     if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
@@ -2654,7 +2664,8 @@ async function promptForChoice(spec, lines, rl) {
   }
   for (;;) {
     const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
-    const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}): `);
+    const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}; "all recommended" for the rest): `);
+    if (/^all\s+recommended$/i.test(String(answer).trim())) return ALL_RECOMMENDED_REST;
     const resolved = resolveDisplayedChoiceAnswer(spec, answer);
     if (choiceValues(spec).includes(resolved)) return resolved;
     console.log(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}. Enter a displayed letter or canonical value.`);
@@ -2914,8 +2925,13 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       : readline.createInterface({ input: process.stdin, output: process.stdout });
   }
   try {
-    for (const spec of missing) {
+    for (const [position, spec] of missing.entries()) {
       const answer = await promptForChoice(spec, lines, rl);
+      if (answer === ALL_RECOMMENDED_REST) {
+        for (const rest of missing.slice(position)) assignChoice(args, rest.key, rest.recommended);
+        console.log(`Applying the displayed recommendation to the remaining ${missing.length - position} question(s).`);
+        break;
+      }
       if (!choiceValues(spec).includes(answer)) {
         throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       }
@@ -3164,6 +3180,28 @@ function nativePluginPhaseFailure(platform, phase, result = {}, error = null) {
   return new Error(`${platform} native plugin ${action} failed${status}. Captured helper diagnostics were withheld from routine output.`);
 }
 
+// Codex refuses to repoint its Toolkit marketplace without the owner's separate approval. Say so,
+// and give the one command that approves it, instead of withholding the helper's diagnostics.
+function nativePluginRebindFailure(platform, phase, result, helperArgs) {
+  if (platform !== 'Codex' || phase !== 'mutation') return null;
+  const status = parseFirstJsonObject(result?.stdout || '');
+  const version = /^\d+\.\d+\.\d+$/;
+  if (status?.reason_code === 'downgrade-refused' && version.test(status.installed_version || '') && version.test(status.source_version || '')) {
+    return new Error([
+      `Codex already has Toolkit ${status.installed_version}, which is newer than this Toolkit copy (${status.source_version}), so setup refused to downgrade it. Codex's Toolkit plugin was not changed.`,
+      'Run setup from a Toolkit copy at that version or newer, or keep the newer version as it is.',
+    ].join('\n'));
+  }
+  if (status?.reason_code !== 'marketplace-rebind-required' || typeof status.current_source !== 'string' || !status.current_source) return null;
+  const repoRoot = helperArgs[helperArgs.indexOf('--repo-root') + 1];
+  return new Error([
+    `Codex's Toolkit plugin is registered to a different Toolkit copy (${status.current_source}). Codex's Toolkit plugin was not changed.`,
+    'To use this copy instead, approve the switch by running:',
+    `  node "${path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')}" --write --repo-root "${repoRoot}" --rebind-marketplace-from "${status.current_source}"`,
+    'then run setup again.',
+  ].join('\n'));
+}
+
 function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, allowRefreshRequired = false }) {
   let result;
   try {
@@ -3181,7 +3219,7 @@ function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, 
       console.log(`${platform} native plugin verification: current source identity was not established; approved refresh is required.`);
       return null;
     }
-    throw nativePluginPhaseFailure(platform, phase, result);
+    throw nativePluginRebindFailure(platform, phase, result, args) || nativePluginPhaseFailure(platform, phase, result);
   }
   const summary = parseFirstJsonObject(result.stdout);
   if (!summary || summary.ok !== true) {
@@ -3693,7 +3731,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
-  console.log('Helper-agent capacity questions shown: no');
+  console.log(`Helper-agent capacity questions shown: ${yesNo(args.host === 'codex')}`);
   console.log('Preference writes before answers: no');
   console.log('');
   if (args.host === 'codex') {
@@ -3719,6 +3757,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Technical setting: ${technicalSetting}`);
   console.log(`Helper-capacity outcome this run: ${delegationOutcomeSummary(args, delegation)}`);
   console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
+  if (delegation.load_check) console.log(delegation.load_check.detail);
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
   console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
@@ -3895,11 +3934,21 @@ class ToolkitSetupExecution {
     this.#announcePlan();
     const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
     const localClone = fastForwardLocalClone(args);
+    // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
+    // Apply only this already-approved repair before invoking that CLI; ordinary
+    // capacity changes retain their existing final-step order.
+    const zeroRepair = args.host === 'codex' && this.#current.runtime.runtime === RUNTIMES.V1
+      && this.#current.delegation.status === 'repair-required'
+      && this.#current.delegation.ownership === 'toolkit-managed-v1'
+      && this.#current.delegation.helper_count === 0
+      && ['one-helper', 'custom', 'remove'].includes(args.setupChoices.codexHelperCapacity);
+    const repairedDelegation = zeroRepair ? await applyHostDelegationControl(args, this.#current) : null;
+    if (repairedDelegation?.changed) console.log(`The approved zero-helper repair was applied before Codex plugin setup. Backup: ${repairedDelegation.backup_metadata_path}`);
     const nativeCache = this.#nativePluginSetup();
     runLiteValidation(args, this.#validationResults);
     writeBridgePreferences(args);
     const audit = runBridgeAudit(args);
-    const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
+    const delegation = repairedDelegation || await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
@@ -3985,6 +4034,7 @@ if (require.main === module) {
 
 module.exports = {
   assertSupportedComputer,
+  nativePluginRebindFailure,
   installOfficialN8nSkills,
   applyAntigravitySkills,
   antigravityState,

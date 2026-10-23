@@ -22,7 +22,7 @@ function fixture(t, initial) {
 }
 const byId = (results) => Object.fromEntries(results.map((result) => [result.id, result]));
 
-test('the four recommended settings have their exact documented shapes', () => {
+test('the four selected Toolkit settings keep their projection shapes; host validity still needs UAT', () => {
   assert.deepEqual(SETTINGS.map((spec) => [spec.keyPath.join('.'), spec.value]), [
     ['attribution', false],
     ['crossSessionInbound', 'accept'],

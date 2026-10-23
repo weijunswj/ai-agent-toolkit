@@ -15,6 +15,7 @@ Use this index only when it exists in the repo. Read the smallest matching playb
 - n8n workflow JSON, `n8n-workflows/`, n8n workflow helper scripts, import/export, live n8n, activation, execution, credentials, or repo/live sync: read [n8n workflows](n8n-workflows.md) (`docs/agent-playbooks/n8n-workflows.md`) and [Safety gates](safety-gates.md) (`docs/agent-playbooks/safety-gates.md`).
 - Generated files, templates, schemas, migrations, source data, publishing, or regenerated output: read [Generated files](generated-files.md) (`docs/agent-playbooks/generated-files.md`).
 - Git publication, pull requests, CI, review readiness, or status checks: read [Git completion](git-completion.md) (`docs/agent-playbooks/git-completion.md`).
+- Features touching authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files): read [Invariant models](invariant-models.md) (`docs/agent-playbooks/invariant-models.md`) before G0 planning, G1 tests or G2 review.
 - Slow tests or CI, test runners, test shards, CI test jobs, or test time budgets: read [Fast tests and sharding](fast-tests-and-sharding.md) (`docs/agent-playbooks/fast-tests-and-sharding.md`).
 - Unfamiliar repo, docs index, repo map, architecture notes, validation docs, source-of-truth docs, or documented workflow: read [Local docs](local-docs.md) (`docs/agent-playbooks/local-docs.md`).
 

@@ -21,7 +21,7 @@ test('every runtime version constant equals version.json', () => {
   assert.equal(require('../scripts/toolkit-local-bridge.cjs').BRIDGE_VERSION, recorded);
   assert.equal(require('../scripts/setup-codex-toolkit-plugin.cjs').EXPECTED_TOOLKIT_VERSION, recorded);
   assert.equal(require('../scripts/toolkit-agent-control.cjs').CONTROL_VERSION, recorded);
-  const delegation = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'codex-delegation-config.cjs'), 'utf8');
+  const delegation = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'codex-app-server.cjs'), 'utf8');
   assert.match(delegation, /^const TOOLKIT_CLIENT_VERSION = TOOLKIT_VERSION;$/m);
   for (const rel of MANIFEST_REL_PATHS) {
     assert.equal(JSON.parse(fs.readFileSync(path.join(repoRoot, ...rel.split('/')), 'utf8')).version, recorded, rel);

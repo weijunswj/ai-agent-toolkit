@@ -12,7 +12,9 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const trailer = 'Co-Authored-By: Claude <noreply@anthropic.com>';
 
 function messageFiles(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-attribution-'));
+  const scratch = path.join(repoRoot, '.tmp');
+  fs.mkdirSync(scratch, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(scratch, 'toolkit-attribution-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'msg.txt'), 'Fix the thing\n');
   fs.writeFileSync(path.join(dir, 'body.md'), 'Summary\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n');
@@ -167,6 +169,73 @@ test('ordinary commits, PRs and other commands pass, even when they mention Clau
     assert.equal(attributionRefusal(command, os.tmpdir()), '', command);
   }
   assert.deepEqual(attributionDecision({ tool_input: {} }), {});
+});
+
+test('trailers accept colon or equals separators with optional spaces', () => {
+  for (const separator of [':', '=', ' : ', ' = ', '\t=\t']) {
+    for (const trailer of [`Co-Authored-By${separator}Claude <noreply@anthropic.com>`, `Claude-Session${separator}session_123`]) {
+      assert.equal(attributionRefusal(`git commit --trailer "${trailer}"`), MESSAGE);
+      assert.equal(attributionRefusal(`git commit --trailer=${trailer}`), MESSAGE);
+    }
+  }
+  assert.equal(attributionRefusal('git commit -m "Co-Authored-By=Human <human@example.com>"'), '');
+  assert.equal(attributionRefusal('git commit -m "Describe Claude-Session settings and co-authored-by examples"'), '');
+  const started = performance.now();
+  assert.equal(attributionRefusal(`git commit -m "${'co-authored-by '.repeat(40000)}"`), '');
+  assert.ok(performance.now() - started < 2000, 'trailer matching must stay linear');
+});
+
+test('unquoted parentheses separate commands without changing quoted or escaped paths', (t) => {
+  const dir = messageFiles(t);
+  for (const command of ['(git commit -F sub/msg.txt)', 'x=$(git commit -F sub/msg.txt)', '(git -C sub commit -F msg.txt)']) {
+    assert.equal(attributionRefusal(command, dir), MESSAGE, command);
+  }
+  fs.writeFileSync(path.join(dir, 'msg(1).txt'), trailer);
+  assert.equal(attributionRefusal('git commit -F "msg(1).txt"', dir), MESSAGE);
+  assert.equal(attributionRefusal('git commit -F msg\\(1\\).txt', dir), MESSAGE);
+});
+
+test('git short-option bundles respect the first value-taking option', (t) => {
+  const dir = messageFiles(t);
+  for (const option of ['-sF sub/msg.txt', '-asF sub/msg.txt', '-sFsub/msg.txt', '-asFsub/msg.txt']) {
+    assert.equal(attributionRefusal(`git commit ${option}`, dir), MESSAGE, option);
+  }
+  fs.writeFileSync(path.join(dir, 'F'), trailer);
+  for (const option of ['-amF', '-acF', '-aCF', '-atF', '-am F']) {
+    assert.equal(attributionRefusal(`git commit ${option}`, dir), '', option);
+  }
+  assert.equal(attributionRefusal('gh pr create -sFsub/msg.txt', dir), '');
+});
+
+test('file-option screening is capped and bounded with long directories', (t) => {
+  const dir = messageFiles(t);
+  assert.equal(attributionRefusal(`git commit ${'-F msg.txt '.repeat(64)}`, dir), '');
+  assert.equal(attributionRefusal(`git commit ${'-F msg.txt '.repeat(64)}; git commit ${'-F msg.txt '.repeat(64)}`, dir), '');
+  const started = performance.now();
+  for (const command of [
+    `git commit ${'-F f '.repeat(80000)}`,
+    `git commit ${'-sFf '.repeat(80000)}`,
+    `bash -c "git commit ${'-F f '.repeat(80000)}"`,
+    `bash -c "git commit ${'-F f '.repeat(40)}"; bash -c "git commit ${'-F f '.repeat(40)}"`,
+    `git commit ${'--body-file=- '.repeat(65)}`,
+  ]) assert.match(attributionRefusal(command, dir), /64 file options.*Split/);
+  assert.equal(attributionRefusal(`git -C ${'x'.repeat(200000)} commit ${'-F x '.repeat(60)}`, dir), '');
+  assert.ok(performance.now() - started < 2000, 'file screening must return promptly');
+});
+
+test('each resolved file is inspected once per call, including legacy and missing files', (t) => {
+  const dir = messageFiles(t);
+  const originalStat = fs.statSync;
+  const originalRead = fs.readFileSync;
+  const stats = []; const reads = [];
+  t.mock.method(fs, 'statSync', (file, ...args) => { stats.push(file); return originalStat(file, ...args); });
+  t.mock.method(fs, 'readFileSync', (file, ...args) => { reads.push(file); return originalRead(file, ...args); });
+  assert.equal(attributionRefusal('git commit -F msg.txt -F ./msg.txt -F missing ; bash -c "git commit -F msg.txt -F missing"', dir), '');
+  assert.equal(stats.filter((file) => file === path.join(dir, 'msg.txt')).length, 1);
+  assert.equal(stats.filter((file) => file === path.join(dir, 'missing')).length, 1);
+  assert.equal(reads.filter((file) => file === path.join(dir, 'msg.txt')).length, 1);
+  assert.equal(attributionRefusal('git commit -F msg.txt', dir), '');
+  assert.equal(reads.filter((file) => file === path.join(dir, 'msg.txt')).length, 2, 'cache must not outlive the call');
 });
 
 test('the Claude Code hook refuses with exit 2 and a deny decision, and passes everything else', () => {

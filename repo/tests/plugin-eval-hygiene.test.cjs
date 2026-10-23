@@ -55,6 +55,13 @@ test('OpenAI skill metadata declares Codex product surface for plugin grouping',
     const text = readText(relPath);
     assert.match(text, /^\s*products:\s*$/m, relPath + ' must declare policy.products');
     assert.match(text, /^\s*-\s*codex\s*$/m, relPath + ' must include codex in policy.products');
+    // Codex CLI 0.164.0 embedded skill-policy Product enum (inspected 2026-10-23):
+    // exactly chatgpt, codex, atlas. `api` is rejected as an unknown variant.
+    const productBlock = text.match(/^  products:\s*\n((?:    - [^\n]+\n?)*)/m);
+    assert.ok(productBlock, relPath + ' must use a policy.products list');
+    const products = [...productBlock[1].matchAll(/^    - (\S+)\s*$/gm)].map(match => match[1]);
+    assert.ok(products.length, relPath + ' must list products');
+    for (const product of products) assert.ok(['chatgpt', 'codex', 'atlas'].includes(product), relPath + ': unsupported product ' + product);
   }
 });
 

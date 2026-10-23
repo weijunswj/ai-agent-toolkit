@@ -33,6 +33,8 @@
       "repo/tests/toolkit-local-bridge-claude.test.cjs"
     ],
     "codex": [
+      "repo/scripts/codex-app-server.cjs",
+      "repo/scripts/codex-config-load-check.cjs",
       "repo/scripts/codex-delegation-backup.cjs",
       "repo/scripts/codex-delegation-common.cjs",
       "repo/scripts/codex-delegation-config.cjs",

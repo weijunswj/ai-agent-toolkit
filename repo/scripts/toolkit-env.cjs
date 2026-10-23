@@ -675,6 +675,7 @@ class ToolkitEnv {
         fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
         const result = await feeder.project(binding, { backupDir });
         restart = restart || Boolean(result.restart);
+        if (result.load_check) out.push(result.load_check.detail);
         backup = backupDir;
       }
       this.#manifest.update((record, at) => {
@@ -703,6 +704,7 @@ class ToolkitEnv {
       if (binding.backup) {
         const result = await feeder.revoke(binding);
         restart = restart || Boolean(result.restart);
+        if (result.load_check) out.push(result.load_check.detail);
       }
       this.#manifest.update((current) => {
         current.bindings = current.bindings.filter((entry) => !(entry.harness === binding.harness && entry.server === binding.server));

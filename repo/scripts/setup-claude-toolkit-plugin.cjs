@@ -3,6 +3,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { HostJsonConfigWrite } = require('./host-json-config-write.cjs');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
@@ -248,6 +250,9 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/setup-toolkit-core.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
     ["repo/scripts/codex-delegation-backup.cjs",false],
+    ["repo/scripts/codex-config-load-check.cjs",false],
+    ["repo/scripts/codex-app-server.cjs",false],
+    ["repo/scripts/host-json-config-write.cjs",false],
     ["repo/scripts/codex-delegation-common.cjs",false],
     ["repo/scripts/codex-delegation-config.cjs",false],
     ["repo/scripts/codex-delegation-layout.cjs",false],
@@ -389,7 +394,10 @@ function disableUserPlugin(id, options = {}) {
     return (Array.isArray(list) ? list : list.installed || []).some((entry) => entry.id === id && entry.scope === 'user' && entry.enabled === true);
   };
   if (!enabled()) return false;
-  const result = runClaudeCommand(resolved.command, ['plugin', 'disable', id, '--scope', 'user'], { env });
+  const home = env.USERPROFILE || env.HOME || os.homedir();
+  const configDir = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+  const writer = new HostJsonConfigWrite(path.join(configDir, 'settings.json'), path.join(home, '.ai-agent-toolkit', 'backups', 'claude-settings'));
+  const result = writer.runExternalSync(() => runClaudeCommand(resolved.command, ['plugin', 'disable', id, '--scope', 'user'], { env }));
   if (result.status !== 0) throw new Error(`claude plugin disable failed: ${commandOutput(result) || `exit ${result.status}`}`);
   if (enabled()) throw new Error('the plugin still reads as on after claude plugin disable');
   return true;
@@ -880,57 +888,67 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (!state.ok && options.write && !state.refusesDowngrade) {
-    if (state.canUpdateInPlace) {
-      // Verification-driven update: success means the supported plugin list
-      // state became current, not that the update process exited. A verified
-      // update with a lingering process succeeds with a warning and must not
-      // trigger an unnecessary uninstall + reinstall.
-      const updateOutcome = await runClaudeMutationAndVerify(
-        resolved.command,
-        ['plugin', 'update', pluginId(), '--scope', options.scope],
-        { repoRoot: options.repoRoot, expectedVersion }
-      );
-      if (updateOutcome.ok) {
-        state = updateOutcome.state;
-        if (updateOutcome.warning) warnings.push(updateOutcome.warning);
-      } else if (updateOutcome.childFailed) {
-        warnings.push(`claude plugin update did not exit cleanly, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
-      } else {
-        warnings.push(`claude plugin update did not produce a verified current install before its deadline, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
-      }
-    }
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    const settingsFiles = [path.join(configDir, 'settings.json')];
+    if (options.scope !== 'user') settingsFiles.push(path.join(process.cwd(), '.claude', options.scope === 'local' ? 'settings.local.json' : 'settings.json'));
+    const backupDir = path.join(os.homedir(), '.ai-agent-toolkit', 'backups', 'claude-settings');
+    const mutation = async () => {
 
-    if (!state.ok && !state.refusesDowngrade) {
-      // A stale install can't be refreshed by `plugin install` alone (it
-      // no-ops on an id that already exists), and this is also the recovery
-      // path when `plugin update` itself failed above, so uninstall first.
-      if (state.installed) {
-        const uninstall = runClaudeCommand(resolved.command, [
-          'plugin', 'uninstall', pluginId(), '--scope', options.scope, '--keep-data', '--yes'
-        ]);
-        if (uninstall.status !== 0) {
-          warnings.push(`claude plugin uninstall did not exit cleanly: ${commandOutput(uninstall)}`);
+      if (state.canUpdateInPlace) {
+        // Verification-driven update: success means the supported plugin list
+        // state became current, not that the update process exited. A verified
+        // update with a lingering process succeeds with a warning and must not
+        // trigger an unnecessary uninstall + reinstall.
+        const updateOutcome = await runClaudeMutationAndVerify(
+          resolved.command,
+          ['plugin', 'update', pluginId(), '--scope', options.scope],
+          { repoRoot: options.repoRoot, expectedVersion }
+        );
+        if (updateOutcome.ok) {
+          state = updateOutcome.state;
+          if (updateOutcome.warning) warnings.push(updateOutcome.warning);
+        } else if (updateOutcome.childFailed) {
+          warnings.push(`claude plugin update did not exit cleanly, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
+        } else {
+          warnings.push(`claude plugin update did not produce a verified current install before its deadline, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
         }
       }
-      const marketplaceAdd = runClaudeCommand(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot]);
-      if (marketplaceAdd.status !== 0) {
-        warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);
+
+      if (!state.ok && !state.refusesDowngrade) {
+        // A stale install can't be refreshed by `plugin install` alone (it
+        // no-ops on an id that already exists), and this is also the recovery
+        // path when `plugin update` itself failed above, so uninstall first.
+        if (state.installed) {
+          const uninstall = runClaudeCommand(resolved.command, [
+            'plugin', 'uninstall', pluginId(), '--scope', options.scope, '--keep-data', '--yes'
+          ]);
+          if (uninstall.status !== 0) {
+            warnings.push(`claude plugin uninstall did not exit cleanly: ${commandOutput(uninstall)}`);
+          }
+        }
+        const marketplaceAdd = runClaudeCommand(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot]);
+        if (marketplaceAdd.status !== 0) {
+          warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);
+        }
+        const installOutcome = await runClaudeMutationAndVerify(
+          resolved.command,
+          ['plugin', 'install', pluginId(), '--scope', options.scope],
+          { repoRoot: options.repoRoot, expectedVersion }
+        );
+        if (installOutcome.ok) {
+          state = installOutcome.state;
+          if (installOutcome.warning) warnings.push(installOutcome.warning);
+        } else {
+          for (const warning of warnings) console.error(`WARN: ${warning}`);
+          console.error(`FAIL: ${installOutcome.failure}`);
+          console.error(`Expected commands: claude plugin marketplace add <managed-toolkit-checkout> ; claude plugin install ${pluginId()} --scope ${options.scope}`);
+          return 1;
+        }
       }
-      const installOutcome = await runClaudeMutationAndVerify(
-        resolved.command,
-        ['plugin', 'install', pluginId(), '--scope', options.scope],
-        { repoRoot: options.repoRoot, expectedVersion }
-      );
-      if (installOutcome.ok) {
-        state = installOutcome.state;
-        if (installOutcome.warning) warnings.push(installOutcome.warning);
-      } else {
-        for (const warning of warnings) console.error(`WARN: ${warning}`);
-        console.error(`FAIL: ${installOutcome.failure}`);
-        console.error(`Expected commands: claude plugin marketplace add <managed-toolkit-checkout> ; claude plugin install ${pluginId()} --scope ${options.scope}`);
-        return 1;
-      }
-    }
+    };
+    const guarded = settingsFiles.reduceRight((effect, file) => () => new HostJsonConfigWrite(file, backupDir).runExternal(effect), mutation);
+    const earlyResult = await guarded();
+    if (earlyResult !== undefined) return earlyResult;
   }
 
   if (!state.ok) {

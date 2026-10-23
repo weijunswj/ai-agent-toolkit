@@ -119,6 +119,11 @@ if (args[0] === 'plugin' && args[1] === 'install') {
     return;
   }
   state.installed = true;
+  if (${JSON.stringify(Boolean(options.corruptSettings))}) {
+    const targetDir = ${JSON.stringify(options.corruptSettings === 'project')} ? require('node:path').join(process.cwd(), '.claude') : process.env.CLAUDE_CONFIG_DIR;
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(require('node:path').join(targetDir, 'settings.json'), '{invalid');
+  }
   state.version = ${JSON.stringify(updatedVersion)};
   const scopeIndex = args.indexOf('--scope');
   state.scope = scopeIndex !== -1 ? args[scopeIndex + 1] : 'user';
@@ -212,7 +217,10 @@ function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
   const env = {
     CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '8000',
     CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50',
-    ...(options.env || process.env)
+    ...(options.env || process.env),
+    HOME: path.dirname(path.resolve(fakeClaudePath)),
+    USERPROFILE: path.dirname(path.resolve(fakeClaudePath)),
+    CLAUDE_CONFIG_DIR: path.join(path.dirname(path.resolve(fakeClaudePath)), '.claude'),
   };
   const args = [
     path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
@@ -224,7 +232,7 @@ function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
   if (options.explicit !== false) args.push('--claude-cli', fakeClaudePath);
   args.push(...extraArgs);
   return spawnSync(process.execPath, args, {
-    cwd: repoRoot,
+    cwd: options.cwd || repoRoot,
     encoding: 'utf8',
     timeout: 30000,
     windowsHide: true,
@@ -1064,4 +1072,34 @@ test('the one Claude plugin registry reader follows CLAUDE_CODE_PLUGIN_CACHE_DIR
   assert.equal(registry(override).isRunningCopy(repoRoot), false, 'only a local directory marketplace is a Toolkit-managed install');
   fs.writeFileSync(path.join(pluginsDir, 'known_marketplaces.json'), '{ not json');
   assert.match(registry(override).toolkitInstall().reason, /could not be read/);
+});
+
+
+test('native Claude plugin setup rolls back settings.json bytes when its command writes invalid JSON', () => {
+  const root = tmpRoot();
+  const fakeClaude = writeFakeClaude(root, { corruptSettings: true });
+  const file = path.join(root, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file));
+  const original = Buffer.from('{\r\n  "theme": "dark"\r\n}\r\n');
+  fs.writeFileSync(file, original);
+  const result = runSetup('--write', fakeClaude);
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /JSON read-back check.*previous file was restored exactly/);
+  assert.match(result.stderr, /Native plugin or cache changes may remain/);
+  assert.deepEqual(fs.readFileSync(file), original);
+});
+
+
+test('native Claude project-scope setup checks the settings file in the command working folder', () => {
+  const root = tmpRoot();
+  const fakeClaude = writeFakeClaude(root, { corruptSettings: 'project' });
+  const project = path.join(root, 'project');
+  const file = path.join(project, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const original = Buffer.from('{"theme":"dark"}\r\n');
+  fs.writeFileSync(file, original);
+  const result = runSetup('--write', fakeClaude, ['--scope', 'project'], { cwd: project });
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /JSON read-back check.*previous file was restored exactly/);
+  assert.deepEqual(fs.readFileSync(file), original);
 });

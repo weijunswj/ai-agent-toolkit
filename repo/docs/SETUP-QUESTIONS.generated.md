@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 7 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: Q47K-CZY7-5TVV-FYYP
+Bank reference: FBF9-VR40-CJ9D-J45M
 
 Quick index
 
@@ -14,7 +14,8 @@ Quick index
 1.3 Update reports - Recommended: A - Keep reports
 1.4 Report retention - Recommended: C - Keep current
 1.5 Raise Codex's instruction limit - Recommended: A - Raise it
-2.1 Codex Toolkit maintenance - Recommended: A - Turn on
+2.1 Codex helper capacity - Recommended: A - One helper
+2.2 Codex Toolkit maintenance - Recommended: A - Turn on
 3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
@@ -153,7 +154,36 @@ Quick index
 
 ## 2. Computer performance
 
-### 2.1 Codex Toolkit maintenance
+### 2.1 Codex helper capacity
+
+**What this controls:** How many helpers the main Codex session can open; helpers cannot start helpers under Toolkit rules. Root-only is an explicit opt-out.
+
+**Current:** documentation fixture
+
+**Verification:** verified
+
+**Recommended:** A - One helper
+
+**Recommended outcome:** Allow one helper.
+
+**Why:** G0 and G1 leads need helpers for independent work.
+
+**Choices:**
+
+- **A. One helper** - Allow one helper for G0/G1 evidence gathering and validation.
+- **B. No helpers** - Explicitly opt out of helpers.
+- **C. Choose a number** - Choose a non-negative helper count; more than one needs RAM-risk approval.
+- **D. Keep current** - Preserve this effective behavior: documentation fixture
+- **E. Remove Toolkit setting** - Remove only the owned block after approval.
+- **F. Skip** - Write no helper setting this run.
+
+**After applying:** Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.
+
+**Selected:** A - One helper
+
+---
+
+### 2.2 Codex Toolkit maintenance
 
 **What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.
 
@@ -209,13 +239,10 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `Q47K-CZY7-5TVV-FYYP: all recommended`
-- only your changes, for example: `Q47K-CZY7-5TVV-FYYP: 1.2=B, 1.3=B`
+- `FBF9-VR40-CJ9D-J45M: all recommended`
+- only your changes, for example: `FBF9-VR40-CJ9D-J45M: 1.2=B, 1.3=B`
 
-Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
-The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
-Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.
-Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.
+Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 

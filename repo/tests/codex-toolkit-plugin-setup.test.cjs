@@ -153,6 +153,14 @@ const codexHome = process.env.CODEX_HOME;
 const statePath = path.join(codexHome, 'state.json');
 const configPath = path.join(codexHome, 'config.toml');
 const args = process.argv.slice(2);
+if (args[0] === 'app-server') {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+    const request = JSON.parse(line);
+    if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');
+    if (request.method === 'config/read') process.stdout.write(JSON.stringify({ id: request.id, ...(${JSON.stringify(Boolean(options.rejectConfigLoad))} ? { error: { message: 'agents.max_concurrent_threads_per_session must be at least 1' } } : { result: { config: {} } }) }) + '\\n');
+  });
+  return;
+}
 const omitSessionStart = ${JSON.stringify(Boolean(options.omitSessionStart))};
 const installDelayMs = ${JSON.stringify(options.installDelayMs || 0)};
 const configPrefix = ${JSON.stringify(FAKE_CONFIG_PREFIX)};
@@ -1598,4 +1606,21 @@ test('real Codex CLI: mismatch is refused with no effects, then the gated rebind
   assert.equal(JSON.parse(replay.stdout).marketplace_transition, 'none');
   assert.equal(fs.readFileSync(configPath, 'utf8'), configAfter, 'an already-correct replay changes nothing');
   assert.equal(treeDigest(cacheBase), cacheAfter);
+});
+
+
+test('native plugin setup restores config bytes and holds its journal when Codex rejects the final config', () => {
+  const codexHome = tmpRoot();
+  const fakeCodex = writeFakeHangingCodex(codexHome, { rejectConfigLoad: true });
+  const file = path.join(codexHome, 'config.toml');
+  const before = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  const result = runSetupWrite(codexHome, fakeCodex, { timeout: 20000 });
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /Codex rejected config.toml/);
+  assert.match(result.stderr, /previous file was restored exactly|setup-created file was removed/);
+  assert.match(result.stderr, /Native plugin or cache changes may remain/);
+  if (before) assert.deepEqual(fs.readFileSync(file), before);
+  else assert.equal(fs.existsSync(file), false);
+  const journal = JSON.parse(fs.readFileSync(setup.setupJournalPath(codexHome), 'utf8'));
+  assert.equal(journal.status, 'failed-unverified');
 });
