@@ -8,7 +8,7 @@ const compiler = require('./toolkit-gate-contract-compiler.cjs');
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 
 // Codex serialises a hook tool name as `spawn_agent` only for the default and
-// `multi_agent_v1` namespaces. A namespaced MultiAgentV2 spawn (default namespace
+// `multi_agent_v1` namespaces. A namespaced V2 (`multi_agent_v2`) spawn (default namespace
 // `collaboration`, configurable) reaches hooks under its flattened name, the
 // namespace concatenated with `spawn_agent` (`collaborationspawn_agent`), with no
 // `Agent` matcher alias. Codex accepts `features.multi_agent_v2.tool_namespace` only
@@ -58,7 +58,7 @@ function defineCodexDialect({ HostDialect, HELPER_PROMPT }) {
     entryFor(toolName) { return toolName === 'Agent' ? 'codex_agent_alias' : 'codex_spawn_agent'; }
     // The guard entry name for a native hook name: namespaced spawns map to spawn_agent.
     canonicalName(toolName) { return toolName === 'Agent' ? 'Agent' : 'spawn_agent'; }
-    // A fresh child only. MultiAgentV1 forks with fork_context:true; MultiAgentV2 forks the
+    // A fresh child only. V1 (`multi_agent`) forks with fork_context:true; V2 (`multi_agent_v2`) forks the
     // full history unless fork_turns is exactly "none" (omitted, "all" or a count fork).
     forksSession(toolName, args) {
       if (args.fork_context === true) return true;
@@ -80,7 +80,7 @@ function verifyCodexHelperRegistration(response, { cwd, command, tool_namespace 
   if (!entry || entry.errors?.length || entry.warnings?.length) fail('CODEX_HOOK_REGISTRATION_UNVERIFIED');
   const hooks = entry.hooks.filter(hook => hook.eventName === 'preToolUse' && hook.command === command);
   // Evaluate the registered matcher the way Codex does, for the V1 name, its alias, the default and a
-  // hyphenated MultiAgentV2 name, and the configured namespace; an exact `spawn_agent|Agent` list misses V2.
+  // hyphenated V2 (`multi_agent_v2`) name, and the configured namespace; an exact `spawn_agent|Agent` list misses V2.
   const probes = tool_namespace === undefined ? CODEX_REGISTRATION_PROBES : [...CODEX_REGISTRATION_PROBES, `${tool_namespace}spawn_agent`];
   for (const name of probes) {
     const matching = hooks.find(hook => {

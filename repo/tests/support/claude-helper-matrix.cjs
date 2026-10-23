@@ -149,7 +149,7 @@ const OTHER_ROWS = Object.freeze({
   A16: { proof: 'live', note: 'No helper requested: no Agent call and no hook decision in the run record.' },
   A19: { proof: 'other-host', note: 'Codex managed-block repositories.' },
   A20: { proof: 'other-host', note: 'Codex Windows launcher exit codes.' },
-  A22: { proof: 'waits', on: 'governance states hook wiring (#542, governance builder)', note: 'ENABLED behaves as governed, DECLINED as ungoverned, UNKNOWN is the hard block. The governance builder wires governanceState() into the hook and the predicate, and covers this row.' },
+  A22: { proof: 'waits', on: 'governance states hook wiring', note: 'ENABLED behaves as governed, DECLINED as ungoverned, UNKNOWN is the hard block. The governance builder wires governanceState() into the hook and the predicate, and covers this row.' },
   A23: { proof: 'other-test', file: 'repo/tests/toolkit-claude-attribution-hook.test.cjs', note: 'Attribution hook failure refuses only commit and PR commands.' },
   A24: { proof: 'live', note: 'Launch latency measured before and after; the hook rows also record per-process time.' },
   A25: { proof: 'waits', on: 'checkpoint writer (custody release)', note: 'Stop hook in a bound and an unbound session.' },

@@ -1,6 +1,6 @@
 'use strict';
 
-// The no-force-push branch ruleset check (#542): which rulesets count, how `gh api` answers map to
+// The no-force-push branch ruleset check: which rulesets count, how `gh api` answers map to
 // present, missing, not-enforceable (GitHub Free private repository) and unverified, and that a
 // non-GitHub repository is not applicable. Closure rows NF-01 to NF-04.
 
