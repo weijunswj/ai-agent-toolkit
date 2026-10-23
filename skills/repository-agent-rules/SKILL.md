@@ -24,11 +24,11 @@ All action-blocking questions to the user are fully bold.
 Works for any git host, local git repositories and plain folders.
 
 1. Use the open target or the explicit target path; if neither exists, stop and ask for a target path.
-2. Required files by platform: Codex or unspecified: `AGENTS.md`. Claude Code: `AGENTS.md` and `CLAUDE.md`. Antigravity: `AGENTS.md`, `GEMINI.md` and `.agents/rules/00-agent-toolkit-bootstrap.md`.
-3. For each required file, check that it exists and that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
+2. Required files by platform: Codex or unspecified: `AGENTS.md`. Claude Code: `AGENTS.md` and `CLAUDE.md`. Antigravity: `AGENTS.md` and `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity reads `AGENTS.md` itself, so there is no `GEMINI.md` shim).
+3. For each required file, check that it exists. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. For every other file, check that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
 4. If every file is structurally current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
-Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
+Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line), never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
 
 ## Markers
 
@@ -43,8 +43,7 @@ Every Toolkit insert uses versioned, hashed markers:
 For an explicit request, compare the Toolkit-owned blocks with the current templates instead of stopping at the structural check:
 
 - `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
-- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only)
-- `repo-local/GEMINI.shim.template.md` -> `GEMINI.md` (Antigravity only)
+- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
 - `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
@@ -54,6 +53,7 @@ Rules:
 - A stale, edited or older-format block is backed up, then replaced from the template; unmarked content is preserved.
 - Broken, duplicate, unmatched, nested or out-of-order markers are repaired before any unrelated edit. If unmarked content cannot be separated safely, write a clean file and report the backup.
 - Never delete duplicate, conflicting or obsolete unmarked content automatically; keep it, or keep it in the backup, and report it. Never create shims for platforms out of scope.
+- A refresh removes the retired `GEMINI.md` shim: back it up, then remove a `GEMINI.md` that holds only the old Toolkit `GEMINI.SHIM` block, or remove just that block when the file has other text. Never touch a `GEMINI.md` without that block.
 - Before modifying, record the target path, git presence, branch, HEAD and dirty state where available, existing files, and whether they were already dirty or hand-edited. In a plain folder, treat existing instruction files as the user's unless complete markers say otherwise.
 
 ### Backups and ignore files
@@ -76,21 +76,11 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
-3. Watch every check on the pull request's exact head.
-4. Read the owner's stored choice with `node "<Toolkit plugin root>/repo/scripts/toolkit-local-bridge.cjs" --audit` (read-only; field `refresh_pr_auto_merge_enabled`). Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed. This skill grants no merge authority of its own; the owner's setup choice "Merge rule-refresh PRs when the required checks pass" is the only source. Never set or change that choice yourself; only setup, with the owner's answer, does.
+3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.
 
-Stop at the open pull request and report its link, head and the reason instead of merging when:
+When the repository has no GitHub remote, leave the refreshed files uncommitted and report them. Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write.
 
-- the stored choice is off, missing or cannot be read;
-- no check has been reported on the exact head by the end of the watch (checks can register only after the pull request opens, so zero checks never counts as passed);
-- any check on the exact head fails, or is still pending when the watch ends;
-- review rules or branch protection block the merge;
-- the pull request contains any file this refresh does not own;
-- the repository has no GitHub remote (then leave the refreshed files uncommitted and report them).
-
-Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write.
-
-**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, after the pull request outcome above (merged, stopped at the open pull request, or no GitHub remote), stop and end with this exact format:
+**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, after the pull request outcome above (stopped at the open pull request, or no GitHub remote), stop and end with this exact format:
 
 **SESSION RESET RECOMMENDED:**
 

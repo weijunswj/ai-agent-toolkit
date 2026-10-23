@@ -796,10 +796,6 @@ function quotePowerShellArgument(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function quotePosixArgument(value) {
-  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
-}
-
 function verifiedSetupScriptPath(setupScriptPath = path.join(__dirname, 'setup-toolkit.cjs')) {
   const resolved = path.resolve(setupScriptPath);
   let stat;
@@ -813,7 +809,6 @@ function restoreCommands(metadataPath, setupScriptPath) {
   return {
     setup_script_path: scriptPath,
     powershell: `node ${quotePowerShellArgument(scriptPath)} ${RESTORE_FLAG} ${quotePowerShellArgument(path.resolve(metadataPath))}`,
-    posix: `node ${quotePosixArgument(scriptPath)} ${RESTORE_FLAG} ${quotePosixArgument(path.resolve(metadataPath))}`,
   };
 }
 

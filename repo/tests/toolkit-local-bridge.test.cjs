@@ -18,8 +18,6 @@ const {
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
-  discoverCodexPluginHookRoots,
-  repairThirdPartyCodexPluginHooks,
   toolkitSkillPayload,
   payloadChecksum,
   updateReportSignature,
@@ -30,14 +28,11 @@ const {
   CACHE_FINGERPRINT_PATHS,
   prepareInstalledSessionStart,
   sourceSessionStartCommand,
+  sourceHelperHookCommand,
   windowsSessionStartCommand,
+  windowsHelperHookCommand,
   verifyInstalledCacheFreshness
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
-const {
-  N8N_SKILLS_COMPATIBILITY,
-  repairPluginRoot
-} = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
-const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const {
   RECORD_PREFIX,
@@ -47,7 +42,6 @@ const {
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
 const expectedBridgeVersion = '3.9.0';
-const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpRoot() {
   const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
@@ -476,12 +470,16 @@ function writeCodexPluginRefreshFixture(repoPath) {
             }
           ]
         }
+      ],
+      PreToolUse: [
+        {
+          matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
+          hooks: [{ type: 'command', command: sourceHelperHookCommand() }]
+        }
       ]
     }
   }, null, 2)}\n`);
   for (const relPath of [
-    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
-    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
   ]) {
@@ -501,8 +499,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const source = process.cwd();",
-    "const target = process.env.PLUGIN_ROOT;",
-    "if (!target) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    "const oldRoot = process.env.PLUGIN_ROOT;",
+    "if (!oldRoot) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    "const target = process.env.TOOLKIT_TEST_CODEX_NEW_CACHE || oldRoot;",
+    "fs.rmSync(oldRoot, { recursive: true, force: true });",
     "fs.rmSync(target, { recursive: true, force: true });",
     "fs.mkdirSync(path.dirname(target), { recursive: true });",
     "fs.cpSync(source, target, {",
@@ -512,12 +512,13 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "if (process.platform === 'win32') {",
     "  const hooksPath = path.join(target, '.codex-plugin', 'hooks', 'hooks.json');",
     "  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));",
-    `  hooks.hooks.SessionStart[0].hooks[0].command = ${JSON.stringify(windowsSessionStartCommand())};`,
+    `  hooks.hooks.SessionStart[0].hooks[0].commandWindows = ${JSON.stringify(windowsSessionStartCommand())};`,
+    `  hooks.hooks.PreToolUse[0].hooks[0].commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
     "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
     "}",
-    "process.stdout.write(JSON.stringify({ ok: true }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '9.9.9', cache_root: target }, null, 2));",
     ''
   ].join('\n'));
 }
@@ -565,98 +566,6 @@ function createRepoAutoUpdateFixture() {
   git(root, ['clone', origin, upstream]);
   configureGitUser(upstream);
   return { root, origin, repo, upstream, initialCommit };
-}
-
-function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-start.sh') {
-  writeJson(path.join(pluginRoot, 'plugin.json'), {
-    name: 'generic-third-party',
-    version: '0.0.0-test',
-    repository: 'https://example.invalid/generic-third-party'
-  });
-  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
-    hooks: {
-      SessionStart: [
-        {
-          matcher: 'startup',
-          hooks: [
-            {
-              type: 'command',
-              command
-            }
-          ]
-        }
-      ]
-    }
-  });
-  writeFile(path.join(pluginRoot, 'hooks', 'session-start.sh'), [
-    '#!/usr/bin/env bash',
-    'echo "generic hook"',
-    ''
-  ].join('\n'));
-}
-
-function copySupportedN8nPluginFixture(pluginRoot) {
-  fs.rmSync(pluginRoot, { recursive: true, force: true });
-  fs.mkdirSync(pluginRoot, { recursive: true });
-  fs.cpSync(supportedN8nFixtureRoot, pluginRoot, { recursive: true, force: true });
-}
-
-function copySupportedN8nCrlfPluginFixture(pluginRoot) {
-  copySupportedN8nPluginFixture(pluginRoot);
-  let converted = 0;
-  for (const relPath of N8N_SKILLS_COMPATIBILITY.text_eol_paths) {
-    const filePath = path.join(pluginRoot, ...relPath.split('/'));
-    if (!fs.existsSync(filePath)) continue;
-    const bytes = fs.readFileSync(filePath);
-    const output = [];
-    for (let index = 0; index < bytes.length; index += 1) {
-      if (bytes[index] === 0x0a && (index === 0 || bytes[index - 1] !== 0x0d)) output.push(0x0d);
-      output.push(bytes[index]);
-    }
-    fs.writeFileSync(filePath, Buffer.from(output));
-    converted += 1;
-  }
-  assert.equal(converted, 12);
-}
-
-function n8nInstalledEntry(version = '1.0.1', overrides = {}) {
-  return {
-    pluginId: 'n8n-skills@n8n-io',
-    name: 'n8n-skills',
-    marketplaceName: 'n8n-io',
-    version,
-    installed: true,
-    enabled: true,
-    ...overrides
-  };
-}
-
-function codexPluginList(entries = []) {
-  return { installed: entries, available: [] };
-}
-
-function writeFakeCodexPluginList(root, pluginList) {
-  const statePath = path.join(root, 'fake-codex-plugin-list.json');
-  const commandPath = path.join(root, 'fake-codex-plugin-list.cjs');
-  writeJson(statePath, pluginList);
-  writeFile(commandPath, [
-    "'use strict';",
-    "const fs = require('node:fs');",
-    `const statePath = ${JSON.stringify(statePath)};`,
-    'const args = process.argv.slice(2);',
-    "if (args.join(' ') === 'plugin --help') {",
-    "  process.stdout.write('Manage Codex plugins\\n');",
-    '  process.exit(0);',
-    '}',
-    "if (args.join(' ') === 'plugin list --json --available') {",
-    "  process.stdout.write(fs.readFileSync(statePath, 'utf8'));",
-    '  process.exit(0);',
-    '}',
-    "process.stderr.write(`unexpected fake Codex arguments: ${args.join(' ')}\\n`);",
-    'process.exit(2);',
-    ''
-  ].join('\n'));
-  return { commandPath, statePath };
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -714,8 +623,9 @@ test('Antigravity portable skills preview and copy only into an explicit workspa
   assert.equal(copied.target, '.agents/skills');
   assert.equal(copied.wrote, true);
   const skillsRoot = path.join(projectRoot, '.agents', 'skills');
-  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames());
-  assert.ok(fs.existsSync(path.join(skillsRoot, 'toolkit-setup', 'SKILL.md')));
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames().filter((name) => !INTERNAL_SKILLS.includes(name)));
+  assert.equal(fs.existsSync(path.join(skillsRoot, 'toolkit-setup')), false, 'Toolkit-only skills stay out of the portable copy');
   assert.equal(fs.existsSync(path.join(projectRoot, '.gemini')), false);
   assert.equal(fs.existsSync(path.join(projectRoot, '.opencode')), false);
   assert.equal(fs.existsSync(path.join(root, 'hub')), false, 'portable copying must not mutate bridge state');
@@ -2990,18 +2900,40 @@ test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', (
 });
 
 test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
-  writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
-  writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'claude-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  assert.equal(result.status, 'needs-attention');
-  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['CLAUDE.md:stale-block']);
+  assert.equal(fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8'), '@AGENTS.md\n');
+  const oldMarkedShim = [
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.5.0 sha256=5bab3ffc1689 -->',
+    '# Claude Code Instructions',
+    '',
+    '@AGENTS.md',
+    '',
+    'Root `AGENTS.md` is canonical.',
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->',
+    ''
+  ].join('\n');
+  const cases = [
+    ['@AGENTS.md\n', []],
+    ['@AGENTS.md\r\n', []],
+    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
+    [oldMarkedShim, ['CLAUDE.md:stale-block']],
+    ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
+    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']],
+    ['# Notes\n\n```text\n@AGENTS.md\n```\n', ['CLAUDE.md:unmanaged']],
+    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['CLAUDE.md:broken-marker']]
+  ];
+  for (const [claudeText, expected] of cases) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
+    writeFile(path.join(root, 'CLAUDE.md'), claudeText);
+    const result = runAgentRulesPreflight(
+      { hook: true, syncSource: 'claude-plugin' },
+      { targetRoot: root, pluginRoot: repoRoot }
+    );
+    assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), expected, JSON.stringify(claudeText));
+    if (expected.length) assert.equal(result.status, 'needs-attention');
+  }
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
@@ -3196,10 +3128,37 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Action needed: none\./);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
   assert.doesNotMatch(report.text, /run `setup toolkit`/);
+});
+
+test('Codex auto-refresh across a version bump checks the newly installed cache folder', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const root = fixture.root;
+  const oldPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.6.0');
+  const newPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.9.0');
+  const hub = path.join(root, 'hub', 'current');
+
+  writeCodexPluginRefreshFixture(fixture.repo);
+  writeFile(path.join(oldPluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  let result = run([
+    '--hub', hub, '--repo-path', fixture.repo, '--write', '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh', '--sync-source', 'codex-plugin'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, PLUGIN_ROOT: oldPluginRoot, TOOLKIT_TEST_CODEX_NEW_CACHE: newPluginRoot })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(oldPluginRoot), false, 'the folder the hook ran from was replaced');
+  assert.equal(fs.existsSync(path.join(newPluginRoot, '.codex-plugin', 'plugin.json')), true);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
+  assert.doesNotMatch(report.text, /refresh-failed|run `setup toolkit`/);
 });
 
 test('Claude hook reports the install check and never runs Codex refresh', () => {
@@ -3223,7 +3182,7 @@ test('Claude hook reports the install check and never runs Codex refresh', () =>
   assert.match(report.text, /^## Install check$/m);
   assert.doesNotMatch(report.text, /Claude Code native plugin cache/);
   assert.doesNotMatch(report.text, /Codex native plugin cache/);
-  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.doesNotMatch(report.text, /Codex plugin updated/);
 });
 
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
@@ -3263,7 +3222,7 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
   );
 
   const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.codex_plugin_auto_refresh_enabled, true);
@@ -3315,7 +3274,7 @@ test('Codex auto-refresh runs before a delegated hub sync failure', () => {
   );
 
   const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.match(report.text, /repo update status: `sync-delegation-failed`/);
   assert.match(report.text, /warning\/error: `delegated repo sync failed:/);
@@ -4001,15 +3960,13 @@ test('legacy persisted all-report opening migrates while retention is preserved'
 });
 
 test('central report classification opens only actionable reports', () => {
-  const base = { repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {} };
+  const base = { repo: {}, nativePluginCache: {} };
   assert.deepEqual(classifyUpdateReport(base), { meaningful: false, actionable: false, kind: 'no-op' });
   assert.deepEqual(classifyUpdateReport({ ...base, repo: { status: 'updated' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
   assert.deepEqual(classifyUpdateReport({ ...base, nativePluginCache: { status: 'refreshed' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
-  assert.deepEqual(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'repaired' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
   assert.equal(classifyUpdateReport({ ...base, repo: { status: 'validation-failed' } }).actionable, true);
   assert.equal(classifyUpdateReport({ ...base, repo: { status: 'skipped', error: 'remote mismatch' } }).actionable, true);
   assert.equal(classifyUpdateReport({ ...base, nativePluginCache: { status: 'refresh-failed' } }).actionable, true);
-  assert.equal(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'partial-failed' } }).actionable, true);
 
   const writes = [];
   const opens = [];
@@ -4033,7 +3990,7 @@ test('central report classification opens only actionable reports', () => {
 });
 
 test('each restored hand edit gets its own report, even on the same Toolkit content', () => {
-  const restored = (folder) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+  const restored = (folder) => ({ repo: {}, nativePluginCache: {}, installCheck: { status: 'passed', actions: [], checks: [
     { id: 'helpers', status: 'passed', summary: 'current' },
     { id: 'global-rules', status: 'passed', updated: true,
       summary: `Claude Code (~/.claude/CLAUDE.md): restored; an edit inside the Toolkit block was replaced, and the edited copy is in the backup below Backup: ~/.ai-agent-toolkit/backups/global-rules/${folder}` }
@@ -4057,7 +4014,7 @@ test('each restored hand edit gets its own report, even on the same Toolkit cont
   assert.equal(invoke(restored('2026-10-22T10-00-00-000Z')).reportPath, '', 'the same run replayed is still deduplicated');
 
   // A file recreated after a hand deletion has the same summary each time; its run id still differs.
-  const created = (run) => ({ repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, installCheck: { status: 'passed', actions: [], checks: [
+  const created = (run) => ({ repo: {}, nativePluginCache: {}, installCheck: { status: 'passed', actions: [], checks: [
     { id: 'global-rules', status: 'passed', updated: true, run, summary: 'Claude Code (~/.claude/CLAUDE.md): created' }] } });
   assert.equal(invoke(created('2026-10-22T11-00-00-000Z')).reportPath, 'restore-3.md');
   assert.equal(invoke(created('2026-10-22T12-00-00-000Z')).reportPath, 'restore-4.md');
@@ -4265,13 +4222,16 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
   // The Codex helper guard is the only PreToolUse entry; it guards spawn_agent, its Agent alias and the
-  // flattened namespaced MultiAgentV2 spawn names such as collaborationspawn_agent.
-  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$']);
+  // flattened namespaced MultiAgentV2 spawn names such as collaborationspawn_agent, and checks shell
+  // commands (Bash) for AI attribution in commits and pull requests.
+  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$']);
   assert.match(codexHooks.hooks.PreToolUse[0].hooks[0].command, /toolkit-codex-helper-hook.cjs/);
   assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell']);
+  assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
   assert.equal(codexHooks.hooks.Stop, undefined);
@@ -4290,8 +4250,9 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/, relPath);
-    assert.match(text, /\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs/, relPath);
+    assert.match(text, /node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs"/, relPath);
+    assert.doesNotMatch(text, /"%USERPROFILE%/, relPath);
+    assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
     assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
     assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
@@ -4299,7 +4260,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /exact setup script path executed/i, relPath);
     assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
-    assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
+    assert.doesNotMatch(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
     assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
@@ -4314,10 +4275,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
-    assert.match(text, /repair-codex-plugin-windows-hooks\.cjs/, relPath);
-    assert.match(text, /installed plugin cache/i, relPath);
-    assert.match(text, /%USERPROFILE%\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
-    assert.match(text, /fail with the repair error/i, relPath);
+    assert.match(text, /\$env:USERPROFILE\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode is not a Toolkit target/i, relPath);
@@ -4325,13 +4283,12 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
     assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /Omit host-specific rows when they have no practical effect/i, relPath);
-    assert.match(text, /Antigravity receives explicit portable skills copies; native AG2 install\/update\/sync is unsupported/i, relPath);
+    assert.match(text, /Antigravity receives explicit portable skills copies: setup's opt-in question copies them into `~\/\.gemini\/config\/skills`[^\n]*; native AG2 install\/update\/sync is unsupported/i, relPath);
     assert.match(text, /--copy-antigravity-skills/, relPath);
     assert.match(text, /The bridge writes into no other app/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
-    assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
-    assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
+    assert.match(text, /Setup copies the official `n8n-io\/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
     assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
     assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
@@ -4358,11 +4315,6 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /older Claude Code bridge still uses the legacy global `hub_version` guard/i);
   // Claude Code runs Toolkit in place from the managed checkout, not from a cache copy.
   assert.match(text, /Claude Code runs Toolkit in place from the managed checkout/);
-  assert.match(text, /selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement/i);
-  assert.match(text, /never guesses by directory or version ordering/i);
-  assert.match(text, /unknown or malformed layouts fail closed/i);
-  assert.doesNotMatch(text, /automatic repair path is generic for third-party/i);
-  assert.doesNotMatch(text, /opt-in also permits repair of unsafe hook launchers in installed third-party/i);
   assert.match(text, /fully resolved on a machine only after the Codex cache and the managed checkout both have the fixed bridge/i);
   assert.match(text, /Codex: run `setup toolkit` in Codex/i);
   assert.match(text, /Claude Code: run `setup toolkit --host claude-code`/i);
@@ -4430,15 +4382,10 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
   }
 
-  // repository-agent-rules may read one stored owner choice through the read-only audit
-  // command; that read alone does not make it a bridge setup skill.
-  const READ_ONLY_AUDIT = /`node "<Toolkit plugin root>\/repo\/scripts\/toolkit-local-bridge\.cjs" --audit` \(read-only; field `refresh_pr_auto_merge_enabled`\)/g;
-  const rulesSkill = fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'SKILL.md'), 'utf8');
-  assert.equal((rulesSkill.match(READ_ONLY_AUDIT) || []).length, 1, 'repository-agent-rules reads the bridge only through the read-only audit');
   const bridgeSkillNames = skillNames.filter((skill) => {
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
-    const skillText = fs.readFileSync(skillPath, 'utf8').replace(READ_ONLY_AUDIT, '');
+    const skillText = fs.readFileSync(skillPath, 'utf8');
     return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity portable skills|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
@@ -4453,393 +4400,20 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
   assert.doesNotMatch(fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8'), /Generated from toolkit (?:project source|curated output for AI)/);
 });
 
-test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook JSON output', {
-  skip: process.platform !== 'win32' ? 'Windows PowerShell/Git Bash hook verification is Windows-only' : false
-}, () => {
-  const root = tmpRoot();
-  const pluginRoot = path.join(root, 'n8n-skills-plugin');
-  copySupportedN8nPluginFixture(pluginRoot);
-
-  assert.ok(
-    auditPluginRoot(pluginRoot, { windows: true }).some((error) => /directly invokes|bare bash/i.test(error)),
-    'fixture should start with Windows-unsafe shell hooks'
-  );
-
-  const repair = repairPluginRoot(pluginRoot, {
-    windows: true,
-    write: true,
-    n8n: true
-  });
-  assert.ok(repair.repaired, 'repair should update the fixture');
-
-  const hooksJson = readJson(path.join(pluginRoot, 'hooks', 'hooks.json'));
-  for (const entry of collectHookCommands(hooksJson)) {
-    assert.match(entry.command, /^powershell(?:\.exe)?\s/i, entry.command);
-    assert.match(entry.command, /hooks\/run-hook\.ps1/, entry.command);
-    assert.doesNotMatch(entry.command, /^(?:\.\/)?hooks\/.+\.sh(?:$|\s)/i, entry.command);
-    assert.doesNotMatch(entry.command, /^(?:bash|bash\.exe)(?:\s|$)/i, entry.command);
-  }
-
-  const errors = auditPluginRoot(pluginRoot, { windows: true, verifyOutput: true });
-  assert.deepEqual(errors, []);
-});
-
-test('Codex plugin hook reconciliation repairs only the exact supported n8n cache', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'Codex Home With Spaces');
-  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
-  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
-  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
-  writeGenericPluginHookFixture(toolkitRoot);
-  writeGenericPluginHookFixture(thirdPartyRoot);
-  copySupportedN8nCrlfPluginFixture(n8nRoot);
-  copySupportedN8nPluginFixture(historicalN8nRoot);
-  const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
-  const historicalManifest = readJson(historicalManifestPath);
-  historicalManifest.version = '1.0.0';
-  writeJson(historicalManifestPath, historicalManifest);
-  const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
-  const historicalBefore = snapshotTree(historicalN8nRoot);
-
-  const result = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    currentPluginRoot: toolkitRoot,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
-  });
-
-  assert.equal(result.status, 'repaired');
-  assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [n8nRoot]);
-  assert.deepEqual(
-    result.skipped.map((entry) => entry.plugin_root).sort(),
-    [historicalN8nRoot, thirdPartyRoot, toolkitRoot].sort()
-  );
-
-  const repairedHooks = readJson(path.join(n8nRoot, 'hooks', 'hooks.json'));
-  const repairedCommand = collectHookCommands(repairedHooks)[0].command;
-  assert.match(repairedCommand, /^powershell(?:\.exe)?\s/i);
-  assert.match(repairedCommand, /hooks\/run-hook\.ps1/);
-  assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), true);
-  assert.deepEqual(fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json')), unrelatedBefore);
-  assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), false);
-  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'retained historical n8n cache must not be repaired');
-
-  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
-  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
-
-  const repairedBefore = snapshotTree(n8nRoot);
-  const second = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    currentPluginRoot: toolkitRoot,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
-  });
-  assert.equal(second.status, 'not-needed');
-  assert.deepEqual(snapshotTree(n8nRoot), repairedBefore, 'current healthy cache must be a byte-idempotent no-op');
-});
-
-test('Codex plugin identity discovery exposes moved n8n hook layouts and fails closed', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'Codex Home With Spaces');
-  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nPluginFixture(n8nRoot);
-  fs.renameSync(path.join(n8nRoot, 'hooks', 'hooks.json'), path.join(n8nRoot, 'hooks', 'hooks-v2.json'));
-  const before = snapshotTree(n8nRoot);
-
-  const discovered = discoverCodexPluginHookRoots({ codexHome });
-  assert.deepEqual(discovered.roots.map((entry) => entry.plugin_root), [n8nRoot]);
-
-  const result = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
-  });
-  assert.equal(result.status, 'repair-failed');
-  assert.match(result.errors.join('\n'), /malformed|fingerprint|layout/i);
-  assert.deepEqual(snapshotTree(n8nRoot), before, 'moved hook layout must fail closed without writes');
-});
-
-test('Codex plugin reconciliation refuses ambiguous current state and cleanly skips no target', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'codex-home');
-  const supportedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  const unknownRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
-  copySupportedN8nCrlfPluginFixture(supportedRoot);
-  copySupportedN8nPluginFixture(unknownRoot);
-  const unknownManifestPath = path.join(unknownRoot, '.codex-plugin', 'plugin.json');
-  const unknownManifest = readJson(unknownManifestPath);
-  unknownManifest.version = '1.0.2';
-  writeJson(unknownManifestPath, unknownManifest);
-  const supportedBefore = snapshotTree(supportedRoot);
-  const unknownBefore = snapshotTree(unknownRoot);
-
-  const ambiguous = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.1'), n8nInstalledEntry('1.0.2')])
-  });
-  assert.equal(ambiguous.status, 'repair-failed');
-  assert.match(ambiguous.errors.join('\n'), /ambiguous|multiple/i);
-  assert.deepEqual(snapshotTree(supportedRoot), supportedBefore, 'ambiguous current state must not repair supported cache');
-  assert.deepEqual(snapshotTree(unknownRoot), unknownBefore, 'ambiguous current state must not modify unknown cache');
-
-  const noTarget = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(noTarget.status, 'repair-failed');
-  assert.match(noTarget.errors.join('\n'), /cannot be proven|ambiguous|omitted/i);
-  assert.deepEqual(snapshotTree(supportedRoot), supportedBefore, 'CLI omission must not repair a supported cache without independent proof');
-  assert.deepEqual(snapshotTree(unknownRoot), unknownBefore, 'CLI omission must not modify an unknown cache without independent proof');
-});
-
-test('Codex n8n config fallback distinguishes enabled, disabled, and unprovable CLI omissions', () => {
-  const root = tmpRoot();
-  const enabledHome = path.join(root, 'enabled-home');
-  const enabledRoot = path.join(enabledHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nCrlfPluginFixture(enabledRoot);
-  writeFile(path.join(enabledHome, 'config.toml'), [
-    '[plugins."n8n-skills@n8n-io"]',
-    'enabled = true',
-    ''
-  ].join('\n'));
-
-  const enabled = repairThirdPartyCodexPluginHooks({
-    codexHome: enabledHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(enabled.status, 'repaired');
-  assert.deepEqual(enabled.repaired.map((entry) => entry.plugin_root), [enabledRoot]);
-  assert.match(collectHookCommands(readJson(path.join(enabledRoot, 'hooks', 'hooks.json')))[0].command, /^powershell(?:\.exe)?\s/i);
-  const enabledAfterRepair = snapshotTree(enabledRoot);
-  const enabledAgain = repairThirdPartyCodexPluginHooks({
-    codexHome: enabledHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(enabledAgain.status, 'not-needed');
-  assert.deepEqual(snapshotTree(enabledRoot), enabledAfterRepair, 'config fallback rerun must be a byte-idempotent no-op');
-
-  const disabledHome = path.join(root, 'disabled-home');
-  const disabledRoot = path.join(disabledHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nCrlfPluginFixture(disabledRoot);
-  writeFile(path.join(disabledHome, 'config.toml'), [
-    '[plugins."n8n-skills@n8n-io"]',
-    'enabled = false',
-    ''
-  ].join('\n'));
-  const disabledBefore = snapshotTree(disabledRoot);
-  const disabled = repairThirdPartyCodexPluginHooks({
-    codexHome: disabledHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(disabled.status, 'not-needed');
-  assert.deepEqual(snapshotTree(disabledRoot), disabledBefore, 'explicitly disabled retained cache must remain untouched');
-
-  const unprovableHome = path.join(root, 'unprovable-home');
-  const unprovableRoot = path.join(unprovableHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nPluginFixture(unprovableRoot);
-  const unprovableBefore = snapshotTree(unprovableRoot);
-  const unprovable = repairThirdPartyCodexPluginHooks({
-    codexHome: unprovableHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(unprovable.status, 'repair-failed');
-  assert.match(unprovable.errors.join('\n'), /cannot be proven|omitted|config/i);
-  assert.deepEqual(snapshotTree(unprovableRoot), unprovableBefore, 'unprovable CLI omission must perform zero writes');
-});
-
-test('Codex n8n config fallback never selects arbitrarily across retained versions', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'codex-home');
-  const supportedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  const unknownRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
-  copySupportedN8nCrlfPluginFixture(supportedRoot);
-  copySupportedN8nPluginFixture(unknownRoot);
-  const unknownManifestPath = path.join(unknownRoot, '.codex-plugin', 'plugin.json');
-  const unknownManifest = readJson(unknownManifestPath);
-  unknownManifest.version = '1.0.2';
-  writeJson(unknownManifestPath, unknownManifest);
-  writeFile(path.join(codexHome, 'config.toml'), [
-    '[plugins."n8n-skills@n8n-io"]',
-    'enabled = true',
-    ''
-  ].join('\n'));
-  const supportedBefore = snapshotTree(supportedRoot);
-  const unknownBefore = snapshotTree(unknownRoot);
-
-  const result = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(result.status, 'repair-failed');
-  assert.match(result.errors.join('\n'), /multiple|ambiguous|cannot be proven/i);
-  assert.deepEqual(snapshotTree(supportedRoot), supportedBefore);
-  assert.deepEqual(snapshotTree(unknownRoot), unknownBefore);
-});
-
-test('Codex n8n reconciliation cleanly skips when no n8n cache identity exists', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'codex-home');
-  writeGenericPluginHookFixture(path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0'));
-
-  const result = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([])
-  });
-  assert.equal(result.status, 'not-needed');
-  assert.equal(result.scanned, 0);
-  assert.deepEqual(result.repaired, []);
-});
-
-test('Codex maintenance auto-reapplies supported n8n hook repair after refresh', {
-  skip: process.platform !== 'win32' ? 'Windows hook repair is Windows-only' : false
-}, () => {
-  const root = tmpRoot();
-  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha hook repair\n' });
-  const hub = path.join(root, 'hub', 'current');
-  const codexHome = path.join(root, 'codex-home');
-  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
-  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
-  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
-  writeGenericPluginHookFixture(toolkitRoot);
-  writeGenericPluginHookFixture(thirdPartyRoot);
-  copySupportedN8nCrlfPluginFixture(n8nRoot);
-  copySupportedN8nPluginFixture(historicalN8nRoot);
-  const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
-  const historicalManifest = readJson(historicalManifestPath);
-  historicalManifest.version = '1.0.0';
-  writeJson(historicalManifestPath, historicalManifest);
-  const fakeCodex = writeFakeCodexPluginList(root, codexPluginList([n8nInstalledEntry('1.0.1')]));
-  const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
-  const historicalBefore = snapshotTree(historicalN8nRoot);
-
-  let result = run([
-    '--hub', hub,
-    '--repo-path', sourceRepo,
-    '--write',
-    '--enable-auto-sync',
-    '--enable-auto-sync',
-    '--enable-codex-plugin-auto-refresh',
-    '--sync-source', 'codex-plugin'
-  ], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      CODEX_HOME: codexHome,
-      CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath,
-      PLUGIN_ROOT: toolkitRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      CODEX_HOME: codexHome,
-      CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath,
-      PLUGIN_ROOT: toolkitRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
-
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Repaired `1` supported n8n Skills Codex plugin hook cache/);
-  assert.match(report.text, /n8n-skills@n8n-io/);
-  assert.match(report.text, /n8n Skills plugin hook reconciliation: `repaired`/);
-
-  const repairedHooks = readJson(path.join(n8nRoot, 'hooks', 'hooks.json'));
-  assert.match(collectHookCommands(repairedHooks)[0].command, /^powershell(?:\.exe)?\s/i);
-  assert.deepEqual(fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json')), unrelatedBefore);
-  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
-  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
-
-  copySupportedN8nCrlfPluginFixture(n8nRoot);
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath, PLUGIN_ROOT: toolkitRoot })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(collectHookCommands(readJson(path.join(n8nRoot, 'hooks', 'hooks.json')))[0].command, /^powershell(?:\.exe)?\s/i);
-  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'startup maintenance must skip retained historical caches');
-
-  const afterRefreshRepair = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath, PLUGIN_ROOT: toolkitRoot })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), afterRefreshRepair);
-  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'idempotent startup maintenance must leave historical caches unchanged');
-});
-
-test('Codex plugin hook reconciliation fails closed on unknown n8n layout without touching cache extras', () => {
-  const root = tmpRoot();
-  const codexHome = path.join(root, 'Codex Home With Spaces');
-  const historicalRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
-  copySupportedN8nPluginFixture(historicalRoot);
-  copySupportedN8nPluginFixture(n8nRoot);
-  const manifestPath = path.join(n8nRoot, '.codex-plugin', 'plugin.json');
-  const manifest = readJson(manifestPath);
-  manifest.version = '1.0.2';
-  writeJson(manifestPath, manifest);
-  const envPath = path.join(n8nRoot, '.env');
-  writeFile(envPath, 'fixture sentinel must remain untouched\n');
-  const beforeHooks = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
-  const beforeEnv = fs.readFileSync(envPath);
-  const historicalBefore = snapshotTree(historicalRoot);
-
-  const result = repairThirdPartyCodexPluginHooks({
-    codexHome,
-    windows: true,
-    write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
-  });
-
-  assert.equal(result.status, 'repair-failed');
-  assert.match(result.errors.join('\n'), /unsupported n8n Skills version 1\.0\.2|compatibility contract changed/i);
-  assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), beforeHooks);
-  assert.deepEqual(fs.readFileSync(envPath), beforeEnv);
-  assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), false);
-  assert.deepEqual(snapshotTree(historicalRoot), historicalBefore, 'retained supported cache must not be repaired when current is unknown');
-});
-
-test('the rule-refresh PR merge choice defaults off, persists through flags and is readable from a read-only audit', () => {
+test('the removed rule-refresh PR merge choice is gone: its flags are rejected and an old state key is dropped on the next write', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const env = isolatedHomeEnv(root, { PATH: process.env.PATH });
-  const audit = () => {
-    const result = run(['--hub', hub, '--audit'], { env });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout).refresh_pr_auto_merge_enabled;
-  };
-  assert.equal(audit(), false);
-  assert.equal(run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge'], { env }).status, 0);
-  assert.equal(readJson(path.join(hub, 'state.json')).refresh_pr_auto_merge_enabled, true);
-  const before = snapshotTree(root);
-  assert.equal(audit(), true);
-  assert.deepEqual(snapshotTree(root), before, 'the audit read writes nothing');
-  assert.equal(run(['--hub', hub, '--write', '--disable-refresh-pr-auto-merge'], { env }).status, 0);
-  assert.equal(audit(), false);
-  const conflict = run(['--hub', hub, '--write', '--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge'], { env });
-  assert.notEqual(conflict.status, 0);
-  assert.match(conflict.stderr, /cannot be used together/);
+  for (const flag of ['--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge']) {
+    const result = run(['--hub', hub, '--write', flag], { env });
+    assert.notEqual(result.status, 0, flag);
+  }
+  assert.equal(run(['--hub', hub, '--write', '--enable-update-reports'], { env }).status, 0);
+  const statePath = path.join(hub, 'state.json');
+  writeJson(statePath, { ...readJson(statePath), refresh_pr_auto_merge_enabled: true });
+  const audit = run(['--hub', hub, '--audit'], { env });
+  assert.equal(audit.status, 0, audit.stderr);
+  assert.equal('refresh_pr_auto_merge_enabled' in JSON.parse(audit.stdout), false);
+  assert.equal(run(['--hub', hub, '--write', '--enable-update-reports'], { env }).status, 0);
+  assert.equal('refresh_pr_auto_merge_enabled' in readJson(statePath), false);
 });

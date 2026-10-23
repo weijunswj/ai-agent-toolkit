@@ -82,3 +82,19 @@ test('portable Antigravity copy refuses symlinked target directories', (t) => {
   assert.throws(() => copyPortableSkills({ projectRoot: project, sourceSkillsRoot: path.join(source, 'skills'), write: true }), /symbolic link or junction/);
   assert.deepEqual(fs.readdirSync(external), []);
 });
+
+test('portable Antigravity copy leaves out the Toolkit-only skills', (t) => {
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  const project = tempRoot();
+  const source = sourceFixture();
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(source, { recursive: true, force: true }));
+  for (const name of INTERNAL_SKILLS) {
+    fs.mkdirSync(path.join(source, 'skills', name), { recursive: true });
+    fs.writeFileSync(path.join(source, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: Fixture\n---\n`, 'utf8');
+  }
+  const result = copyPortableSkills({ projectRoot: project, sourceSkillsRoot: path.join(source, 'skills'), write: true });
+  assert.equal(result.skills, 1);
+  assert.deepEqual(fs.readdirSync(path.join(project, '.agents', 'skills')), ['release-readiness-audit']);
+  assert.deepEqual([...INTERNAL_SKILLS].sort(), ['controller-bootstrap', 'github-program-reconciler', 'toolkit-env', 'toolkit-setup']);
+});

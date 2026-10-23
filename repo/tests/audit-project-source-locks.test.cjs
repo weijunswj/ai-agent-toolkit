@@ -174,13 +174,30 @@ test('active source locks allow one source mapping to different root surfaces', 
   }
 });
 
-test('the two canonical active source locks pass unchanged', () => {
+test('the three canonical active source locks pass unchanged', () => {
   const cwd = copyRepo();
   try {
     const result = runAudit(cwd);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /passed for 2 lock file\(s\)/);
+    assert.match(result.stdout, /passed for 3 lock file\(s\)/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('the official n8n skills are an exact pinned copy under repo/contracts/third-party/, with no hooks or plugin wrappers', () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo', 'source-watch', 'provenance', 'n8n-io-skills', 'SOURCE-LOCK.json'), 'utf8'));
+  assert.equal(lock.source_repo, 'n8n-io/skills');
+  assert.match(lock.source_commit, /^[0-9a-f]{40}$/);
+  const exact = lock.files.filter((file) => file.mode === 'exact');
+  assert.ok(exact.length > 0);
+  for (const file of exact) {
+    assert.ok(file.root_surface_path.startsWith('repo/contracts/third-party/n8n-io-skills/'), file.root_surface_path);
+    assert.ok(file.source_path === 'LICENSE' || file.source_path.startsWith('skills/'), file.source_path);
+  }
+  const folders = new Set(exact.filter((file) => file.source_path.startsWith('skills/')).map((file) => file.source_path.split('/')[1]));
+  assert.equal(folders.size, 15);
+  for (const excluded of ['hooks/hooks.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'package.json']) {
+    assert.equal(lock.files.find((file) => file.source_path === excluded)?.mode, 'excluded', excluded);
   }
 });

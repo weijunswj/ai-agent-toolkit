@@ -15,6 +15,14 @@ function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-toolkit-plugin-'));
 }
 
+// A stand-in PowerShell executable at a path without spaces: the Windows hook command writes the
+// path unquoted, so setup accepts only such paths.
+function fakePowerShell() {
+  const file = path.join(tmpRoot(), 'powershell.exe');
+  fs.writeFileSync(file, '');
+  return file;
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -492,7 +500,7 @@ test('Codex SessionStart verifier rejects the old direct bridge command and inco
   });
   const errors = setup.verifySessionStartHook(hooksPath).join('\n');
   assert.match(errors, /startup, resume, clear, and compact/);
-  assert.match(errors, /exact portable source Toolkit launcher shape/);
+  assert.match(errors, /exact portable Toolkit launcher shape/);
   assert.match(errors, /must not call toolkit-local-bridge\.cjs directly/);
 });
 
@@ -519,6 +527,7 @@ test('Windows SessionStart preparation installs strict launcher metadata without
 });
 
 test('Windows SessionStart publishes verified runtime metadata before hook activation and reruns as a no-op', () => {
+  const powershellPath = fakePowerShell();
   const cache = path.join(tmpRoot(), 'cache with spaces & metacharacters [safe]');
   copyPackageFingerprint(repoRoot, cache);
   const hooksPath = path.join(cache, '.codex-plugin', 'hooks', 'hooks.json');
@@ -527,7 +536,7 @@ test('Windows SessionStart publishes verified runtime metadata before hook activ
   const prepared = setup.prepareInstalledSessionStart(cache, {
     platform: 'win32',
     nodePath: process.execPath,
-    powershellPath: process.execPath,
+    powershellPath,
     writeFileAtomically(filePath, bytes) {
       writes.push(filePath);
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -537,18 +546,19 @@ test('Windows SessionStart publishes verified runtime metadata before hook activ
   assert.deepEqual(writes, [runtimePath, hooksPath]);
   assert.deepEqual(prepared, { changed: true, hooksChanged: true, runtimeChanged: true });
   assert.deepEqual(setup.verifySessionStartRuntime(cache, { platform: 'win32', nodePath: process.execPath }), []);
-  assert.deepEqual(setup.verifySessionStartHook(hooksPath, { windows: true, powershellPath: process.execPath }), []);
+  assert.deepEqual(setup.verifySessionStartHook(hooksPath, { windows: true, powershellPath }), []);
 
   const repeated = setup.prepareInstalledSessionStart(cache, {
     platform: 'win32',
     nodePath: process.execPath,
-    powershellPath: process.execPath,
+    powershellPath,
     writeFileAtomically() { assert.fail('a current SessionStart pair must not be rewritten'); },
   });
   assert.deepEqual(repeated, { changed: false, hooksChanged: false, runtimeChanged: false });
 });
 
 test('Windows SessionStart publication failures preserve one safe hook/runtime state', () => {
+  const powershellPath = fakePowerShell();
   for (const failure of ['runtime', 'hook']) {
     const cache = path.join(tmpRoot(), `cache-${failure}`);
     copyPackageFingerprint(repoRoot, cache);
@@ -558,7 +568,7 @@ test('Windows SessionStart publication failures preserve one safe hook/runtime s
     assert.throws(() => setup.prepareInstalledSessionStart(cache, {
       platform: 'win32',
       nodePath: process.execPath,
-      powershellPath: process.execPath,
+      powershellPath,
       writeFileAtomically(filePath, bytes) {
         if (failure === 'runtime' && filePath === runtimePath) throw new Error('injected runtime publication failure');
         if (failure === 'hook' && filePath === hooksPath) throw new Error('injected hook publication failure');
@@ -576,6 +586,7 @@ test('Windows SessionStart publication failures preserve one safe hook/runtime s
 });
 
 test('stale Windows SessionStart runtime metadata is repaired and verified before hook activation', () => {
+  const powershellPath = fakePowerShell();
   const cache = path.join(tmpRoot(), 'stale-runtime-cache');
   copyPackageFingerprint(repoRoot, cache);
   const hooksPath = path.join(cache, '.codex-plugin', 'hooks', 'hooks.json');
@@ -585,7 +596,7 @@ test('stale Windows SessionStart runtime metadata is repaired and verified befor
   setup.prepareInstalledSessionStart(cache, {
     platform: 'win32',
     nodePath: process.execPath,
-    powershellPath: process.execPath,
+    powershellPath,
     writeFileAtomically(filePath, bytes) {
       writes.push(filePath);
       fs.writeFileSync(filePath, bytes);
@@ -609,7 +620,27 @@ test('Windows hooks freshness rejects every non-command cache difference after l
   writeJson(hooksPath, hooks);
 
   const errors = setup.verifyInstalledCacheFreshness(codexCache, repoRoot).join('\n');
-  assert.match(errors, /stale.*after normalizing the Windows SessionStart command/i);
+  assert.match(errors, /stale.*after removing the Windows hook commands/i);
+});
+
+test('installed hooks keep the portable command and add commandWindows to both hooks; the source carries none', () => {
+  const powershellPath = fakePowerShell();
+  const cache = path.join(tmpRoot(), 'cache with spaces');
+  copyPackageFingerprint(repoRoot, cache);
+  setup.prepareInstalledSessionStart(cache, { platform: 'win32', nodePath: process.execPath, powershellPath, writeFileAtomically(filePath, bytes) { fs.writeFileSync(filePath, bytes); } });
+  const installed = JSON.parse(fs.readFileSync(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
+  const session = installed.hooks.SessionStart[0].hooks[0];
+  const helper = installed.hooks.PreToolUse[0].hooks[0];
+  assert.equal(session.command, setup.sourceSessionStartCommand());
+  assert.equal(helper.command, setup.sourceHelperHookCommand());
+  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"`);
+  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1"`);
+  const source = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
+  assert.equal(JSON.stringify(source).includes('commandWindows'), false);
+  assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.HELPER_HOOK_POWERSHELL_REL_PATH), true);
+  for (const unsafe of ['C:\\Program Files\\PowerShell\\powershell.exe', 'C:\\Windows\\Power&shell.exe', 'powershell.exe']) {
+    assert.throws(() => setup.windowsSessionStartCommand(unsafe), /without spaces or special characters/, unsafe);
+  }
 });
 
 test('Codex Toolkit plugin setup verifier accepts active expected-version install with SessionStart cache', () => {
@@ -967,9 +998,7 @@ test('Codex cache fingerprints include every new installed setup dependency and 
     'repo/scripts/toolkit-agent-control.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
-    'repo/scripts/repo-local-backup.cjs',
-    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
-    'repo/scripts/repair-codex-plugin-windows-hooks.cjs'
+    'repo/scripts/repo-local-backup.cjs'
   ];
   for (const relPath of dependencies) assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(relPath), true, relPath);
   for (const relPath of dependencies) {

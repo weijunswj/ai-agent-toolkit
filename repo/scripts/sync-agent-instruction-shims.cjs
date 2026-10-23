@@ -5,8 +5,10 @@
 // writing them (--write) or checking them (default), and reports every error in one run:
 //   - the governed rules (repo/contracts/agent-rules/toolkit-governed-rules.md) into the portable
 //     managed AGENTS template and this repository's root AGENTS.md;
-//   - the CLAUDE, GEMINI and Antigravity shim templates, whose source is the body between their
-//     own markers, into their portable copies and this repository's root shims;
+//   - the CLAUDE.md shim, which is exactly the import line `@AGENTS.md` with no markers, into its
+//     portable copy and this repository's root CLAUDE.md;
+//   - the Antigravity bootstrap template, whose source is the body between its own markers, into
+//     its portable copy and this repository's root bootstrap;
 //   - the n8n safety rules into the three portable n8n skill derivatives, and the n8n adapter into
 //     the n8n-safety-router adapter template.
 // Every block uses the versioned, hashed marker format of toolkit-managed-block.cjs. The global
@@ -47,12 +49,13 @@ const publishedRoot = 'skills/repository-agent-rules/repo-local';
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 // The block names the governed block replaces in root AGENTS.md.
 const ROOT_REPLACED_BLOCKS = Object.freeze([GOVERNED_BLOCK]);
-// Shim templates: file, block name and the root file each one is projected into.
+// Marked shim templates: file, block name and the root file each one is projected into.
 const SHIMS = Object.freeze([
-  { file: 'CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', target: 'CLAUDE.md' },
-  { file: 'GEMINI.shim.template.md', name: 'GEMINI.SHIM', target: 'GEMINI.md' },
   { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', target: '.agents/rules/00-agent-toolkit-bootstrap.md' }
 ]);
+// The CLAUDE.md shim is recognised by exact content, so it carries no markers. Claude Code reads
+// the import natively; Antigravity reads AGENTS.md itself, so no GEMINI.md shim exists.
+const CLAUDE_SHIM = Object.freeze({ file: 'CLAUDE.shim.template.md', target: 'CLAUDE.md', text: '@AGENTS.md\n' });
 const MANAGED_TEMPLATE = 'AGENTS.managed.template.md';
 const ROOT_HEADING = '# AI Agent Toolkit Repo Rules';
 
@@ -233,6 +236,18 @@ class InstructionProjectionOperation {
     this.#project('AGENTS.md', `${ROOT_HEADING}\n\n${governedBlock}\n${rest ? `\n${rest}\n` : ''}`);
   }
 
+  #projectClaudeShim() {
+    const relPath = `${templateRoot}/${CLAUDE_SHIM.file}`;
+    const source = this.#readRequired(relPath);
+    if (source === null) return;
+    if (source !== CLAUDE_SHIM.text.trimEnd()) {
+      this.#fail(`${relPath} must be exactly the line @AGENTS.md.`);
+      return;
+    }
+    this.#project(`${publishedRoot}/${CLAUDE_SHIM.file}`, CLAUDE_SHIM.text, 'portable instruction template');
+    this.#project(CLAUDE_SHIM.target, CLAUDE_SHIM.text);
+  }
+
   #projectShim(shim, block) {
     const rest = this.#outside(shim.target, readOptional(shim.target), [shim.name]);
     if (rest === null) return;
@@ -251,6 +266,7 @@ class InstructionProjectionOperation {
     const governedBlock = this.#block(governedPath, GOVERNED_BLOCK, governed);
     this.#projectTemplate(MANAGED_TEMPLATE, this.#templateText(governedBlock));
     this.#projectRootAgents(governedBlock);
+    this.#projectClaudeShim();
     for (const shim of SHIMS) {
       const body = this.#shimBody(shim);
       if (body === null) continue;

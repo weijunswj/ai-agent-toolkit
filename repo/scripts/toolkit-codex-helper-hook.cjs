@@ -23,6 +23,8 @@ function governed(input, environment = process.env) {
 // `Agent` alias, and the flattened MultiAgentV2 name `<namespace>spawn_agent` for any
 // host-valid namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 async function decide(input, environment = process.env) {
+  // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
+  if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
   if (!governed(input, environment)) return {};
   const { CodexDialect, commandDecision } = adapter();
   if (!CodexDialect.isSpawnRequest(input?.tool_name)) return {};

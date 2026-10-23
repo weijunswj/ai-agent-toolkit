@@ -87,19 +87,6 @@ function fixtureBoundaryViolations(boundary, product) {
   return violations;
 }
 
-function assertWindowsHookRecoveryGuidance(text, label) {
-  assert.match(text, /\.sh/, label);
-  assert.match(text, /Windows/i, label);
-  assert.match(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, label);
-  assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, label);
-  assert.match(text, /C:\\WINDOWS\\system32\\bash\.exe/, label);
-  assert.match(text, /C:\\Program Files\\Git\\(?:bin|usr\\bin)\\bash\.exe|Windows Git Bash/i, label);
-  assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, label);
-  assert.match(text, /npx skills add n8n-io\/skills/, label);
-  assert.match(text, /using-n8n-skills/, label);
-  assert.match(text, /repair (?:fails|cannot|failed)|cannot be repaired/i, label);
-}
-
 function isInsideRoot(rootRealPath, realPath) {
   const relative = path.relative(rootRealPath, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -362,7 +349,8 @@ test('n8n creation evidence keeps test fixtures out of workflow-template routing
 });
 
 test('skill safety matrix covers current skill folders and safety boundaries', () => {
-  const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const fullMatrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const matrix = fullMatrix.split('\n## Skill Safety Matrix\n')[1].split('\n## ')[0];
   const headerLine = matrix.split('\n').find((line) => line.startsWith('| Skill |'));
   const requiredColumns = [
     'Skill',
@@ -437,25 +425,6 @@ test('toolkit skill routing stays routing-only', () => {
   assert.doesNotMatch(routing, /`\$skill-name`/);
 });
 
-test('narrow n8n plugin repair intents route without capturing workspace or live n8n work', () => {
-  const routing = readText(routingPartial);
-  const source = readText(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'));
-
-  for (const text of [routing, source]) {
-    assert.match(text, /n8n-skills@n8n-io/);
-    assert.match(text, /\.sh hooks? opening|\.sh` hooks opening/i);
-    assert.match(text, /repo-local n8n helper|n8n-workflows\/scripts/i);
-    assert.match(text, /live n8n|Docker|server/i);
-  }
-  assert.match(source, /repair n8n plugin/);
-  assert.match(source, /fix n8n skill hooks/);
-  assert.match(source, /repair the n8n Skills plugin/);
-  assert.match(source, /Claude Code plugin/);
-  assert.match(source, /Toolkit source or canonical skill/);
-  assert.match(source, /smallest numbered choice/);
-  assert.match(source, /Do not load every n8n or MCP skill/);
-});
-
 test('markdown docs use markdown numbered steps instead of HTML or compressed step lists', () => {
   const files = markdownFilesIn(['README.md', 'repo', 'skills']);
 
@@ -510,7 +479,6 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   const howToUse = readText(path.join(repoRoot, 'repo', 'docs', 'HOW-TO-USE.md'));
   const readme = readText(path.join(repoRoot, 'README.md'));
   const aiRulesReadme = readText(path.join(repoRoot, 'skills', 'repository-agent-rules', 'README.md'));
-  const readmeInstallSection = readme.split('\n## Install Skills By Platform\n')[1].split('\n## MCP Status\n')[0];
   const howToUseInstallSection = howToUse.split('\n## Install Toolkit Skills\n')[1].split('\n## Documentation Links\n')[0];
 
   for (const heading of ['Codex Setup', 'Claude Code Setup', 'OpenCode Setup', 'Antigravity 2 Setup']) {
@@ -521,20 +489,18 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
     assert.match(howToUse, new RegExp(`^### ${heading}$`, 'm'), heading);
   }
 
-  assert.match(readme, /^## Install Skills By Platform$/m);
-  assert.match(readmeInstallSection, /This section is only for manually copying Toolkit-owned skill folders/);
-  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity 2']) {
-    assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
-  }
+  // Windows is the only supported computer OS: no POSIX setup commands or $HOME skill paths.
+  assert.doesNotMatch(howToUse, /POSIX|\$HOME|\/etc\/codex/);
+  assert.doesNotMatch(readme, /POSIX|\$HOME|\/etc\/codex/);
 
   assert.match(howToUse, /### Native Toolkit Setup/);
   assert.match(howToUse, /For normal human setup, keep the journey short/);
   assert.match(howToUse, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
   assert.match(howToUse, /manually approve the startup hook when Codex prompts/);
-  assert.match(howToUse, /Windows Codex uses `node "%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main`/);
-  assert.match(howToUse, /POSIX Codex uses `node "\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main`/);
+  assert.match(howToUse, /Codex uses `node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main`/);
   assert.match(howToUse, /Claude Code appends `--host claude-code`/);
   assert.match(howToUse, /active repo only as bootstrap\/fallback|active repo.*bootstrap\/fallback/i);
+  assert.match(howToUse, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);
   assert.match(howToUse, /\.codex-plugin\/plugin\.json/);
   assert.match(howToUse, /\.claude-plugin\/plugin\.json/);
   assert.match(howToUse, /Codex does not install or update Claude Code/);
@@ -552,10 +518,11 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, and other supporting files beside `SKILL\.md` when present/);
   assert.match(howToUse, /Do not paste secrets, tokens, `.env` values, or credentials into repo files/);
   assert.match(howToUse, /### Manual Skill Folder Locations/);
-  assert.match(howToUse, /Codex \| `<repo>\/\.agents\/skills\/<skill-name>\/`/);
-  assert.match(howToUse, /Claude Code \| `<repo>\/\.claude\/skills\/<skill-name>\/`/);
-  assert.match(howToUse, /OpenCode \| `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
-  assert.match(howToUse, /Antigravity 2 \| `<workspace>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \| Portable skills copy only; no native plugin install or sync\./);
+  assert.match(howToUse, /\| Platform \| Manual Toolkit-owned skill folder locations \| Active instruction files \|/);
+  assert.match(howToUse, /\| Codex \| `<repo>\\\.agents\\skills\\<skill-name>\\`<br>`%USERPROFILE%\\\.agents\\skills\\<skill-name>\\` \| `AGENTS\.md` \|/);
+  assert.match(howToUse, /\| Claude Code \| `<repo>\\\.claude\\skills\\<skill-name>\\`<br>`%USERPROFILE%\\\.claude\\skills\\<skill-name>\\` \| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
+  assert.match(howToUse, /\| OpenCode \| `<repo>\\\.opencode\\skills\\<skill-name>\\`[^\n]*\| `AGENTS\.md` \|/);
+  assert.match(howToUse, /\| Antigravity 2 \| `<workspace>\\\.agents\\skills\\<skill-name>\\` \(portable copy only; no native plugin\) \| `AGENTS\.md`, Antigravity 2 bootstrap \|/);
   assert.match(howToUse, /\*\*Choose any one supported Codex skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);
@@ -564,75 +531,45 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUse, /\.gemini\\config\\plugins/);
   assert.match(howToUse, /--copy-antigravity-skills --antigravity-project-root <absolute-path>/);
   assert.match(howToUse, /\| Scope \| Skill folder location \|/);
-  assert.match(howToUse, /\| Repo-level \| `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User-level \| `\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| Project OpenCode config \| `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| Workspace portable copy \| `<workspace>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
+  assert.match(howToUse, /\| Repo-level \| `<repo>\\\.agents\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| User-level \| `%USERPROFILE%\\\.agents\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /`~\/\.codex\/config\.toml` is for Codex configuration/);
+  assert.match(howToUse, /\| Project-level \| `<repo>\\\.claude\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| User-level \| `%USERPROFILE%\\\.claude\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /Use `CLAUDE\.md`, `CLAUDE\.local\.md`, or `\.claude\/rules\/`/);
+  assert.match(howToUse, /\| Project OpenCode config \| `<repo>\\\.opencode\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| User OpenCode config \| `%USERPROFILE%\\\.config\\opencode\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| Project Claude-compatible \| `<repo>\\\.claude\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| User Claude-compatible \| `%USERPROFILE%\\\.claude\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| Project agent-compatible \| `<repo>\\\.agents\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /\| User agent-compatible \| `%USERPROFILE%\\\.agents\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.match(howToUse, /Use `AGENTS\.md`, `AGENTS\.override\.md`, or the configured OpenCode rules file/);
+  assert.match(howToUse, /\| Workspace portable copy \| `<workspace>\\\.agents\\skills\\<skill-name>\\SKILL\.md` \|/);
+  assert.doesNotMatch(howToUse, /\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md/);
+  assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
+  assert.match(howToUse, /Antigravity 2 reads `AGENTS\.md` itself, so Toolkit installs no `GEMINI\.md` shim/);
+  assert.match(howToUse, /A repository opts into Toolkit governance with the governed block in its `AGENTS\.md`/);
+  assert.match(howToUse, /\[repo-local\/AGENTS\.managed\.template\.md\]\(\.\.\/\.\.\/skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
 
-  assert.match(readme, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
-  assert.match(readme, /managed checkout setup script when it exists|managed checkout script when it exists/i);
-  assert.match(readme, /node "%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main/);
-  assert.match(readme, /node "\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main/);
-  assert.match(readme, /active repo.*bootstrap\/fallback/i);
-  assert.match(readme, /manually approve the startup hook when Codex prompts/);
-  assert.match(readme, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);
-  assert.match(readmeInstallSection, /Copy the whole `skills\/<skill-name>\/` folder into \*\*ANY ONE\*\* supported location/);
-  assert.match(readme, /`<workspace>\/\.agents\/skills\/<skill-name>\/` \(portable copy only; no native plugin\)/);
-  assert.match(readme, /\| Platform \| Manual Toolkit-owned skill folder locations \| Active instruction files \| Reference \|/);
-  assert.match(readme, /\| Codex \| `<repo>\/\.agents\/skills\/<skill-name>\/`<br>`\$HOME\/\.agents\/skills\/<skill-name>\/`<br>`\/etc\/codex\/skills\/<skill-name>\/` \|/);
-  assert.match(readme, /\| Claude Code \| `<repo>\/\.claude\/skills\/<skill-name>\/`<br>`\$HOME\/\.claude\/skills\/<skill-name>\/` \|/);
-  assert.match(readme, /\| OpenCode \| `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| Antigravity 2 \| `<workspace>\/\.agents\/skills\/<skill-name>\/` \(portable copy only; no native plugin\) \|/);
-  assert.match(readme, /\| Codex \|[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(readme, /\| Claude Code \|[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
-  assert.match(readme, /\| OpenCode \|[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(readme, /\| Antigravity 2 \|[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity 2 bootstrap \|/);
-  assert.doesNotMatch(readmeInstallSection, /Native plugin package via/);
-  assert.doesNotMatch(readmeInstallSection, /Opt-in bridge target/);
-  assert.doesNotMatch(readmeInstallSection, /\[Official n8n Skills\]/);
-  assert.doesNotMatch(readmeInstallSection, /setup n8n plugin|using-n8n-skills|n8n_live/i);
+  // The README is the short front page; it links out for the detail above.
+  assert.match(readme, /Open the folder in Codex or Claude Code and say `setup toolkit`/);
+  assert.match(readme, /`%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit`/);
+  assert.match(readme, /\[where each app looks\]\(repo\/docs\/HOW-TO-USE\.md#manual-skill-folder-locations\)/);
+  assert.match(readme, /Copy the whole folder, not just `SKILL\.md`/);
+  assert.match(readme, /\(skills\/n8n-safety-router\/\)/);
   assert.doesNotMatch(readme, /codex plugin marketplace add n8n-io\/skills/);
   assert.doesNotMatch(readme, /node repo\/scripts\/repair-codex-plugin-windows-hooks\.cjs --plugin-root/);
-  assert.doesNotMatch(readme, /\| Platform \| Supported skill-folder location \| Repo-local instruction outputs \|/);
-  assert.doesNotMatch(readme, /Repo-local instruction outputs/);
-
-  assert.match(howToUse, /\| Repo-level \| `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User-level \| `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| Admin-level \| `\/etc\/codex\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /`~\/\.codex\/config\.toml` is for Codex configuration/);
-  assert.match(howToUse, /\| Project-level \| `<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User-level \| `\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /Use `CLAUDE\.md`, `CLAUDE\.local\.md`, or `\.claude\/rules\/`/);
-  assert.match(howToUse, /\| Project OpenCode config \| `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User OpenCode config \| `\$HOME\/\.config\/opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| Project Claude-compatible \| `<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User Claude-compatible \| `\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| Project agent-compatible \| `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /\| User agent-compatible \| `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.match(howToUse, /Use `AGENTS\.md`, `AGENTS\.override\.md`, or the configured OpenCode rules file/);
-  assert.match(howToUse, /\| Workspace portable copy \| `<workspace>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
-  assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md/);
-  assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/skills\/<skill-name>\/SKILL\.md/);
-  assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
-  assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
-  assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
-  assert.match(readme, /A repository opts into Toolkit governance with the governed block in its `AGENTS\.md`/);
-  assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
-  assert.match(readme, /\(skills\/n8n-safety-router\/\)/);
-  assert.doesNotMatch(readme, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\//);
-  assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
-  assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
+
   assert.match(aiRulesReadme, /\| Template \| Target \| When \|/);
   assert.match(aiRulesReadme, /\| \[repo-local\/AGENTS\.managed\.template\.md\]\(repo-local\/AGENTS\.managed\.template\.md\) \| `AGENTS\.md` \| Always; the block is the opt-in \|/);
-  assert.match(aiRulesReadme, /\| \[repo-local\/CLAUDE\.shim\.template\.md\]\(repo-local\/CLAUDE\.shim\.template\.md\) \| `CLAUDE\.md` \| Claude Code \|/);
+  assert.match(aiRulesReadme, /\| \[repo-local\/CLAUDE\.shim\.template\.md\]\(repo-local\/CLAUDE\.shim\.template\.md\) \| `CLAUDE\.md` \| Claude Code; exactly the line `@AGENTS\.md`, no markers \|/);
   assert.match(aiRulesReadme, /\| \[repo-local\/antigravity-bootstrap\.template\.md\]\(repo-local\/antigravity-bootstrap\.template\.md\) \| `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` \| Antigravity \|/);
-  assert.match(aiRulesReadme, /\| Codex \| `<repo>\/\.agents\/skills\/<skill>\/`/);
-  assert.match(aiRulesReadme, /\| Antigravity \| `<workspace>\/\.agents\/skills\/<skill>\/` \(portable skills copy only; no native plugin\) \|/);
+  assert.match(aiRulesReadme, /\| Codex \| `<repo>\\\.agents\\skills\\<skill>\\`/);
+  assert.match(aiRulesReadme, /\| Antigravity \| `<workspace>\\\.agents\\skills\\<skill>\\` \(portable skills copy only; no native plugin\) \|/);
+  assert.doesNotMatch(aiRulesReadme, /GEMINI\.shim/);
 
   const installDocs = [howToUse, readme].join('\n');
-  assert.match(installDocs, /\.codex-plugin\/plugin\.json/);
-  assert.match(installDocs, /\.claude-plugin\/plugin\.json/);
   assert.doesNotMatch(installDocs, /\.claude-plugin\/marketplace\.json/);
   assert.doesNotMatch(installDocs, /(?:codex|claude) plugin package template/i);
   assert.doesNotMatch(installDocs, /Minimal Codex plugin manifest/i);
@@ -644,7 +581,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   );
 });
 
-test('n8n environment setup plugin flow stays Windows-safe before hook approval', () => {
+test('root docs link n8n environment setup without marketplace-only plugin install', () => {
   const rootDocs = [
     'README.md',
     'repo/docs/HOW-TO-USE.md'
@@ -656,17 +593,16 @@ test('n8n environment setup plugin flow stays Windows-safe before hook approval'
     assert.doesNotMatch(text, /codex plugin marketplace add n8n-io\/skills/, relPath);
     assert.doesNotMatch(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
   }
+});
 
-  const paths = [
-    'skills/n8n-environment-setup/SKILL.md'
-  ];
-
-  for (const relPath of paths) {
-    const text = readText(path.join(repoRoot, relPath));
-    assert.match(text, /bare `?\.sh`? hooks?/i, relPath);
-    assert.match(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
-    assert.match(text, /--verify-output/, relPath);
-    assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, relPath);
-    assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, relPath);
-  }
+test('packaging table classes every skill and keeps internal skills out of the portable copy', () => {
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const section = matrix.split('\n## Packaging\n')[1].split('\n## ')[0];
+  assert.match(section, /^\| Skill \| Class \| Claude Code plugin \| Codex plugin \| Antigravity copy \|$/m);
+  const rows = [...section.matchAll(/^\|\s*\[[^\]]+\]\(\.\.\/\.\.\/skills\/([^/)]+)\/\)\s*\|\s*(portable|internal)\s*\|\s*Yes\s*\|\s*Yes\s*\|\s*(Yes|No)\s*\|$/gm)]
+    .map((match) => ({ name: match[1], cls: match[2], antigravity: match[3] }));
+  assert.deepEqual(rows.map((row) => row.name).sort(), skillNames());
+  assert.deepEqual(rows.filter((row) => row.cls === 'internal').map((row) => row.name).sort(), [...INTERNAL_SKILLS].sort());
+  for (const row of rows) assert.equal(row.antigravity, row.cls === 'portable' ? 'Yes' : 'No', row.name);
 });

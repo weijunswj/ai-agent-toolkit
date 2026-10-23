@@ -29,7 +29,7 @@ const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 const processLaunch = require('./claude-process-launch.cjs');
 const {
-  EnvStoreError, MAX_VALUE_BYTES, assertName, assertValue, nameProblem, storeForPlatform, supportReference,
+  EnvStoreError, MAX_VALUE_BYTES, PlatformStore, assertName, assertValue, nameProblem, supportReference,
 } = require('./toolkit-env-store.cjs');
 const {
   ClaudeCodeFeeder, CodexFeeder, FeederError, HARNESSES, OPENCODE_SLOT, STATES, assertHeader, assertServer, helperCommand,
@@ -180,14 +180,12 @@ class EnvManifest {
   }
 }
 
-// The editor to open the edit file with, by full path where the system has one: Windows looks for a
-// bare program name in the working folder first. Linux's xdg-open is found on PATH (never the folder).
+// The editor to open the edit file with, by full path: Windows looks for a bare program name in the
+// working folder first. Toolkit supports Windows computers only.
 function editorCommand(file, platform = process.platform, environment = process.env) {
-  if (platform === 'win32') {
-    const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
-    return [path.win32.join(root, 'System32', 'notepad.exe'), [file]];
-  }
-  return ['xdg-open', [file]];
+  if (platform !== 'win32') throw new EnvError(`toolkit env supports Windows only; this computer runs ${platform}.`);
+  const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
+  return [path.win32.join(root, 'System32', 'notepad.exe'), [file]];
 }
 
 function defaultOpener(file, platform = process.platform) {
@@ -344,7 +342,7 @@ class ToolkitEnv {
   // The real wiring for this user. The helper command always names the managed Toolkit checkout
   // (it survives updates), falling back to this copy only when no managed checkout is recorded.
   // The home folder comes from the given environment, so a test environment never reads real files.
-  static forUser({ environment = process.env, homeDir = (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(), toolkitRoot, ask, askHidden } = {}) {
+  static forUser({ environment = process.env, homeDir = (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(), toolkitRoot, ask, askHidden, platform = process.platform } = {}) {
     const paths = new EnvPaths({ homeDir, environment });
     let root = toolkitRoot;
     if (!root) {
@@ -353,7 +351,7 @@ class ToolkitEnv {
     }
     const commandFor = (binding) => helperCommand({ nodePath: process.execPath, scriptPath: path.join(root, 'repo', 'scripts', 'toolkit-env.cjs'), name: binding.name, header: binding.header, scheme: binding.scheme });
     return new ToolkitEnv({
-      store: storeForPlatform(),
+      store: new PlatformStore({ platform }),
       manifest: new EnvManifest({ file: paths.manifest }),
       editSession: new EnvEditSession({ directory: paths.editDir }),
       feeders: [
@@ -601,6 +599,8 @@ class ToolkitEnv {
   // that drifted, and entries still on the old helper that read ~/.codex/.env. Names only.
   // { state: 'not-set-up' | 'passed' | 'action', summary, actions: [] }
   health() {
+    // No key store on this computer (Toolkit supports Windows only): nothing to check.
+    if (typeof this.#store.available === 'function' && !this.#store.available()) return { state: 'skipped', summary: 'no key store on this computer', actions: [] };
     const claude = this.#feeder(HARNESSES.CLAUDE);
     let interim = [];
     try { interim = claude ? claude.interimHelperEntries() : []; } catch {}

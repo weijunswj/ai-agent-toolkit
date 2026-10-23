@@ -8,15 +8,15 @@
   },
   "records": [
     {
-      "target_key": "advisory:n8n-skills-hook-compatibility",
-      "target_kind": "advisory",
+      "target_key": "source-lock:repo/source-watch/provenance/n8n-io-skills",
+      "target_kind": "source_lock",
       "repository": "n8n-io/skills",
       "ref": "main",
-      "advisory_target_id": "n8n-skills-hook-compatibility",
-      "reviewed_through_sha": "046c330c9308bbfc54ceab1adbe3d8fc6bebc8fa",
-      "reviewed_at": "2026-07-30",
-      "disposition": "READ_ONLY_REVIEW_REQUIRED",
-      "owning_tracker": "#244"
+      "source_lock_path": "repo/source-watch/provenance/n8n-io-skills/SOURCE-LOCK.json",
+      "reviewed_through_sha": "27b6b9f429ac0be90cae764512dbc579d7107e95",
+      "reviewed_at": "2026-10-23",
+      "disposition": "NO_ACTION",
+      "owning_tracker": "#421"
     },
     {
       "target_key": "source-lock:repo/source-watch/provenance/google-design-md",

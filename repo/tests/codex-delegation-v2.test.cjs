@@ -599,13 +599,13 @@ test('whole-file proposal validation rejects adversarial security-setting mutati
   }
 });
 
-test('exact restore commands quote absolute hostile script and metadata paths for both shells', () => {
+test('the exact restore command quotes absolute hostile script and metadata paths for PowerShell', () => {
   const hostile = `C:\\Users\\O'Brien\\A & B;$(bad)\\restore.json`;
   const commands = config.restoreCommands(hostile);
   assert.ok(path.isAbsolute(commands.setup_script_path));
   assert.match(commands.powershell, new RegExp(config.quotePowerShellArgument(commands.setup_script_path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(commands.powershell, /O''Brien/);
-  assert.match(commands.posix, /O'"'"'Brien/);
+  assert.equal(Object.hasOwn(commands, 'posix'), false, 'Windows only: no POSIX restore command');
   assert.doesNotMatch(commands.powershell, /\["/);
 });
 
@@ -762,13 +762,13 @@ test('generated PowerShell restore command executes outside the Toolkit checkout
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
 });
 
-test('generated POSIX restore command executes outside the Toolkit checkout', { skip: process.platform === 'win32' }, async () => {
+test('the restore entry point runs outside the Toolkit checkout with a hostile metadata path', async () => {
   const hostileRoot = path.join(tempRoot(), `O'Brien & (restore);$x[1]`);
   const filePath = configPath(hostileRoot);
   const original = 'model = "before"\n';
   writeConfig(filePath, original);
   const result = await configureV2(filePath);
-  const restored = spawnSync('/bin/sh', ['-c', result.restore_commands.posix], {
+  const restored = spawnSync(process.execPath, [result.restore_commands.setup_script_path, config.RESTORE_FLAG, result.backup_metadata_path], {
     cwd: tempRoot(), env: { ...process.env, CODEX_HOME: path.dirname(filePath), HOME: hostileRoot }, encoding: 'utf8',
   });
   assert.equal(restored.status, 0, restored.stderr || restored.stdout);

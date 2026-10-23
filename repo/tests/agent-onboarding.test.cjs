@@ -15,14 +15,21 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   const readme = readText('README.md');
   const agents = readText('AGENTS.md');
 
-  assert.match(readme, /A practical skills-first toolkit of reusable AI-agent skills, machine contracts, provenance records, and safe maintenance scripts\./);
-  assert.match(readme, /This repo keeps reusable AI-agent material in a direct canonical layout/);
-  assert.match(readme, /\[skills\/\]\(skills\/\) contains complete copyable AI-agent skill folders\./);
-  assert.match(readme, /\[repo\/\]\(repo\/\) contains maintenance docs, scripts, tests, provenance, and validation policy\./);
-  assert.match(readme, /\| Full guide or source context \| Open the relevant `skills\/<skill-name>\/` folder or `repo\/contracts\/` entry\. \|/);
-  assert.match(readme, /\| Install a skill \| Copy the whole skill folder using \[Install Skills By Platform\]/);
-  assert.match(readme, /\| Review skill safety \| Use the \[Skill Safety Matrix\]/);
-  assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
+  // The README is a short front page: supported OS, what it is, install, update, remove, skills, where the docs live.
+  const headings = [...readme.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(headings.slice(0, 6), ['Install', 'Update', 'Remove', 'Skills', 'Where the docs live', 'Appendix: Source-of-Truth Contract']);
+  assert.equal(readme.split('\n')[2], '**Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)');
+  assert.match(readme, /Open the folder in Codex or Claude Code and say `setup toolkit`/);
+  assert.match(readme, /say `refresh toolkit`/);
+  assert.match(readme, /`claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`/);
+  assert.match(readme, /`codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local`/);
+  assert.match(readme, /toolkit-global-rules\.cjs" --remove/);
+  assert.match(readme, /\[Skill Safety Matrix\]\(repo\/docs\/SKILL-SAFETY-MATRIX\.md\)/);
+  assert.match(readme, /\[How To Use\]\(repo\/docs\/HOW-TO-USE\.md#install-toolkit-skills\)/);
+  assert.match(readme, /Maintainers start with \[AGENTS\.md\]\(AGENTS\.md\)/);
+  assert.doesNotMatch(readme, /POSIX|\$HOME|macOS Codex|Linux Codex/);
+  const beforeAppendix = readme.slice(0, readme.indexOf('## Appendix'));
+  assert.ok(beforeAppendix.split('\n').length <= 80, 'README front page stays short');
 
   assert.match(agents, /This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository\./);
   assert.match(agents, /Keep this file short: it loads in every session here/);
@@ -48,8 +55,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /run the host-aware orchestrator from the managed checkout when that checkout exists/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/);
+  assert.doesNotMatch(readText('repo/docs/FOR_AI_AGENTS.md'), /POSIX|\$HOME\/\.ai-agent-toolkit/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Use `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` from the active repo only as bootstrap\/fallback/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Verification after managed setup must use the managed checkout verifier/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Even when Toolkit is already installed, complete the full setup journey so stale pieces are detected and patched in order/);
@@ -60,9 +67,11 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
 
 test('agent onboarding path does not advertise repo-wide MCP as a current surface', () => {
   const readme = readText('README.md');
+  const howToUse = readText('repo/docs/HOW-TO-USE.md');
   const surfaceAudit = readText('repo/docs/SURFACE-FIDELITY-AUDIT.md');
 
-  assert.match(readme, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
+  assert.match(readme, /There is no repo-wide MCP server; n8n work uses the \[official n8n Skills\]/);
+  assert.match(howToUse, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
   assert.match(surfaceAudit, /No repo-wide `mcp\/\*\*` surface is shipped or maintained\./);
   assert.match(surfaceAudit, /No secondary routing metadata, duplicate package-build path, or privileged publication workflow is part of the maintained topology\./);
   assert.match(surfaceAudit, /that no required local surface points back to the deleted project\/publisher tree\./);

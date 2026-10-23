@@ -1,14 +1,11 @@
 'use strict';
 
-// The OS-native stores behind `toolkit env`. One store per operating system, built-in tools only,
-// no fallback store (macOS is not supported):
-//   Windows  Credential Manager generic credentials, target ai-agent-toolkit/env/<NAME>, kept on
-//            this PC (local-machine persistence), written through the Win32 credential API from
-//            the built-in Windows PowerShell.
-//   Linux    Secret Service through `secret-tool`, attributes service=ai-agent-toolkit/env name=<NAME>.
-// Values travel only on stdin and stdout of these tools, never in their arguments, and no store
-// method logs or reports a value. Every store has the same methods: backend, list(), readAll(names),
-// read(name), writeAll(entries), remove(name).
+// The store behind `toolkit env`: Windows Credential Manager generic credentials, target
+// ai-agent-toolkit/env/<NAME>, kept on this PC (local-machine persistence), written through the Win32
+// credential API from the built-in Windows PowerShell. Toolkit supports Windows computers only, so there
+// is no other store and no fallback. Values travel only on stdin and stdout, never in arguments, and no
+// store method logs or reports a value. The store's methods: backend, list(), readAll(names), read(name),
+// writeAll(entries), remove(name).
 
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -241,77 +238,30 @@ class WindowsCredentialStore {
   }
 }
 
-const LINUX_NO_KEYRING = 'This Linux session has no desktop keyring (Secret Service), so Toolkit cannot store keys here. Install and unlock a keyring such as GNOME Keyring or KWallet, with the `secret-tool` command (package libsecret-tools), then try again. Toolkit does not fall back to a plain file.';
-
-// Secret Service through `secret-tool`, which reads a stored value from stdin.
-class LinuxSecretServiceStore {
-  #secretTool; #spawn; #service;
-
-  constructor({ secretTool = 'secret-tool', service = STORE_PREFIX, spawn = spawnSync } = {}) {
-    this.#secretTool = secretTool;
-    this.#spawn = spawn;
-    this.#service = service;
-  }
-
-  get backend() { return 'Linux Secret Service'; }
-
-  #call(args, input) {
-    const result = this.#spawn(this.#secretTool, args, { input, encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
-    if (result.error) throw new EnvStoreError(LINUX_NO_KEYRING, 'backend-unavailable');
-    if (result.status !== 0 && /secret service|dbus|org\.freedesktop|no such secret collection|cannot autolaunch/i.test(String(result.stderr || ''))) {
-      throw new EnvStoreError(LINUX_NO_KEYRING, 'backend-unavailable');
-    }
-    return result;
-  }
-
-  list() {
-    const result = this.#call(['search', '--all', '--unlock', 'service', this.#service]);
-    if (result.status !== 0 && /\S/.test(String(result.stderr || ''))) throw new EnvStoreError('The Linux keyring could not list keys.', 'backend-failed');
-    const names = [];
-    for (const line of `${result.stdout || ''}\n${result.stderr || ''}`.split(/\r?\n/)) {
-      const match = /^attribute\.name = (.+)$/.exec(line.trim());
-      if (match && !nameProblem(match[1])) names.push(match[1]);
-    }
-    return sortedNames(names);
-  }
-
-  readAll(names) {
-    const values = new Map();
-    for (const name of names.map(assertName)) {
-      const result = this.#call(['lookup', 'service', this.#service, 'name', name]);
-      if (result.status !== 0) {
-        if (/\S/.test(String(result.stderr || ''))) throw new EnvStoreError(`The Linux keyring could not read ${name}.`, 'backend-failed');
-        continue;
-      }
-      values.set(name, String(result.stdout || ''));
-    }
-    return values;
-  }
-
-  read(name) { return this.readAll([name]).get(name); }
-
-  writeAll(entries) {
-    const list = [...entries].map(([name, value]) => [assertName(name), assertValue(name, value)]);
-    for (const [name, value] of list) {
-      const result = this.#call(['store', `--label=Toolkit env ${name}`, 'service', this.#service, 'name', name], value);
-      if (result.status !== 0) throw new EnvStoreError(`The Linux keyring could not save ${name}.`, 'backend-failed');
-    }
-  }
-
-  remove(name) {
-    const existed = this.readAll([name]).has(name);
-    if (!existed) return false;
-    const result = this.#call(['clear', 'service', this.#service, 'name', name]);
-    if (result.status !== 0) throw new EnvStoreError(`The Linux keyring could not remove ${name}.`, 'backend-failed');
-    return true;
-  }
-}
-
-// The store for this operating system. There is no other store and no fallback.
+// The store for this computer: Windows only, with no fallback.
 function storeForPlatform(platform = process.platform, options = {}) {
   if (platform === 'win32') return new WindowsCredentialStore(options);
-  if (platform === 'linux') return new LinuxSecretServiceStore(options);
-  throw new EnvStoreError(`Toolkit env has no store for ${platform}.`, 'backend-unavailable');
+  throw new EnvStoreError(`Toolkit env supports Windows only; this computer runs ${platform}.`, 'backend-unavailable');
+}
+
+// The platform store, built on first use, so reading the install check or the manifest never needs a
+// key store; available() says whether this computer has one.
+class PlatformStore {
+  #platform; #options; #store = null;
+
+  constructor({ platform = process.platform, options = {} } = {}) {
+    this.#platform = platform;
+    this.#options = options;
+  }
+
+  available() { return this.#platform === 'win32'; }
+  #get() { this.#store ||= storeForPlatform(this.#platform, this.#options); return this.#store; }
+  get backend() { return this.#get().backend; }
+  list() { return this.#get().list(); }
+  readAll(names) { return this.#get().readAll(names); }
+  read(name) { return this.#get().read(name); }
+  writeAll(entries) { return this.#get().writeAll(entries); }
+  remove(name) { return this.#get().remove(name); }
 }
 
 // A short reference that ties a printed error to nothing private.
@@ -321,7 +271,7 @@ function supportReference() {
 
 module.exports = Object.freeze({
   EnvStoreError,
-  LinuxSecretServiceStore,
+  PlatformStore,
   MAX_VALUE_BYTES,
   STORE_PREFIX,
   WindowsCredentialStore,
