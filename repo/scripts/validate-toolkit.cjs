@@ -630,8 +630,8 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
 
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
-  // Windows is the only supported computer OS (#532); the README says so right under its title.
-  if (!/^# AI Agent Toolkit\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with the "**Supported OS:** Windows" line under its title');
+  // Windows is the only supported computer OS (#532); the README says so right after its title and one-paragraph intro.
+  if (!/^# AI Agent Toolkit\n\n[^#*\n][^\n]*\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with its title, a one-paragraph intro, then the "**Supported OS:** Windows" line');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();

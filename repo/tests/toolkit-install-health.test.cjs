@@ -7,7 +7,7 @@ require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update 
 
 const test = require('node:test');
 const os = require('node:os');
-const { ToolkitInstallHealthCheck, STATUS } = require('../scripts/toolkit-install-health.cjs');
+const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
@@ -242,4 +242,45 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
+});
+
+test('the Claude app account copy check reports an older claude.ai copy with the fix, reads only, and blocks nothing', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-account-plugin-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const localAppData = path.join(root, 'LocalAppData');
+  const folder = path.join(localAppData, 'Claude-Data', 'claude_example', 'rpm', 'aaa', 'bbb');
+  const put = (rel, value) => { fs.mkdirSync(path.dirname(path.join(folder, rel)), { recursive: true }); fs.writeFileSync(path.join(folder, rel), JSON.stringify(value)); };
+  const check = (folders) => new ToolkitInstallHealthCheck({ toolkitRoot: repoRoot, expectedVersion: '9.9.1', hubPath: path.join(root, 'hub'),
+    helperDefinitions: { refresh: () => ({ status: 'current' }), check: () => ({ status: 'current', project_overrides: [], detail: '' }) },
+    globalRules: fakeGlobalRules(), depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) }, accountPluginFolders: folders })
+    .run({ refreshHelpers: false });
+  const find = (result) => result.checks.find((entry) => entry.id === 'account-plugin');
+
+  assert.deepEqual(claudeAccountPluginFolders({}), [], 'no LOCALAPPDATA: no folders');
+  assert.deepEqual(claudeAccountPluginFolders({ LOCALAPPDATA: localAppData }), [], 'no Claude app data: no folders');
+  assert.equal(find(check(null)), undefined, 'skipped when no folders are given');
+
+  put('manifest.json', { plugins: [{ id: 'plugin_other', name: 'something-else' }, { id: 'plugin_toolkit', name: 'ai-agent-toolkit' }] });
+  put('plugin_toolkit/.claude-plugin/plugin.json', { name: 'ai-agent-toolkit', version: '9.8.0' });
+  const folders = claudeAccountPluginFolders({ LOCALAPPDATA: localAppData });
+  assert.deepEqual(folders, [folder]);
+  assert.equal(claudeAccountToolkitVersion(folders), '9.8.0');
+  const before = fs.readFileSync(path.join(folder, 'manifest.json'));
+  const result = check(folders);
+  const older = find(result);
+  assert.equal(older.status, STATUS.PASSED, 'an older account copy never blocks');
+  assert.equal(result.status, STATUS.PASSED);
+  assert.match(older.summary, /Your claude\.ai account copy of Toolkit is 9\.8\.0; this computer has 9\.9\.1\. The Claude app runs the account copy, and claude\.ai updates it from Toolkit's main branch: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude\.ai, and if the copy stays behind, remove that marketplace and add it again\./);
+  assert.doesNotMatch(older.summary, /plugin_toolkit|claude_example|LocalAppData/, 'no ids or paths in the report');
+  assert.ok(fs.readFileSync(path.join(folder, 'manifest.json')).equals(before), 'the check never writes');
+
+  put('plugin_toolkit/.claude-plugin/plugin.json', { name: 'ai-agent-toolkit', version: '9.9.1' });
+  assert.match(find(check(folders)).summary, /Your claude\.ai account copy of Toolkit is current \(9\.9\.1\)\./);
+
+  // Unsafe ids and malformed versions are ignored, so nothing is reported.
+  put('manifest.json', { plugins: [{ id: '../escape', name: 'ai-agent-toolkit' }] });
+  assert.equal(find(check(folders)), undefined);
+  put('manifest.json', { plugins: [{ id: 'plugin_toolkit', name: 'ai-agent-toolkit' }] });
+  put('plugin_toolkit/.claude-plugin/plugin.json', { version: 'latest' });
+  assert.equal(find(check(folders)), undefined);
 });

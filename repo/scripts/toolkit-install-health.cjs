@@ -12,6 +12,8 @@
 // record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
 // when stale), the Toolkit-owned Claude Code depth setting against the selected topology, and,
 // once toolkit env is in use, its store and connected MCP entries (by key name only).
+// Notices that block nothing: an older uploaded Projects controller skill, and an older Toolkit copy
+// from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it).
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
@@ -55,12 +57,43 @@ function compareSkillVersions(left, right) {
   return Number(ln) === Number(rn) ? 0 : (Number(ln) > Number(rn) ? 1 : -1);
 }
 
+// The Claude desktop app keeps plugins from the user's claude.ai account in
+// %LOCALAPPDATA%\Claude-Data\claude_<package>\rpm\<a>\<b>\, with a manifest.json listing each plugin's id.
+// Returns those folders, or [] when the app is not installed. Read only.
+function claudeAccountPluginFolders(environment = process.env) {
+  const base = environment.LOCALAPPDATA ? path.join(environment.LOCALAPPDATA, 'Claude-Data') : '';
+  const folders = [];
+  const children = (dir) => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()); } catch { return []; } };
+  for (const app of children(base).filter((entry) => entry.name.startsWith('claude_'))) {
+    const rpm = path.join(base, app.name, 'rpm');
+    for (const first of children(rpm)) for (const second of children(path.join(rpm, first.name))) folders.push(path.join(rpm, first.name, second.name));
+  }
+  return folders;
+}
+
+// The newest Toolkit version among the account copies in those folders, or '' when there is none.
+function claudeAccountToolkitVersion(folders) {
+  const versions = [];
+  for (const folder of folders) {
+    let manifest;
+    try { manifest = readJsonIfExists(path.join(folder, 'manifest.json')); } catch { continue; }
+    for (const plugin of Array.isArray(manifest?.plugins) ? manifest.plugins : []) {
+      if (plugin?.name !== 'ai-agent-toolkit' || typeof plugin.id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(plugin.id)) continue;
+      let pluginJson;
+      try { pluginJson = readJsonIfExists(path.join(folder, plugin.id, '.claude-plugin', 'plugin.json')); } catch { continue; }
+      if (/^\d+\.\d+\.\d+$/.test(pluginJson?.version || '')) versions.push(pluginJson.version);
+    }
+  }
+  return versions.sort(compareVersions).pop() || '';
+}
+
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #platform;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #platform;
 
   // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
   // syncedSkillsDir: where Claude Code keeps skills synced from claude.ai, or null to skip the Projects skill check.
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, platform = process.platform }) {
+  // accountPluginFolders: the Claude desktop app's account-plugin folders, or null to skip that check.
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, platform = process.platform }) {
     this.#platform = platform;
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
@@ -70,6 +103,7 @@ class ToolkitInstallHealthCheck {
     this.#depth = depthSetting;
     this.#env = envHealth;
     this.#syncedSkillsDir = syncedSkillsDir;
+    this.#accountPluginFolders = accountPluginFolders;
   }
 
   // The checks the installed session-start hook runs, wired to the real files.
@@ -88,6 +122,7 @@ class ToolkitInstallHealthCheck {
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
       envHealth: ToolkitEnv.forUser({ environment }),
       syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
+      accountPluginFolders: claudeAccountPluginFolders(environment),
     });
   }
 
@@ -111,6 +146,19 @@ class ToolkitInstallHealthCheck {
     if (uploaded && compareSkillVersions(uploaded, repoVersion) >= 0) return this.#check('projects-skill', label, STATUS.PASSED, `Your uploaded copy is current (${uploaded}).`);
     return this.#check('projects-skill', label, STATUS.PASSED,
       `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}. Upload ${slash(source)} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+  }
+
+  // Shown only when the Claude desktop app holds a Toolkit copy from the user's claude.ai account.
+  // The app runs that copy, and claude.ai alone updates it (from the Toolkit repository's main), so an
+  // older copy is reported with the fix; Toolkit never changes it, and it blocks nothing.
+  #accountPluginCheck() {
+    if (!this.#accountPluginFolders?.length || !/^\d+\.\d+\.\d+$/.test(this.#expectedVersion || '')) return null;
+    const account = claudeAccountToolkitVersion(this.#accountPluginFolders);
+    if (!account) return null;
+    const label = 'Claude app account copy';
+    if (compareVersions(account, this.#expectedVersion) >= 0) return this.#check('account-plugin', label, STATUS.PASSED, `Your claude.ai account copy of Toolkit is current (${account}).`);
+    return this.#check('account-plugin', label, STATUS.PASSED,
+      `Your claude.ai account copy of Toolkit is ${account}; this computer has ${this.#expectedVersion}. The Claude app runs the account copy, and claude.ai updates it from Toolkit's main branch: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, and if the copy stays behind, remove that marketplace and add it again.`);
   }
 
   #check(id, label, status, summary, action = '') {
@@ -260,6 +308,8 @@ class ToolkitInstallHealthCheck {
     if (env) checks.push(env);
     const projectsSkill = this.#projectsSkillCheck();
     if (projectsSkill) checks.push(projectsSkill);
+    const accountPlugin = this.#accountPluginCheck();
+    if (accountPlugin) checks.push(accountPlugin);
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;
     const actions = checks.filter((entry) => entry.status !== STATUS.PASSED && entry.action).map((entry) => entry.action);
@@ -292,4 +342,4 @@ if (require.main === module) {
   catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ ToolkitInstallHealthCheck, STATUS, storedClaudeTopology, main });
+module.exports = Object.freeze({ claudeAccountPluginFolders, claudeAccountToolkitVersion, ToolkitInstallHealthCheck, STATUS, storedClaudeTopology, main });
