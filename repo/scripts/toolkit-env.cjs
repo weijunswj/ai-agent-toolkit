@@ -81,22 +81,24 @@ class EnvPaths {
 // Replaces a Windows file's or folder's whole permission list with one entry: full control for
 // the current user (inherited by a folder's contents). Removing inherited entries is not enough:
 // a folder made where nothing is inherited gets explicit SYSTEM and Administrators entries.
+// The path arrives base64-encoded, since Windows PowerShell reads stdin in the console code page.
 const WINDOWS_PRIVATE_SCRIPT = String.raw`
 $env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 $ErrorActionPreference = 'Stop'
 try {
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  $target = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($request.path))
   $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
   if ($request.folder) {
     $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-    [System.IO.Directory]::SetAccessControl($request.path, $acl)
+    [System.IO.Directory]::SetAccessControl($target, $acl)
   } else {
     $acl = [System.Security.AccessControl.FileSecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow'))
-    [System.IO.File]::SetAccessControl($request.path, $acl)
+    [System.IO.File]::SetAccessControl($target, $acl)
   }
   [Console]::Out.Write('ok')
 } catch {
@@ -111,7 +113,7 @@ function restrictToCurrentUser(target, folder, { platform = process.platform, en
   const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
   const powershell = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const result = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PRIVATE_SCRIPT, 'utf16le').toString('base64')], {
-    input: JSON.stringify({ path: target, folder }), encoding: 'utf8', windowsHide: true, timeout: 30000,
+    input: JSON.stringify({ path: Buffer.from(target, 'utf8').toString('base64'), folder }), encoding: 'utf8', windowsHide: true, timeout: 30000,
   });
   return !result.error && result.status === 0 && result.stdout === 'ok';
 }
@@ -648,8 +650,10 @@ class ToolkitEnv {
     const tooLong = [];
     const empty = [];
     const candidates = new Map();
-    for (const { name, value } of entries) {
-      if (nameProblem(name)) notRule.push(name);
+    for (const { name, value, line } of entries) {
+      // A name that fails the rule may be part of a value (a value on its own line), so it is
+      // reported by line number only.
+      if (nameProblem(name)) notRule.push(line);
       else if (value === '') empty.push(name);
       else if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) tooLong.push(name);
       else candidates.set(name, value);
@@ -669,7 +673,7 @@ class ToolkitEnv {
     out.push(`imported: ${toWrite.size} name${toWrite.size === 1 ? '' : 's'}${toWrite.size ? ` (${[...toWrite.keys()].sort().join(', ')})` : ''}`);
     if (already.length) out.push(`already in the store with the same value: ${already.sort().join(', ')}`);
     if (differs.length) out.push(`kept the store's value (it differs from the file): ${differs.sort().join(', ')}`);
-    if (notRule.length) out.push(`not imported, the name does not follow PROVIDER_SOLUTION_PURPOSE: ${notRule.sort().join(', ')}`);
+    if (notRule.length) out.push(`not imported, line${notRule.length === 1 ? '' : 's'} ${notRule.join(', ')}: the text before = is not a valid key name (names look like PROVIDER_SOLUTION_PURPOSE; check ${notRule.length === 1 ? 'it' : 'them'} in Notepad)`);
     if (empty.length) out.push(`not imported, empty value: ${empty.sort().join(', ')}`);
     if (tooLong.length) out.push(`not imported, value too long (max ${MAX_VALUE_BYTES} bytes): ${tooLong.sort().join(', ')}`);
     if (skipped.length) out.push(`skipped lines: ${skipped.join(', ')} (not NAME=value; check them in Notepad before retiring the file)`);
@@ -682,8 +686,12 @@ class ToolkitEnv {
   async retireCodexEnv() {
     const file = this.#paths.codexEnvFile;
     if (!fs.existsSync(file)) return { code: 0, out: [`There is no ${this.#paths.show(file)}; nothing to retire.`], err: [] };
-    const { entries, skipped } = parseDotEnv(fs.readFileSync(file, 'utf8'));
-    const stored = this.#store.readAll(entries.filter((entry) => !nameProblem(entry.name)).map((entry) => entry.name));
+    const parsed = parseDotEnv(fs.readFileSync(file, 'utf8'));
+    // Lines whose text before = is not a valid name are reported by number only, like other lines
+    // that are not NAME=value: that text may be part of a value.
+    const entries = parsed.entries.filter((entry) => !nameProblem(entry.name));
+    const skipped = [...parsed.skipped, ...parsed.entries.filter((entry) => nameProblem(entry.name)).map((entry) => entry.line)].sort((a, b) => a - b);
+    const stored = this.#store.readAll(entries.map((entry) => entry.name));
     const notStored = entries.filter((entry) => stored.get(entry.name) !== entry.value).map((entry) => entry.name);
     if (notStored.length) throw new EnvError(`Not retired. These keys in the file are not in the store with the same value: ${[...new Set(notStored)].sort().join(', ')}. Run toolkit env import-codex-env, or add them with toolkit env edit.`);
     const codex = this.#feeder(HARNESSES.CODEX);
@@ -691,7 +699,7 @@ class ToolkitEnv {
     if (references.length) {
       throw new EnvError(`Not retired. Codex still reads keys from its environment for: ${references.map((entry) => `${entry.server} (${entry.name})`).join(', ')}. Connect them first with toolkit env connect SERVER --name NAME.`);
     }
-    const note = skipped.length ? ` Lines ${skipped.join(', ')} are not NAME=value; check them first.` : '';
+    const note = skipped.length ? ` Lines ${skipped.join(', ')} are not NAME=value with a valid key name and were not imported; check them first.` : '';
     const answer = String(await this.#ask(`Move ${this.#paths.show(file)} into a private backup folder?${note} Type yes to go ahead: `) || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: ['Nothing was changed.'], err: [] };
     ensurePrivateDirectory(this.#paths.backupsDir);

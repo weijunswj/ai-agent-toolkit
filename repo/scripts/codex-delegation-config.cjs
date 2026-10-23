@@ -406,7 +406,9 @@ async function cleanupTemporaryEditorDirectory(root, options = {}) {
 function terminateChildTree(child) {
   if (!child.pid) return;
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    // By full path: Windows looks for a bare program name in the working folder first.
+    const taskkill = path.win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
+    spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
       timeout: 10000,
       stdio: 'ignore',

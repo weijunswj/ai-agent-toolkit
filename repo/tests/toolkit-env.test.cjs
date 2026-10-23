@@ -272,7 +272,8 @@ test('import copies ~/.codex/.env into the store, reads each back, and leaves th
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /^imported: 2 names \(X1_TEST_ONE_KEY, X1_TEST_TWO_KEY\)$/m);
   assert.match(result.stdout, /kept the store's value \(it differs from the file\): X1_TEST_DIFFERS_KEY/);
-  assert.match(result.stdout, /does not follow PROVIDER_SOLUTION_PURPOSE: lowercase_name/);
+  assert.match(result.stdout, /^not imported, line 4: the text before = is not a valid key name/m);
+  assert.doesNotMatch(result.stdout, /lowercase_name/);
   assert.match(result.stdout, /empty value: X1_TEST_EMPTY_KEY/);
   assert.match(result.stdout, /^skipped lines: 5 \(not NAME=value/m);
   assert.equal(fs.readFileSync(paths.codexEnvFile, 'utf8'), text);
@@ -666,4 +667,35 @@ test('the real wiring takes the home folder from the environment it is given', (
   assert.equal(env.health().state, 'not-set-up');
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { coolify: { type: 'http', url: 'https://x.example.test', headersHelper: 'node "C:/h/codex-env-bearer.cjs" X1_TEST_COOLIFY_TOKEN' } } }));
   assert.equal(ToolkitEnv.forUser({ environment, toolkitRoot: ROOT }).health().state, 'action');
+});
+
+test('no-leak: import and retire report a value on its own .env line by line number only', async (t) => {
+  // A value pasted under NAME=, and the last line of a multi-line PEM key: base64 with = padding
+  // and no + or /, so the text before = looks like a (non-rule) name.
+  const kept = sentinel();
+  const tail = `Ab${crypto.randomBytes(12).toString('hex')}Cd`;
+  const pem = `Zm${crypto.randomBytes(12).toString('hex')}Q`;
+  const { run, paths, store } = harness(t, { answers: ['no'] });
+  writeCodexEnv(paths, `X1_TEST_API_KEY=\n${tail}==\nX1_TEST_PEM_KEY="-----BEGIN KEY-----\n${pem}=\n-----END KEY-----"\nX1_TEST_KEPT_KEY=${kept}\n`);
+  const imported = await run('import-codex-env');
+  assert.equal(imported.code, 0, imported.stderr);
+  assert.match(imported.stdout, /^not imported, lines 2, 4: the text before = is not a valid key name/m);
+  store.writeAll(new Map([['X1_TEST_KEPT_KEY', kept]]));
+  const retire = await run('retire-codex-env');
+  assert.match(retire.stdout + retire.stderr, /X1_TEST_API_KEY/);
+  for (const result of [imported, retire]) {
+    for (const secret of [tail, pem, kept]) assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret));
+  }
+});
+
+test('private folders and files work on Windows paths with non-ASCII characters', { skip: process.platform !== 'win32' && 'Windows only' }, (t) => {
+  const { ensurePrivateDirectory } = require('../scripts/toolkit-env.cjs');
+  const home = tempHome(t);
+  const folder = path.join(home, 'Zoë-ü 日本', 'private');
+  ensurePrivateDirectory(folder);
+  const file = path.join(folder, 'codex.env');
+  fs.writeFileSync(file, 'X1_TEST_KEPT_KEY=dummy\n');
+  const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [folder], { encoding: 'utf8' }).stdout;
+  assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
+  assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
 });
