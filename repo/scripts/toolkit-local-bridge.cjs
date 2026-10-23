@@ -21,9 +21,10 @@ const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
+const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.8.0';
+const BRIDGE_VERSION = TOOLKIT_VERSION;
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;

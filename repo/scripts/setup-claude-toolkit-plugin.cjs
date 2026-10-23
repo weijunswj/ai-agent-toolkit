@@ -260,6 +260,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
     ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
     ["repo/contracts/toolkit-local-bridge/version.json",true],
+    ["repo/scripts/toolkit-version.cjs",false],
     ["repo/scripts/toolkit-global-rules.cjs",false],
     ["repo/scripts/toolkit-managed-block.cjs",false],
     ["repo/contracts/agent-rules/global-rules.md",false],
