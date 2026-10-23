@@ -7,10 +7,12 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '../..');
 const skillRoot = path.join(root, 'skills/controller-bootstrap');
+// Windows checkouts may convert text files to CRLF; the checks are about the words, not line ends.
+const readSkill = (rel) => fs.readFileSync(path.join(skillRoot, rel), 'utf8').replace(/\r\n/g, '\n');
 
 test('controller bootstrap documents full re-entry, custody, actor, feedback, and update procedures', () => {
-  const skill = fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8');
-  const qualification = fs.readFileSync(path.join(skillRoot, 'references/qualification.md'), 'utf8');
+  const skill = readSkill('SKILL.md');
+  const qualification = readSkill('references/qualification.md');
 
   for (const requirement of [
     'Initial adoption reads the complete direction once',
@@ -56,10 +58,10 @@ test('controller bootstrap documents full re-entry, custody, actor, feedback, an
 });
 
 test('controller bootstrap is explicit-only and depends on accepted live governance sources', () => {
-  const skill = fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8');
-  const readme = fs.readFileSync(path.join(skillRoot, 'README.md'), 'utf8');
-  const host = fs.readFileSync(path.join(skillRoot, 'agents/openai.yaml'), 'utf8');
-  const qualification = fs.readFileSync(path.join(skillRoot, 'references/qualification.md'), 'utf8');
+  const skill = readSkill('SKILL.md');
+  const readme = readSkill('README.md');
+  const host = readSkill('agents/openai.yaml');
+  const qualification = readSkill('references/qualification.md');
 
   assert.match(skill, /^---\nname: controller-bootstrap\n/);
   assert.match(skill, /Use only when explicitly asked/);

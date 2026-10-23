@@ -11,7 +11,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+// Windows checkouts may convert text files to CRLF; the contracts are about the words, not line ends.
+const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function section(text, number) {

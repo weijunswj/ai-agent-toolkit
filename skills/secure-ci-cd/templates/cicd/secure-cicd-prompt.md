@@ -243,7 +243,7 @@ After I approve the CI/security plan:
 6. Create or update `docs/ci-cd/CURRENT_CICD_STATUS.md` as the live source of truth for the CI/CD setup.
 7. Add comments in generated workflow files explaining each job.
 8. Make workflows clear, maintainable, and production-ready.
-9. Use pinned major versions for common GitHub Actions where suitable.
+9. Pin every GitHub Action to a full commit SHA with its version in a comment (for example `uses: actions/checkout@<40-hex SHA> # v7.0.1`), never a tag or major version alone.
 10. Avoid clever YAML that is hard to maintain.
 11. Run local validation where possible.
 12. Tell me exactly what changed.
@@ -270,6 +270,7 @@ CI workflow requirements:
 - Run security checks first.
 - Run lint if available.
 - Run tests if available.
+- Shard tests by default once the suite takes more than a few minutes: one manifest names the shards per operating system plus one `rest` shard that takes every unnamed test file, a matrix runs each shard with `fail-fast: false` and a timeout, and one final job `needs` every shard, runs with `if: ${{ always() }}`, and fails unless every shard succeeded and the shard summaries cover every discovered test file exactly once. Make that final job the required check, and add a drift-guard test that pins the test steps. On Windows, give each run its own long-form temp folder under the runner's temp folder. Follow the repo's `docs/agent-playbooks/fast-tests-and-sharding.md` when it exists.
 - Run build if available.
 - Fail safely if important commands fail.
 - Skip gracefully only when a command/tool truly does not exist.

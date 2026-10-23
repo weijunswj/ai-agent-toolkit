@@ -103,6 +103,11 @@ class TestRun {
 
   removeFolder() {
     if (!this.folder) return true;
+    // Tests should clean up after themselves; whatever they left goes with the run folder.
+    let left = [];
+    try { left = fs.readdirSync(this.folder).filter((name) => name !== 'test-results.jsonl'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (left.length) this.out.write(`Removing ${left.length} temp item(s) tests left behind (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', ...' : ''}).\n`);
     fs.rmSync(this.folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     if (fs.existsSync(this.folder)) {
       this.err.write(`Could not remove the test temp folder ${this.folder}. Remove it by hand once nothing holds it open.\n`);

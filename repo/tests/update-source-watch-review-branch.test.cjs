@@ -43,9 +43,16 @@ function bashSearchPath() {
   return result.stdout;
 }
 
+// The git the wrappers hand off to, as Git Bash itself finds it. On Windows, where.exe can return
+// C:\Program Files\Git\bin\git.exe, which cygpath maps to /bin/git.exe, a path Git Bash cannot
+// run because its /bin is usr\bin; asking bash avoids that translation.
 function realGitPath() {
-  const command = process.platform === 'win32' ? 'where.exe' : 'which';
-  return execFileSync(command, ['git'], { encoding: 'utf8' })
+  if (process.platform === 'win32') {
+    const result = spawnSync(bashPath, ['-lc', 'command -v git'], { encoding: 'utf8' });
+    if (result.status !== 0 || !result.stdout.trim()) throw new Error(result.stderr || 'Git Bash cannot find git');
+    return result.stdout.trim();
+  }
+  return execFileSync('which', ['git'], { encoding: 'utf8' })
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);

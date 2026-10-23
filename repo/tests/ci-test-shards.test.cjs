@@ -250,6 +250,26 @@ test('local runs pick the test files a change affects', () => {
   assert.deepEqual(shards.affectedTestFiles(['README.md'], discovered, (file) => texts[file]), []);
 });
 
+test('the duration check reports without a budget and fails files over a declared or raised budget', () => {
+  const { checkDurations, readReport } = require('../scripts/check-test-durations.cjs');
+  const report = readReport({ schema: 'toolkit-test-durations/v1', system: 'windows', files: { 'repo/tests/a.test.cjs': 50, 'repo/tests/b.test.cjs': 5 } });
+  const summary = readReport({ schema: shards.SUMMARY_SCHEMA, system: 'linux', files: [{ file: 'repo/tests/a.test.cjs', seconds: 12 }] });
+  assert.deepEqual(summary.files, { 'repo/tests/a.test.cjs': 12 });
+  assert.throws(() => readReport({ schema: 'other', system: 'linux', files: {} }), /not a run-tests\.cjs/);
+
+  let result = checkDurations([report], undefined);
+  assert.deepEqual(result.errors, []);
+  assert.match(result.lines[0], /no budget set; slowest files: a\.test\.cjs 50 s/);
+  result = checkDurations([report], { seconds_per_file: { windows: 30 } });
+  assert.match(result.errors.join('\n'), /a\.test\.cjs took 50 s, over its 30 s budget/);
+  result = checkDurations([report], { seconds_per_file: { windows: 30 }, raised: { 'windows:repo/tests/a.test.cjs': { seconds: 60, reason: 'copies a whole workspace per case' } } });
+  assert.deepEqual(result.errors, []);
+  result = checkDurations([report], { seconds_per_file: { windows: 30 }, raised: { 'windows:repo/tests/a.test.cjs': { seconds: 60, reason: '' } } });
+  assert.match(result.errors.join('\n'), /needs a recorded reason/);
+  result = checkDurations([report], { seconds_per_file: { windows: -1 } });
+  assert.match(result.errors.join('\n'), /must be a positive number/);
+});
+
 test('shard files run longest first and the estimate models the concurrency slots', () => {
   const durations = { 'x': 10, 'y': 30, 'z': 20 };
   assert.deepEqual(shards.runOrder(['x', 'y', 'w', 'z'], durations), ['y', 'z', 'x', 'w']);

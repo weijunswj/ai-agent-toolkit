@@ -56,8 +56,13 @@ function prepareLauncherFixture(launcher) {
   return { root, wrapperPath };
 }
 
+// A PowerShell launch can take several seconds to start on a busy CI runner. The timeout bounds a
+// hung launcher; the cleanup waits for a slow child to let go of the folder, so a busy folder does
+// not hide the launcher's own failure.
+const LAUNCH_TIMEOUT_MS = 60000;
+
 function removeLauncherFixture(root) {
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
 }
 
 function assertPrintedDockerWindowsInstallUrl(output, message) {
@@ -147,7 +152,7 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
           }),
           input: '\r\n',
           encoding: 'utf8',
-          timeout: 15000
+          timeout: LAUNCH_TIMEOUT_MS
         });
         assert.equal(result.status, 0, `${launcher.id}/${scenario}\n${result.stdout}\n${result.stderr}`);
         assert.match(result.stdout, /Docker CLI was not found/i, scenario);
@@ -194,7 +199,7 @@ test('Docker Compose missing exits both CMD launchers after one Enter without op
         env: launcherEnv([binDir], { N8N_DOCKER_LOG: dockerLog }),
         input: '\r\n',
         encoding: 'utf8',
-        timeout: 15000
+        timeout: LAUNCH_TIMEOUT_MS
       });
       assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Docker CLI exists/i, launcher.id);
@@ -236,7 +241,7 @@ test('Docker ready opens both local and production CMD launcher menus normally',
         env: launcherEnv([binDir], { N8N_DOCKER_LOG: dockerLog }),
         input: '5\r\n\r\n10\r\n',
         encoding: 'utf8',
-        timeout: 15000
+        timeout: LAUNCH_TIMEOUT_MS
       });
       assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Choose an action:/i, launcher.id);
