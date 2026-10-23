@@ -142,12 +142,20 @@ function windowsHelperHookCommand(powershellPath = defaultWindowsPowerShellPath(
   return windowsHookCommand(HELPER_HOOK_POWERSHELL_REL_PATH, powershellPath);
 }
 
-// The installed copy keeps the portable command and adds commandWindows to both Toolkit hooks.
+// The installed copy keeps the portable command and adds commandWindows to every Toolkit hook. The
+// governance prompt hold (UserPromptSubmit) runs the helper hook script, so it shares its launcher.
 function renderInstalledWindowsHooks(hooks, powershellPath) {
   const rendered = structuredClone(hooks);
   rendered.hooks.SessionStart[0].hooks[0].commandWindows = windowsSessionStartCommand(powershellPath);
-  rendered.hooks.PreToolUse[0].hooks[0].commandWindows = windowsHelperHookCommand(powershellPath);
+  for (const hook of helperScriptHooks(rendered)) hook.commandWindows = windowsHelperHookCommand(powershellPath);
   return rendered;
+}
+
+// Every hook entry that runs the helper hook script: the helper PreToolUse group, the governance
+// PreToolUse group and the UserPromptSubmit prompt hold.
+function helperScriptHooks(hooks) {
+  const groups = [...(hooks?.hooks?.PreToolUse || []), ...(hooks?.hooks?.UserPromptSubmit || [])];
+  return groups.flatMap(group => group?.hooks || []).filter(hook => hook?.command === sourceHelperHookCommand());
 }
 
 // The source shape of the installed hooks: the same file with every commandWindows removed.
@@ -299,8 +307,13 @@ function verifySessionStartHook(hooksPath, options = {}) {
   if (/toolkit-local-bridge\.cjs/.test(command)) errors.push('SessionStart command must not call toolkit-local-bridge.cjs directly');
   const helperHook = hooks?.hooks?.PreToolUse?.[0]?.hooks?.[0];
   if (helperHook?.command !== sourceHelperHookCommand()) errors.push('PreToolUse helper hook must use the exact portable Toolkit command');
+  const promptHook = hooks?.hooks?.UserPromptSubmit?.[0]?.hooks?.[0];
+  if (promptHook?.command !== sourceHelperHookCommand()) errors.push('UserPromptSubmit governance hook must use the exact portable Toolkit command');
+  const governanceHook = hooks?.hooks?.PreToolUse?.[1]?.hooks?.[0];
+  if (governanceHook?.command !== sourceHelperHookCommand()) errors.push('PreToolUse governance hook must use the exact portable Toolkit command');
   const sessionWindows = sessionStart[0]?.hooks?.[0]?.commandWindows;
   const helperWindows = helperHook?.commandWindows;
+  const otherWindows = [promptHook?.commandWindows, governanceHook?.commandWindows];
   if (options.windows) {
     let expectedSession = '';
     let expectedHelper = '';
@@ -312,7 +325,8 @@ function verifySessionStartHook(hooksPath, options = {}) {
     }
     if (sessionWindows !== expectedSession) errors.push('SessionStart commandWindows must use the exact installed Windows launcher shape');
     if (helperWindows !== expectedHelper) errors.push('PreToolUse helper hook commandWindows must use the exact installed Windows launcher shape');
-  } else if (sessionWindows !== undefined || helperWindows !== undefined) {
+    if (otherWindows.some(value => value !== expectedHelper)) errors.push('governance hook commandWindows must use the exact installed Windows launcher shape');
+  } else if (sessionWindows !== undefined || helperWindows !== undefined || otherWindows.some(value => value !== undefined)) {
     errors.push('the source hooks must not carry commandWindows; setup adds it to the installed copy only');
   }
   return errors;

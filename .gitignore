@@ -11,6 +11,8 @@
 **/.claude/*
 !/.claude/settings.json
 .tmp/
+# Toolkit governance state (local, never committed)
+/.ai-agent-toolkit/
 /_agent-toolkit-backups/
 .agent-toolkit-backups/
 /n8n-workflows/

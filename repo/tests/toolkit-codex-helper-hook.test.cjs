@@ -85,7 +85,8 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
     const event = { tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { fork_turns: 'none' } };
     const clean = { ...process.env }; for (const key of MARKERS) delete clean[key];
     const broken = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });
-    assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed/);
+    // The governance gate is missing too, so inside a repository it holds first (fail closed, #542).
+    assert.equal(broken.status, 2); assert.match(broken.stderr, /governance check failed/);
     assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
     // Same boundary, intact modules: the guard itself decides.
     const intact = run(event);
@@ -93,6 +94,13 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
     // Outside a governed checkout the broken copy still makes no decision for other repositories.
     const elsewhere = spawnSync(process.execPath, [copy], { input: JSON.stringify({ ...event, cwd: dir }), env: clean, encoding: 'utf8', timeout: 20000 });
     assert.equal(elsewhere.status, 0); assert.equal(elsewhere.stdout, '');
+    // With the gate present but the decision modules missing, the helper guard itself fails closed.
+    for (const name of ['toolkit-governance-gate.cjs', 'toolkit-governance-repo-state.cjs', 'toolkit-governance-state.cjs', 'toolkit-capability-registry.cjs']) {
+      fs.copyFileSync(path.join(ROOT, 'repo', 'scripts', name), path.join(dir, name));
+    }
+    fs.writeFileSync(path.join(dir, 'toolkit-governance-gate.cjs'), "module.exports = { ToolGate: class { decide() { return null; } }, insideRepository: () => true };\n");
+    const helperBroken = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });
+    assert.equal(helperBroken.status, 2); assert.match(helperBroken.stderr, /Toolkit helper guard failed/);
     // Without the predicate itself, only a launcher marker gates.
     fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
     const unknown = spawnSync(process.execPath, [copy], { input: JSON.stringify(event), env: clean, encoding: 'utf8', timeout: 20000 });

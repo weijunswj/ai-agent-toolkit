@@ -25,6 +25,7 @@ const registry = require('./toolkit-capability-registry.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
+const gate = require('./toolkit-governance-gate.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const COMMANDS = Object.freeze(['status', 'enable', 'decline', 'reopen', 'check', 'catalogue']);
@@ -151,7 +152,9 @@ class ToolkitGovernanceCli {
     const current = status.capabilities[CAPABILITY].state;
     const operation = command === 'enable' ? 'enable' : current === 'enabled' ? 'disable' : 'decline';
     if ((command === 'enable' && current === 'enabled') || (command === 'decline' && current === 'disabled')) {
-      this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'declined'} for this repository. Nothing was written.`]);
+      // The repository's own copy is still made to agree, so the hooks open.
+      new gate.GovernanceGate({ registryOptions: this.#registryOptions }).evaluate(this.#cwd);
+      this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'declined'} for this repository; no new decision was written.`]);
       return 0;
     }
     const question = command === 'enable'
@@ -162,28 +165,13 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
       return 1;
     }
-    registry.writeCapabilityDecision({
-      cwd: this.#cwd,
-      ...this.#registryOptions,
-      capabilityId: CAPABILITY,
-      operation,
-      ownerAction: {
-        confirmed: true,
-        category: 'explicit-owner',
-        channel: 'capability-route',
-        operation,
-        choice_semantic_id: registry.capabilityDecisionSemanticId(CAPABILITY, operation),
-        contract_digest: registry.CONTRACT_DIGEST,
-        scope_digest: registry.capabilityScopeDigest(status.repository_id, CAPABILITY, operation, 'capability-route'),
-      },
-      expectedRevision: status.registry_revision,
-      expectedHash: status.snapshot_hash,
-    });
-    // Read the decision back through the same reader every hook uses.
-    const after = this.#state();
-    const expected = command === 'enable' ? 'ENABLED' : 'DECLINED';
-    if (after.state !== expected || after.repository_id !== status.repository_id) {
-      throw new GovernanceCliError(`Your decision was written, but reading it back gave ${label(after)} instead of ${expected}. Run \`toolkit governance check\`.`);
+    // One writer for the CLI and the prompt hold: the registry decision, read back through the same
+    // gate every hook uses, which also writes the repository's own copy of the state.
+    let after;
+    try {
+      after = gate.writeGovernanceDecision(this.#cwd, command, { registryOptions: this.#registryOptions }).state;
+    } catch (error) {
+      throw new GovernanceCliError(`Your decision could not be recorded and read back (${error && error.code ? error.code : 'UNEXPECTED'}). Run \`toolkit governance check\`.`);
     }
     this.#print(json, after, [`Recorded. ${describe(after).join('\n')}`]);
     return 0;
