@@ -104,7 +104,7 @@ test('executor apply and parent claim refusals name the controller without sugge
   const child = store.read('child', 423).doc;
   for (const action of [() => state.claimDocument(child, successor), () => state.authoriseWrite('child', child, null, successor)]) {
     assert.throws(action, error => {
-      assert.match(error.message, /G1 gate holder \(INT-TK421-, epoch 1\)/);
+      assert.match(error.message, /holder INT-TK421- for gate G1 \(epoch 1\)/);
       return true;
     });
   }
@@ -125,19 +125,48 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
   }
 });
 
-test('implicit skill guidance limits apply and parent takeover to appointed controllers', () => {
+test('every custody surface bans executor parent claims but permits assigned child handover', () => {
   const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
   const skill = read('skills/github-program-reconciler/SKILL.md');
   const when = skill.split('## When to run')[1].split('## What ships')[0];
+  const description = skill.split('description: ')[1].split('\n')[0];
+  const who = skill.split('**Who records what.**')[1].split('**Returns (LIFE-1).**')[0];
   const prompt = read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0];
   const trigger = JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger;
-  for (const text of [when, prompt, trigger]) {
+  const readme = read('skills/github-program-reconciler/README.md');
+  const changelog = read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0];
+  for (const surface of [description, when, who, prompt, readme, changelog, trigger]) {
+    const text = surface.replaceAll('`', '');
+    assert.ok(text.includes('Executors never apply, and never claim or take over the parent document.'));
+    assert.ok(text.includes('A gate successor the controller has assigned (for example G1 after G0) takes the child with claim --issue <n> --role <gate> --takeover.'));
+    assert.match(text, /Only a newly appointed controller takes over the parent document, after posting its takeover record/);
+    assert.doesNotMatch(text, /never apply, claim the parent or take over|a controller arranges any child gate custody change/);
+  }
+  for (const text of [description, when, prompt, trigger]) {
     assert.match(text, /Any session may (?:run the )?dry-run/i);
     assert.match(text, /only the appointed controller holding the parent document runs `?--apply/i);
-    assert.match(text, /Executors[^.]*never apply, claim the parent or take over/);
-    assert.match(text, /Only a newly appointed controller takes over[^.]*after posting its takeover record/);
     assert.match(text, /the binding is added/i);
     assert.doesNotMatch(text, /governance setup/);
+  }
+});
+
+test('child refusals identify the appointed controller when it also holds the child', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const { github, store, binding } = setup();
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
+    toolkitVersion: '3.9.0', environment: {}, stdout: { write() {} } };
+  cli.main(['claim', '--issue', '423', '--role', 'G1', '--session', controller.session], deps);
+  const child = store.read('child', 423).doc;
+  const parentDoc = store.read('parent', 421).doc;
+  for (const action of [
+    () => cli.main(['claim', '--issue', '423', '--role', 'G1', '--session', builder.session], deps),
+    () => state.authoriseWrite('child', child, parentDoc, builder),
+  ]) {
+    assert.throws(action, error => {
+      assert.match(error.message, /held by the appointed controller \(INT-TK421-, gate G1, epoch 1\)/);
+      assert.doesNotMatch(error.message, /G1 gate holder|controller-1|builder-1/);
+      return true;
+    });
   }
 });
 

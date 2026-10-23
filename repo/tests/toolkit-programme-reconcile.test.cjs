@@ -25,7 +25,7 @@ const CATALOGUE = [
   { issue: 499, label: 'R1', class: 'CORE', parent: null, order: 0 },
 ];
 
-function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.0' } = {}) {
+function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.0', controller = writer } = {}) {
   const github = new FakeGitHub({ repository, store: 'acme/state-store' });
   const binding = {
     schema: state.SCHEMA.binding, repository, parent_issue: parentIssue, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-',
@@ -42,9 +42,9 @@ function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGU
   }))(github);
   let clock = 0;
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => `T${clock += 1}`, toolkitVersion: version });
-  const parent = state.claimDocument(state.newParent({ repository, parentIssue, outcomes }), writer, {});
+  const parent = state.claimDocument(state.newParent({ repository, parentIssue, outcomes }), controller, {});
   store.write('parent', parentIssue, parent, { sha: null, previous: null });
-  const reconciler = (who = writer) => new state.Reconciler({
+  const reconciler = (who = controller) => new state.Reconciler({
     store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
     mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer: who, toolkitVersion: version,
   });
@@ -302,13 +302,13 @@ test('merged PRs with green checks list open issues for the controller without c
     const finding = dry.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.issue, 8);
     assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
-    assert.ok(finding.detail.endsWith(accepted ? 'acceptance recorded' : 'no accepted return yet'));
-    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted, uat: null, review: null }]);
+    assert.ok(finding.detail.endsWith(accepted ? 'G1 acceptance recorded' : 'G1 not accepted'));
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: null, review: null }]);
     assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
     assert.equal(github.mutations(), 0);
     const formatted = cli.formatReport(dry);
     assert.ok(formatted.includes('Ready to close (the controller decides; nothing is closed automatically)'));
-    assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}`));
+    assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'G1 acceptance recorded' : 'G1 not accepted'}`));
     assert.ok(formatted.includes('; UAT: not recorded; review: not recorded'));
 
     const applied = reconciler().run({ apply: true });
@@ -342,7 +342,7 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
 
   const check = accepted => {
     const report = reconciler().run();
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted, uat: 'PENDING', review: 'IN_REVIEW' }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: 'PENDING', review: 'IN_REVIEW' }]);
     assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
     assert.match(cli.formatReport(report), /UAT: PENDING; review: IN_REVIEW/);
   };
@@ -352,6 +352,99 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
   store.mutate('child', 8, { writer, parentDoc, change: child => state.consumeReturn(child, { returnId: 'g1-r1', verdict: 'ACCEPT', writer, parentDoc }) });
   check(true);
   assert.equal(github.issues.get(8).state, 'open');
+});
+
+test('the CLI hands the child from G0 to assigned G1 while ctrl retains parent acceptance', () => {
+  const ctrl = { session: 'ctrl', prefix: writer.prefix };
+  const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+  const { github, store, binding } = setup({ parentIssue: 7, outcomes, controller: ctrl, issues: gh => gh.addIssue(8, { parent: 7 }) });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-handover-'));
+  const output = [];
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
+    toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
+  const run = (args, session = null) => {
+    output.length = 0;
+    assert.equal(cli.main([...args, ...(session ? ['--session', session] : []), '--json'], deps), 0);
+    return JSON.parse(output.join(''));
+  };
+  try {
+    run(['claim', '--issue', '8', '--role', 'G0'], 'g0');
+    run(['return', '--issue', '8', '--submit', 'g0-r1'], 'g0');
+    run(['return', '--issue', '8', '--consume', 'g0-r1', '--verdict', 'ACCEPT'], 'ctrl');
+    assert.throws(() => run(['claim', '--issue', '8', '--role', 'G1'], 'g1'), error => {
+      assert.equal(error.code, 'CLAIM_HELD');
+      assert.match(error.message, /Issue 8 is held by the holder INT-TK421- for gate G0 \(epoch 1\)/);
+      assert.match(error.message, /take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller/);
+      return true;
+    });
+    run(['claim', '--issue', '8', '--role', 'G1', '--takeover'], 'g1');
+    const patch = path.join(dir, 'candidate.json');
+    fs.writeFileSync(patch, JSON.stringify({ candidate: { branch: 'feature' } }));
+    run(['update', '--issue', '8', '--patch', patch], 'g1');
+    run(['return', '--issue', '8', '--submit', 'g1-r1'], 'g1');
+    github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
+    const pending = run(['reconcile']);
+    assert.deepEqual(pending.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: false, accepted: false, uat: null, review: null }]);
+    assert.match(cli.formatReport(pending), /G1 not accepted/);
+    for (const session of ['g0', 'g1', 'g2', 'helper']) {
+      assert.throws(() => run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT'], session), { code: session === 'g1' ? 'ROLE_REFUSED' : 'STALE_WRITER' });
+    }
+    run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT'], 'ctrl');
+    const accepted = run(['reconcile']);
+    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, uat: null, review: null }]);
+    assert.match(cli.formatReport(accepted), /G1 acceptance recorded/);
+    assert.equal(codes(accepted).includes('CHILD_STATE_CONFLICT #8'), false);
+    assert.equal(store.read('parent', 7).doc.fence.holder_session, 'ctrl');
+    assert.equal(store.read('child', 8).doc.fence.holder_session, 'g1');
+    assert.equal(github.issues.get(8).state, 'open');
+    assert.equal(github.mutations(), 0, 'the walk writes private state only, never public issue state');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('G0-only acceptance is named but cannot count as merged implementation completion', () => {
+  for (const gate of ['G0', 'G1', 'G2']) {
+    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
+    let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), writer, { role: gate });
+    doc.candidate.branch = 'feature';
+    doc = state.submitReturn(doc, { returnId: 'r1', writer });
+    doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc });
+    store.write('child', 8, doc, { sha: null, previous: null });
+    github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
+    const report = reconciler().run();
+    const accepted = gate !== 'G0';
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, uat: null, review: null }]);
+    const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
+    assert.equal(finding.gate, gate);
+    assert.equal(finding.accepted, accepted);
+    assert.match(finding.detail, new RegExp(`${gate} acceptance recorded$`));
+    assert.ok(cli.formatReport(report).includes(`${gate} acceptance recorded`));
+    assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
+    assert.equal(github.issues.get(8).state, 'open');
+  }
+});
+
+test('binding checks name workflow jobs that always wait for every test job', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const binding = JSON.parse(fs.readFileSync(path.join(root, '.github/toolkit-programme.json'), 'utf8'));
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/validate.yml'), 'utf8');
+  // Only the job keys and their text are needed; no YAML dependency or expression evaluation.
+  const jobText = workflow.split(/^jobs:\s*$/m)[1];
+  assert.ok(jobText, 'the workflow must define jobs');
+  const jobs = new Map([...jobText.matchAll(/^  ([\w-]+):\r?\n([\s\S]*?)(?=^  [\w-]+:|(?![\s\S]))/gm)].map(match => [match[1], match[2]]));
+  const tests = [...jobs].filter(([, body]) => /(?:^|\n)\s+(?:run:\s*)?(?:node\s+[^\n]*run-tests\.cjs(?![^\n]*--verify-ci)|node\s+--test\b|npm\s+(?:run\s+)?test\b)/.test(body)).map(([name]) => name);
+  assert.ok(tests.length > 0, 'the workflow must contain test jobs');
+  assert.ok(binding.required_checks.length > 0, 'the binding must require a check');
+  for (const name of binding.required_checks) {
+    const body = jobs.get(name);
+    assert.ok(body, `required check ${name} must be a workflow job`);
+    assert.match(body, /^    if: \$\{\{\s*always\(\)\s*\}\}\s*$/m, `${name} must run even after failed tests`);
+    const needs = /^    needs:\s*\[([^\]]*)\]/m.exec(body)?.[1].split(',').map(value => value.trim().replace(/^['"]|['"]$/g, ''))
+      || [...(body.match(/^    needs:\s*\r?\n((?:      - [\w-]+\r?\n)+)/m)?.[1] || '').matchAll(/- ([\w-]+)/g)].map(match => match[1]);
+    for (const testJob of tests.filter(job => job !== name)) assert.ok(needs.includes(testJob), `${name} must need ${testJob}`);
+  }
 });
 
 test('the close list excludes red, missing, pending or off-head checks, unmerged PRs and closed issues', () => {

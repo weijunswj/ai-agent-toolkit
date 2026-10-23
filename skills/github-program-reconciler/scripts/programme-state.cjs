@@ -23,6 +23,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { DEFAULT_THRESHOLD } = require('./decision-trace-audit.cjs');
+const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -60,14 +61,6 @@ const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
 const TEXT_LIMIT = 200;
-
-class ProgrammeError extends Error {
-  constructor(code, message, details = {}) {
-    super(message);
-    this.code = code;
-    this.details = details;
-  }
-}
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
@@ -377,9 +370,15 @@ function isHolder(doc, writer) {
   return Boolean(doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
 }
 
-function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child') {
-  const role = kind === 'parent' ? 'appointed controller' : `${doc?.gate?.role || 'unassigned'} gate holder`;
-  return `${role} (${doc?.fence?.holder_prefix || 'nobody'}, epoch ${doc?.fence?.epoch ?? 0})`;
+function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
+  const prefix = doc?.fence?.holder_prefix || 'nobody';
+  const epoch = doc?.fence?.epoch ?? 0;
+  if (kind === 'parent') return `appointed controller (${prefix}, epoch ${epoch})`;
+  const gate = doc?.gate?.role || 'unassigned';
+  if (doc?.fence?.holder_session && isHolder(parentDoc, { session: doc.fence.holder_session, prefix })) {
+    return `appointed controller (${prefix}, gate ${gate}, epoch ${epoch})`;
+  }
+  return `holder ${prefix} for gate ${gate} (epoch ${epoch})`;
 }
 
 function authoriseWrite(kind, doc, parentDoc, writer) {
@@ -392,18 +391,18 @@ function authoriseWrite(kind, doc, parentDoc, writer) {
   }
   if (doc && isHolder(doc, writer)) return;
   if (parentDoc && isHolder(parentDoc, writer)) return;
-  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc)}; the parent document is held by the ${holderDescription(parentDoc, 'parent')}. This session holds neither document; report to the controller.`);
+  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc, 'child', parentDoc)}; the parent document is held by the ${holderDescription(parentDoc, 'parent')}. This session holds neither document; report to the controller.`);
 }
 
 // Claim or take over a document: one compare-and-swap that increments the epoch and records the holder.
-function claimDocument(doc, writer, { takeover = false, role = null, route = null } = {}) {
+function claimDocument(doc, writer, { takeover = false, role = null, route = null, parentDoc = null } = {}) {
   const next = clone(doc);
   const held = Boolean(next.fence.holder_session);
   if (isHolder(next, writer) && !role) return null;
   if (held && !isHolder(next, writer) && !takeover) {
     throw new ProgrammeError('CLAIM_HELD', next.schema === SCHEMA.parent
       ? `The parent document is held by the ${holderDescription(next)}; only that controller applies. Run a dry run and report instead.`
-      : `Issue ${next.issue} is held by the ${holderDescription(next)}. Report to the controller before changing gate custody.`);
+      : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}; take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller.`);
   }
   if (!isHolder(next, writer)) next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
   if (next.schema === SCHEMA.child && role) {
@@ -424,9 +423,13 @@ function currentGateAccepted(child) {
   return child.gate.state === 'RETIRED' && Boolean(latest?.consumed && latest.verdict === 'ACCEPT');
 }
 
+function completionAccepted(child) {
+  return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
+}
+
 // LIFE-1 successor: returns are consumed by return ID, never by session. REOPEN keeps the session
 // active, a new submission gets a new return ID, so ACCEPT after REOPEN works in the same session.
-function submitReturn(doc, { returnId, writer }) {
+function submitReturn(doc, { returnId, writer, parentDoc = null }) {
   if (!isText(returnId)) throw new ProgrammeError('USAGE', 'A return needs a return ID.');
   const next = clone(doc);
   const existing = next.gate.returns.find(entry => entry.return_id === returnId);
@@ -438,7 +441,7 @@ function submitReturn(doc, { returnId, writer }) {
     throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return.`);
   }
   if (next.gate.session_id && writer && next.gate.session_id !== writer.session && !isHolder(next, writer)) {
-    throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next)} can submit its return.`);
+    throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next, 'child', parentDoc)} can submit its return.`);
   }
   next.gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch });
   next.gate.state = 'SUBMITTED';
@@ -727,22 +730,6 @@ function upsertStateBlock(text, rendered) {
 // ---------------------------------------------------------------------------------------------
 // Owners with effects
 
-// Resolves an executable to a full path from absolute PATH entries, skipping the working folder
-// (Windows looks there first for a bare name) and, on Windows, anything but `.exe`.
-function resolveExecutable(name, { environment = process.env, platform = process.platform, cwd = process.cwd(), exists = fs.existsSync } = {}) {
-  const api = platform === 'win32' ? path.win32 : path.posix;
-  const file = platform === 'win32' ? `${name}.exe` : name;
-  const raw = environment.PATH ?? environment.Path ?? '';
-  const here = api.resolve(cwd).toLowerCase();
-  for (const entry of String(raw).split(platform === 'win32' ? ';' : ':')) {
-    const dir = entry.trim().replace(/^"(.*)"$/, '$1');
-    if (!dir || !api.isAbsolute(dir) || api.resolve(dir).toLowerCase() === here) continue;
-    const candidate = api.join(dir, file);
-    if (exists(candidate)) return candidate;
-  }
-  throw new ProgrammeError('EXECUTABLE_NOT_FOUND', `${name} was not found on PATH. Install it or add its folder to PATH.`);
-}
-
 // The only place that runs `gh api`. Returns status and parsed JSON; never retries.
 class GitHubTransport {
   constructor({ ghPath, run = spawnSync, timeoutMs = 120000 }) {
@@ -883,7 +870,7 @@ class StateStore {
         const fresh = this.read(kind, number);
         if (!fresh.doc) throw error;
         if (origin && (fresh.doc.fence.epoch !== origin.fence.epoch || fresh.doc.fence.holder_session !== origin.fence.holder_session)) {
-          throw new ProgrammeError('STALE_WRITER', `${this.docPath(kind, number)} is now held by the ${holderDescription(fresh.doc)}; this write was refused.`);
+          throw new ProgrammeError('STALE_WRITER', `${this.docPath(kind, number)} is now held by the ${holderDescription(fresh.doc, kind, parentDoc)}; this write was refused.`);
         }
         const touched = Object.keys({ ...start, ...next }).filter(key => key !== 'revision' && key !== 'volatile'
           && JSON.stringify(canonical(start[key])) !== JSON.stringify(canonical(next[key])));
@@ -1168,9 +1155,11 @@ class Reconciler {
     const pr = observed.prs.get(issueNumber);
     if (pr) {
       if (pr.state === 'MERGED' && checks.state === 'GREEN' && checks.at_head === pr.head && issue.state === 'open') {
-        const accepted = currentGateAccepted(desired);
-        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, accepted, uat: desired.uat.state, review: desired.review.state,
-          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}` });
+        const gate = desired.gate.role;
+        const gateAccepted = currentGateAccepted(desired);
+        const accepted = completionAccepted(desired);
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, uat: desired.uat.state, review: desired.review.state,
+          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
         findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
@@ -1184,7 +1173,7 @@ class Reconciler {
     // Document versus issue.
     if (desired.lifecycle === 'DONE' && issue.state === 'open') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: 'the state document says DONE but the issue is open' });
     if (!['DONE', 'RETIRED'].includes(desired.lifecycle) && issue.state === 'closed') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the issue is closed but the state document says ${desired.lifecycle}` });
-    if (pr?.state === 'MERGED' && desired.lifecycle !== 'DONE' && !currentGateAccepted(desired)) {
+    if (pr?.state === 'MERGED' && desired.lifecycle !== 'DONE' && !completionAccepted(desired)) {
       findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `PR #${pr.number} is merged but no accepted completion is recorded` });
     }
   }
@@ -1499,7 +1488,7 @@ class Reconciler {
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
-      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, accepted, uat, review }) => ({ issue, pr, head, accepted, uat, review })),
+      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, uat, review })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
       recovered: plan.resolutions,
       holds: plan.holds,

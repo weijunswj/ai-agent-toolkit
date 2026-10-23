@@ -5,6 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
 const { auditDecisionTraces, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
@@ -17,7 +18,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
   const context = {
     module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write() {} } },
     require(name) {
-      if (name === './programme-state.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
+      if (name === './resolve-executable.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
         return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
@@ -41,6 +42,21 @@ test('loading the audit before programme state preserves the shared body thresho
   const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
   const reconciler = new state.Reconciler({});
   assert.equal(reconciler.threshold, 60000);
+});
+
+test('the real audit CLI without gh fails without a circular dependency warning', () => {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) if (key.toLowerCase() === 'path') delete environment[key];
+  environment.PATH = '';
+  const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs'), '--repo', 'o/r', '--issue', '1'], {
+    env: environment, encoding: 'utf8', windowsHide: true, timeout: 10000,
+  });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /gh was not found on PATH/);
+  assert.doesNotMatch(result.stderr, /circular dependency/i);
+  assert.match(result.stderr.trim(), /^FAIL: gh was not found on PATH\. Install it or add its folder to PATH\.$/);
 });
 
 test('every non-bot comment must be reachable from the body, directly or through a linked index comment', () => {

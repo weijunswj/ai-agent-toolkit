@@ -167,7 +167,7 @@ const commands = {
     const outcome = outcomeFor(parentDoc, args.issue);
     const result = context.store.mutate('child', args.issue, {
       writer, authorise: false, create: () => state.newChild({ repository: context.repository, outcome }),
-      change: doc => state.claimDocument(doc, writer, options),
+      change: doc => state.claimDocument(doc, writer, { ...options, parentDoc }),
     });
     return writeResult('child', args.issue, result);
   },
@@ -186,7 +186,7 @@ const commands = {
     const writer = requireWriter(context);
     const parentDoc = readParent(context);
     const change = args.submit
-      ? doc => state.submitReturn(doc, { returnId: args.submit, writer })
+      ? doc => state.submitReturn(doc, { returnId: args.submit, writer, parentDoc })
       : doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc });
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
     return writeResult('child', args.issue, result);
@@ -199,7 +199,7 @@ function formatReport(report) {
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
   if (report.findings.length) lines.push('', 'Findings', ...report.findings.map(finding => `- ${finding.code} #${finding.issue}: ${finding.detail}`));
-  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.accepted ? 'acceptance recorded' : 'no accepted return yet'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}`));
+  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
