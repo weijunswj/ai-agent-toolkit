@@ -44,6 +44,7 @@
       "repo/scripts/toolkit-codex-helper-agents.cjs",
       "repo/scripts/toolkit-codex-helper-hook.cjs",
       "repo/scripts/toolkit-codex-helper-hook.ps1",
+      "repo/scripts/toolkit-codex-helper-policy.cjs",
       "repo/scripts/toolkit-codex-session-start.cjs",
       "repo/scripts/toolkit-codex-session-start.ps1",
       "repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs",
@@ -56,6 +57,7 @@
       "repo/tests/codex-toolkit-windows-alias-route.test.cjs",
       "repo/tests/toolkit-codex-helper-agents.test.cjs",
       "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "repo/tests/toolkit-codex-helper-policy.test.cjs",
       "repo/tests/toolkit-local-bridge-codex.test.cjs"
     ]
   },

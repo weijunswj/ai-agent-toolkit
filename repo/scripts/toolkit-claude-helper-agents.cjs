@@ -192,7 +192,8 @@ class ClaudeHelperDefinitions {
     return { status, agents_dir: dir, files: entries.map(publicEntry), project_overrides: projects, detail };
   }
 
-  // Rewrites the user-level files when they are stale; otherwise writes nothing. Always prunes old backups.
+  // Rewrites the user-level files when they are stale; otherwise writes nothing. Always prunes old backups;
+  // a prune failure is returned as prune_warning, since the definitions themselves are already settled.
   refresh() {
     const dir = claudeUserAgentsDirectory(this.#environment);
     const { entries, status, detail } = this.#assess(dir, []);
@@ -204,7 +205,8 @@ class ClaudeHelperDefinitions {
       const { backup_dir } = new AgentDirectoryInstaller(dir, files).apply(this.#backupRoot);
       result = { status: 'updated', backup_dir, files, detail: '' };
     }
-    this.#pruneBackups(result.backup_dir);
+    try { this.#pruneBackups(result.backup_dir); }
+    catch (error) { result.prune_warning = `Old helper backups in ${this.#backupRoot} could not be removed (${error.code || error.message}); the helpers themselves are fine.`; }
     return result;
   }
 

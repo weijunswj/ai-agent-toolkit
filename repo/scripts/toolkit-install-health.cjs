@@ -47,6 +47,8 @@ function readJsonIfExists(file) {
 function slash(value) { return String(value || '').replace(/\\/g, '/'); }
 
 const PROJECTS_SKILL_REL = path.join('repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md');
+const QUALIFICATION_REL = path.join('repo', 'contracts', 'host-qualification', 'claude-code.json');
+const PLATFORM_NAMES = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const skillVersion = (text) => /^Version:\s*(\d{4}-\d{2}-\d{2}\.\d+)\s*$/m.exec(String(text || ''))?.[1] || '';
 // Versions look like 2026-10-23.6: the date, then a counter for that day.
 function compareSkillVersions(left, right) {
@@ -86,12 +88,13 @@ function claudeAccountToolkitVersion(folders) {
 }
 
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #platform;
 
   // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
   // syncedSkillsDir: where Claude Code keeps skills synced from claude.ai, or null to skip the Projects skill check.
   // accountPluginFolders: the Claude desktop app's account-plugin folders, or null to skip that check.
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null }) {
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, platform = process.platform }) {
+    this.#platform = platform;
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
     this.#hubPath = hubPath;
@@ -162,11 +165,30 @@ class ToolkitInstallHealthCheck {
     return { id, label, status, summary, ...(action ? { action } : {}) };
   }
 
+  // What the stored native results say about the helper route on this computer's platform, and the
+  // known limit. Informational: there is nothing for the owner to fix, so it always passes.
+  #helperRoutes() {
+    const label = 'Helper routes';
+    let record;
+    try { record = readJsonIfExists(path.join(this.#toolkitRoot, QUALIFICATION_REL)); }
+    catch { record = null; }
+    const runs = Array.isArray(record?.runs) ? record.runs : [];
+    const platform = PLATFORM_NAMES[this.#platform] || this.#platform;
+    const here = runs.filter((run) => run.platform === this.#platform).at(-1);
+    const latest = runs.at(-1);
+    const describe = (run) => `Claude Code ${run.claude_code_version} (${PLATFORM_NAMES[run.platform] || run.platform}, ${run.date})`;
+    const status = here ? `Qualified on ${describe(here)}.`
+      : latest ? `Not yet qualified on ${platform}; last qualified on ${describe(latest)}.`
+        : 'Not yet qualified: no stored native result.';
+    const limits = (Array.isArray(record?.known_limits) ? record.known_limits : []).map((limit) => ` Known limit: ${limit.summary}`).join('');
+    return this.#check('helper-routes', label, STATUS.PASSED, `${status}${limits}`);
+  }
+
   // plugin: { installed, current, running_copy, updated_this_run } from setup.
   #plugin(plugin) {
     const label = 'Claude Code plugin';
     if (plugin.installed !== true || plugin.current !== true) {
-      return this.#check('plugin', label, STATUS.ACTION, `Toolkit ${this.#expectedVersion} is not installed and current in Claude Code.`,
+      return this.#check('plugin', label, STATUS.ACTION, `Toolkit ${this.#expectedVersion} is not installed, enabled and current in Claude Code, so its hooks are not enforced.`,
         'Run `setup toolkit` and choose to install or refresh the Claude Code plugin.');
     }
     if (!samePath(plugin.running_copy, this.#toolkitRoot)) {
@@ -212,11 +234,12 @@ class ToolkitInstallHealthCheck {
       const detail = `the project copy ${slash(mismatch.file)} does not match the selected stack. Toolkit does not change project files; update or remove it.`;
       return this.#check('helpers', label, STATUS.ACTION, `held: ${detail}`, detail);
     }
+    const note = result.prune_warning ? ` ${slash(result.prune_warning)}` : '';
     if (result.status === 'updated') {
-      return { ...this.#check('helpers', label, STATUS.PASSED, `updated this run (backup: ${slash(result.backup_dir)})`), updated: true };
+      return { ...this.#check('helpers', label, STATUS.PASSED, `updated this run (backup: ${slash(result.backup_dir)}).${note}`), updated: true };
     }
-    if (result.status === 'not-installed') return this.#check('helpers', label, STATUS.PASSED, 'not installed');
-    return this.#check('helpers', label, STATUS.PASSED, 'current');
+    if (result.status === 'not-installed') return this.#check('helpers', label, STATUS.PASSED, `not installed${note}`);
+    return this.#check('helpers', label, STATUS.PASSED, `current${note}`);
   }
 
   // The Toolkit global rules block in each harness's user-level file, refreshed when stale.
@@ -280,6 +303,7 @@ class ToolkitInstallHealthCheck {
     checks.push(this.#helperDefinitions(refreshHelpers, projectDirectories));
     checks.push(this.#globalRulesCheck());
     if (topology === 'root-only' || topology === 'broader-native') checks.push(this.#depthSetting(topology));
+    checks.push(this.#helperRoutes());
     const env = this.#env ? this.#envCheck() : null;
     if (env) checks.push(env);
     const projectsSkill = this.#projectsSkillCheck();

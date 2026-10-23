@@ -4,7 +4,7 @@ Source: repo/contracts/agent-rules/repo-local
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=6223c67f377a -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=a8b663d930a2 -->
 # Toolkit-Governed Repository Rules
 
 This block and `.github/toolkit-programme.json` opt the repository into Toolkit governance; nothing governed applies without both or after the user declines. Generic rules are the Toolkit global rules in the harness's user-level file. If they are missing (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor except the evidence-store line, which the floor names.
@@ -35,7 +35,7 @@ Models and effort come only from an explicitly selected stack registry revision 
 ## Records And Evidence
 
 - Programme tracking: keep the parent issue's tracker current (SHA, version, lane and gate, PR, review and UAT state, queue, completed, deferred and superseded work) and record start, PR head, review verdicts, findings and exact-head fixes, CI, merge, UAT result, remediation and completion. Keep pending gates open after merge.
-- Decision traces: the programme issue body is the canonical record. Link every non-bot comment from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), one line per record ID; a record that replaces another adds `SUPERSEDES=<record ID>`. Before the body passes 60,000 characters (GitHub's limit is 65,536), move older index lines into an index comment linked from the body, so every record stays one hop away. The `github-program-reconciler` trace audit fails on any unlinked comment.
+- Decision traces: the programme issue body is the canonical record. The `github-program-reconciler` links every non-bot comment from it (`#issuecomment-<id>`), one list per comment tag (first line, then `---`); parent and child traces never mix, and within a tag the latest comment wins. `SUPERSEDES=<record ID>` replaces a record. Before 60,000 characters, long lists page into index comments one hop away. G0 reads both traces and has the owner confirm a live-scope summary first (decision-trace playbook).
 - SHAs: link files and commits with the 7-character short SHA (longer if GitHub reports it ambiguous) and write the full 40-character SHA beside the link as plain code text.
 - Takeover: a new controller posts one takeover record on the parent's CURRENT before acting (its identity, the bound commit and `CONTROLLER.md` blob, evidence that the previous writer stopped, the next action) and reads it back.
 - Custody: session folders, side-session notes, scratchpads and temp paths are never custody. Packets, plans and reviews reach the selected private evidence store with a manifest and read-back before a record cites them; archive old sessions only after that read-back.

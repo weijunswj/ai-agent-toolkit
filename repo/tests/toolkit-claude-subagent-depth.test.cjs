@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ClaudeSubagentDepthSetting, SETTING, STATES } = require('../scripts/toolkit-claude-subagent-depth.cjs');
+const { ClaudeSubagentDepthSetting, SETTING, STATES, LOCK_STALE_MS } = require('../scripts/toolkit-claude-subagent-depth.cjs');
 const { canonicalPath } = require('../scripts/toolkit-canonical-path.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
@@ -23,6 +23,22 @@ function fixture(t, settingsText) {
   const recordPath = path.join(controlRoot, 'claude-subagent-depth.json');
   return { configDir, controlRoot, settingsPath, recordPath, environment, setting, read };
 }
+
+test('apply holds a lock beside the ownership record: a live lock refuses with nothing changed, a stale one is taken over', t => {
+  const f = fixture(t);
+  const lock = `${f.recordPath}.lock`;
+  fs.mkdirSync(f.controlRoot, { recursive: true });
+  fs.writeFileSync(lock, '1\n');
+  const waiting = new ClaudeSubagentDepthSetting({ environment: f.environment, lockWaitMs: 0 });
+  assert.throws(() => waiting.apply('enable'), /Another Toolkit setup run is changing the Claude Code depth setting/);
+  assert.equal(fs.existsSync(f.settingsPath), false, 'nothing written while another run holds the lock');
+  assert.equal(fs.existsSync(f.recordPath), false);
+  const old = new Date(Date.now() - LOCK_STALE_MS - 1000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(waiting.apply('enable').changed, true, 'a lock left by a run that died is taken over');
+  assert.deepEqual(f.read(), { env: { [SETTING]: '1' } });
+  assert.equal(fs.existsSync(lock), false, 'the lock is released after apply');
+});
 
 test('turning on with no settings file writes only the one-layer key; turning off removes it and the file Toolkit created', t => {
   const f = fixture(t);
