@@ -1695,6 +1695,10 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   }
 
   if (!state.ok) {
+    // Only the reason code and the two versions: setup withholds the rest of the helper output.
+    if (options.json && state.refusesDowngrade) {
+      console.log(JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: state.installed?.version || '', source_version: EXPECTED_TOOLKIT_VERSION }));
+    }
     for (const error of state.errors) console.error(`FAIL: ${error}`);
     console.error('Run with --write to install or update through the supported Codex local marketplace path.');
     console.error(`Expected commands: ${codexToolkitInstallCommands(options.repoRoot).map((args) => `codex ${args.join(' ')}`).join(' ; ')}`);

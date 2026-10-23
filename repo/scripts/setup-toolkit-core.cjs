@@ -2268,15 +2268,12 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
       markdown ? `- only your changes, for example: \`${example}\`` : `  - only your changes, for example: ${example}`,
       markdown ? '- press Enter to answer questions one at a time' : '  - press Enter to answer questions one at a time',
       '',
-      'Unspecified changed-only entries use the displayed recommendation for this in-memory bank.',
-      'Malformed concise input is rejected and can be corrected before any setup write.',
-      'Choice letters and existing canonical textual values remain supported in one-at-a-time mode.',
+      'Anything you do not list takes its recommendation.',
     ];
   }
   if (mode === 'tty-one-at-a-time') {
     return [
-      'After this complete bank, answer unresolved questions one at a time.',
-      'Displayed choice letters and existing canonical textual values are accepted; invalid input is re-prompted before any setup write.',
+      'Answer each question below: Enter takes its recommendation, and "all recommended" takes it for every remaining question.',
     ];
   }
   if (mode === 'non-tty-line-by-line') {
@@ -2321,10 +2318,7 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
     markdown ? `- \`${bankReference}: all recommended\`` : `  - ${bankReference}: all recommended`,
     markdown ? `- only your changes, for example: \`${bankReference}: ${example}\`` : `  - only your changes, for example: ${bankReference}: ${example}`,
     '',
-    'Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.',
-    'The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.',
-    'Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.',
-    'Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.',
+    'Anything you do not list takes its recommendation.',
   ];
   return lines;
 }
@@ -3191,6 +3185,13 @@ function nativePluginPhaseFailure(platform, phase, result = {}, error = null) {
 function nativePluginRebindFailure(platform, phase, result, helperArgs) {
   if (platform !== 'Codex' || phase !== 'mutation') return null;
   const status = parseFirstJsonObject(result?.stdout || '');
+  const version = /^\d+\.\d+\.\d+$/;
+  if (status?.reason_code === 'downgrade-refused' && version.test(status.installed_version || '') && version.test(status.source_version || '')) {
+    return new Error([
+      `Codex already has Toolkit ${status.installed_version}, which is newer than this Toolkit copy (${status.source_version}), so setup refused to downgrade it. Setup changed nothing.`,
+      'Run setup from a copy that has the newer version (for example after that version merges), or keep the newer version as it is.',
+    ].join('\n'));
+  }
   if (status?.reason_code !== 'marketplace-rebind-required' || typeof status.current_source !== 'string' || !status.current_source) return null;
   const repoRoot = helperArgs[helperArgs.indexOf('--repo-root') + 1];
   return new Error([

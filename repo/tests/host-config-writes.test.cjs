@@ -231,3 +231,14 @@ test('a refused Codex marketplace rebind tells the user why and the one command 
   assert.equal(nativePluginRebindFailure('Codex', 'verification', { status: 1, stdout }, helperArgs), null);
   assert.equal(nativePluginRebindFailure('Claude Code', 'mutation', { status: 1, stdout }, helperArgs), null);
 });
+
+test('a refused Codex downgrade says which versions conflict and that nothing changed', () => {
+  const { nativePluginRebindFailure } = require('../scripts/setup-toolkit-core.cjs');
+  const helperArgs = ['repo/scripts/setup-codex-toolkit-plugin.cjs', '--write', '--json', '--repo-root', os.tmpdir()];
+  const stdout = `${JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: '9.9.1', source_version: '9.9.0' })}\n`;
+  const error = nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout }, helperArgs);
+  assert.match(error.message, /Codex already has Toolkit 9\.9\.1, which is newer than this Toolkit copy \(9\.9\.0\), so setup refused to downgrade it\. Setup changed nothing\./);
+  assert.doesNotMatch(error.message, /withheld/);
+  const odd = `${JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: 'x; rm', source_version: '9.9.0' })}\n`;
+  assert.equal(nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout: odd }, helperArgs), null);
+});

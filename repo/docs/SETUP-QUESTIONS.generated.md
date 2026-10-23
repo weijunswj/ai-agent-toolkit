@@ -242,10 +242,7 @@ Reply with the displayed bank reference and either:
 - `RJHS-KMPA-MSWF-S6Y3: all recommended`
 - only your changes, for example: `RJHS-KMPA-MSWF-S6Y3: 1.2=B, 1.3=B`
 
-Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
-The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
-Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.
-Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.
+Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 
