@@ -79,10 +79,10 @@ function runHook(context, event, { environment = {}, hook = AGENT_HOOK } = {}) {
 }
 
 // A copy of the hook whose decision module throws, beside the real governance predicate.
-function brokenHook(context) {
+function brokenHook(context, hook = AGENT_HOOK) {
   const dir = path.join(context.base, 'broken-hook');
   fs.mkdirSync(dir, { recursive: true });
-  for (const name of ['toolkit-claude-agent-hook.cjs', 'toolkit-governed-repo.cjs']) fs.copyFileSync(path.join(SCRIPTS, name), path.join(dir, name));
+  for (const name of ['toolkit-claude-agent-hook.cjs', 'toolkit-governed-repo.cjs']) fs.copyFileSync(path.join(path.dirname(hook), name), path.join(dir, name));
   fs.writeFileSync(path.join(dir, 'toolkit-agent-control.cjs'), 'throw new Error("matrix: decision module failed to load");\n');
   return path.join(dir, 'toolkit-claude-agent-hook.cjs');
 }
@@ -156,8 +156,9 @@ const OTHER_ROWS = Object.freeze({
 const LIVE_TOO = Object.freeze(['A1', 'A2', 'A6', 'A7', 'A14']);
 const ROW_IDS = Object.freeze(Array.from({ length: 26 }, (_, i) => `A${i + 1}`));
 
-// Runs one hook case in `context` and returns its verdict; the context is reset afterwards.
-function runHookCase(context, [row, name, event, expected, pattern, options = {}]) {
+// Runs one hook case in `context` and returns its verdict; the context is reset afterwards. `hook`
+// is the hook command file to run, such as the copy an installed plugin uses.
+function runHookCase(context, [row, name, event, expected, pattern, options = {}], { hook = AGENT_HOOK } = {}) {
   try {
     options.setup?.(context);
     const cwd = options.cwd ? options.cwd(context) : context.repo;
@@ -171,7 +172,7 @@ function runHookCase(context, [row, name, event, expected, pattern, options = {}
       for (const { file } of Object.values(context.definitions)) fs.utimesSync(path.join(context.agentsDir, file), later, later);
       input = { ...input, transcript_path: transcript };
     }
-    const observed = runHook(context, input, { environment: options.environment, hook: options.brokenHook ? brokenHook(context) : AGENT_HOOK });
+    const observed = runHook(context, input, { environment: options.environment, hook: options.brokenHook ? brokenHook(context, hook) : hook });
     const pass = observed.exit === 0 && observed.result === expected && (!pattern || pattern.test(observed.reason || ''));
     return { row, case: name, expected, observed, pass };
   } finally { context.reset(); }
