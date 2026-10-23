@@ -560,6 +560,9 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
           method: 'config/batchWrite',
           params: { edits: options.edits || configEdits(options.runtime, options.helperCount) },
         }, {
+          // A fresh empty folder: on Windows a bare `codex` is otherwise looked up in the caller's
+          // working folder first.
+          cwd: root,
           timeoutMs: options.timeoutMs,
           closeTimeoutMs: options.closeTimeoutMs,
           forceExitTimeoutMs: options.forceExitTimeoutMs,

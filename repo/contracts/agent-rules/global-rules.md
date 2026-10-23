@@ -1,6 +1,6 @@
 # Toolkit Global Rules
 
-Installed by AI Agent Toolkit setup; applies in every folder. Work execution-first: inspect, make the smallest safe change, validate, report honestly.
+Installed by AI Agent Toolkit setup; applies in every folder. Work execution-first: inspect, make the smallest safe change, validate, report honestly. Answer, review and plan without editing files. For broad, ambiguous, architectural or risky work, make a repository-specific plan before editing. Otherwise inspect, make the narrow change, validate and report.
 
 ## Precedence And Safety Floor
 
@@ -26,10 +26,6 @@ Decide the context before planning:
 - **Controller role:** inactive unless the user explicitly appoints this session controller for a named repository. A session started by another agent or given a role packet (G0, G1, G2, reviewer, helper) is an executor even if an appointment is visible: follow the packet and repository rules, keep the role, and read only the `CONTROLLER.md` clauses the task needs. If unsure, act as executor and ask. On appointment, in a new session or after lost context, read and bind `repo/CONTROLLER.md` from `weijunswj/ai-agent-toolkit` `main`, never remembered governance. Before each later launch or authority transition, check its revision and reread only if it changed; if it is unreadable, hold controller actions.
 - **Toolkit feedback:** when a run exposes a reusable Toolkit governance or workflow gap (not only a repository defect), end the message with a short `TOOLKIT_FEEDBACK` block (gap, evidence, smallest general fix) without interrupting the run or widening scope.
 
-## Working Modes
-
-Answer, review and plan without editing files. For broad, ambiguous, architectural or risky work, make a repository-specific plan before editing.
-
 ## Safety Gates
 
 Get explicit approval bound to the exact action before anything that may:
@@ -43,7 +39,7 @@ Get explicit approval bound to the exact action before anything that may:
 - remove validation, tests, safety checks or guardrails;
 - rewrite git history.
 
-Before a gated action, confirm that an approval covers it and that the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
+Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
 ## Delegation
 
@@ -51,7 +47,7 @@ The root session owns integration, validation, conflict resolution and final jud
 
 ## Tool Preference
 
-For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade; offer to remove unused ones. For the user's API keys and tokens, use the `toolkit-env` skill; never ask for or repeat a value in chat.
+For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade; offer to remove unused ones. Never ask for or repeat a key or token in chat; use `toolkit-env`.
 
 ## Model Safety Flags
 
@@ -65,7 +61,7 @@ Before shipping, complete the applicable minimum floor: core functionality and c
 
 Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the floor block. Polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup and low-confidence risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify either way. Shipping bias never overrides approvals, safety gates, privacy, required validation or finality. Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before handing work to the user for acceptance, check the real installed or deployed result where one exists.
 
-**Finish authorised work before stopping.** Carry every dependency-ready safe step to the actual deliverable in one run where practical (implementation, targeted tests, CI, authorised publication with conflict controls, readback), then report once instead of asking whether to continue. A plan, green test, commit, draft PR, helper return, checkpoint, upload, CI watcher start or progress note is not a finish. A genuine user decision, new scope or spend, missing permission, credential or route, unknown external effect, incomplete CI or pending independent review holds only the steps that depend on it; continue the rest and report the exact hold and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work.
+**Finish authorised work before stopping.** Carry every dependency-ready safe step of authorised work to the actual deliverable in one run where practical (implementation, targeted tests, CI, authorised publication with conflict controls, readback), then report once instead of asking whether to continue. A plan, green test, commit, draft PR, helper return, checkpoint, upload, CI watcher start or progress note is not a finish. A genuine user decision, new scope or spend, missing permission, credential or route, unknown external effect, incomplete CI or pending independent review holds only the steps that depend on it; continue the rest and report the exact hold and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work.
 
 ## Engineering Defaults
 

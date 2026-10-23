@@ -41,7 +41,8 @@ function nameProblem(name) {
 
 function assertName(name) {
   const problem = nameProblem(name);
-  if (problem) throw new EnvStoreError(`${String(name || '').slice(0, MAX_NAME_LENGTH) || 'That key'}: ${problem}.`, 'bad-name');
+  // Text that is not a valid name may be a value typed in the wrong place, so it is never repeated.
+  if (problem) throw new EnvStoreError(`That is not a valid key name: ${problem}.`, 'bad-name');
   return name;
 }
 

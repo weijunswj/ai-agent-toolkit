@@ -41,9 +41,8 @@ function assertServer(server) {
 }
 
 function assertHeader(header) {
-  if (!HEADER_PATTERN.test(String(header || '')) || RESERVED_HEADERS.has(String(header).toLowerCase())) {
-    throw new FeederError(`${header || 'That header'} cannot be set by a header helper.`);
-  }
+  if (!HEADER_PATTERN.test(String(header || ''))) throw new FeederError('That is not a valid header name.');
+  if (RESERVED_HEADERS.has(String(header).toLowerCase())) throw new FeederError(`${header} cannot be set by a header helper.`);
   return header;
 }
 
@@ -101,7 +100,7 @@ class ClaudeCodeFeeder {
   plan(binding) {
     assertServer(binding.server);
     const entry = this.entry(binding.server);
-    if (!entry) return { ok: false, hold: `Claude Code has no user MCP entry named ${binding.server}.` };
+    if (!entry) return { ok: false, hold: 'Claude Code has no user MCP entry with that name.' };
     if (!['http', 'sse'].includes(entry.type) || typeof entry.url !== 'string') {
       return { ok: false, hold: `Claude Code's ${binding.server} entry is not an HTTP entry; connect local (stdio) servers with toolkit env run instead.` };
     }
@@ -223,7 +222,7 @@ class CodexFeeder {
 
   // The batchWrite edits that connect this entry, or why it cannot be connected.
   #edits(binding, table, command = this.#commandFor(binding)) {
-    if (!table) return { hold: `Codex has no MCP entry named ${binding.server}.` };
+    if (!table) return { hold: 'Codex has no MCP entry with that name.' };
     if (typeof table.url !== 'string') return { hold: `Codex's ${binding.server} entry is not an HTTP entry; connect local (stdio) servers with toolkit env run instead.` };
     if (table.bearer_token !== undefined) return { hold: `Codex's ${binding.server} entry has a fixed bearer token. Remove it from the Codex config first, so no copy of the value stays there.` };
     const fixed = Object.keys(table.http_headers || {}).find((header) => header.toLowerCase() === binding.header.toLowerCase());

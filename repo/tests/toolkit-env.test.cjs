@@ -125,13 +125,17 @@ test('apply saves nothing when a line is wrong, and names the line without its v
   const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   await run('edit');
   const file = editFile(paths);
-  fs.appendFileSync(file, `X1_TEST_GOOD_KEY=${value}\nbad_name_here=${value}\nnot a line\n`);
+  // A space typed instead of =, and a base64 value ending in = on its own line: the text before
+  // the = is part of a value and must not be repeated.
+  const spaced = sentinel();
+  const based = sentinel();
+  fs.appendFileSync(file, `X1_TEST_GOOD_KEY=${value}\nbad_name_here=${value}\nnot a line\nX1_TEST_NEON_URL postgres://user:${spaced}@db.example/db?sslmode=require\n${based}QUJD==\n`);
   const result = await run('apply');
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Nothing was saved/);
-  assert.match(result.stderr, /line \d+: bad_name_here: key names look like/);
+  assert.match(result.stderr, /line \d+: the text before = is not a valid key name \(key names look like/);
   assert.match(result.stderr, /line \d+ is not NAME=value/);
-  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(value));
+  for (const secret of [value, spaced, based, 'bad_name_here', 'postgres']) assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret));
   assert.equal(store.peek('X1_TEST_GOOD_KEY'), undefined);
   assert.ok(fs.existsSync(file), 'the file is kept so it can be fixed');
 });
@@ -305,7 +309,16 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
   assert.equal(moved.code, 0, moved.stderr);
   assert.equal(fs.existsSync(paths.codexEnvFile), false);
   const folder = fs.readdirSync(paths.backupsDir).find((name) => name.startsWith('env-retire-'));
-  assert.ok(fs.existsSync(path.join(paths.backupsDir, folder, 'codex.env')));
+  const backup = path.join(paths.backupsDir, folder, 'codex.env');
+  assert.ok(fs.existsSync(backup));
+  if (process.platform === 'win32') {
+    // The moved file gets its own current-user-only permissions, not the ones it came with.
+    const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [backup], { encoding: 'utf8' }).stdout;
+    assert.doesNotMatch(acl, /\(I\)|SYSTEM|Administrators/);
+    assert.match(acl, new RegExp(`${process.env.USERNAME}:\\(F\\)`));
+  } else {
+    assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
+  }
   assert.match(moved.stdout, /delete that backup yourself/);
   assert.doesNotMatch(moved.stdout + moved.stderr, new RegExp(value));
 });
@@ -409,7 +422,7 @@ test('Codex: entries with a fixed token or no URL are not connected', { skip: !T
   const binding = (server) => ({ harness: 'codex', server, name: 'X1_TEST_COOLIFY_TOKEN', header: 'Authorization', scheme: 'Bearer' });
   assert.match(feeder.plan(binding('fixed')).hold, /fixed bearer token/);
   assert.match(feeder.plan(binding('other')).hold, /not an HTTP entry/);
-  assert.match(feeder.plan(binding('absent')).hold, /no MCP entry named absent/);
+  assert.match(feeder.plan(binding('absent')).hold, /no MCP entry with that name/);
 });
 
 // A stand-in `claude` CLI for `mcp remove` and `mcp add-json` against a test settings file.
@@ -468,7 +481,7 @@ test('Claude Code: entries with fixed headers or no HTTP URL are not connected',
   const binding = (server) => ({ harness: 'claude-code', server, name: 'X1_TEST_COOLIFY_TOKEN', header: 'Authorization', scheme: 'Bearer' });
   assert.match(feeder.plan(binding('fixed')).hold, /fixed headers/);
   assert.match(feeder.plan(binding('local')).hold, /not an HTTP entry/);
-  assert.match(feeder.plan(binding('absent')).hold, /no user MCP entry named absent/);
+  assert.match(feeder.plan(binding('absent')).hold, /no user MCP entry with that name/);
 });
 
 test('the helper command keeps its meaning under cmd.exe /Q /D /C with spaces in both paths', { skip: process.platform !== 'win32' && 'Windows only' }, (t) => {
@@ -604,4 +617,50 @@ test('macOS writes go on stdin as one escaped word, hex only for control charact
   assert.equal(calls[1].input, `add-generic-password -U -s ai-agent-toolkit/env -a X1_TEST_STORE_TWO -X ${Buffer.from('line\nbreak').toString('hex')} /tmp/test.keychain-db\n`);
   store.writeAll(new Map([['X1_TEST_STORE_LONG', 'x'.repeat(2560)]]));
   assert.throws(() => store.writeAll(new Map([['X1_TEST_STORE_LONG', `${'\u0001'}${'x'.repeat(2559)}`]])), /too long for the macOS Keychain/);
+});
+
+test('no-leak: a value typed where a name, command, program or option belongs is never repeated', async (t) => {
+  const value = sentinel();
+  const { run } = harness(t, { values: { X1_TEST_COOLIFY_TOKEN: sentinel() }, hidden: [sentinel()] });
+  const results = [];
+  for (const argv of [
+    ['set', 'X1_TEST_SET_KEY', value],
+    ['set', value],
+    ['remove', `${value}_X_Y`],
+    [value],
+    ['header', value],
+    ['header', 'X1_TEST_COOLIFY_TOKEN', '--header', `${value}/+=`],
+    ['run', '--names', 'X1_TEST_COOLIFY_TOKEN', '--', value],
+    ['run', '--names', value, '--', process.execPath],
+    ['connect', 'coolify', '--name', 'X1_TEST_COOLIFY_TOKEN', '--harness', value],
+    ['connect', value, '--name', 'X1_TEST_COOLIFY_TOKEN'],
+    ['status', value],
+  ]) results.push(await run(...argv));
+  for (const result of results) {
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /\(ENV-[0-9A-F]{8}\)/);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(value.slice(6)));
+  }
+});
+
+test('the editor starts by its full path, so a program in the working folder is never picked up', () => {
+  const { editorCommand } = require('../scripts/toolkit-env.cjs');
+  assert.deepEqual(editorCommand('C:\\x\\f.txt', 'win32', { SystemRoot: 'C:\\Windows' }), ['C:\\Windows\\System32\\notepad.exe', ['C:\\x\\f.txt']]);
+  assert.deepEqual(editorCommand('/x/f.txt', 'darwin', {}), ['/usr/bin/open', ['-t', '/x/f.txt']]);
+});
+
+test('the global rules keep every clause and point keys and tokens at toolkit-env', () => {
+  const text = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8');
+  assert.match(text, /Otherwise inspect, make the narrow change, validate and report\./);
+  assert.match(text, /Carry every dependency-ready safe step of authorised work to the actual deliverable/);
+  assert.match(text, /Never ask for or repeat a key or token in chat; use `toolkit-env`\./);
+});
+
+test('the real wiring takes the home folder from the environment it is given', (t) => {
+  const home = tempHome(t);
+  const environment = { USERPROFILE: home, HOME: home, SystemRoot: process.env.SystemRoot || 'C:\\Windows' };
+  const env = ToolkitEnv.forUser({ environment, toolkitRoot: ROOT });
+  assert.equal(env.health().state, 'not-set-up');
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { coolify: { type: 'http', url: 'https://x.example.test', headersHelper: 'node "C:/h/codex-env-bearer.cjs" X1_TEST_COOLIFY_TOKEN' } } }));
+  assert.equal(ToolkitEnv.forUser({ environment, toolkitRoot: ROOT }).health().state, 'action');
 });

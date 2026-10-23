@@ -28,7 +28,7 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | Change or add keys | `edit`, then `apply` | Notepad (or your default editor) opens a private file listing every key as `NAME=<unchanged>`. Type new values over `<unchanged>` or add `NAME=value` lines, save and close, then say "done" (or run `apply`). It prints `changed:` and `added:` lines and deletes the file. A blank value or a deleted line changes nothing. An edit file left unsaved for 30 minutes is deleted by the next command. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it in your own terminal. |
 | Remove a key | `remove NAME` | Asks a yes/no that names the key first. |
-| Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and commands that would print the environment. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
+| Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
 ## Connecting an app
 

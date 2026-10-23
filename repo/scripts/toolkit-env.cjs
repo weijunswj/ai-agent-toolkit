@@ -94,6 +94,16 @@ function ensurePrivateDirectory(directory, { platform = process.platform, enviro
   }
 }
 
+// A moved file keeps the permissions it had, so give it its own: owner-only (0600), or on Windows
+// inheritance removed and full control for the current user only.
+function makePrivateFile(file, { platform = process.platform, environment = process.env, spawn: run = spawnSync } = {}) {
+  if (platform !== 'win32') { fs.chmodSync(file, 0o600); return; }
+  const user = environment.USERDOMAIN ? `${environment.USERDOMAIN}\\${environment.USERNAME}` : environment.USERNAME;
+  const icacls = path.win32.join(environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows', 'System32', 'icacls.exe');
+  const result = run(icacls, [file, '/inheritance:r', '/grant:r', `${user}:F`], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
+  if (result.error || result.status !== 0) throw new EnvError(`The file was moved to ${file}, but Toolkit could not limit it to your account; check its permissions.`);
+}
+
 function writeJsonAtomically(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`);
@@ -141,8 +151,18 @@ class EnvManifest {
   }
 }
 
+// The editor to open the edit file with, by full path where the system has one: Windows looks for a
+// bare program name in the working folder first. Linux's xdg-open is found on PATH (never the folder).
+function editorCommand(file, platform = process.platform, environment = process.env) {
+  if (platform === 'win32') {
+    const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
+    return [path.win32.join(root, 'System32', 'notepad.exe'), [file]];
+  }
+  return platform === 'darwin' ? ['/usr/bin/open', ['-t', file]] : ['xdg-open', [file]];
+}
+
 function defaultOpener(file, platform = process.platform) {
-  const [command, args] = platform === 'win32' ? ['notepad.exe', [file]] : platform === 'darwin' ? ['open', ['-t', file]] : ['xdg-open', [file]];
+  const [command, args] = editorCommand(file, platform);
   return new Promise((resolve) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false });
     child.once('error', () => resolve(false));
@@ -220,7 +240,8 @@ class EnvEditSession {
       const name = text.slice(0, at).trim();
       const value = text.slice(at + 1).trim();
       const problem = nameProblem(name);
-      if (problem) { problems.push(`line ${index + 1}: ${name.slice(0, 64)}: ${problem}`); return; }
+      // Never repeat text that is not a valid name: it may be part of a value.
+      if (problem) { problems.push(`line ${index + 1}: the text before = is not a valid key name (${problem})`); return; }
       if (values.has(name)) { problems.push(`line ${index + 1}: ${name} appears more than once`); return; }
       if (value === UNCHANGED) return;
       if (value === '' || value === '<remove>') { blank += 1; return; }
@@ -293,7 +314,8 @@ class ToolkitEnv {
 
   // The real wiring for this user. The helper command always names the managed Toolkit checkout
   // (it survives updates), falling back to this copy only when no managed checkout is recorded.
-  static forUser({ environment = process.env, homeDir = os.homedir(), toolkitRoot, ask, askHidden } = {}) {
+  // The home folder comes from the given environment, so a test environment never reads real files.
+  static forUser({ environment = process.env, homeDir = (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(), toolkitRoot, ask, askHidden } = {}) {
     const paths = new EnvPaths({ homeDir, environment });
     let root = toolkitRoot;
     if (!root) {
@@ -456,7 +478,7 @@ class ToolkitEnv {
     if (missing.length) throw new EnvError(`Not in the Toolkit env store: ${missing.join(', ')}.`);
     let parts;
     try { parts = processLaunch.directSpawnParts(command, args, { label: 'Program', platform: this.#platform }); }
-    catch (error) { throw new EnvError(/command script/.test(error.message) ? error.message : `${command} was not found.`); }
+    catch (error) { throw new EnvError(/command script/.test(error.message) ? error.message : 'The program after -- was not found.'); }
     return new Promise((resolve) => {
       const child = this.#spawnChild(parts.command, parts.args, {
         env: { ...process.env, ...Object.fromEntries(values) },
@@ -478,7 +500,7 @@ class ToolkitEnv {
     if (!this.#store.list().includes(name)) throw new EnvError(`${name} is not in the Toolkit env store yet. Add it first with toolkit env edit or toolkit env set ${name}.`);
     const wanted = harness ? harness.split(',').map((entry) => entry.trim()) : this.#feeders.map((feeder) => feeder.id);
     const unknown = wanted.filter((id) => !this.#feeder(id));
-    if (unknown.length) throw new EnvError(`Unknown app: ${unknown.join(', ')}. Use claude-code or codex.`);
+    if (unknown.length) throw new EnvError('--harness takes claude-code, codex or both, separated by a comma.');
     const out = [];
     const plans = [];
     for (const id of wanted) {
@@ -492,7 +514,7 @@ class ToolkitEnv {
       }
       plans.push({ feeder, binding, plan });
     }
-    if (!plans.length) throw new EnvError(`No app has an MCP entry named ${server} that Toolkit can connect.`);
+    if (!plans.length) throw new EnvError('No app has an MCP entry with that name that Toolkit can connect. Check the name with claude mcp list or in the Codex config.');
     const changes = plans.flatMap((entry) => entry.plan.changes);
     if (changes.length) {
       out.push('Toolkit will change:', ...changes.map((change) => `  ${change}`), 'A backup of each entry is kept, and toolkit env revoke --feeders puts them back.');
@@ -650,6 +672,7 @@ class ToolkitEnv {
     ensurePrivateDirectory(folder);
     const target = path.join(folder, 'codex.env');
     fs.renameSync(file, target);
+    makePrivateFile(target);
     return {
       code: 0,
       out: [
@@ -704,7 +727,8 @@ function takeFlag(args, flag) {
 }
 
 function noExtra(args) {
-  if (args.length) throw new EnvError(`Unexpected argument: ${String(args[0]).slice(0, 40)}. Run toolkit env for help.`);
+  // The extra text is not repeated: it may be a value typed in the wrong place.
+  if (args.length) throw new EnvError(`There ${args.length === 1 ? 'is 1 argument' : `are ${args.length} arguments`} too many. Never type a value on the command line; run toolkit env for help.`);
 }
 
 // Parses arguments and maps every failure to a plain message with a reference. No other work.
@@ -767,7 +791,7 @@ class ToolkitEnvCli {
         case 'import-codex-env': noExtra(args); return this.#print(env.importCodexEnv());
         case 'retire-codex-env': noExtra(args); return this.#print(await env.retireCodexEnv());
         case undefined: case 'help': case '--help': this.#stdout.write(`${USAGE.join('\n')}\n`); return 0;
-        default: throw new EnvError(`Unknown command: ${String(command).slice(0, 40)}. Run toolkit env for help.`);
+        default: throw new EnvError('That is not a toolkit env command. Run toolkit env for help.');
       }
     } catch (error) {
       const reference = supportReference();
@@ -818,6 +842,7 @@ module.exports = Object.freeze({
   ToolkitEnv,
   ToolkitEnvCli,
   dumpsEnvironment,
+  editorCommand,
   ensurePrivateDirectory,
   parseDotEnv,
 });
