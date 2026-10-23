@@ -376,18 +376,18 @@ function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' 
   if (kind === 'parent') return `parent holder (${prefix}, epoch ${epoch})`;
   const gate = doc?.gate?.role || 'unassigned';
   if (doc?.fence?.holder_session && isHolder(parentDoc, { session: doc.fence.holder_session, prefix })) {
-    return `appointed controller (${prefix}, gate ${gate}, epoch ${epoch})`;
+    return `parent holder (${prefix}, gate ${gate}, epoch ${epoch})`;
   }
   return `holder ${prefix} for gate ${gate} (epoch ${epoch})`;
 }
 
 function parentRefusal(doc) {
-  return `The parent document is held by the ${holderDescription(doc)}. Only the appointed controller applies; other sessions dry-run and report to the controller. If you are the appointed controller and another session holds the parent, post your takeover record, then run claim --parent --takeover.`;
+  return `The parent document is held by the ${holderDescription(doc)}. Only that holder writes programme state; other sessions dry-run and report to the controller. A controller stopped by a takeover stops and reports to the owner.`;
 }
 
 function authoriseWrite(kind, doc, parentDoc, writer) {
   if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
-    throw new ProgrammeError('WRITER_UNKNOWN', 'Writes need a session (--session or TOOLKIT_PROGRAMME_SESSION) and a record prefix.');
+    throw new ProgrammeError('WRITER_UNKNOWN', 'Controller writes need --session <the controller session id> and a record prefix.');
   }
   if (kind === 'parent') {
     if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', parentRefusal(doc));
@@ -413,7 +413,9 @@ function claimDocument(doc, writer, { takeover = false, role = null, route = nul
     if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2');
     const sameSession = next.gate.role === role && next.gate.session_id === writer.session;
     next.gate.role = role;
-    next.gate.state = sameSession && next.gate.state ? next.gate.state : 'ACTIVE';
+    // Claiming a gate again starts a new activation of an accepted (RETIRED) gate, which only removes
+    // that acceptance; an unfinished gate keeps its state.
+    next.gate.state = sameSession && next.gate.state && next.gate.state !== 'RETIRED' ? next.gate.state : 'ACTIVE';
     next.gate.session_id = writer.session;
     if (route) next.gate.route = route;
     if (next.lifecycle === 'PLANNED') next.lifecycle = 'ACTIVE';
@@ -442,7 +444,7 @@ function submitReturn(doc, { returnId, writer, parentDoc = null }) {
     return null;
   }
   if (!['ACTIVE', 'WAITING_OWNER', 'INTERRUPTED'].includes(next.gate.state)) {
-    throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return.`);
+    throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return. Report to the controller.`);
   }
   if (next.gate.session_id && writer && next.gate.session_id !== writer.session && !isHolder(next, writer)) {
     throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next, 'child', parentDoc)} can submit its return.`);
@@ -1162,7 +1164,7 @@ class Reconciler {
         const gate = desired.gate.role;
         const gateAccepted = currentGateAccepted(desired);
         const accepted = completionAccepted(desired);
-        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, uat: desired.uat.state, review: desired.review.state,
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, uat: desired.uat.state ? uatText(desired) : null, review: desired.review.state ? reviewText(desired) : null,
           detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
@@ -1515,6 +1517,7 @@ class Reconciler {
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
       : !apply && report.effects.length ? 'Controller: run reconcile --apply for this plan; other sessions report it'
+        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     return report;
@@ -1547,7 +1550,7 @@ module.exports = Object.freeze({
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
-  newParent, newChild, isHolder, authoriseWrite, claimDocument, submitReturn, consumeReturn, applyPatch,
+  newParent, newChild, isHolder, parentRefusal, authoriseWrite, claimDocument, submitReturn, consumeReturn, applyPatch,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, originSlug, bindRepository,
 });

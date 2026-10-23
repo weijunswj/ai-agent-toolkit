@@ -124,225 +124,201 @@ test('a concurrent first G0 claim survives the controller applying a planned cre
   assert.doesNotThrow(() => state.submitReturn(after, { returnId: 'g0-r1', writer: builder, parentDoc: parentDoc() }));
 });
 
-test('every command and next action preserves controller custody and authority for every role', t => {
+// In this version only the appointed controller writes. The matrix runs every CLI command, in every
+// scenario, as every role, in text and JSON output:
+// - any write without --controller is USAGE before any GitHub or store call;
+// - a non-holder that adds --controller is refused by the fence and changes nothing, except the two
+//   inherently self-declared steps (creating a missing parent, a deliberate parent takeover), which
+//   only the text guards and which this matrix therefore leaves out;
+// - no output tells a non-controller to use --controller, --takeover, --consume or init-parent, and
+//   every sentence about --apply or init-parent is addressed to the controller;
+// - the controller's writes succeed or fail only for state reasons.
+test('only the appointed controller writes: every command x scenario x role', () => {
   const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
-  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-messages-'));
-  const catalogue = path.join(dir, 'catalogue.json');
-  fs.writeFileSync(catalogue, JSON.stringify({ outcomes: CATALOGUE }));
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-split-'));
+  const file = (name, value) => { const target = path.join(dir, `${name}.json`); fs.writeFileSync(target, JSON.stringify(value)); return target; };
+  const catalogue = file('catalogue', { outcomes: CATALOGUE });
   const patches = {
-    ordinary: { next_action: 'Continue the assigned build' }, parent: { private: { note: 'Proposed catalogue update' } },
-    uat: { uat: { state: 'PASSED', at_head: SHA_A } },
-    review: { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } },
-    done: { lifecycle: 'DONE' }, retired: { lifecycle: 'RETIRED' }, gate: { gate: {} }, fence: { fence: {} },
+    ordinary: file('ordinary', { next_action: 'Continue the build' }),
+    uat: file('uat', { uat: { state: 'PASSED', at_head: SHA_A } }),
+    done: file('done', { lifecycle: 'DONE' }),
+    parent: file('parent', { private: { note: 'Catalogue change' } }),
   };
-  for (const [name, patch] of Object.entries(patches)) fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(patch));
-  const patch = name => path.join(dir, `${name}.json`);
-  // All four required entry states, plus the child holder who is not the parent holder, terminal
-  // gates, both planning holds, and the settled/no-change and attention-only next-action branches.
+  const writes = [
+    ['reconcile', '--apply'], ['init-parent', '--catalogue', catalogue, '--apply'], ['update-parent', '--patch', patches.parent],
+    ['claim', '--parent'], ['claim', '--parent', '--takeover'], ['claim', '--issue', '423', '--role', 'G1'],
+    ['claim', '--issue', '423', '--role', 'G1', '--takeover'], ['update', '--issue', '423', '--patch', patches.ordinary],
+    ['update', '--issue', '423', '--patch', patches.uat], ['update', '--issue', '423', '--patch', patches.done],
+    ['return', '--issue', '423', '--submit', 'r9'], ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'ACCEPT'],
+  ];
+  const reads = [['reconcile'], ['reconcile', '--issue', '423'], ['show', '--parent'], ['show', '--issue', '423'], ['init-parent', '--catalogue', catalogue]];
   const scenarios = [
     { name: 'no parent', parent: false },
-    { name: 'parent held by another session' },
-    { name: 'child held by another session', child: 'other' },
-    { name: 'holds present: body too large', child: 'other', hold: 'body' },
-    { name: 'holds present: unknown effect', child: 'other', hold: 'unknown' },
-    { name: 'child holder, parent held by another session', child: 'own' },
-    { name: 'child holder, submitted gate', child: 'own', gate: 'SUBMITTED' },
-    { name: 'child holder, retired gate', child: 'own', gate: 'RETIRED' },
-    { name: 'child holder, gate not started', child: 'own', gate: 'unassigned' },
-    { name: 'settled state', settled: true },
-    { name: 'attention findings only', settled: true, attention: true },
+    { name: 'parent held by the controller' },
+    { name: 'child held by the controller with a submitted return', child: true },
+    { name: 'body hold present', child: true, hold: true },
+    { name: 'settled', child: true, settled: true },
   ];
-  const commands = [
-    ['reconcile'], ['reconcile', '--apply'], ['claim', '--parent'], ['claim', '--issue', '423', '--role', 'G1'],
-    ['update', '--issue', '423', '--patch', patch('ordinary')], ['update-parent', '--patch', patch('parent')],
-    ['return', '--issue', '423', '--submit', 'r1'], ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'ACCEPT'],
-    ['show', '--parent'], ['show', '--issue', '423'],
-    ...['uat', 'review', 'done', 'retired', 'gate', 'fence'].map(name => ['update', '--issue', '423', '--patch', patch(name)]),
-    ['init-parent', '--catalogue', catalogue],
-  ];
-  const roles = [
-    { name: 'child holder', writer: builder },
-    { name: 'assigned G1 successor', writer: { ...builder, session: 'assigned-g1' } },
-    { name: 'G2 reviewer', writer: { ...builder, session: 'reviewer-g2' } },
-    { name: 'helper', writer: { ...builder, session: 'unrelated-helper' } },
-    { name: 'controller', writer: controller },
-  ];
-  const counts = Object.fromEntries(roles.map(role => [role.name, 0]));
-  let takeovers = 0;
-  const seen = new Set();
-  const nextActions = new Set();
-  const protectedChild = doc => ({
-    uat: doc.uat, review: doc.review,
-    terminal: ['DONE', 'RETIRED'].includes(doc.lifecycle) ? doc.lifecycle : null,
-    consumed: doc.gate.returns.filter(entry => entry.consumed),
-  });
-  const childDocuments = store => CATALOGUE.map(outcome => store.read('child', outcome.issue).doc);
-  const checkGuidance = text => {
+  const others = [builder, successor, { session: 'reviewer-g2', prefix: 'INT-TK421-' }, { session: 'helper-1', prefix: 'INT-TK421-' }];
+  const inherent = args => (args[0] === 'init-parent' && args.includes('--apply')) || (args[0] === 'claim' && args.includes('--takeover') && args.includes('--parent'));
+  const addressed = text => {
+    assert.doesNotMatch(text, /--controller|--takeover|--consume|--verdict/, 'non-controller output names a controller-only option');
     for (const sentence of text.split(/\n|(?<=[.!?])\s+/)) {
-      if (!/init-parent|claim --parent|--apply|update-parent|shorten it first/.test(sentence)) continue;
-      assert.match(sentence, /(?:^|: )(?:Controller:|The appointed controller|Only the appointed controller|If you are the appointed controller)/,
-        `parent instruction is not addressed to the controller: ${sentence}`);
-    }
-    for (const sentence of text.split(/\n|(?<=[.!?])\s+/).filter(line => line.includes('--takeover'))) {
-      assert.ok(sentence.includes('If you are the appointed controller') || /Issue 423.*controller assigned this gate to you/.test(sentence), sentence);
+      if (!/--apply|init-parent|update-parent|claim --parent/.test(sentence)) continue;
+      assert.match(sentence, /(?:^|: )"?(?:Controller:|The appointed controller|Only the appointed controller)/, `not addressed to the controller: ${sentence}`);
     }
   };
+  let cases = 0;
   try {
     for (const scenario of scenarios) {
-      for (const role of roles) {
-        const isController = role.name === 'controller';
-        const isGateSuccessor = role.name === 'assigned G1 successor';
-        // With no child yet these are prospective gate sessions. Initial claims create custody;
-        // only the assigned successor tests changing another session's existing child custody.
-        const writer = role.name === 'child holder' && scenario.child === 'other' ? successor : role.writer;
-        const tries = [...commands,
-          ...(scenario.parent !== false || isController ? [['init-parent', '--catalogue', catalogue, '--apply']] : []),
-          ...(isGateSuccessor && scenario.child && scenario.gate !== 'unassigned'
-            ? [['claim', '--issue', '423', '--role', 'G1', '--takeover']] : []),
-        ];
-        for (const args of tries) for (const json of [false, true]) {
-          const { github, store, binding, reconciler } = setup({ initialiseParent: scenario.parent !== false });
-          if (scenario.child) {
-            const holder = scenario.child === 'own' ? builder : successor;
-            let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), holder,
-              { role: scenario.gate === 'unassigned' ? null : 'G0' });
-            if (['SUBMITTED', 'RETIRED'].includes(scenario.gate)) doc = state.submitReturn(doc, { returnId: 'r1', writer: holder });
-            if (scenario.gate === 'RETIRED') doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: store.read('parent', 421).doc });
-            store.write('child', 423, doc, { sha: null, previous: null });
-          }
-          if (scenario.hold === 'body') github.issues.get(421).body = 'x'.repeat(59990);
-          if (scenario.hold === 'unknown') store.mutate('parent', 421, { writer: controller, change: doc => {
-            doc.pending_effects.push({ intent_id: 'unknown', kind: 'replace_block', target: { issue: 999, digest: 'c'.repeat(64) }, state: 'UNKNOWN' });
-            return doc;
-          } });
-          if (scenario.settled) reconciler().run({ apply: true });
-          if (scenario.attention) github.addIssue(999, { parent: 421 });
-          const before = store.read('parent', 421).doc;
-          const childrenBefore = childDocuments(store);
-          const writes = github.commits;
-          const mutations = github.mutations();
-          let output = '';
-          let error = null;
-          const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
-            toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => { output += text; } } };
-          try { cli.main([...args, '--session', writer.session, ...(json ? ['--json'] : [])], deps); }
-          catch (caught) { error = caught; output += `${caught.code}: ${caught.message}`; }
-          const label = `${role.name}: ${scenario.name}: ${args.join(' ')} (${json ? 'JSON' : 'text'})`;
-          counts[role.name] += 1;
-          assert.ok(output, label);
-          if (error) {
-            assert.ok(error instanceof state.ProgrammeError, label);
-            if (!isController) seen.add(error.code);
-            assert.equal(github.commits, writes, `${label}: refused command writes nothing`);
-          }
-          if (args[0] === 'reconcile' && !isController) {
-            let report;
-            if (!error && json) report = JSON.parse(output);
-            if (report) {
-              report.holds.forEach(hold => seen.add(hold.code));
-              const action = report.next_action;
-              nextActions.add(action.startsWith('Controller: resolve') ? 'hold' : action.startsWith('Controller: run') ? 'plan'
-                : action.startsWith('Controller: decide') ? 'attention' : action.startsWith('None:') ? 'none' : action);
+      const prepare = () => {
+        const fixture = setup({ initialiseParent: scenario.parent !== false });
+        if (scenario.child) {
+          let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), controller, { role: 'G1' });
+          doc = state.submitReturn(doc, { returnId: 'r1', writer: controller });
+          fixture.store.write('child', 423, doc, { sha: null, previous: null });
+        }
+        if (scenario.hold) fixture.github.issues.get(421).body = 'x'.repeat(59990);
+        if (scenario.settled) fixture.reconciler().run({ apply: true });
+        return fixture;
+      };
+      for (const json of [false, true]) {
+        for (const role of [...others, controller]) {
+          for (const args of [...writes, ...reads]) for (const flagged of role === controller ? [true] : [false, true]) {
+            const isWrite = writes.includes(args);
+            if (!isWrite && flagged && role !== controller) continue;
+            if (role !== controller && flagged && inherent(args)) continue;
+            const { github, store, binding } = prepare();
+            const parentBefore = scenario.parent === false ? null : store.read('parent', 421).doc;
+            const childBefore = scenario.child ? store.read('child', 423).doc : null;
+            const calls = github.calls.length;
+            const mutations = github.mutations();
+            let output = '';
+            let error = null;
+            const argv = [...args, '--session', role.session, ...(flagged && isWrite ? ['--controller'] : []), ...(json ? ['--json'] : [])];
+            const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
+              toolkitVersion: '3.9.0', environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write: text => { output += text; } } };
+            try { cli.main(argv, deps); } catch (caught) { error = caught; output += `${caught.code}: ${caught.message}`; }
+            const label = `${scenario.name} / ${role.session} / ${argv.join(' ')}`;
+            cases += 1;
+            if (role === controller) {
+              if (error) assert.ok(!['STALE_WRITER', 'ROLE_REFUSED', 'CLAIM_HELD', 'USAGE', 'WRITER_UNKNOWN'].includes(error.code), `${label}: ${error.code}`);
+              continue;
             }
-          }
-          // JSON stores report text as escaped strings. Inspect the actual values too.
-          if (json && !error) {
-            const strings = value => typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(strings) : [];
-            strings(JSON.parse(output)).forEach(checkGuidance);
-          } else checkGuidance(output);
-          const after = store.read('parent', 421).doc;
-          const childrenAfter = childDocuments(store);
-          if (!isController) {
-            assert.deepEqual(after?.fence, before?.fence, `${label}: parent fence is unchanged`);
-            for (const key of ['outcomes', 'release_plan', 'private']) {
-              assert.deepEqual(after?.[key], before?.[key], `${label}: parent ${key} is unchanged`);
+            if (isWrite && !flagged) {
+              assert.equal(error?.code, 'USAGE', label);
+              assert.equal(github.calls.length, calls, `${label}: usage is checked before any GitHub call`);
             }
-            assert.deepEqual(after, before, `${label}: parent custody and content are unchanged`);
-            for (const [index, outcome] of CATALOGUE.entries()) {
-              const empty = state.newChild({ repository: 'acme/app', outcome });
-              assert.deepEqual(protectedChild(childrenAfter[index] || empty), protectedChild(childrenBefore[index] || empty),
-                `${label}: #${outcome.issue} acceptance, terminal lifecycle and consumed returns are unchanged`);
-            }
-            assert.equal(github.mutations(), mutations, `${label}: no public writes`);
-            if (isGateSuccessor && childrenBefore[0]?.fence.holder_session && !args.includes('--takeover')) {
-              assert.deepEqual(childrenAfter[0].fence, childrenBefore[0].fence, `${label}: custody needs the documented child takeover`);
-            }
-          } else if ((args[0] === 'reconcile' && args.includes('--apply')) || args.includes('--consume')
-            || args[0] === 'update-parent' || args[0] === 'init-parent'
-            || (args[0] === 'update' && ['uat', 'review', 'done'].some(name => args.includes(patch(name))))) {
-            assert.ok(!['STALE_WRITER', 'ROLE_REFUSED', 'CLAIM_HELD'].includes(error?.code), `${label}: controller authority was refused`);
-            assert.ok(!error || ['PARENT_STATE_MISSING', 'STATE_MISSING', 'STATE_EXISTS', 'RETURN_UNKNOWN'].includes(error.code),
-              `${label}: controller failed for a reason other than fixture state: ${error?.code}`);
-            if (before && (args[0] === 'update-parent' || (childrenBefore[0] && args[0] === 'update')
-              || (args.includes('--consume') && childrenBefore[0]?.gate.returns.length))) {
-              assert.equal(error, null, `${label}: the valid controller operation succeeds`);
-            }
-            if (!before && args[0] === 'init-parent' && args.includes('--apply')) {
-              assert.equal(error, null, `${label}: the controller initialises the missing parent`);
-              assert.deepEqual(after.fence, { epoch: 1, holder_prefix: controller.prefix, holder_session: controller.session });
-            }
-          }
-          if (args.includes('--takeover')) {
-            assert.equal(error, null, `${label}: the assigned successor can take the child`);
-            const childBefore = childrenBefore[0];
-            const childAfter = childrenAfter[0];
-            assert.deepEqual(childAfter.fence, {
-              epoch: childBefore.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session,
-            }, `${label}: only the child fence moves to the assigned successor`);
-            assert.equal(childAfter.gate.role, 'G1', label);
-            assert.equal(childAfter.gate.session_id, writer.session, label);
-            assert.equal(childAfter.gate.state, 'ACTIVE', label);
-            // A gate handover also records its new session and write metadata, but preserves all
-            // other child content, including returns submitted at the previous epoch.
-            assert.deepEqual(childAfter, {
-              ...childBefore, fence: childAfter.fence,
-              gate: { ...childBefore.gate, role: 'G1', session_id: writer.session, state: 'ACTIVE' },
-              private: { ...childBefore.private, host_session: writer.session }, revision: childBefore.revision + 1,
-              volatile: { ...childBefore.volatile, written_at: childAfter.volatile.written_at },
-            }, `${label}: only child custody and write metadata change`);
-            assert.deepEqual(childrenAfter.slice(1), childrenBefore.slice(1), `${label}: other child fences and documents are unchanged`);
-            assert.equal(github.commits, writes + 1, `${label}: exactly one child document is written`);
-            takeovers += 1;
+            if (isWrite) assert.ok(error, `${label}: a non-controller write succeeded`);
+            assert.equal(github.mutations(), mutations, `${label}: GitHub changed`);
+            if (parentBefore) assert.deepEqual(store.read('parent', 421).doc, parentBefore, `${label}: parent changed`);
+            if (childBefore) assert.deepEqual(store.read('child', 423).doc, childBefore, `${label}: child changed`);
+            addressed(output);
           }
         }
       }
     }
-    assert.deepEqual([...seen].sort(), ['CLAIM_HELD', 'EFFECT_UNKNOWN', 'GATE_NOT_ACTIVE', 'PARENT_STATE_MISSING', 'PATCH_REFUSED', 'ROLE_REFUSED', 'RETURN_CONFLICT', 'STALE_WRITER', 'STATE_EXISTS', 'STATE_MISSING', 'BODY_TOO_LARGE'].sort());
-    assert.deepEqual([...nextActions].sort(), ['attention', 'hold', 'none', 'plan']);
-    assert.deepEqual(Object.values(counts), [394, 406, 394, 394, 396]);
-    assert.equal(takeovers, 12);
-    t.diagnostic(`Role cases: ${JSON.stringify(counts)}; total: ${Object.values(counts).reduce((sum, count) => sum + count, 0)}; child takeovers: ${takeovers}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(cases > 600, `${cases} cases`);
+});
+
+test('a stopped controller is told to stop and report, never to take the parent back', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const { github, store, binding, reconciler } = setup();
+  github.intercept(call => {
+    if (call.method === 'POST' && /\/sub_issues$/.test(call.path) && store.read('parent', 421).doc.fence.epoch === 1) {
+      store.mutate('parent', 421, { writer: successor, authorise: false, change: doc => state.claimDocument(doc, successor, { takeover: true }) });
+    }
+    return undefined;
+  });
+  const messages = [];
+  try { reconciler(controller).run({ apply: true }); } catch (error) { messages.push(error.message); }
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.0', stdout: { write() {} } };
+  for (const args of [['claim', '--parent'], ['reconcile', '--apply'], ['update-parent', '--patch', __filename]]) {
+    try { cli.main([...args, '--session', controller.session, '--controller'], deps); } catch (error) { messages.push(error.message); }
+  }
+  assert.equal(messages.length, 4);
+  for (const message of messages) {
+    assert.match(message, /A controller stopped by a takeover stops and reports to the owner\./);
+    assert.doesNotMatch(message, /--takeover|claim --parent/);
+  }
+});
+
+test('the controller can reopen an accepted gate for a correction, and acceptance follows the new return', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const { github, store, binding, reconciler } = setup();
+  const run = args => {
+    let output = '';
+    cli.main([...args, '--session', controller.session, '--controller', '--json'], { transport: github, binding, originUrl: 'https://github.com/acme/app.git',
+      repoRoot: __dirname, toolkitVersion: '3.9.0', stdout: { write: text => { output += text; } } });
+    return JSON.parse(output);
+  };
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-reopen-'));
+  try {
+    const branch = path.join(dir, 'branch.json');
+    fs.writeFileSync(branch, JSON.stringify({ candidate: { branch: 'feature' } }));
+    run(['claim', '--issue', '423', '--role', 'G1']);
+    run(['update', '--issue', '423', '--patch', branch]);
+    run(['return', '--issue', '423', '--submit', 'g1-r1']);
+    run(['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
+    assert.equal(store.read('child', 423).doc.gate.state, 'RETIRED');
+    assert.equal(run(['claim', '--issue', '423', '--role', 'G1']).outcome, 'WRITTEN', 'claiming the accepted gate again starts a new activation');
+    assert.equal(store.read('child', 423).doc.gate.state, 'ACTIVE');
+    run(['return', '--issue', '423', '--submit', 'g1-r2']);
+    github.addPr(540, { head: SHA_B, merged: true, state: 'MERGED', contexts: [green('validate')], branch: 'feature' });
+    let report = reconciler().run();
+    assert.deepEqual(report.close_list.map(entry => [entry.gate, entry.gate_accepted, entry.accepted]), [['G1', false, false]]);
+    assert.ok(report.findings.some(finding => finding.code === 'CHILD_STATE_CONFLICT' && finding.issue === 423));
+    run(['return', '--issue', '423', '--consume', 'g1-r2', '--verdict', 'ACCEPT']);
+    report = reconciler().run();
+    assert.deepEqual(report.close_list.map(entry => [entry.gate, entry.gate_accepted, entry.accepted]), [['G1', true, true]]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('executor parent refusals name the holder neutrally and address recovery only to the appointed controller', () => {
+test('the close list shows evidence at an older head as STALE_HEAD', () => {
+  const { github, store, reconciler, parentDoc } = setup();
+  store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), authorise: true,
+    change: doc => {
+      let next = state.claimDocument(doc, controller, { role: 'G1' });
+      next = state.submitReturn(next, { returnId: 'r1', writer: controller });
+      next = state.consumeReturn(next, { returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc() });
+      return state.applyPatch('child', next, { candidate: { branch: 'feature' }, uat: { state: 'PASSED', at_head: SHA_A },
+        review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } }, { writer: controller, parentDoc: parentDoc() });
+    } });
+  github.addPr(540, { head: SHA_B, merged: true, state: 'MERGED', contexts: [green('validate')], branch: 'feature' });
+  const stale = reconciler().run().close_list[0];
+  assert.match(stale.uat, /^PASSED \(STALE_HEAD, was aaaaaaa\)$/);
+  assert.match(stale.review, /^PASSED \(STALE_HEAD\)$/);
+  github.prs.get(540).head = SHA_A;
+  github.prs.get(540).rollupOid = SHA_A;
+  const current = reconciler().run().close_list[0];
+  assert.deepEqual([current.uat, current.review], ['PASSED', 'PASSED']);
+});
+
+test('sessions come from --session only, every --issue is 1 or more, and a dry run after an interrupted pass asks the controller to apply', () => {
   const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
-  const { github, store, binding, claimAsBuilder } = setup();
-  claimAsBuilder();
-  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
-    toolkitVersion: '3.9.0', environment: {}, stdout: { write() {} } };
-  const writes = github.mutations();
-  for (const [args, code] of [[['reconcile', '--apply'], 'STALE_WRITER'], [['claim', '--parent'], 'CLAIM_HELD']]) {
-    assert.throws(() => cli.main([...args, '--session', builder.session], deps), error => {
-      assert.equal(error.code, code);
-      assert.match(error.message, /the parent holder \(INT-TK421-, epoch 1\)/);
-      assert.match(error.message, /Only the appointed controller applies/);
-      assert.match(error.message, /dry-run and report to the controller/);
-      assert.match(error.message, /If you are the appointed controller and another session holds the parent, post your takeover record, then run claim --parent --takeover\./);
-      return true;
-    });
+  const { github, store, binding, reconciler } = setup();
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.0',
+    environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write() {} } };
+  assert.throws(() => cli.main(['reconcile', '--apply', '--controller'], deps), { code: 'WRITER_UNKNOWN' }, 'an inherited session never writes');
+  assert.throws(() => cli.parseArgs(['reconcile', '--apply', '--controller', '--session', '']), { code: 'USAGE' });
+  for (const argv of [['show', '--issue', '0'], ['reconcile', '--issue', '0'], ['reconcile', '--issue', '-1'], ['show', '--issue', '1.5']]) {
+    assert.throws(() => cli.parseArgs(argv), { code: 'USAGE' }, argv.join(' '));
   }
-  assert.equal(github.mutations(), writes);
-  assert.equal(store.read('parent', 421).doc.fence.holder_session, controller.session);
-  const child = store.read('child', 423).doc;
-  for (const action of [() => state.claimDocument(child, successor), () => state.authoriseWrite('child', child, null, successor)]) {
-    assert.throws(action, error => {
-      assert.match(error.message, /holder INT-TK421- for gate G1 \(epoch 1\)/);
-      return true;
-    });
-  }
+  // An effect that landed before its intent was cleared: the next dry run asks the controller to apply.
+  reconciler().run({ apply: true });
+  store.mutate('child', 423, { writer: controller, parentDoc: store.read('parent', 421).doc, change: doc => {
+    doc.pending_effects.push({ intent_id: 'landed', kind: 'attach', target: { issue: 423, parent: 421 }, state: 'IN_FLIGHT' });
+    return doc;
+  } });
+  const dry = reconciler().run();
+  assert.deepEqual(dry.recovered.map(entry => entry.outcome), ['DONE']);
+  assert.match(dry.next_action, /^Controller: run reconcile --apply to clear 1 settled intent\(s\)$/);
+  assert.equal(store.read('child', 423).doc.pending_effects.length, 1);
 });
 
 test('binding documentation scopes opt-in to the reconciler while governed issue records remain', () => {
@@ -357,58 +333,6 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       assert.match(text, /without that block get no governed issue writes/i, file);
       assert.match(text, /every `programme\.cjs` command refuses without it/, file);
     }
-  }
-});
-
-test('every custody surface bans executor parent claims but permits assigned child handover', () => {
-  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
-  const skill = read('skills/github-program-reconciler/SKILL.md');
-  const when = skill.split('## When to run')[1].split('## What ships')[0];
-  const description = skill.split('description: ')[1].split('\n')[0];
-  const who = skill.split('**Who records what.**')[1].split('**Returns (LIFE-1).**')[0];
-  const prompt = read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0];
-  const trigger = JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger;
-  const readme = read('skills/github-program-reconciler/README.md');
-  const changelog = read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0];
-  for (const surface of [description, when, who, prompt, readme, changelog, trigger]) {
-    const text = surface.replaceAll('`', '');
-    assert.ok(text.includes('Executors never apply, and never claim or take over the parent document.'));
-    assert.match(text, /(?:A gate successor the controller has assigned|The single gate successor assigned by the controller) \(for example G1 after G0\) takes the child with claim --issue <n> --role <gate> --takeover\./);
-    assert.match(text, /Only the appointed controller takes over the parent document, after posting its takeover record/);
-    assert.doesNotMatch(text, /never apply, claim the parent or take over|a controller arranges any child gate custody change/);
-  }
-  assert.match(who, /Only the appointed controller runs `init-parent --apply`\./);
-  assert.match(who, /One session holds a gate at a time\./);
-  assert.match(who, /G2 reviewers report their verdicts, and the controller records them in `review\.verdicts`; reviewers do not take over the child\./);
-  assert.match(who, /If you are the appointed controller and another session holds the parent, post your takeover record, then run claim --parent --takeover\./);
-  assert.match(skill, /\| `init-parent --catalogue[^\n]*Only the appointed controller runs `init-parent --apply`/);
-  assert.doesNotMatch(skill, /held by this session/);
-  assert.match(read('skills/github-program-reconciler/agents/openai.yaml'), /allow_implicit_invocation: true/);
-  for (const text of [description, when, prompt, trigger]) {
-    assert.match(text, /Any session may (?:run the )?dry-run/i);
-    assert.match(text, /only the appointed controller holding the parent document runs `?--apply/i);
-    assert.match(text, /the binding is added/i);
-    assert.doesNotMatch(text, /governance setup/);
-  }
-});
-
-test('child refusals identify the appointed controller when it also holds the child', () => {
-  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
-  const { github, store, binding } = setup();
-  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
-    toolkitVersion: '3.9.0', environment: {}, stdout: { write() {} } };
-  cli.main(['claim', '--issue', '423', '--role', 'G1', '--session', controller.session], deps);
-  const child = store.read('child', 423).doc;
-  const parentDoc = store.read('parent', 421).doc;
-  for (const action of [
-    () => cli.main(['claim', '--issue', '423', '--role', 'G1', '--session', builder.session], deps),
-    () => state.authoriseWrite('child', child, parentDoc, builder),
-  ]) {
-    assert.throws(action, error => {
-      assert.match(error.message, /held by the appointed controller \(INT-TK421-, gate G1, epoch 1\)/);
-      assert.doesNotMatch(error.message, /G1 gate holder|controller-1|builder-1/);
-      return true;
-    });
   }
 });
 
@@ -520,11 +444,32 @@ test('without the opt-in binding the command line refuses before any GitHub call
   const github = new FakeGitHub();
   const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-unbound-'));
   try {
-    for (const argv of [['reconcile'], ['reconcile', '--apply', '--session', 's'], ['show'], ['claim', '--issue', '1', '--session', 's']]) {
+    for (const argv of [['reconcile'], ['reconcile', '--apply', '--controller', '--session', 's'], ['show'], ['claim', '--issue', '1', '--controller', '--session', 's']]) {
       assert.throws(() => cli.main(argv, { transport: github, repoRoot: dir, originUrl: 'https://github.com/acme/app.git', stdout: { write() {} } }), { code: 'BINDING_MISSING' });
     }
     assert.equal(github.calls.length, 0, 'no GitHub call is made in a repository that has not opted in');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('every custody surface says only the appointed controller writes in this version', () => {
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  const skill = read('skills/github-program-reconciler/SKILL.md');
+  const surfaces = {
+    description: skill.split('description: ')[1].split('\n')[0],
+    when: skill.split('## When to run')[1].split('## What ships')[0],
+    who: skill.split('**Who records what.**')[1].split('**Returns (LIFE-1).**')[0],
+    prompt: read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0],
+    readme: read('skills/github-program-reconciler/README.md'),
+    changelog: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
+    trigger: JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger,
+  };
+  for (const [name, text] of Object.entries(surfaces)) {
+    assert.match(text, /only the appointed controller writes programme state/i, name);
+    assert.doesNotMatch(text, /gate successor|takes the child|child holder may|submit returns;/i, `${name} still describes executor custody`);
+  }
+  assert.match(surfaces.who, /A controller stopped by a takeover stops and reports to the owner/);
+  assert.match(surfaces.who, /verifies that the previous writer stopped, posts its takeover record/);
+  assert.doesNotMatch(skill, /TOOLKIT_PROGRAMME_SESSION/);
 });

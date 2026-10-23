@@ -4,16 +4,22 @@
 // Command line for programme state documents and the reconcile pass. Run it from a checkout of the
 // governed repository; `.github/toolkit-programme.json` names the parent issue and the private store.
 //
-//   reconcile [--apply] [--issue <n>] [--parent-file <file>]   dry run unless --apply
+// Anyone may read:
+//   reconcile [--issue <n>] [--parent-file <file>]   dry run
 //   show [--parent | --issue <n>] [--include-private]
-//   init-parent --catalogue <file> [--apply]
+//   init-parent --catalogue <file>                     validate a catalogue
+//
+// In this version only the appointed controller writes. Every write needs --controller and
+// --session <id>, and every write except creating the parent and a deliberate parent takeover also
+// needs that session to hold the parent document:
+//   reconcile --apply [--issue <n>]
+//   init-parent --catalogue <file> --apply
 //   update-parent --patch <file>
 //   claim (--parent | --issue <n>) [--role G0|G1|G2] [--model <m> --effort <e> [--route-read-back]] [--takeover]
 //   update --issue <n> --patch <file>
 //   return --issue <n> (--submit <return-id> | --consume <return-id> --verdict ACCEPT|REOPEN)
 //
-// Writes need --session <id> (or TOOLKIT_PROGRAMME_SESSION) and use the binding's writer prefix
-// unless --prefix is given. Add --json for machine-readable output.
+// The record prefix is the binding's writer prefix unless --prefix is given. --json prints JSON.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,7 +29,7 @@ const state = require('./programme-state.cjs');
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'show', 'init-parent', 'update-parent', 'claim', 'update', 'return'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json']);
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--submit', '--consume', '--verdict', '--session', '--prefix', '--repo-root']);
 
 function parseArgs(argv) {
@@ -35,21 +41,28 @@ function parseArgs(argv) {
     if (FLAGS.has(flag)) { args[flag.slice(2)] = true; continue; }
     if (!VALUES.has(flag)) throw new ProgrammeError('USAGE', `Unknown option: ${flag}`);
     const value = rest[index + 1];
-    if (value === undefined || value.startsWith('--')) throw new ProgrammeError('USAGE', `${flag} needs a value`);
+    if (value === undefined || value === '' || value.startsWith('--')) throw new ProgrammeError('USAGE', `${flag} needs a value`);
     args[flag.slice(2)] = value;
     index += 1;
   }
   if (args.issue !== undefined) {
-    if (!/^\d+$/.test(args.issue)) throw new ProgrammeError('USAGE', '--issue must be an issue number');
-    args.issue = Number(args.issue);
+    args.issue = /^\d+$/.test(args.issue) ? Number(args.issue) : NaN;
+    if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw new ProgrammeError('USAGE', '--issue must be an issue number (1 or more).');
+  }
+  if (isWrite(args) && !args.controller) {
+    throw new ProgrammeError('USAGE', 'In this version only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller.');
   }
   if (command === 'claim') {
-    if (Boolean(args.parent) === (args.issue !== undefined) || (args.issue !== undefined && (!Number.isSafeInteger(args.issue) || args.issue < 1))) {
-      throw new ProgrammeError('USAGE', 'claim needs exactly one of --parent or --issue <n>, with n >= 1.');
-    }
+    if (Boolean(args.parent) === (args.issue !== undefined)) throw new ProgrammeError('USAGE', 'claim needs --issue <n> or --parent.');
     if (args.parent && args.role !== undefined) throw new ProgrammeError('USAGE', '--role cannot be used with --parent.');
   }
   return args;
+}
+
+// Commands that write programme state or GitHub. In this version each one is the controller's.
+function isWrite(args) {
+  if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
+  return ['update-parent', 'claim', 'update', 'return'].includes(args.command);
 }
 
 function toolkitVersion(file = VERSION_FILE) {
@@ -84,14 +97,22 @@ function openContext(args, deps = {}) {
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = new state.STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now: deps.now, toolkitVersion: version });
   store.verify();
-  const session = args.session || (deps.environment || process.env).TOOLKIT_PROGRAMME_SESSION || null;
-  const writer = session ? { session, prefix: args.prefix || binding.writer_prefix } : null;
+  // The session comes from --session only; an inherited environment never makes a session a writer.
+  const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
   return { binding, transport, repository, store, writer, version };
 }
 
 function requireWriter(context) {
-  if (!context.writer) throw new ProgrammeError('WRITER_UNKNOWN', 'This command writes state: pass --session <id> or set TOOLKIT_PROGRAMME_SESSION.');
+  if (!context.writer) throw new ProgrammeError('WRITER_UNKNOWN', 'Controller writes need --session <the controller session id>.');
   return context.writer;
+}
+
+// Every controller write except creating the parent and a deliberate parent takeover needs the
+// writing session to hold the parent document.
+function requireParentHolder(context, parentDoc) {
+  const writer = requireWriter(context);
+  if (!state.isHolder(parentDoc, writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
+  return writer;
 }
 
 function outcomeFor(parentDoc, issue) {
@@ -114,13 +135,14 @@ function redact(doc) {
   return copy;
 }
 
-function writeResult(kind, number, result) {
-  return { document: `${kind === 'parent' ? 'parent' : 'issue'}-${number}.json`, outcome: result.outcome, revision: result.doc?.revision ?? null, epoch: result.doc?.fence?.epoch ?? null };
+function writeResult(kind, number, result, writer) {
+  return { document: `${kind === 'parent' ? 'parent' : 'issue'}-${number}.json`, outcome: result.outcome, revision: result.doc?.revision ?? null,
+    epoch: result.doc?.fence?.epoch ?? null, acting: { prefix: writer.prefix, session: writer.session } };
 }
 
 const commands = {
   reconcile(args, context) {
-    if (args.apply) requireWriter(context);
+    if (args.apply) requireParentHolder(context, readParent(context));
     if (args.apply && args['parent-file']) throw new ProgrammeError('USAGE', '--parent-file is for dry runs only.');
     const reconciler = new state.Reconciler({
       store: context.store,
@@ -151,14 +173,15 @@ const commands = {
     if (context.store.read('parent', context.binding.parent_issue).doc) throw new ProgrammeError('STATE_EXISTS', 'The parent state document already exists. Only the appointed controller runs update-parent.');
     doc.fence = { epoch: 1, holder_prefix: writer.prefix, holder_session: writer.session };
     const result = context.store.write('parent', context.binding.parent_issue, doc, { sha: null, previous: null });
-    return writeResult('parent', context.binding.parent_issue, result);
+    return writeResult('parent', context.binding.parent_issue, result, writer);
   },
 
   'update-parent'(args, context) {
     if (!args.patch) throw new ProgrammeError('USAGE', 'update-parent needs --patch <file>.');
+    const writer = requireParentHolder(context, readParent(context));
     const patch = readJsonFile(args.patch, 'patch');
-    const result = context.store.mutate('parent', context.binding.parent_issue, { writer: requireWriter(context), change: doc => state.applyPatch('parent', doc, patch) });
-    return writeResult('parent', context.binding.parent_issue, result);
+    const result = context.store.mutate('parent', context.binding.parent_issue, { writer, change: doc => state.applyPatch('parent', doc, patch) });
+    return writeResult('parent', context.binding.parent_issue, result, writer);
   },
 
   claim(args, context) {
@@ -166,36 +189,38 @@ const commands = {
     const route = args.model || args.effort ? { model: args.model || null, effort: args.effort || null, read_back: Boolean(args['route-read-back']) } : null;
     const options = { takeover: Boolean(args.takeover), role: args.role || null, route };
     if (args.parent) {
+      readParent(context);
       const result = context.store.mutate('parent', context.binding.parent_issue, { writer, authorise: false, change: doc => state.claimDocument(doc, writer, options) });
-      return writeResult('parent', context.binding.parent_issue, result);
+      return writeResult('parent', context.binding.parent_issue, result, writer);
     }
     const parentDoc = readParent(context);
+    requireParentHolder(context, parentDoc);
     const outcome = outcomeFor(parentDoc, args.issue);
     const result = context.store.mutate('child', args.issue, {
       writer, authorise: false, create: () => state.newChild({ repository: context.repository, outcome }),
       change: doc => state.claimDocument(doc, writer, { ...options, parentDoc }),
     });
-    return writeResult('child', args.issue, result);
+    return writeResult('child', args.issue, result, writer);
   },
 
   update(args, context) {
     if (!args.issue || !args.patch) throw new ProgrammeError('USAGE', 'update needs --issue <n> and --patch <file>.');
-    const patch = readJsonFile(args.patch, 'patch');
-    const writer = requireWriter(context);
     const parentDoc = readParent(context);
+    const writer = requireParentHolder(context, parentDoc);
+    const patch = readJsonFile(args.patch, 'patch');
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.applyPatch('child', doc, patch, { writer, parentDoc }) });
-    return writeResult('child', args.issue, result);
+    return writeResult('child', args.issue, result, writer);
   },
 
   return(args, context) {
     if (!args.issue || (!args.submit && !args.consume)) throw new ProgrammeError('USAGE', 'return needs --issue <n> and --submit <id> or --consume <id> --verdict ACCEPT|REOPEN.');
-    const writer = requireWriter(context);
     const parentDoc = readParent(context);
+    const writer = requireParentHolder(context, parentDoc);
     const change = args.submit
       ? doc => state.submitReturn(doc, { returnId: args.submit, writer, parentDoc })
       : doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc });
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
-    return writeResult('child', args.issue, result);
+    return writeResult('child', args.issue, result, writer);
   },
 };
 

@@ -354,7 +354,7 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
   assert.equal(github.issues.get(8).state, 'open');
 });
 
-test('the CLI bootstraps with ctrl, then hands the child from G0 to assigned G1 with controller acceptance', () => {
+test('the CLI bootstraps with the controller, which records gates and acceptance; executors only dry-run', () => {
   const ctrl = { session: 'ctrl', prefix: writer.prefix };
   const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
   const { github, store, binding } = setup({ parentIssue: 7, outcomes, controller: ctrl, initialiseParent: false, issues: gh => gh.addIssue(8, { parent: 7 }) });
@@ -362,50 +362,45 @@ test('the CLI bootstraps with ctrl, then hands the child from G0 to assigned G1 
   const output = [];
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
     toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
-  const run = (args, session = null) => {
+  const run = (args, session = 'ctrl') => {
     output.length = 0;
-    assert.equal(cli.main([...args, ...(session ? ['--session', session] : []), '--json'], deps), 0);
+    assert.equal(cli.main([...args, '--session', session, '--controller', '--json'], deps), 0);
     return JSON.parse(output.join(''));
   };
+  const dryRun = () => { output.length = 0; cli.main(['reconcile', '--json'], deps); return JSON.parse(output.join('')); };
   try {
     assert.equal(cli.main(['reconcile', '--session', 'g1'], deps), 1);
     assert.match(output.join(''), /Controller: resolve PARENT_STATE_MISSING on #7/);
-    const bootstrap = 'No parent state document for #7 yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.';
-    assert.ok(output.join('').includes(bootstrap));
-    assert.throws(() => run(['claim', '--issue', '8', '--role', 'G1'], 'g1'), { code: 'PARENT_STATE_MISSING', message: bootstrap });
+    assert.ok(output.join('').includes('No parent state document for #7 yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.'));
+    assert.throws(() => cli.main(['claim', '--issue', '8', '--role', 'G1', '--session', 'g1'], deps), { code: 'USAGE' });
     assert.equal(github.commits, 0);
     const catalogue = path.join(dir, 'catalogue.json');
     fs.writeFileSync(catalogue, JSON.stringify({ outcomes }));
-    assert.equal(run(['init-parent', '--catalogue', catalogue, '--apply'], 'ctrl').outcome, 'WRITTEN');
+    assert.equal(run(['init-parent', '--catalogue', catalogue, '--apply']).outcome, 'WRITTEN');
     assert.equal(store.read('parent', 7).doc.fence.holder_session, 'ctrl');
-    run(['claim', '--issue', '8', '--role', 'G0'], 'g0');
-    run(['return', '--issue', '8', '--submit', 'g0-r1'], 'g0');
-    run(['return', '--issue', '8', '--consume', 'g0-r1', '--verdict', 'ACCEPT'], 'ctrl');
-    assert.throws(() => run(['claim', '--issue', '8', '--role', 'G1'], 'g1'), error => {
-      assert.equal(error.code, 'CLAIM_HELD');
-      assert.match(error.message, /Issue 8 is held by the holder INT-TK421- for gate G0 \(epoch 1\)/);
-      assert.match(error.message, /take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller/);
-      return true;
-    });
-    run(['claim', '--issue', '8', '--role', 'G1', '--takeover'], 'g1');
+    run(['claim', '--issue', '8', '--role', 'G0']);
+    run(['return', '--issue', '8', '--submit', 'g0-r1']);
+    run(['return', '--issue', '8', '--consume', 'g0-r1', '--verdict', 'ACCEPT']);
+    const handover = run(['claim', '--issue', '8', '--role', 'G1']);
+    assert.deepEqual(handover.acting, { prefix: writer.prefix, session: 'ctrl' }, 'write results name the acting session');
     const patch = path.join(dir, 'candidate.json');
     fs.writeFileSync(patch, JSON.stringify({ candidate: { branch: 'feature' } }));
-    run(['update', '--issue', '8', '--patch', patch], 'g1');
-    run(['return', '--issue', '8', '--submit', 'g1-r1'], 'g1');
+    run(['update', '--issue', '8', '--patch', patch]);
+    run(['return', '--issue', '8', '--submit', 'g1-r1']);
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
-    const pending = run(['reconcile']);
+    const pending = dryRun();
     assert.deepEqual(pending.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: false, accepted: false, uat: null, review: null }]);
     assert.match(cli.formatReport(pending), /G1 not accepted/);
     for (const session of ['g0', 'g1', 'g2', 'helper']) {
-      assert.throws(() => run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT'], session), { code: session === 'g1' ? 'ROLE_REFUSED' : 'STALE_WRITER' });
+      assert.throws(() => cli.main(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', session], deps), { code: 'USAGE' });
+      assert.throws(() => cli.main(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', session, '--controller'], deps), { code: 'STALE_WRITER' });
     }
-    run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT'], 'ctrl');
-    const accepted = run(['reconcile']);
+    run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
+    const accepted = dryRun();
     assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, uat: null, review: null }]);
     assert.match(cli.formatReport(accepted), /G1 acceptance recorded/);
     assert.equal(codes(accepted).includes('CHILD_STATE_CONFLICT #8'), false);
-    assert.equal(store.read('parent', 7).doc.fence.holder_session, 'ctrl');
-    assert.equal(store.read('child', 8).doc.fence.holder_session, 'g1');
+    assert.equal(store.read('child', 8).doc.fence.holder_session, 'ctrl');
     assert.equal(github.issues.get(8).state, 'open');
     assert.equal(github.mutations(), 0, 'the walk writes private state only, never public issue state');
   } finally {
@@ -490,15 +485,16 @@ test('the close list excludes red, missing, pending or off-head checks, unmerged
   }
 });
 
-test('the command line binds identity, refuses writes without a session and prints a readable plan', () => {
+test('the command line binds identity, refuses writes without the controller flag or session and prints a readable plan', () => {
   const { github, binding } = setup();
   const output = [];
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
   assert.equal(cli.main(['reconcile'], deps), 0);
   assert.match(output.join(''), /Planned effects\n1\. /);
   assert.match(output.join(''), /Next action: Controller: run reconcile --apply for this plan; other sessions report it/);
-  assert.throws(() => cli.main(['reconcile', '--apply'], deps), { code: 'WRITER_UNKNOWN' });
-  assert.throws(() => cli.main(['reconcile', '--apply', '--parent-file', 'x.json', '--session', 's'], deps), { code: 'USAGE' });
+  assert.throws(() => cli.main(['reconcile', '--apply'], deps), { code: 'USAGE' });
+  assert.throws(() => cli.main(['reconcile', '--apply', '--controller'], deps), { code: 'WRITER_UNKNOWN' });
+  assert.throws(() => cli.main(['reconcile', '--apply', '--controller', '--parent-file', 'x.json', '--session', writer.session], deps), { code: 'USAGE' });
   assert.throws(() => cli.main(['reconcile'], { ...deps, originUrl: 'https://github.com/acme/other.git' }), { code: 'GH_FAILED' });
   assert.throws(() => cli.parseArgs(['reconcile', '--issue', 'abc']), { code: 'USAGE' });
   assert.throws(() => cli.parseArgs(['merge']), { code: 'USAGE' });
@@ -507,13 +503,13 @@ test('the command line binds identity, refuses writes without a session and prin
   try {
     const patch = path.join(dir, 'patch.json');
     fs.writeFileSync(patch, JSON.stringify({ next_action: 'Run the sandbox drill' }));
+    const asController = args => cli.main([...args, '--session', writer.session, '--controller'], deps);
     output.length = 0;
-    assert.equal(cli.main(['claim', '--issue', '423', '--role', 'G1', '--session', 'builder-1', '--model', 'opus', '--effort', 'high', '--route-read-back', '--json'], deps), 0);
+    assert.equal(asController(['claim', '--issue', '423', '--role', 'G1', '--model', 'opus', '--effort', 'high', '--route-read-back', '--json']), 0);
     assert.equal(JSON.parse(output.join('')).epoch, 1);
-    output.length = 0;
-    cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'builder-1'], deps);
-    cli.main(['return', '--issue', '423', '--submit', 'r1', '--session', 'builder-1'], deps);
-    cli.main(['return', '--issue', '423', '--consume', 'r1', '--verdict', 'REOPEN', '--session', 'controller-1'], deps);
+    asController(['update', '--issue', '423', '--patch', patch]);
+    asController(['return', '--issue', '423', '--submit', 'r1']);
+    asController(['return', '--issue', '423', '--consume', 'r1', '--verdict', 'REOPEN']);
     output.length = 0;
     cli.main(['show', '--issue', '423'], deps);
     const shown = JSON.parse(output.join(''));
@@ -521,7 +517,8 @@ test('the command line binds identity, refuses writes without a session and prin
     assert.equal(shown.document.gate.state, 'ACTIVE');
     assert.equal(shown.document.gate.session_id, '(redacted)');
     assert.deepEqual(shown.document.gate.route, { model: 'opus', effort: 'high', read_back: true });
-    assert.throws(() => cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'someone-else'], deps), { code: 'STALE_WRITER' });
+    assert.throws(() => cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'someone-else'], deps), { code: 'USAGE' });
+    assert.throws(() => cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'someone-else', '--controller'], deps), { code: 'STALE_WRITER' });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

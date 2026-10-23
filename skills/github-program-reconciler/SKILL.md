@@ -1,6 +1,6 @@
 ---
 name: github-program-reconciler
-description: Reconcile programme state on github.com where .github/toolkit-programme.json exists. Any session may dry-run reconcile and report at significant events (the binding is added; a child issue changes; a merge; a PR opens or its head moves; an issue closes or reopens; outcomes reorder; a release; a controller changes). Only the appointed controller holding the parent document runs --apply. Executors never apply, and never claim or take over the parent document. Only the appointed controller takes over the parent document, after posting its takeover record and verifying that the previous writer stopped. A gate successor the controller has assigned (for example G1 after G0) takes the child with claim --issue <n> --role <gate> --takeover. Only the parent holder consumes returns, records UAT and review, and sets DONE or RETIRED. The child holder may set release, candidate, blockers, next action, private and a non-final lifecycle, and submit returns; it never records acceptance or completion. Every programme.cjs command refuses without the binding; governed issue records are unchanged in 3.9.0. Never closes, deletes or merges.
+description: Reconcile programme state on github.com where .github/toolkit-programme.json exists, at significant events (the binding is added; a child issue changes; a merge; a PR opens or its head moves; an issue closes or reopens; outcomes reorder; a release; a controller changes). Any session may run the dry-run reconcile or show and report it. In 3.9.0 only the appointed controller writes programme state: it holds the parent document and runs every writing command itself, including gates, returns, UAT, review and completion. Executors (G0, G1, G2) and helpers never write; executor claims, returns and gate handover follow in the R5b custody release. Every programme.cjs command refuses without the binding; governed issue records are unchanged in 3.9.0. Never closes, deletes or merges.
 ---
 
 # GitHub Program Reconciler
@@ -11,7 +11,7 @@ This skill loads on its own (its OpenAI metadata sets `allow_implicit_invocation
 
 ## When to run
 
-Any session may run the dry-run `reconcile` at these significant events and report it. Only the appointed controller holding the parent document runs `--apply`. Executors never apply, and never claim or take over the parent document. Only the appointed controller takes over the parent document, after posting its takeover record and verifying that the previous writer stopped. A gate successor the controller has assigned (for example G1 after G0) takes the child with `claim --issue <n> --role <gate> --takeover`. Only the parent holder consumes returns, records UAT and review, and sets DONE or RETIRED. The child holder may set release, candidate, blockers, next action, private and a non-final lifecycle, and submit returns; it never records acceptance or completion.
+Any session may run the dry-run `reconcile` (or `show`) at these significant events and report it to the controller. In 3.9.0 only the appointed controller writes programme state; see "Who records what" below.
 
 - The binding is added (the repository opts into the reconciler).
 - A task (child issue) is added, deleted or modified.
@@ -63,11 +63,11 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 - Writes use Contents API compare-and-swap on the blob sha with readback. Unchanged state is never written (GitHub would still make an empty commit). The revision moves only when content changes; timestamps and pending effects do not count.
 - On a 409 the change is re-applied only when the other writer touched different top-level fields and the fence did not move; otherwise `STATE_CONFLICT` or `STALE_WRITER`.
 
-**Fence.** A document is held by one session and record prefix. A child may be written by its holder or by the parent's holder. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
+**Fence.** A document is held by one session and record prefix. In 3.9.0 every write comes from the session that holds the parent document. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
 
-**Who records what.** The appointed controller holds the parent document; only that holder runs `reconcile --apply`, consumes returns, records UAT and review, and sets `DONE` or `RETIRED`. Only the appointed controller runs `init-parent --apply`. Executors never apply, and never claim or take over the parent document. Only the appointed controller takes over the parent document, after posting its takeover record and verifying that the previous writer stopped. If you are the appointed controller and another session holds the parent, post your takeover record, then run claim --parent --takeover. One session holds a gate at a time. The single gate successor assigned by the controller (for example G1 after G0) takes the child with `claim --issue <n> --role <gate> --takeover`. G2 reviewers report their verdicts, and the controller records them in `review.verdicts`; reviewers do not take over the child. The current gate executor holds the child document and may set release, candidate, blockers, next action, `private`, a non-final lifecycle, and submit returns. A child holder never consumes returns, records UAT or review, or sets `DONE` or `RETIRED` (`ROLE_REFUSED` otherwise). Any session may dry-run and report.
+**Who records what.** In 3.9.0 only the appointed controller writes programme state. The controller creates the parent document (`init-parent --apply`) and holds it, and runs every writing command with `--controller`: `reconcile --apply`, `update-parent`, `claim`, `update` and `return`. It records each gate (`claim --issue <n> --role <gate>`), submits and consumes returns, records UAT and G2 review verdicts, and sets `DONE` or `RETIRED`. Without `--controller` a writing command is refused before it reads anything, and with it a session that does not hold the parent is refused by the fence. Every other session, including G0, G1 and G2 executors and helpers, runs only the dry-run `reconcile` and `show` and reports to the controller. Executor claims, returns and gate handover follow in the R5b custody release. A controller stopped by a takeover stops and reports to the owner; only a controller appointed after that takeover verifies that the previous writer stopped, posts its takeover record, then runs `claim --parent --takeover --controller`.
 
-**Returns (LIFE-1).** A gate return is consumed by its return ID, never by session. `REOPEN` puts the gate back to `ACTIVE` in the same session, a new submission takes a new ID, and `ACCEPT` retires the gate. Consuming the same ID again with the same verdict does nothing; a different verdict is `RETURN_CONFLICT`; a return from before a takeover is `STALE_RETURN`.
+**Returns (LIFE-1).** A gate return is consumed by its return ID, never by session. `REOPEN` puts the gate back to `ACTIVE` in the same session, a new submission takes a new ID, and `ACCEPT` retires the gate. Claiming an accepted gate again starts a new activation for a correction, which removes that acceptance until the new return is accepted. Consuming the same ID again with the same verdict does nothing; a different verdict is `RETURN_CONFLICT`; a return from before a takeover is `STALE_RETURN`.
 
 **Evidence at a head.** UAT `PASSED`, `UAT_RETAINED` and `UAT_PARTIAL_REQUIRED` must carry `at_head` (the full SHA), and a decided review must carry at least one verdict with its head; otherwise the write is refused. Evidence at an older head than the live PR head renders as `STALE_HEAD`.
 
@@ -76,15 +76,15 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 | Command | Writes |
 |---|---|
 | `reconcile [--issue <n>]` | Nothing: prints findings and the effect plan |
-| `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; only the appointed controller holding the parent document |
+| `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; controller only |
 | `show [--parent \| --issue <n>] [--include-private]` | Nothing; sessions and `private` are redacted unless asked |
-| `init-parent --catalogue <file> [--apply]` | Only the appointed controller runs `init-parent --apply`. Creates the parent document held by that controller |
-| `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch) |
-| `claim (--parent \| --issue <n>) [--role G0\|G1\|G2] [--model <m> --effort <e> [--route-read-back]] [--takeover]` | The fence and gate |
-| `update --issue <n> --patch <file>` | Release, candidate, blockers, next action, `private` or a non-final lifecycle; UAT, review and `DONE`/`RETIRED` only from the controller |
-| `return --issue <n> (--submit <id> \| --consume <id> --verdict ACCEPT\|REOPEN)` | Gate returns; consuming is the controller's |
+| `init-parent --catalogue <file> [--apply]` | Without `--apply`, nothing (validates the catalogue). Only the appointed controller runs `init-parent --apply`, which creates the parent document held by that controller |
+| `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch); controller only |
+| `claim (--parent \| --issue <n>) [--role G0\|G1\|G2] [--model <m> --effort <e> [--route-read-back]] [--takeover]` | The fence and gate; controller only |
+| `update --issue <n> --patch <file>` | Lifecycle, release, candidate, UAT, review, blockers, next action or `private`; controller only |
+| `return --issue <n> (--submit <id> \| --consume <id> --verdict ACCEPT\|REOPEN)` | Gate returns; controller only |
 
-Writes need `--session <id>` (or `TOOLKIT_PROGRAMME_SESSION`); the record prefix defaults to the binding's writer prefix. `--json` prints machine-readable output. `reconcile --parent-file <file>` dry-runs a proposed catalogue before `init-parent`. The PR for a child is found from `candidate.branch` and then kept by number.
+Every write needs `--controller` and `--session <id>` (an environment variable never supplies a session), and every write except `init-parent --apply` and a parent takeover needs that session to hold the parent document; the record prefix defaults to the binding's writer prefix. Every `--issue` is 1 or more. `--json` prints machine-readable output. `reconcile --parent-file <file>` dry-runs a proposed catalogue before `init-parent`. The PR for a child is found from `candidate.branch` and then kept by number.
 
 ## The reconcile pass
 
@@ -117,7 +117,7 @@ Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n
 ## Review truth
 
 - Inventory the PR's submitted reviews and inline conversations completely (all pages) before classifying findings. An empty, stale, unavailable or incomplete inventory is not green.
-- Record review verdicts with the reviewer and the exact full head SHA they reviewed (`update --patch` on `review.verdicts`). A verdict at an older head is stale once the PR head moves.
+- The controller records review verdicts with the reviewer and the exact full head SHA they reviewed (`update --patch` on `review.verdicts`). A verdict at an older head is stale once the PR head moves.
 - Classify materiality against the agreed acceptance (ship blocker, Hardening, Later or optional, unsupported or duplicate). A finding is not final because an executor calls it blocking; a disposition needs closing evidence at the exact head and a controller reference.
 - An initial nonblocking finding is recorded where the controller keeps deferred findings, with enough public-safe evidence to revalidate it before work on the same component, before that PR's finality and in the final programme sweep. Converge same-root findings instead of opening micro-issues.
 - Executors inspect and recommend. They never reply to or resolve threads, dismiss reviews, mark Ready, merge or claim finality; the controller and owner do.
