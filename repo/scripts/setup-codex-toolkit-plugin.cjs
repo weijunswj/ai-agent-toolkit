@@ -28,6 +28,8 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-stack-selection.cjs",
   "repo/scripts/toolkit-claude-task-session.cjs",
   "repo/scripts/toolkit-v3-native-helper-adapter.cjs",
+  "repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs",
+  "repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs",
   "repo/scripts/toolkit-v3-helper-guard.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
   "repo/scripts/toolkit-attribution-guard.cjs",
