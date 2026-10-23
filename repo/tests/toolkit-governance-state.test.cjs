@@ -325,6 +325,6 @@ test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result',
   assert.equal(result.state, 'ENABLED');
   assert.ok(perRunMs < 250, `one evaluation took ${perRunMs} ms`);
   const text = JSON.stringify(result);
-  assert.equal(text.includes('example-owner'), false, 'the raw remote is not in the result');
-  assert.equal(text.includes('github.com'), false);
+  assert.doesNotMatch(text, /example-owner/, 'the raw remote is not in the result');
+  assert.doesNotMatch(text, /github\.com/);
 });
