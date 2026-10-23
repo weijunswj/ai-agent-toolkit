@@ -10,7 +10,7 @@
     "schema": { "const": "toolkit.programme-state.child.v1" },
     "repository": { "$ref": "#/$defs/repository" },
     "issue": { "type": "integer", "minimum": 1 },
-    "revision": { "type": "integer", "minimum": 0, "description": "Increases only when content outside revision, volatile and pending_effects changes." },
+    "revision": { "type": "integer", "minimum": 0, "description": "Increases only when content outside revision, volatile, pending_effects and journals_seen changes." },
     "fence": { "$ref": "#/$defs/fence" },
     "lifecycle": { "enum": ["PLANNED", "ACTIVE", "WAITING_OWNER", "HOLD", "DONE", "RETIRED"] },
     "completed_at": { "type": ["string", "null"], "format": "date-time", "description": "When the outcome finished: the time the controller set it done, or the issue close time filled once by the reconciler. Orders the COMPLETED rows." },
@@ -21,8 +21,23 @@
       "required": ["role", "state", "session_id", "route", "returns"],
       "properties": {
         "role": { "enum": ["G0", "G1", "G2", null] },
-        "state": { "enum": ["ACTIVE", "WAITING_OWNER", "INTERRUPTED", "SUBMITTED", "RETIRED", null] },
+        "state": { "enum": ["ASSIGNED", "ACTIVE", "WAITING_OWNER", "INTERRUPTED", "SUBMITTED", "RETIRED", null] },
         "session_id": { "type": ["string", "null"], "minLength": 1 },
+        "assignment": {
+          "description": "The controller's current assignment for this gate. Only the session bound to it may journal; journals for any other assignment are stale and never consumed.",
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "role"],
+              "properties": {
+                "id": { "$ref": "#/$defs/assignmentId" },
+                "role": { "enum": ["G0", "G1", "G2"] }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
         "route": {
           "type": ["object", "null"],
           "additionalProperties": false,
@@ -41,9 +56,12 @@
             "required": ["return_id", "verdict", "consumed", "epoch"],
             "properties": {
               "return_id": { "type": "string", "minLength": 1 },
-              "verdict": { "enum": ["ACCEPT", "REOPEN", null] },
+              "verdict": { "enum": ["ACCEPT", "REOPEN", "WAITING_OWNER", null] },
               "consumed": { "type": "boolean" },
-              "epoch": { "type": "integer", "minimum": 0 }
+              "epoch": { "type": "integer", "minimum": 0 },
+              "assignment": { "$ref": "#/$defs/assignmentId" },
+              "at_head": { "$ref": "#/$defs/optionalSha" },
+              "mode": { "enum": ["native", "toolkit_assisted"], "description": "native: captured from the executor's checkpoint journal; toolkit_assisted: recorded by the controller from the executor's report." }
             }
           }
         }
@@ -120,6 +138,12 @@
     "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "next_action": { "type": "string", "minLength": 1, "description": "Exactly one next action." },
     "pending_effects": { "$ref": "#/$defs/pendingEffects" },
+    "journals_seen": {
+      "type": "object",
+      "description": "The last blob of each executor checkpoint journal the controller's reconcile has read, so a stale journal is reported once. Outside the digest.",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}--[0-9a-f]{16}\\.json$" },
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+    },
     "private": { "type": "object", "description": "Local paths, session IDs and anything not public-safe. Never rendered. Secret-shaped values are refused here as everywhere in the document." },
     "volatile": { "type": "object", "description": "Write timestamps and the writing Toolkit version; outside the digest." }
   },
@@ -127,6 +151,7 @@
     "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
     "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "optionalSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+    "assignmentId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$" },
     "fence": {
       "type": "object",
       "additionalProperties": false,

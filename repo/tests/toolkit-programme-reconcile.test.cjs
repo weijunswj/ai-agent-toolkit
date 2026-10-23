@@ -8,6 +8,7 @@ const test = require('node:test');
 const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
+const { gatedChild } = require('./toolkit-programme-fake-github.cjs');
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -51,6 +52,8 @@ function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGU
   return { github, store, binding, reconciler, repository, parentIssue };
 }
 
+// Posts a comment and returns it as the REST list shows it.
+const comment = (github, issue, body, options = {}) => { const id = github.addComment(issue, { body, ...options }); return github.commentsOf(issue).find(entry => entry.id === id); };
 const codes = report => report.findings.map(finding => `${finding.code} #${finding.issue}`);
 const kinds = report => report.effects.map(effect => `${effect.kind} #${effect.target.issue}`);
 const patchCount = (github, number) => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`)).length;
@@ -151,9 +154,9 @@ test('the graph replaces the hand-kept index once, moves a top block below the s
 test('every body lists every comment on its issue, with supersession marked and the latest comment winning', () => {
   const { github, reconciler } = setup();
   reconciler().run({ apply: true });
-  const first = github.addComment(423, '## INT-TK421-010 - First call\nDetails.');
-  const second = github.addComment(423, 'INT-TK421-011 new call\nSUPERSEDES=INT-TK421-010');
-  github.addComment(423, 'bot noise', { login: 'ci[bot]', type: 'Bot' });
+  const first = comment(github, 423, '## INT-TK421-010 - First call\nDetails.');
+  const second = comment(github, 423, 'INT-TK421-011 new call\nSUPERSEDES=INT-TK421-010');
+  comment(github, 423, 'bot noise', { login: 'ci[bot]', type: 'Bot' });
   const dry = reconciler().run();
   assert.ok(dry.findings.some(finding => finding.code === 'TRACE_STALE' && finding.issue === 423));
   assert.deepEqual(dry.effects.map(effect => effect.text), ["Update the comment trace in #423's body"]);
@@ -165,7 +168,7 @@ test('every body lists every comment on its issue, with supersession marked and 
     `- ${second.created_at.slice(0, 10)} · INT-TK421-011 · [INT-TK421-011 new call](#issuecomment-${second.id}) · SUPERSEDES=INT-TK421-010`,
   ], 'bots are left out');
   const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
-  assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.issues.get(423).comments, recordPrefix: 'INT-TK421-' }).ok, true);
+  assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-' }).ok, true);
   assert.equal(reconciler().run().summary, 'No changes');
   assert.deepEqual(state.findStateBlock(github.issues.get(467).body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(3), ['- No comments yet.']);
 });
@@ -175,12 +178,12 @@ test('a trace that would overflow the body moves whole into one index comment, t
   reconciler().run({ apply: true });
   const limit = github.issues.get(423).body.length + 600;
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
-  const early = [1, 2, 3, 4, 5].map(n => github.addComment(423, `INT-TK421-02${n} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
+  const early = [1, 2, 3, 4, 5].map(n => comment(github, 423, `INT-TK421-02${n} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
   const dry = run(false);
   assert.ok(dry.effects.some(effect => effect.text === "Move #423's comment trace (5 line(s)) into a new index comment"));
   const applied = run(true);
   assert.deepEqual(applied.holds, []);
-  const comments = github.issues.get(423).comments;
+  const comments = github.commentsOf(423);
   const index = comments.at(-1);
   assert.ok(index.body.startsWith('<!-- decision-trace-index -->'));
   for (const comment of early) assert.ok(index.body.includes(`(#issuecomment-${comment.id})`), 'the whole list moved');
@@ -190,13 +193,13 @@ test('a trace that would overflow the body moves whole into one index comment, t
   assert.deepEqual(lines, [`- ${index.created_at.slice(0, 10)} · index · [Earlier comments, part 1](#issuecomment-${index.id})`], 'the body keeps one link in place of the list');
   assert.equal(run(false).summary, 'No changes');
 
-  const later = github.addComment(423, 'INT-TK421-030 later');
+  const later = comment(github, 423, 'INT-TK421-030 later');
   run(true);
   const again = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(3);
   assert.equal(again.length, 2);
   assert.match(again[1], new RegExp(`\\(#issuecomment-${later.id}\\)$`), 'a newer comment is listed directly again');
   const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
-  assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.issues.get(423).comments, recordPrefix: 'INT-TK421-', threshold: limit }).ok, true);
+  assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-', threshold: limit }).ok, true);
 });
 
 test('an interrupted index-comment move is settled by reading the comments, never posted twice', () => {
@@ -204,11 +207,11 @@ test('an interrupted index-comment move is settled by reading the comments, neve
   reconciler().run({ apply: true });
   const limit = github.issues.get(423).body.length + 400;
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
-  [1, 2, 3, 4].map(n => github.addComment(423, `INT-TK421-04${n} ${'y'.repeat(80)}`));
+  [1, 2, 3, 4].map(n => comment(github, 423, `INT-TK421-04${n} ${'y'.repeat(80)}`));
   let failBody = true;
   github.intercept(call => (failBody && call.method === 'PATCH' && call.path.endsWith('/issues/423') ? (failBody = false, { status: 502, json: { message: 'Bad gateway' } }) : undefined));
   run(true);
-  const posted = () => github.issues.get(423).comments.filter(comment => comment.body.startsWith('<!-- decision-trace-index -->')).length;
+  const posted = () => github.commentsOf(423).filter(comment => comment.body.startsWith('<!-- decision-trace-index -->')).length;
   assert.equal(posted(), 1);
   run(true);
   assert.equal(posted(), 1, 'the next pass reads the index comment back instead of posting again');
@@ -347,12 +350,12 @@ test('continuation makes no duplicate child, no new gate and no false finality',
   const { github, store, reconciler } = setup();
   reconciler().run({ apply: true });
   const files = github.files.size;
-  const executor = { session: 'builder-7', prefix: 'INT-TK421-' };
-  const claim = () => store.mutate('child', 470, { writer: executor, authorise: false, change: doc => state.claimDocument(doc, executor, { role: 'G1' }) });
-  assert.equal(claim().outcome, 'WRITTEN');
-  assert.equal(claim().outcome, 'NOOP', 'the same session claiming again starts no new gate');
+  const parentDoc = store.read('parent', 421).doc;
+  const assign = () => store.mutate('child', 470, { writer, parentDoc, change: doc => state.assignGate(doc, { assignment: 'g1-a1', role: 'G1' }) });
+  assert.equal(assign().outcome, 'WRITTEN');
+  assert.equal(assign().outcome, 'NOOP', 'issuing the same assignment again starts no new gate');
   github.addPr(600, { head: SHA_A, merged: true, state: 'MERGED', contexts: [green('validate')], branch: 'h2-allow-list' });
-  store.mutate('child', 470, { writer: executor, change: doc => state.applyPatch('child', doc, { candidate: { branch: 'h2-allow-list' } }) });
+  store.mutate('child', 470, { writer, parentDoc, change: doc => state.applyPatch('child', doc, { candidate: { branch: 'h2-allow-list' } }) });
   const report = reconciler().run({ apply: true });
   assert.ok(codes(report).includes('CHILD_STATE_CONFLICT #470'), 'a merged PR without an accepted return is not completion');
   assert.equal(store.read('child', 470).doc.lifecycle, 'ACTIVE');
@@ -411,10 +414,9 @@ test('merged PRs with green checks list open issues for the controller without c
   for (const accepted of [false, true]) {
     const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
     const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
-    let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), writer, { role: 'G1' });
+    const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: 'G1', returnId: 'r1',
+      verdict: accepted ? 'ACCEPT' : null, writer, parentDoc: store.read('parent', 7).doc, head: SHA_A });
     doc.candidate.branch = 'feature';
-    doc = state.submitReturn(doc, { returnId: 'r1', writer });
-    if (accepted) doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc });
     store.write('child', 8, doc, { sha: null, previous: null });
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
 
@@ -423,13 +425,13 @@ test('merged PRs with green checks list open issues for the controller without c
     assert.equal(finding.issue, 8);
     assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
     assert.ok(finding.detail.endsWith(accepted ? 'G1 acceptance recorded' : 'G1 not accepted'));
-    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: null, review: null }]);
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: null, review: accepted ? 'PASSED' : null }]);
     assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
     assert.equal(github.mutations(), 0);
     const formatted = cli.formatReport(dry);
     assert.ok(formatted.includes('Ready to close (the controller decides; nothing is closed automatically)'));
     assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'G1 acceptance recorded' : 'G1 not accepted'}`));
-    assert.ok(formatted.includes('; UAT: not recorded; review: not recorded'));
+    assert.ok(formatted.includes(`; UAT: not recorded; review: ${accepted ? 'PASSED' : 'not recorded'}`));
 
     const applied = reconciler().run({ apply: true });
     assert.deepEqual(applied.holds, []);
@@ -447,30 +449,28 @@ test('merged PRs with green checks list open issues for the controller without c
 test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merged PR', () => {
   const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
   const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
-  const g0 = { session: 'g0', prefix: writer.prefix };
-  const g1 = { session: 'g1', prefix: writer.prefix };
   const parentDoc = store.read('parent', 7).doc;
-  let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), g0, { role: 'G0' });
-  doc = state.submitReturn(doc, { returnId: 'g0-r1', writer: g0 });
-  doc = state.consumeReturn(doc, { returnId: 'g0-r1', verdict: 'ACCEPT', writer, parentDoc });
-  doc = state.claimDocument(doc, g1, { role: 'G1', takeover: true });
+  let doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: 'G0', returnId: 'g0-r1', verdict: 'ACCEPT', writer, parentDoc });
+  doc = state.assignGate(doc, { assignment: 'g1-a1', role: 'G1' });
   doc.candidate.branch = 'feature';
   doc.uat.state = 'PENDING';
   doc.review.state = 'IN_REVIEW';
   store.write('child', 8, doc, { sha: null, previous: null });
   github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
 
-  const check = accepted => {
+  const check = (accepted, review = 'IN_REVIEW') => {
     const report = reconciler().run();
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: 'PENDING', review: 'IN_REVIEW' }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: 'PENDING', review }]);
     assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
-    assert.match(cli.formatReport(report), /UAT: PENDING; review: IN_REVIEW/);
+    assert.match(cli.formatReport(report), new RegExp(`UAT: PENDING; review: ${review}`));
   };
   check(false);
-  store.mutate('child', 8, { writer: g1, parentDoc, change: child => state.submitReturn(child, { returnId: 'g1-r1', writer: g1 }) });
+  store.mutate('child', 8, { writer, parentDoc, change: child => state.recordReturn(child, { returnId: 'g1-r1', assignment: 'g1-a1' }) });
   check(false);
-  store.mutate('child', 8, { writer, parentDoc, change: child => state.consumeReturn(child, { returnId: 'g1-r1', verdict: 'ACCEPT', writer, parentDoc }) });
-  check(true);
+  assert.throws(() => store.mutate('child', 8, { writer, parentDoc, change: child => state.consumeReturn(child, { returnId: 'g1-r1', verdict: 'ACCEPT', writer, parentDoc, liveHead: SHA_A }) }), { code: 'EVIDENCE_STALE' });
+  store.mutate('child', 8, { writer, parentDoc, change: child => state.applyPatch('child', child, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } }, { writer, parentDoc }) });
+  store.mutate('child', 8, { writer, parentDoc, change: child => state.consumeReturn(child, { returnId: 'g1-r1', verdict: 'ACCEPT', writer, parentDoc, liveHead: SHA_A }) });
+  check(true, 'PASSED');
   assert.equal(github.issues.get(8).state, 'open');
 });
 
@@ -491,22 +491,22 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
   try {
     assert.equal(cli.main(['reconcile', '--session', 'g1'], deps), 1);
     assert.match(output.join(''), /Controller: resolve PARENT_STATE_MISSING on #7/);
-    assert.ok(output.join('').includes('No parent state document for #7 yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.'));
-    assert.throws(() => cli.main(['claim', '--issue', '8', '--role', 'G1', '--session', 'g1'], deps), { code: 'USAGE' });
+    assert.ok(output.join('').includes('No parent state document for #7 yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.'));
+    assert.throws(() => cli.main(['assign', '--issue', '8', '--role', 'G1', '--assignment', 'g1-a1', '--session', 'g1'], deps), { code: 'USAGE' });
     assert.equal(github.commits, 0);
     const catalogue = path.join(dir, 'catalogue.json');
     fs.writeFileSync(catalogue, JSON.stringify({ outcomes }));
     assert.equal(run(['init-parent', '--catalogue', catalogue, '--apply']).outcome, 'WRITTEN');
     assert.equal(store.read('parent', 7).doc.fence.holder_session, 'ctrl');
-    run(['claim', '--issue', '8', '--role', 'G0']);
-    run(['return', '--issue', '8', '--submit', 'g0-r1']);
+    run(['assign', '--issue', '8', '--role', 'G0', '--assignment', 'g0-a1']);
+    run(['return', '--issue', '8', '--record', 'g0-r1', '--assignment', 'g0-a1']);
     run(['return', '--issue', '8', '--consume', 'g0-r1', '--verdict', 'ACCEPT']);
-    const handover = run(['claim', '--issue', '8', '--role', 'G1']);
+    const handover = run(['assign', '--issue', '8', '--role', 'G1', '--assignment', 'g1-a1']);
     assert.deepEqual(handover.acting, { prefix: writer.prefix, session: 'ctrl' }, 'write results name the acting session');
     const patch = path.join(dir, 'candidate.json');
     fs.writeFileSync(patch, JSON.stringify({ candidate: { branch: 'feature' } }));
     run(['update', '--issue', '8', '--patch', patch]);
-    run(['return', '--issue', '8', '--submit', 'g1-r1']);
+    run(['return', '--issue', '8', '--record', 'g1-r1', '--assignment', 'g1-a1']);
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const pending = dryRun();
     assert.deepEqual(pending.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: false, accepted: false, uat: null, review: null }]);
@@ -515,12 +515,15 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
       assert.throws(() => cli.main(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', session], deps), { code: 'USAGE' });
       assert.throws(() => cli.main(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', session, '--controller'], deps), { code: 'STALE_WRITER' });
     }
+    const review = path.join(dir, 'review.json');
+    fs.writeFileSync(review, JSON.stringify({ review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } }));
+    run(['update', '--issue', '8', '--patch', review]);
     run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
     const accepted = dryRun();
-    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, uat: null, review: null }]);
+    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, uat: null, review: 'PASSED' }]);
     assert.match(cli.formatReport(accepted), /G1 acceptance recorded/);
     assert.equal(codes(accepted).includes('CHILD_STATE_CONFLICT #8'), false);
-    assert.equal(store.read('child', 8).doc.fence.holder_session, 'ctrl');
+    assert.equal(store.read('child', 8).doc.fence.holder_session, null, 'the controller writes children through the parent fence');
     assert.equal(github.issues.get(8).state, 'open');
     assert.equal(github.mutations(), 0, 'the walk writes private state only, never public issue state');
   } finally {
@@ -532,15 +535,13 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
   for (const gate of ['G0', 'G1', 'G2']) {
     const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
     const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
-    let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), writer, { role: gate });
+    const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: gate, returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc, head: SHA_A });
     doc.candidate.branch = 'feature';
-    doc = state.submitReturn(doc, { returnId: 'r1', writer });
-    doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc });
     store.write('child', 8, doc, { sha: null, previous: null });
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const report = reconciler().run();
     const accepted = gate !== 'G0';
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, uat: null, review: null }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
     const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);
@@ -611,7 +612,7 @@ test('the command line binds identity, refuses writes without the controller fla
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
   assert.equal(cli.main(['reconcile'], deps), 0);
   assert.match(output.join(''), /Planned effects\n1\. /);
-  assert.match(output.join(''), /Next action: Controller: run reconcile --apply for this plan; other sessions report it/);
+  assert.match(output.join(''), /Next action: Controller: run reconcile --apply --controller for this plan; other sessions report it/);
   assert.throws(() => cli.main(['reconcile', '--apply'], deps), { code: 'USAGE' });
   assert.throws(() => cli.main(['reconcile', '--apply', '--controller'], deps), { code: 'WRITER_UNKNOWN' });
   assert.throws(() => cli.main(['reconcile', '--apply', '--controller', '--parent-file', 'x.json', '--session', writer.session], deps), { code: 'USAGE' });
@@ -625,18 +626,18 @@ test('the command line binds identity, refuses writes without the controller fla
     fs.writeFileSync(patch, JSON.stringify({ next_action: 'Run the sandbox drill' }));
     const asController = args => cli.main([...args, '--session', writer.session, '--controller'], deps);
     output.length = 0;
-    assert.equal(asController(['claim', '--issue', '423', '--role', 'G1', '--model', 'opus', '--effort', 'high', '--route-read-back', '--json']), 0);
-    assert.equal(JSON.parse(output.join('')).epoch, 1);
-    asController(['update', '--issue', '423', '--patch', patch]);
-    asController(['return', '--issue', '423', '--submit', 'r1']);
+    assert.equal(asController(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1', '--json']), 0);
+    assert.equal(JSON.parse(output.join('')).epoch, 0, 'assigning a gate does not move the fence');
+    asController(['return', '--issue', '423', '--record', 'r1', '--assignment', 'g1-a1']);
     asController(['return', '--issue', '423', '--consume', 'r1', '--verdict', 'REOPEN']);
+    asController(['update', '--issue', '423', '--patch', patch]);
     output.length = 0;
     cli.main(['show', '--issue', '423'], deps);
     const shown = JSON.parse(output.join(''));
     assert.equal(shown.document.next_action, 'Run the sandbox drill');
     assert.equal(shown.document.gate.state, 'ACTIVE');
-    assert.equal(shown.document.gate.session_id, '(redacted)');
-    assert.deepEqual(shown.document.gate.route, { model: 'opus', effort: 'high', read_back: true });
+    assert.deepEqual(shown.document.gate.assignment, { id: 'g1-a1', role: 'G1' });
+    assert.equal(shown.document.gate.returns.at(-1).verdict, 'REOPEN');
     assert.throws(() => cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'someone-else'], deps), { code: 'USAGE' });
     assert.throws(() => cli.main(['update', '--issue', '423', '--patch', patch, '--session', 'someone-else', '--controller'], deps), { code: 'STALE_WRITER' });
   } finally {

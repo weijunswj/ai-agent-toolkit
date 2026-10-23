@@ -5,7 +5,7 @@ name: Programme reconcile
 # its comments by the owner or a collaborator, and by hand.
 #
 # Inputs: the binding (.github/toolkit-programme.json), the secret TOOLKIT_PROGRAMME_TOKEN (writes
-# this repository's issues and the private state store) and the variable TOOLKIT_PROGRAMME_SESSION
+# this repository's issues and the private state store) and the variable TOOLKIT_PROGRAMME_WRITER
 # (the controller's stable writer name, for example toolkit-421-controller, which holds the parent
 # fence; every coordinator and this run write under it, so replacing a coordinator changes nothing).
 # Without both, the run does nothing and says so. An issue that is not a catalogued task is skipped.
@@ -54,11 +54,11 @@ jobs:
       - name: Reconcile the programme
         env:
           GH_TOKEN: ${{ secrets.TOOLKIT_PROGRAMME_TOKEN }}
-          SESSION: ${{ vars.TOOLKIT_PROGRAMME_SESSION }}
+          SESSION: ${{ vars.TOOLKIT_PROGRAMME_WRITER }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
           if [ -z "$GH_TOKEN" ] || [ -z "$SESSION" ]; then
-            echo "::notice::Programme reconcile is not set up: add the TOOLKIT_PROGRAMME_TOKEN secret and the TOOLKIT_PROGRAMME_SESSION variable. Nothing was read or written."
+            echo "::notice::Programme reconcile is not set up: add the TOOLKIT_PROGRAMME_TOKEN secret and the TOOLKIT_PROGRAMME_WRITER variable. Nothing was read or written."
             exit 0
           fi
           script=skills/github-program-reconciler/scripts/programme.cjs
