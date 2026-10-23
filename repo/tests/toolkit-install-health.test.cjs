@@ -57,7 +57,25 @@ test('everything current passes with no actions', (t) => {
   const passed = unit(t).run({ topology: 'root-only' });
   assert.equal(passed.status, STATUS.PASSED);
   assert.deepEqual(passed.actions, []);
-  assert.deepEqual(passed.checks.map((entry) => entry.id), ['update-record', 'helpers', 'global-rules', 'depth']);
+  assert.deepEqual(passed.checks.map((entry) => entry.id), ['update-record', 'helpers', 'global-rules', 'depth', 'helper-routes']);
+});
+
+test('the helper routes line reports the stored native result for this platform and the known limits', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const record = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'host-qualification', 'claude-code.json'), 'utf8'));
+  writeFile(path.join(root, 'repo', 'contracts', 'host-qualification', 'claude-code.json'), JSON.stringify(record));
+  const check = (platform, toolkitRoot = root) => new ToolkitInstallHealthCheck({ toolkitRoot, expectedVersion: VERSION, hubPath: path.join(root, 'hub'),
+    helperDefinitions: { refresh: () => ({ status: 'current' }), check: () => ({ status: 'current', project_overrides: [] }) },
+    globalRules: fakeGlobalRules(), depthSetting: { inspect: () => ({}) }, platform }).run();
+  const linux = byId(check('linux'), 'helper-routes');
+  assert.equal(linux.status, STATUS.PASSED, 'informational: nothing for the owner to fix');
+  assert.match(linux.summary, /^Qualified on Claude Code 2\.1\.309 \(Linux, 2026-10-23\)\./);
+  assert.match(linux.summary, /Known limit: A session started with --agents can redefine a Toolkit helper name/);
+  assert.match(byId(check('win32'), 'helper-routes').summary, /^Not yet qualified on Windows; last qualified on Claude Code 2\.1\.309 \(Linux, 2026-10-23\)\./);
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
+  t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+  assert.equal(byId(check('win32', empty), 'helper-routes').summary, 'Not yet qualified: no stored native result.');
 });
 
 test('the plugin check follows the setup facts and the copy Claude Code runs', (t) => {
@@ -68,6 +86,8 @@ test('the plugin check follows the setup facts and the copy Claude Code runs', (
   assert.match(byId(elsewhere, 'plugin').summary, /does not run Toolkit from the managed checkout/);
   const missing = check.run({ plugin: plugin('', { installed: false, current: false }) });
   assert.equal(missing.status, STATUS.ACTION);
+  // Matrix row A10: a missing or disabled plugin (setup's verify fails, so installed is false) is not enforced.
+  assert.match(byId(missing, 'plugin').summary, /is not installed, enabled and current in Claude Code, so its hooks are not enforced\./);
   assert.match(missing.actions[0], /Run `setup toolkit` and choose to install or refresh the Claude Code plugin/);
 });
 

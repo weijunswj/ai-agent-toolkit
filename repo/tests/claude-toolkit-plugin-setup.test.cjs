@@ -55,7 +55,8 @@ function writeFakeClaude(stateDir, options = {}) {
     updateCount: 0,
     uninstallCount: 0,
     trusted: options.trusted === undefined ? true : options.trusted,
-    hooksActive: options.hooksActive === undefined ? true : options.hooksActive
+    hooksActive: options.hooksActive === undefined ? true : options.hooksActive,
+    cachePath: options.cachePath || ''
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
@@ -192,7 +193,8 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       enabled: true,
       scope: state.scope || 'user',
       source: { path: state.repoRoot },
-      installPath: state.repoRoot,
+      installPath: state.cachePath || state.repoRoot,
+      ...(state.cachePath ? { readFromFolder: state.repoRoot, folderVersion: state.version } : {}),
       trusted: state.trusted,
       hooksActive: state.hooksActive
     }
@@ -489,26 +491,29 @@ test('claudeSpawnParts routes PATH-resolved bare Windows commands through an exp
   assert.equal(parts.windowsVerbatimArguments, true);
 });
 
-test('strict enforcement requires host-reported trust and active hooks bound to exact installed bytes', () => {
+test('the activation proof comes from the folder Claude Code runs: no hook blocker and a working agent hook there', () => {
+  // Claude Code reports no trust or hook-active state, so the list's own fields decide nothing.
   for (const options of [{ trusted: false }, { hooksActive: false }, { trusted: null }, { hooksActive: null }]) {
     const stateDir = tmpRoot();
     const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true, ...options }));
     assert.equal(result.status, 0, result.stderr);
-    const summary = JSON.parse(result.stdout);
-    assert.equal(summary.installed_current, true);
-    assert.equal(summary.strict_enforcement_verified, false);
-    assert.equal(summary.activation_proof, null);
+    assert.equal(JSON.parse(result.stdout).strict_enforcement_verified, true);
   }
 
+  // A local marketplace runs the plugin from readFromFolder; a stale cache copy does not matter.
   const stateDir = tmpRoot();
-  const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true }));
+  const cachePath = path.join(stateDir, 'stale-cache');
+  fs.mkdirSync(cachePath);
+  const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true, cachePath }));
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.trusted, true);
   assert.equal(summary.hook_active, true);
   assert.equal(summary.strict_enforcement_verified, true);
+  assert.equal(summary.cache_path, path.resolve(repoRoot));
   assert.equal(summary.activation_proof.plugin_version, expectedVersion());
   assert.equal(summary.activation_proof.schema, 3);
+  assert.equal(summary.activation_proof.cache_identity, crypto.createHash('sha256').update(path.resolve(repoRoot)).digest('hex'));
   for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
     assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
   }
@@ -516,15 +521,40 @@ test('strict enforcement requires host-reported trust and active hooks bound to 
   assert.equal(summary.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processLaunchBytes).digest('hex'));
 });
 
-test('plugin setup cannot manufacture native trust or hook activation', () => {
+test('plugin setup cannot claim hook activation when settings turn hooks off', () => {
   const stateDir = tmpRoot();
-  const fake = writeFakeClaude(stateDir, { initialInstalled: false, trusted: false, hooksActive: false });
-  const result = runSetup('--write', fake);
+  const fake = writeFakeClaude(stateDir, { initialInstalled: true, trusted: true, hooksActive: true });
+  writeJson(path.join(stateDir, '.claude', 'settings.json'), { disableAllHooks: true });
+  const result = runSetup('--verify', fake);
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.trusted, false);
   assert.equal(summary.hook_active, false);
   assert.equal(summary.strict_enforcement_verified, false);
+  assert.equal(summary.activation_proof, null);
+  assert.match(summary.warnings.join('\n'), /disableAllHooks, so Claude Code runs no hooks/);
+});
+
+test('hook blockers read user and managed settings, and a broken agent hook is not active', () => {
+  const root = tmpRoot();
+  const env = { HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: path.join(root, '.claude') };
+  const managedDirectory = path.join(root, 'managed');
+  assert.deepEqual(setup.hookBlockers({ env, managedDirectory }), []);
+  writeJson(path.join(managedDirectory, 'managed-settings.d', '10-hooks.json'), { allowManagedHooksOnly: true });
+  assert.match(setup.hookBlockers({ env, managedDirectory }).join('\n'), /allowManagedHooksOnly, so Claude Code may skip Toolkit's hooks/);
+  fs.writeFileSync(path.join(managedDirectory, 'managed-settings.json'), '{ not json');
+  assert.match(setup.hookBlockers({ env, managedDirectory }).join('\n'), /could not be read, so Toolkit cannot tell whether it turns hooks off/);
+
+  const runFolder = path.join(root, 'run');
+  fs.mkdirSync(path.join(runFolder, 'repo', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(runFolder, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs'), 'process.stdout.write("{}\\n");\n');
+  const broken = setup.hookActivation({ enabled: true, readFromFolder: runFolder, installPath: repoRoot }, { env, managedDirectory: path.join(root, 'none') });
+  assert.equal(broken.hooks_allowed, true);
+  assert.equal(broken.hook_active, false);
+  assert.match(broken.reasons.join('\n'), /did not refuse a test launch/);
+  const working = setup.hookActivation({ enabled: true, installPath: repoRoot }, { env, managedDirectory: path.join(root, 'none') });
+  assert.equal(working.hook_active, true, working.reasons.join('\n'));
+  assert.equal(setup.hookActivation({ enabled: false, installPath: repoRoot }, { env }).hook_active, false);
 });
 
 test('claudeSpawnParts executes explicit Windows exe paths directly and rejects ambiguous executable input', () => {

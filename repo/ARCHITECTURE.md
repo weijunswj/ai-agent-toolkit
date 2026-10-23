@@ -62,6 +62,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Package version | `repo/contracts/toolkit-local-bridge/version.json`, read at runtime through `repo/scripts/toolkit-version.cjs` |
 | Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Host needs for programme custody | `repo/docs/HOST-CONTRACT.md`, `repo/contracts/programme-state/host-contract-v1.json` |
+| Stored native host results (helper route) | `repo/contracts/host-qualification/claude-code.json` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership
