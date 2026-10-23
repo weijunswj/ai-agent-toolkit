@@ -13,11 +13,23 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 5. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
 6. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
 
+## Match: Host Configuration Writes
+
+Triggers: any Toolkit code that writes host configuration, including Codex, Claude Code or future OpenCode support.
+
+Read: `repo/docs/agent-playbooks/host-config-writes.md`.
+
 ## Match: Model Safety Flags
 
 Triggers: a session or subagent switched to a fallback model by a safety classifier, or always-loaded wording that may trigger false safety flags.
 
 Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/model-safety-flags.md`.
+
+## Match: Invariant Models
+
+Triggers: a feature that touches authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files).
+
+Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/invariant-models.md`.
 
 ## Docs By Task
 

@@ -11,7 +11,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
 | Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand; never offered as a plugin skill |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand, and the managed project-instructions block it places; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Scripts | `repo/scripts/` | Setup, bridge, hooks, synchronizers, audits and validators |
@@ -34,7 +34,11 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
+| Promise check | `repo/scripts/toolkit-promise-check.cjs` ([how to use it](docs/TOOLKIT-PROMISE-CHECK.md)) |
+| Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+
+Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scripts/codex-config-load-check.cjs` (Codex effective-load check and rollback) and `repo/scripts/host-json-config-write.cjs` (Claude JSON read-back and rollback); see [host config writes](docs/agent-playbooks/host-config-writes.md).
 
 ## Sources of truth
 

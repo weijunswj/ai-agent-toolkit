@@ -37,10 +37,13 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
 });
 
 test('each block stays inside its own budget', () => {
-  assert.ok(crlfBytes(GLOBAL) <= 16500, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // 3.8.1 added the owner's scratch and invariant-model rules; the combined Codex limit above stays the hard cap.
+  assert.ok(crlfBytes(GLOBAL) <= 16900, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 9500, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
-  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');
+  // CONTROLLER.md loads only for controllers, not every session; 3.8.1 added the owner's promise,
+  // run-standard, scratch, feedback-intake and G0 model rules, so its budget rose from 18000.
+  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 19000, 'CONTROLLER.md');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {

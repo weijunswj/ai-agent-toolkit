@@ -65,6 +65,7 @@ function createFakeCodexAppServer(root) {
     "    const v1 = process.env.SETUP_FAKE_CODEX_RUNTIME === 'v1';",
     "    process.stdout.write(JSON.stringify({ id: message.id, result: { data: [{ name: 'multi_agent_v2', enabled: !v1 }, { name: 'multi_agent', enabled: v1 }] } }) + '\\n');",
     "  }",
+    "  if (message.method === 'config/read') process.stdout.write(JSON.stringify({ id: message.id, result: { config: {} } }) + '\\n');",
     "  if (message.method === 'config/batchWrite') {",
     "    if (process.env.SETUP_FAKE_CODEX_EDITOR_LOG) fs.appendFileSync(process.env.SETUP_FAKE_CODEX_EDITOR_LOG, 'config/batchWrite\\n');",
     "    const target = path.join(process.env.CODEX_HOME, 'config.toml');",
@@ -127,10 +128,10 @@ function createMinimalSetupRepo(root, options = {}) {
     writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
   }
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.8.0', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.8.1', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '3.8.0', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '3.8.1', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
@@ -143,13 +144,17 @@ function createMinimalSetupRepo(root, options = {}) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const write = process.argv.includes('--write');",
+    ...(options.rejectZeroConfig ? [
+      "const active = path.join(process.env.CODEX_HOME, 'config.toml');",
+      "if (fs.existsSync(active) && fs.readFileSync(active, 'utf8').includes('max_threads = 0')) { console.error('Codex plugin CLI cannot load the zero helper cap'); process.exit(40); }",
+    ] : []),
     "const refreshMarker = path.join(process.cwd(), 'CODEX_PLUGIN_REFRESHED');",
     "const sourcePath = process.env.SETUP_FAKE_PRIVATE_REPO || process.cwd();",
     "const cachePath = process.env.SETUP_FAKE_PRIVATE_CACHE || path.join(process.cwd(), 'fake-codex-cache');",
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CODEX_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
-    "const summary = { ok: true, version: '3.8.0', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
+    "const summary = { ok: true, version: '3.8.1', installed: true, enabled: true, current: true, source_path: sourcePath, cache_path: cachePath, cache_root: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' };",
     "if (write && process.env.SETUP_FAKE_CODEX_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(41); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",
@@ -167,8 +172,8 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (write) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.env.SETUP_FAKE_CLAUDE_REFRESH_REQUIRED === '1' && !write && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture at ' + sourcePath); process.exit(1); }",
     "const active = process.env.SETUP_FAKE_CLAUDE_ENFORCEMENT !== '0' && process.env.SETUP_FAKE_CLAUDE_TRUST !== '0';",
-    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.8.0', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
-    "const summary = { ok: true, version: '3.8.0', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
+    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '3.8.1', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
+    "const summary = { ok: true, version: '3.8.1', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: sourcePath, source_identity: 'claude-plugin-registry', cache_path: cachePath, installed_entry: { installPath: cachePath }, install_path: [sourcePath], trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof };",
     "if (write && process.env.SETUP_FAKE_CLAUDE_WRITE_FAILURE === '1') { process.stdout.write(JSON.stringify(summary)); console.error('write failed at ' + cachePath); process.exit(42); }",
     "if (write) fs.writeFileSync(refreshMarker, '1');",
     "process.stdout.write(JSON.stringify(summary));",

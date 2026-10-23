@@ -193,3 +193,13 @@ test('review-state source-lock identities bind to canonical provenance paths', (
   assert.equal(record.target_key, `source-lock:${sourceProjectRel}`);
   assert.equal(record.source_lock_path, sourceLockRel);
 });
+
+// The committed review state must parse the way the scheduled notifier reads it (records in
+// target_key order). An out-of-order file made every notifier run fail after 3.7.0.
+test('the committed review state parses with records in target_key order', () => {
+  const { records } = reviewState.readReviewState(repoRoot);
+  const keys = records.map((record) => record.target_key);
+  assert.deepEqual(keys, [...keys].sort((a, b) => a.localeCompare(b)));
+  const validator = fs.readFileSync(path.join(repoRoot, 'repo/scripts/validate-toolkit.cjs'), 'utf8');
+  assert.match(validator, /sourceWatchReviewState\.readReviewState\(root, 'repo\/source-watch\/review-state\.json'\)/);
+});

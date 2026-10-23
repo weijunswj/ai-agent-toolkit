@@ -15,8 +15,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { HostJsonConfigWrite } = require('./host-json-config-write.cjs');
 const { canonicalPath } = require('./toolkit-canonical-path.cjs');
 
+// Existing Toolkit projections below are not a claim of host acceptance.
+// JSON read-back checks integrity; host schema/behaviour still requires restart/turn UAT.
 const SETTINGS = Object.freeze([
   Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, label: 'No AI attribution in commits and pull requests' }),
   Object.freeze({ id: 'cross-session-inbound', keyPath: ['crossSessionInbound'], value: 'accept', label: 'Messages from your other Claude sessions wake this one' }),
@@ -70,12 +73,13 @@ function withoutValue(settings, keyPath, createdParents) {
 }
 
 class ClaudeUserSettings {
-  #settingsPath; #recordPath;
+  #settingsPath; #recordPath; #settingsWriter;
 
-  constructor({ environment = process.env, controlRoot } = {}) {
+  constructor({ environment = process.env, controlRoot, settingsWriteOptions } = {}) {
     const configDir = environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
     const root = controlRoot || environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control');
     this.#settingsPath = path.resolve(configDir, 'settings.json');
+    this.#settingsWriter = new HostJsonConfigWrite(this.#settingsPath, path.join(path.resolve(root), 'backups', 'claude-settings'), settingsWriteOptions);
     this.#recordPath = path.join(path.resolve(root), 'claude-user-settings.json');
   }
 
@@ -118,13 +122,13 @@ class ClaudeUserSettings {
   #writeSettings(read, settings) {
     const current = fs.existsSync(this.#settingsPath) ? fs.readFileSync(this.#settingsPath, 'utf8') : null;
     if (current !== read.text) throw new Error('The Claude Code user settings file changed while setup was running; run setup again.');
-    if (settings === null) { fs.rmSync(this.#settingsPath, { force: true }); return; }
+    if (settings === null) { this.#settingsWriter.run(read.text, null); return; }
     const indent = read.text?.match(/^﻿?\{\r?\n(\s+)"/)?.[1] || 2;
     const bom = read.text?.startsWith('﻿') ? '﻿' : '';
     let body = `${JSON.stringify(settings, null, indent)}\n`;
     if (read.text?.includes('\r\n')) body = body.replace(/\n/g, '\r\n');
     fs.mkdirSync(path.dirname(this.#settingsPath), { recursive: true });
-    this.#atomicWrite(this.#settingsPath, bom + body);
+    this.#settingsWriter.run(read.text, bom + body);
   }
 
   #entryKey(spec) { return `${spec.id}|${canonicalPath(this.#settingsPath)}`; }

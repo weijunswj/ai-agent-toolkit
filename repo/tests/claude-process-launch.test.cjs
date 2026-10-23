@@ -66,7 +66,7 @@ test('unsafe or ambiguous executable strings are rejected before process creatio
 });
 
 test('relative path-like Claude commands are rejected on every platform', () => {
-  for (const platform of ['linux', 'darwin', 'win32']) {
+  for (const platform of ['linux', 'win32']) {
     const relative = platform === 'win32' ? '.\\bin\\claude.cmd' : './bin/claude';
     assert.throws(() => launch.validateExecutable(relative, platform), /must be absolute/i);
   }

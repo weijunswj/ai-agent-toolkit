@@ -38,6 +38,8 @@ Get explicit approval bound to the exact action before anything that may:
 - remove validation, tests, safety checks or guardrails;
 - rewrite git history.
 
+Deleting scratch this agent created in this task (temporary worktrees, briefs, outputs, test runs/repositories) needs no approval after durable report/evidence recording. Never delete sole evidence, user data or anything the agent did not create under this exception.
+
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
 ## Delegation
@@ -65,13 +67,14 @@ Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects
 ## Engineering Defaults
 
 - **Ownership:** give stateful or effectful behaviour (application, runtime, resource, persistence, workflow) a cohesive owner object with explicit constructor dependencies and methods that enforce its invariants and effect order, composed through narrow interfaces. Pure transformations, data definitions, predicates and stateless adapters may stay functions. No mutable state in module globals and no classes that only forward. Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics. Record the boundary and reason for a consequential exception, and have planning, validation and review check the actual state and effect owners and their dependency contracts, not class counts. Never refactor generated or third-party code as canonical source; keep its licences and provenance.
+- **Invariant models:** authority, custody, state-machine or host-config features start from a written model of who may do what in which state and a closure matrix (command x state x role, or config key x cited host limit), tested table-driven and reviewed against; a missing path reopens the matrix.
 - **Errors and privacy:** user-facing errors are generic with a support-safe reference that matches the server log entry. Logs hold no prompts, uploads, model outputs, secrets, auth headers or cookies, payment data, private connector data or unneeded personal data.
 - **Fallbacks:** fix the real failure path. No broad fallbacks, silent compatibility paths, sample-data fallbacks, fake success or catch-and-continue unless needed for correctness, data or migration safety, or approved compatibility; then make it narrow, visible, tested on both paths and documented with a removal condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations or failed validation, use fake business data, or silently downgrade production behaviour.
-- **Deployment branches:** unless the repository defines its own convention, a branch for deployment or release preparation of a named environment is `deployment/<environment>` (lowercase, for example `deployment/staging`); never `deploy/`, `release-deploy/`, bare `prod/` or `staging/`. A branch name grants no deployment, merge or live authority.
+- **Deployment branches:** unless the repository has its own convention, a deployment or release-preparation branch for a named environment is `deployment/<environment>` (lowercase, e.g. `deployment/staging`); never `deploy/`, `release-deploy/`, bare `prod/` or `staging/`. A branch name grants no deployment, merge or live authority.
 
 ## Scope And Hygiene
 
-Repository docs are task context. Before editing, read the repository's instructions, its playbook index (for example `docs/agent-playbooks/INDEX.md`) and only the smallest matching playbook or doc set, never recursively, including the docs for any documented workflow, setup, policy, generated file, migration, API contract or operations area you change. Use repo maps to target reading and keep them current. Inspect the target files and pick the smallest validation; avoid broad scans unless targeted evidence is insufficient.
+Before editing, read repository instructions, the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Use and maintain repo maps. Inspect targets; choose the smallest validation. Broaden scans only if targeted evidence is insufficient.
 
 Keep the diff narrow and in style. Change order: no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed. Never weaken validation, schemas, guardrails, approvals or error handling to pass. After editing, run the smallest validation first, fix targeted failures, rerun, and review the diff for unrelated changes.
 
@@ -79,13 +82,13 @@ Keep the diff narrow and in style. Change order: no change, reuse, smallest root
 
 Status, reports, plans, handoffs and operations notes go under an existing documented path, not new root `STATUS.md`, `REPORT.md` or `PLAN.md`. Broad docs work merges durable findings into the smallest canonical home, compresses without losing decisions, validation, risks, provenance, ownership or licensing, and reports what was consolidated, kept, archived or deleted.
 
-Never create files or folders at a drive root; use the user profile, the repo's temp folder or the scratchpad for temporary files and delete them after.
+Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`); use a user-profile folder only for an outside path or more permission, never a drive root. Delete scratch once its report/evidence is recorded.
 
 When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
 
 ## Human-readable Work
 
-New or changed human-facing work (screens, labels, notifications, errors, instructions, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows get business-purpose names, descriptive node names and notes on trigger, stages, inputs, outputs, errors, retries and recovery; renames keep node IDs, expressions, connections and credentials. Check the real surface when validating: misleading text is a real defect, but unrelated work triggers no blanket rename. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition.
+New or changed human-facing work (screens, labels, notifications, errors, instructions, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow the n8n rules' readable presentation; renames keep node IDs, expressions, connections and credentials. Check the real surface when validating: misleading text is a real defect, but unrelated work triggers no blanket rename. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition.
 
 ## Validation And Git
 

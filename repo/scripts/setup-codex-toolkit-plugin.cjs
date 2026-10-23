@@ -7,10 +7,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
+const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+const { captureCodexConfigSnapshot } = require('./codex-delegation-backup.cjs');
+const { backupRoot: codexBackupRoot } = require('./codex-delegation-common.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.8.0';
+const EXPECTED_TOOLKIT_VERSION = '3.8.1';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -37,6 +40,9 @@ const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
   'repo/scripts/codex-delegation-backup.cjs',
+  'repo/scripts/codex-config-load-check.cjs',
+  'repo/scripts/codex-app-server.cjs',
+  'repo/scripts/host-json-config-write.cjs',
   'repo/scripts/codex-delegation-common.cjs',
   'repo/scripts/codex-delegation-config.cjs',
   'repo/scripts/codex-delegation-layout.cjs',
@@ -1218,6 +1224,7 @@ function marketplaceMismatchMessage(binding) {
 // Every destructive step requires a positive marketplace binding read back from native list + config.
 class CodexToolkitWriteTransaction {
   #command; #options; #journal;
+  #configBackup = null; #loadChecked = false;
   #pluginChanged = false; #transition = 'none'; #warnings = [];
 
   constructor(command, options) {
@@ -1248,7 +1255,39 @@ class CodexToolkitWriteTransaction {
     return evaluateMarketplaceBinding(listed, readConfigSnapshot(this.#options.codexHome), this.#options.repoRoot, pluginList);
   }
 
+  // The host CLI renders marketplace paths and plugins.<plugin>.enabled booleans.
+  // https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23);
+  // no numeric/path limit is documented there, so check the actual resulting config.
+  #prepareConfigBackup() {
+    if (this.#configBackup) return;
+    const file = codexConfigPath(this.#options.codexHome);
+    const snapshot = captureCodexConfigSnapshot(file);
+    const dir = path.join(codexBackupRoot(file), `native-setup-${crypto.randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const backupPath = path.join(dir, snapshot.existed ? 'config.toml.original' : 'config.toml.absent');
+    fs.writeFileSync(backupPath, snapshot.bytes, { flag: 'wx', mode: 0o600 });
+    this.#configBackup = { configPath: file, snapshot, backupPath };
+  }
+
+  #checkConfig() {
+    if (!this.#configBackup || this.#loadChecked) return;
+    this.#loadChecked = true;
+    const current = captureCodexConfigSnapshot(this.#configBackup.configPath);
+    const previous = this.#configBackup.snapshot;
+    if (previous.existed === current.existed && previous.bytes.equals(current.bytes)) return;
+    const loadCheck = new CodexConfigLoadCheck(this.#options.loadCheckOptions || { codexCommand: this.#command }).verify({
+      ...this.#configBackup, replacementBytes: current.existed ? current.bytes : null,
+    });
+    if (loadCheck.status !== 'verified') this.#warnings.push(loadCheck.detail);
+  }
+
+  #complete(fields) {
+    this.#checkConfig();
+    this.#journal.finish('completed', fields);
+  }
+
   #record(step, binding, state, extra = {}) {
+    this.#prepareConfigBackup();
     if (this.#journal.isOpen) return this.#journal.step(step);
     return this.#journal.begin(step, {
       requested: { marketplace_root: this.#options.repoRoot, version: EXPECTED_TOOLKIT_VERSION },
@@ -1270,7 +1309,12 @@ class CodexToolkitWriteTransaction {
     try {
       return await this.#run();
     } catch (error) {
+      try { this.#checkConfig(); }
+      catch (loadError) { error = loadError; }
       this.#journal.finish('failed-unverified');
+      if (error.code === 'CODEX_CONFIG_LOAD_FAILED' || error.code === 'CODEX_CONFIG_ROLLBACK_FAILED') {
+        error.message += ` Native plugin or cache changes may remain; inspect the setup journal at ${this.#journal.path}.`;
+      }
       throw error;
     }
   }
@@ -1300,7 +1344,7 @@ class CodexToolkitWriteTransaction {
     pluginList = this.#listPlugins();
     state = this.#evaluate(pluginList);
     if (state.ok || state.refusesDowngrade) {
-      this.#journal.finish('completed');
+      this.#complete();
       return this.#result(state);
     }
 
@@ -1322,7 +1366,7 @@ class CodexToolkitWriteTransaction {
     });
     this.#pluginChanged = this.#pluginChanged || addOutcome.hookChanged;
     if (addOutcome.warning) this.#warnings.push(addOutcome.warning);
-    this.#journal.finish('completed', { installed_version: addOutcome.state.installed?.version || null });
+    this.#complete({ installed_version: addOutcome.state.installed?.version || null });
     return this.#result(addOutcome.state);
   }
 

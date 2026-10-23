@@ -101,7 +101,7 @@ test('setup docs claim no retired automatic admission and keep honest enforcemen
     // The retired Toolkit direct launcher's automatic memory admission is no longer claimed.
     assert.doesNotMatch(text, /limited automatically from verified available memory|automatically limits controlled children/i, relPath);
     if (relPath !== 'skills/toolkit-setup/SKILL.md') assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
-    assert.match(text, /does not ask|no ordinary .*capacity|no longer asks/i, relPath);
+    assert.match(text, /recommends one helper|recommendation is one helper/i, relPath);
     assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement|no Markdown-only path is called hard enforcement/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
