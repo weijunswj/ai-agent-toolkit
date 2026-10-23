@@ -151,14 +151,19 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   parent.fence = { epoch: 3, holder_prefix: 'INT-TK421-', holder_session: secret };
   const doc = child({ private: { path: secret }, fence: { epoch: 2, holder_prefix: 'INT-TK421-', holder_session: secret } });
   doc.gate = { role: 'G1', state: 'ACTIVE', session_id: secret, route: { model: secret, effort: secret, read_back: true }, returns: [] };
-  doc.next_action = 'Finish <!-- injected --> step | with pipe\nand newline';
+  doc.next_action = 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline';
   const children = new Map([[423, doc]]);
   const parentBody = state.renderParentBlockBody(parent, children);
   const childBody = state.renderChildBlockBody(doc, outcome);
   for (const body of [parentBody, childBody]) {
     assert.equal(body.includes(secret), false, 'a private value leaked into a rendered block');
-    assert.equal(body.includes('injected -->'), false, 'comment markers in free text are removed');
+    const freeText = body.split('\n').filter(line => line.includes('injected'));
+    assert.equal(freeText.length, 1, 'free text stays on one line');
+    assert.equal(/[<>]/.test(freeText[0].replace(/<!-- programme-state[^>]*-->/, '').replace(/\[[^\]]*\]\([^)]*\)/g, '')), false, 'no < or > from free text survives');
+    assert.match(freeText[0], /&lt;!&lt;!---- injected --!&gt;/);
+    assert.match(freeText[0], /step \\\\\\\| with pipe and newline/, 'backslash and pipe are both escaped');
   }
+  assert.equal(state.findStateBlock(state.renderBlock(childBody, '3.9.0')).error, undefined, 'free text cannot close the block early');
   const rendered = state.renderBlock(childBody, '3.9.0');
   const { blocks, errors } = managedBlock.findBlocks(rendered);
   assert.deepEqual(errors, []);

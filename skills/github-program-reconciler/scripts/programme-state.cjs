@@ -453,9 +453,12 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
 
 const shortSha = sha => (isSha(sha) ? sha.slice(0, 7) : '');
 
+// Free text as one Markdown table-safe line: shortened first, then `&`, `<` and `>` become entities
+// (so no comment, marker or tag can be opened) and backslash and `|` are escaped.
 function publicText(value) {
-  const text = String(value ?? '').replace(/<!--|-->/g, '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|').trim();
-  return text.length > TEXT_LIMIT ? `${text.slice(0, TEXT_LIMIT - 3)}...` : text;
+  const line = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const short = line.length > TEXT_LIMIT ? `${line.slice(0, TEXT_LIMIT - 3)}...` : line;
+  return short.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 function shaLink(repository, sha) {
@@ -570,7 +573,8 @@ function renderBlock(body, version) {
 
 const BLOCK_BEGIN = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ${BLOCK_NAME} v2 toolkit=(\\d+\\.\\d+\\.\\d+) sha256=([0-9a-f]{12}) -->$`);
 const BLOCK_END = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ${BLOCK_NAME} -->$`);
-const BLOCK_ANY = new RegExp(`AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:`);
+// Only a line that starts as an HTML comment is a marker; rendered free text has `<` escaped.
+const BLOCK_ANY = new RegExp(`^\\s*<!--\\s*AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:`);
 
 // The one state block in a body, with offsets; `error` for broken or duplicated markers.
 function findStateBlock(text) {
