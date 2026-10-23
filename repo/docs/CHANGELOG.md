@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased (governance states)
+
+- **Per-repository governance decision:** each repository is ENABLED, DECLINED, UNKNOWN or PORTABLE, computed by one function (`toolkit-governance-state.cjs`). The decision is stored in the user's own registry on this computer, keyed by repository identity, so every clone and worktree shares one answer. HTTPS, SSH and `git@` clones of a repository map to the same identity, and decisions stored under older key forms are still read. `node <Toolkit>/repo/scripts/toolkit-governance.cjs` has `status`, `enable`, `decline`, `reopen`, `check` (a read-only conformance report), `catalogue` (skills per state) and `migrate` (moves an old-form decision to the current identity).
+- **Rules follow the state:** the governed rules apply only in ENABLED repositories that also carry `.github/toolkit-programme.json`. DECLINED or incomplete repositories get the global rules, gates, subagents and portable skills. The global rules gain a governance-state line, and the governed block's opening says both pieces are needed. Repository rules can ship the binding from a new template, and a governed repository is offered a no-force-push branch ruleset.
+- **Hard stop until you decide:** in a git repository with no decision, Claude Code and Codex hold every message, and every tool that changes something, until you reply `toolkit governance enable` or `toolkit governance decline`. Held messages come back on the turn you answer. An agent cannot answer for you in any folder. The answer is also recorded in the repository as `.ai-agent-toolkit/governance.json`, which Toolkit keeps out of git (a `.gitignore` inside the folder plus one line added to the root `.gitignore`). That copy grants nothing by itself: the hook checks it against your registry and rewrites it when it is missing or wrong. Each session start says the repository's state.
+- **Limits:** Claude Code cloud sessions are not gated, because they keep no registry. On Codex, a hook that crashes or times out lets the message through, because Codex has no fail-closed setting for hooks. Codex also runs the new hooks only after you trust them in `/hooks`.
+- **Helper launches follow the state:** the helper hooks on both hosts treat a repository as governed only when its state is ENABLED with the binding, or when a Toolkit launcher started the session.
+
 ## Unreleased (decision history before planning)
 
 - **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
