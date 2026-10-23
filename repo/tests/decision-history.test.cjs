@@ -136,6 +136,9 @@ test('summaries are one short plain line safe inside a link', () => {
   assert.equal(summaryOf('[a](b) | c'), '(a)(b) c');
   assert.equal(summaryOf('x'.repeat(200)).length, 80);
   assert.equal(summaryOf(''), 'comment');
+  assert.equal(summaryOf('<!-- a\nb --> Real <b>line</b>'), 'Real bline/b');
+  assert.equal(summaryOf('<!-- never closed\nstill hidden'), 'comment');
+  assert.doesNotMatch(summaryOf('<<!--x-->!-- y'), /<|>/);
 });
 
 test('a gap-audit ledger reads as untagged entries and reports issues it does not hold', () => {
