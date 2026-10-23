@@ -20,7 +20,7 @@ test('the Projects controller skill has one source file with a Version line', ()
   }
   assert.doesNotMatch(text, /## Adding work to a repo/);
   assert.doesNotMatch(text, /Toolkit may absorb this framework later/);
-  assert.match(text, /No coordinator edits the copy uploaded to the user's claude\.ai account/);
+  assert.match(text, /Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten/);
 });
 
 test('no plugin payload or skills folder reaches the Projects controller skill', () => {
