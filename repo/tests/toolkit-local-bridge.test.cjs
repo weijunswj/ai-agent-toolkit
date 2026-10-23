@@ -12,7 +12,6 @@ const {
   runRepoValidation,
   getRepoValidationLabels,
   openUpdateReport,
-  updateReportDir,
   cleanupUpdateReports,
   sanitizeOutputMessage,
   replaceDirectoryAtomically,
@@ -20,85 +19,39 @@ const {
   formatAgentRulesPreflight,
   toolkitSkillPayload,
   payloadChecksum,
-  updateReportSignature,
   classifyUpdateReport,
   maybeWriteUpdateReport
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
-  prepareInstalledSessionStart,
-  sourceSessionStartCommand,
-  sourceHelperHookCommand,
-  sourceCheckpointHookCommand,
-  windowsSessionStartCommand,
-  windowsHelperHookCommand,
-  windowsCheckpointHookCommand,
-  CHECKPOINT_HOOK_TIMEOUT_SECONDS,
-  verifyInstalledCacheFreshness
+  prepareInstalledSessionStart
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
-const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const {
   RECORD_PREFIX,
   createOwnedStagingGeneration
 } = require('../scripts/toolkit-staging-generations.cjs');
-
-const repoRoot = path.resolve(__dirname, '..', '..');
-const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.9.0';
-
-function tmpRoot() {
-  const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
-  return fs.realpathSync.native(created);
-}
-
-function run(args, options = {}) {
-  return spawnSync(process.execPath, [script, ...args], {
-    cwd: options.cwd || repoRoot,
-    encoding: 'utf8',
-    env: { ...process.env, ...(options.env || {}) },
-    timeout: options.timeout || 300000
-  });
-}
-
-function isolatedHomeEnv(root, extra = {}) {
-  return {
-    PATH: '',
-    USERPROFILE: root,
-    HOME: root,
-    LOCALAPPDATA: path.join(root, 'local-app-data'),
-    VIRTUAL_ENV: '',
-    CONDA_PREFIX: '',
-    UV_PYTHON: '',
-    ...extra
-  };
-}
-
-// The Claude hook maintains only the installed Toolkit copy: the one Claude Code's plugin
-// registry names. This records `runningRoot` there inside the isolated `root`, in the same
-// shape `claude plugin marketplace add` and `claude plugin install` write.
-function installToolkitCopy(root, runningRoot = repoRoot) {
-  const configDir = path.join(root, '.claude');
-  writeJson(path.join(configDir, 'plugins', 'known_marketplaces.json'), {
-    'ai-agent-toolkit-local': { source: { source: 'directory', path: runningRoot }, installLocation: runningRoot }
-  });
-  writeJson(path.join(configDir, 'plugins', 'installed_plugins.json'), {
-    version: 2,
-    plugins: {
-      'ai-agent-toolkit@ai-agent-toolkit-local': [{
-        scope: 'user',
-        version: expectedBridgeVersion,
-        installPath: path.join(configDir, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion)
-      }]
-    }
-  });
-  return configDir;
-}
-
-// Environment for a Claude hook run in the isolated `root`: its Claude config folder is kept there too,
-// and the running Toolkit copy is this worktree, the one installToolkitCopy records by default.
-function claudeHookEnv(root, extra = {}) {
-  return isolatedHomeEnv(root, { CLAUDE_CONFIG_DIR: path.join(root, '.claude'), CLAUDE_PLUGIN_ROOT: repoRoot, ...extra });
-}
+const {
+  repoRoot,
+  script,
+  expectedBridgeVersion,
+  tmpRoot,
+  run,
+  isolatedHomeEnv,
+  installToolkitCopy,
+  claudeHookEnv,
+  readJson,
+  writeJson,
+  git,
+  writeFile,
+  writeDisabledHookHub,
+  completeCoreCacheFixture,
+  createMinimalToolkitSource,
+  readLatestReport,
+  writeRepoToolkitFixture,
+  commitAll,
+  createRepoAutoUpdateFixture,
+  currentCommit
+} = require('./support/toolkit-local-bridge-fixture.cjs');
 
 // Runs `fn` with this process's home, Claude config folder and Toolkit control root inside the
 // isolated `root`. An in-process bridge run then reads the isolated plugin registry, and the install
@@ -119,10 +72,6 @@ function withIsolatedClaudeHome(root, fn) {
       else process.env[key] = value;
     }
   }
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
 function repoSkillNames(root = repoRoot) {
@@ -158,39 +107,14 @@ function readPngSize(filePath) {
   };
 }
 
-function writeJson(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
-
 function parseLastJson(stdout) {
   const start = stdout.indexOf('{');
   assert.notEqual(start, -1, stdout);
   return JSON.parse(stdout.slice(start));
 }
 
-function git(cwd, args) {
-  const result = spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
-    timeout: 60000
-  });
-  assert.equal(
-    result.status,
-    0,
-    `git ${args.join(' ')} failed in ${cwd}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-  );
-  return result.stdout.trim();
-}
-
 function currentBranch(repoPath) {
   return git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
-}
-
-function writeFile(filePath, text) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, text, 'utf8');
 }
 
 function snapshotTree(root) {
@@ -216,67 +140,6 @@ function snapshotTree(root) {
 function ownedStagingArtifacts(parent) {
   if (!fs.existsSync(parent)) return [];
   return fs.readdirSync(parent).filter((name) => name.startsWith(RECORD_PREFIX) || name.startsWith('.staging-') || /^\..+\.staging-/.test(name));
-}
-
-function writeDisabledHookHub(hub) {
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: expectedBridgeVersion,
-    auto_sync_enabled: false,
-    repo_path: repoRoot
-  });
-}
-
-const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
-  'repo/contracts/toolkit-local-bridge/version.json',
-  'repo/scripts/toolkit-gate-contract-compiler.cjs',
-  'repo/scripts/toolkit-capability-registry.cjs',
-  'repo/contracts/agent-rules/global-rules.md',
-  'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
-  'repo/CONTROLLER.md',
-  'repo/ARCHITECTURE.md',
-]);
-const CORE_CACHE_FIXTURE_DIRS = Object.freeze([
-  'repo/contracts/control-plane-kernel',
-  'repo/contracts/repository-capability-registry',
-  'repo/scripts/toolkit-control-plane',
-  'repo/contracts/controller-kernel',
-]);
-
-function completeCoreCacheFixture(repoPath, includeFiles = true) {
-  if (includeFiles) fs.cpSync(path.join(repoRoot,'repo/scripts'),path.join(repoPath,'repo/scripts'),{recursive:true,force:false});
-  for (const relPath of includeFiles ? CORE_CACHE_FIXTURE_PATHS : []) {
-    const target = path.join(repoPath, ...relPath.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
-  }
-  for (const relPath of CORE_CACHE_FIXTURE_DIRS) {
-    fs.cpSync(path.join(repoRoot, ...relPath.split('/')),
-      path.join(repoPath, ...relPath.split('/')), { recursive: true });
-  }
-}
-
-function createMinimalToolkitSource(root, skills = { alpha: 'alpha v1\n', beta: 'beta v1\n' }) {
-  const repo = path.join(root, 'source-repo');
-  fs.mkdirSync(repo, { recursive: true });
-  git(repo, ['init']);
-  git(repo, ['checkout', '-B', 'main']);
-  configureGitUser(repo);
-  for (const [name, body] of Object.entries(skills)) {
-    writeFile(path.join(repo, 'skills', name, 'SKILL.md'), [
-      '---',
-      `name: ${name}`,
-      `description: ${name} fixture skill for Toolkit bridge tests`,
-      '---',
-      '',
-      body.trimEnd(),
-      ''
-    ].join('\n'));
-    writeFile(path.join(repo, 'skills', name, 'README.md'), `${name} readme\n`);
-  }
-  commitAll(repo, 'minimal toolkit skills');
-  return repo;
 }
 
 function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
@@ -341,17 +204,6 @@ function quoteCommandPart(value) {
   return `"${value}"`;
 }
 
-function readLatestReport(hub) {
-  const state = readJson(path.join(hub, 'state.json'));
-  assert.ok(state.last_update_report_path, 'state should record latest update report path');
-  assert.equal(fs.existsSync(state.last_update_report_path), true, 'latest update report should exist');
-  return {
-    state,
-    reportPath: state.last_update_report_path,
-    text: fs.readFileSync(state.last_update_report_path, 'utf8')
-  };
-}
-
 function createLegacyDelegatedSyncFixture() {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha legacy v1\n' });
@@ -380,158 +232,6 @@ function createLegacyDelegatedSyncFixture() {
   return { root, sourceRepo, hub, fromCommit, toCommit };
 }
 
-function configureGitUser(repoPath) {
-  git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
-  git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
-  git(repoPath, ['config', 'core.autocrlf', 'false']);
-}
-
-function writeHookLightSmokeFixture(repoPath) {
-  writeFile(path.join(repoPath, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'), [
-    "'use strict';",
-    "const assert = require('node:assert/strict');",
-    "const test = require('node:test');",
-    "test('fixture bridge smoke test passes', () => assert.equal(true, true));",
-    ''
-  ].join('\n'));
-}
-
-function writeRepoToolkitFixture(repoPath, label) {
-  writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
-  writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'SKILL.md'), [
-    '---',
-    'name: fixture-skill',
-    `description: Fixture Toolkit skill for bridge repo source tests ${label}`,
-    '---',
-    '',
-    `# Fixture Skill ${label}`,
-    ''
-  ].join('\n'));
-  writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'README.md'), `fixture ${label}\n`);
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'validate-toolkit.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    "if (process.env.TOOLKIT_BRIDGE_TEST_VALIDATE_FAIL === '1') {",
-    "  console.error('validation failed by fixture');",
-    '  process.exit(7);',
-    '}',
-    ''
-  ].join('\n'));
-  writeFile(path.join(repoPath, 'repo', 'tests', 'toolkit-local-bridge.test.cjs'), [
-    "'use strict';",
-    "const assert = require('node:assert/strict');",
-    "const test = require('node:test');",
-    "test('fixture bridge tests pass', () => assert.equal(true, true));",
-    ''
-  ].join('\n'));
-  writeHookLightSmokeFixture(repoPath);
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    "const fs = require('node:fs');",
-    "const marker = process.env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER;",
-    "if (marker) fs.appendFileSync(marker, `${JSON.stringify(process.argv.slice(2))}\\n`, 'utf8');",
-    "if (!process.argv.includes('--skip-repo-auto-update')) {",
-    "  console.error('missing recursion guard');",
-    '  process.exit(43);',
-    '}',
-    ''
-  ].join('\n'));
-  for (const name of [
-    'codex-delegation-backup.cjs',
-    'codex-delegation-common.cjs',
-    'codex-delegation-config.cjs',
-    'codex-delegation-layout.cjs',
-    'codex-delegation-state.cjs',
-    'setup-toolkit-core.cjs',
-    'repo-ignore-hygiene.cjs',
-    'repo-local-backup.cjs',
-    'toolkit-agent-control.cjs',
-    'claude-process-launch.cjs',
-    'toolkit-staging-generations.cjs'
-  ]) {
-    writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
-  }
-}
-
-function writeCodexPluginRefreshFixture(repoPath) {
-  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit',
-    version: expectedBridgeVersion,
-    hooks: './.codex-plugin/hooks/hooks.json'
-  }, null, 2));
-  writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
-  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [
-        {
-          matcher: 'startup|resume|clear|compact',
-          hooks: [
-            {
-              type: 'command',
-              command: sourceSessionStartCommand()
-            }
-          ]
-        }
-      ],
-      PreToolUse: [
-        {
-          matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
-          hooks: [{ type: 'command', command: sourceHelperHookCommand() }]
-        }
-      ],
-      Stop: [
-        {
-          hooks: [{ type: 'command', command: sourceCheckpointHookCommand(), timeout: CHECKPOINT_HOOK_TIMEOUT_SECONDS }]
-        }
-      ]
-    }
-  }, null, 2)}\n`);
-  for (const relPath of [
-    'repo/scripts/toolkit-codex-session-start.cjs',
-    'repo/scripts/toolkit-codex-session-start.ps1',
-  ]) {
-    const target = path.join(repoPath, ...relPath.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
-  }
-  completeCoreCacheFixture(repoPath);
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    ''
-  ].join('\n'));
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    "const fs = require('node:fs');",
-    "const path = require('node:path');",
-    "const source = process.cwd();",
-    "const oldRoot = process.env.PLUGIN_ROOT;",
-    "if (!oldRoot) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
-    "const target = process.env.TOOLKIT_TEST_CODEX_NEW_CACHE || oldRoot;",
-    "fs.rmSync(oldRoot, { recursive: true, force: true });",
-    "fs.rmSync(target, { recursive: true, force: true });",
-    "fs.mkdirSync(path.dirname(target), { recursive: true });",
-    "fs.cpSync(source, target, {",
-    "  recursive: true,",
-    "  filter: (src) => !src.split(path.sep).includes('.git')",
-    "});",
-    "if (process.platform === 'win32') {",
-    "  const hooksPath = path.join(target, '.codex-plugin', 'hooks', 'hooks.json');",
-    "  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));",
-    `  hooks.hooks.SessionStart[0].hooks[0].commandWindows = ${JSON.stringify(windowsSessionStartCommand())};`,
-    `  hooks.hooks.PreToolUse[0].hooks[0].commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
-    `  hooks.hooks.Stop[0].hooks[0].commandWindows = ${JSON.stringify(windowsCheckpointHookCommand())};`,
-    "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
-    "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
-    "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
-    "}",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '9.9.9', cache_root: target }, null, 2));",
-    ''
-  ].join('\n'));
-}
-
 function writeRealBridgeDelegator(repoPath) {
   writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
     '#!/usr/bin/env node',
@@ -551,41 +251,11 @@ function writeRealBridgeDelegator(repoPath) {
   ].join('\n'));
 }
 
-function commitAll(repoPath, message) {
-  git(repoPath, ['add', '.']);
-  git(repoPath, ['commit', '-m', message]);
-  return git(repoPath, ['rev-parse', 'HEAD']);
-}
-
-function createRepoAutoUpdateFixture() {
-  const root = tmpRoot();
-  const origin = path.join(root, 'origin.git');
-  const repo = path.join(root, 'repo');
-  const upstream = path.join(root, 'upstream');
-  git(root, ['init', '--bare', origin]);
-  fs.mkdirSync(repo, { recursive: true });
-  git(repo, ['init']);
-  git(repo, ['checkout', '-B', 'main']);
-  configureGitUser(repo);
-  writeRepoToolkitFixture(repo, 'initial');
-  const initialCommit = commitAll(repo, 'initial toolkit fixture');
-  git(repo, ['remote', 'add', 'origin', origin]);
-  git(repo, ['push', '-u', 'origin', 'main']);
-  git(root, ['--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
-  git(root, ['clone', origin, upstream]);
-  configureGitUser(upstream);
-  return { root, origin, repo, upstream, initialCommit };
-}
-
 function pushRepoToolkitUpdate(fixture, label) {
   writeRepoToolkitFixture(fixture.upstream, label);
   const commit = commitAll(fixture.upstream, `update ${label}`);
   git(fixture.upstream, ['push', 'origin', 'main']);
   return commit;
-}
-
-function currentCommit(repoPath) {
-  return git(repoPath, ['rev-parse', 'HEAD']);
 }
 
 function reportPathFromOutput(stdout, hub) {
@@ -2670,7 +2340,7 @@ test('hook mode validation uses hook-light smoke validation and skips full bridg
   const fullSuiteValidation = getRepoValidationLabels();
   assert.equal(fullSuiteValidation.length, 2);
   assert.equal(fullSuiteValidation[0], 'node repo/scripts/validate-toolkit.cjs');
-  assert.equal(fullSuiteValidation[1], 'node --test repo/tests/toolkit-local-bridge.test.cjs');
+  assert.equal(fullSuiteValidation[1], 'node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs');
 
   const validation = runRepoValidation(path.join(fixture.repo), { hookMode: true });
   assert.equal(validation.status, 'passed');
@@ -2883,68 +2553,6 @@ test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is o
   assert.equal(readJson(path.join(hub, 'state.json')).auto_sync_enabled, true);
 });
 
-
-test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  const template = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
-  writeFile(path.join(root, 'AGENTS.md'), template);
-  const hub = path.join(root, '.test-home', 'hub', 'current');
-  writeDisabledHookHub(hub);
-
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    cwd: root,
-    env: isolatedHomeEnv(path.join(root, '.test-home'), {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: repoRoot
-    })
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n');
-  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /STOP: Root AGENTS\.md is missing|repo-local repository-agent-rules are not installed/);
-});
-
-test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
-  const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
-  assert.equal(fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8'), '@AGENTS.md\n');
-  const oldMarkedShim = [
-    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.5.0 sha256=5bab3ffc1689 -->',
-    '# Claude Code Instructions',
-    '',
-    '@AGENTS.md',
-    '',
-    'Root `AGENTS.md` is canonical.',
-    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->',
-    ''
-  ].join('\n');
-  const cases = [
-    ['@AGENTS.md\n', []],
-    ['@AGENTS.md\r\n', []],
-    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
-    [oldMarkedShim, ['CLAUDE.md:stale-block']],
-    ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
-    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']],
-    ['# Notes\n\n```text\n@AGENTS.md\n```\n', ['CLAUDE.md:unmanaged']],
-    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['CLAUDE.md:broken-marker']]
-  ];
-  for (const [claudeText, expected] of cases) {
-    const root = tmpRoot();
-    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-    writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
-    writeFile(path.join(root, 'CLAUDE.md'), claudeText);
-    const result = runAgentRulesPreflight(
-      { hook: true, syncSource: 'claude-plugin' },
-      { targetRoot: root, pluginRoot: repoRoot }
-    );
-    assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), expected, JSON.stringify(claudeText));
-    if (expected.length) assert.equal(result.status, 'needs-attention');
-  }
-});
-
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
@@ -3059,234 +2667,6 @@ test('hook report is generated when repo was already advanced before the hook ru
   assert.match(report.text, new RegExp(`Previous observed commit: \`${fixture.initialCommit}\``));
   assert.match(report.text, new RegExp(`Current commit: \`${updatedCommit}\``));
   assert.match(report.text, /repo update status: `up-to-date`/);
-});
-
-test('hook report tells user to run setup toolkit when Codex native plugin cache is stale', () => {
-  const root = tmpRoot();
-  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex cache source\n' });
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
-  const hub = path.join(root, 'hub', 'current');
-
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
-  let result = run([
-    '--hub', hub,
-    '--repo-path', sourceRepo,
-    '--write',
-    '--enable-auto-sync',
-    '--enable-auto-sync',
-    '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
-  assert.equal(result.status, 0, result.stderr);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
-
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache: `stale`/);
-  assert.match(report.text, /Action needed: enable Codex plugin auto-refresh in setup, or run `setup toolkit`\./);
-  assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
-  assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
-  const repeatedState = readJson(path.join(hub, 'state.json'));
-  assert.equal(repeatedState.last_update_report_path, report.reportPath);
-  assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
-});
-
-test('hook report does not ask to enable Codex auto-refresh when it is already enabled', () => {
-  const fixture = createRepoAutoUpdateFixture();
-  const root = fixture.root;
-  const sourceRepo = fixture.repo;
-  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
-  const hub = path.join(root, 'hub', 'current');
-
-  writeCodexPluginRefreshFixture(sourceRepo);
-  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
-  let result = run([
-    '--hub', hub,
-    '--repo-path', sourceRepo,
-    '--write',
-    '--enable-auto-sync',
-    '--enable-codex-plugin-auto-refresh',
-    '--enable-auto-sync',
-    '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
-  assert.equal(result.status, 0, result.stderr);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
-
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Action needed: none\./);
-  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
-  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
-  assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
-  assert.doesNotMatch(report.text, /run `setup toolkit`/);
-});
-
-test('Codex auto-refresh across a version bump checks the newly installed cache folder', () => {
-  const fixture = createRepoAutoUpdateFixture();
-  const root = fixture.root;
-  const oldPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.6.0');
-  const newPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.7.0');
-  const hub = path.join(root, 'hub', 'current');
-
-  writeCodexPluginRefreshFixture(fixture.repo);
-  writeFile(path.join(oldPluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
-  let result = run([
-    '--hub', hub, '--repo-path', fixture.repo, '--write', '--enable-auto-sync',
-    '--enable-codex-plugin-auto-refresh', '--sync-source', 'codex-plugin'
-  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
-  assert.equal(result.status, 0, result.stderr);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH, PLUGIN_ROOT: oldPluginRoot, TOOLKIT_TEST_CODEX_NEW_CACHE: newPluginRoot })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(oldPluginRoot), false, 'the folder the hook ran from was replaced');
-  assert.equal(fs.existsSync(path.join(newPluginRoot, '.codex-plugin', 'plugin.json')), true);
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
-  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
-  assert.doesNotMatch(report.text, /refresh-failed|run `setup toolkit`/);
-});
-
-test('Claude hook reports the install check and never runs Codex refresh', () => {
-  const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  installToolkitCopy(root);
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot
-  });
-  const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', repoRoot);
-  const agents = path.join(root, '.claude', 'agents');
-  fs.mkdirSync(agents, { recursive: true });
-  const { file, text } = renderer.render('G0');
-  fs.writeFileSync(path.join(agents, file), text.replace(/SHA-256 `[0-9a-f]{64}`/, `SHA-256 \`${'0'.repeat(64)}\``));
-
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    env: claudeHookEnv(root, { PATH: process.env.PATH })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const report = readLatestReport(hub);
-  assert.match(report.text, /^## Install check$/m);
-  assert.doesNotMatch(report.text, /Claude Code native plugin cache/);
-  assert.doesNotMatch(report.text, /Codex native plugin cache/);
-  assert.doesNotMatch(report.text, /Codex plugin updated/);
-});
-
-test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
-  const fixture = createRepoAutoUpdateFixture();
-  const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
-  writeCodexPluginRefreshFixture(fixture.repo);
-  const refreshedCommit = commitAll(fixture.repo, 'add codex plugin refresh fixture');
-  git(fixture.repo, ['push', 'origin', 'main']);
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
-
-  let result = run([
-    '--hub', hub,
-    '--enable-repo-auto-update',
-    '--repo-path', fixture.repo,
-    '--repo-branch', 'main',
-    '--repo-remote', fixture.origin,
-    '--enable-auto-sync',
-    '--enable-codex-plugin-auto-refresh',
-    '--write'
-  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
-  assert.equal(result.status, 0, result.stderr);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
-  assert.equal(currentCommit(fixture.repo), refreshedCommit);
-  assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
-    [],
-    'auto-refresh should leave the installed plugin cache matching the trusted repo'
-  );
-
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
-  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
-  const state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.codex_plugin_auto_refresh_enabled, true);
-});
-
-test('Codex auto-refresh runs before a delegated hub sync failure', () => {
-  const fixture = createRepoAutoUpdateFixture();
-  const hub = path.join(fixture.root, 'hub', 'current');
-  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
-  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
-
-  let result = run([
-    '--hub', hub,
-    '--enable-repo-auto-update',
-    '--repo-path', fixture.repo,
-    '--repo-branch', 'main',
-    '--repo-remote', fixture.origin,
-    '--enable-auto-sync',
-    '--enable-codex-plugin-auto-refresh',
-    '--write'
-  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
-  assert.equal(result.status, 0, result.stderr);
-
-  writeCodexPluginRefreshFixture(fixture.upstream);
-  writeFile(path.join(fixture.upstream, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
-    '#!/usr/bin/env node',
-    "'use strict';",
-    "console.error('Refusing downgrade: delegated fixture is intentionally older than hub state');",
-    'process.exit(42);',
-    ''
-  ].join('\n'));
-  git(fixture.upstream, ['add', '.']);
-  git(fixture.upstream, ['commit', '-m', 'refresh codex cache but fail delegated sync']);
-  git(fixture.upstream, ['push', 'origin', 'main']);
-
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(fixture.root, {
-      PATH: process.env.PATH,
-      PLUGIN_ROOT: stalePluginRoot
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
-  assert.match(result.stdout, /delegated repo sync failed/);
-  assert.deepEqual(
-    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
-    [],
-    'auto-refresh should still update the Codex plugin cache before delegated sync failure is reported'
-  );
-
-  const report = readLatestReport(hub);
-  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
-  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
-  assert.match(report.text, /repo update status: `sync-delegation-failed`/);
-  assert.match(report.text, /warning\/error: `delegated repo sync failed:/);
 });
 
 test('active hook writes persist each source independently without requiring a report', () => {
@@ -4282,7 +3662,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.ok(setupValidationBlock, relPath);
     assert.match(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs/, relPath);
     assert.doesNotMatch(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
-    assert.match(text, /Run `node --test repo\/tests\/toolkit-local-bridge\.test\.cjs` when the change affects bridge behavior/i, relPath);
+    assert.match(text, /Run `node --test repo\/tests\/toolkit-local-bridge\.test\.cjs repo\/tests\/toolkit-local-bridge-codex\.test\.cjs repo\/tests\/toolkit-local-bridge-claude\.test\.cjs` when the change affects bridge behavior/i, relPath);
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
@@ -4329,26 +3709,6 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /fully resolved on a machine only after the Codex cache and the managed checkout both have the fixed bridge/i);
   assert.match(text, /Codex: run `setup toolkit` in Codex/i);
   assert.match(text, /Claude Code: run `setup toolkit --host claude-code`/i);
-});
-
-test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {
-  const marketplace = readJson(path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'));
-  assert.equal(marketplace.name, 'ai-agent-toolkit-local');
-  assert.equal(marketplace.interface.displayName, 'AI Agent Toolkit local');
-  assert.equal(Array.isArray(marketplace.plugins), true);
-  assert.equal(marketplace.plugins.length, 1);
-  assert.deepEqual(marketplace.plugins[0], {
-    name: 'ai-agent-toolkit',
-    source: {
-      source: 'local',
-      path: '.'
-    },
-    policy: {
-      installation: 'AVAILABLE',
-      authentication: 'ON_USE'
-    },
-    category: 'Developer Tools'
-  });
 });
 
 test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {

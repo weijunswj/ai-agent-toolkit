@@ -12,7 +12,10 @@ permissions:
 # The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The
 # validate job runs after every shard, also when one failed: its "Run validation" step runs the
 # repository checks and then proves from the shard summaries that each system ran every test file
-# once with no failure. A failed, cancelled or skipped shard fails it.
+# once with no failure. A failed, cancelled or skipped shard fails it. The personal-data job checks
+# every commit of the pull request or push, the commit messages, the branch name and the pull
+# request title and body for email addresses, phone numbers and WhatsApp links (values are never
+# printed); validate waits for it too, so a hit or a scan error fails the required check.
 jobs:
   tests-linux:
     runs-on: ubuntu-latest
@@ -90,8 +93,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  personal-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check for personal data
+        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci
+
   validate:
-    needs: [tests-linux, tests-windows]
+    needs: [tests-linux, tests-windows, personal-data]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

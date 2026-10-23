@@ -17,6 +17,12 @@ Bind each approval to the exact owner, action, target, resources, effects, recip
 - Do not touch customer/private data or live databases without approval.
 - Do not remove tests, validation, guardrails, or approval gates to make a check pass.
 
+## Personal Data Pushed By Mistake
+
+- Pushed to a public repository means public. Clones, forks, cached views and pull request references can keep it; squashing, rebasing, force-pushing or deleting the branch does not remove it from GitHub.
+- Agents never rewrite history or force-push to "fix" it. Remove the value in a new commit, record the affected commit SHAs and where the value appeared (place and class, never the value), and tell the owner at once. Rotate anything credential-like first.
+- Offer the owner the GitHub removal route: GitHub's sensitive-data procedure, then a GitHub Support request to purge cached views and pull request references. That route is the owner's decision and action, and it never reaches forks or other people's clones.
+
 ## Reporting
 
 If approval is required, state the action, target, risk, and exact confirmation needed. If approval is not available, stop before the risky action and report the safe work completed.

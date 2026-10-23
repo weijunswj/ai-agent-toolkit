@@ -12,6 +12,10 @@
 //                          invocation of the shared HelperRouteGuard.
 //   NativeHookDecision   - composes the above for a host hook command and renders
 //                          the native allow/deny output.
+// Host lanes live in their own files and extend HostDialect through a factory, so they
+// never require this core back:
+//   toolkit-v3-native-helper-adapter-codex.cjs  - Codex dialect, hook matcher, registration check.
+//   toolkit-v3-native-helper-adapter-claude.cjs - Claude dialect, exact model maps, Task alias.
 // The exported functions keep the existing public contract as thin facades.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,7 +24,9 @@ const { types } = require('node:util');
 const compiler = require('./toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('./toolkit-v3-helper-guard.cjs');
 const { CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
-const helperSpec = require('./toolkit-claude-helper-spec.cjs');
+const { CODEX_SPAWN_MATCHER, CODEX_HELPER_HOOK_MATCHER, CodexHookMatcher, defineCodexDialect,
+  verifyCodexHelperRegistration } = require('./toolkit-v3-native-helper-adapter-codex.cjs');
+const { defineClaudeDialect } = require('./toolkit-v3-native-helper-adapter-claude.cjs');
 
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 const HELPER_PROMPT = 'Complete only the lead-assigned bounded leaf task. Do not spawn or delegate to another agent. Do not approve scope, publish, activate or declare programme completion. Return exact changed files, checks and blockers to the lead.';
@@ -61,118 +67,19 @@ class HostDialect {
   helperIdentity(name) { return name; }
   entryFor(toolName) { return toolName; }
   resolveObservedState(binding) { return binding.host_state; }
+  // Hook-command vocabulary: which native tool names this host's hook decides, whether a
+  // request forks the session, the guard entry name, extra pinned caller fields, alias checks.
+  handles() { return false; }
+  forksSession() { return false; }
+  canonicalName(toolName) { return toolName; }
+  callerBinding() { return {}; }
+  checkAlias() {}
 }
 
-// Codex serialises a hook tool name as `spawn_agent` only for the default and
-// `multi_agent_v1` namespaces. A namespaced MultiAgentV2 spawn (default namespace
-// `collaboration`, configurable) reaches hooks under its flattened name, the
-// namespace concatenated with `spawn_agent` (`collaborationspawn_agent`), with no
-// `Agent` matcher alias. Codex accepts `features.multi_agent_v2.tool_namespace` only
-// as [A-Za-z0-9_-]+, so the registered matcher and this recogniser share that one
-// alphabet, hyphen included. Both hooks.json copies carry CODEX_HELPER_HOOK_MATCHER: the spawn
-// names plus Bash, which the same hook checks for AI attribution lines.
-const CODEX_TOOL_NAMESPACE = /^[A-Za-z0-9_-]+$/;
-const CODEX_SPAWN_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$';
-const CODEX_HELPER_HOOK_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$';
-const CODEX_SPAWN_TOOL = new RegExp(CODEX_SPAWN_MATCHER);
-// Registration probes: default/V1 name, its alias, the default V2 namespace and a hyphenated one.
-const CODEX_REGISTRATION_PROBES = Object.freeze(['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent']);
-
-// Codex hook matcher semantics (codex-rs hooks/src/engine/matcher.rs): empty or `*`
-// matches everything; a pattern of only [A-Za-z0-9_|] is an exact pipe list; any
-// other pattern is an unanchored regex search.
-class CodexHookMatcher {
-  #kind; #pattern; #regex;
-  constructor(pattern) {
-    this.#pattern = typeof pattern === 'string' ? pattern : '';
-    if (!this.#pattern || this.#pattern === '*') this.#kind = 'ALL';
-    else if (/^[A-Za-z0-9_|]+$/.test(this.#pattern)) this.#kind = 'EXACT';
-    else { this.#kind = 'REGEX'; this.#regex = new RegExp(this.#pattern, 'u'); }
-    Object.freeze(this);
-  }
-  matches(input) {
-    if (this.#kind === 'ALL') return true;
-    if (typeof input !== 'string') return false;
-    return this.#kind === 'EXACT' ? this.#pattern.split('|').includes(input) : this.#regex.test(input);
-  }
-}
-
-class CodexDialect extends HostDialect {
-  constructor() {
-    super({ host: 'codex', provider: 'openai',
-      overrideFields: [['provider', 'provider'], ['model_provider', 'provider'], ['model', 'model'], ['reasoning_effort', 'reasoning'], ['effort', 'reasoning']] });
-  }
-  nativeDefinition(name, route) {
-    return { agent_type: name, agent_config: { model: route.model, model_provider: route.provider,
-      model_reasoning_effort: route.reasoning, developer_instructions: HELPER_PROMPT } };
-  }
-  static isSpawnRequest(toolName) { return typeof toolName === 'string' && CODEX_SPAWN_TOOL.test(toolName); }
-  entryFor(toolName) { return toolName === 'Agent' ? 'codex_agent_alias' : 'codex_spawn_agent'; }
-  // The guard entry name for a native hook name: namespaced spawns map to spawn_agent.
-  canonicalName(toolName) { return toolName === 'Agent' ? 'Agent' : 'spawn_agent'; }
-  // A fresh child only. MultiAgentV1 forks with fork_context:true; MultiAgentV2 forks the
-  // full history unless fork_turns is exactly "none" (omitted, "all" or a count fork).
-  forksSession(toolName, args) {
-    if (args.fork_context === true) return true;
-    const v2 = (toolName !== 'spawn_agent' && toolName !== 'Agent') || Object.hasOwn(args, 'task_name') || Object.hasOwn(args, 'fork_turns');
-    return v2 && (typeof args.fork_turns !== 'string' || args.fork_turns.trim().toLowerCase() !== 'none');
-  }
-}
-
-// Exact native IDs only. Family aliases can resolve differently with environment,
-// allowlist, parent family and mods; the observer must resolve those first.
-const CLAUDE_NATIVE_MODELS = Object.freeze({ 'haiku-5.5': 'claude-haiku-5-5', 'opus-5.5': 'claude-opus-5-5' });
-const CLAUDE_LOGICAL_MODELS = Object.freeze(Object.fromEntries(Object.entries(CLAUDE_NATIVE_MODELS).map(([k, v]) => [v, k])));
-class ClaudeDialect extends HostDialect {
-  constructor() {
-    super({ host: 'claude-code', provider: 'anthropic',
-      overrideFields: [['provider', 'provider'], ['model_provider', 'provider'], ['model', 'model'], ['reasoning_effort', 'reasoning'], ['effort', 'reasoning']] });
-  }
-  supports(route) { return super.supports(route) && Boolean(CLAUDE_NATIVE_MODELS[route.model]); }
-  logicalModel(value) { return CLAUDE_LOGICAL_MODELS[value] || value; }
-  static nativeModel(route) {
-    if (!route || route.provider !== 'anthropic' || !CLAUDE_NATIVE_MODELS[route.model]) fail('CLAUDE_NATIVE_ROUTE_UNSUPPORTED');
-    return CLAUDE_NATIVE_MODELS[route.model];
-  }
-  // One helper name per role on every Claude definition source: the saved user agent
-  // (toolkit-claude-helper-agents.cjs) and a launcher's session --agents definition both
-  // load as `toolkit-<role>-helper`. Toolkit ships no plugin agent, so no plugin-scoped
-  // identity exists. Which source was loaded is a launcher observation, not this name.
-  // Tools, limits, description and instructions come from the same helper spec as the
-  // saved user agent, so a session definition never inherits the parent's tools.
-  nativeDefinition(name, route, callerRole) {
-    const spec = helperSpec.roleSpec(callerRole);
-    if (spec.name !== name) fail('NATIVE_HELPER_DEFINITION_SELECTION_INVALID');
-    return { name, model: CLAUDE_NATIVE_MODELS[route.model], effort: route.reasoning,
-      tools: [...spec.tools], disallowedTools: [...spec.disallowed], maxTurns: spec.maxTurns,
-      description: spec.description, prompt: helperSpec.roleInstructions(spec) };
-  }
-  helperIdentity(_name, native) { return native.name; }
-  entryFor() { return 'claude_parent_agent'; }
-
-  // Resolves the concrete model and effort Claude Code will actually use, following
-  // its precedence. Aliases, provider remaps and substitution must be observed natively;
-  // they cannot manufacture an exact approved route here.
-  resolveObservedState(binding, invocation, environment) {
-    const config = binding.native_config;
-    if (!config || config.loaded_agent !== binding.helper_identity || config.mods_present !== false
-      || config.provider !== 'anthropic' || !Array.isArray(config.available_models)) fail('CLAUDE_EFFECTIVE_CONFIG_UNVERIFIED');
-    const forced = environment.CLAUDE_CODE_SUBAGENT_MODEL_FORCE === '1';
-    let model = forced ? environment.CLAUDE_CODE_SUBAGENT_MODEL || config.parent_model
-      : invocation.model || config.agent_model || environment.CLAUDE_CODE_SUBAGENT_MODEL || config.parent_model;
-    if (model === 'inherit') model = config.parent_model;
-    if (!config.available_models.includes(model)) fail('CLAUDE_MODEL_SUBSTITUTION_UNQUALIFIED');
-    const logical = CLAUDE_LOGICAL_MODELS[model];
-    if (!logical) fail('CLAUDE_MODEL_ALIAS_UNQUALIFIED');
-    const effort = environment.CLAUDE_CODE_EFFORT_LEVEL || invocation.effort || config.agent_effort || config.session_effort;
-    if (!effort) fail('CLAUDE_EFFECTIVE_EFFORT_UNVERIFIED');
-    const state = compiler.trustedJsonCopy(binding.host_state);
-    state.routing.effective_route = { provider: config.provider, model: logical, reasoning: effort };
-    return state;
-  }
-}
-
+const CodexDialect = defineCodexDialect({ HostDialect, HELPER_PROMPT });
+const ClaudeDialect = defineClaudeDialect({ HostDialect });
 const DIALECTS = Object.freeze({ codex: new CodexDialect(), 'claude-code': new ClaudeDialect() });
+
 
 // Rendering is separate from admission, native acknowledgement and launch. The
 // same current registry supplies explicit definitions and the enforcing guard.
@@ -306,20 +213,14 @@ function hookOutput(result) {
 
 // Composes the host dialect, pinned binding and adapter for one hook command.
 class NativeHookDecision {
-  #host; #dialect; #options;
-  constructor(host, options = {}) { this.#host = host; this.#dialect = HostDialect.for(host); this.#options = options; }
-
-  #handles(name) {
-    return this.#host === 'codex' ? CodexDialect.isSpawnRequest(name)
-      : this.#host === 'claude-code' ? ['Agent', 'Task'].includes(name) : false;
-  }
+  #dialect; #options;
+  constructor(host, options = {}) { this.#dialect = HostDialect.for(host); this.#options = options; }
 
   async decide(input) {
     const name = input.tool_name, options = this.#options;
-    if (!this.#handles(name)) return {};
+    if (!this.#dialect.handles(name)) return {};
     try {
-      if (this.#host === 'codex' && this.#dialect.forksSession(name, input.tool_input || {})) fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED');
-      // Task is only admitted when separately bound as the supported Agent alias.
+      if (this.#dialect.forksSession(name, input.tool_input || {})) fail('NATIVE_SESSION_TRANSITION_UNQUALIFIED');
       const entryId = this.#dialect.entryFor(name);
       const binding = options.observe_host_state ? null : new PinnedNativeBinding(options.binding_path, options.binding_sha256);
       const envelope = binding ? binding.envelope() : null;
@@ -328,34 +229,12 @@ class NativeHookDecision {
       const adapter = new NativeHelperAdapter({ entry_id: entryId, observe_host_state: observer,
         source_capture: selected.source_capture, selection: selected.selection,
         helper_identity: envelope ? envelope.helper_identity : options.helper_identity,
-        ...(envelope ? { session_id: envelope.session_id, cwd: envelope.cwd,
-          ...(this.#host === 'codex' ? { caller_model: envelope.caller_model } : {}) } : {}),
+        ...(envelope ? { session_id: envelope.session_id, cwd: envelope.cwd, ...this.#dialect.callerBinding(envelope) } : {}),
         dispatch_native: () => ({ permission_check: 'VERIFIED', inference_dispatched: false }) });
-      if (name === 'Task' && options.task_alias_qualified !== true) fail('NATIVE_ALIAS_UNQUALIFIED');
-      return hookOutput(await adapter.invoke({ ...input, tool_name: this.#host === 'claude-code' ? 'Agent' : this.#dialect.canonicalName(name) }));
+      this.#dialect.checkAlias(name, options);
+      return hookOutput(await adapter.invoke({ ...input, tool_name: this.#dialect.canonicalName(name) }));
     } catch (error) { return hookOutput({ decision: 'DENY', code: error.code || 'NATIVE_BINDING_INVALID' }); }
   }
-}
-
-// Checks a Codex `hooks/list` response. This is an acceptance check run on that output (manually or by a
-// qualification harness); no production launcher calls it. `tool_namespace` is the configured
-// features.multi_agent_v2.tool_namespace, when one is set.
-function verifyCodexHelperRegistration(response, { cwd, command, tool_namespace }) {
-  if (tool_namespace !== undefined && (typeof tool_namespace !== 'string' || !CODEX_TOOL_NAMESPACE.test(tool_namespace))) fail('CODEX_TOOL_NAMESPACE_INVALID');
-  const data = compiler.trustedJsonCopy(response);
-  const entry = data?.data?.find(item => item.cwd === cwd);
-  if (!entry || entry.errors?.length || entry.warnings?.length) fail('CODEX_HOOK_REGISTRATION_UNVERIFIED');
-  const hooks = entry.hooks.filter(hook => hook.eventName === 'preToolUse' && hook.command === command);
-  // Evaluate the registered matcher the way Codex does, for the V1 name, its alias, the default and a
-  // hyphenated MultiAgentV2 name, and the configured namespace; an exact `spawn_agent|Agent` list misses V2.
-  const probes = tool_namespace === undefined ? CODEX_REGISTRATION_PROBES : [...CODEX_REGISTRATION_PROBES, `${tool_namespace}spawn_agent`];
-  for (const name of probes) {
-    const matching = hooks.find(hook => {
-      try { return new CodexHookMatcher(hook.matcher).matches(name); } catch { return false; }
-    });
-    if (!matching || matching.enabled !== true || !['trusted', 'managed'].includes(matching.trustStatus)) fail('CODEX_REQUIRED_HOOK_NOT_TRUSTED');
-  }
-  return Object.freeze({ state: 'REGISTRATION_VERIFIED', qualification: 'UNQUALIFIED_UNTIL_NATIVE_MATRIX', cwd });
 }
 
 // Public facades preserving the existing module contract.

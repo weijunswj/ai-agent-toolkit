@@ -88,6 +88,7 @@ function createRealBridgePluginFixture(root) {
     'repo/contracts/agent-rules/global-rules.md',
     'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
     'repo/contracts/toolkit-local-bridge/version.json',
+    'repo/scripts/toolkit-version.cjs',
   ]) copyFile(relPath, pluginRoot);
   writeSourceHooks(pluginRoot);
   setup.prepareInstalledSessionStart(pluginRoot);

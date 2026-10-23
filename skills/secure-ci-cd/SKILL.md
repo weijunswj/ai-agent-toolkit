@@ -61,7 +61,14 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - Use `n8n-workflow-transport` for installing, copying, adapting, or validating n8n workflow-file transport helpers.
 - For mixed Secure CI/CD and n8n helper/template requests, keep this skill focused on CI/CD safety and validation, then use the dedicated n8n skill for the n8n-specific procedure.
 
+## Personal-Data Guard
+
+- [`scripts/personal-data-guard.cjs`](scripts/personal-data-guard.cjs) is a zero-dependency scanner for email addresses, phone numbers and WhatsApp number links in file content (including Word, Excel, PowerPoint and PDF text), file names, commit and tag messages, branch names and pull request text. It prints the place, class and rule only, never the value, and any error that stops a complete scan fails.
+- [`scripts/install-personal-data-guard.cjs`](scripts/install-personal-data-guard.cjs) installs it into a repository on the owner's opt-in: a copy under `.github/scripts/`, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned), git hooks in the folder git really uses, and with `--workflow` the CI job from [`templates/github-actions/personal-data-guard.yml`](templates/github-actions/personal-data-guard.yml). `--check` reports drift.
+- Hooks can be skipped with `--no-verify`; the CI job is the backstop. Follow `docs/agent-playbooks/privacy-safe-checks.md` in the target repository (the repository-agent-rules playbook) for fixtures, allow markers and the pushed-by-mistake steps.
+
 ## AI-Facing Surfaces
 
 - Reference: [references/secure-ci-cd.md](references/secure-ci-cd.md)
 - Templates: [templates/cicd/](templates/cicd/)
+- Scripts: [scripts/](scripts/)

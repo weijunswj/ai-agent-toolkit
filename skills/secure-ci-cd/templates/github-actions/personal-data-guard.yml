@@ -1,0 +1,37 @@
+name: Personal data guard
+
+# Fails when a pull request or a push adds an email address, a phone number or a WhatsApp number
+# link: in file content, file names, commit and tag messages, branch names, or the pull request
+# title and body. Every commit is checked, not only the last one. The output names the place and
+# class only, never the value. Local hooks can be skipped with --no-verify; this check cannot.
+#
+# The pull request title and body are read from the event file by the guard, never written into
+# this script. Any error that stops a complete scan fails the job.
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+    tags: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  personal-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check for personal data
+        run: node .github/scripts/personal-data-guard.cjs ci

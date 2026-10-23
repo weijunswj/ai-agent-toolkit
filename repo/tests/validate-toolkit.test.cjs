@@ -385,8 +385,8 @@ function parseValidationWorkflowSteps(source, jobName = 'validate') {
   return { steps, errors: [] };
 }
 
-// Every job of the validation workflow (test shards and the validate job) checks out the event's
-// full history before its validation floor.
+// Every job of the validation workflow (test shards, the personal-data check and the validate job)
+// checks out the event's full history before its validation floor.
 function validationWorkflowCheckoutErrors(source) {
   const names = workflowJobNames(source);
   if (!names.length) return ['missing jobs section'];
@@ -412,7 +412,8 @@ function jobCheckoutErrors(source, jobName) {
     step.source.includes('node repo/scripts/validate-toolkit.cjs') ||
     step.source.includes('node repo/scripts/run-tests.cjs') ||
     step.source.includes('npm run validate:all') ||
-    step.source.includes('npm run validate:toolkit')
+    step.source.includes('npm run validate:toolkit') ||
+    step.source.includes('node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci')
   ));
   if (validationIndex === -1) errors.push('existing validation floor is missing');
   else if (parsed.steps.indexOf(checkout) >= validationIndex) errors.push('checkout must precede the existing validation floor');
@@ -708,7 +709,7 @@ test('every validation job fetches full history before its own validation floor'
   const relPath = '.github/workflows/validate.yml';
   const source = readText(relPath);
   assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
-  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'validate']);
+  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'personal-data', 'validate']);
   assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
   assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
   assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');

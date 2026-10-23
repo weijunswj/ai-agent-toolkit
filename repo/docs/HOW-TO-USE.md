@@ -200,7 +200,7 @@ After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks u
 
 ```powershell
 npm run validate:all
-node --test repo/tests/toolkit-local-bridge.test.cjs
+node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs
 ```
 
 Disable auto-sync:
