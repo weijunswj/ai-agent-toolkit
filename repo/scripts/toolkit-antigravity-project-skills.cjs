@@ -6,6 +6,9 @@ const path = require('node:path');
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PORTABLE_SKILLS_RELATIVE_PATH = path.join('.agents', 'skills');
+// Skills that only run Toolkit itself; the native plugins carry them, the portable copy does not.
+// repo/docs/SKILL-SAFETY-MATRIX.md "Packaging" lists the same set (validate-toolkit.cjs checks it).
+const INTERNAL_SKILLS = Object.freeze(['controller-bootstrap', 'github-program-reconciler', 'toolkit-env', 'toolkit-setup']);
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = { projectRoot: '', write: false, help: false };
@@ -38,7 +41,7 @@ function listPortableSkills(sourceSkillsRoot) {
   }
   const skills = [];
   for (const entry of fs.readdirSync(sourceSkillsRoot, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() || !SKILL_NAME_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory() || !SKILL_NAME_PATTERN.test(entry.name) || INTERNAL_SKILLS.includes(entry.name)) continue;
     const skillRoot = path.join(sourceSkillsRoot, entry.name);
     const manifest = lstatIfExists(path.join(skillRoot, 'SKILL.md'));
     if (!manifest) continue;
@@ -224,4 +227,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { copyPortableSkills, parseArgs, run };
+module.exports = { INTERNAL_SKILLS, copyPortableSkills, parseArgs, run };

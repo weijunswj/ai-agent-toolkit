@@ -362,7 +362,8 @@ test('n8n creation evidence keeps test fixtures out of workflow-template routing
 });
 
 test('skill safety matrix covers current skill folders and safety boundaries', () => {
-  const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const fullMatrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const matrix = fullMatrix.split('\n## Skill Safety Matrix\n')[1].split('\n## ')[0];
   const headerLine = matrix.split('\n').find((line) => line.startsWith('| Skill |'));
   const requiredColumns = [
     'Skill',
@@ -637,4 +638,16 @@ test('n8n environment setup plugin flow stays Windows-safe before hook approval'
     assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, relPath);
     assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, relPath);
   }
+});
+
+test('packaging table classes every skill and keeps internal skills out of the portable copy', () => {
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const section = matrix.split('\n## Packaging\n')[1].split('\n## ')[0];
+  assert.match(section, /^\| Skill \| Class \| Claude Code plugin \| Codex plugin \| Antigravity copy \|$/m);
+  const rows = [...section.matchAll(/^\|\s*\[[^\]]+\]\(\.\.\/\.\.\/skills\/([^/)]+)\/\)\s*\|\s*(portable|internal)\s*\|\s*Yes\s*\|\s*Yes\s*\|\s*(Yes|No)\s*\|$/gm)]
+    .map((match) => ({ name: match[1], cls: match[2], antigravity: match[3] }));
+  assert.deepEqual(rows.map((row) => row.name).sort(), skillNames());
+  assert.deepEqual(rows.filter((row) => row.cls === 'internal').map((row) => row.name).sort(), [...INTERNAL_SKILLS].sort());
+  for (const row of rows) assert.equal(row.antigravity, row.cls === 'portable' ? 'Yes' : 'No', row.name);
 });

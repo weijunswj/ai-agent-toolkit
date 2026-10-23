@@ -147,7 +147,7 @@ After explicit approval of that exact write:
 node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
-The copy writes only skill files under `<workspace>\.agents\skills\`. It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync.
+The copy writes only skill files under `<workspace>\.agents\skills\` and leaves out the Toolkit-only skills (see Packaging in the [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md#packaging)). It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync.
 
 **Use the portable workspace location for Toolkit skills:**
 

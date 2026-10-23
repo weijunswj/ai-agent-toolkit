@@ -42,6 +42,30 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 | [windows-local-dev-services](../../skills/windows-local-dev-services/) | Start, relaunch, verify, or troubleshoot Windows localhost web apps, API servers, and dev services. | Medium | May create or read local logs and launch local dev servers when requested. | None bundled. | Local ports, background processes, execution policy, package managers, and browser verification can affect the developer machine. | Approval required for destructive cleanup, package installation, privileged process changes, or non-local network exposure. | None required. | First-party development module with retired internal source provenance. | Keep targets on localhost unless explicitly approved. Verify with logs and health checks before claiming success. |
 | [toolkit-env](../../skills/toolkit-env/) | See, add, change, rotate or remove the user's API keys and tokens ("edit my env", "what keys do I have"), or connect a Claude Code or Codex MCP entry to one. | Medium | The OS credential store; `~/.ai-agent-toolkit/env/` (names-only record, private temporary edit file); `~/.ai-agent-toolkit/backups/`; Claude Code user MCP entries through the `claude mcp` command; `~/.codex/config.toml` MCP entries through Codex's own config editor. | `repo/scripts/toolkit-env.cjs`, `toolkit-env-store.cjs`, `toolkit-env-feeders.cjs`; built-in Windows PowerShell or Linux `secret-tool`. | Same-user programs can still ask the store for a value; a wrong connection can stop an MCP server from connecting until revoked. | Removing a key, connecting or undoing MCP entries, and retiring `~/.codex/.env` need the user's own yes for that exact key or entry. Never ask for, type, pipe or print a value. | `toolkit-setup` installs Toolkit itself. | First-party development module with no third-party source. | Values stay in the OS store, the open edit file, `header` output and `run`'s child environment only. Linux without a keyring stops; no plain-file fallback. |
 
+## Packaging
+
+Where each skill ships. **portable** skills work in any agent and go in every package; **internal** skills only run Toolkit itself, so the native plugins carry them and the Antigravity portable copy leaves them out. `repo/scripts/toolkit-antigravity-project-skills.cjs` holds the same internal list, and `node repo/scripts/validate-toolkit.cjs` checks that the two agree and that this table covers every skill exactly once.
+
+| Skill | Class | Claude Code plugin | Codex plugin | Antigravity copy |
+| --- | --- | --- | --- | --- |
+| [codex-ssh-hostinger-coolify-setup-maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) | portable | Yes | Yes | Yes |
+| [controller-bootstrap](../../skills/controller-bootstrap/) | internal | Yes | Yes | No |
+| [frontend-art-direction](../../skills/frontend-art-direction/) | portable | Yes | Yes | Yes |
+| [github-program-reconciler](../../skills/github-program-reconciler/) | internal | Yes | Yes | No |
+| [local-ai-safety](../../skills/local-ai-safety/) | portable | Yes | Yes | Yes |
+| [managed-app-foundation-review](../../skills/managed-app-foundation-review/) | portable | Yes | Yes | Yes |
+| [n8n-environment-setup](../../skills/n8n-environment-setup/) | portable | Yes | Yes | Yes |
+| [n8n-safety-router](../../skills/n8n-safety-router/) | portable | Yes | Yes | Yes |
+| [n8n-workflow-transport](../../skills/n8n-workflow-transport/) | portable | Yes | Yes | Yes |
+| [release-readiness-audit](../../skills/release-readiness-audit/) | portable | Yes | Yes | Yes |
+| [repository-agent-rules](../../skills/repository-agent-rules/) | portable | Yes | Yes | Yes |
+| [secure-ci-cd](../../skills/secure-ci-cd/) | portable | Yes | Yes | Yes |
+| [self-hosted-service-safety](../../skills/self-hosted-service-safety/) | portable | Yes | Yes | Yes |
+| [skill-product-review](../../skills/skill-product-review/) | portable | Yes | Yes | Yes |
+| [toolkit-env](../../skills/toolkit-env/) | internal | Yes | Yes | No |
+| [toolkit-setup](../../skills/toolkit-setup/) | internal | Yes | Yes | No |
+| [windows-local-dev-services](../../skills/windows-local-dev-services/) | portable | Yes | Yes | Yes |
+
 ## Description Review Notes
 
 OpenAI/Codex metadata permits implicit discovery for the 12 products admitted by `repo/tests/fixtures/skill-routing-cases.json`. `codex-ssh-hostinger-coolify-setup-maintainer`, `controller-bootstrap`, `github-program-reconciler`, and `release-readiness-audit` remain explicit-only. Implicit discovery never grants mutation or live-system authority.
