@@ -1,10 +1,9 @@
 'use strict';
 
 // `toolkit governance migrate`: the one-time pass over the repositories already on this computer
-// (#542). It finds every repository in the given folders (each folder itself and the folders
-// directly inside it), shows one list with a proposed answer per repository, and writes only
-// after the user types yes in a terminal. Running it again changes nothing that is already
-// decided.
+// It finds every repository in the given folders (each folder itself and the folders directly
+// inside it), shows one list with a proposed answer per repository, and writes only after the
+// user types yes in a terminal. Running it again changes nothing that is already decided.
 //
 // Proposals: a repository already decided stays as it is; a decision stored under an earlier
 // key is carried over to the repository's own key; an evidence store named in another
