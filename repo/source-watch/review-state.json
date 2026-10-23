@@ -8,17 +8,6 @@
   },
   "records": [
     {
-      "target_key": "source-lock:repo/source-watch/provenance/n8n-io-skills",
-      "target_kind": "source_lock",
-      "repository": "n8n-io/skills",
-      "ref": "main",
-      "source_lock_path": "repo/source-watch/provenance/n8n-io-skills/SOURCE-LOCK.json",
-      "reviewed_through_sha": "27b6b9f429ac0be90cae764512dbc579d7107e95",
-      "reviewed_at": "2026-10-23",
-      "disposition": "NO_ACTION",
-      "owning_tracker": "#421"
-    },
-    {
       "target_key": "source-lock:repo/source-watch/provenance/google-design-md",
       "target_kind": "source_lock",
       "repository": "google-labs-code/design.md",
@@ -30,14 +19,25 @@
       "owning_tracker": "#322"
     },
     {
+      "target_key": "source-lock:repo/source-watch/provenance/n8n-io-skills",
+      "target_kind": "source_lock",
+      "repository": "n8n-io/skills",
+      "ref": "main",
+      "source_lock_path": "repo/source-watch/provenance/n8n-io-skills/SOURCE-LOCK.json",
+      "reviewed_through_sha": "27b6b9f429ac0be90cae764512dbc579d7107e95",
+      "reviewed_at": "2026-10-23",
+      "disposition": "NO_ACTION",
+      "owning_tracker": "#421"
+    },
+    {
       "target_key": "source-lock:repo/source-watch/provenance/ui-ux-pro-max",
       "target_kind": "source_lock",
       "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json",
-      "reviewed_through_sha": "4857a2c5ef989794751a0f66b8545a4a49566286",
-      "reviewed_at": "2026-07-30",
-      "disposition": "READ_ONLY_REVIEW_REQUIRED",
+      "reviewed_through_sha": "d14efff8ed1faa4187f004f79926f428c8074ec7",
+      "reviewed_at": "2026-10-23",
+      "disposition": "NO_ACTION",
       "owning_tracker": "#323"
     }
   ]

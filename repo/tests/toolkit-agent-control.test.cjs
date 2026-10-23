@@ -126,7 +126,7 @@ test('Codex and Claude profile state is isolated', () => {
   assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.BROADER_NATIVE);
 });
 
-test('the Claude hook denies native Agent under root-only and retired direct profiles and requires a routing binding for broader-native', async () => {
+test('the Claude hook denies a default Agent launch in governed work under root-only, retired direct and unbound broader-native profiles', async () => {
   const rootOnlyRoot = root();
   control.configureProfile('claude-code', rootOnly(), { root: rootOnlyRoot });
   const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot }).hookSpecificOutput;

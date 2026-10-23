@@ -47,7 +47,7 @@ test('Claude Code plan omits unsupported automatic admission and never emits Cod
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
-test('plain and JSON plans omit ordinary helper quantity choices', () => {
+test('plain and JSON plans expose the one-helper recommendation', () => {
   const root = tmpRoot();
   const plain = run(['--plan'], { env: isolatedHomeEnv(root) });
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -55,8 +55,8 @@ test('plain and JSON plans omit ordinary helper quantity choices', () => {
   assert.equal(json.status, 0, json.stderr);
   assert.doesNotMatch(plain.stdout, /Codex helper agents|how many helper|custom number/i);
   const plan = JSON.parse(json.stdout);
-  assert.equal(plan.question_bank.some((row) => row.key === 'codexHelperCapacity'), false);
-  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
+  assert.equal(plan.question_bank.find((row) => row.key === 'codexHelperCapacity').recommended, 'one-helper');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'one-helper');
 });
 
 test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
@@ -69,9 +69,9 @@ test('canonical question specification orders delegation before plugin auto-refr
   };
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
   assert.deepEqual(keys, [
-    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexDocLimit', 'codexPluginAutoRefresh',
+    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexDocLimit', 'codexHelperCapacity', 'codexPluginAutoRefresh',
   ]);
-  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  assert.equal(args.setupChoices.codexHelperCapacity, '');
 });
 
 test('agent-facing setup docs match the report question rows', () => {
@@ -134,14 +134,14 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
-  assert.equal(core.setupQuestionSpecs(args, current).some((spec) => spec.key === 'codexHelperCapacity'), false);
+  assert.equal(core.setupQuestionSpecs(args, current).find((spec) => spec.key === 'codexHelperCapacity').recommended, 'one-helper');
 });
 
-test('ordinary bank removes quantity choice while advanced compatibility flags remain restrictive', () => {
+test('ordinary bank displays capacity while explicit compatibility flags remain restrictive', () => {
   const args = core.parseArgs(['--plan', '--codex-helper-count', '2', '--approve-high-helper-capacity']);
   const current = { managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' }, audit: { repo_auto_update: {}, targets: {} }, runtime: { runtime: 'MultiAgentV2' }, delegation: { status: 'configured', helper_count: 4 }, nativePlugin: { status: 'not checked' } };
   const specs = core.setupQuestionSpecs(args, current);
-  assert.equal(specs.some((spec) => spec.key === 'codexHelperCapacity'), false);
+  assert.equal(specs.find((spec) => spec.key === 'codexHelperCapacity').selected, 'custom');
   assert.equal(args.setupChoices.codexHelperCapacity, 'custom');
   assert.equal(args.codexHelperCount, 2);
 });
@@ -158,18 +158,18 @@ test('missing wizard output fails after one render and never emits a shortcut al
   assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { return false; } }), /no approval prompt or write is allowed/i);
 });
 
-test('--yes-recommended applies the visibly recommended root-only Codex outcome', () => {
+test('--yes-recommended applies the visibly recommended one-helper Codex outcome', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const ordinaryBank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.doesNotMatch(ordinaryBank, /Codex helper agents|helper quantity/i);
-  assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
+  assert.match(result.stdout, /Helper-agent capacity questions shown: yes/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
   assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
   assert.ok(backupFiles(root).length > 0);
 });
 
@@ -219,15 +219,15 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'default', 'keep'].join('\n'),
+    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
-  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.1\*\* Codex Toolkit maintenance/);
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance/);
   assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.1 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -259,7 +259,7 @@ test('partial explicit flags reject concise input before writes and accept only 
 
   const accepted = run(args, {
     env,
-    input: ['disable', 'enable', 'default', 'keep'].join('\n'),
+    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
     timeout: 300000,
   });
   assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
@@ -272,13 +272,13 @@ test('multiple explicit flags render and accept one remaining ordered non-TTY an
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
     '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
-  ], { env: isolatedHomeEnv(root), input: 'B\n', timeout: 300000 });
+  ], { env: isolatedHomeEnv(root), input: 'keep\nB\n', timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   const guide = bank.slice(bank.indexOf('Some visible questions'));
-  assert.match(guide, /\*\*2\.1\*\* Codex Toolkit maintenance \[A-C\]/);
+  assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-C\]/);
   assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
-  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off/);
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off/);
 });
 
 test('choice-activated custom checkout detail is rendered and consumed in the canonical post-answer block', () => {
@@ -287,7 +287,7 @@ test('choice-activated custom checkout detail is rendered and consumed in the ca
   const customPath = path.join(root, 'Chosen Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'C', 'B', customPath].join('\n'),
+    input: ['custom', 'A', 'C', 'keep', 'B', customPath].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -302,7 +302,7 @@ test('choice-activated custom retention detail follows the displayed canonical o
   const { origin } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'A', 'B', 'B', '14'].join('\n'),
+    input: ['A', 'A', 'B', 'keep', 'B', '14'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -316,7 +316,7 @@ test('simultaneous custom checkout and retention consume details in displayed or
   const customPath = path.join(root, 'Two Detail Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'B', 'B', customPath, '21'].join('\n'),
+    input: ['custom', 'A', 'B', 'keep', 'B', customPath, '21'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -345,13 +345,13 @@ test('preselected path and helper details share rendering consumption and summar
   const rendered = [
     bank.indexOf('1. 1.1 Update source: custom managed-checkout path'),
     bank.indexOf('2. 1.4 Report retention: positive report-retention duration'),
-    bank.indexOf('3. Advanced compatibility selection: bounded Codex helper count'),
+    bank.indexOf('3. 2.1 Codex helper capacity: bounded Codex helper count'),
   ];
   assert.ok(rendered.every((index) => index >= 0) && rendered[0] < rendered[1] && rendered[1] < rendered[2]);
   const summary = [
     result.stdout.indexOf('Detail 1 1.1 Update source'),
     result.stdout.indexOf('Detail 2 1.4 Report retention'),
-    result.stdout.indexOf('Detail 3 Advanced compatibility selection'),
+    result.stdout.indexOf('Detail 3 2.1 Codex helper capacity'),
   ];
   assert.ok(summary.every((index) => index >= 0) && summary[0] < summary[1] && summary[1] < summary[2]);
 });

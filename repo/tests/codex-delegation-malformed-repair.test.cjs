@@ -219,7 +219,8 @@ test('every newly rejected implied-span case invokes no editor, backup, replacem
     let replacementCalled = false;
     const result = await config.configureCodexDelegation(filePath, {
       runtime,
-      helperCount: 0,
+      // V1 cannot express zero helpers (Codex requires at least 1), so V1 cases use one helper.
+      helperCount: runtime === V1 ? 1 : 0,
       codexHome,
       allowUserOwnedReplacement: true,
       editor: async () => { editorCalled = true; throw new Error(`rejected state must not invoke editor: ${label}`); },
@@ -332,7 +333,7 @@ test('repair approval rejects affected-range, proposal, generation, runtime, hel
     ['implied-span', (proposal) => ({ ...proposal.approval_binding, repair_identity: { ...proposal.approval_binding.repair_identity, implied_category_spans: [] } }), V2, 0, null],
     ['proposal', (proposal) => ({ ...proposal.approval_binding, proposal_digest: '0'.repeat(64) }), V2, 0, null],
     ['generation', (proposal) => proposal.approval_binding, V2, 0, 'different-generation'],
-    ['runtime', (proposal) => proposal.approval_binding, V1, 0, null],
+    ['runtime', (proposal) => proposal.approval_binding, V1, 1, null],
     ['helper-count', (proposal) => proposal.approval_binding, V2, 1, null],
   ];
   for (const [label, bindingFor, runtime, helperCount, generation] of variants) {

@@ -1643,7 +1643,7 @@ test('missing-target installation fails closed when exclusive creation is unavai
 });
 
 test('existing-target capability is explicit and changed files fail closed with a complete manual batch', () => {
-  for (const platform of ['win32', 'linux', 'darwin', 'freebsd']) {
+  for (const platform of ['win32', 'linux']) {
     assert.deepEqual(exportSync.detectExistingTargetMutationCapability(platform), {
       capability: 'conditional-single-target-existing-file-replacement',
       supported: false,

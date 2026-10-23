@@ -160,7 +160,7 @@ test('a clean Claude setup passes the install check and exits 0', () => {
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = claudeSetup(root, setupRepo, origin, ['--enable-codex-doc-limit']);
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created Codex \(~\/\.codex\/AGENTS\.md\): created Codex project_doc_max_bytes \(~\/\.codex\/config\.toml\): raised to 65536 \(was the default 32768\); --remove puts it back Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ \S+ \d+ B = \d+ B of 65536 B\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created Codex \(~\/\.codex\/AGENTS\.md\): created (?:Codex config check: [^\n]+? )?Codex project_doc_max_bytes \(~\/\.codex\/config\.toml\): raised to 65536 \(was the default 32768\); --remove puts it back Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ \S+ \d+ B = \d+ B of 65536 B\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
   for (const file of [path.join(root, '.claude', 'CLAUDE.md'), path.join(root, '.codex', 'AGENTS.md')]) {
     assert.match(fs.readFileSync(file, 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /, file);
   }

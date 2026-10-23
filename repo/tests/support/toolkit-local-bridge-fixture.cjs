@@ -231,6 +231,9 @@ function writeRepoToolkitFixture(repoPath, label) {
   ].join('\n'));
   for (const name of [
     'codex-delegation-backup.cjs',
+    'codex-config-load-check.cjs',
+    'codex-app-server.cjs',
+    'host-json-config-write.cjs',
     'codex-delegation-common.cjs',
     'codex-delegation-config.cjs',
     'codex-delegation-layout.cjs',
