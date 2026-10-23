@@ -1,6 +1,6 @@
 'use strict';
 
-// `toolkit governance` (#542): decisions are written only after a typed yes at a terminal and
+// `toolkit governance`: decisions are written only after a typed yes at a terminal and
 // read back; `check` is read-only with exit codes 0, 1 and 2; the skill catalogue is computed
 // per state and fails on drift. Closure rows H-06 and H-07 (unit parts), K-01, C-01, C-02, S-10
 // (for the new modules).

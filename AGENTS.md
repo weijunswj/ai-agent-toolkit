@@ -48,7 +48,7 @@ Models and effort come only from an explicitly selected stack registry revision 
 This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Portable installs use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md). Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
 
 - **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the portable index), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
-- **Programme:** for [programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421), follow [Toolkit V3](repo/docs/TOOLKIT-V3.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
+- **Programme:** for the Toolkit programme, follow [Toolkit V3](repo/docs/TOOLKIT-V3.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
 
 ## Safety
 
@@ -73,5 +73,6 @@ Before adding a skill, adapter, template or contract, check the existing `skills
 
 - Run targeted checks for touched scripts, docs, generated surfaces and instruction files. Never run `npm run validate:all` locally here; CI owns the full gate.
 - If a generated-output or contract check fails on unrelated stale files, report it instead of widening the PR.
+- Docs, skills and instructions say what a reference means in plain English, without GitHub issue or PR links or numbers; repo file links are fine. CI runs `repo/scripts/check-plain-references.cjs`.
 - Use authenticated `gh` for authorised GitHub work. Before creating or updating PRs or issues, confirm the account with `gh auth status` and `gh api user --jq .login`; if that route is unavailable, hold the operation. Authentication grants no task authority.
 - After a push, update the PR body when the diff, safety notes, validation, generated output or user-facing behaviour changed.

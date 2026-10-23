@@ -1,6 +1,6 @@
 'use strict';
 
-// `toolkit governance check`: a read-only conformance report for one repository (#542). It never
+// `toolkit governance check`: a read-only conformance report for one repository. It never
 // writes anything. Exit codes: 0 conformant, 1 drift, incomplete materials or a decision still
 // pending, 2 the state could not be read.
 //

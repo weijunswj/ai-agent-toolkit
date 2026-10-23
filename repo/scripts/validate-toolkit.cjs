@@ -9,6 +9,7 @@ const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const surfaceAudit = require('./audit-published-surfaces.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
+const plainReferences = require('./check-plain-references.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index += 1) {
@@ -778,6 +779,13 @@ function validateTrackedLocalRuntimeFiles(errors) {
 }
 
 
+// User-facing docs, skills and instructions say what a reference means instead of linking GitHub issues or pull requests.
+function validatePlainReferences(errors) {
+  try {
+    for (const finding of plainReferences.check(root).failures) fail(errors, plainReferences.describeFailure(finding));
+  } catch (error) { fail(errors, `Plain-references check could not run: ${error.message}`); }
+}
+
 function validateContinuousCoreSources(errors) {
   try {
     const compiler=require('./toolkit-gate-contract-compiler.cjs');
@@ -809,6 +817,7 @@ function validate() {
   validateContracts(errors);
   validateContinuousCoreSources(errors);
   validateLegacyReferences(errors);
+  validatePlainReferences(errors);
   validateExecutables(errors);
   validateNoSecrets(errors);
   validateTrackedLocalRuntimeFiles(errors);

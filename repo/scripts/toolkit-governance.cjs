@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// `toolkit governance`: see and decide whether Toolkit governs the repository you are in (#542).
+// `toolkit governance`: see and decide whether Toolkit governs the repository you are in.
 // Shown to people as `toolkit governance <command>`; run as
 //   node <Toolkit checkout>/repo/scripts/toolkit-governance.cjs <command>
 //
