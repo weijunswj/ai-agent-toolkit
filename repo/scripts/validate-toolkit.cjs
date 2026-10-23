@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
 const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
+const sourceWatchReviewState = require('./source-watch-review-state.cjs');
 const surfaceAudit = require('./audit-published-surfaces.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 
@@ -629,8 +630,8 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
 
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
-  // Windows is the only supported computer OS (#532); the README says so right under its title.
-  if (!/^# AI Agent Toolkit\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with the "**Supported OS:** Windows" line under its title');
+  // Windows is the only supported computer OS (#532); the README says so right after its title and one-paragraph intro.
+  if (!/^# AI Agent Toolkit\n\n[^#*\n][^\n]*\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with its title, a one-paragraph intro, then the "**Supported OS:** Windows" line');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();
@@ -674,7 +675,7 @@ function validatePluginVersions(errors) {
   const constants = [
     ['repo/scripts/toolkit-local-bridge.cjs', 'BRIDGE_VERSION'],
     ['repo/scripts/setup-codex-toolkit-plugin.cjs', 'EXPECTED_TOOLKIT_VERSION'],
-    ['repo/scripts/codex-delegation-config.cjs', 'TOOLKIT_CLIENT_VERSION'],
+    ['repo/scripts/codex-app-server.cjs', 'TOOLKIT_CLIENT_VERSION'],
     ['repo/scripts/toolkit-agent-control.cjs', 'CONTROL_VERSION']
   ];
   // Runtime constants read the one version source (toolkit-version.cjs); a literal version here
@@ -701,6 +702,11 @@ function validateSourceWatch(errors) {
     else {
       try { readJson(rel); } catch (error) { fail(errors, `${rel} is invalid JSON: ${error.message}`); }
     }
+  }
+  // Parse review state the way the source-watch notifier does (schema, dispositions, target_key order),
+  // so a file it would refuse fails here instead of in a scheduled run.
+  if (existsRel('repo/source-watch/review-state.json')) {
+    try { sourceWatchReviewState.readReviewState(root, 'repo/source-watch/review-state.json'); } catch (error) { fail(errors, `repo/source-watch/review-state.json is not valid review state: ${error.message}`); }
   }
   const workflow = existsRel('.github/workflows/source-watch-pr.yml') ? readText('.github/workflows/source-watch-pr.yml') : '';
   if (!workflow.includes('This PR is a review notification only.')) fail(errors, 'Source-watch PR workflow must remain notification-only');

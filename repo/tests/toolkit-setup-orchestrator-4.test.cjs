@@ -14,8 +14,8 @@ test('missing and misordered conditional details fail before every setup write',
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
     const customPath = path.join(root, 'Must Not Be Written');
     const input = mode === 'missing'
-      ? ['custom', 'A', 'C', 'B'].join('\n')
-      : ['custom', 'A', 'B', 'B', '14', customPath].join('\n');
+      ? ['custom', 'A', 'C', 'keep', 'B'].join('\n')
+      : ['custom', 'A', 'B', 'keep', 'B', '14', customPath].join('\n');
     const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
       env: isolatedHomeEnv(root), input, timeout: 300000,
     });
@@ -34,7 +34,7 @@ test('fully explicit setup does not wait for or advertise setup-question stdin',
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
     '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
-    '--skip-codex-plugin-auto-refresh',
+    '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'keep',
   ], { env: isolatedHomeEnv(root), deadlineMs: 300000 });
   assert.equal(result.code, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
@@ -49,7 +49,7 @@ test('Windows drive-letter path with spaces remains line-by-line detail input', 
   const result = run([
     '--execute', '--managed-checkout', 'custom', '--repo-remote', origin,
     '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
-    '--skip-codex-plugin-auto-refresh',
+    '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'keep',
   ], { env: isolatedHomeEnv(fixtureRoot), input: `${setupRepo}\n`, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /append detail lines in this exact canonical order[\s\S]*custom managed-checkout path/);
@@ -83,13 +83,13 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   const reference = displayedBankReference(preview.stdout);
   const result = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true,
     env,
-    input: `${reference}: 1.2=b, 2.1=B\n`,
+    input: `${reference}: 1.2=b, 2.2=B\n`,
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
   assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
-  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
   assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
 });
 

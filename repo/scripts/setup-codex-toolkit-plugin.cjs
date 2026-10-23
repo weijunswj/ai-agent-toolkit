@@ -8,6 +8,9 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
+const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+const { captureCodexConfigSnapshot } = require('./codex-delegation-backup.cjs');
+const { backupRoot: codexBackupRoot } = require('./codex-delegation-common.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -44,6 +47,9 @@ const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
   'repo/scripts/codex-delegation-backup.cjs',
+  'repo/scripts/codex-config-load-check.cjs',
+  'repo/scripts/codex-app-server.cjs',
+  'repo/scripts/host-json-config-write.cjs',
   'repo/scripts/codex-delegation-common.cjs',
   'repo/scripts/codex-delegation-config.cjs',
   'repo/scripts/codex-delegation-layout.cjs',
@@ -1264,6 +1270,7 @@ function marketplaceMismatchMessage(binding) {
 // Every destructive step requires a positive marketplace binding read back from native list + config.
 class CodexToolkitWriteTransaction {
   #command; #options; #journal;
+  #configBackup = null; #loadChecked = false;
   #pluginChanged = false; #transition = 'none'; #warnings = [];
 
   constructor(command, options) {
@@ -1294,7 +1301,39 @@ class CodexToolkitWriteTransaction {
     return evaluateMarketplaceBinding(listed, readConfigSnapshot(this.#options.codexHome), this.#options.repoRoot, pluginList);
   }
 
+  // The host CLI renders marketplace paths and plugins.<plugin>.enabled booleans.
+  // https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23);
+  // no numeric/path limit is documented there, so check the actual resulting config.
+  #prepareConfigBackup() {
+    if (this.#configBackup) return;
+    const file = codexConfigPath(this.#options.codexHome);
+    const snapshot = captureCodexConfigSnapshot(file);
+    const dir = path.join(codexBackupRoot(file), `native-setup-${crypto.randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const backupPath = path.join(dir, snapshot.existed ? 'config.toml.original' : 'config.toml.absent');
+    fs.writeFileSync(backupPath, snapshot.bytes, { flag: 'wx', mode: 0o600 });
+    this.#configBackup = { configPath: file, snapshot, backupPath };
+  }
+
+  #checkConfig() {
+    if (!this.#configBackup || this.#loadChecked) return;
+    this.#loadChecked = true;
+    const current = captureCodexConfigSnapshot(this.#configBackup.configPath);
+    const previous = this.#configBackup.snapshot;
+    if (previous.existed === current.existed && previous.bytes.equals(current.bytes)) return;
+    const loadCheck = new CodexConfigLoadCheck(this.#options.loadCheckOptions || { codexCommand: this.#command }).verify({
+      ...this.#configBackup, replacementBytes: current.existed ? current.bytes : null,
+    });
+    if (loadCheck.status !== 'verified') this.#warnings.push(loadCheck.detail);
+  }
+
+  #complete(fields) {
+    this.#checkConfig();
+    this.#journal.finish('completed', fields);
+  }
+
   #record(step, binding, state, extra = {}) {
+    this.#prepareConfigBackup();
     if (this.#journal.isOpen) return this.#journal.step(step);
     return this.#journal.begin(step, {
       requested: { marketplace_root: this.#options.repoRoot, version: EXPECTED_TOOLKIT_VERSION },
@@ -1316,7 +1355,12 @@ class CodexToolkitWriteTransaction {
     try {
       return await this.#run();
     } catch (error) {
+      try { this.#checkConfig(); }
+      catch (loadError) { error = loadError; }
       this.#journal.finish('failed-unverified');
+      if (error.code === 'CODEX_CONFIG_LOAD_FAILED' || error.code === 'CODEX_CONFIG_ROLLBACK_FAILED') {
+        error.message += ` Native plugin or cache changes may remain; inspect the setup journal at ${this.#journal.path}.`;
+      }
       throw error;
     }
   }
@@ -1346,7 +1390,7 @@ class CodexToolkitWriteTransaction {
     pluginList = this.#listPlugins();
     state = this.#evaluate(pluginList);
     if (state.ok || state.refusesDowngrade) {
-      this.#journal.finish('completed');
+      this.#complete();
       return this.#result(state);
     }
 
@@ -1368,7 +1412,7 @@ class CodexToolkitWriteTransaction {
     });
     this.#pluginChanged = this.#pluginChanged || addOutcome.hookChanged;
     if (addOutcome.warning) this.#warnings.push(addOutcome.warning);
-    this.#journal.finish('completed', { installed_version: addOutcome.state.installed?.version || null });
+    this.#complete({ installed_version: addOutcome.state.installed?.version || null });
     return this.#result(addOutcome.state);
   }
 
@@ -1386,7 +1430,12 @@ class CodexToolkitWriteTransaction {
       return this.#addMarketplace(binding, state);
     }
     if (binding.status === 'mismatch') {
-      if (!this.#options.rebindFrom) throw new Error(marketplaceMismatchMessage(binding));
+      if (!this.#options.rebindFrom) {
+        const error = new Error(marketplaceMismatchMessage(binding));
+        error.code = 'MARKETPLACE_REBIND_REQUIRED';
+        error.currentSource = binding.root;
+        throw error;
+      }
       return this.#rebindMarketplace(binding, state);
     }
     throw new Error(`${binding.reason}. The marketplace-source binding cannot be verified. No marketplace, plugin or cache changes were made.`);
@@ -1692,6 +1741,10 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   }
 
   if (!state.ok) {
+    // Only the reason code and the two versions: setup withholds the rest of the helper output.
+    if (options.json && state.refusesDowngrade) {
+      console.log(JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: state.installed?.version || '', source_version: EXPECTED_TOOLKIT_VERSION }));
+    }
     for (const error of state.errors) console.error(`FAIL: ${error}`);
     console.error('Run with --write to install or update through the supported Codex local marketplace path.');
     console.error(`Expected commands: ${codexToolkitInstallCommands(options.repoRoot).map((args) => `codex ${args.join(' ')}`).join(' ; ')}`);
@@ -1739,6 +1792,11 @@ if (require.main === module) {
   main().then((code) => {
     process.exitCode = code;
   }, (error) => {
+    // The orchestrator withholds helper stderr; this one structured line carries only the reason
+    // code and the user's own current marketplace path, so setup can say what to do next.
+    if (error.code === 'MARKETPLACE_REBIND_REQUIRED' && process.argv.includes('--json')) {
+      console.log(JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: error.currentSource }));
+    }
     console.error(`FAIL: ${error.message}`);
     process.exitCode = 1;
   });

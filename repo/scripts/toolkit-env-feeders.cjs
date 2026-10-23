@@ -22,6 +22,8 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { parseTomlDocument } = require('./codex-delegation-common.cjs');
 const { captureCodexConfigSnapshot, createCodexConfigBackup, writeRegularFileAtomically } = require('./codex-delegation-backup.cjs');
 
+const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+
 const HARNESSES = Object.freeze({ CLAUDE: 'claude-code', CODEX: 'codex', OPENCODE: 'opencode' });
 const STATES = Object.freeze({ CURRENT: 'current', NEEDS_UPDATE: 'needs update', MISSING: 'entry missing', UNREADABLE: 'could not be checked' });
 const SERVER_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -178,10 +180,11 @@ function plainToml(value) {
 }
 
 class CodexFeeder {
-  #configPath; #codexHome; #editor; #parse; #commandFor;
+  #configPath; #codexHome; #editor; #parse; #commandFor; #loadCheck;
 
   // editor(bytes, { edits }) returns { bytes } with Codex's own edit applied to a copy.
-  constructor({ codexHome, editor, parse = parseTomlDocument, commandFor }) {
+  constructor({ codexHome, editor, parse = parseTomlDocument, commandFor, loadCheckOptions }) {
+    this.#loadCheck = new CodexConfigLoadCheck(loadCheckOptions);
     this.#codexHome = codexHome;
     this.#configPath = path.join(codexHome, 'config.toml');
     this.#editor = editor || ((bytes, options) => require('./codex-delegation-config.cjs').editWithCodexAppServer(bytes, { codexHome, ...options }));
@@ -255,6 +258,8 @@ class CodexFeeder {
     return { ok: true, current: planned.edits.length === 0, changes: planned.changes };
   }
 
+  // Host field types: https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23),
+  // mcp_servers.<id>.http_headers_helper is a command string; no command-length limit is documented.
   // Apply edits through Codex's editor, check that only the named keys of this entry changed, back
   // up the config, then swap it in unless the file changed meanwhile.
   async #write(server, edits, expected, backupRoot) {
@@ -282,7 +287,8 @@ class CodexFeeder {
     }
     const backup = createCodexConfigBackup(this.#configPath, { snapshot, backupRoot, replacementBytes: edited.bytes });
     writeRegularFileAtomically(this.#configPath, edited.bytes, snapshot.mode, { expectedSnapshot: snapshot });
-    return backup;
+    const loadCheck = this.#loadCheck.verify({ configPath: this.#configPath, snapshot, backupPath: backup.backup_path, replacementBytes: edited.bytes });
+    return { ...backup, load_check: loadCheck };
   }
 
   async project(binding, { backupDir }) {
@@ -293,7 +299,7 @@ class CodexFeeder {
     const { edits } = this.#edits(binding, servers[binding.server]);
     const expected = Object.fromEntries(edits.map((edit) => [edit.keyPath.split('.').slice(2).join('.'), edit.value === null ? undefined : edit.value]));
     const backup = await this.#write(binding.server, edits, expected, path.join(backupDir, 'codex'));
-    return { changed: true, backup: backup.metadata_path, restart: true };
+    return { changed: true, backup: backup.metadata_path, restart: true, load_check: backup.load_check };
   }
 
   status(bindings) {
@@ -332,8 +338,8 @@ class CodexFeeder {
     const headers = new Set([...Object.keys(previous.env_http_headers || {}), ...Object.keys(current.env_http_headers || {})]);
     for (const header of headers) restore(`env_http_headers.${header}`, previous.env_http_headers?.[header], current.env_http_headers?.[header]);
     if (!edits.length) return { restored: false };
-    await this.#write(binding.server, edits, expected, path.join(binding.backup, 'codex-revoke'));
-    return { restored: true, restart: true };
+    const backup = await this.#write(binding.server, edits, expected, path.join(binding.backup, 'codex-revoke'));
+    return { restored: true, restart: true, load_check: backup.load_check };
   }
 }
 

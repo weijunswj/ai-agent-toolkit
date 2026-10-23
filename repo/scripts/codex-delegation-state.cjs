@@ -34,7 +34,15 @@ function tomlString(value) {
   return JSON.stringify(String(value)).replace(/\\u2028|\\u2029/g, (match) => match.toLowerCase());
 }
 
+// Host source: https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23),
+// plus Codex CLI 0.164.0: spawned-helper cap must be at least 1; the primary is excluded.
 function expectedLegacyBlock(helperCount = 1, eol = '\n') {
+  if (!Number.isSafeInteger(helperCount) || helperCount < 1) throw new Error('Codex cannot limit helpers to zero; choose one helper or a custom number of at least 1.');
+  return legacyBlockForInspection(helperCount, eol);
+}
+
+// Inspection must recognise a historical zero block so setup can propose an approved repair.
+function legacyBlockForInspection(helperCount, eol) {
   return [
     CODEX_DELEGATION_BEGIN,
     `max_threads = ${helperCount}`,
@@ -616,7 +624,7 @@ function v1State(parsed, layout, base) {
       layout.agentsTables[0],
       layout.beginMarkers[0],
       layout.endMarkers[0],
-      expectedLegacyBlock(helperCount, '\n'),
+      legacyBlockForInspection(helperCount, '\n'),
       'Toolkit legacy delegation'
     );
     if (!exact || error) return { ...base, status: 'conflicting', detail: error || 'Toolkit legacy markers contain unsupported values.' };
@@ -624,14 +632,14 @@ function v1State(parsed, layout, base) {
   if (exact) {
     return {
       ...base,
-      status: 'configured',
+      status: helperCount === 0 ? (managed ? 'repair-required' : 'conflicting') : 'configured',
       ownership: managed ? 'toolkit-managed-v1' : 'user-owned-compatible-v1',
       helper_count: helperCount,
       total_threads: null,
       hard_nested_helper_enforcement: 'supported',
       recursive_helper_control: 'hard-enforced by the supported V1 nesting-depth control',
       recursive_hard_block: true,
-      detail: managed ? `Toolkit-managed MultiAgentV1 capacity allows ${helperCount} helper(s).` : `Compatible user-owned MultiAgentV1 values allow ${helperCount} helper(s).`,
+      detail: helperCount === 0 ? (managed ? 'Codex refuses max_threads = 0. This Toolkit-owned block needs a one-helper repair proposal.' : 'Codex refuses the user-owned max_threads = 0; a replacement requires approval.') : managed ? `Toolkit-managed MultiAgentV1 capacity allows ${helperCount} helper(s).` : `Compatible user-owned MultiAgentV1 values allow ${helperCount} helper(s).`,
     };
   }
   if (anyValue) return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV1 limits are incomplete, non-integer, or use a different nesting depth; Toolkit will not overwrite them.' };

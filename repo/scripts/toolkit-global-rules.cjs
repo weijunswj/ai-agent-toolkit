@@ -207,6 +207,10 @@ class GlobalRulesFile {
 // always top-level), or one plain top-level decimal line it can replace whole. Any other shape is
 // left for the owner. Every candidate is parsed before writing: the key must read 65536 and every
 // other value must be unchanged, or nothing is written.
+// Host field: https://learn.chatgpt.com/docs/config-file/config-reference (2026-10-23).
+// The reference documents bytes, but no numeric upper limit; Codex load-checks each write.
+const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+const { captureCodexConfigSnapshot } = require('./codex-delegation-backup.cjs');
 const DOC_LIMIT_KEY = 'project_doc_max_bytes';
 const DOC_LIMIT_MODES = Object.freeze(['raise', 'restore', 'report', 'none']);
 const DOC_LIMIT_DEFAULT = 32768;
@@ -236,8 +240,8 @@ function withoutKey(doc) {
 }
 
 class CodexDocLimit {
-  #file; #backupDir;
-  constructor({ file, backupDir }) { this.#file = file; this.#backupDir = backupDir; }
+  #file; #backupDir; #loadCheck; #lastLoadCheck;
+  constructor({ file, backupDir, loadCheckOptions }) { this.#file = file; this.#backupDir = backupDir; this.#loadCheck = new CodexConfigLoadCheck(loadCheckOptions); }
 
   get file() { return this.#file; }
 
@@ -318,6 +322,7 @@ class CodexDocLimit {
   // Copies the exact bytes into this run's backup folder, then writes only if the file still holds
   // what was read.
   #write(original, updated) {
+    const snapshot = captureCodexConfigSnapshot(this.#file);
     let backup = null;
     if (original) {
       fs.mkdirSync(this.#backupDir, { recursive: true });
@@ -333,6 +338,7 @@ class CodexDocLimit {
       writeFileAtomically(this.#file, updated);
       if (readIfExists(this.#file) !== updated) fail('GLOBAL_RULES_READBACK_MISMATCH', `${this.#file} did not read back as written.`);
     }
+    this.#lastLoadCheck = this.#loadCheck.verify({ configPath: this.#file, snapshot, backupPath: backup, replacementBytes: updated === null ? null : Buffer.from(updated) });
     return backup;
   }
 
@@ -366,7 +372,7 @@ class CodexDocLimit {
       return { state: 'manual', limit: before.limit, detail: 'a raised config.toml would not read back exactly as intended', action: 'skipped' };
     }
     const backup = this.#write(original, updated);
-    return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: before.previous, action: 'raised', backup };
+    return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: before.previous, action: 'raised', backup, load_check: this.#lastLoadCheck };
   }
 
   // Puts back the exact bytes Toolkit replaced (or nothing), and deletes the file when Toolkit
@@ -382,7 +388,7 @@ class CodexDocLimit {
     const backup = this.#write(read, deleteFile ? null : updated);
     const limit = block.previous === 'none' ? DOC_LIMIT_DEFAULT : Number(block.previous);
     return { state: limit >= DOC_LIMIT_TARGET ? 'sufficient' : limit === 0 ? 'off' : 'low', limit, previous: block.previous,
-      action: deleteFile ? 'deleted-file' : 'restored-previous', backup };
+      action: deleteFile ? 'deleted-file' : 'restored-previous', backup, load_check: this.#lastLoadCheck };
   }
 }
 
@@ -407,7 +413,7 @@ class GlobalRules {
   // at all. --remove always puts the previous value back.
   constructor({ environment = process.env, toolkitRoot = TOOLKIT_ROOT, harnesses = ['claude-code', 'codex'],
     backupRoot, ledgerFile, retentionDays = 7, now = () => new Date(), respectRemoval = false, repoAgentsFile = null,
-    codexDocLimit = 'report' } = {}) {
+    codexDocLimit = 'report', loadCheckOptions } = {}) {
     this.#respectRemoval = respectRemoval === true;
     if (!DOC_LIMIT_MODES.includes(codexDocLimit)) fail('GLOBAL_RULES_ARGUMENT', 'Unknown Codex limit mode: ' + codexDocLimit);
     this.#docLimitMode = codexDocLimit;
@@ -424,7 +430,7 @@ class GlobalRules {
     for (const harness of harnesses) if (!HARNESSES.includes(harness)) fail('GLOBAL_RULES_HARNESS_UNKNOWN', `Unknown harness: ${harness}`);
     this.#files = [...new Set(harnesses)].map(harness => new GlobalRulesFile({ harness, file: harnessFile(harness, env), expected, backupDir: this.#backupDir, ledger }));
     if (harnesses.includes('codex')) {
-      this.#docLimit = new CodexDocLimit({ file: path.join(path.dirname(harnessFile('codex', env)), 'config.toml'), backupDir: this.#backupDir });
+      this.#docLimit = new CodexDocLimit({ file: path.join(path.dirname(harnessFile('codex', env)), 'config.toml'), backupDir: this.#backupDir, loadCheckOptions: loadCheckOptions || { environment: { ...process.env, ...env } } });
       // The repository whose rules share Codex's budget: the git root of the working folder, else this Toolkit checkout.
       const gitRoot = nearestGitRoot(process.cwd());
       this.#repoAgents = repoAgentsFile || (gitRoot && fs.existsSync(path.join(gitRoot, 'AGENTS.md')) ? path.join(gitRoot, 'AGENTS.md') : path.join(toolkitRoot, 'AGENTS.md'));
@@ -537,6 +543,7 @@ function describeResult(result) {
     lines.push(`Your hand-written "${title}" section in ${display || file} repeats the Toolkit global rules; remove it when convenient. Toolkit does not edit it.`);
   }
   const limit = result.doc_limit;
+  if (result.doc_limit?.load_check) lines.push(result.doc_limit.load_check.detail);
   const manual = `set ${DOC_LIMIT_KEY} = ${DOC_LIMIT_TARGET} at the top of ~/.codex/config.toml yourself`;
   if (limit) {
     const where = `Codex ${DOC_LIMIT_KEY} (${limit.display})`;

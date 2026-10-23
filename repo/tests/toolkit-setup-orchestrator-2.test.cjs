@@ -8,7 +8,7 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const delegation = require('../scripts/codex-delegation-config.cjs');
 
-test('ordinary setup automatically selects the root-only safety outcome without a quantity row', () => {
+test('ordinary setup recommends one helper in the visible capacity question', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], {
@@ -17,9 +17,9 @@ test('ordinary setup automatically selects the root-only safety outcome without 
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.doesNotMatch(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:/);
-  assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
+  assert.match(result.stdout, /Helper-agent capacity questions shown: yes/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
 });
 
 test('auto-selected Codex capacity consumes a piped technical approval when unrelated user config must be preserved', () => {
@@ -36,7 +36,7 @@ test('auto-selected Codex capacity consumes a piped technical approval when unre
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const configured = fs.readFileSync(configPath, 'utf8');
   assert.ok(configured.startsWith(original));
-  assert.match(configured, /max_concurrent_threads_per_session = 1/);
+  assert.match(configured, /max_concurrent_threads_per_session = 2/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
 });
 test('ordinary setup preserves conflicting user-owned Codex state instead of defaulting it to root-only', () => {
@@ -208,7 +208,7 @@ test('explicit migrate is rejected when no exact legacy block is pending', () =>
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'migrate',
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
   assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.match(result.stderr, /No exact Toolkit-managed PR #237 legacy setting is available to migrate/);
+  assert.match(result.stderr, /No exact Toolkit-managed legacy setting is available to migrate/);
   assert.deepEqual(fs.readFileSync(configPath), original);
   assert.equal(fs.existsSync(editorLog), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
@@ -249,7 +249,7 @@ test('already matching user-owned V1 and V2 configs complete without apply, edit
     {
       name: 'V1 yes-recommended',
       runtime: 'v1',
-      text: '[agents]\nmax_threads = 0\nmax_depth = 1\n',
+      text: '[agents]\nmax_threads = 1\nmax_depth = 1\n',
       args: ['--yes-recommended'],
     },
   ];
@@ -431,4 +431,20 @@ test('managed setup script can run from its own standard managed checkout', () =
   assert.match(result.stdout, /\| 1\.1 \| Update source \|[^\n]*Selected: A\. Use the dedicated clean update copy/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.equal(fs.existsSync(codexConfig(root)), true);
+});
+
+
+test('approved V1 zero repair runs before plugin setup that cannot load the broken config', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root, { rejectZeroConfig: true });
+  const configPath = codexConfig(root);
+  const broken = `[agents]\n${delegation.expectedLegacyBlock(1).replace('max_threads = 1', 'max_threads = 0')}\n`;
+  writeFile(configPath, broken);
+  const env = { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_RUNTIME: 'v1' };
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--approve-codex-config-proposal', '--skip-codex-plugin-auto-refresh'], { env, timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /approved zero-helper repair was applied before Codex plugin setup/);
+  assert.match(fs.readFileSync(configPath, 'utf8'), /max_threads = 1\r?\nmax_depth = 1/);
+  assert.ok(backupFiles(root).some(file => file.endsWith('config.toml.original')));
 });

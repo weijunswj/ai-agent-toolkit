@@ -100,13 +100,14 @@ const list = JSON.parse(fs.readFileSync(state, 'utf8'));
 if (a[0] === 'plugin' && a[1] === 'list') { console.log(JSON.stringify(list)); process.exit(0); }
 if (a[0] === 'plugin' && a[1] === 'disable') { for (const e of list) if (e.id === a[2] && e.scope === a[4]) e.enabled = false; fs.writeFileSync(state, JSON.stringify(list)); process.exit(0); }
 process.exit(2);`);
+  const env = { ...process.env, HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude') };
   const write = (list) => fs.writeFileSync(state, JSON.stringify(list));
   write([{ id: 'n8n-skills@n8n-io', scope: 'user', enabled: true }, { id: 'n8n-skills@n8n-io', scope: 'project', enabled: true }]);
-  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), true);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake, env }), true);
   assert.deepEqual(JSON.parse(fs.readFileSync(state, 'utf8')).map((e) => e.enabled), [false, true]);
-  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), false);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake, env }), false);
   write([]);
-  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), false);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake, env }), false);
 });
 
 test('older-name copies in Antigravity older skills folder are reported as loading twice and never touched', (t) => {
