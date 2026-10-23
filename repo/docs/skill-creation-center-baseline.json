@@ -524,7 +524,7 @@
       "third_party_audit": "Not applicable first-party router; no private plugin cache, third-party package payload, executable dependency, or credential is copied into the skill.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs repo/tests/skill-routing.test.cjs"
+        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
     "windows-local-dev-services": {

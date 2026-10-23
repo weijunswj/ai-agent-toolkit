@@ -2340,7 +2340,7 @@ test('hook mode validation uses hook-light smoke validation and skips full bridg
   const fullSuiteValidation = getRepoValidationLabels();
   assert.equal(fullSuiteValidation.length, 2);
   assert.equal(fullSuiteValidation[0], 'node repo/scripts/validate-toolkit.cjs');
-  assert.equal(fullSuiteValidation[1], 'node --test repo/tests/toolkit-local-bridge.test.cjs');
+  assert.equal(fullSuiteValidation[1], 'node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs');
 
   const validation = runRepoValidation(path.join(fixture.repo), { hookMode: true });
   assert.equal(validation.status, 'passed');
@@ -3660,7 +3660,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.ok(setupValidationBlock, relPath);
     assert.match(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs/, relPath);
     assert.doesNotMatch(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
-    assert.match(text, /Run `node --test repo\/tests\/toolkit-local-bridge\.test\.cjs` when the change affects bridge behavior/i, relPath);
+    assert.match(text, /Run `node --test repo\/tests\/toolkit-local-bridge\.test\.cjs repo\/tests\/toolkit-local-bridge-codex\.test\.cjs repo\/tests\/toolkit-local-bridge-claude\.test\.cjs` when the change affects bridge behavior/i, relPath);
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);

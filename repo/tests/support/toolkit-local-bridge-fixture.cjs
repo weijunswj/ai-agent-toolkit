@@ -206,13 +206,15 @@ function writeRepoToolkitFixture(repoPath, label) {
     '}',
     ''
   ].join('\n'));
-  writeFile(path.join(repoPath, 'repo', 'tests', 'toolkit-local-bridge.test.cjs'), [
-    "'use strict';",
-    "const assert = require('node:assert/strict');",
-    "const test = require('node:test');",
-    "test('fixture bridge tests pass', () => assert.equal(true, true));",
-    ''
-  ].join('\n'));
+  for (const name of ['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs']) {
+    writeFile(path.join(repoPath, 'repo', 'tests', name), [
+      "'use strict';",
+      "const assert = require('node:assert/strict');",
+      "const test = require('node:test');",
+      "test('fixture bridge tests pass', () => assert.equal(true, true));",
+      ''
+    ].join('\n'));
+  }
   writeHookLightSmokeFixture(repoPath);
   writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
     '#!/usr/bin/env node',
