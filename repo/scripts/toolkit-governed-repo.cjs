@@ -4,38 +4,38 @@
 // helper launches in this working directory?". Ordinary and ungoverned work gets no
 // restriction, so both hooks return no decision there.
 //
-// Governed when any of these holds:
+// Governed when either holds:
 //   - a launcher marker is present in the hook environment (a Toolkit launcher started
-//     this session for a gate, a pinned task profile or a pinned helper binding);
-//   - the nearest git root's AGENTS.md carries the TOOLKIT-GOVERNED-RULES block, or the
-//     GLOBAL-AGENTS.MD-TEMPLATE block it replaces (kept while governed repositories still carry
-//     it; remove once each has taken its 3.4.0 rules refresh);
-//   - the nearest git root is a Toolkit source checkout.
-// The managed-block test can be turned off (`managedBlock: false`) for a host whose
-// helper policy is only qualified inside Toolkit itself: Codex keeps native helpers in
-// repositories that merely carry the managed block until its own allow-list exists (#469).
-// The walk stops at the first `.git` (a directory, or the file a worktree uses). Node
-// built-ins only. A read error never gates on its own: without a launcher marker the
-// result is ungoverned.
+//     this session for a gate, a pinned task profile or a pinned helper binding, which
+//     must hold wherever it is supplied);
+//   - the repository's governance state (toolkit-governance-state.cjs, the single authority)
+//     is ENABLED with the governed rules in force: the TOOLKIT-GOVERNED-RULES block and a
+//     valid programme binding, and the user has not declined. A DECLINED, UNKNOWN or
+//     incomplete repository is not governed here; an UNKNOWN one is held by the
+//     governance gate before any helper launch is reached.
+// The `managedBlock: false` option keeps a host whose helper policy is only qualified inside
+// Toolkit itself to Toolkit checkouts: Codex keeps native helpers in other governed
+// repositories until its own allow-list exists (#469). The walk stops at the first `.git`
+// (a directory, or the file a worktree uses). Node built-ins only, no subprocess. Without a
+// launcher marker, an error is ungoverned.
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-const GOVERNED_BLOCK = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (?:TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
 // Stable files every Toolkit checkout carries; documentation paths are not used.
 const CHECKOUT_FILES = Object.freeze([
   ['repo', 'contracts', 'toolkit-local-bridge', 'version.json'],
   ['skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'],
 ]);
-const AGENTS_READ_LIMIT = 1024 * 1024;
 
 class GovernedRepoPredicate {
-  #environment; #managedBlock;
-  constructor(environment = process.env, { managedBlock = true } = {}) {
+  #environment; #managedBlock; #registryOptions;
+  constructor(environment = process.env, { managedBlock = true, registryOptions = {} } = {}) {
     this.#environment = environment || {};
     this.#managedBlock = managedBlock !== false;
+    this.#registryOptions = registryOptions;
   }
 
   // The gate role a Toolkit launcher declared for this session, if any.
@@ -58,36 +58,26 @@ class GovernedRepoPredicate {
     }
   }
 
-  static #hasGovernedBlock(root) {
-    const file = path.join(root, 'AGENTS.md');
-    let stat;
-    try { stat = fs.statSync(file); } catch { return false; }
-    if (!stat.isFile()) return false;
-    const handle = fs.openSync(file, 'r');
-    try {
-      const buffer = Buffer.alloc(Math.min(stat.size, AGENTS_READ_LIMIT));
-      fs.readSync(handle, buffer, 0, buffer.length, 0);
-      return GOVERNED_BLOCK.test(buffer.toString('utf8'));
-    } finally { fs.closeSync(handle); }
-  }
-
   static #isToolkitCheckout(root) {
     return CHECKOUT_FILES.every(parts => fs.existsSync(path.join(root, ...parts)));
   }
 
-  // { governed, reason, root, marker, gate_role }
+  // { governed, reason, root, marker, gate_role, state }
   evaluate(cwd) {
     const marker = this.launcherMarker();
     const gate_role = this.gateRole();
-    const result = (governed, reason, root = null) => Object.freeze({ governed, reason, root, marker, gate_role });
+    const result = (governed, reason, root = null, state = null) => Object.freeze({ governed, reason, root, marker, gate_role, state });
     let root;
     try {
       root = GovernedRepoPredicate.gitRoot(typeof cwd === 'string' && cwd ? cwd : process.cwd());
       if (marker) return result(true, 'launcher-marker', root);
       if (!root) return result(false, 'no-git-root');
-      if (this.#managedBlock && GovernedRepoPredicate.#hasGovernedBlock(root)) return result(true, 'managed-agents-block', root);
-      if (GovernedRepoPredicate.#isToolkitCheckout(root)) return result(true, 'toolkit-checkout', root);
-      return result(false, 'ungoverned-repository', root);
+      const state = require('./toolkit-governance-state.cjs').governanceState(root, this.#registryOptions);
+      if (state.state !== 'ENABLED' || !state.governed_rules_bind) return result(false, `governance-${state.state === 'ENABLED' ? 'incomplete' : state.state.toLowerCase()}`, root, state.state);
+      if (!this.#managedBlock) {
+        return GovernedRepoPredicate.#isToolkitCheckout(root) ? result(true, 'toolkit-checkout', root, state.state) : result(false, 'outside-toolkit', root, state.state);
+      }
+      return result(true, 'governance-enabled', root, state.state);
     } catch {
       return marker ? result(true, 'launcher-marker', root || null) : result(false, 'predicate-error');
     }

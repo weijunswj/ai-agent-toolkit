@@ -12,8 +12,8 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const { governedRepo } = require('../scripts/toolkit-governed-repo.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
+const { makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
 
-const TEMPLATE = fs.readFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
 
 function scratch(t) {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-helper-policy-')));
@@ -26,7 +26,7 @@ function fixture(t, { install = true } = {}) {
   const dir = scratch(t);
   const repo = path.join(dir, 'repo'), plain = path.join(dir, 'plain'), configDir = path.join(dir, 'claude'), controlRoot = path.join(dir, 'control');
   for (const r of [repo, plain]) fs.mkdirSync(path.join(r, '.git'), { recursive: true });
-  fs.writeFileSync(path.join(repo, 'AGENTS.md'), TEMPLATE);
+  makeGoverned(repo, 'helper-policy');
   fs.writeFileSync(path.join(plain, 'AGENTS.md'), '# Project rules\n');
   fs.mkdirSync(path.join(configDir, 'agents'), { recursive: true });
   const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', ROOT);
@@ -40,25 +40,37 @@ function fixture(t, { install = true } = {}) {
 const denied = output => output?.hookSpecificOutput?.permissionDecision === 'deny';
 const reason = output => output.hookSpecificOutput.permissionDecisionReason;
 
-test('the governed-repo predicate walks to the first .git and needs a managed block, the Toolkit checkout or a launcher marker', t => {
+test('the governed-repo predicate walks to the first .git and follows the governance state, or a launcher marker', t => {
   const dir = scratch(t);
   assert.equal(governedRepo(dir, {}).governed, false, 'no git root');
   assert.equal(governedRepo(dir, { TOOLKIT_GATE_ROLE: 'G1' }).reason, 'launcher-marker');
-  const managed = path.join(dir, 'managed');
-  fs.mkdirSync(path.join(managed, '.git'), { recursive: true });
-  fs.writeFileSync(path.join(managed, 'AGENTS.md'), TEMPLATE);
+  const managed = makeGoverned(path.join(dir, 'managed'), 'predicate');
   fs.mkdirSync(path.join(managed, 'src', 'deep'), { recursive: true });
-  assert.equal(governedRepo(path.join(managed, 'src', 'deep'), {}).reason, 'managed-agents-block');
+  assert.equal(governedRepo(path.join(managed, 'src', 'deep'), {}).reason, 'governance-enabled');
+  // The managed block alone no longer governs: without the binding the repository is undecided.
+  fs.rmSync(path.join(managed, '.github'), { recursive: true });
+  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-unknown']);
+  // Declined: the block is ignored.
+  const registryPath = path.join(dir, 'state', 'repository-governance.v1.json');
+  const registry = require('../scripts/toolkit-capability-registry.cjs');
+  const declined = makeGoverned(path.join(dir, 'declined'), 'predicate-declined');
+  const childProcess = require('node:child_process');
+  childProcess.execFileSync('git', ['-C', declined, 'init', '--quiet']);
+  const options = { registryPath, testOnly: true };
+  const status = registry.getRepositoryStatus({ cwd: declined, ...options });
+  registry.writeCapabilityDecision({ cwd: declined, ...options, capabilityId: 'repository.governance', operation: 'decline',
+    ownerAction: { confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation: 'decline',
+      choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', 'decline'), contract_digest: registry.CONTRACT_DIGEST,
+      scope_digest: registry.capabilityScopeDigest(status.repository_id, 'repository.governance', 'decline', 'capability-route') },
+    expectedRevision: status.registry_revision, expectedHash: status.snapshot_hash });
+  assert.equal(governedRepo(declined, {}, { registryOptions: options }).reason, 'governance-declined');
   // A nested repository (here a worktree-style `.git` file) stops the walk before the managed parent.
   const nested = path.join(managed, 'vendor', 'lib');
   fs.mkdirSync(nested, { recursive: true });
   fs.writeFileSync(path.join(nested, '.git'), 'gitdir: ../../.git/worktrees/lib\n');
   const inner = governedRepo(nested, {});
   assert.equal(inner.governed, false); assert.equal(inner.root, nested);
-  // Literal marker examples are not a managed block.
-  fs.writeFileSync(path.join(nested, 'AGENTS.md'), 'Example: `<!-- AI-AGENT-TOOLKIT:x:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`\n');
-  assert.equal(governedRepo(nested, {}).governed, false);
-  assert.equal(governedRepo(ROOT, {}).governed, true, 'the Toolkit checkout');
+  assert.equal(governedRepo(ROOT, {}).governed, true, 'the Toolkit checkout opts in like any other repository');
 });
 
 test('outside governed work every main-session agent launch is left to Claude Code', t => {
