@@ -28,7 +28,9 @@ const {
   CACHE_FINGERPRINT_PATHS,
   prepareInstalledSessionStart,
   sourceSessionStartCommand,
+  sourceHelperHookCommand,
   windowsSessionStartCommand,
+  windowsHelperHookCommand,
   verifyInstalledCacheFreshness
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
@@ -468,6 +470,12 @@ function writeCodexPluginRefreshFixture(repoPath) {
             }
           ]
         }
+      ],
+      PreToolUse: [
+        {
+          matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
+          hooks: [{ type: 'command', command: sourceHelperHookCommand() }]
+        }
       ]
     }
   }, null, 2)}\n`);
@@ -504,7 +512,8 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "if (process.platform === 'win32') {",
     "  const hooksPath = path.join(target, '.codex-plugin', 'hooks', 'hooks.json');",
     "  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));",
-    `  hooks.hooks.SessionStart[0].hooks[0].command = ${JSON.stringify(windowsSessionStartCommand())};`,
+    `  hooks.hooks.SessionStart[0].hooks[0].commandWindows = ${JSON.stringify(windowsSessionStartCommand())};`,
+    `  hooks.hooks.PreToolUse[0].hooks[0].commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
     "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
