@@ -6,7 +6,8 @@ name: Programme reconcile
 #
 # Inputs: the binding (.github/toolkit-programme.json), the secret TOOLKIT_PROGRAMME_TOKEN (writes
 # this repository's issues and the private state store) and the variable TOOLKIT_PROGRAMME_SESSION
-# (the appointed controller's session, which holds the parent fence; the run writes as its operator).
+# (the controller's stable writer name, for example toolkit-421-controller, which holds the parent
+# fence; every coordinator and this run write under it, so replacing a coordinator changes nothing).
 # Without both, the run does nothing and says so. An issue that is not a catalogued task is skipped.
 # A run caused by the reconciler's own edit finds nothing to change and writes nothing, so runs
 # never loop. Failures leave the pass's intents for the next run to settle by readback.
