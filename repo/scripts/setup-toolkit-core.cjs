@@ -1698,9 +1698,9 @@ function antigravitySkillsQuestion(args, current) {
     section: 'Other coding apps',
     title: "Copy Toolkit's skills into Antigravity?",
     prompt: 'Antigravity skills choice',
-    whatThisControls: "Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
+    whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
     choices: [
-      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
       wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],

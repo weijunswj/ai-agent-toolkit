@@ -147,8 +147,8 @@ function writeJsonAtomically(file, value) {
 }
 
 // Names-only record: each key Toolkit saved (with times), each MCP entry connected to a key, and the
-// layout of the edit file (comment lines, key names and blank lines). It never holds a value or
-// anything derived from one.
+// layout of the edit file (comment lines, key names and blank lines). Assignment values never
+// enter the layout. Comments are screened, but arbitrary prose cannot be certified secret-free.
 class EnvManifest {
   #file; #now;
 
@@ -167,7 +167,7 @@ class EnvManifest {
       throw new EnvError('The Toolkit env record (~/.ai-agent-toolkit/env/manifest.json) could not be read.');
     }
     if (parsed?.schema !== MANIFEST_SCHEMA) throw new EnvError('The Toolkit env record has an unknown format.');
-    const layout = Array.isArray(parsed.layout) ? parsed.layout.filter((entry) => typeof entry === 'string') : [];
+    const layout = checkedLayout(parsed.layout === undefined ? [] : parsed.layout);
     return { schema: MANIFEST_SCHEMA, names: parsed.names || {}, bindings: Array.isArray(parsed.bindings) ? parsed.bindings : [], layout };
   }
 
@@ -175,6 +175,7 @@ class EnvManifest {
   update(change) {
     const record = this.read();
     change(record, this.#now().toISOString());
+    checkedLayout(record.layout);
     writeJsonAtomically(this.#file, record);
     return record;
   }
@@ -184,12 +185,30 @@ class EnvManifest {
   }
 }
 
-// A comment line that could hold a secret: a NAME=value pair with a value, or a long token-like run
-// of letters and digits. Such a line is never stored; it is reported by line number only.
+// Reject assignments anywhere in a comment, common token prefixes, long opaque runs and hidden
+// controls. NFKC also catches fullwidth assignments. This is a conservative screen, not a proof
+// that arbitrary human-readable text is not a password. Refusals report line numbers only.
 function secretLikeComment(text) {
-  const body = text.replace(/^#+\s*/, '');
-  if (/^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*\S/.test(body)) return true;
-  return /[A-Za-z0-9_\-+/=.]{24,}/.test(body) && /\d/.test(body) && /[A-Za-z]/.test(body);
+  if (/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u.test(text)) return true;
+  const body = text.normalize('NFKC');
+  if (/[\p{L}_][\p{L}\p{N}_]*\s*=\s*\S/u.test(body)) return true;
+  if (/(?:^|[^\p{L}\p{N}_])(?:sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[\p{L}\p{N}_-]+/u.test(body)) return true;
+  return [...body.matchAll(/[\p{L}\p{M}\p{N}_\-+/=.]{24,}/gu)].some(([run]) => /[\p{L}\p{N}]/u.test(run));
+}
+
+// Validate both old records and pending writes, so a pre-existing unsafe layout is never copied
+// into another edit file or propagated by an unrelated manifest update.
+function checkedLayout(layout) {
+  if (!Array.isArray(layout) || layout.length > MAX_LAYOUT_LINES) throw new EnvError('The Toolkit env layout has an invalid format or too many lines.');
+  const invalid = [];
+  layout.forEach((entry, index) => {
+    const valid = typeof entry === 'string' && entry === entry.trim() && (entry === '' || (entry.startsWith('#')
+      ? entry.length <= MAX_COMMENT_CHARS && !secretLikeComment(entry)
+      : !nameProblem(entry)));
+    if (!valid) invalid.push(index + 1);
+  });
+  if (invalid.length) throw new EnvError(`The Toolkit env layout has unsafe or invalid entries at line${invalid.length === 1 ? '' : 's'} ${invalid.join(', ')}. Remove or reword them in ~/.ai-agent-toolkit/env/manifest.json before trying again.`);
+  return layout;
 }
 
 // The names-only layout of env-file lines: comment lines, key names and single blank lines, in
@@ -330,10 +349,10 @@ class EnvEditSession {
       const problem = nameProblem(name);
       // Never repeat text that is not a valid name: it may be part of a value.
       if (problem) { problems.push(`line ${index + 1}: the text before = is not a valid key name (${problem})`); return; }
-      if (values.has(name)) { problems.push(`line ${index + 1}: ${name} appears more than once`); return; }
+      if (values.has(name)) { problems.push(`line ${index + 1}: the key name appears more than once`); return; }
       if (value === UNCHANGED) return;
       if (value === '' || value === '<remove>') { blank += 1; return; }
-      if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) { problems.push(`line ${index + 1}: ${name}: value too long (max ${MAX_VALUE_BYTES} bytes)`); return; }
+      if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) { problems.push(`line ${index + 1}: value too long (max ${MAX_VALUE_BYTES} bytes)`); return; }
       values.set(name, value);
     });
     return { values, problems, blank, layout };

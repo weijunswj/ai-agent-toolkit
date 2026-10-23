@@ -52,4 +52,8 @@ The install check (run by `setup toolkit` and at each Claude Code session start,
 
 ## What it protects, and what it does not
 
+`edit` keeps accepted `#` comment and section lines, their order, and single blank lines for the next edit. The layout in `manifest.json` contains key names without assignment values, plus accepted comments verbatim. `apply` refuses suspicious comments by line number only; import and retire omit those comments from the layout and report their line numbers. Assignments embedded in prose, common token prefixes, long opaque strings (including alphabetic base64), and hidden control characters are refused. Ordinary Unicode headings are kept. Existing layouts are checked again before use or writes; an unsafe record stops with the layout entry numbers so you can remove or reword them locally.
+
+This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file and a retired `.env` backup intentionally contain typed or original values and must be treated as sensitive.
+
 Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it.

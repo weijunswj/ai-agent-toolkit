@@ -148,3 +148,14 @@ test('install removes Toolkit copies of retired skills; a bad ledger entry is ne
   assert.ok(fs.existsSync(target), 'an empty or traversal name never removes the skills folder itself');
   assert.ok(fs.existsSync(path.join(target, 'mine')), 'a folder outside a skills folder is never removed');
 });
+
+test('n8n copies left in Antigravity by an earlier build are removed when Antigravity is not chosen', (t) => {
+  const dir = home(t);
+  new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir, antigravity: true }).install();
+  const antigravity = path.join(dir, '.gemini', 'config', 'skills');
+  assert.equal(fs.readdirSync(antigravity).length, 15);
+  const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir }).install();
+  assert.equal(result.pruned.length, 15);
+  assert.deepEqual(fs.readdirSync(antigravity), []);
+  assert.equal(fs.readdirSync(path.join(dir, '.agents', 'skills')).length, 15);
+});

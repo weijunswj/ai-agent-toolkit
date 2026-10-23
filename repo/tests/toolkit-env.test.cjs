@@ -313,12 +313,21 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
   const backup = path.join(paths.backupsDir, folder, 'codex.env');
   assert.ok(fs.existsSync(backup));
   if (process.platform === 'win32') {
+    const identity = spawnSync(path.join(process.env.SystemRoot, 'System32', 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' });
+    assert.equal(identity.status, 0, identity.stderr);
+    const sid = identity.stdout.match(/S-1-[0-9-]+/i)?.[0];
+    assert.ok(sid, 'the executing Windows identity must have a SID');
     // The folder and the moved file each hold one entry: the current user.
     for (const target of [path.dirname(backup), backup]) {
       const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [target], { encoding: 'utf8' }).stdout;
       assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
       assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
-      assert.match(acl, new RegExp(`\\\\${process.env.USERNAME}:`, 'i'), acl);
+      const aclScript = '$ErrorActionPreference = "Stop"; $acl = Get-Acl -LiteralPath ([Console]::In.ReadToEnd()); $acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }';
+      const access = spawnSync(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclScript, 'utf16le').toString('base64'),
+      ], { input: target, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      assert.equal(access.status, 0, access.stderr);
+      assert.equal(access.stdout.trim(), sid, 'the sole ACL entry must be the executing identity, not USERNAME');
     }
   } else {
     assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
@@ -370,6 +379,135 @@ test('a comment that looks like a key or token stops apply and is reported by li
     assert.doesNotMatch(refused.stdout + refused.stderr, /ghp_/);
   }
   assert.equal(fs.existsSync(paths.manifest) && /ghp_|OLD_TOKEN/.test(fs.readFileSync(paths.manifest, 'utf8')), false);
+});
+
+function unsafeLayoutComments() {
+  return [
+    ['inline assignment', '# Previous credential: OLD_TOKEN=dummy-inline-secret'],
+    ['spaced assignment', '# Notes (export OLD_TOKEN = dummy-spaced-secret)'],
+    ['quoted assignment', '# OLD_TOKEN="dummy quoted value"'],
+    ['alphabetic token', '# ghp_abcdefghijklmnopqrstuvwxyzABCDEF'],
+    ['short prefixed token', '# sk-abcdefgHIJKLMN'],
+    ['base64 without digits', `# ${Buffer.from('a'.repeat(30)).toString('base64')}`],
+    ['long base64', `# ${Buffer.from('synthetic only '.repeat(30)).toString('base64')}`],
+    ['numeric token', `# ${'1234567890'.repeat(4)}`],
+    ['unicode assignment', '# Notes: \u5bc6\u94a5=dummy-unicode-secret'],
+    ['unicode token', `# ${'\u5bc6\u94a5'.repeat(16)}`],
+    ['fullwidth assignment', '# Notes: TOKEN\uff1ddummy-wide-secret'],
+    ['invisible token separator', '# abcdefghijklmnop\u200bqrstuvwxyzABCDEF'],
+    ['unicode line separator', '# Heading\u2028dummy-hidden-secret'],
+    ['bare carriage return', '# Heading\rdummy-carriage-secret'],
+    ['NUL in comment', '# Heading\u0000dummy-control-secret'],
+  ];
+}
+
+test('layout refusals are atomic and disclose only line numbers across adversarial comment formats', async (t) => {
+  for (const [label, comment] of unsafeLayoutComments()) await t.test(label, async (t) => {
+    const value = sentinel();
+    const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: value } });
+    await run('edit');
+    const file = editFile(paths);
+    fs.writeFileSync(file, `# Safe section\r\n\r\n${comment}\r\nX1_TEST_NEW_KEY=${value}\r\n`);
+    const refused = await run('apply');
+    assert.equal(refused.code, 1, label);
+    assert.match(refused.stderr, /line 3: this comment looks like it may hold a key or token/);
+    assert.ok(!(refused.stdout + refused.stderr).includes(comment), 'a refusal must not repeat comment content');
+    assert.ok(!(refused.stdout + refused.stderr).includes(value), 'a refusal must not repeat a value');
+    assert.equal(store.writes, 0, 'a refused layout must not save even valid assignments');
+    assert.equal(fs.existsSync(paths.manifest), false, 'a refused layout must not create a record');
+    assert.deepEqual(fs.readdirSync(paths.envDir), ['edit'], 'no other layout file may be written');
+    assert.equal(fs.existsSync(file), true, 'the private edit remains available for correction');
+  });
+});
+
+test('CRLF, BOM, unicode headings, sections and blank lines round-trip without assignment values', async (t) => {
+  const value = sentinel();
+  const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value } });
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `\uFEFF\r\n# --- Hosting ---\r\n\r\n\r\n# \u65e5\u672c / caf\u00e9\r\nX1_TEST_KEPT_KEY=<unchanged>\r\n\r\nX1_TEST_NEW_KEY=${value}\r\n\r\n`);
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  const expected = ['# --- Hosting ---', '', '# \u65e5\u672c / caf\u00e9', 'X1_TEST_KEPT_KEY', '', 'X1_TEST_NEW_KEY'];
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, expected);
+  assert.ok(!fs.readFileSync(paths.manifest, 'utf8').includes(value));
+  await run('edit');
+  const reopened = fs.readFileSync(editFile(paths), 'utf8');
+  assert.ok(reopened.endsWith(`${expected.map((line) => line.startsWith('X1_') ? `${line}=<unchanged>` : line).join(os.EOL)}${os.EOL}`));
+  assert.ok(!reopened.includes(value));
+});
+
+test('import and retire never adopt adversarial comments into the layout or repeat their contents', async (t) => {
+  for (const operation of ['import-codex-env', 'retire-codex-env']) await t.test(operation, async (t) => {
+    const value = sentinel();
+    const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value }, answers: ['yes'] });
+    const comments = unsafeLayoutComments().map(([, comment]) => comment);
+    const lines = ['# Safe section', `X1_TEST_KEPT_KEY=${value}`, '', ...comments, ''];
+    writeCodexEnv(paths, lines.join('\r\n'));
+    const result = await run(operation);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`not kept as layout, comment lines ${comments.map((_, index) => index + 4).join(', ')}`));
+    const manifest = fs.readFileSync(paths.manifest, 'utf8');
+    assert.deepEqual(JSON.parse(manifest).layout, ['# Safe section', 'X1_TEST_KEPT_KEY']);
+    for (const text of [result.stdout, result.stderr, manifest]) {
+      assert.ok(!text.includes(value), 'the assignment value must stay out of layout and diagnostics');
+      for (const comment of comments) assert.ok(!text.includes(comment), 'unsafe comment content must stay out of layout and diagnostics');
+    }
+    assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json'], 'the manifest is the only layout store');
+    await run('edit');
+    const reopened = fs.readFileSync(editFile(paths), 'utf8');
+    assert.ok(!reopened.includes(value));
+    for (const comment of comments) assert.ok(!reopened.includes(comment));
+  });
+});
+
+test('manifest layout rejects unsafe existing entries and updates before propagating them', (t) => {
+  const { paths } = harness(t);
+  const manifest = new EnvManifest({ file: paths.manifest });
+  manifest.update((record) => { record.layout = ['# Safe section', 'X1_TEST_KEPT_KEY']; });
+  const before = fs.readFileSync(paths.manifest, 'utf8');
+  for (const [, comment] of unsafeLayoutComments()) {
+    assert.throws(() => manifest.update((record) => { record.layout = [comment]; }), /layout.*line 1/i);
+    assert.equal(fs.readFileSync(paths.manifest, 'utf8'), before);
+    fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1', names: {}, bindings: [], layout: [comment] }));
+    assert.throws(() => manifest.read(), (error) => /layout.*line 1/i.test(error.message) && !error.message.includes(comment));
+    fs.writeFileSync(paths.manifest, before);
+  }
+  assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json']);
+});
+
+test('manifest layout rejects malformed shapes and embedded line breaks without content in errors', (t) => {
+  const { paths } = harness(t);
+  const manifest = new EnvManifest({ file: paths.manifest });
+  for (const layout of [null, {}, [null], [42], ['X1_TEST_KEY\n'], ['# Safe\n# second line'], ['invalid layout value'], Array(501).fill('# Safe')]) {
+    fs.mkdirSync(paths.envDir, { recursive: true });
+    fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1', layout }));
+    assert.throws(() => manifest.read(), /Toolkit env layout/);
+  }
+  fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1' }));
+  assert.deepEqual(manifest.read().layout, [], 'records from before layout support remain readable');
+});
+
+test('duplicate keys and oversized values are refused without repeating any line content', async (t) => {
+  const { run, paths, store } = harness(t);
+  const value = sentinel();
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `X1_TEST_DUPLICATE_KEY=${value}\r\nX1_TEST_DUPLICATE_KEY=${value}\r\nX1_TEST_OVERSIZED_KEY=${'x'.repeat(2561)}\r\n`);
+  const refused = await run('apply');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /line 2: the key name appears more than once/);
+  assert.match(refused.stderr, /line 3: value too long/);
+  for (const text of [value, 'X1_TEST_DUPLICATE_KEY', 'X1_TEST_OVERSIZED_KEY']) assert.ok(!refused.stderr.includes(text));
+  assert.equal(store.writes, 0);
+  assert.equal(fs.existsSync(paths.manifest), false);
+});
+
+test('ordinary prose comments remain verbatim, so screening cannot certify absence of passphrases', async (t) => {
+  const { run, paths } = harness(t);
+  const phrase = 'violet paper canoe'; // Synthetic prose: indistinguishable from a heading or password.
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `# ${phrase}\r\n`);
+  assert.equal((await run('apply')).code, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, [`# ${phrase}`]);
 });
 
 test('remove drops the name from the layout; import and retire keep the .env comments before the file can be deleted', async (t) => {

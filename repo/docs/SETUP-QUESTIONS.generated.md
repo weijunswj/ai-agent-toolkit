@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: 6WJD-DB4J-A8E6-M4Z4
+Bank reference: Q47K-CZY7-5TVV-FYYP
 
 Quick index
 
@@ -184,7 +184,7 @@ Quick index
 
 ### 3.1 Copy Toolkit's skills into Antigravity?
 
-**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 
 **Current:** Toolkit's skills are not in Antigravity's global skills folder.
 
@@ -198,7 +198,7 @@ Quick index
 
 **Choices:**
 
-- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **A. Copy and keep current** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 - **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.
@@ -209,8 +209,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `6WJD-DB4J-A8E6-M4Z4: all recommended`
-- only your changes, for example: `6WJD-DB4J-A8E6-M4Z4: 1.2=B, 1.3=B`
+- `Q47K-CZY7-5TVV-FYYP: all recommended`
+- only your changes, for example: `Q47K-CZY7-5TVV-FYYP: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -223,7 +223,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: 874A-WVBY-AJ1W-T5R6
+Bank reference: T19W-KZ0H-S62J-NF7T
 
 Quick index
 
@@ -456,7 +456,7 @@ Quick index
 
 ### 3.3 Copy Toolkit's skills into Antigravity?
 
-**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 
 **Current:** Toolkit's skills are not in Antigravity's global skills folder.
 
@@ -470,7 +470,7 @@ Quick index
 
 **Choices:**
 
-- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **A. Copy and keep current** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 - **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.

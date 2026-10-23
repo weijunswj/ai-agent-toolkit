@@ -32,7 +32,9 @@ test('every attribution form in git commit and gh pr create/edit is refused', (t
     'git commit -Fmsg.txt',
     `gh pr merge 12 --squash --body "${trailer}"`,
     'gh pr merge 12 --body-file body.md',
-    `git -C sub commit -F msg.txt`
+    `git -C sub commit -F msg.txt`,
+    'git -c core.editor=true -C sub commit -F msg.txt',
+    'git -C sub commit -m x && gh pr create --title x --body-file body.md'
   ]) {
     assert.equal(attributionRefusal(command, dir), MESSAGE, command);
   }
