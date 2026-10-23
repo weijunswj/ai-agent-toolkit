@@ -4,7 +4,9 @@
 // reconciler makes and copies the behaviour measured against a real sandbox repository on
 // 2026-10-23: sub-issue ids (not numbers), 422 for a second parent without replace_parent or a
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
-// over an existing file, and a new commit even for an identical Contents PUT.
+// over an existing file, and a new commit even for an identical Contents PUT. With `branchLag` on,
+// a Contents read of the branch serves the files as of the commit before the latest one, as the
+// real API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
 
 const crypto = require('node:crypto');
 
@@ -24,6 +26,8 @@ class FakeGitHub {
     this.files = new Map();
     this.prs = new Map();
     this.commits = 0;
+    this.snapshots = new Map();
+    this.branchLag = false;
     this.clock = Date.UTC(2026, 9, 23, 0, 0, 0);
     this.calls = [];
     this.hooks = [];
@@ -33,10 +37,16 @@ class FakeGitHub {
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
 
   addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [] } = {}) {
-    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, updated_at: this.tick() };
+    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, comments: [], updated_at: this.tick() };
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
     return issue;
+  }
+
+  addComment(number, body, { login = 'owner', type = 'User' } = {}) {
+    const comment = { id: this.nextId++, user: { login, type }, body, created_at: this.tick() };
+    this.issues.get(number).comments.push(comment);
+    return comment;
   }
 
   link(parent, child) {
@@ -105,6 +115,12 @@ class FakeGitHub {
       if (method === 'PATCH') { issue.body = body.body; issue.updated_at = this.tick(); }
       return ok(200, this.issueJson(issue));
     }
+    if ((match = /^issues\/(\d+)\/comments$/.exec(rest)) && method === 'GET') {
+      const issue = this.issues.get(Number(match[1]));
+      if (!issue) return ok(404, { message: 'Not Found' });
+      const page = Number(params.get('page') || 1);
+      return ok(200, issue.comments.slice((page - 1) * 100, page * 100));
+    }
     if ((match = /^issues\/(\d+)\/sub_issues$/.exec(rest))) {
       const parent = this.issues.get(Number(match[1]));
       if (!parent) return ok(404, { message: 'Not Found' });
@@ -150,9 +166,14 @@ class FakeGitHub {
   contents(method, filePath, body, params) {
     const file = this.files.get(filePath);
     if (method === 'GET') {
-      if (params.get('ref') && params.get('ref') !== this.branch) return ok(404, { message: 'No commit found for the ref' });
-      if (!file) return ok(404, { message: 'Not Found' });
-      return ok(200, { sha: file.sha, encoding: 'base64', content: Buffer.from(file.text, 'utf8').toString('base64') });
+      const ref = params.get('ref') || this.branch;
+      const files = ref === this.branch
+        ? (this.branchLag && this.commits > 0 ? this.snapshots.get(`c${this.commits - 1}`) || new Map() : this.files)
+        : this.snapshots.get(ref);
+      if (!files) return ok(404, { message: 'No commit found for the ref' });
+      const found = files.get(filePath);
+      if (!found) return ok(404, { message: 'Not Found' });
+      return ok(200, { sha: found.sha, encoding: 'base64', content: Buffer.from(found.text, 'utf8').toString('base64') });
     }
     if (method === 'PUT') {
       if (body.branch !== this.branch) return ok(404, { message: `Branch ${body.branch} not found` });
@@ -161,7 +182,7 @@ class FakeGitHub {
       if (!file && body.sha) return ok(404, { message: 'Not Found' });
       const text = Buffer.from(body.content, 'base64').toString('utf8');
       this.files.set(filePath, { text, sha: blobSha(text) });
-      this.commits += 1;
+      this.commit();
       return ok(file ? 200 : 201, { content: { sha: blobSha(text) }, commit: { sha: `c${this.commits}` } });
     }
     return ok(405, { message: 'Method not allowed' });
@@ -171,7 +192,12 @@ class FakeGitHub {
   putFile(filePath, doc) {
     const text = `${JSON.stringify(doc, null, 2)}\n`;
     this.files.set(filePath, { text, sha: blobSha(text) });
+    this.commit();
+  }
+
+  commit() {
     this.commits += 1;
+    this.snapshots.set(`c${this.commits}`, new Map(this.files));
   }
 
   readFile(filePath) {

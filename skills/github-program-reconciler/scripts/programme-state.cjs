@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, auditDecisionTraces } = require('./decision-trace-audit.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
 const SCHEMA = Object.freeze({
@@ -99,7 +99,7 @@ const SHAPES = {
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
-  outcome: { all: ['issue', 'label', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'lane', 'owner_prefix'] },
+  outcome: { all: ['issue', 'label', 'class', 'parent', 'order', 'lane', 'owner_prefix', 'complete_when'], optional: ['label', 'lane', 'owner_prefix', 'complete_when'] },
   release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
   gate: { all: ['role', 'state', 'session_id', 'route', 'returns'] },
   route: { all: ['model', 'effort', 'read_back'], optional: ['model', 'effort', 'read_back'] },
@@ -205,6 +205,7 @@ function validateParent(doc) {
       check(errors, optional(outcome.label, isText), `${at}.label must be text`);
       check(errors, optional(outcome.lane, isText), `${at}.lane must be text`);
       check(errors, optional(outcome.owner_prefix, value => PREFIX.test(value)), `${at}.owner_prefix must be a record prefix`);
+      check(errors, optional(outcome.complete_when, isText), `${at}.complete_when must be text`);
     }
     // Expected parents must be the programme parent or another outcome, and the tree must have no loop.
     const outcomes = new Map((Array.isArray(doc.outcomes) ? doc.outcomes : []).filter(isObject).map(entry => [entry.issue, entry]));
@@ -311,6 +312,11 @@ function validateBinding(binding) {
     check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
     check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
     check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    const projection = binding.projection;
+    if (projection !== undefined) {
+      check(errors, isObject(projection) && Object.keys(projection).every(key => ['after_section', 'replace_section'].includes(key)), 'projection may hold only after_section and replace_section');
+      check(errors, isObject(projection) && optional(projection.after_section, isText) && optional(projection.replace_section, isText), 'projection.after_section and projection.replace_section must be heading text');
+    }
     screenSecrets(errors, binding, 'binding');
   }
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
@@ -569,11 +575,6 @@ function shaLink(repository, sha) {
   return isSha(sha) ? `[${shortSha(sha)}](https://github.com/${repository}/commit/${sha}) \`${sha}\`` : '-';
 }
 
-function gateText(child) {
-  if (!child.gate.role && !child.gate.state) return child.lifecycle;
-  return [child.gate.role, child.gate.state].filter(Boolean).join(' ');
-}
-
 function checksText(child) {
   const checks = child.pr.checks;
   if (!child.pr.number) return '-';
@@ -613,51 +614,87 @@ function compareOutcomes(a, b) {
   return CLASSES.indexOf(a.class) - CLASSES.indexOf(b.class) || a.order - b.order || a.issue - b.issue;
 }
 
-// Outcomes in tree order: each expected parent's children by class, order and issue, nested ones
-// straight after their parent, then outcomes with no expected parent sorted by the same rule.
-function treeOrder(parent) {
-  const ordered = [];
-  const visit = number => {
-    for (const outcome of parent.outcomes.filter(entry => entry.parent === number).sort(compareOutcomes)) {
-      ordered.push(outcome);
-      visit(outcome.issue);
-    }
-  };
-  visit(parent.parent_issue);
-  const placed = new Set(ordered.map(outcome => outcome.issue));
-  return [...ordered, ...parent.outcomes.filter(outcome => !placed.has(outcome.issue)).sort(compareOutcomes)];
+// Status is the lifecycle in the words of the programme page; class stays priority only.
+const STATUS_TEXT = Object.freeze({ PLANNED: 'PLANNED', ACTIVE: 'CURRENT', WAITING_OWNER: 'WAITING ON OWNER', HOLD: 'HELD', DONE: 'COMPLETED', RETIRED: 'RETIRED' });
+const CLASS_GROUPS = Object.freeze([['CORE', 'Core'], ['HARDENING', 'Hardening'], ['LATER', 'Later'], ['OPTIONAL', 'Optional']]);
+const GRAPH_HEADER = ['| Outcome | Status | Current gate | Current work | Complete when |', '|---|---|---|---|---|'];
+
+const statusText = child => (child ? STATUS_TEXT[child.lifecycle] : 'NO STATE YET');
+
+// Finished outcomes (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) leave the class groups.
+function isFinished(outcome, child) {
+  return outcome.class === 'COMPLETED' || outcome.class === 'RETIRED' || Boolean(child && TERMINAL_LIFECYCLES.includes(child.lifecycle));
 }
 
-function renderParentBlockBody(parent, children) {
-  const repository = parent.repository;
-  const rows = treeOrder(parent).map(outcome => {
+function currentGateText(child) {
+  if (!child || (!child.gate.role && !child.gate.state)) return '-';
+  return [child.gate.role, child.gate.state].filter(Boolean).join(' ');
+}
+
+// One cell: PR and head, CI at the head, UAT, review, release, blockers and the next action.
+function currentWorkText(child, repository) {
+  if (!child) return '-';
+  const parts = [];
+  if (child.pr.number) {
+    parts.push(`PR #${child.pr.number}${child.pr.state ? ` ${child.pr.state}` : ''}${child.pr.head ? ` at ${shaLink(repository, child.pr.head)}` : ''}`);
+    parts.push(`CI ${checksText(child)}`);
+  }
+  if (child.uat.state) parts.push(`UAT ${uatText(child)}`);
+  if (child.review.state) parts.push(`review ${reviewText(child)}`);
+  if (child.release) parts.push(`release ${publicText(child.release)}`);
+  if (child.blockers.length) parts.push(`blocked: ${child.blockers.map(publicText).join('; ')}`);
+  if (child.next_action) parts.push(`next: ${publicText(child.next_action)}`);
+  return parts.join('; ') || '-';
+}
+
+// Outcomes of one group in tree order: roots under a native parent first, then roots with none,
+// each by class, order and issue, and each followed by its own children in the same group. A row
+// whose expected parent is not the programme parent names it.
+function groupRows(parent, members, children) {
+  const inGroup = new Set(members.map(outcome => outcome.issue));
+  const parentless = outcome => (outcome.parent === null || outcome.parent === undefined ? 1 : 0);
+  const sort = list => [...list].sort((a, b) => parentless(a) - parentless(b) || compareOutcomes(a, b));
+  const rows = [];
+  const visit = outcome => {
     const child = children.get(outcome.issue);
     const nested = outcome.parent && outcome.parent !== parent.parent_issue ? ` (under #${outcome.parent})` : '';
     const label = `${outcome.label ? `${publicText(outcome.label)} ` : ''}#${outcome.issue}${nested}`;
-    const lane = publicText(outcome.lane || '-');
-    if (!child) return `| ${label} | ${outcome.class} | ${lane} | (no state yet) | - | - | - | - | - |`;
-    return `| ${label} | ${outcome.class} | ${lane} | ${gateText(child)} | ${prText(child)} | ${shaLink(repository, child.pr.head)} | ${checksText(child)} | ${uatText(child)} | ${publicText(child.next_action)} |`;
-  });
-  return [
+    rows.push(`| ${label} | ${statusText(child)} | ${currentGateText(child)} | ${currentWorkText(child, parent.repository)} | ${publicText(outcome.complete_when || '-')} |`);
+    for (const next of sort(members.filter(entry => entry.parent === outcome.issue))) visit(next);
+  };
+  for (const root of sort(members.filter(entry => !inGroup.has(entry.parent)))) visit(root);
+  return rows;
+}
+
+function renderParentBlockBody(parent, children) {
+  const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
+  const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
+  const lines = [
     revisionLine(parent, children),
-    `**Programme state** (state revision ${parent.revision}; generated from the state documents, so edit those rather than this table)`,
+    '## Programme Graph',
     '',
-    '| Outcome | Class | Lane | Gate | PR | Head | CI at head | UAT | Next action |',
-    '|---|---|---|---|---|---|---|---|---|',
-    ...rows,
-  ].join('\n');
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Groups follow priority: Core, then Hardening, Later and Optional; finished work is collapsed at the end.`,
+  ];
+  for (const [cls, heading] of CLASS_GROUPS) {
+    const members = active.filter(outcome => outcome.class === cls);
+    if (members.length) lines.push('', `### ${heading}`, '', ...GRAPH_HEADER, ...groupRows(parent, members, children));
+  }
+  if (finished.length) {
+    lines.push('', `<details><summary>Completed and retired (${finished.length})</summary>`, '', ...GRAPH_HEADER, ...groupRows(parent, finished, children), '', '</details>');
+  }
+  return lines.join('\n');
 }
 
 function renderChildBlockBody(child, outcome) {
-  const repository = child.repository;
   const lines = [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `**Programme state** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
     '',
-    `- Class: ${outcome?.class || '-'}; lane: ${publicText(outcome?.lane || '-')}; lifecycle: ${child.lifecycle}; release: ${publicText(child.release || '-')}`,
-    `- Gate: ${gateText(child)}`,
-    `- PR: ${prText(child)}; head ${shaLink(repository, child.pr.head)}; CI at head: ${checksText(child)}`,
+    `- Status: ${statusText(child)}; class: ${outcome?.class || '-'}; lane: ${publicText(outcome?.lane || '-')}; release: ${publicText(child.release || '-')}`,
+    `- Current gate: ${currentGateText(child)}`,
+    `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
+    `- Complete when: ${publicText(outcome?.complete_when || '-')}`,
     `- Next action: ${publicText(child.next_action)}`,
   ];
   if (child.blockers.length) lines.push(`- Blockers: ${child.blockers.map(publicText).join('; ')}`);
@@ -722,15 +759,83 @@ function findStateBlock(text) {
   return { block: found };
 }
 
-// The body with the state block replaced, or inserted at the top. Uses the body's own line ending.
-function upsertStateBlock(text, rendered) {
+// Headings outside fenced code, with their level, text and line offsets.
+function headings(text) {
+  const found = [];
+  let fenced = false;
+  for (let offset = 0; offset < text.length;) {
+    const next = text.indexOf('\n', offset);
+    const stop = next === -1 ? text.length : next;
+    const line = text.slice(offset, stop).replace(/\r$/, '');
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    const heading = !fenced && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
+    offset = next === -1 ? text.length : next + 1;
+  }
+  return found;
+}
+
+// Where the block belongs in a body that has no block: in place of the `replace_section`
+// section; else right after the `after_section` section; else after the first title and a marked
+// note directly under it (`<!-- NAME:BEGIN -->` ... `<!-- NAME:END -->`); else at the top.
+function blockTarget(text, placement = {}) {
+  const all = headings(text);
+  const sectionEnd = heading => {
+    const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
+    return next ? next.start : text.length;
+  };
+  const named = name => name && all.find(entry => entry.text.toLowerCase() === String(name).trim().toLowerCase());
+  const replaced = named(placement.replace_section);
+  if (replaced) return { start: replaced.start, end: sectionEnd(replaced), replaces: true };
+  const after = named(placement.after_section);
+  if (after) return { start: sectionEnd(after), end: sectionEnd(after), replaces: false };
+  const title = all.find(entry => entry.level === 1);
+  if (!title) return { start: 0, end: 0, replaces: false };
+  let at = title.end;
+  const rest = text.slice(at);
+  const lead = /^\s*/.exec(rest)[0].length;
+  const note = /^<!--\s*([A-Za-z0-9_.:-]+):BEGIN\b[^\n]*-->[^\n]*\n/.exec(rest.slice(lead));
+  if (note) {
+    const close = rest.indexOf(`<!-- ${note[1]}:END`, lead);
+    if (close !== -1) {
+      const lineEnd = rest.indexOf('\n', close);
+      at += lineEnd === -1 ? rest.length : lineEnd + 1;
+    }
+  }
+  return { start: at, end: at, replaces: false };
+}
+
+const trimEnd = text => text.replace(/\s+$/, '');
+const trimStart = text => text.replace(/^\s+/, '');
+
+// The body with the state block written. An existing block is replaced in place, byte for byte
+// around it, unless it sits above its place (for example at the very top) or the binding's
+// `replace_section` is still in the body: then it moves, once. A new block goes to its place.
+// Uses the body's own line ending; `moved` says whether the block changed position.
+function upsertStateBlock(text, rendered, placement = {}) {
   const source = String(text || '');
   const eol = /\r\n/.test(source) ? '\r\n' : '\n';
   const block = rendered.split('\n').join(eol);
   const { block: found, error } = findStateBlock(source);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
-  if (found) return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length };
-  return { body: source ? `${block}${eol}${eol}${source}` : `${block}${eol}`, start: 0, end: block.length };
+  let rest = source;
+  if (found) {
+    const before = trimEnd(source.slice(0, found.start));
+    const after = trimStart(source.slice(found.end));
+    rest = before && after ? `${before}${eol}${eol}${after}` : before || after;
+    const target = blockTarget(rest, placement);
+    const goal = trimEnd(rest.slice(0, target.start));
+    const above = goal.length > before.length && goal.startsWith(before);
+    if (!target.replaces && !above) {
+      return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length, moved: false };
+    }
+  }
+  const target = blockTarget(rest, placement);
+  const before = trimEnd(rest.slice(0, target.start));
+  const after = trimStart(rest.slice(target.end));
+  const head = before ? `${before}${eol}${eol}` : '';
+  const body = `${head}${block}${after ? `${eol}${eol}${after}` : eol}`;
+  return { body, start: head.length, end: head.length + block.length, moved: Boolean(found) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -796,6 +901,9 @@ class StateStore {
     this.now = now;
     this.toolkitVersion = toolkitVersion;
     this.writes = 0;
+    // Per document this process wrote: the blob its write replaced and the version it wrote.
+    // GitHub can serve the replaced version on a branch read made right after the write.
+    this.ownWrites = new Map();
   }
 
   docPath(kind, number) {
@@ -818,8 +926,14 @@ class StateStore {
     return true;
   }
 
-  read(kind, number) {
-    const response = this.transport.request('GET', `${this.contentsPath(kind, number)}?ref=${encodeURIComponent(this.store.branch)}`);
+  // Reads the branch, or a fixed commit when `ref` is given. A branch read that still shows the
+  // version this process's own write replaced returns the written version instead.
+  read(kind, number, ref = null) {
+    const response = this.transport.request('GET', `${this.contentsPath(kind, number)}?ref=${encodeURIComponent(ref || this.store.branch)}`);
+    const own = ref ? null : this.ownWrites.get(this.docPath(kind, number));
+    if (own && (response.status === 404 ? own.replaced === null : response.status === 200 && response.json.sha === own.replaced)) {
+      return { doc: clone(own.doc), sha: own.sha };
+    }
     if (response.status === 404) return { doc: null, sha: null };
     if (response.status !== 200) throw ghFailure(response, `Reading ${this.docPath(kind, number)}`);
     if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${this.docPath(kind, number)} is too large to read through the Contents API.`);
@@ -845,15 +959,21 @@ class StateStore {
       ...(sha ? { sha } : {}),
     });
     if (response.status === 409 || (response.status === 422 && !sha)) {
+      this.ownWrites.delete(this.docPath(kind, number));
       throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} moved since it was read.`, { status: response.status });
     }
     if (!okStatus(response.status)) throw ghFailure(response, `Writing ${this.docPath(kind, number)}`);
     this.writes += 1;
-    const readback = this.read(kind, number);
-    if (!readback.doc || canonicalText(readback.doc) !== text) {
+    // Read back at the commit the write created: a branch read can still serve the old version.
+    const commit = response.json?.commit?.sha;
+    const blob = response.json?.content?.sha;
+    if (!commit || !blob) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${this.docPath(kind, number)} was written but GitHub returned no commit to read it back from.`);
+    const readback = this.read(kind, number, commit);
+    if (!readback.doc || canonicalText(readback.doc) !== text || readback.sha !== blob) {
       throw new ProgrammeError('STATE_READBACK_MISMATCH', `${this.docPath(kind, number)} did not read back as written.`);
     }
-    return { outcome: 'WRITTEN', doc: readback.doc, sha: readback.sha };
+    this.ownWrites.set(this.docPath(kind, number), { replaced: sha || null, doc: clone(readback.doc), sha: blob });
+    return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
   }
 
   // Read, authorise, change and write with compare-and-swap. On a conflict the change is re-applied
@@ -949,6 +1069,18 @@ class ProgrammeGraphReader {
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more sub-issues than this reader pages through.`);
+  }
+
+  // Every comment on an issue, for the decision-trace audit.
+  comments(number) {
+    const all = [];
+    for (let page = 1; page < 100; page += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, `Reading comments of ${number}`);
+      all.push(...response.json.map(comment => ({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at })));
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('GH_FAILED', `Issue ${number} has more comments than this reader pages through.`);
   }
 
   blockedBy(number) {
@@ -1057,7 +1189,7 @@ function intentId(kind, target) {
 
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN']);
+  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED']);
 
 const EFFECT_TEXT = {
   create_state: effect => `Create the state document for #${effect.target.issue}`,
@@ -1065,7 +1197,7 @@ const EFFECT_TEXT = {
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => `${effect.insert ? 'Add' : 'Update'} the state block in #${effect.target.issue}'s body`,
+  replace_block: effect => `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`,
 };
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
@@ -1210,6 +1342,24 @@ class Reconciler {
     return blocks;
   }
 
+  // The decision-trace audit on the parent and each catalogued issue. Report only: the controller
+  // writes index lines with decision-trace-audit --repair, which never runs from here.
+  auditTraces(parent, observed, only, findings) {
+    const numbers = only ? [only, parent.parent_issue] : [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)];
+    for (const number of numbers) {
+      const issue = observed.issues.get(number);
+      if (!issue) continue;
+      const result = auditDecisionTraces({ body: issue.body, comments: this.reader.comments(number), recordPrefix: this.binding.record_prefix, threshold: this.threshold });
+      if (result.unlinked.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked.length} comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
+      for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
+    }
+  }
+
+  // The parent page follows the binding's projection; child pages put the block under the title.
+  placementFor(number) {
+    return number === this.binding.parent_issue ? (this.binding.projection || {}) : {};
+  }
+
   diffBlocks(parent, children, observed, only, effects, findings, holds) {
     const blocks = this.renderAll(parent, children);
     const targets = only ? [only, parent.parent_issue] : [...blocks.keys()];
@@ -1219,14 +1369,17 @@ class Reconciler {
       if (!issue || body === undefined) continue;
       const { block, error } = findStateBlock(issue.body);
       if (error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error }); continue; }
-      if (block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered) continue;
-      findings.push({ code: 'PROJECTION_STALE', issue: number, detail: block ? (block.tampered ? 'the block was edited by hand' : 'the block differs from the state documents') : 'no state block yet' });
-      const length = upsertStateBlock(issue.body, renderBlock(body, this.toolkitVersion || '0.0.0')).body.length;
+      const placement = this.placementFor(number);
+      const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
+      const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
+      if (current && !move) continue;
+      findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
+      const length = upsertStateBlock(issue.body, renderBlock(body, this.toolkitVersion || '0.0.0'), placement).body.length;
       if (length >= this.threshold) {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body' });
         continue;
       }
-      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body) }, insert: !block, body, updated_at: issue.updated_at });
+      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body) }, insert: !block, move: current && move, body, updated_at: issue.updated_at });
     }
   }
 
@@ -1293,6 +1446,7 @@ class Reconciler {
       return [number, copy];
     }));
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
+    this.auditTraces(parent, observed, only, findings);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -1461,7 +1615,7 @@ class Reconciler {
         const before = this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         let next;
-        try { next = upsertStateBlock(before.body, renderBlock(body, version)); }
+        try { next = upsertStateBlock(before.body, renderBlock(body, version), this.placementFor(number)); }
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
         if (next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);

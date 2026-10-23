@@ -88,6 +88,17 @@ test('a dry run plans the native tree without writing; apply makes it agree and 
   assert.equal(github.mutations(), before.mutations, 'the second pass makes no GitHub write');
 });
 
+test('a full apply finishes and settles while every branch read lags one commit behind', () => {
+  const { github, reconciler } = setup();
+  github.branchLag = true;
+  const applied = reconciler().run({ apply: true });
+  assert.deepEqual(applied.holds, []);
+  assert.deepEqual(applied.results.filter(entry => !['DONE', 'NOOP'].includes(entry.outcome)), [], JSON.stringify(applied.results));
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  github.branchLag = false;
+  assert.equal(reconciler().run().summary, 'No changes');
+});
+
 test('dependencies are shown but never set or imply a parent', () => {
   const { github, reconciler } = setup();
   const report = reconciler().run({ apply: true });
@@ -109,7 +120,47 @@ test('parent and child blocks are rendered from the same state revision', () => 
   assert.match(childBlock.body, new RegExp(`child=423@${doc.revision} -->`));
   assert.ok(github.issues.get(421).body.endsWith('## CURRENT\nHand-written controller prose.\n'), 'hand-written text outside the block is kept');
   const rows = parentBlock.body.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('| Outcome')).map(line => line.split(' | ')[0].slice(2));
-  assert.deepEqual(rows, ['C2 #423', 'Shared H #467', 'H1 Codex #469 (under #467)', 'H2 Claude #470 (under #467)', 'S1-A #459', 'C1 predecessor #422', 'R1 #499', 'Q #425'], 'rows follow the tree');
+  assert.deepEqual(rows, ['C2 #423', 'Shared H #467', 'H1 Codex #469 (under #467)', 'H2 Claude #470 (under #467)', 'R1 #499', 'Q #425', 'S1-A #459', 'C1 predecessor #422'], 'rows follow class priority and the tree, finished work last');
+});
+
+test('the graph replaces the hand-kept index once, moves a top block below the status, and then settles', () => {
+  const { github, binding, reconciler } = setup();
+  binding.projection = { after_section: 'CURRENT', replace_section: 'Programme index' };
+  github.issues.get(421).body = '# Programme\n\n## CURRENT\n\nLive now.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n';
+  github.issues.get(423).body = '# C2 title\n\nBody of 423';
+  reconciler().run({ apply: true });
+  const page = github.issues.get(421).body;
+  assert.equal(page.includes('Programme index'), false, 'the hand-kept index is replaced');
+  assert.ok(page.startsWith('# Programme\n\n## CURRENT\n\nLive now.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN'), 'status first, then the graph');
+  assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n## Parent completion\n\nDone when.\n'));
+  assert.ok(github.issues.get(423).body.startsWith('# C2 title\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN'), 'a child block sits under the title');
+  assert.equal(reconciler().run().summary, 'No changes');
+
+  // A block someone moved back to the top is planned as a move, not a content change.
+  const end = page.indexOf('-->', page.indexOf(':END STATE')) + 3;
+  const block = page.slice(page.indexOf('<!-- AI-AGENT-TOOLKIT'), end);
+  github.issues.get(421).body = `${block}\n\n${page.replace(`${block}\n\n`, '')}`;
+  const dry = reconciler().run();
+  assert.deepEqual(dry.effects.map(effect => effect.text), ["Move the state block in #421's body"]);
+  assert.ok(dry.findings.some(finding => finding.detail === 'the block is not in its place on the page'));
+  reconciler().run({ apply: true });
+  assert.equal(github.issues.get(421).body, page);
+});
+
+test('the pass reports comment-trace gaps and unmarked superseded records without writing them', () => {
+  const { github, reconciler } = setup();
+  reconciler().run({ apply: true });
+  const old = github.addComment(423, 'INT-TK421-010 first call');
+  github.addComment(423, 'INT-TK421-011 new call\nSUPERSEDES=INT-TK421-010');
+  github.addComment(423, 'bot noise', { login: 'ci[bot]', type: 'Bot' });
+  github.issues.get(423).body += `\n\n[INT-TK421-010](#issuecomment-${old.id})`;
+  const before = github.mutations();
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.findings.filter(finding => finding.code.startsWith('TRACE_')).map(finding => `${finding.code} #${finding.issue}: ${finding.detail}`), [
+    'TRACE_UNLINKED #423: 1 comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair',
+    'TRACE_SUPERSEDED_UNMARKED #423: INT-TK421-010 is superseded by INT-TK421-011 but not marked "superseded by"',
+  ]);
+  assert.equal(github.mutations(), before, 'trace gaps are reported, never written by the pass');
 });
 
 test('reclassifying an outcome keeps its identity, document and native link', () => {
@@ -123,7 +174,7 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.equal(docAfter.revision, docBefore.revision);
   assert.deepEqual(docAfter.fence, docBefore.fence);
   assert.equal(github.issues.get(423).parent, 421);
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /Class: HARDENING/);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: HARDENING/);
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {

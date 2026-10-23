@@ -4,11 +4,14 @@
 // Decision-trace audit for a programme issue. The issue body is the canonical record: every
 // non-bot comment must be reachable from it, either linked directly by fragment link
 // (#issuecomment-<id>) or listed in an index comment that the body links (one hop). Fails on any
-// unlinked comment, a SUPERSEDES= reference to an unknown record, or a body at or over the
-// threshold (default 60,000 characters; GitHub's limit is 65,536).
+// unlinked comment, a SUPERSEDES= reference to an unknown record, a superseded record that is not
+// marked "superseded by" (in its own comment or on an index line that links it), or a body at or
+// over the threshold (default 60,000 characters; GitHub's limit is 65,536).
 //
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
-// index) to a local file; publishing it is the caller's separately authorised step.
+// index, in the shape "- <date> · <record> · [<summary>](#issuecomment-<id>)", plus
+// "SUPERSEDES=" and "superseded by" where they apply) to a local file; publishing it is the
+// caller's separately authorised step. The reconcile pass runs the same audit and reports gaps.
 //
 // Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>]
 //          [--threshold <chars>] [--repair --out <file>]
@@ -56,8 +59,35 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const records = new Map(people.map(comment => [String(comment.id), recordId(comment.body, recordPrefix)]));
   const knownIds = new Set([...records.values()].filter(Boolean));
 
+  // Which record replaced which, from SUPERSEDES= lines that name a known record.
+  const commentOf = new Map();
+  for (const [id, record] of records) if (record && !commentOf.has(record)) commentOf.set(record, id);
+  const supersededBy = new Map();
+  const supersedes = new Map();
+  if (recordPrefix) {
+    for (const comment of people) {
+      for (const match of String(comment.body || '').matchAll(SUPERSEDES)) {
+        const old = recordId(match[1], recordPrefix);
+        if (!old || !commentOf.has(old)) continue;
+        const by = records.get(String(comment.id)) || `comment ${comment.id}`;
+        if (!supersededBy.has(old)) supersededBy.set(old, by);
+        supersedes.set(String(comment.id), [...(supersedes.get(String(comment.id)) || []), old]);
+      }
+    }
+  }
+  const linkedText = [String(body || ''), ...linkedIndexes.map(index => String(index.body || ''))].join('\n').split('\n');
+  const supersededUnmarked = [...supersededBy].map(([record, by]) => ({ id: commentOf.get(record), record, superseded_by: by }))
+    .filter(entry => {
+      const own = people.find(comment => String(comment.id) === entry.id);
+      if (/superseded by/i.test(String(own?.body || ''))) return false;
+      return !linkedText.some(line => line.includes(`#issuecomment-${entry.id}`) && /superseded by/i.test(line));
+    });
   const unlinked = people.filter(comment => !reachable.has(String(comment.id)))
-    .map(comment => ({ id: String(comment.id), record: records.get(String(comment.id)), index: indexes.includes(comment) }));
+    .map(comment => ({
+      id: String(comment.id), record: records.get(String(comment.id)), index: indexes.includes(comment),
+      date: String(comment.created_at || '').slice(0, 10) || null, summary: commentSummary(comment.body),
+      supersedes: supersedes.get(String(comment.id)) || [], superseded_by: supersededBy.get(records.get(String(comment.id))) || null,
+    }));
   // Only a SUPERSEDES= value that starts with a record ID (the prefix plus digits) is a reference to
   // check, whatever follows it (a full stop, "-draft", "_x"); prose such as "SUPERSEDES=the
   // auto-refresh allowance" is left alone.
@@ -69,22 +99,41 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const bodyLength = String(body || '').length;
   const overThreshold = bodyLength >= threshold;
   return {
-    ok: !unlinked.length && !unknownSupersedes.length && !overThreshold,
+    ok: !unlinked.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
     comments: people.length, linked: people.length - unlinked.length, unlinked, unknown_supersedes: unknownSupersedes,
+    superseded_unmarked: supersededUnmarked,
     unlabelled, body_length: bodyLength, threshold, over_threshold: overThreshold,
     index_comments: linkedIndexes.map(comment => String(comment.id))
   };
 }
 
-// One index line per unlinked comment, in comment order.
-function indexLines(unlinked) {
-  return unlinked.map(entry => `- [${entry.record || `comment ${entry.id}`}](#issuecomment-${entry.id})`);
+// A comment's first heading or line as one short plain line for an index entry.
+function commentSummary(text) {
+  const first = String(text || '').split('\n').map(line => line.replace(/<!--.*?-->/g, '').replace(/[#*_`>]/g, '').trim()).find(Boolean) || 'comment';
+  const plain = first.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[[\]|]/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.length > 90 ? `${plain.slice(0, 87)}...` : plain;
+}
+
+// One index line per entry, in comment order, with a same-issue fragment link:
+// "- <date> · <record> · [<summary>](#issuecomment-<id>)", then SUPERSEDES= and "superseded by".
+function indexLines(entries) {
+  return entries.map(entry => [
+    `- ${entry.date || 'undated'}`,
+    entry.record || 'comment',
+    `[${entry.summary || `comment ${entry.id}`}](#issuecomment-${entry.id})`,
+    ...(entry.supersedes || []).map(record => `SUPERSEDES=${record}`),
+    ...(entry.superseded_by ? [`superseded by ${entry.superseded_by}`] : []),
+  ].join(' · '));
 }
 
 // The body with the missing lines added inside its decision index, creating a collapsed index at
 // the end when the body has none. Never removes or reorders existing text.
-function repairedBody(body, unlinked) {
-  const lines = indexLines(unlinked);
+// Superseded records that are already linked but not marked get a marking line of their own.
+function repairedBody(body, unlinked, supersededUnmarked = []) {
+  const missing = new Set(unlinked.map(entry => entry.id));
+  const marks = supersededUnmarked.filter(entry => !missing.has(entry.id))
+    .map(entry => `- superseded record · ${entry.record} · [${entry.record}](#issuecomment-${entry.id}) · superseded by ${entry.superseded_by}`);
+  const lines = [...indexLines(unlinked), ...marks];
   if (!lines.length) return body;
   const text = String(body || '');
   const end = text.indexOf(INDEX_END);
@@ -131,7 +180,7 @@ function main(argv = process.argv.slice(2)) {
   const { body, comments } = fetchIssue(args.repo, args.issue);
   const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
   if (args.repair) {
-    fs.writeFileSync(args.out, repairedBody(body, result.unlinked));
+    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked));
     result.repair_file = args.out;
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -143,4 +192,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, indexLines, repairedBody, parseArgs });
+module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, indexLines, repairedBody, parseArgs });

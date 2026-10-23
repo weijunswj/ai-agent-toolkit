@@ -185,7 +185,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.0', body: childBody }), 'current');
 });
 
-test('parent rows sort by class, then order and issue, including nested children and the parentless tail', () => {
+test('parent rows group by class priority, then order and issue, with finished work collapsed at the end', () => {
   const outcomes = [
     { issue: 8, class: 'CORE', parent: 7, order: 9 },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0 },
@@ -205,7 +205,10 @@ test('parent rows sort by class, then order and issue, including nested children
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
   const body = state.renderParentBlockBody(parent, new Map());
   const rows = body.split('\n').filter(line => line.startsWith('| #')).map(line => Number(/^\| #(\d+)/.exec(line)[1]));
-  assert.deepEqual(rows, [14, 15, 8, 17, 16, 11, 10, 13, 12, 9, 21, 19, 20, 18]);
+  assert.deepEqual(rows, [14, 15, 8, 17, 21, 19, 20, 11, 10, 13, 18, 12, 9, 16]);
+  const headings = body.split('\n').filter(line => line.startsWith('#') || line.startsWith('<details>'));
+  assert.deepEqual(headings, ['## Programme Graph', '### Core', '### Hardening', '### Later', '### Optional', '<details><summary>Completed and retired (3)</summary>']);
+  assert.match(body, /^\| #16 \(under #8\) \| NO STATE YET \|/m, 'a finished child of an active outcome names its parent');
 });
 
 test('a state block is replaced without touching the bytes around it', () => {
@@ -225,6 +228,34 @@ test('a state block is replaced without touching the bytes around it', () => {
   assert.throws(() => state.upsertStateBlock(twice, state.renderBlock('c', '3.9.0')), { code: 'MANAGED_BLOCK_BROKEN' });
   const edited = state.renderBlock('original', '3.9.0').replace('\noriginal\n', '\nedited\n');
   assert.equal(state.findStateBlock(edited).block.tampered, true);
+});
+
+test('the block goes in place of the named section, after the status section, or under the title and its note, and moves once', () => {
+  const block = state.renderBlock('graph', '3.9.1');
+  const page = '# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n';
+  const placement = { after_section: 'CURRENT', replace_section: 'Programme index' };
+  const replaced = state.upsertStateBlock(page, block, placement).body;
+  assert.equal(replaced, `# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n${block}\n\n## Parent completion\n\nDone when.\n`);
+  assert.equal(state.upsertStateBlock(replaced, block, placement).body, replaced, 'once the section is gone the block stays where it is');
+
+  const noIndex = page.replace('## Programme index\n\n| old | table |\n\n', '');
+  const afterCurrent = state.upsertStateBlock(noIndex, block, placement).body;
+  assert.ok(afterCurrent.includes(`Live now.\n\n${block}\n\n## Delivery model`));
+
+  const topped = `${block}\n\n${noIndex}`;
+  const moved = state.upsertStateBlock(topped, block, placement);
+  assert.equal(moved.moved, true, 'a block above its place moves down');
+  assert.equal(moved.body, afterCurrent);
+  assert.equal(state.upsertStateBlock(moved.body, block, placement).moved, false, 'and stays there');
+
+  const lower = noIndex.replace('Done when.\n', `Done when.\n\n${block}\n`);
+  assert.equal(state.upsertStateBlock(lower, block, placement).body, lower, 'a block placed lower by hand is left there');
+
+  const child = '# Child title\n\n<!-- INT-X:CURRENT-DIRECTION:BEGIN -->\n> Direction note.\n<!-- INT-X:CURRENT-DIRECTION:END -->\n\nParent: #421\n\n## Status\n\nText.\n';
+  assert.equal(state.upsertStateBlock(`${block}\n\n${child}`, block).body, child.replace('END -->\n\n', `END -->\n\n${block}\n\n`));
+  assert.equal(state.upsertStateBlock('No title here.\n', block).body, `${block}\n\nNo title here.\n`);
+  const fenced = '```\n# not a title\n```\n# Real title\nBody.\n';
+  assert.ok(state.upsertStateBlock(fenced, block).body.includes(`# Real title\n\n${block}\n\nBody.`));
 });
 
 test('order moves reach the catalogue order and leave other sub-issues alone', () => {
@@ -299,6 +330,31 @@ test('the state store refuses a public or read-only store and never writes uncha
   assert.equal(changed.doc.revision, 2);
   assert.throws(() => store.write('child', 423, { ...changed.doc, next_action: 'Stale' }, { sha: created.sha, previous: changed.doc }), { code: 'STATE_CONFLICT' });
   assert.throws(() => store.write('child', 423, child({ next_action: 'Racing create' }), { sha: null, previous: null }), { code: 'STATE_CONFLICT' });
+});
+
+test('a branch read that lags behind a write neither fails the read-back nor the next compare-and-swap', () => {
+  const github = new FakeGitHub();
+  const store = new state.StateStore({ transport: github, store: { repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' } });
+  const parent = state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcome] }), writer, {});
+  github.branchLag = true;
+  const created = store.write('child', 423, child(), { sha: null, previous: null });
+  assert.equal(created.outcome, 'WRITTEN', 'the read-back reads the new commit, not the lagging branch');
+  assert.equal(github.calls.at(-1).path.endsWith('?ref=c1'), true);
+  const first = store.mutate('child', 423, { writer, parentDoc: parent, change: doc => { doc.next_action = 'First'; return doc; } });
+  assert.equal(first.outcome, 'WRITTEN', 'a branch read showing nothing yet returns the version this process created');
+  const second = store.mutate('child', 423, { writer, parentDoc: parent, change: doc => { doc.next_action = 'Second'; return doc; } });
+  assert.equal(second.outcome, 'WRITTEN', 'a branch read showing the replaced version returns the written one, so its sha is current');
+  assert.equal(second.doc.next_action, 'Second');
+  github.branchLag = false;
+  assert.equal(github.readFile(store.docPath('child', 423)).next_action, 'Second');
+  assert.equal(store.read('child', 423).doc.next_action, 'Second');
+
+  // Another writer's version is never replaced by this process's own copy.
+  const filePath = store.docPath('child', 423);
+  const theirs = github.readFile(filePath);
+  theirs.blockers = ['theirs'];
+  github.putFile(filePath, theirs);
+  assert.deepEqual(store.read('child', 423).doc.blockers, ['theirs']);
 });
 
 test('a compare-and-swap conflict re-applies disjoint changes and holds overlapping ones or takeovers', () => {

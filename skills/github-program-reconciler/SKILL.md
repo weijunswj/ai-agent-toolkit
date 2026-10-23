@@ -22,7 +22,7 @@ Any session may run the dry-run `reconcile` (or `show`) at these significant eve
 - A release ships.
 - A controller is appointed or rebinds.
 
-Check for the binding first at each event; without it, do not run `programme.cjs`. The separate decision-trace audit and governed issue records are unchanged. The reconciler never closes, deletes or merges.
+Check for the binding first at each event; without it, do not run `programme.cjs`. Governed issue records are unchanged. The reconciler never closes, deletes or merges.
 
 ## What ships
 
@@ -53,12 +53,13 @@ The governed repository holds `.github/toolkit-programme.json` (no secrets):
 - The repository is the `origin` remote as GitHub names it; the file must agree and cannot override it (`REPO_IDENTITY_MISMATCH`).
 - `store.kind` names the backend. The only kind is `github`: a separate repository that exists, is private and is writable, checked before every pass (`STATE_STORE_UNVERIFIED`). Another kind (a different store) is added in code with the same compare-and-swap contract; an unknown kind stops at setup. There is no fallback store.
 - `required_checks` adds check names to the ones GitHub marks required. With neither, checks are never `GREEN`. (Toolkit's `main` has no required status checks configured, so its binding names them.)
+- `projection` (optional) places the Programme Graph on the parent page: `replace_section` names a hand-kept section the graph replaces while it is still there (removed in the same body write), and `after_section` names the status section the graph follows. Toolkit uses `"after_section": "CURRENT", "replace_section": "Programme index"`.
 
 ## State documents
 
 One private JSON document per outcome (`issue-<n>.json`) and one for the parent (`parent-<n>.json`) under the store path.
 
-- **Parent:** fence, release-plan pointer and the **outcome catalogue** (issue, label, class `CORE`/`HARDENING`/`LATER`/`OPTIONAL`/`COMPLETED`/`RETIRED`, expected native parent, order within its class, lane, owner prefix). The catalogue is data: nothing is hard-coded to one programme.
+- **Parent:** fence, release-plan pointer and the **outcome catalogue** (issue, label, class `CORE`/`HARDENING`/`LATER`/`OPTIONAL`/`COMPLETED`/`RETIRED`, expected native parent, order within its class, lane, owner prefix, and an optional one-line `complete_when`). The catalogue is data: nothing is hard-coded to one programme.
 - **Child:** lifecycle, release, gate (role, state, session, route, returns), candidate (full 40-character SHAs), PR (number, state, head, required checks at that head), UAT, review verdicts, blockers, exactly one next action, pending effects and a `private` field that is never rendered.
 - Writes use Contents API compare-and-swap on the blob sha with readback. Unchanged state is never written (GitHub would still make an empty commit). The revision moves only when content changes; timestamps and pending effects do not count.
 - On a 409 the change is re-applied only when the other writer touched different top-level fields and the fence did not move; otherwise `STATE_CONFLICT` or `STALE_WRITER`.
@@ -91,7 +92,7 @@ Every write needs `--controller` and `--session <id>` (an environment variable n
 1. **Bind** repository identity, the store and the binding; read the parent and every catalogued child document.
 2. **Observe** (read-only): issues, native parents, each expected parent's sub-issues in order, `blocked_by` edges, and for each child PR its head and required checks at that head.
 3. **Recover first:** each pending effect from an earlier pass is settled by reading its target. Done or not done leaves the document; an unreadable target stays `UNKNOWN` and holds that target. Nothing is replayed without that read.
-4. **Diff** into findings: `NATIVE_PARENT_MISSING`, `NATIVE_PARENT_WRONG`, `NATIVE_ORDER_DRIFT`, `PR_HEAD_MOVED` (review and UAT at the old head show `STALE_HEAD`), `CHECKS_PENDING`/`RED`/`UNKNOWN`/`GREEN_AT_HEAD`, `PROJECTION_STALE`, `CHILD_STATE_CONFLICT` (for example `DONE` on an open issue, or a merged PR where the current gate is not accepted, or only G0 is accepted), and report-only `READY_TO_CLOSE`, `NATIVE_PARENT_UNEXPECTED`, `NATIVE_CHILD_UNKNOWN`, `DEPENDENCY_IMPLIES_PARENT`. Outcomes sort by class (`CORE`, `HARDENING`, `LATER`, `OPTIONAL`, `COMPLETED`, `RETIRED`), then by `order` within the class, then issue number, for both native siblings and rendered siblings (including nested children and the parentless tail).
+4. **Diff** into findings: `NATIVE_PARENT_MISSING`, `NATIVE_PARENT_WRONG`, `NATIVE_ORDER_DRIFT`, `PR_HEAD_MOVED` (review and UAT at the old head show `STALE_HEAD`), `CHECKS_PENDING`/`RED`/`UNKNOWN`/`GREEN_AT_HEAD`, `PROJECTION_STALE`, `CHILD_STATE_CONFLICT` (for example `DONE` on an open issue, or a merged PR where the current gate is not accepted, or only G0 is accepted), and report-only `READY_TO_CLOSE`, `NATIVE_PARENT_UNEXPECTED`, `NATIVE_CHILD_UNKNOWN`, `DEPENDENCY_IMPLIES_PARENT`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED` (the decision-trace audit on the parent and every catalogued issue). Native siblings sort by class (`CORE`, `HARDENING`, `LATER`, `OPTIONAL`, `COMPLETED`, `RETIRED`), then by `order` within the class, then issue number.
 5. **Plan** only these effects: create or update a child document, attach a sub-issue, reparent (`replace_parent`), reorder (fewest moves), replace a managed block. Closing, deleting, merging and detaching never appear. Dependencies never set a parent.
 6. **Apply** (only with `--apply`), one effect at a time: write an `IN_FLIGHT` intent into the owning document, mutate, read back (both the child's parent and the parent's list for links; the whole body for blocks), then clear the intent or mark it `UNKNOWN` and hold.
 7. **Report** the repository, store and parent revision, findings, effects with outcomes, holds, write counts and one next action. The `READY_TO_CLOSE` close list names open issues whose PR is merged with required checks `GREEN` at its head, with the PR, head, current gate, UAT and review states. `gate_accepted` records whether the current gate is `RETIRED` with its latest return consumed as `ACCEPT`; `accepted` counts completion only for G1 or G2. The controller decides; nothing is closed automatically, and a missing G1-or-later current-gate acceptance still reports `CHILD_STATE_CONFLICT`. A pass with nothing to do says `No changes` and writes nothing.
@@ -100,10 +101,11 @@ GitHub details the code relies on (checked against the REST docs and a private s
 
 ## Managed blocks
 
-Each catalogued issue body gets one block in the Toolkit marker format (`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=<version> sha256=<12 hex> -->` ... `END STATE`), inserted at the top the first time:
+Each catalogued issue body gets one block in the Toolkit marker format (`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=<version> sha256=<12 hex> -->` ... `END STATE`):
 
-- the parent block is the generated outcome table (tree order, gate, PR, head as a 7-character link plus the full SHA as text, CI at head, UAT, next action); the controller's prose and the decision index stay hand-written outside it;
-- each child block shows that child's state and its document revision;
+- the parent block is the `## Programme Graph`. It replaces the binding's `replace_section` while that section is on the page, else follows its `after_section` (the status section), else sits under the title. Active outcomes are grouped by class (Core, then Hardening, Later and Optional), each group in tree order with the columns `Outcome | Status | Current gate | Current work | Complete when`. Status is the lifecycle (`PLANNED`, `CURRENT`, `WAITING ON OWNER`, `HELD`, `COMPLETED`, `RETIRED`); Current work folds the PR, its head as a 7-character link plus the full SHA as text, CI at the head, UAT, review, release, blockers and the next action into one cell. Finished outcomes (class `COMPLETED` or `RETIRED`, or a `DONE` or `RETIRED` lifecycle) are collapsed at the end. The controller's prose and the decision index stay hand-written outside it;
+- each child block sits under the title and a marked note directly under it (for example the current-direction note), and shows that child's status, class, gate, PR, UAT, review, completion line and next action with its document revision;
+- a block already in place is updated in place; a block above its place (for example at the very top) or a `replace_section` still on the page moves it once, reported as "Move the state block";
 - a hidden line in the parent block lists every child revision, so parent and child can be checked against each other.
 
 Issue `PATCH` has no compare-and-swap, so the pass builds the new body from a fresh read, re-reads just before writing and refuses on change (`BODY_MOVED`, re-planned next pass), changes only the bytes between its markers, proves the whole body read back exactly, and refuses a body that would reach 60,000 characters (`BODY_TOO_LARGE`, the decision-trace threshold). The renderer reads an allow-list of public fields: never `private`, sessions or routes.
@@ -112,7 +114,7 @@ Issue `PATCH` has no compare-and-swap, so the pass builds the new body from a fr
 
 The programme issue body is the canonical record: every non-bot comment must be linked from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), directly or through an index comment the body links (one hop). Records that replace others carry `SUPERSEDES=<record ID>`. Keep the body under 60,000 characters (GitHub's limit is 65,536) by moving older index lines into an index comment marked `<!-- decision-trace-index -->`.
 
-Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`). It fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
+Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`). It fails on any unlinked comment, unknown `SUPERSEDES=` target, a superseded record not marked "superseded by" (in its own comment or on an index line that links it), or a body at the threshold, and lists comments without a record ID. The reconcile pass runs the same audit on the parent and every catalogued issue and reports `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; it never writes index lines. `--repair --out <file>` writes a proposed body with the missing index lines in the shape `- <date> · <record or comment> · [<summary>](#issuecomment-<id>)`, plus `SUPERSEDES=<record>` and `superseded by <record>` where they apply, and a marking line for each linked but unmarked superseded record; publishing it is a separately authorised write followed by readback and a clean re-audit.
 
 ## Review truth
 
