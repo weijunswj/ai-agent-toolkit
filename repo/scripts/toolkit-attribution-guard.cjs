@@ -8,8 +8,10 @@
 //
 // It also refuses commands that skip a repository's own commit and push checks (git commit -n or
 // --no-verify, git push --no-verify, or a different core.hooksPath) in a Toolkit-governed or
-// personal-data-guarded repository. This is best effort: CI is the backstop. Not covered:
-// GIT_CONFIG_* environment variables, git aliases, scripts and programs that run git themselves,
+// personal-data-guarded repository, and force pushes (--force, -f, --force-with-lease, --mirror or a
+// +refspec) there and to an evidence store (a TRANSPORT-* repository). This is best effort: CI and
+// branch rules are the backstop. Not covered:
+// GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
 
 const fs = require('node:fs');
@@ -232,7 +234,10 @@ function attributionRefusal(command, cwd) {
 }
 
 const BYPASS_MESSAGE = 'This command skips the repository\'s commit or push checks (git commit -n or --no-verify, git push --no-verify, or a different core.hooksPath). This repository runs them on every commit and push: fix what they report and retry without the bypass. If a check is wrong, tell the owner.';
+const FORCE_MESSAGE = 'This command force-pushes (--force, -f, --force-with-lease, --mirror or a +refspec). Toolkit-governed repositories and evidence stores keep their history: push a new commit or a merge commit instead, or push to a new branch.';
 const HOOKS_PATH = 'core.hookspath';
+const PUSH_VALUE_LETTERS = 'o';
+const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '--push-option']);
 const GIT_CONFIG_WRITES = new Set(['set', 'unset', '--unset', '--unset-all', '--replace-all', '--add', 'edit', '--edit', '-e', 'rename-section', 'remove-section', '--rename-section', '--remove-section']);
 const COMMIT_VALUE_LETTERS = 'mFcCtS';
 
@@ -296,15 +301,63 @@ function skipsChecks({ configs, sub, args }) {
   return false;
 }
 
-// Whether a folder is inside a Toolkit-governed or personal-data-guarded repository: the nearest
-// folder with a .git entry carries the governed rules block in AGENTS.md or the guard config.
-function checkedRepository(folder, cache) {
+// Whether a push rewrites history on the remote: --force and its abbreviations, -f in a
+// short-option bundle, --force-with-lease, --mirror, or a refspec that starts with +.
+function forcePush({ sub, args }) {
+  if (sub !== 'push') return false;
+  let positional = 0;
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (word === '--') { positional = Infinity; continue; }
+    if (positional !== Infinity && word.startsWith('--')) {
+      if (word.startsWith('--force') || (word.length >= 5 && '--force'.startsWith(word)) || word === '--mirror') return true;
+      if (PUSH_VALUE_OPTIONS.has(word)) index += 1;
+      continue;
+    }
+    if (positional !== Infinity && word.startsWith('-') && word.length > 1) {
+      for (let letter = 1; letter < word.length; letter += 1) {
+        if (word[letter] === 'f') return true;
+        if (PUSH_VALUE_LETTERS.includes(word[letter])) { if (letter === word.length - 1) index += 1; break; }
+      }
+      continue;
+    }
+    // The first word after the options is the remote; the rest are refspecs.
+    if (positional++ > 0 && word.startsWith('+')) return true;
+  }
+  return false;
+}
+
+// The repository's git config text, also for a worktree whose .git is a file.
+function gitConfigText(root) {
+  const dotGit = path.join(root, '.git');
+  let gitDir = dotGit;
+  try {
+    if (fs.statSync(dotGit).isFile()) {
+      gitDir = path.resolve(root, readSmallFile(dotGit).replace(/^gitdir:\s*/, '').trim());
+      const common = readSmallFile(path.join(gitDir, 'commondir')).trim();
+      if (common) gitDir = path.resolve(gitDir, common);
+    }
+  } catch { return ''; }
+  return readSmallFile(path.join(gitDir, 'config'));
+}
+
+// An evidence store by its repository name: a remote URL ending in TRANSPORT-<name>.
+const STORE_URL = /(?:^|[/:])transport-[\w.-]+?(?:\.git)?\/?$/i;
+function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
+
+// What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
+// carries the governed rules block in AGENTS.md or the guard config, `store` when one of its
+// remotes is an evidence store.
+function repositoryKind(folder, cache) {
   if (cache.has(folder)) return cache.get(folder);
-  let answer = false;
+  let answer = { checked: false, store: false };
   for (let current = folder, depth = 0; depth < 64; depth += 1) {
     if (fs.existsSync(path.join(current, '.git'))) {
-      answer = fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-        || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')));
+      answer = {
+        checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
+          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md'))),
+        store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
+      };
       break;
     }
     const parent = path.dirname(current);
@@ -332,7 +385,12 @@ function bypassRefusal(command, cwd, depth = 0) {
     }
     const git = gitCommand(current, root);
     if (git?.refusal) return git.refusal;
-    if (git && skipsChecks(git) && checkedRepository(git.base, cache)) return BYPASS_MESSAGE;
+    if (git && skipsChecks(git) && repositoryKind(git.base, cache).checked) return BYPASS_MESSAGE;
+    if (git && forcePush(git)) {
+      const kind = repositoryKind(git.base, cache);
+      const target = git.args.find((word) => !word.startsWith('-'));
+      if (kind.checked || kind.store || storeUrl(target)) return FORCE_MESSAGE;
+    }
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
@@ -353,4 +411,4 @@ function attributionDecision(input) {
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ BYPASS_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution });
+module.exports = Object.freeze({ BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution });

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const { BYPASS_MESSAGE, attributionRefusal, attributionDecision, bypassRefusal, MESSAGE } = require('../scripts/toolkit-attribution-guard.cjs');
+const { BYPASS_MESSAGE, FORCE_MESSAGE, attributionRefusal, attributionDecision, bypassRefusal, MESSAGE } = require('../scripts/toolkit-attribution-guard.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const trailer = 'Co-Authored-By: Claude <noreply@anthropic.com>';
@@ -282,6 +282,7 @@ function bypassRepos(t) {
     governed: make('governed', { 'AGENTS.md': '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n' }),
     guarded: make('guarded', { '.github/personal-data-guard.json': '{}\n' }),
     plain: make('plain', { 'AGENTS.md': '# Rules\n' }),
+    store: make('store', { '.git/config': '[remote "origin"]\n\turl = https://github.com/owner/TRANSPORT-evidence.git\n' }),
   };
 }
 
@@ -345,4 +346,28 @@ test('the Claude Code hook and the Codex helper hook refuse a bypass with a deny
   const helper = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs')], { input: input('Bash'), encoding: 'utf8' });
   assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
   assert.deepEqual(attributionDecision({ tool_input: { command: 'git push --no-verify' }, cwd: repos.plain }), {});
+});
+
+test('force pushes are refused in governed and guarded repositories and to evidence stores', (t) => {
+  const repos = bypassRepos(t);
+  const forced = [
+    'git push --force',
+    'git push -f origin feature',
+    'git push -uf origin feature',
+    'git push --force-with-lease',
+    'git push --force-with-lease=main:abc123 origin main',
+    'git push --forc',
+    'git push origin +main',
+    'git push origin +HEAD:main',
+    'git push --mirror',
+    'bash -c "git push --force origin main"',
+  ];
+  for (const root of [repos.governed, repos.guarded, repos.store]) {
+    for (const command of forced) assert.equal(bypassRefusal(command, root), FORCE_MESSAGE, `${path.basename(root)}: ${command}`);
+  }
+  assert.equal(bypassRefusal('git push https://github.com/owner/TRANSPORT-evidence.git +main', repos.plain), FORCE_MESSAGE, 'a store named on the command line');
+  for (const command of ['git push origin main', 'git push -u origin feature', 'git push -o ci.skip origin main', 'git push --follow-tags origin main', 'git push origin :old-branch']) {
+    assert.equal(bypassRefusal(command, repos.store), '', command);
+  }
+  for (const command of forced) assert.equal(bypassRefusal(command, repos.plain), '', `plain repository: ${command}`);
 });
