@@ -236,6 +236,44 @@ test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, C
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
 });
 
+test('the generated CURRENT summary names work in progress, what waits on the owner and the next queued tasks', () => {
+  const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: issue === 10 ? 'HARDENING' : 'CORE', parent: 7, order: issue, name: `Task ${issue}` }));
+  outcomes.push({ issue: 11, class: 'COMPLETED', parent: 7, order: 0, name: 'Done task' });
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (issue, changes = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), ...changes });
+  const pr = number => ({ number, state: 'OPEN', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } });
+  const gate = role => ({ role, state: 'ACTIVE', session_id: null, route: null, returns: [] });
+  const children = new Map([
+    [1, doc(1, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(541), next_action: 'Finish the sweep' })],
+    [2, doc(2, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(543), uat: { state: 'PENDING', at_head: null } })],
+    [3, doc(3, { lifecycle: 'WAITING_OWNER' })],
+    [4, doc(4, { lifecycle: 'HOLD', blockers: ['needs the key'] })],
+    [11, doc(11, { lifecycle: 'DONE' })],
+  ]);
+  const body = state.renderCurrentBlockBody(parent, children, new Map());
+  assert.equal(body, [
+    '<!-- programme-current -->',
+    '_Generated from the programme state (revision 0); hand-written notes follow this summary._',
+    '',
+    '**In progress**',
+    '- Task 1 (#1): G1, PR #541; next: Finish the sweep',
+    '',
+    '**Waiting on you**',
+    '- Task 2 (#2): your UAT on PR #543',
+    '- Task 3 (#3): your decision',
+    '- Task 4 (#4): blocked: needs the key',
+    '',
+    '**Next up**',
+    '- Task 5 (#5)',
+    '- Task 6 (#6)',
+    '- Task 7 (#7)',
+    '- Task 8 (#8)',
+    '- Task 9 (#9)',
+  ].join('\n'));
+  const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Waiting on you\*\*\n- None\.\n\n\*\*Next up\*\*\n- None\.$/);
+});
+
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {
   const outcomeDone = { issue: 459, class: 'COMPLETED', parent: 421, order: 1 };
   const parentDoc = state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcomeDone] }), controller, {});
