@@ -21,9 +21,10 @@ const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
+const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.9.0';
+const BRIDGE_VERSION = TOOLKIT_VERSION;
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -33,7 +34,9 @@ const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const DEFAULT_UPDATE_REPORT_MAX_FILES = 200;
-const FULL_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs');
+// The full bridge suite: the shared file plus its per-host files (Codex, Claude Code).
+const FULL_VALIDATION_TESTS = Object.freeze(['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs']
+  .map((name) => path.join('repo', 'tests', name)));
 const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
@@ -502,8 +505,8 @@ function buildValidationSuite({ hookMode = false } = {}) {
           timeout: HOOK_LIGHT_VALIDATION_TIMEOUT_MS
         }
       : {
-          label: 'node --test repo/tests/toolkit-local-bridge.test.cjs',
-          args: ['--test', FULL_VALIDATION_TEST],
+          label: 'node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs',
+          args: ['--test', ...FULL_VALIDATION_TESTS],
           timeout: VALIDATE_TOOLKIT_TIMEOUT_MS
         }
   ];
