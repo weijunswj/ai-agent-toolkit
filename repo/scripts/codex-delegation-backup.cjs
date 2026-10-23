@@ -93,7 +93,7 @@ function snapshotsMatch(expected, current) {
     && sameIdentity(expected.identity, current.identity);
 }
 
-function assertSnapshotCurrent(configPath, expected, message = 'Codex config changed while the isolated proposal was being prepared; refusing to overwrite the concurrent edit.') {
+function assertSnapshotCurrent(configPath, expected, message = 'config.toml changed on disk after setup read it. Codex or another program may have rewritten it. Setup wrote nothing. Close Codex, then run setup again.') {
   const current = captureCodexConfigSnapshot(configPath);
   if (!snapshotsMatch(expected, current)) {
     throw new Error(message);
@@ -262,7 +262,20 @@ class CodexConfigRestoreTransaction {
 
   }
 }
-function restoreCodexDelegationBackup(metadataPath, options = {}) {return new CodexConfigRestoreTransaction(metadataPath,options).run();}
+// Automatic rollback must restore the previous bytes even when those bytes were the
+// broken installation being repaired. Explicit restore is a new host-config write.
+function rollbackCodexDelegationBackup(metadataPath, options = {}) { return new CodexConfigRestoreTransaction(metadataPath, options).run(); }
+function restoreCodexDelegationBackup(metadataPath, options = {}) {
+  const { expectedConfigPath, generationPath } = readBackupMetadata(metadataPath, options);
+  const snapshot = captureCodexConfigSnapshot(expectedConfigPath);
+  const backupPath = path.join(generationPath, `config.toml.before-restore-${crypto.randomUUID()}`);
+  fs.writeFileSync(backupPath, snapshot.bytes, { flag: 'wx', mode: 0o600 });
+  const result = new CodexConfigRestoreTransaction(metadataPath, options).run();
+  const replacementBytes = result.removed_created_file ? null : fs.readFileSync(expectedConfigPath);
+  const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
+  const loadCheck = new CodexConfigLoadCheck(options.loadCheckOptions || options).verify({ configPath: expectedConfigPath, snapshot, backupPath, replacementBytes });
+  return { ...result, load_check: loadCheck };
+}
 
 module.exports = {
   BACKUP_SCHEMA,
@@ -273,4 +286,5 @@ module.exports = {
   writeRegularFileAtomically,
   readBackupMetadata,
   restoreCodexDelegationBackup,
+  rollbackCodexDelegationBackup,
 };

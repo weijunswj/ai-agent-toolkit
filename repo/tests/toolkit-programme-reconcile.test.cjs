@@ -26,7 +26,7 @@ const CATALOGUE = [
   { issue: 499, label: 'R1', class: 'CORE', parent: null, order: 0 },
 ];
 
-function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.0', controller = writer, initialiseParent = true } = {}) {
+function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.1', controller = writer, initialiseParent = true } = {}) {
   const github = new FakeGitHub({ repository, store: 'acme/state-store' });
   const binding = {
     schema: state.SCHEMA.binding, repository, parent_issue: parentIssue, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-',
@@ -359,7 +359,7 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-handover-'));
   const output = [];
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
-    toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
+    toolkitVersion: '3.9.1', environment: {}, stdout: { write: text => output.push(text) } };
   const run = (args, session = 'ctrl') => {
     output.length = 0;
     assert.equal(cli.main([...args, '--session', session, '--controller', '--json'], deps), 0);
@@ -487,7 +487,7 @@ test('the close list excludes red, missing, pending or off-head checks, unmerged
 test('the command line binds identity, refuses writes without the controller flag or session and prints a readable plan', () => {
   const { github, binding } = setup();
   const output = [];
-  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.1', environment: {}, stdout: { write: text => output.push(text) } };
   assert.equal(cli.main(['reconcile'], deps), 0);
   assert.match(output.join(''), /Planned effects\n1\. /);
   assert.match(output.join(''), /Next action: Controller: run reconcile --apply --controller for this plan; other sessions report it/);

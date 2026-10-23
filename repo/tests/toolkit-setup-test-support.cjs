@@ -66,6 +66,7 @@ function createFakeCodexAppServer(root) {
     "    const v1 = process.env.SETUP_FAKE_CODEX_RUNTIME === 'v1';",
     "    process.stdout.write(JSON.stringify({ id: message.id, result: { data: [{ name: 'multi_agent_v2', enabled: !v1 }, { name: 'multi_agent', enabled: v1 }] } }) + '\\n');",
     "  }",
+    "  if (message.method === 'config/read') process.stdout.write(JSON.stringify({ id: message.id, result: { config: {} } }) + '\\n');",
     "  if (message.method === 'config/batchWrite') {",
     "    if (process.env.SETUP_FAKE_CODEX_EDITOR_LOG) fs.appendFileSync(process.env.SETUP_FAKE_CODEX_EDITOR_LOG, 'config/batchWrite\\n');",
     "    const target = path.join(process.env.CODEX_HOME, 'config.toml');",
@@ -144,6 +145,10 @@ function createMinimalSetupRepo(root, options = {}) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const write = process.argv.includes('--write');",
+    ...(options.rejectZeroConfig ? [
+      "const active = path.join(process.env.CODEX_HOME, 'config.toml');",
+      "if (fs.existsSync(active) && fs.readFileSync(active, 'utf8').includes('max_threads = 0')) { console.error('Codex plugin CLI cannot load the zero helper cap'); process.exit(40); }",
+    ] : []),
     "const refreshMarker = path.join(process.cwd(), 'CODEX_PLUGIN_REFRESHED');",
     "const sourcePath = process.env.SETUP_FAKE_PRIVATE_REPO || process.cwd();",
     "const cachePath = process.env.SETUP_FAKE_PRIVATE_CACHE || path.join(process.cwd(), 'fake-codex-cache');",
@@ -208,7 +213,14 @@ function createGitBackedSetupRepo(root, options = {}) {
   const setupRepo = path.join(root, 'repo');
   fs.mkdirSync(setupRepo, { recursive: true });
   runTestGit(root, ['init', '--bare', origin]);
+  // No background repack: tests snapshot origin.git byte for byte, and a detached auto gc after a
+  // push can rewrite it mid-test (seen on Linux CI once setup's script closure grew).
+  runTestGit(origin, ['config', 'receive.autogc', 'false']);
+  runTestGit(origin, ['config', 'gc.auto', '0']);
+  runTestGit(origin, ['config', 'maintenance.auto', 'false']);
   runTestGit(setupRepo, ['init']);
+  runTestGit(setupRepo, ['config', 'gc.auto', '0']);
+  runTestGit(setupRepo, ['config', 'maintenance.auto', 'false']);
   runTestGit(setupRepo, ['checkout', '-b', 'main']);
   runTestGit(setupRepo, ['config', 'user.email', 'setup-test@example.invalid']);
   runTestGit(setupRepo, ['config', 'user.name', 'Setup Test']);

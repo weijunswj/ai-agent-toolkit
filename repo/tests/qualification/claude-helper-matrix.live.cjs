@@ -31,12 +31,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const matrix = require('../support/claude-helper-matrix.cjs');
+const sessionAgents = require('../../scripts/toolkit-claude-session-agents.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const REGISTRY = path.join(ROOT, 'repo', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
 // Limits that are recorded, not failed: the host gives Toolkit no way to enforce them.
 const KNOWN_LIMITS = Object.freeze({
-  A14: 'A session started with its own --agents copy of a Toolkit helper is not route-enforced: no hook can see session definitions.',
+  A14: 'A session started with its own --agents copy of a Toolkit helper is not route-enforced by the hook: no hook can see session definitions. Toolkit launchers refuse such a launch with toolkit-claude-session-agents.cjs.',
 });
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -182,12 +183,15 @@ function liveCases(live, context) {
       return { observed: s, pass: s.hook_decisions.some(d => d.decision === 'deny') && s.helpers.every(h => h.turns.length === 0) };
     }],
     ['A14', 'a session --agents definition with a Toolkit name does not run off-route', () => {
-      const s = live.run('a14-session-agents', ask('toolkit-g0-helper'), { agents: { 'toolkit-g0-helper': { description: 'session copy', prompt: 'Reply HELPER-OK.', model: 'claude-opus-5-5', effort: 'low' } } });
+      const agents = { 'toolkit-g0-helper': { description: 'session copy', prompt: 'Reply HELPER-OK.', model: 'claude-opus-5-5', effort: 'low' } };
+      // A Toolkit launcher runs this check first and would not start the session.
+      const launcher = sessionAgents.checkClaudeArguments(['--agents', JSON.stringify(agents)], { stack: 'owner-claude', toolkitRoot: ROOT });
+      const s = { ...live.run('a14-session-agents', ask('toolkit-g0-helper'), { agents }), launcher_check: launcher };
       // Known limit: no hook input carries session definitions and SubagentStart cannot block, so a
       // session started with its own --agents copy of a Toolkit helper is not route-enforced. The row
       // records what ran; it passes only if no helper turn ran off the pin.
       const onPin = s.helpers.flatMap(h => h.turns).every(t => t.model === g0.model && t.effort === g0.effort);
-      return { observed: s, pass: onPin, limit: onPin ? null : KNOWN_LIMITS.A14 };
+      return { observed: s, pass: onPin, limit: onPin ? null : launcher.refused ? KNOWN_LIMITS.A14 : `${KNOWN_LIMITS.A14} The launcher check did not refuse it either.` };
     }],
     ['A16', 'no helper requested: no agent call, no hook decision, no helper records', () => {
       const s = live.run('a16-no-helper', 'Reply with exactly NO-HELPER. Do not use any tools.');

@@ -29,19 +29,7 @@
     {
       "file": "repo/docs/FOR_AI_AGENTS.md",
       "rule": "number-reference",
-      "text": "#237",
-      "count": 1
-    },
-    {
-      "file": "repo/docs/FOR_AI_AGENTS.md",
-      "rule": "number-reference",
       "text": "#469",
-      "count": 1
-    },
-    {
-      "file": "repo/docs/HOW-TO-USE.md",
-      "rule": "codex-mode-name",
-      "text": "MultiAgentV2",
       "count": 1
     },
     {
@@ -61,18 +49,6 @@
       "rule": "number-reference",
       "text": "#247",
       "count": 1
-    },
-    {
-      "file": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md",
-      "rule": "number-reference",
-      "text": "#237",
-      "count": 3
-    },
-    {
-      "file": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md",
-      "rule": "codex-mode-name",
-      "text": "MultiAgentV2",
-      "count": 6
     },
     {
       "file": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md",
@@ -355,24 +331,6 @@
       "rule": "number-reference",
       "text": "#421",
       "count": 1
-    },
-    {
-      "file": "skills/toolkit-setup/SKILL.md",
-      "rule": "codex-mode-name",
-      "text": "MultiAgentV2",
-      "count": 4
-    },
-    {
-      "file": "skills/toolkit-setup/SKILL.md",
-      "rule": "codex-mode-name",
-      "text": "MultiAgentV1",
-      "count": 2
-    },
-    {
-      "file": "skills/toolkit-setup/SKILL.md",
-      "rule": "number-reference",
-      "text": "#237",
-      "count": 2
     }
   ]
 }

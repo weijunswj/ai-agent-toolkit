@@ -43,3 +43,35 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
     assert.doesNotMatch(read(rel), /claude-projects/, rel);
   }
 });
+
+test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
+  const text = read(SKILL_REL);
+  assert.match(text, /^Version: 2026-10-23\.17$/m);
+  assert.match(text, /Account-plugin sync: compares the version of the Toolkit plugin on the user's claude\.ai account/);
+  assert.match(text, /remove the account marketplace and add it again with Sync automatically on/);
+  assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
+  assert.match(text, /toolkit-projects-instructions\.cjs --render/);
+  assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);
+  assert.match(text, /Read the saved instructions back/);
+  assert.match(text, /record the block's toolkit version in project memory/);
+  assert.match(text, /`edited`: flag edits inside the markers, show the difference and replace only after owner confirmation/);
+  assert.match(text, /declined project-instructions <version>/);
+  assert.match(text, /Never offer that version again; offer the next newer version once/);
+  assert.match(text, /Never touch lines outside the markers/);
+  assert.match(text, /Every scheduled task runs as a fresh session per run, with no bound thread/);
+  assert.match(text, /Fresh-session routines cannot be created from a device-linked/);
+  assert.match(text, /cheapest that does the task well, starting one notch higher and stepping down after clean runs/);
+  assert.match(text, /Write these requirements into every task prompt/);
+  for (const required of ['capped short message to the coordinator with retry', 'full report to a file',
+    'resolve its own thread after the report is delivered', 'ALL unresolved threads and project-chat posts',
+    'small page limits', 'ALL unanswered owner items with no reply or reaction', 'link and ask date',
+    'ONE reminder each run', 'stale thread labels', '**Overdue promise:**', 'fenced `toolkit-promises` block',
+    'toolkit-promise-check.cjs --list <file>', 'Pre-wire follow-ups into briefs',
+    'never take over a gate\'s verdict', 'accept, downgrade or reject with a reason per item']) {
+    assert.ok(text.includes(required), required);
+  }
+  const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.match(body, /Every thread is an executor/);
+  assert.match(body, /Do not copy CONTROLLER\.md/);
+  assert.match(body, /TOOLKIT_FEEDBACK item in the thread reply as one line/);
+});
