@@ -124,7 +124,7 @@ test('a concurrent first G0 claim survives the controller applying a planned cre
   assert.doesNotThrow(() => state.submitReturn(after, { returnId: 'g0-r1', writer: builder, parentDoc: parentDoc() }));
 });
 
-// In this version only the appointed controller writes. The matrix runs every CLI command, in every
+// Only the appointed controller writes. The matrix runs every CLI command, in every
 // scenario, as every role, in text and JSON output:
 // - any write without --controller is USAGE before any GitHub or store call;
 // - a non-holder that adds --controller is refused by the fence and changes nothing, except the two
@@ -329,7 +329,7 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       const text = read(file);
       assert.doesNotMatch(text, /(?:issue tracking|records|comments)[^.\n]*(?:off by default|opt-in)/i, file);
       assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
-      assert.match(text, /Toolkit-governed rules[^\n]*issue records are unchanged in 3\.9\.0/, file);
+      assert.match(text, /binding does not change the Toolkit-governed rules[^\n]*or their issue records/, file);
       assert.match(text, /without that block get no governed issue writes/i, file);
       assert.match(text, /every `programme\.cjs` command refuses without it/, file);
     }
@@ -453,7 +453,7 @@ test('without the opt-in binding the command line refuses before any GitHub call
   }
 });
 
-test('every custody surface says only the appointed controller writes in this version', () => {
+test('every custody surface says only the appointed controller writes', () => {
   const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
   const skill = read('skills/github-program-reconciler/SKILL.md');
   const surfaces = {
@@ -472,4 +472,15 @@ test('every custody surface says only the appointed controller writes in this ve
   assert.match(surfaces.who, /A controller stopped by a takeover stops and reports to the owner/);
   assert.match(surfaces.who, /verifies that the previous writer stopped, posts its takeover record/);
   assert.doesNotMatch(skill, /TOOLKIT_PROGRAMME_SESSION/);
+});
+
+test('user-facing reconciler text names no release numbers or roadmap', () => {
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md',
+    'skills/github-program-reconciler/agents/openai.yaml', 'skills/github-program-reconciler/scripts/programme.cjs',
+    'skills/github-program-reconciler/scripts/programme-state.cjs', 'repo/docs/SKILL-SAFETY-MATRIX.md', 'repo/docs/FOR_AI_AGENTS.md',
+    'repo/contracts/agent-rules/toolkit-skill-routing.md', 'repo/contracts/programme-state/binding-v1.schema.json']) {
+    const text = read(file).replace(/toolkit=\d+\.\d+\.\d+/g, '');
+    assert.doesNotMatch(text, /\bin \d+\.\d+\.\d+\b|this version|R5b custody|custody release/i, file);
+  }
 });

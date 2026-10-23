@@ -2,7 +2,7 @@
 
 **Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
-**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json`; every `programme.cjs` command refuses without it. This version supports github.com only, with `kind: github` as its only state store backend. The Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) and their issue records are unchanged in 3.9.0; the binding does not switch them off. Company or third-party repositories without that block get no governed issue writes, only the coding-governance gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
+**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json`; every `programme.cjs` command refuses without it. It supports github.com only, with `kind: github` as its only state store backend. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Company or third-party repositories without that block get no governed issue writes, only the coding-governance gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
 

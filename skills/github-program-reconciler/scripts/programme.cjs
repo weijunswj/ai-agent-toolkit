@@ -9,7 +9,7 @@
 //   show [--parent | --issue <n>] [--include-private]
 //   init-parent --catalogue <file>                     validate a catalogue
 //
-// In this version only the appointed controller writes. Every write needs --controller and
+// Only the appointed controller writes. Every write needs --controller and
 // --session <id>, and every write except creating the parent and a deliberate parent takeover also
 // needs that session to hold the parent document:
 //   reconcile --apply [--issue <n>]
@@ -50,7 +50,7 @@ function parseArgs(argv) {
     if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw new ProgrammeError('USAGE', '--issue must be an issue number (1 or more).');
   }
   if (isWrite(args) && !args.controller) {
-    throw new ProgrammeError('USAGE', 'In this version only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller.');
+    throw new ProgrammeError('USAGE', 'Only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller.');
   }
   if (command === 'claim') {
     if (Boolean(args.parent) === (args.issue !== undefined)) throw new ProgrammeError('USAGE', 'claim needs --issue <n> or --parent.');
@@ -59,7 +59,7 @@ function parseArgs(argv) {
   return args;
 }
 
-// Commands that write programme state or GitHub. In this version each one is the controller's.
+// Commands that write programme state or GitHub. Each one is the controller's.
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
   return ['update-parent', 'claim', 'update', 'return'].includes(args.command);
