@@ -8,20 +8,21 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { CodexHelperAgentRenderer } = require('../scripts/toolkit-codex-helper-agents.cjs');
 const { CodexNamedHelperPolicy } = require('../scripts/toolkit-codex-helper-policy.cjs');
+const { makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
 const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 const renderer = CodexHelperAgentRenderer.fromRepository('owner-gpt');
 
-// A governed repository (Toolkit-governed rules block) and an isolated Codex home with the
+// A governed repository (ENABLED by repository opt-in: the governed rules block and a programme
+// binding) and an isolated Codex home with the
 // current helper agent files. Nothing here reads the real ~/.codex.
 function fixture(t, { install = true } = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-policy-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const repo = path.join(base, 'repo'), home = path.join(base, 'codex'), agents = path.join(home, 'agents');
-  fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
-  fs.copyFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(repo, 'AGENTS.md'));
+  makeGoverned(repo, 'codex-helper-policy');
   if (install) {
     fs.mkdirSync(agents, { recursive: true });
     for (const role of ['G0', 'G1']) { const { file, text } = renderer.render(role); fs.writeFileSync(path.join(agents, file), text); }
