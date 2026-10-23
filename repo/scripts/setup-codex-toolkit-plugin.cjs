@@ -55,6 +55,8 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/codex-delegation-layout.cjs',
   'repo/scripts/codex-delegation-state.cjs',
   'repo/scripts/setup-toolkit-core.cjs',
+  'repo/scripts/setup-core-claude.cjs',
+  'repo/scripts/setup-core-codex.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/repo-ignore-hygiene.cjs',

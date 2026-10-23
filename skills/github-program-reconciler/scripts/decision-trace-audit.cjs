@@ -22,6 +22,7 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
+const { commentTag, splitTag } = require('./decision-tags.cjs');
 
 const DEFAULT_THRESHOLD = 60000;
 const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
@@ -71,18 +72,21 @@ function recordFacts(people, recordPrefix) {
   return { records, commentOf, supersededBy, supersedes };
 }
 
+// The tag line and its `---` are not part of the summary.
 function entryFor(comment, facts, index) {
   const record = facts.records.get(String(comment.id));
+  const { tag, text } = splitTag(comment.body);
   return {
-    id: String(comment.id), record, index,
-    date: String(comment.created_at || '').slice(0, 10) || null, summary: commentSummary(comment.body),
+    id: String(comment.id), record, index, tag,
+    date: String(comment.created_at || '').slice(0, 10) || null, summary: commentSummary(text),
     supersedes: facts.supersedes.get(String(comment.id)) || [], superseded_by: facts.supersededBy.get(record) || null,
   };
 }
 
-// The trace an issue body carries: its index comments (each a link) and, as index entries in
-// comment order, every comment none of them lists. `marks` names superseded records that an index
-// comment lists without "superseded by".
+// The trace an issue body carries: its index comments (each a link, with the tag it holds) and, as
+// index entries in comment order, every comment none of them lists, each with its tag (null for
+// "Other comments"). `marks` names superseded records that an index comment lists without
+// "superseded by", with the tag of the record's comment.
 function traceEntries(comments, recordPrefix = null) {
   const people = comments.filter(comment => !isBot(comment));
   const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
@@ -90,10 +94,11 @@ function traceEntries(comments, recordPrefix = null) {
   for (const index of indexes) for (const line of String(index.body || '').split('\n')) for (const id of linkedIds(line)) covered.set(id, `${covered.get(id) || ''}\n${line}`);
   const facts = recordFacts(people, recordPrefix);
   const entries = people.filter(comment => !indexes.includes(comment) && !covered.has(String(comment.id))).map(comment => entryFor(comment, facts, false));
-  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by }))
+  const tagOf = id => commentTag(people.find(comment => String(comment.id) === id)?.body);
+  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by, tag: tagOf(facts.commentOf.get(record)) }))
     .filter(entry => covered.has(entry.id) && !/superseded by/i.test(covered.get(entry.id))
       && !/superseded by/i.test(String(people.find(comment => String(comment.id) === entry.id)?.body || '')));
-  return { indexes: indexes.map(comment => ({ id: String(comment.id), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
+  return { indexes: indexes.map(comment => ({ id: String(comment.id), tag: commentTag(comment.body), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
 }
 
 // body: the issue body. comments: GitHub issue comments ({ id, user, body }).
