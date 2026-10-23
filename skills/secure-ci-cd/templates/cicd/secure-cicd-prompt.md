@@ -177,6 +177,7 @@ Add a security job that runs before build/test/deploy.
 
 Minimum security checks:
 - Secret scanning using a suitable scanner, preferably Gitleaks by default.
+- Personal-data scanning (email addresses, phone numbers, WhatsApp links) on every commit, commit message and pull request title and body, with this skill's guard (`scripts/install-personal-data-guard.cjs --workflow`) unless the owner declines; see `scripts/personal-data-guard.cjs explain`.
 - Dependency review where supported.
 - Static analysis or CodeQL where supported by the project language.
 - Docker image scanning if Docker is used.

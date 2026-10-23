@@ -5,9 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
+const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '3.9.0';
+const CONTROL_VERSION = TOOLKIT_VERSION;
 // Host-profile topologies the store reads and writes. A stored profile with any other
 // topology, such as the retired Toolkit direct topology, reads as unsupported (root-only).
 // NAMED_HELPERS admits only the Toolkit G0/G1 leaf helpers in governed work. Toolkit 2.10.x

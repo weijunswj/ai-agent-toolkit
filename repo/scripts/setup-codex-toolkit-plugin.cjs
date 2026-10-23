@@ -7,10 +7,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
+const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '3.9.0';
+const EXPECTED_TOOLKIT_VERSION = TOOLKIT_VERSION;
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -22,10 +23,13 @@ const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-sourc
 const CODEX_JSON_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const CACHE_FINGERPRINT_PATHS = [
   "repo/contracts/toolkit-local-bridge/version.json",
+  "repo/scripts/toolkit-version.cjs",
   "repo/scripts/toolkit-antigravity-project-skills.cjs",
   "repo/scripts/toolkit-stack-selection.cjs",
   "repo/scripts/toolkit-claude-task-session.cjs",
   "repo/scripts/toolkit-v3-native-helper-adapter.cjs",
+  "repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs",
+  "repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs",
   "repo/scripts/toolkit-v3-helper-guard.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
   "repo/scripts/toolkit-attribution-guard.cjs",
