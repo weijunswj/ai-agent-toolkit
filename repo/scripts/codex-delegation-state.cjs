@@ -30,6 +30,12 @@ const RUNTIMES = Object.freeze({
   UNKNOWN: 'unknown',
 });
 
+// How a runtime is named to people: Codex's version label plus its setting key.
+const RUNTIME_LABELS = Object.freeze({ [RUNTIMES.V1]: 'V1 (multi_agent)', [RUNTIMES.V2]: 'V2 (multi_agent_v2)' });
+function runtimeLabel(runtime) {
+  return RUNTIME_LABELS[runtime] || runtime;
+}
+
 function tomlString(value) {
   return JSON.stringify(String(value)).replace(/\\u2028|\\u2029/g, (match) => match.toLowerCase());
 }
@@ -462,16 +468,16 @@ function v2State(parsed, layout, base) {
         helper_count: null,
         total_threads: null,
         hard_nested_helper_enforcement: 'not-supported',
-        detail: 'MultiAgentV2 is enabled with the official boolean form; Toolkit can migrate that exact enablement to the configured V2 table when helper capacity is explicitly approved.',
+        detail: 'Codex V2 (multi_agent_v2) is enabled with the official boolean form; Toolkit can migrate that exact enablement to the configured V2 table when helper capacity is explicitly approved.',
       };
     }
     return { ...base, status: 'conflicting', detail: 'features.multi_agent_v2 is not a compatible enabled table or boolean; Toolkit will not rewrite that user-owned shape.' };
   }
   if (layout.multiAgentV2Tables.length > 1 || layout.multiAgentV2Children.length) {
-    return { ...base, status: 'conflicting', detail: 'The MultiAgentV2 table layout is duplicated or has unsupported child tables.' };
+    return { ...base, status: 'conflicting', detail: 'The Codex V2 (multi_agent_v2) table layout is duplicated or has unsupported child tables.' };
   }
   if (parsed.multi_agent_v2_present && layout.multiAgentV2Tables.length !== 1) {
-    return { ...base, status: 'conflicting', detail: 'The effective MultiAgentV2 table is not represented by one explicit [features.multi_agent_v2] table.' };
+    return { ...base, status: 'conflicting', detail: 'The effective Codex V2 (multi_agent_v2) table is not represented by one explicit [features.multi_agent_v2] table.' };
   }
 
   const values = parsed.multi_agent_v2_values || {};
@@ -491,15 +497,15 @@ function v2State(parsed, layout, base) {
 
   if (anyManaged) {
     if (!exactBoolean(enabled, true) || !Number.isSafeInteger(helperCount) || helperCount < 0 || !exactGuidance) {
-      return { ...base, status: 'conflicting', detail: 'Toolkit MultiAgentV2 markers do not contain valid capacity and guidance values.' };
+      return { ...base, status: 'conflicting', detail: 'Toolkit V2 (multi_agent_v2) markers do not contain valid capacity and guidance values.' };
     }
-    if (!completeManagedValues) return { ...base, status: 'conflicting', detail: 'Toolkit MultiAgentV2 capacity and guidance ownership markers are incomplete.' };
+    if (!completeManagedValues) return { ...base, status: 'conflicting', detail: 'Toolkit V2 (multi_agent_v2) capacity and guidance ownership markers are incomplete.' };
     const table = layout.multiAgentV2Tables[0];
     const checks = [
-      ...(managedEnablement ? [[layout.enablementBeginMarkers[0], layout.enablementEndMarkers[0], managedAssignmentBlock(CODEX_V2_ENABLEMENT_BEGIN, 'enabled = true', CODEX_V2_ENABLEMENT_END), 'Toolkit MultiAgentV2 enablement']] : []),
-      [layout.helperBeginMarkers[0], layout.helperEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_CAPACITY_BEGIN, `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`, CODEX_HELPER_CAPACITY_END), 'Toolkit MultiAgentV2 helper capacity'],
-      [layout.rootGuidanceBeginMarkers[0], layout.rootGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_ROOT_GUIDANCE_BEGIN, `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`, CODEX_ROOT_GUIDANCE_END), 'Toolkit MultiAgentV2 root guidance'],
-      [layout.helperGuidanceBeginMarkers[0], layout.helperGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_GUIDANCE_BEGIN, `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`, CODEX_HELPER_GUIDANCE_END), 'Toolkit MultiAgentV2 helper guidance'],
+      ...(managedEnablement ? [[layout.enablementBeginMarkers[0], layout.enablementEndMarkers[0], managedAssignmentBlock(CODEX_V2_ENABLEMENT_BEGIN, 'enabled = true', CODEX_V2_ENABLEMENT_END), 'Toolkit V2 (multi_agent_v2) enablement']] : []),
+      [layout.helperBeginMarkers[0], layout.helperEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_CAPACITY_BEGIN, `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`, CODEX_HELPER_CAPACITY_END), 'Toolkit V2 (multi_agent_v2) helper capacity'],
+      [layout.rootGuidanceBeginMarkers[0], layout.rootGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_ROOT_GUIDANCE_BEGIN, `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`, CODEX_ROOT_GUIDANCE_END), 'Toolkit V2 (multi_agent_v2) root guidance'],
+      [layout.helperGuidanceBeginMarkers[0], layout.helperGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_GUIDANCE_BEGIN, `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`, CODEX_HELPER_GUIDANCE_END), 'Toolkit V2 (multi_agent_v2) helper guidance'],
     ];
     for (const [begin, end, expected, label] of checks) {
       const error = validateManagedBlock(layout, table, begin, end, expected, label);
@@ -518,7 +524,7 @@ function v2State(parsed, layout, base) {
       hard_nested_helper_enforcement: 'not-supported',
       recursive_helper_control: 'policy-only; no native hard block verified',
       recursive_hard_block: false,
-      detail: `Toolkit-managed MultiAgentV2 capacity allows ${helperCount} helper(s) plus the root (${helperCount + 1} total session threads); the root counts toward the total.`,
+      detail: `Toolkit-managed Codex V2 (multi_agent_v2) capacity allows ${helperCount} helper(s) plus the root (${helperCount + 1} total session threads); the root counts toward the total.`,
     };
   }
 
@@ -537,19 +543,19 @@ function v2State(parsed, layout, base) {
         hard_nested_helper_enforcement: 'not-supported',
         recursive_helper_control: 'policy-only; no native hard block verified',
         recursive_hard_block: false,
-        detail: `Compatible user-owned MultiAgentV2 values allow ${helperCount} helper(s) plus the root (${helperCount + 1} total session threads); the root counts toward the total and Toolkit will not claim ownership.`,
+        detail: `Compatible user-owned Codex V2 (multi_agent_v2) values allow ${helperCount} helper(s) plus the root (${helperCount + 1} total session threads); the root counts toward the total and Toolkit will not claim ownership.`,
       };
     }
     return {
       ...base,
       status: 'conflicting',
       enablement_ownership: exactBoolean(enabled, true) ? 'user-owned-table' : 'replace-required',
-      detail: 'User-owned MultiAgentV2 capacity or guidance values are present; Toolkit will not overwrite them.',
+      detail: 'User-owned Codex V2 (multi_agent_v2) capacity or guidance values are present; Toolkit will not overwrite them.',
     };
   }
 
   if (enabled?.present && !exactBoolean(enabled, true)) {
-    return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV2 enablement is false or non-boolean; Toolkit will not overwrite it.' };
+    return { ...base, status: 'conflicting', detail: 'User-owned Codex V2 (multi_agent_v2) enablement is false or non-boolean; Toolkit will not overwrite it.' };
   }
 
   if (layout.beginMarkers.length === 1) {
@@ -561,10 +567,10 @@ function v2State(parsed, layout, base) {
       layout.beginMarkers[0],
       layout.endMarkers[0],
       expectedLegacyBlock(1, '\n'),
-      'Toolkit PR #237 legacy delegation'
+      'old Toolkit helper block'
     );
     if (!legacyExact || error) {
-      return { ...base, status: 'conflicting', detail: error || 'Toolkit PR #237 markers do not contain the complete expected legacy values.' };
+      return { ...base, status: 'conflicting', detail: error || 'The old Toolkit helper block markers do not contain the complete expected legacy values.' };
     }
     return {
       ...base,
@@ -572,7 +578,7 @@ function v2State(parsed, layout, base) {
       ownership: 'toolkit-managed-v1-legacy',
       helper_count: 1,
       total_threads: 2,
-      detail: 'The exact Toolkit PR #237 legacy block is present and will be migrated to MultiAgentV2 without touching user-owned settings.',
+      detail: 'The exact old Toolkit helper block is present and will be migrated to Codex V2 (multi_agent_v2) without touching user-owned settings.',
     };
   }
 
@@ -586,7 +592,7 @@ function v2State(parsed, layout, base) {
       helper_count: null,
       total_threads: null,
       hard_nested_helper_enforcement: 'not-supported',
-      detail: 'MultiAgentV2 is effective, so the preserved user-owned legacy [agents] values do not enforce the active helper capacity. No effective Toolkit helper capacity is configured.',
+      detail: 'Codex V2 (multi_agent_v2) is effective, so the preserved user-owned legacy [agents] values do not enforce the active helper capacity. No effective Toolkit helper capacity is configured.',
     };
   }
 
@@ -597,7 +603,7 @@ function v2State(parsed, layout, base) {
     helper_count: null,
     total_threads: null,
     hard_nested_helper_enforcement: 'not-supported',
-    detail: 'MultiAgentV2 is effective and no Toolkit-managed helper capacity is configured.',
+    detail: 'Codex V2 (multi_agent_v2) is effective and no Toolkit-managed helper capacity is configured.',
   };
 }
 
@@ -639,14 +645,14 @@ function v1State(parsed, layout, base) {
       hard_nested_helper_enforcement: 'supported',
       recursive_helper_control: 'hard-enforced by the supported V1 nesting-depth control',
       recursive_hard_block: true,
-      detail: helperCount === 0 ? (managed ? 'Codex refuses max_threads = 0. This Toolkit-owned block needs a one-helper repair proposal.' : 'Codex refuses the user-owned max_threads = 0; a replacement requires approval.') : managed ? `Toolkit-managed MultiAgentV1 capacity allows ${helperCount} helper(s).` : `Compatible user-owned MultiAgentV1 values allow ${helperCount} helper(s).`,
+      detail: helperCount === 0 ? (managed ? 'Codex refuses max_threads = 0. This Toolkit-owned block needs a one-helper repair proposal.' : 'Codex refuses the user-owned max_threads = 0; a replacement requires approval.') : managed ? `Toolkit-managed Codex V1 (multi_agent) capacity allows ${helperCount} helper(s).` : `Compatible user-owned Codex V1 (multi_agent) values allow ${helperCount} helper(s).`,
     };
   }
-  if (anyValue) return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV1 limits are incomplete, non-integer, or use a different nesting depth; Toolkit will not overwrite them.' };
+  if (anyValue) return { ...base, status: 'conflicting', detail: 'User-owned Codex V1 (multi_agent) limits are incomplete, non-integer, or use a different nesting depth; Toolkit will not overwrite them.' };
   if (layout.agentsChildren.length && layout.agentsTables.length === 0) {
     return { ...base, status: 'conflicting', detail: 'Codex config contains [agents.<role>] child tables without an explicit [agents] table.' };
   }
-  return { ...base, status: 'unconfigured', helper_count: null, total_threads: null, hard_nested_helper_enforcement: 'supported', recursive_helper_control: 'hard-enforced when Toolkit configures the supported V1 nesting-depth control', recursive_hard_block: true, detail: 'MultiAgentV1 is effective and helper capacity is not configured.' };
+  return { ...base, status: 'unconfigured', helper_count: null, total_threads: null, hard_nested_helper_enforcement: 'supported', recursive_helper_control: 'hard-enforced when Toolkit configures the supported V1 nesting-depth control', recursive_hard_block: true, detail: 'Codex V1 (multi_agent) is effective and helper capacity is not configured.' };
 }
 
 function codexDelegationConfigState(configBytes, configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
@@ -667,7 +673,7 @@ function codexDelegationConfigState(configBytes, configPath = codexConfigPath(),
   const base = stateBase(configPath, text, bytes, runtime, { parser: parsed.parser, layout, parsed });
   if (layout.unknownToolkitDelegationMarkers.length) return { ...base, status: 'conflicting', detail: 'Unknown or obsolete Toolkit delegation ownership markers are present; ownership is ambiguous and Toolkit will not modify the file.' };
   const anyV2Marker = layout.enablementBeginMarkers.length || layout.helperBeginMarkers.length || layout.rootGuidanceBeginMarkers.length || layout.helperGuidanceBeginMarkers.length;
-  if (layout.beginMarkers.length && anyV2Marker) return { ...base, status: 'conflicting', detail: 'Legacy and MultiAgentV2 Toolkit marker blocks cannot coexist.' };
+  if (layout.beginMarkers.length && anyV2Marker) return { ...base, status: 'conflicting', detail: 'Legacy and Codex V2 (multi_agent_v2) Toolkit marker blocks cannot coexist.' };
   const malformedMarkers = markerFailure(layout)
     || markerRepairKinds(layout.recognizedToolkitDelegationMarkers || []).includes('reversed-marker-order');
   if (malformedMarkers) {
@@ -694,6 +700,7 @@ function codexDelegationConfigState(configBytes, configPath = codexConfigPath(),
 
 module.exports = {
   RUNTIMES,
+  runtimeLabel,
   tomlString,
   expectedLegacyBlock,
   expectedCodexDelegationBlock,

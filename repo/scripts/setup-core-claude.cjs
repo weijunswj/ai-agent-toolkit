@@ -49,6 +49,13 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return topology;
   }
 
+  // True when every managed Claude Code setting already has a value (yours or Toolkit's).
+  function claudeSettingsAllSet(current) {
+    const entries = current?.claudeSettings;
+    return Array.isArray(entries) && entries.length > 0
+      && entries.every((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
+  }
+
   // One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
   function claudeSettingsOutcome(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return 'The Claude Code user settings have not been read yet.';
@@ -257,7 +264,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
     });
   }
-  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
+  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsAllSet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
 }
 
 module.exports = { defineClaudeSetup };

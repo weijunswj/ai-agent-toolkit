@@ -56,10 +56,10 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
       return null;
     }
     if (current.delegation.status === 'migration-required' && choice !== 'migrate') {
-      throw new Error('Selected helper setting remains unapplied. The exact PR #237 legacy setting can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
+      throw new Error('Selected helper setting remains unapplied. The exact old Toolkit helper block can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
     }
     if (choice === 'migrate' && (current.runtime.runtime !== RUNTIMES.V2 || current.delegation.status !== 'migration-required')) {
-      throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed PR #237 legacy setting is available to migrate; choose an ordinary helper setting or `keep`.');
+      throw new Error('Selected helper setting remains unapplied. No exact old Toolkit helper block is available to migrate; choose an ordinary helper setting or `keep`.');
     }
     const helperCount = selectedHelperCount(args, current);
     const previewOptions = {
