@@ -51,12 +51,18 @@ function supersededIds(text, prefix) {
   return [...String(text || '').matchAll(SUPERSEDES)].map(match => (prefix ? recordId(match[1], prefix) : match[1])).filter(Boolean);
 }
 
-// A comment's first heading or line as one short plain line, safe inside a Markdown link.
+// A comment's first heading or line as one short plain line, safe inside a Markdown link. HTML comments
+// go first (across lines, closed or not), then every angle bracket, so no summary can open a comment or tag.
 function summaryOf(text) {
-  const first = String(text || '').split('\n').map(line => line.replace(/<!--.*?-->/g, '').replace(/[#*_`>|]/g, '').trim())
+  const visible = String(text || '').replace(/<!--[\s\S]*?(?:--!?>|$)/g, '');
+  const first = visible.split('\n').map(line => line.replace(/[<>#*_`|]/g, '').trim())
     .find(line => line && line !== '---') || 'comment';
   const plain = first.replace(/\[/g, '(').replace(/\]/g, ')').replace(/\s+/g, ' ');
   return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain;
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
 function mentions(text) {
@@ -124,7 +130,7 @@ function analyseTrace(entries, explicit = new Set()) {
   const uncertain = [];
   for (const entry of other) {
     for (const decision of live) {
-      if (entry.created_at > decision.created_at && new RegExp(`(^|[^A-Za-z0-9-])${decision.tag.replace(/[.]/g, '\\.')}($|[^A-Za-z0-9-])`, 'i').test(entry.text)) {
+      if (entry.created_at > decision.created_at && new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(decision.tag)}($|[^A-Za-z0-9-])`, 'i').test(entry.text)) {
         uncertain.push({ entry, tag: decision.tag });
       }
     }
