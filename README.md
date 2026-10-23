@@ -1,12 +1,12 @@
 # AI Agent Toolkit
 
+Skills and working rules for AI coding agents. Toolkit installs them into Codex and Claude Code as a native plugin, keeps them current from this repository's `main` branch, and adds a short set of global rules every session follows. Antigravity gets a portable copy of the skills only.
+
 **Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
 **Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json`; every `programme.cjs` command refuses without it. It supports github.com only, with `kind: github` as its only state store backend. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Company or third-party repositories without that block get no governed issue writes, only the coding-governance gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
-
-Skills and working rules for AI coding agents. Toolkit installs them into Codex and Claude Code as a native plugin, keeps them current from this repository's `main` branch, and adds a short set of global rules every session follows. Antigravity gets a portable copy of the skills only.
 
 ## Install
 
