@@ -190,7 +190,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, then COMPLETED by completion, and flattens nesting', () => {
+test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
     { issue: 8, class: 'CORE', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
@@ -224,15 +224,15 @@ test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, t
   assert.equal(lines[1], '## Programme Graph');
   assert.ok(lines.includes('| Task | Child # | PR # | Class | Status | Lane | Task Description |'));
   const rows = lines.filter(line => /^\| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
-  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [21, 14, 15, 8, 17, 11, 10, 13, 18, 9, 12, 16], 'active by class, then order and issue; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [21, 14, 15, 8, 17, 11, 10, 13, 18, 12, 16, 9], 'active by class, then order and issue; finished oldest first');
   assert.deepEqual(rows[3], ['Shared host contract', '#8', '#549', 'CORE', 'IN PROGRESS', 'G1', 'One contract for both hosts']);
   assert.deepEqual(rows[1].slice(0, 2), ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
   assert.deepEqual(rows[2].slice(0, 2), ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
   assert.deepEqual(rows[4].slice(3, 6), ['CORE', 'IN PROGRESS', '-'], 'no gate, no lane');
   assert.deepEqual(rows[7].slice(3, 6), ['LATER', 'QUEUED', '-'], 'OPTIONAL shows as LATER');
-  assert.deepEqual(rows[9].slice(3), ['-', 'COMPLETED', '-', 'Retired: Old predecessor'], 'a retired outcome shows as completed and says so');
-  assert.deepEqual(rows[11].slice(3, 6), ['CORE', 'COMPLETED', '-'], 'a finished nested child goes down to COMPLETED');
-  assert.equal(rows[10][0], 'External Operation Authority');
+  assert.deepEqual(rows[11].slice(3), ['-', 'RETIRED', '-', 'Old predecessor'], 'retired is its own group below COMPLETED');
+  assert.deepEqual(rows[10].slice(3, 6), ['CORE', 'COMPLETED', '-'], 'a finished nested child goes down to COMPLETED');
+  assert.equal(rows[9][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
 });
 

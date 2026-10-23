@@ -44,6 +44,8 @@ const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
 const GOVERNED_BLOCK_LINE = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
 const BINDING_FILE = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_SCHEMA = 'toolkit.programme-binding.v1';
+// An early name for the binding; reported for the owner, never read or rewritten.
+const LEGACY_BINDING_FILE = Object.freeze(['.github', 'ai-agent-toolkit-programme.json']);
 const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const AGENTS_READ_LIMIT = 1024 * 1024;
 const BINDING_READ_LIMIT = 64 * 1024;
@@ -179,7 +181,11 @@ function readIdentity(cwd) {
   if (origins.length !== 1) return { root, valid: false, reason: 'origin-ambiguous' };
   const remote = validateRemoteIdentity(origins[0]);
   if (!remote.valid) return { root, valid: false, reason: 'origin-unsupported' };
-  return { root, valid: true, reason: null, repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical), remote };
+  return {
+    root, valid: true, reason: null, remote,
+    repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical),
+    legacy_repository_ids: registry.legacyRepositoryIdsForCanonicalRemote(remote.canonical),
+  };
 }
 
 // "owner/name" for a remote whose path has exactly two segments (a trailing .git dropped).
@@ -229,11 +235,22 @@ function readBinding(root, identity) {
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
-  return { present: true, valid: problems.length === 0, problems };
+  return { present: true, valid: problems.length === 0, problems, store_repository: problems.length === 0 ? parsed.store.repository : null };
+}
+
+// The evidence store a valid binding names ("owner/name"), or null. Kept out of the state result,
+// which never carries repository names.
+function bindingStoreRepository(root) {
+  try {
+    const binding = readBinding(root, readIdentity(root));
+    return binding.valid ? binding.store_repository : null;
+  } catch { return null; }
 }
 
 function readMaterials(root, identity) {
-  return { governed_block: readGovernedBlock(root), binding: readBinding(root, identity) };
+  let legacyBinding = false;
+  try { legacyBinding = fs.lstatSync(path.join(root, ...LEGACY_BINDING_FILE)).isFile(); } catch { legacyBinding = false; }
+  return { governed_block: readGovernedBlock(root), binding: readBinding(root, identity), legacy_binding_file: legacyBinding };
 }
 
 // ---- registry ---------------------------------------------------------------------------------
@@ -252,16 +269,17 @@ function registryPathFor(options = {}) {
 }
 
 // The user's recorded governance decision for one identity: 'enabled', 'disabled' or
-// 'unresolved' (nothing recorded), with its decision kind. A missing file is 'unresolved'; a
-// file that cannot be read or does not validate throws.
-function readDecision(repositoryId, options = {}) {
+// 'unresolved' (nothing recorded), with its decision kind. Keys earlier versions stored for the
+// same repository count when the repository's own key has no entry and they agree. A missing
+// file is 'unresolved'; a file that cannot be read or does not validate throws.
+function readDecision(repositoryId, options = {}, legacyIds = []) {
   const bytes = readSmallFile(registryPathFor(options), registry.MAX_REGISTRY_BYTES, 'REGISTRY_TOO_LARGE');
   if (!bytes) return { state: 'unresolved', decision_kind: null };
   let parsed;
   try { parsed = registry.parseRegistryBytes(bytes); } catch (error) { fail(/^[A-Z][A-Z0-9_]{1,63}$/.test(error && error.code) ? error.code : 'REGISTRY_MALFORMED'); }
-  const record = parsed.repositories.find(entry => entry.repository_id === repositoryId);
-  const entry = record && record.capabilities.find(candidate => candidate.capability_id === GOVERNANCE_CAPABILITY);
-  return entry ? { state: entry.state, decision_kind: entry.decision_kind } : { state: 'unresolved', decision_kind: null };
+  const entry = registry.readCapabilityMap(parsed, repositoryId, legacyIds)[GOVERNANCE_CAPABILITY];
+  const own = registry.readCapabilityMap(parsed, repositoryId, [])[GOVERNANCE_CAPABILITY];
+  return { state: entry.state, decision_kind: entry.decision_kind, legacy_key: entry.state !== 'unresolved' && own.state === 'unresolved' };
 }
 
 // ---- derivation -------------------------------------------------------------------------------
@@ -280,6 +298,7 @@ function result(fields) {
     governed_rules_bind: complete,
     programme_records_bind: complete,
     recorded_decision: fields.recorded_decision || null,
+    recorded_under_legacy_key: fields.legacy_key === true,
     repository_id: fields.repository_id || null,
     root: fields.root || null,
     materials: fields.materials ? Object.freeze({
@@ -288,6 +307,7 @@ function result(fields) {
       binding: fields.materials.binding.valid === true,
       binding_present: fields.materials.binding.present === true,
       binding_problems: Object.freeze([...(fields.materials.binding.problems || [])]),
+      legacy_binding_file: fields.materials.legacy_binding_file === true,
     }) : null,
     error_code: fields.error_code || null,
   });
@@ -301,12 +321,12 @@ class GovernanceState {
   constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, registryOptions = {} } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
-    this.#readDecision = (repositoryId) => decisionReader(repositoryId, registryOptions);
+    this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
   }
 
   // The pure rule table over already-read inputs.
   static derive({ identity, materials, decision }) {
-    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, materials };
+    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const block = materials.governed_block.present === true;
     const binding = materials.binding.valid === true;
     if (decision.state === 'disabled') return result({ ...base, state: 'DECLINED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
@@ -335,7 +355,7 @@ class GovernanceState {
     let decision;
     let materials;
     try {
-      decision = this.#readDecision(identity.repository_id);
+      decision = this.#readDecision(identity);
     } catch (error) {
       return result({ ...partial, state: 'UNKNOWN', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
     }
@@ -357,6 +377,12 @@ function findGitRootQuietly(cwd) {
 }
 
 // The single exported entry point other lanes consume (hooks, setup, conformance, catalogue, R6).
+// The command a person types to run the governance CLI from this Toolkit copy. There is no
+// `toolkit` executable, so messages show the real path.
+function governanceCommand(subcommand) {
+  return `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
+}
+
 function governanceState(cwd, options = {}) {
   return new GovernanceState({ registryOptions: options }).evaluate(cwd);
 }
@@ -372,9 +398,11 @@ module.exports = Object.freeze({
   GovernanceState,
   GovernanceStateError,
   governanceState,
+  governanceCommand,
   readIdentity,
   readMaterials,
   readGovernedBlock,
+  bindingStoreRepository,
   readDecision,
   registryPathFor,
   bindingProblems,

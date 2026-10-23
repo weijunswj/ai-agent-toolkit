@@ -198,3 +198,16 @@ test('the command line needs an explicit stack and writes nothing without --writ
   assert.equal(written.status, 0, written.stderr);
   assert.deepEqual(fs.readdirSync(agents).sort(), [FILE.G0, FILE.G1]);
 });
+
+test('setup lines: current, updated with the load-check note, not installed with the install command, and held', () => {
+  const { describeSetupResult } = require('../scripts/toolkit-codex-helper-agents.cjs');
+  assert.deepEqual(describeSetupResult({ status: 'current' }), ['Toolkit helpers: current.']);
+  const updated = describeSetupResult({ status: 'updated', backup_dir: 'C:\\Users\\me\\.ai-agent-toolkit\\backups\\b', load_check: { status: 'unverified' }, detail: 'Codex was not asked to load the helper agents, so they are written but not verified.' });
+  assert.equal(updated[0], 'Toolkit helpers: updated this run (backup: C:/Users/me/.ai-agent-toolkit/backups/b). Start a new Codex session to use them.');
+  assert.match(updated[1], /^Codex load check: .*not verified/);
+  assert.equal(describeSetupResult({ status: 'updated', backup_dir: null, load_check: { status: 'verified' }, detail: '' }).length, 1);
+  const missing = describeSetupResult({ status: 'not-installed' }, '<managed-toolkit-checkout>');
+  assert.match(missing[0], /not installed\. In Toolkit-governed repositories Codex launches no helpers/);
+  assert.equal(missing[1], 'To install them for your selected stack: node "<managed-toolkit-checkout>/repo/scripts/toolkit-codex-helper-agents.cjs" --stack <stack> --write');
+  assert.deepEqual(describeSetupResult({ status: 'held', detail: 'a file was not written by Toolkit.' }), ['Toolkit helpers: held: a file was not written by Toolkit.']);
+});

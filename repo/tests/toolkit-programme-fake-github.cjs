@@ -135,6 +135,13 @@ class FakeGitHub {
     }
     if ((match = /^issues\/(\d+)$/.exec(rest))) {
       const issue = this.issues.get(Number(match[1]));
+      const pr = !issue && this.prs.get(Number(match[1]));
+      if (pr) {
+        // A pull request read or edited through the issues API, as GitHub allows.
+        if (method === 'PATCH') { pr.body = body.body; pr.updated_at = this.tick(); }
+        return ok(200, { number: pr.number, id: pr.number, title: `PR ${pr.number}`, body: pr.body, state: pr.state === 'OPEN' || pr.state === 'DRAFT' ? 'open' : 'closed',
+          state_reason: null, closed_at: null, updated_at: pr.updated_at || null, pull_request: { url: '' }, parent_issue_url: null, issue_dependencies_summary: { total_blocked_by: 0 } });
+      }
       if (!issue) return ok(404, { message: 'Not Found' });
       if (method === 'PATCH') { issue.body = body.body; issue.updated_at = this.tick(); }
       return ok(200, this.issueJson(issue));

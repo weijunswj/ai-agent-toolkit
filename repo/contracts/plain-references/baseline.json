@@ -51,12 +51,6 @@
       "count": 1
     },
     {
-      "file": "repo/docs/TOOLKIT-LOCAL-BRIDGE.md",
-      "rule": "number-reference",
-      "text": "#469",
-      "count": 1
-    },
-    {
       "file": "repo/docs/TOOLKIT-V3.md",
       "rule": "github-link",
       "text": "https://github.com/weijunswj/ai-agent-toolkit/issues/421",

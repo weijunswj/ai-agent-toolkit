@@ -26,7 +26,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 
 | Entry | Path |
 |---|---|
-| Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` |
+| Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` (shared core), `repo/scripts/setup-core-claude.cjs`, `repo/scripts/setup-core-codex.cjs` |
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
 | Install check | `repo/scripts/toolkit-install-health.cjs` |
@@ -44,7 +44,9 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+| Comment tags and G0 decision history | `skills/github-program-reconciler/scripts/decision-tags.cjs`, `skills/github-program-reconciler/scripts/decision-history.cjs` |
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
+| Governance state (`toolkit-governance.cjs`) | `repo/scripts/toolkit-governance-state.cjs` (the one state function), `repo/scripts/toolkit-governance.cjs` (CLI), `repo/scripts/toolkit-governance-conformance.cjs`, `repo/scripts/toolkit-governance-migration.cjs`, `repo/scripts/toolkit-governance-ruleset.cjs`, `repo/scripts/toolkit-governance-catalogue.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 | Executor checkpoint journals and turn-end hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 
@@ -63,6 +65,9 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Package version | `repo/contracts/toolkit-local-bridge/version.json`, read at runtime through `repo/scripts/toolkit-version.cjs` |
 | Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Host needs for programme custody | `repo/docs/HOST-CONTRACT.md`, `repo/contracts/programme-state/host-contract-v1.json` |
+| Per-repository governance decisions | `repo/scripts/toolkit-capability-registry.cjs` (user-side store and identity), `repo/contracts/repository-capability-registry/` |
+| Skill tiers per governance state | `repo/contracts/agent-rules/governance-skill-tiers.json` |
+| Stored native host results (helper route) | `repo/contracts/host-qualification/claude-code.json` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership

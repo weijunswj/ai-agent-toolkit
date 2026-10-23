@@ -10,8 +10,11 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
 const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
+// An empty Codex home, so the real ~/.codex/agents never decides a test.
+const EMPTY_CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-home-'));
+process.on('exit', () => fs.rmSync(EMPTY_CODEX_HOME, { recursive: true, force: true }));
 function run(input, env = {}) {
-  const clean = { ...process.env, ...env };
+  const clean = { ...process.env, CODEX_HOME: EMPTY_CODEX_HOME, ...env };
   for (const key of MARKERS) if (!(key in env)) delete clean[key];
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env: clean, encoding: 'utf8', timeout: 20000 });
   return { status: r.status, output: JSON.parse(r.stdout.trim() || '{}'), stderr: r.stderr };
@@ -37,12 +40,12 @@ test('outside a V3-governed checkout and without a binding the hook makes no dec
   } finally { fs.rmSync(elsewhere, { recursive: true, force: true }); }
 });
 
-test('inside the V3-governed Toolkit checkout an unbound helper request is blocked before dispatch', () => {
+test('inside the V3-governed Toolkit checkout a helper request without installed agent files is blocked before dispatch', () => {
   for (const tool of ['spawn_agent', 'Agent', 'collaborationspawn_agent']) {
     const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper', fork_turns: 'none' } });
     assert.equal(r.status, 2, tool);
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny');
-    assert.match(r.stderr, /Toolkit helper held: NATIVE_BINDING_REQUIRED/);
+    assert.match(r.stderr, /no toolkit-g1-helper agent file is installed/);
   }
   assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'other tools are untouched');
 });
@@ -59,7 +62,7 @@ test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones
     const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { task_name: 'leaf', message: 'x', fork_turns: 'none' } });
     assert.equal(r.status, 2, tool);
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny', tool);
-    assert.match(r.stderr, /Toolkit helper held: NATIVE_BINDING_REQUIRED/, tool);
+    assert.match(r.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, tool);
   }
   // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus Bash.
   for (const hooks of [plugin, contract]) assert.equal(hooks.hooks.PreToolUse[0].matcher, CODEX_HELPER_HOOK_MATCHER);
@@ -89,7 +92,7 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
     assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
     // Same boundary, intact modules: the guard itself decides.
     const intact = run(event);
-    assert.equal(intact.status, 2); assert.match(intact.stderr, /NATIVE_BINDING_REQUIRED/);
+    assert.equal(intact.status, 2); assert.match(intact.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
     // Outside a governed checkout the broken copy still makes no decision for other repositories.
     const elsewhere = spawnSync(process.execPath, [copy], { input: JSON.stringify({ ...event, cwd: dir }), env: clean, encoding: 'utf8', timeout: 20000 });
     assert.equal(elsewhere.status, 0); assert.equal(elsewhere.stdout, '');
@@ -102,7 +105,7 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the Codex hook stays inside Toolkit: a managed-block-only repository keeps native helpers, the checkout and a launcher marker gate', () => {
+test('A19: a repository with the Toolkit-governed rules block is governed on Codex too; a plain repository is not', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-scope-'));
   try {
     const plain = path.join(dir, 'plain'), managed = path.join(dir, 'managed');
@@ -111,16 +114,16 @@ test('the Codex hook stays inside Toolkit: a managed-block-only repository keeps
     fs.copyFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(managed, 'AGENTS.md'));
     const nested = path.join(managed, 'src'); fs.mkdirSync(nested);
     const spawn = cwd => ({ tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd, tool_input: { fork_turns: 'none' } });
-    for (const cwd of [plain, managed, nested]) {
-      const r = run(spawn(cwd));
-      assert.equal(r.status, 0, cwd); assert.deepEqual(r.output, {}, cwd);
-    }
-    // The Claude hook still treats the same managed-block-only repository as governed.
+    const r = run(spawn(plain));
+    assert.equal(r.status, 0); assert.deepEqual(r.output, {}, 'plain repository: no decision');
+    // Same predicate as the Claude hook: the managed block makes the repository governed.
     assert.equal(require('../scripts/toolkit-governed-repo.cjs').governedRepo(nested, {}).governed, true);
-    const checkout = run(spawn(ROOT));
-    assert.equal(checkout.status, 2); assert.match(checkout.stderr, /NATIVE_BINDING_REQUIRED/);
-    const marked = run(spawn(managed), { TOOLKIT_GATE_ROLE: 'G1' });
-    assert.equal(marked.status, 2); assert.match(marked.stderr, /NATIVE_BINDING_REQUIRED/);
+    for (const cwd of [managed, nested, ROOT]) {
+      const held = run(spawn(cwd));
+      assert.equal(held.status, 2, cwd); assert.match(held.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, cwd);
+    }
+    const marked = run(spawn(plain), { TOOLKIT_GATE_ROLE: 'G1' });
+    assert.equal(marked.status, 2); assert.match(marked.stderr, /allows only the toolkit-g0-helper/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased (decision history before planning)
+
+- **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
+- **G0 reads the history first:** before planning a programme child, G0 runs the read-only `decision-history.cjs`. It reads the parent's and the child's comment traces separately, takes the latest comment per tag as live, and marks earlier ones as replaced (by an explicit `SUPERSEDES=`, by inference, or confirmed by the owner). It lists the untagged comments to read and prints a short live-scope summary with exact counts. It writes nothing: only the appointed controller writes programme state.
+- **The owner confirms before it is the spec:** the summary becomes the child's spec only after the owner confirms it. The controller records that as a `SCOPE-CONFIRMED` comment on the child, and each correction is its own tagged comment.
+- **Enablement backfill:** when governance is first enabled, the first reconcile pass writes every trace, and `decision-history.cjs --programme` reports each issue's coverage for the owner. An existing crawl can be read with `--ledger`.
+- **Rules:** the governed Decision traces rule, a new portable decision-trace playbook routed from both playbook indexes, one Projects skill brief line and one `CONTROLLER.md` clause.
+
 ## Unreleased (executor checkpoints and host contract)
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.
@@ -10,6 +18,19 @@
 - **Host contract:** `repo/docs/HOST-CONTRACT.md` and its JSON twin record what custody needs from Claude Code and Codex: session identity, the turn-end hook rules, completion modes, duplicate-launch and handover checks, and honest limits.
 - **Clearer messages:** next actions addressed to the controller name `--controller`; a write without a session says it needs this session's own ID; an unsupported store kind names the supported one; whitespace-only values are refused.
 
+## Unreleased (programme page: tags, retired and links)
+
+- **Comment traces by tag.** A comment's tag is its first line when its second line is `---`. Each page lists every comment per tag, with untagged comments under "Other comments"; tags are never combined. On overflow, tag lists move out largest first, each into its own index comment that carries the tag. The parent's list and a task's list stay separate.
+- **RETIRED is its own status.** Retired tasks sort in their own group below COMPLETED and no longer show as completed.
+- **Parent > Child > PR links.** Every task page, and every open or draft PR for a task, opens with `Path: #<parent> > ... > #<task> > PR #<pr>`, kept current by the reconcile pass; merged and closed PRs are left alone.
+- **Over-threshold pages are caught.** A page at or over the size threshold is re-planned even when nothing else changed, so its largest tag lists move out or it is held as `BODY_TOO_LARGE`.
+
+## Unreleased (Projects skill and block fixes)
+
+- **Claude Projects controller skill 2026-10-23.18** (re-upload it). Toolkit no longer asks for feedback about Toolkit itself: the project-instructions block, the skill and the global rules drop their `TOOLKIT_FEEDBACK` rules. If you want such feedback, keep the rule in your own instructions, outside the Toolkit markers. The next instructions check reports the block as outdated, and the sync replaces it after your OK.
+- **Sync dedupes and reads the settings itself.** When the block is added or replaced, the coordinator also removes the lines outside the markers that the block now fully covers and trims the repeated part of lines that partly repeat it, in the same change and under the same OK; project-specific text and anything that differs stays. Threads can't read project settings, so the coordinator reads them and runs the check itself or hands a thread the exact text.
+- **Briefs name sibling PRs.** A G0 lists the open sibling PRs it checked for overlap, and the G1 brief requires a re-check against them before building.
+
 ## Unreleased (claude.ai account copy check)
 
 - **The Claude Code install check reports a stale claude.ai account copy of Toolkit.** The Claude desktop app runs the copy from your claude.ai account, and only claude.ai updates it (from main). Setup and each Claude Code session start now read that copy's version from the app's local plugin folder and, when it is older than the Toolkit on this computer, say so with the fix: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, or remove that marketplace and add it again. Read only: Toolkit never changes the account copy, reports no ids or paths, and the notice blocks nothing.
@@ -17,11 +38,14 @@
 ## Unreleased (programme page and state read-back)
 
 - **The Programme Graph replaces the hand-kept Programme index.** It sits below the status section (the binding's new `projection`: `replace_section` "Programme index", `after_section` "CURRENT"), and child status blocks move under the title and the current-direction note. A block at the very top moves once.
-- **Seven columns, sorted by class then completion.** `Task | Child # | PR # | Class | Status | Lane | Task Description`, with classes `CORE`, `HARDENING`, `LATER` and statuses `QUEUED`, `IN PROGRESS`, `COMPLETED` (retired tasks show as completed and say so; `OPTIONAL` shows as `LATER`; a planned task with an open PR shows as in progress). Rows sort `CORE`, `HARDENING`, `LATER`, then `COMPLETED` by completion time with the latest last; nested children sort like any row, and native sub-issues follow the same order. The catalogue gains `name` and `description`, and child state gains `completed_at` (filled once from the issue close time, or set by the controller).
+- **Seven columns, sorted by class then completion.** `Task | Child # | PR # | Class | Status | Lane | Task Description`, with classes `CORE`, `HARDENING`, `LATER` and statuses `QUEUED`, `IN PROGRESS`, `COMPLETED`, `RETIRED` (retired tasks have their own status; `OPTIONAL` shows as `LATER`; a planned task with an open PR shows as in progress). Rows sort `CORE`, `HARDENING`, `LATER`, then `COMPLETED` by completion time with the latest last; nested children sort like any row, and native sub-issues follow the same order. The catalogue gains `name` and `description`, and child state gains `completed_at` (filled once from the issue close time, or set by the controller).
 - **Every body lists every comment.** A generated comment trace closes each catalogued body: one line per comment with date, record, summary and link, marked `SUPERSEDES=` or "superseded by", under the rule that the body comes first and the latest comment wins. When the body would overflow, the whole list moves into one new index comment and the body keeps its link, repeating as comments grow.
 - **Trace audit and repair.** The decision-trace audit fails on a superseded record left unmarked; reconcile reports `TRACE_STALE`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; `--repair` writes lines in the same shape, plus topic tags from a decision ledger with `--ledger`.
 - **Untracked PRs are flagged.** `PR_UNTRACKED` (report only) names an open PR that says `Refs #n` (or Completes, Closes, Fixes, Resolves) for an open task whose state records no PR or branch.
 - **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first programme apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
+## Unreleased (setup self-update)
+
+- **Fix: setup no longer runs old code after updating itself.** When setup fast-forwards the Toolkit copy it is running from and the update changes setup's own scripts, it now stops right there, before any plugin, settings or config step, says so under `## Setup updated itself`, and asks for one more run (exit code 24). Before, the rest of the run kept using the scripts it had loaded before the update, so a just-shipped setup message could still read "diagnostics withheld". The setup skill reruns the same command straight away.
 
 ## Unreleased (personal-data guard)
 

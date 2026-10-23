@@ -19,6 +19,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
     module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write() {} } },
     require(name) {
       if (name === './resolve-executable.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
+      if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
         return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
@@ -70,7 +71,7 @@ test('every non-bot comment must be reachable from the body, directly or through
   const body = 'Index: [one](#issuecomment-1) [older](#issuecomment-2)';
   const result = auditDecisionTraces({ body, comments, recordPrefix: PREFIX });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false, date: null, summary: 'INT-TK421-004 SUPERSEDES=INT-TK421-001', supersedes: ['INT-TK421-001'], superseded_by: null }]);
+  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false, tag: null, date: null, summary: 'INT-TK421-004 SUPERSEDES=INT-TK421-001', supersedes: ['INT-TK421-001'], superseded_by: null }]);
   assert.deepEqual(result.superseded_unmarked, [{ id: '1', record: 'INT-TK421-001', superseded_by: 'INT-TK421-004' }], 'the replaced record is not marked yet');
   assert.deepEqual(result.index_comments, ['2']);
   assert.equal(result.comments, 4, 'bots are ignored');

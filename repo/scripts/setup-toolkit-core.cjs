@@ -15,10 +15,11 @@ const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolki
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
 const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
-const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
-const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS, claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
-const { ToolkitEnv } = require('./toolkit-env.cjs');
-const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
+const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
+const { STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { GlobalRules } = require('./toolkit-global-rules.cjs');
+const { defineCodexSetup } = require('./setup-core-codex.cjs');
+const { defineClaudeSetup } = require('./setup-core-claude.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -1040,20 +1041,6 @@ function inspectManagedCheckout(args, audit) {
   };
 }
 
-function inspectCodexNativePluginState(args) {
-  const probeRoot = scriptRootForReadOnlyProbe(args);
-  const result = runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupCodexArgs({ ...args, repoRoot: probeRoot }, '--verify'),
-    { cwd: probeRoot, capture: true, timeout: 120000, allowFailure: true, quiet: true }
-  );
-  return {
-    status: result.status === 0 ? 'fresh' : 'needs-review',
-    detail: (result.status === 0 ? result.stdout : (result.stderr || result.stdout || '')).trim()
-  };
-}
-
 function printDelegationPreview(preview) {
   console.log('');
   console.log('# Codex helper-agent config preview');
@@ -1105,182 +1092,12 @@ function printDelegationRemovalPreview(preview) {
   console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
 }
 
-function selectedHelperCount(args, current) {
-  const choice = args.setupChoices.codexHelperCapacity;
-  if (choice === 'one-helper') return 1;
-  if (choice === 'root-only') return 0;
-  if (choice === 'custom') return args.codexHelperCount;
-  if (choice === 'migrate') return current.delegation.helper_count;
-  return null;
-}
-
-function needsPipedCodexProposalApproval(args, current) {
-  if (args.host !== 'codex' || args.approveCodexConfigProposal) return false;
-  const choice = args.setupChoices.codexHelperCapacity;
-  if (!['one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(choice)) return false;
-  const helperCount = selectedHelperCount(args, current);
-  if (choice === 'custom' && !Number.isSafeInteger(helperCount)) return false;
-  const previewOptions = {
-    runtime: current.runtime.runtime,
-    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-  };
-  const preview = choice === 'remove'
-    ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
-    : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
-        ...previewOptions,
-        helperCount,
-        allowUserOwnedReplacement: true,
-      });
-  return preview.selected_outcome_matches !== true
-    && ['preview', 'removal-preview'].includes(preview.status)
-    && preview.requires_user_confirmation === true;
-}
-async function confirmSelectedDelegationProposal(args, current, questionBank) {
-  const assertQuestionBankConsumed = () => {
-    if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
-  };
-  if (args.host !== 'codex') {
-    assertQuestionBankConsumed();
-    return null;
-  }
-  const choice = args.setupChoices.codexHelperCapacity;
-  if (!['one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(choice)) {
-    assertQuestionBankConsumed();
-    return null;
-  }
-  if (current.delegation.status === 'migration-required' && choice !== 'migrate') {
-    throw new Error('Selected helper setting remains unapplied. The exact PR #237 legacy setting can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
-  }
-  if (choice === 'migrate' && (current.runtime.runtime !== RUNTIMES.V2 || current.delegation.status !== 'migration-required')) {
-    throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed PR #237 legacy setting is available to migrate; choose an ordinary helper setting or `keep`.');
-  }
-  const helperCount = selectedHelperCount(args, current);
-  const previewOptions = {
-    runtime: current.runtime.runtime,
-    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-  };
-  const preview = choice === 'remove'
-    ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
-    : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
-        ...previewOptions,
-        helperCount,
-        allowUserOwnedReplacement: true,
-      });
-  if (preview.selected_outcome_matches === true) {
-    assertQuestionBankConsumed();
-    args.codexDelegationPreview = preview;
-    return preview;
-  }
-  if (!['preview', 'removal-preview'].includes(preview.status)) {
-    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration or runtime detection problem, then rerun setup. ${preview.detail || preview.status}`);
-  }
-  preview.before_semantics = current.delegation.detail;
-  if (choice === 'remove') printDelegationRemovalPreview(preview);
-  else printDelegationPreview(preview);
-  if (preview.requires_user_confirmation && !args.approveCodexConfigProposal) {
-    let answer = '';
-    if (questionBank.remaining_input.length) answer = String(questionBank.remaining_input.shift()).trim().toLowerCase();
-    else if (process.stdin.isTTY) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      try { answer = (await rl.question('Type apply to approve this exact Codex configuration proposal: ')).trim().toLowerCase(); }
-      finally { rl.close(); }
-    }
-    if (answer !== 'apply') {
-      throw new Error('Selected helper setting remains unapplied. Required action: review the exact technical proposal and answer `apply`, or pass --approve-codex-config-proposal.');
-    }
-    args.approveCodexConfigProposal = true;
-  }
-  assertQuestionBankConsumed();
-  args.codexDelegationPreview = preview;
-  return preview;
-}
-
 async function applyHostDelegationControl(args, current, nativeCache = {}) {
-  if (args.host === 'claude-code') {
-    const topology = resolveClaudeTopology(args, current);
-    const strict = topology === agentControl.TOPOLOGIES.ROOT_ONLY;
-    const installedEnforcement = nativeCache.restart_required !== true
-      && nativeCache.strict_enforcement_verified === true && nativeCache.trusted === true
-      && nativeCache.hook_active === true && agentControl.validActivationProof(nativeCache.activation_proof, {
-        pluginVersion: nativeCache.installed_version || nativeCache.version,
-        cachePath: nativeCache.cache_path,
-      });
-    if (strict && !installedEnforcement) {
-      const invalidated = agentControl.invalidateProfile('claude-code', 'Root-only remains the safe fallback while current native hook trust/activation or installed Toolkit bytes are unverified.');
-      return { ...invalidated, status: 'safe-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
-    }
-    const configured = agentControl.configureProfile('claude-code', {
-      topology,
-      capacity_mode: agentControl.CAPACITY_MODES.ROOT_ONLY,
-      enforcement_verified: strict,
-      activation_proof: nativeCache.activation_proof,
-      claude_cli: processLaunch.resolveClaudeCommandInput({
-        explicit: args.claudeCli,
-        persisted: current.agentProfile?.claude_cli,
-      }),
-    });
-    return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: true, client_scope: 'Claude-only Toolkit profile' };
-  }
+  if (args.host === 'claude-code') return applyClaudeAgentControl(args, current, nativeCache);
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
   }
-  const choice = args.setupChoices.codexHelperCapacity;
-  const configPath = current.delegation.config_path || delegation.codexConfigPath();
-  const options = {
-    runtime: current.runtime.runtime,
-    helperCount: selectedHelperCount(args, current),
-    codexCommand: args.codexCli,
-    codexHome: delegation.defaultCodexHome(),
-    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-    allowUserOwnedReplacement: args.approveCodexConfigProposal,
-  };
-  if (!['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
-  if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
-  const preview = args.codexDelegationPreview;
-  if (preview?.selected_outcome_matches === true) {
-    const verifiedNoop = delegation.previewCodexDelegation(configPath, {
-      runtime: current.runtime.runtime,
-      helperCount: options.helperCount,
-      setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-      allowUserOwnedReplacement: true,
-    });
-    if (verifiedNoop.selected_outcome_matches !== true) {
-      throw new Error('Selected helper setting remains unapplied. The previously matching user-owned Codex configuration changed before final verification; rerun setup.');
-    }
-    return verifiedNoop;
-  }
-  if (!preview || !['preview', 'removal-preview'].includes(preview.status) || !preview.approval_binding) {
-    throw new Error('Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal. Rerun setup to receive a fresh proposal.');
-  }
-  options.backupGenerationId = preview.backup_generation_id;
-  options.approvedProposal = preview.approval_binding;
-  const effectiveChoice = ['one-helper', 'root-only', 'custom'].includes(choice) ? 'custom' : choice;
-  const result = await delegation.delegationResultForChoice(effectiveChoice, configPath, options);
-  if (result.status === 'approval-stale' || result.status === 'approval-invalid') throw new Error(result.detail);
-  if (choice === 'remove') {
-    if (result.status !== 'removed' || result.changed !== true) {
-      throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
-    }
-    return result;
-  }
-  if (result.status !== 'configured' || result.helper_count !== options.helperCount) {
-    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
-  }
-  return result;
-}
-
-function inspectClaudeNativePluginStatePreApproval(args) {
-  const probeRoot = scriptRootForReadOnlyProbe(args);
-  try {
-    const manifest = readJsonFile(path.join(probeRoot, '.claude-plugin', 'plugin.json'));
-    return {
-      status: 'verification-deferred', current: false, enforcement_verified: false, strict_enforcement_verified: false,
-      manifest_version: manifest.version || 'unknown', expected_version: manifest.version || 'unknown',
-      detail: 'Source metadata inspected without launching Claude; installed/current/trust/hook/activation state is deferred until approval.',
-    };
-  } catch (error) {
-    return { status: 'invalid-source-metadata', current: false, enforcement_verified: false, strict_enforcement_verified: false, detail: error.message };
-  }
+  return applyCodexDelegationControl(args, current);
 }
 
 async function collectCurrentState(args) {
@@ -1602,23 +1419,6 @@ function assertManagedCheckoutChoiceAvailable(args, specs) {
   }
 }
 
-// `keep` preserves only a supported current profile. A stale, unverifiable or retired
-// (Toolkit direct) profile reads as unsupported, so keep resolves it to root-only.
-function resolveClaudeTopology(args, current) {
-  const profile = current.agentProfile || agentControl.readProfile('claude-code');
-  const choice = args.setupChoices.claudeTopology || 'keep';
-  // Resolution rewrites keep to a concrete topology, so the depth effect is taken from the
-  // first (unresolved) answer only: keep leaves the depth setting as it is.
-  if (!args.claudeSubagentDepthChoice) args.claudeSubagentDepthChoice = SUBAGENT_DEPTH_FOR_TOPOLOGY[choice] || 'keep';
-  const kept = profile.supported === true
-    && [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.BROADER_NATIVE].includes(profile.topology);
-  const topology = choice === 'keep'
-    ? (kept ? profile.topology : agentControl.TOPOLOGIES.ROOT_ONLY)
-    : (choice === 'broader-native' ? agentControl.TOPOLOGIES.BROADER_NATIVE : agentControl.TOPOLOGIES.ROOT_ONLY);
-  args.setupChoices.claudeTopology = topology;
-  return topology;
-}
-
 function currentManagedSourceOutcome(current, args) {
   const managed = current?.managed || {};
   if (!managed.currentPath) return 'No Toolkit update source is configured yet.';
@@ -1647,18 +1447,6 @@ const SUBAGENT_DEPTH_FOR_TOPOLOGY = Object.freeze({ 'root-only': 'enable', 'broa
 
 function claudeSubagentDepthChoice(options) {
   return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
-}
-
-// One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
-function claudeSettingsOutcome(entries) {
-  if (!Array.isArray(entries) || entries.length === 0) return 'The Claude Code user settings have not been read yet.';
-  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return `${entries[0].detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
-  const describe = (entry) => {
-    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (set by Toolkit).`;
-    if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `${entry.label}: your own value is kept.`;
-    return `${entry.label}: not set.`;
-  };
-  return entries.map(describe).join(' ');
 }
 
 const N8N_SKILLS_PLUGIN = 'n8n-skills@n8n-io';
@@ -1726,11 +1514,6 @@ function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ tool
     }
   } catch (error) { return `not changed (${copyFailure(error)}).`; }
   return '';
-}
-
-// Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
-function applyClaudeUserSettings(args, settings = new ClaudeUserSettings()) {
-  return settings.apply(args.setupChoices.claudeSettings || 'keep');
 }
 
 function claudeSubagentDepthOutcome(depth) {
@@ -3039,6 +2822,22 @@ function applySetupChoices(args, current) {
   args.repoRoot = path.resolve(args.repoRoot);
 }
 
+// Setup that runs from the checkout it just fast-forwarded keeps executing the scripts it loaded
+// before the update. When the update changed setup's own scripts, this run stops before any plugin,
+// settings or config step and asks for one more run, which starts with the updated code.
+function setupSelfUpdateRerun(args, managed) {
+  if (managed.update_action !== 'fast-forwarded' || !samePath(repoRootFromScript(), args.repoRoot)) return null;
+  const changed = runGitCapture(args.repoRoot, ['diff', '--name-only', managed.commit_before, managed.commit_after, '--', 'repo/scripts'],
+    'git diff --name-only (setup scripts)', false, true);
+  if (!changed) return null;
+  return [
+    '## Setup updated itself',
+    `Setup updated its Toolkit copy from ${managed.commit_before.slice(0, 7)} to ${managed.commit_after.slice(0, 7)}, and the update changed setup's own scripts.`,
+    'This run stopped there, before any plugin, settings or config step, so the older setup code changed nothing else.',
+    'Run the same setup command again: it starts with the updated setup and asks the setup questions again.',
+  ].join('\n');
+}
+
 // The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
 // checkout: fast-forward it to the default branch if it is clean and on that branch, else skip with the
 // reason. It never resets, forces, stashes or switches branches.
@@ -3160,12 +2959,6 @@ function nodeScriptArgs(relScript, extraArgs = []) {
   return [path.join(...relScript.split('/')), ...extraArgs];
 }
 
-function setupCodexArgs(args, mode) {
-  const extra = [mode, '--json', '--repo-root', args.repoRoot];
-  if (args.codexCli) extra.push('--codex-cli', args.codexCli);
-  return nodeScriptArgs('repo/scripts/setup-codex-toolkit-plugin.cjs', extra);
-}
-
 function parseJsonFromOutput(text) {
   return parseFirstJsonObject(text) || {};
 }
@@ -3245,66 +3038,6 @@ function defaultCodexPluginCachePath(version) {
   return path.join(os.homedir(), '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
 }
 
-function runCodexNativePluginSetup(args) {
-  const verifySummary = runNativePluginJsonPhase({
-    platform: 'Codex',
-    phase: 'verification',
-    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    args: setupCodexArgs(args, '--verify'),
-    cwd: args.repoRoot,
-    timeout: 120000,
-    allowRefreshRequired: true
-  });
-  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
-  if (verifySummary) {
-    const summary = verifySummary;
-    return {
-      status: 'already fresh',
-      installed: summary.installed === true,
-      enabled: summary.enabled === true,
-      current: summary.current === true,
-      cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
-      expected_version: expectedVersion,
-      installed_version: summary.version || expectedVersion,
-      updated_this_run: false,
-      restart_required: false,
-      hook_trust_status: summary.hook_trust_status || 'verification-unavailable',
-      hook_execution_status: summary.hook_execution_status || 'verification unavailable; open `/hooks` in Codex',
-      hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit hooks'
-    };
-  }
-  runNativePluginJsonPhase({
-    platform: 'Codex',
-    phase: 'mutation',
-    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
-    args: setupCodexArgs(args, '--write'),
-    cwd: args.repoRoot,
-    timeout: 180000
-  });
-  const summary = runNativePluginJsonPhase({
-    platform: 'Codex post-mutation',
-    phase: 'verification',
-    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    args: setupCodexArgs(args, '--verify'),
-    cwd: args.repoRoot,
-    timeout: 120000
-  });
-  return {
-    status: 'refreshed',
-    installed: summary.installed === true,
-    enabled: summary.enabled === true,
-    current: summary.current === true,
-    cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
-    expected_version: expectedVersion,
-    installed_version: summary.version || expectedVersion,
-    updated_this_run: true,
-    restart_required: true,
-    hook_trust_status: 'pending-review',
-    hook_execution_status: 'skipped until the current hook is reviewed and trusted',
-    hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit hooks'
-  };
-}
-
 function readJsonFile(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -3313,55 +3046,8 @@ function readJsonFile(filePath) {
   }
 }
 
-function verifyClaudeNativePluginMetadata(args) {
-  const pluginPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
-  const hooksPath = path.join(args.repoRoot, '.claude-plugin', 'hooks', 'hooks.json');
-  if (!fs.existsSync(pluginPath)) throw new Error(`Missing Claude Code native plugin manifest: ${pluginPath}`);
-  if (!fs.existsSync(hooksPath)) throw new Error(`Missing Claude Code native plugin hooks: ${hooksPath}`);
-
-  const plugin = readJsonFile(pluginPath);
-  const hooks = readJsonFile(hooksPath);
-  if (plugin.name !== 'ai-agent-toolkit') throw new Error(`Unexpected Claude Code plugin name: ${plugin.name || '<missing>'}`);
-  if (plugin.skills !== './skills') throw new Error('Claude Code plugin manifest must load Toolkit skills from ./skills');
-  if (plugin.hooks !== './.claude-plugin/hooks/hooks.json') {
-    throw new Error('Claude Code plugin manifest must point hooks to ./.claude-plugin/hooks/hooks.json');
-  }
-
-  const sessionStart = hooks?.hooks?.SessionStart;
-  if (!Array.isArray(sessionStart) || !sessionStart.length) {
-    throw new Error('Claude Code plugin hooks must include a SessionStart hook');
-  }
-  const commands = sessionStart
-    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
-    .map((entry) => String(entry.command || ''));
-  const command = commands.find((value) => value.includes('toolkit-local-bridge.cjs')) || '';
-  if (!command) throw new Error('Claude Code SessionStart hook must call toolkit-local-bridge.cjs');
-  for (const required of ['${CLAUDE_PLUGIN_ROOT}', '--hook', '--sync-enabled', '--write', '--sync-source claude-plugin']) {
-    if (!command.includes(required)) throw new Error(`Claude Code SessionStart hook command is missing ${required}`);
-  }
-  if (/--force-downgrade/.test(command)) {
-    throw new Error('Claude Code SessionStart hook must not force a downgrade');
-  }
-  const agentHookCommands = (hooks?.hooks?.PreToolUse || [])
-    .filter((entry) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(entry?.matcher || '')))
-    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
-    .map((entry) => String(entry.command || ''));
-  if (!agentHookCommands.some((value) => value.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
-    throw new Error('Claude Code plugin hooks must block native Agent launches through toolkit-claude-agent-hook.cjs');
-  }
-  console.log('Claude Code native plugin metadata verified.');
-  console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
-  return {
-    status: 'metadata present',
-    manifest_path: pluginPath,
-    expected_version: expectedToolkitVersion(args.repoRoot, 'claude-code'),
-    manifest_version: plugin.version || 'unknown',
-    updated_this_run: false,
-    restart_required: false,
-    hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
-  };
-}
-
+// Claude Code installs show no hook trust prompt (seen on 2.1.304 to 2.1.309), so setup asks for none.
+const CLAUDE_HOOK_TRUST_ACTION = 'none: Claude Code has no separate trust step for plugin hooks; an enabled plugin\'s hooks run in sessions started after it is installed';
 
 function verifyCurrentClaudeNativeEnforcement(args) {
   const metadata = verifyClaudeNativePluginMetadata(args);
@@ -3380,12 +3066,6 @@ function verifyCurrentClaudeNativeEnforcement(args) {
   } catch (error) {
     return { ...metadata, status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
   }
-}
-function setupClaudeArgs(args, mode) {
-  const extra = [mode, '--json', '--repo-root', args.repoRoot];
-  if (mode === '--write') extra.push('--scope', 'user');
-  if (args.claudeCli) extra.push('--claude-cli', args.claudeCli);
-  return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
 }
 
 // Static fallbacks match the helper's one precedence-selected CLI probe and
@@ -3412,82 +3092,6 @@ function claudeSetupBudgets(claudeCli = '') {
     // Fall through to the static fallback budgets below.
   }
   return { verify: CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS, write: CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS };
-}
-
-function runClaudeNativePluginSetup(args) {
-  const budgets = claudeSetupBudgets(args.claudeCli);
-  const verifySummary = runNativePluginJsonPhase({
-    platform: 'Claude',
-    phase: 'verification',
-    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    args: setupClaudeArgs(args, '--verify'),
-    cwd: args.repoRoot,
-    timeout: budgets.verify,
-    allowRefreshRequired: true
-  });
-  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
-  const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
-  if (verifySummary) {
-    const summary = verifySummary;
-    return {
-      status: 'already fresh',
-      manifest_path: manifestPath,
-      expected_version: expectedVersion,
-      manifest_version: summary.version || expectedVersion,
-      installed_version: summary.version || expectedVersion,
-      scope: summary.scope || 'user',
-      current: summary.current === true,
-      enforcement_verified: summary.enforcement_verified === true,
-      strict_enforcement_verified: summary.strict_enforcement_verified === true,
-      installed_current: summary.installed_current === true,
-      enabled: summary.enabled === true,
-      source_path: summary.source_path || '',
-      cache_path: summary.cache_path || '',
-      trusted: summary.trusted === true,
-      hook_active: summary.hook_active === true,
-      activation_proof: summary.activation_proof || null,
-      updated_this_run: false,
-      restart_required: false,
-      hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
-    };
-  }
-  runNativePluginJsonPhase({
-    platform: 'Claude',
-    phase: 'mutation',
-    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
-    args: setupClaudeArgs(args, '--write'),
-    cwd: args.repoRoot,
-    timeout: budgets.write
-  });
-  const summary = runNativePluginJsonPhase({
-    platform: 'Claude post-mutation',
-    phase: 'verification',
-    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    args: setupClaudeArgs(args, '--verify'),
-    cwd: args.repoRoot,
-    timeout: budgets.verify
-  });
-  return {
-    status: summary.current === true ? 'installed this run' : 'install not verified',
-    manifest_path: manifestPath,
-    expected_version: expectedVersion,
-    manifest_version: summary.version || expectedVersion,
-    installed_version: summary.version || expectedVersion,
-    scope: summary.scope || 'user',
-    current: summary.current === true,
-    enforcement_verified: summary.enforcement_verified === true,
-    strict_enforcement_verified: summary.strict_enforcement_verified === true,
-    installed_current: summary.installed_current === true,
-    enabled: summary.enabled === true,
-    source_path: summary.source_path || '',
-    cache_path: summary.cache_path || '',
-    trusted: summary.trusted === true,
-    hook_active: summary.hook_active === true,
-    activation_proof: summary.activation_proof || null,
-    updated_this_run: true,
-    restart_required: true,
-    hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
-  };
 }
 
 function runClaudeNativePluginVerify(args) {
@@ -3677,17 +3281,11 @@ function printValidationSummary(validationResults) {
   }
 }
 
-// Applies the depth effect of the owner's topology answer to the Claude Code user settings.
-// Root-only writes, broader-native removes only Toolkit's value; keep or no answer changes nothing.
-function applyClaudeSubagentDepth(args, setting = new ClaudeSubagentDepthSetting()) {
-  return setting.apply(args.claudeSubagentDepthChoice || 'keep');
-}
-
-// safe-root-only is Toolkit's expected default whenever setup records no verified hook activation;
-// Claude Code 2.1.306 reports none, so it is not a failure and is never called verified.
+// safe-root-only is Toolkit's safe default whenever setup could not verify the installed hook this
+// run; it is not a failure and is never called verified.
 function profileOutcomeSummary(delegation) {
   if (delegation.status === 'safe-root-only') {
-    return 'safe-root-only: root-only, Toolkit\'s safe default. Setup recorded no verified hook activation (current Claude Code versions do not report one), so the Toolkit hook keeps root-only. This is expected; no action is needed.';
+    return 'safe-root-only: root-only, Toolkit\'s safe default. Setup could not verify the installed Toolkit hook this run (it was just installed, a setting turns hooks off, or its agent hook did not answer a test launch), so the Toolkit hook keeps root-only. This is safe; to verify it, run `setup toolkit` again in a new Claude Code session.';
   }
   return delegation.status || 'unchanged';
 }
@@ -3863,43 +3461,15 @@ function setupGlobalRules(args) {
     harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report' });
 }
 
-// Codex setup has no install check, so it installs and reports the global rules directly.
-function runCodexGlobalRules(args) {
+// Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.
+function runCodexHelperAgents(args) {
   let result;
-  try { result = setupGlobalRules(args).refresh(); }
-  catch (error) { result = { status: 'held', files: [], covered: [], backup_dir: null, detail: error.message }; }
+  try { result = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot }).refresh(); }
+  catch (error) { result = { status: 'held', detail: error.message }; }
   console.log('');
-  console.log('## Global rules');
-  const lines = describeGlobalRules(result);
-  for (const line of lines.length ? lines : [`held: ${result.detail}`]) console.log(line);
+  console.log('## Toolkit helpers');
+  for (const line of describeCodexHelpers(result, '<managed-toolkit-checkout>')) console.log(line);
   return result;
-}
-
-// The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
-// helper definitions, and returns the result the summary and exit code report.
-function runClaudeInstallCheck(args, nativeCache, delegation) {
-  const check = new ToolkitInstallHealthCheck({
-    toolkitRoot: args.repoRoot,
-    expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
-    hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
-    helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
-    globalRules: setupGlobalRules(args),
-    depthSetting: new ClaudeSubagentDepthSetting(),
-    envHealth: ToolkitEnv.forUser(),
-    syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
-    accountPluginFolders: claudeAccountPluginFolders(),
-  });
-  const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
-  return check.run({
-    plugin: {
-      installed,
-      current: installed && nativeCache.current === true,
-      running_copy: nativeCache.source_path || '',
-      updated_this_run: nativeCache.updated_this_run === true,
-    },
-    topology: delegation.topology || null,
-    projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
-  });
 }
 
 // One approved setup execution: collects current state and answers, verifies the
@@ -3934,6 +3504,11 @@ class ToolkitSetupExecution {
     await this.#collectAndAnswer();
     this.#announcePlan();
     const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    const rerun = setupSelfUpdateRerun(args, managed);
+    if (rerun) {
+      console.log(rerun);
+      return SETUP_ACTION_REQUIRED;
+    }
     const localClone = fastForwardLocalClone(args);
     // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
     // Apply only this already-approved repair before invoking that CLI; ordinary
@@ -3959,7 +3534,8 @@ class ToolkitSetupExecution {
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
+    const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
+    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 
@@ -4032,6 +3608,26 @@ if (require.main === module) {
       }
     });
 }
+
+// Host lanes (setup-core-codex.cjs, setup-core-claude.cjs) receive the core helpers they use.
+const {
+  selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal,
+  applyCodexDelegationControl, inspectCodexNativePluginState, setupCodexArgs,
+  runCodexNativePluginSetup, runCodexGlobalRules
+} = defineCodexSetup({
+  RUNTIMES, defaultCodexPluginCachePath, expectedToolkitVersion, nodeScriptArgs,
+  printDelegationPreview, printDelegationRemovalPreview, runCommand, runNativePluginJsonPhase,
+  scriptRootForReadOnlyProbe, setupGlobalRules
+});
+const {
+  inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome,
+  applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
+} = defineClaudeSetup({
+  CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
+  expectedToolkitVersion, nodeScriptArgs, readJsonFile, runNativePluginJsonPhase,
+  scriptRootForReadOnlyProbe, setupGlobalRules, unknown
+});
 
 module.exports = {
   assertSupportedComputer,

@@ -23,6 +23,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, indexLines, markLines } = require('./decision-trace-audit.cjs');
+const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
 const SCHEMA = Object.freeze({
@@ -56,7 +57,7 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment'];
+const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale) and
@@ -74,6 +75,7 @@ const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
+const NAV_BLOCK_NAME = 'NAV';
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
 const TEXT_LIMIT = 200;
@@ -893,6 +895,7 @@ function isRetired(outcome, child) {
 
 // A planned outcome with an open or draft PR is already in progress.
 function statusText(outcome, child) {
+  if (isRetired(outcome, child)) return 'RETIRED';
   if (isFinished(outcome, child)) return 'COMPLETED';
   if (!child) return 'QUEUED';
   return child.lifecycle === 'PLANNED' && !['OPEN', 'DRAFT'].includes(child.pr.state) ? 'QUEUED' : 'IN PROGRESS';
@@ -910,10 +913,8 @@ function taskName(outcome, issue) {
   return publicText(title || outcome.label || `#${outcome.issue}`);
 }
 
-function descriptionText(outcome, child) {
-  const text = publicText(outcome.description || '');
-  if (!isRetired(outcome, child)) return text || '-';
-  return text ? `Retired: ${text}` : 'Retired';
+function descriptionText(outcome) {
+  return publicText(outcome.description || '') || '-';
 }
 
 // When an outcome finished: the state's completion time, else the issue's close time.
@@ -930,14 +931,16 @@ function graphOrder(parent, children, issues) {
   const byOrder = (a, b) => a.order - b.order || a.issue - b.issue;
   const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => GRAPH_CLASS[outcome.class] === cls).sort(byOrder));
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
-  const done = [...finished].sort((a, b) => {
+  const byCompletion = (a, b) => {
     const left = when(a);
     const right = when(b);
     if (left && right && left !== right) return left < right ? -1 : 1;
     if (Boolean(left) !== Boolean(right)) return left ? -1 : 1;
     return a.issue - b.issue;
-  });
-  return [...groups.flat(), ...done];
+  };
+  const retired = finished.filter(outcome => isRetired(outcome, children.get(outcome.issue)));
+  const completed = finished.filter(outcome => !retired.includes(outcome));
+  return [...groups.flat(), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
 }
 
 // `issues` maps an issue number to what GitHub shows for it (title, close time).
@@ -946,7 +949,7 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
     const child = children.get(outcome.issue);
     const cls = GRAPH_CLASS[outcome.class] || '-';
     const pr = child?.pr.number ? `#${child.pr.number}` : '-';
-    return `| ${taskName(outcome, issues.get(outcome.issue))} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${laneText(outcome, child)} | ${descriptionText(outcome, child)} |`;
+    return `| ${taskName(outcome, issues.get(outcome.issue))} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${laneText(outcome, child)} | ${descriptionText(outcome)} |`;
   });
   return [
     revisionLine(parent, children),
@@ -961,17 +964,44 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
 
 // The comment trace an issue body carries: links to its index comments, then one line per comment
 // none of them lists, then marks for superseded records an index comment left unmarked.
+// A trace's lists, one per tag in first-seen order and "Other comments" last. Tags never mix.
+function traceGroups(trace) {
+  const groups = new Map();
+  const add = (tag, kind, item) => {
+    const key = tag || null;
+    if (!groups.has(key)) groups.set(key, { tag: key, indexes: [], entries: [], marks: [] });
+    groups.get(key)[kind].push(item);
+  };
+  for (const index of trace.indexes) add(index.tag, 'indexes', index);
+  for (const entry of trace.entries) add(entry.tag, 'entries', entry);
+  for (const mark of trace.marks) add(mark.tag, 'marks', mark);
+  const other = groups.get(null);
+  groups.delete(null);
+  return [...groups.values(), ...(other ? [other] : [])];
+}
+
+// The comment trace an issue body carries: for each tag, links to that tag's index comments, one
+// line per comment none of them lists, and marks for superseded records an index comment left
+// unmarked.
 function renderTraceBlockBody(number, trace) {
   const lines = [
     `<!-- programme-trace issue=${number} -->`,
-    '**Comment trace** (generated from every comment on this issue). Read the body first; where comments disagree, the latest one wins.',
-    '',
-    ...trace.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](#issuecomment-${index.id})`),
-    ...indexLines(trace.entries),
-    ...markLines(trace.marks),
+    '**Comment trace** (generated from every comment on this issue). Read the body first. Each tag is its own list and tags are never combined; within a tag, where comments disagree, the latest one wins. Tag a comment by making its first line the tag and its second line `---`.',
   ];
-  if (lines.length === 3) lines.push('- No comments yet.');
+  const groups = traceGroups(trace);
+  for (const group of groups) {
+    lines.push('', `**${group.tag ? publicText(group.tag) : OTHER_COMMENTS}**`, '',
+      ...group.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](#issuecomment-${index.id})`),
+      ...indexLines(group.entries), ...markLines(group.marks));
+  }
+  if (!groups.length) lines.push('', '- No comments yet.');
   return lines.join('\n');
+}
+
+// The links that open a task page or PR: the programme parent, any expected parents in between,
+// the task, then its PR. GitHub turns each #n into a link.
+function renderNavBlockBody(chain, pr) {
+  return ['<!-- programme-nav -->', `**Path:** ${chain.map(number => `#${number}`).join(' > ')}${pr ? ` > PR #${pr}` : ''}`].join('\n');
 }
 
 function renderChildBlockBody(child, outcome) {
@@ -980,7 +1010,7 @@ function renderChildBlockBody(child, outcome) {
     `**Status** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
     '',
     `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${GRAPH_CLASS[outcome?.class] || '-'}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
-    `- Task: ${outcome ? descriptionText(outcome, child) : '-'}`,
+    `- Task: ${outcome ? descriptionText(outcome) : '-'}`,
     `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
     `- Next action: ${publicText(child.next_action)}`,
@@ -1063,9 +1093,23 @@ function upsertTraceBlock(text, rendered) {
   return `${before ? `${before}${eol}${eol}` : ''}${block}${eol}`;
 }
 
+// The body with the links block first: replaced in place, else added at the very top.
+function upsertNavBlock(text, rendered) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const block = rendered.split('\n').join(eol);
+  const { block: found, error } = findStateBlock(source, NAV_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
+  const after = source.replace(/^\s+/, '');
+  return `${block}${eol}${after ? `${eol}${after}` : ''}`;
+}
+
 // Index comment bodies for trace lines, each under the comment size limit.
-function indexCommentBodies(number, lines, intent) {
-  const head = (part, total) => [INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`, `## Comment trace for #${number}`, ''];
+// A tagged list's index comment carries the tag on its first line, so it stays in that tag's list.
+function indexCommentBodies(number, lines, intent, tag = null) {
+  const head = (part, total) => [...(tag ? [tag, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
+    `## Comment trace for #${number}: ${tag || OTHER_COMMENTS}`, ''];
   const chunks = [[]];
   let size = 0;
   for (const line of lines) {
@@ -1597,7 +1641,8 @@ const EFFECT_TEXT = {
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
   replace_block: effect => (effect.state === false ? `Update the comment trace in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
-  post_index_comment: effect => `Move #${effect.target.issue}'s comment trace (${effect.lines.length} line(s)) into a new index comment`,
+  replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
+  post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} line(s)) into a new index comment`,
 };
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
@@ -1605,6 +1650,7 @@ function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
   if (kind === 'replace_block' || kind === 'post_index_comment') return 'body';
+  if (kind === 'replace_pr_nav') return 'pr';
   if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
   return 'all';
 }
@@ -1656,7 +1702,9 @@ class Reconciler {
     });
     const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments };
+    const prPages = new Map();
+    for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages };
   }
 
   // Report-only: an open PR that says "Refs #n" (or Completes, Closes, Fixes, Resolves) for an open
@@ -1779,6 +1827,20 @@ class Reconciler {
     }
   }
 
+  // The links block for a task page (null for the parent page).
+  navFor(parent, number, docs) {
+    if (number === parent.parent_issue) return null;
+    const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+    const chain = [number];
+    const seen = new Set(chain);
+    for (let at = outcomes.get(number)?.parent; at && at !== parent.parent_issue && outcomes.has(at) && !seen.has(at); at = outcomes.get(at).parent) {
+      chain.unshift(at);
+      seen.add(at);
+    }
+    chain.unshift(parent.parent_issue);
+    return renderNavBlockBody(chain, docs.get(number)?.pr?.number || null);
+  }
+
   renderAll(parent, children, issues) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues)]]);
@@ -1808,17 +1870,46 @@ class Reconciler {
   // The body with the state block and the comment trace written. When it would reach the threshold,
   // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
   // measured with a link to that comment in their place.
-  projectBody(number, source, stateBody, comments, version) {
+  projectBody(number, source, stateBody, comments, version, navBody = null) {
     const trace = traceEntries(comments, this.binding.record_prefix);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries);
       const withState = upsertStateBlock(source, renderBlock(stateBody, version), this.placementFor(number));
-      return { body: upsertTraceBlock(withState.body, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
+      const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
+      return { body: upsertTraceBlock(withNav, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
     };
     const full = build(trace);
-    if (full.body.length < this.threshold || (!trace.entries.length && !trace.marks.length)) return { ...full, overflow: null };
-    const linkOnly = { indexes: [...trace.indexes, { id: '9'.repeat(19), date: '0000-00-00' }], entries: [], marks: [] };
-    return { ...build(linkOnly), overflow: [...indexLines(trace.entries), ...markLines(trace.marks)] };
+    if (full.body.length < this.threshold) return { ...full, overflow: [] };
+    // Tag by tag, largest list first, the whole list moves into its own new index comment until the
+    // body fits; the body keeps a link in that tag's list. Tags are never combined.
+    const size = group => [...indexLines(group.entries), ...markLines(group.marks)].join('\n').length;
+    const movable = traceGroups(trace).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
+    let current = trace;
+    let projected = full;
+    const overflow = [];
+    for (const group of movable) {
+      current = {
+        indexes: [...current.indexes, { id: '9'.repeat(19), tag: group.tag, date: '0000-00-00' }],
+        entries: current.entries.filter(entry => (entry.tag || null) !== group.tag),
+        marks: current.marks.filter(mark => (mark.tag || null) !== group.tag),
+      };
+      overflow.push({ tag: group.tag, lines: [...indexLines(group.entries), ...markLines(group.marks)] });
+      projected = build(current);
+      if (projected.body.length < this.threshold) break;
+    }
+    return { ...projected, overflow };
+  }
+
+  // An open or draft PR for a task starts with the same links as the task page, plus the PR itself.
+  diffPrNav(number, doc, navBody, observed, effects) {
+    const pr = doc?.pr;
+    if (!navBody || !pr?.number || !['OPEN', 'DRAFT'].includes(pr.state)) return;
+    const page = observed.prPages?.get(pr.number);
+    if (!page) return;
+    const found = findStateBlock(page.body, NAV_BLOCK_NAME);
+    if (found.error) return;
+    if (found.block && normalizeBlockBody(found.block.body) === normalizeBlockBody(navBody) && !found.block.tampered) return;
+    effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
   }
 
   diffBlocks(parent, children, observed, only, effects, findings, holds) {
@@ -1831,23 +1922,29 @@ class Reconciler {
       if (!issue || body === undefined) continue;
       const { block, error } = findStateBlock(issue.body);
       const traced = findStateBlock(issue.body, TRACE_BLOCK_NAME);
-      if (error || traced.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error }); continue; }
+      const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
+      if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
+      const navBody = this.navFor(parent, number, children);
+      const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
+      this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
       const comments = observed.comments.get(number) || [];
       const placement = this.placementFor(number);
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix));
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
-      if (current && !move && traceCurrent) continue;
+      // A current body at or over the threshold still moves its largest tag lists out.
+      if (current && !move && traceCurrent && navCurrent && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
-      const projected = this.projectBody(number, issue.body, body, comments, version);
+      if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
+      const projected = this.projectBody(number, issue.body, body, comments, version, navBody);
       if (projected.body.length >= this.threshold) {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
         continue;
       }
-      if (projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, after: String(comments.at(-1)?.id || '') }, lines: projected.overflow });
-      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody) },
+      for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, lines: part.lines });
+      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, body, updated_at: issue.updated_at });
     }
   }
@@ -1870,7 +1967,13 @@ class Reconciler {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
           const found = issue ? findStateBlock(issue.body).block : undefined;
           const trace = issue && target.trace ? findStateBlock(issue.body, TRACE_BLOCK_NAME).block : undefined;
-          done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered && (!target.trace || (trace && blockDigest(trace.body) === target.trace))) : null;
+          const nav = issue && target.nav ? findStateBlock(issue.body, NAV_BLOCK_NAME).block : undefined;
+          done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered && (!target.trace || (trace && blockDigest(trace.body) === target.trace))
+            && (!target.nav || (nav && blockDigest(nav.body) === target.nav))) : null;
+        } else if (effect.kind === 'replace_pr_nav') {
+          const page = this.reader.issue(target.pr);
+          const nav = page ? findStateBlock(page.body, NAV_BLOCK_NAME).block : undefined;
+          done = page ? Boolean(nav && blockDigest(nav.body) === target.digest) : null;
         } else if (effect.kind === 'post_index_comment') {
           const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
           done = comments.some(comment => String(comment.body || '').includes(`programme-trace intent=${effect.intent_id} `));
@@ -2092,29 +2195,30 @@ class Reconciler {
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
         if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
-        // An overflowing trace first moves into a new index comment, checked by reading it back.
-        const post = plan.effects.find(entry => entry.kind === 'post_index_comment' && entry.target.issue === number);
-        if (post) {
+        // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
+        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && entry.target.issue === number)) {
+          if (isHeld(`#${number}`, 'body')) break;
           withIntent(post, owner, number, () => {
             const intent = intentId(post.kind, post.target);
-            const bodies = indexCommentBodies(number, post.lines, intent);
+            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag);
             guard();
             for (const text of bodies) this.mutator.postComment(number, text);
             const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
             if (kept === bodies.length) return { outcome: 'DONE' };
             return kept ? { outcome: 'UNKNOWN', detail: `${kept} of ${bodies.length} index comment part(s) read back` } : { outcome: 'NOT_DONE', detail: 'the index comment did not read back' };
           });
-          if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         }
+        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
         // writing an intent when the block is broken or the body would grow past the threshold.
         const before = this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         let next;
-        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version); }
+        const navBody = this.navFor(parentDoc, number, docs);
+        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody); }
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody) } };
-        if (next.overflow || next.body.length >= this.threshold) {
+        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}) } };
+        if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
           hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
           continue;
@@ -2133,6 +2237,35 @@ class Reconciler {
           return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
         });
       }
+    }
+
+    // 5. The parent and task links at the top of each open or draft PR, built from a fresh read.
+    for (const effect of plan.effects.filter(entry => entry.kind === 'replace_pr_nav')) {
+      const number = effect.target.issue;
+      const pr = effect.target.pr;
+      if (isHeld(`#${number}`, 'pr')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+      if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
+      if (!plan.children.get(number)?.doc && !results.some(entry => entry.kind === 'create_state' && entry.target.issue === number && entry.outcome === 'DONE')) {
+        record(effect, 'SKIPPED', `#${number} has no state document to hold the intent`);
+        continue;
+      }
+      const before = this.reader.issue(pr);
+      if (!before) { record(effect, 'HELD', 'the PR could not be read'); hold(effect, 'ISSUE_MISSING', `PR #${pr} could not be read`); continue; }
+      let next;
+      try { next = upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME)); }
+      catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+      withIntent(effect, 'child', number, () => {
+        const latest = this.reader.issue(pr);
+        if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+          return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the PR changed between the read and the write; the next pass re-plans it' };
+        }
+        guard();
+        const response = this.mutator.writeBody(pr, next);
+        const after = this.reader.issue(pr);
+        if (after && after.body === next) return { outcome: 'DONE' };
+        if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+        return { outcome: 'UNKNOWN', detail: 'the PR description did not read back exactly as written' };
+      });
     }
     return { results, holds };
   }

@@ -271,3 +271,12 @@ test('backup pruning removes only old timestamp-named backup folders', t => {
   assert.equal(refreshed.status, 'current');
   assert.deepEqual(fs.readdirSync(f.backupRoot).sort(), [...kept, '2026-10-01T00-00-00-000Z'].sort());
 });
+
+test('a backup prune that fails is a warning on a settled refresh, not a failed check', t => {
+  const f = userFixture(t);
+  install(f);
+  fs.writeFileSync(f.backupRoot, 'a file where the backup folder should be');
+  const refreshed = f.defs().refresh();
+  assert.equal(refreshed.status, 'current');
+  assert.match(refreshed.prune_warning, /Old helper backups in .* could not be removed \(ENOTDIR\); the helpers themselves are fine\./);
+});

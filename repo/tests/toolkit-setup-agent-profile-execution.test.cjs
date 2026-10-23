@@ -176,7 +176,7 @@ test('a kept root-only profile becomes the safe root-only policy once current en
   assert.equal(downgraded.status, 0, downgraded.stderr || downgraded.stdout);
   assert.match(downgraded.stdout, /safe-root-only/i);
   // The safe fallback reads as expected, never as a failure or as verified.
-  assert.match(downgraded.stdout, /Profile outcome this run: safe-root-only: root-only, Toolkit's safe default\. Setup recorded no verified hook activation \(current Claude Code versions do not report one\), so the Toolkit hook keeps root-only\. This is expected; no action is needed\./);
+  assert.match(downgraded.stdout, /Profile outcome this run: safe-root-only: root-only, Toolkit's safe default\. Setup could not verify the installed Toolkit hook this run \(it was just installed, a setting turns hooks off, or its agent hook did not answer a test launch\), so the Toolkit hook keeps root-only\. This is safe; to verify it, run `setup toolkit` again in a new Claude Code session\./);
   // Hook activation unverified this run: the native setting is named, the hook only conditionally.
   assert.match(downgraded.stdout, /Normal folders: one layer; the main session may start subagents; subagents never start another \(the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1, read by Claude Code 2\.1\.217 or later\)\. The Toolkit hook also refuses nested launches once the plugin is installed and active\./);
   assert.doesNotMatch(downgraded.stdout, /verified this run/);
