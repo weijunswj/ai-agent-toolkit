@@ -85,6 +85,20 @@ function launcherEnv(extraPaths = [], overrides = {}) {
   return { ...env, Path: windowsLauncherPath(extraPaths), ...overrides };
 }
 
+// The Docker-missing scenario needs Docker absent from the launcher PATH. Some machines (GitHub's
+// Windows runners) keep docker.exe in System32, so that scenario leaves out every PATH folder that
+// holds a Docker CLI and starts cmd.exe by its full path, which does not need System32 on PATH.
+const DOCKER_COMMANDS = ['docker.exe', 'docker.cmd', 'docker.bat', 'docker.com', 'docker.ps1', 'docker'];
+const CMD_EXE = process.env.ComSpec || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+
+function dockerFreeLauncherEnv(extraPaths = [], overrides = {}) {
+  const env = launcherEnv(extraPaths, overrides);
+  env.Path = env.Path.split(path.delimiter)
+    .filter((dir) => !DOCKER_COMMANDS.some((name) => fs.existsSync(path.join(dir, name))))
+    .join(path.delimiter);
+  return env;
+}
+
 test('both CMD wrappers remove installer relaunch handling but retain unexpected-failure recovery', () => {
   for (const launcher of launcherCases) {
     const wrapper = fs.readFileSync(path.join(repoRoot, launcher.wrapper), 'utf8').replace(/\r\n/g, '\n');
@@ -132,10 +146,16 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
       try {
         const binDir = path.join(root, 'bin');
         fs.mkdirSync(binDir, { recursive: true });
-        // The scenario needs Docker absent from the launcher's PATH; say so plainly when it is not,
-        // instead of letting the launcher wait for a real Docker until the timeout.
-        const docker = spawnSync('where.exe', ['docker'], { env: launcherEnv([binDir]), encoding: 'utf8' });
-        assert.notEqual(docker.status, 0, `Docker CLI is on the launcher PATH at ${String(docker.stdout).trim()}; this scenario needs it absent`);
+        const env = dockerFreeLauncherEnv([binDir], {
+          CI: scenario === 'ci' ? 'true' : '',
+          GITHUB_ACTIONS: '',
+          TF_BUILD: '',
+          BUILD_BUILDID: '',
+          N8N_LAUNCHER_TEST_MODE: ''
+        });
+        const pathDirs = env.Path.split(path.delimiter);
+        assert.ok(pathDirs.some((dir) => fs.existsSync(path.join(dir, 'powershell.exe'))), 'the launcher PATH still finds powershell.exe');
+        assert.ok(pathDirs.every((dir) => !DOCKER_COMMANDS.some((name) => fs.existsSync(path.join(dir, name)))), 'no Docker CLI on the launcher PATH');
         const wingetMarker = path.join(root, 'winget-called.txt');
         if (scenario === 'winget-present') {
           writeCmd(path.join(binDir, 'winget.cmd'), [
@@ -144,16 +164,9 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
             'exit /b 91'
           ]);
         }
-        const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
+        const result = spawnSync(CMD_EXE, ['/d', '/c', wrapperPath], {
           cwd: root,
-          env: launcherEnv([binDir], {
-            CI: scenario === 'ci' ? 'true' : '',
-            GITHUB_ACTIONS: '',
-            TF_BUILD: '',
-            BUILD_BUILDID: '',
-            N8N_LAUNCHER_TEST_MODE: '',
-            N8N_WINGET_MARKER: wingetMarker
-          }),
+          env: { ...env, N8N_WINGET_MARKER: wingetMarker },
           input: '\r\n',
           encoding: 'utf8',
           timeout: LAUNCH_TIMEOUT_MS
