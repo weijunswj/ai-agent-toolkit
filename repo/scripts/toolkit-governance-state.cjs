@@ -44,6 +44,8 @@ const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
 const GOVERNED_BLOCK_LINE = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
 const BINDING_FILE = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_SCHEMA = 'toolkit.programme-binding.v1';
+// An early name for the binding; reported for the owner, never read or rewritten.
+const LEGACY_BINDING_FILE = Object.freeze(['.github', 'ai-agent-toolkit-programme.json']);
 const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const AGENTS_READ_LIMIT = 1024 * 1024;
 const BINDING_READ_LIMIT = 64 * 1024;
@@ -233,11 +235,22 @@ function readBinding(root, identity) {
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
-  return { present: true, valid: problems.length === 0, problems };
+  return { present: true, valid: problems.length === 0, problems, store_repository: problems.length === 0 ? parsed.store.repository : null };
+}
+
+// The evidence store a valid binding names ("owner/name"), or null. Kept out of the state result,
+// which never carries repository names.
+function bindingStoreRepository(root) {
+  try {
+    const binding = readBinding(root, readIdentity(root));
+    return binding.valid ? binding.store_repository : null;
+  } catch { return null; }
 }
 
 function readMaterials(root, identity) {
-  return { governed_block: readGovernedBlock(root), binding: readBinding(root, identity) };
+  let legacyBinding = false;
+  try { legacyBinding = fs.lstatSync(path.join(root, ...LEGACY_BINDING_FILE)).isFile(); } catch { legacyBinding = false; }
+  return { governed_block: readGovernedBlock(root), binding: readBinding(root, identity), legacy_binding_file: legacyBinding };
 }
 
 // ---- registry ---------------------------------------------------------------------------------
@@ -265,7 +278,8 @@ function readDecision(repositoryId, options = {}, legacyIds = []) {
   let parsed;
   try { parsed = registry.parseRegistryBytes(bytes); } catch (error) { fail(/^[A-Z][A-Z0-9_]{1,63}$/.test(error && error.code) ? error.code : 'REGISTRY_MALFORMED'); }
   const entry = registry.readCapabilityMap(parsed, repositoryId, legacyIds)[GOVERNANCE_CAPABILITY];
-  return { state: entry.state, decision_kind: entry.decision_kind };
+  const own = registry.readCapabilityMap(parsed, repositoryId, [])[GOVERNANCE_CAPABILITY];
+  return { state: entry.state, decision_kind: entry.decision_kind, legacy_key: entry.state !== 'unresolved' && own.state === 'unresolved' };
 }
 
 // ---- derivation -------------------------------------------------------------------------------
@@ -284,6 +298,7 @@ function result(fields) {
     governed_rules_bind: complete,
     programme_records_bind: complete,
     recorded_decision: fields.recorded_decision || null,
+    recorded_under_legacy_key: fields.legacy_key === true,
     repository_id: fields.repository_id || null,
     root: fields.root || null,
     materials: fields.materials ? Object.freeze({
@@ -292,6 +307,7 @@ function result(fields) {
       binding: fields.materials.binding.valid === true,
       binding_present: fields.materials.binding.present === true,
       binding_problems: Object.freeze([...(fields.materials.binding.problems || [])]),
+      legacy_binding_file: fields.materials.legacy_binding_file === true,
     }) : null,
     error_code: fields.error_code || null,
   });
@@ -310,7 +326,7 @@ class GovernanceState {
 
   // The pure rule table over already-read inputs.
   static derive({ identity, materials, decision }) {
-    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, materials };
+    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const block = materials.governed_block.present === true;
     const binding = materials.binding.valid === true;
     if (decision.state === 'disabled') return result({ ...base, state: 'DECLINED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
@@ -379,6 +395,7 @@ module.exports = Object.freeze({
   readIdentity,
   readMaterials,
   readGovernedBlock,
+  bindingStoreRepository,
   readDecision,
   registryPathFor,
   bindingProblems,

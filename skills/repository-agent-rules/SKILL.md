@@ -45,6 +45,7 @@ For an explicit request, compare the Toolkit-owned blocks with the current templ
 - `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
 - `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
+- `repo-local/toolkit-programme.template.json` -> `.github/toolkit-programme.json`, only when the user enables Toolkit governance for the repository (`toolkit governance enable`) and asks for the binding. Fill in the repository, parent issue, record prefixes and the separate private evidence store from the user's answers; the binding lands through a pull request, never a push to the default branch.
 - `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `fast-tests-and-sharding.md`, `generated-files.md`, `git-completion.md`, `invariant-models.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `privacy-safe-checks.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
 Rules:
