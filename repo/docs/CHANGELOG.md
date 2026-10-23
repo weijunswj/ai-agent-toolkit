@@ -2,6 +2,8 @@
 
 ## 3.7.0 (setup and hooks)
 
+- **Claude Projects controller skill 2026-10-23.8:** another project edits the uploaded copy only at your request. Upload the new file to claude.ai after this merges.
+- **Commands you paste work in PowerShell.** Printed and documented `node` commands use `"$env:USERPROFILE\..."` instead of the cmd-only `"%USERPROFILE%\..."`.
 - **Antigravity copy question is back** (#472). When Antigravity is installed, setup asks "Copy Toolkit's skills into Antigravity?" (opt-in). Choosing it copies the portable skills into `~/.gemini/config/skills` and keeps Toolkit's copies current; a later answer removes only Toolkit's copies. The per-workspace bridge copy stays.
 - **Windows only in setup.** Setup stops before any step on a computer that is not Windows (Linux runs only as a CI build machine), and `toolkit env` loses the Linux key store. The install check builds the key store only when it needs it, so it skips `toolkit env` on a computer without one (#532).
 - **Recommended Claude Code settings.** New setup question "Use Toolkit's recommended Claude Code settings?" sets four values in `~/.claude/settings.json`: `attribution: false`, `crossSessionInbound: "accept"`, `switchModelsOnFlag: false`, and read `AGENTS.md` as well as `CLAUDE.md`. A value you set yourself is never changed; turning it off removes only what Toolkit set.

@@ -206,7 +206,7 @@ The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and ex
 For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, agents must run the full script-backed journey even when Toolkit is already installed:
 
 ```powershell
-node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
+node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
 Append `--host claude-code` for Claude Code. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. If fallback/bootstrap is used, say it is bootstrap-only and hand off to the managed checkout script after the managed checkout exists.
@@ -360,13 +360,13 @@ Repo auto-update uses the configured local Toolkit Git repo as source of truth. 
 Enable or refresh the managed-main setup with:
 
 ```powershell
-node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
+node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
 Advanced bridge-only configuration can still point at an explicit trusted checkout:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
 ```
 
 Use `--repo-remote <url>` only when intentionally testing or maintaining a non-default remote. The expected production remote is `https://github.com/weijunswj/ai-agent-toolkit`.

@@ -11,7 +11,7 @@ description: Use when the user talks about their env, env keys, secrets, API key
 
 Use the managed Toolkit checkout, so connected apps keep working after updates:
 
-- `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
+- `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
 
 If that file is missing, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
 

@@ -4250,7 +4250,8 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/, relPath);
+    assert.match(text, /node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs"/, relPath);
+    assert.doesNotMatch(text, /"%USERPROFILE%/, relPath);
     assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
     assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
@@ -4274,7 +4275,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
-    assert.match(text, /%USERPROFILE%\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
+    assert.match(text, /\$env:USERPROFILE\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode is not a Toolkit target/i, relPath);
@@ -4282,12 +4283,12 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
     assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /Omit host-specific rows when they have no practical effect/i, relPath);
-    assert.match(text, /Antigravity receives explicit portable skills copies; native AG2 install\/update\/sync is unsupported/i, relPath);
+    assert.match(text, /Antigravity receives explicit portable skills copies: setup's opt-in question copies them into `~\/\.gemini\/config\/skills`[^\n]*; native AG2 install\/update\/sync is unsupported/i, relPath);
     assert.match(text, /--copy-antigravity-skills/, relPath);
     assert.match(text, /The bridge writes into no other app/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
-    assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
+    assert.match(text, /Setup copies the official `n8n-io\/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
     assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
     assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
