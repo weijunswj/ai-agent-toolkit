@@ -28,12 +28,14 @@ function gitSha(cwd, ref) {
   return git(cwd, ['rev-parse', ref]).trim();
 }
 
+// A Windows path as Git Bash reads it, by drive letter (D:\a\b -> /d/a/b). cygpath would map a path
+// inside the temp folder to /tmp/..., and Git Bash binds /tmp to whichever temp folder its first
+// process saw, so that form can point somewhere else in the helper's own bash.
 function bashPathValue(value) {
-  if (process.platform !== 'win32') return value;
-  const escaped = value.replace(/'/g, "'\\''");
-  const result = spawnSync(bashPath, ['-lc', `cygpath -u -- '${escaped}'`], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr || `Unable to convert path: ${value}`);
-  return result.stdout.trim();
+  if (process.platform !== 'win32' || value.startsWith('/')) return value;
+  const resolved = path.resolve(value);
+  if (!/^[A-Za-z]:\\/.test(resolved)) throw new Error(`Unable to convert path: ${value}`);
+  return `/${resolved[0].toLowerCase()}${resolved.slice(2).replace(/\\/g, '/')}`;
 }
 
 function bashSearchPath() {
