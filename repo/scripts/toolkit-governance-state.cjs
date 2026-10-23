@@ -377,6 +377,12 @@ function findGitRootQuietly(cwd) {
 }
 
 // The single exported entry point other lanes consume (hooks, setup, conformance, catalogue, R6).
+// The command a person types to run the governance CLI from this Toolkit copy. There is no
+// `toolkit` executable, so messages show the real path.
+function governanceCommand(subcommand) {
+  return `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
+}
+
 function governanceState(cwd, options = {}) {
   return new GovernanceState({ registryOptions: options }).evaluate(cwd);
 }
@@ -392,6 +398,7 @@ module.exports = Object.freeze({
   GovernanceState,
   GovernanceStateError,
   governanceState,
+  governanceCommand,
   readIdentity,
   readMaterials,
   readGovernedBlock,
