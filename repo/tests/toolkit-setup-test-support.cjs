@@ -212,7 +212,14 @@ function createGitBackedSetupRepo(root, options = {}) {
   const setupRepo = path.join(root, 'repo');
   fs.mkdirSync(setupRepo, { recursive: true });
   runTestGit(root, ['init', '--bare', origin]);
+  // No background repack: tests snapshot origin.git byte for byte, and a detached auto gc after a
+  // push can rewrite it mid-test (seen on Linux CI once setup's script closure grew).
+  runTestGit(origin, ['config', 'receive.autogc', 'false']);
+  runTestGit(origin, ['config', 'gc.auto', '0']);
+  runTestGit(origin, ['config', 'maintenance.auto', 'false']);
   runTestGit(setupRepo, ['init']);
+  runTestGit(setupRepo, ['config', 'gc.auto', '0']);
+  runTestGit(setupRepo, ['config', 'maintenance.auto', 'false']);
   runTestGit(setupRepo, ['checkout', '-b', 'main']);
   runTestGit(setupRepo, ['config', 'user.email', 'setup-test@example.invalid']);
   runTestGit(setupRepo, ['config', 'user.name', 'Setup Test']);
