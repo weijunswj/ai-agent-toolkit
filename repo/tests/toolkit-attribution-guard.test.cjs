@@ -53,6 +53,44 @@ test('git message paths survive Bash and PowerShell line continuations', (t) => 
   }
 });
 
+test('raw command detection screens wrappers, substitutions and shell-specific quoting', (t) => {
+  const dir = messageFiles(t);
+  const commands = [
+    ['heredoc with apostrophe', `cat > msg.txt <<'EOF'\nFix what doesn't work\n${trailer}\nEOF\ngit commit -F msg.txt`],
+    ['subshell', `(git commit -m "${trailer}")`],
+    ['command substitution', `x=$(git commit -m "${trailer}")`],
+    ['bash wrapper', `bash -c "git commit -m '${trailer}'"`],
+    ['PowerShell wrapper', `powershell -Command "git commit -m '${trailer}'"`],
+    ['cmd wrapper', `cmd /c "git commit -m '${trailer}'"`],
+    ['PowerShell trailing backslash', `Write-Output "C:\\repo\\"; git commit -m "${trailer}"`],
+    ['backtick before closing quote', 'echo "note`"; git commit -m "' + trailer + '"'],
+    ['ANSI-C apostrophe', "echo $'it\\'s'; git commit -m \"" + trailer + '"'],
+    ['PowerShell here-string', `$m = @'\nFix what doesn't work\n${trailer}\n'@\ngit commit -m $m`],
+    ['PowerShell call operator', `& git commit -m "${trailer}"`],
+    ['wrapped PR merge', `bash -c "gh pr merge 12 --body '${trailer}'"`],
+  ];
+  for (const [label, command] of commands) assert.equal(attributionRefusal(command, dir), MESSAGE, label);
+});
+
+test('unpaired message and body files still get the legacy and base-folder screens', (t) => {
+  const dir = messageFiles(t);
+  for (const command of [
+    "cat <<'EOF'\nFix what doesn't work\nEOF\ngit commit -F sub/msg.txt",
+    '(git commit -F sub/msg.txt )',
+    'x=$(git commit -F sub/msg.txt )',
+    'bash -c "git commit -F sub/msg.txt"',
+    'powershell -Command "git commit -F sub/msg.txt"',
+    'cmd /c "git commit -F sub/msg.txt"',
+    'bash -c "git -C sub commit -F msg.txt"',
+    "echo doesn't; git -C sub commit -F msg.txt",
+    'git status --file=sub/msg.txt ; git commit -m x',
+    'git commit -- --body-file=body.md',
+    'bash -c "gh pr create --body-file body.md"',
+  ]) assert.equal(attributionRefusal(command, dir), MESSAGE, command);
+  fs.writeFileSync(path.join(dir, 'msg.txt'), trailer);
+  assert.equal(attributionRefusal('bash -c "git -C sub/clean commit -F msg.txt"', dir), MESSAGE);
+});
+
 test('quoted and escaped separators stay inside the same git command', (t) => {
   const dir = messageFiles(t);
   for (const separator of [';', '&&', '||', '|', '\n']) for (const quote of ['"', "'"]) {
@@ -103,6 +141,19 @@ test('long command detection is bounded and commands beyond the limit are refuse
   assert.equal(attributionRefusal('git -c x=y '.repeat(20000)), '');
   assert.match(attributionRefusal('x'.repeat(1024 * 1024 + 1)), /character limit/);
   assert.ok(performance.now() - started < 1000, 'long commands must return promptly');
+});
+
+test('repeated -C resolution is capped before paths can grow quadratically', (t) => {
+  const dir = messageFiles(t);
+  assert.equal(attributionRefusal(`git ${'-C "" '.repeat(64)}commit -m x`, dir), '');
+  const started = performance.now();
+  for (const command of [
+    `git ${'-C -C '.repeat(50000)}`,
+    `git ${'-C segment '.repeat(50000)}commit -F msg.txt`,
+    `git ${'-Csegment '.repeat(50000)}commit -F msg.txt`,
+    `git ${'-C "" '.repeat(65)}commit -m x`,
+  ]) assert.match(attributionRefusal(command, dir), /64 git -C options per command/);
+  assert.ok(performance.now() - started < 1500, 'repeated -C options must return promptly');
 });
 
 test('ordinary commits, PRs and other commands pass, even when they mention Claude', () => {

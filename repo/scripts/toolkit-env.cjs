@@ -186,7 +186,7 @@ class EnvManifest {
 }
 
 // Screen NAME=value assignments, common token prefixes, long opaque runs and hidden controls.
-// Empty/unchanged assignments and decorative equals are harmless; NFKC catches fullwidth equals.
+// Empty/unchanged assignments still pass the token screens; NFKC catches fullwidth equals.
 // This cannot prove human-readable text is not a password. Refusals never repeat comment text.
 function secretLikeComment(text) {
   const chars = [...text];
@@ -199,6 +199,7 @@ function secretLikeComment(text) {
     } else if (/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) return true;
   }
   const body = text.normalize('NFKC');
+  let commentedName = '';
   // Consume each name once, then inspect its suffix rather than retrying a greedy name pattern
   // at every letter when a long comment contains no equals sign.
   for (const match of body.matchAll(/[\p{L}_][\p{L}\p{N}_]*/gu)) {
@@ -208,7 +209,7 @@ function secretLikeComment(text) {
     at += 1;
     while (at < body.length && /\s/u.test(body[at])) at += 1;
     if (at < body.length && body.slice(at).trim() !== UNCHANGED) return true;
-    if (body.slice(0, match.index).trim() === '#') return false;
+    if (body.slice(0, match.index).trim() === '#' && !nameProblem(match[0])) commentedName = match[0];
   }
   if (/(?:^|[^\p{L}\p{N}_])(?:sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[\p{L}\p{N}_-]+/u.test(body)) return true;
   for (const [word] of body.matchAll(/\S+/gu)) {
@@ -216,7 +217,12 @@ function secretLikeComment(text) {
     // For URLs and file paths, screen each component so the separators are not counted as part
     // of one opaque token. Other runs retain the base64 alphabet, including slash and padding.
     const runs = isPath ? /[\p{L}\p{M}\p{N}_\-+=]{24,}/gu : /[\p{L}\p{M}\p{N}_\-+/=.]{24,}/gu;
-    for (const [run] of word.matchAll(runs)) if (/[\p{L}\p{N}]/u.test(run)) return true;
+    // A valid stored-key name may itself be long. Exempt only that name (and its equals),
+    // never the rest of the comment or the token-prefix screen above.
+    for (const [run] of word.matchAll(runs)) {
+      if (commentedName && (run === commentedName || run === `${commentedName}=`)) continue;
+      if (/[\p{L}\p{N}]/u.test(run)) return true;
+    }
   }
   return false;
 }
