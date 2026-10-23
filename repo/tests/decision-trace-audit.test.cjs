@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { auditDecisionTraces, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+const { auditDecisionTraces, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
 const PREFIX = 'INT-TK421-';
@@ -106,6 +106,19 @@ test('index lines carry the date, record, summary, fragment link and supersessio
     '- 2026-10-03 · comment · [Plain note with a link and a pipe](#issuecomment-12)',
   ]);
   assert.equal(auditDecisionTraces({ body: repaired, comments, recordPrefix: PREFIX }).ok, true);
+
+  // Topics from a decision ledger go after the link; a missing topic leaves the line as it was.
+  const topics = ledgerTopics({ schema: 'toolkit.decision-ledger.v1', issues: [{ issue: 7, entries: [
+    { comment_id: 10, topic: 'page-format' }, { comment_id: 12, topic: 'uat | [x]' }, { comment_id: 11, topic: '' },
+  ] }] });
+  assert.deepEqual(repairedBody('', result.unlinked, result.superseded_unmarked, topics).split('\n').filter(line => line.startsWith('- ')), [
+    '- 2026-10-01 · INT-TK421-010 · [INT-TK421-010 - First decision](#issuecomment-10) · page-format · superseded by INT-TK421-011',
+    '- 2026-10-02 · INT-TK421-011 · [INT-TK421-011 replaces it](#issuecomment-11) · SUPERSEDES=INT-TK421-010',
+    '- 2026-10-03 · comment · [Plain note with a link and a pipe](#issuecomment-12) · uat x',
+  ]);
+  assert.throws(() => ledgerTopics({ schema: 'other', issues: [] }), /toolkit\.decision-ledger\.v1/);
+  assert.throws(() => parseArgs(['--repo', 'o/r', '--issue', '7', '--ledger', 'l.json']), /only with --repair/);
+  assert.equal(parseArgs(['--repo', 'o/r', '--issue', '7', '--repair', '--out', 'b.md', '--ledger', 'l.json']).ledger, 'l.json');
 });
 
 test('unknown SUPERSEDES targets and a body at the threshold fail', () => {

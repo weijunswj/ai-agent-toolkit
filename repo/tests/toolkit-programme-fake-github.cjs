@@ -58,8 +58,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '' } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch, body });
   }
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
@@ -155,6 +155,11 @@ class FakeGitHub {
     if ((match = /^issues\/(\d+)\/dependencies\/blocked_by$/.exec(rest))) {
       const issue = this.issues.get(Number(match[1]));
       return ok(200, issue.blockedBy.map(n => this.issueJson(this.issues.get(n))));
+    }
+    if (rest === 'pulls' && !params.get('head')) {
+      const page = Number(params.get('page') || 1);
+      const open = [...this.prs.values()].filter(pr => pr.state === 'OPEN' || pr.state === 'DRAFT');
+      return ok(200, open.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft })));
     }
     if (rest === 'pulls') {
       const branch = (params.get('head') || '').split(':')[1];

@@ -666,6 +666,37 @@ function groupRows(parent, members, children) {
   return rows;
 }
 
+// Release names that look like versions sort numerically; any other name keeps its first-seen
+// place after them.
+function compareReleases(a, b, seen) {
+  const version = name => /^v?(\d+)\.(\d+)(?:\.(\d+))?$/.exec(name);
+  const left = version(a);
+  const right = version(b);
+  if (left && right) return [1, 2, 3].map(at => Number(left[at] || 0) - Number(right[at] || 0)).find(Boolean) || 0;
+  if (left || right) return left ? -1 : 1;
+  return seen.indexOf(a) - seen.indexOf(b);
+}
+
+// One line per class: its open outcomes by release, in release order, unscheduled last.
+function roadmapLines(active, children) {
+  if (!active.some(outcome => children.get(outcome.issue)?.release)) return ['- No release is recorded for any open outcome yet.'];
+  const lines = [];
+  for (const [cls, heading] of CLASS_GROUPS) {
+    const members = active.filter(outcome => outcome.class === cls).sort(compareOutcomes);
+    if (!members.length) continue;
+    const byRelease = new Map();
+    for (const outcome of members) {
+      const release = children.get(outcome.issue)?.release || null;
+      byRelease.set(release, [...(byRelease.get(release) || []), `#${outcome.issue}`]);
+    }
+    const seen = [...byRelease.keys()].filter(Boolean);
+    const named = [...seen].sort((a, b) => compareReleases(a, b, seen)).map(release => `${publicText(release)}: ${byRelease.get(release).join(', ')}`);
+    const unscheduled = byRelease.has(null) ? [`unscheduled: ${byRelease.get(null).join(', ')}`] : [];
+    lines.push(`- **${heading}:** ${[...named, ...unscheduled].join(' · ')}`);
+  }
+  return lines;
+}
+
 function renderParentBlockBody(parent, children) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
@@ -673,12 +704,13 @@ function renderParentBlockBody(parent, children) {
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Groups follow priority: Core, then Hardening, Later and Optional; finished work is collapsed at the end.`,
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Groups follow priority: Core, then Hardening, Later and Optional; the roadmap follows, and finished work is collapsed at the end.`,
   ];
   for (const [cls, heading] of CLASS_GROUPS) {
     const members = active.filter(outcome => outcome.class === cls);
     if (members.length) lines.push('', `### ${heading}`, '', ...GRAPH_HEADER, ...groupRows(parent, members, children));
   }
+  if (active.length) lines.push('', '### Roadmap', '', ...roadmapLines(active, children));
   if (finished.length) {
     lines.push('', `<details><summary>Completed and retired (${finished.length})</summary>`, '', ...GRAPH_HEADER, ...groupRows(parent, finished, children), '', '</details>');
   }
@@ -1108,6 +1140,18 @@ class ProgrammeGraphReader {
     };
   }
 
+  // Open pull requests with their bodies, for PRs that reference an outcome the state does not track.
+  openPullRequests() {
+    const all = [];
+    for (let page = 1; page < 50; page += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=open&per_page=100&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, 'Listing open pull requests');
+      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '' })));
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('GH_FAILED', 'The repository has more open pull requests than this reader pages through.');
+  }
+
   pullRequestForBranch(branch) {
     const owner = this.repository.split('/')[0];
     const response = this.transport.request('GET', `repos/${this.repository}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=all&per_page=10`);
@@ -1115,6 +1159,21 @@ class ProgrammeGraphReader {
     const open = response.json.find(pr => pr.state === 'open');
     return (open || response.json[0])?.number || null;
   }
+}
+
+// Issue numbers each PR body references with Refs, Completes, Closes, Fixes or Resolves, including
+// lists such as "Refs #421, #423": issue -> sorted PR numbers.
+function referencedIssues(prs) {
+  const references = new Map();
+  for (const pr of prs) {
+    for (const match of String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)) {
+      for (const [, number] of match[1].matchAll(/#(\d+)/g)) {
+        const list = references.get(Number(number)) || [];
+        if (!list.includes(pr.number)) references.set(Number(number), [...list, pr.number].sort((a, b) => a - b));
+      }
+    }
+  }
+  return references;
 }
 
 // Native hierarchy and body mutations; each returns the raw status. Readback decides the outcome.
@@ -1189,7 +1248,7 @@ function intentId(kind, target) {
 
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED']);
+  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED', 'PR_UNTRACKED']);
 
 const EFFECT_TEXT = {
   create_state: effect => `Create the state document for #${effect.target.issue}`,
@@ -1244,7 +1303,25 @@ class Reconciler {
       const number = doc?.pr?.number || (doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, this.reader.pullRequest(number));
     }
-    return { issues, subIssues, blockedBy, prs, outcomes };
+    // Open PRs are listed only when some open outcome tracks no PR and no branch.
+    const untracked = outcomes.some(outcome => {
+      const doc = children.get(outcome.issue)?.doc;
+      return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
+    });
+    const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
+    return { issues, subIssues, blockedBy, prs, outcomes, references };
+  }
+
+  // Report-only: an open PR that says "Refs #n" (or Completes, Closes, Fixes, Resolves) for an open
+  // outcome whose state tracks no PR and no branch. The controller confirms before recording it.
+  diffUntracked(parent, docs, observed, only, findings) {
+    for (const outcome of parent.outcomes) {
+      if (only && outcome.issue !== only) continue;
+      const doc = docs.get(outcome.issue);
+      if (isFinished(outcome, doc) || doc?.pr?.number || doc?.candidate?.branch) continue;
+      const numbers = observed.references.get(outcome.issue) || [];
+      if (numbers.length) findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail: `open PR ${numbers.map(number => `#${number}`).join(', ')} references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch` });
+    }
   }
 
   // The child document with observed PR facts applied (pure apart from reading `observed`).
@@ -1447,6 +1524,7 @@ class Reconciler {
     }));
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
     this.auditTraces(parent, observed, only, findings);
+    this.diffUntracked(parent, desiredDocs, observed, only, findings);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }

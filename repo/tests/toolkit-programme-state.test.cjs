@@ -207,8 +207,32 @@ test('parent rows group by class priority, then order and issue, with finished w
   const rows = body.split('\n').filter(line => line.startsWith('| #')).map(line => Number(/^\| #(\d+)/.exec(line)[1]));
   assert.deepEqual(rows, [14, 15, 8, 17, 21, 19, 20, 11, 10, 13, 18, 12, 9, 16]);
   const headings = body.split('\n').filter(line => line.startsWith('#') || line.startsWith('<details>'));
-  assert.deepEqual(headings, ['## Programme Graph', '### Core', '### Hardening', '### Later', '### Optional', '<details><summary>Completed and retired (3)</summary>']);
+  assert.deepEqual(headings, ['## Programme Graph', '### Core', '### Hardening', '### Later', '### Optional', '### Roadmap', '<details><summary>Completed and retired (3)</summary>']);
   assert.match(body, /^\| #16 \(under #8\) \| NO STATE YET \|/m, 'a finished child of an active outcome names its parent');
+  assert.match(body, /^- No release is recorded for any open outcome yet\.$/m);
+});
+
+test('the roadmap lists each class by release in version order, unscheduled last, from the same documents', () => {
+  const outcomes = [
+    { issue: 1, class: 'CORE', parent: 7, order: 1 },
+    { issue: 2, class: 'CORE', parent: 7, order: 2 },
+    { issue: 3, class: 'CORE', parent: 7, order: 3 },
+    { issue: 4, class: 'CORE', parent: 7, order: 4 },
+    { issue: 5, class: 'HARDENING', parent: 7, order: 1 },
+    { issue: 6, class: 'LATER', parent: 7, order: 1 },
+    { issue: 8, class: 'CORE', parent: 7, order: 5 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (issue, release, lifecycle = 'ACTIVE') => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), release, lifecycle });
+  const children = new Map([[1, doc(1, '3.10.0')], [2, doc(2, '3.9.1')], [3, doc(3, null)], [4, doc(4, '3.10.0')], [5, doc(5, 'hardening batch')], [6, doc(6, null)], [8, doc(8, '3.9.1', 'DONE')]]);
+  const body = state.renderParentBlockBody(parent, children);
+  const roadmap = body.split('### Roadmap\n\n')[1].split('\n\n')[0].split('\n');
+  assert.deepEqual(roadmap, [
+    '- **Core:** 3.9.1: #2 · 3.10.0: #1, #4 · unscheduled: #3',
+    '- **Hardening:** hardening batch: #5',
+    '- **Later:** unscheduled: #6',
+  ], 'finished work stays out of the roadmap');
+  assert.match(body, /^\| #2 \| CURRENT \| - \| release 3\.9\.1; next: Controller: admit and plan this outcome \| - \|$/m);
 });
 
 test('a state block is replaced without touching the bytes around it', () => {

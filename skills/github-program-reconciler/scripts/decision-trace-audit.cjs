@@ -14,7 +14,10 @@
 // caller's separately authorised step. The reconcile pass runs the same audit and reports gaps.
 //
 // Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>]
-//          [--threshold <chars>] [--repair --out <file>]
+//          [--threshold <chars>] [--repair --out <file> [--ledger <file>]]
+//
+// --ledger takes a decision ledger (toolkit.decision-ledger.v1) and adds each comment's topic tag to
+// its repair line.
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -115,12 +118,14 @@ function commentSummary(text) {
 }
 
 // One index line per entry, in comment order, with a same-issue fragment link:
-// "- <date> · <record> · [<summary>](#issuecomment-<id>)", then SUPERSEDES= and "superseded by".
-function indexLines(entries) {
+// "- <date> · <record> · [<summary>](#issuecomment-<id>) · <topic>", then SUPERSEDES= and
+// "superseded by". `topics` maps a comment ID to its topic (from a decision ledger); no topic, no part.
+function indexLines(entries, topics = new Map()) {
   return entries.map(entry => [
     `- ${entry.date || 'undated'}`,
     entry.record || 'comment',
     `[${entry.summary || `comment ${entry.id}`}](#issuecomment-${entry.id})`,
+    ...(topics.get(String(entry.id)) ? [topics.get(String(entry.id))] : []),
     ...(entry.supersedes || []).map(record => `SUPERSEDES=${record}`),
     ...(entry.superseded_by ? [`superseded by ${entry.superseded_by}`] : []),
   ].join(' · '));
@@ -129,11 +134,11 @@ function indexLines(entries) {
 // The body with the missing lines added inside its decision index, creating a collapsed index at
 // the end when the body has none. Never removes or reorders existing text.
 // Superseded records that are already linked but not marked get a marking line of their own.
-function repairedBody(body, unlinked, supersededUnmarked = []) {
+function repairedBody(body, unlinked, supersededUnmarked = [], topics = new Map()) {
   const missing = new Set(unlinked.map(entry => entry.id));
   const marks = supersededUnmarked.filter(entry => !missing.has(entry.id))
     .map(entry => `- superseded record · ${entry.record} · [${entry.record}](#issuecomment-${entry.id}) · superseded by ${entry.superseded_by}`);
-  const lines = [...indexLines(unlinked), ...marks];
+  const lines = [...indexLines(unlinked, topics), ...marks];
   if (!lines.length) return body;
   const text = String(body || '');
   const end = text.indexOf(INDEX_END);
@@ -157,7 +162,7 @@ function fetchIssue(repo, issue) {
 }
 
 function parseArgs(argv) {
-  const args = { repo: '', issue: '', recordPrefix: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '' };
+  const args = { repo: '', issue: '', recordPrefix: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '', ledger: '' };
   for (let i = 0; i < argv.length; i += 1) {
     const value = () => argv[++i] || '';
     if (argv[i] === '--repo') args.repo = value();
@@ -166,13 +171,29 @@ function parseArgs(argv) {
     else if (argv[i] === '--threshold') args.threshold = Number(value());
     else if (argv[i] === '--repair') args.repair = true;
     else if (argv[i] === '--out') args.out = value();
+    else if (argv[i] === '--ledger') args.ledger = value();
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
-  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>] [--threshold <chars>] [--repair --out <file>]');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>] [--threshold <chars>] [--repair --out <file> [--ledger <file>]]');
   if (args.recordPrefix !== null && !RECORD_PREFIX.test(args.recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
   if (!Number.isInteger(args.threshold) || args.threshold <= 0) throw new Error('--threshold must be a positive integer');
   if (args.repair && !args.out) throw new Error('--repair needs --out <file>');
+  if (args.ledger && !args.repair) throw new Error('--ledger is used only with --repair');
   return args;
+}
+
+// Topic per comment ID from a decision ledger (schema toolkit.decision-ledger.v1). Topics are
+// keyword tags; a missing or empty topic leaves the line without one.
+function ledgerTopics(ledger) {
+  if (ledger?.schema !== 'toolkit.decision-ledger.v1' || !Array.isArray(ledger.issues)) throw new Error('--ledger must be a toolkit.decision-ledger.v1 file');
+  const topics = new Map();
+  for (const issue of ledger.issues) {
+    for (const entry of Array.isArray(issue.entries) ? issue.entries : []) {
+      const topic = String(entry.topic || '').replace(/[\r\n|[\]·]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (entry.comment_id && topic) topics.set(String(entry.comment_id), topic);
+    }
+  }
+  return topics;
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -180,7 +201,8 @@ function main(argv = process.argv.slice(2)) {
   const { body, comments } = fetchIssue(args.repo, args.issue);
   const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
   if (args.repair) {
-    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked));
+    const topics = args.ledger ? ledgerTopics(JSON.parse(fs.readFileSync(args.ledger, 'utf8').replace(/^\uFEFF/, ''))) : new Map();
+    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked, topics));
     result.repair_file = args.out;
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -192,4 +214,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, indexLines, repairedBody, parseArgs });
+module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, indexLines, ledgerTopics, repairedBody, parseArgs });

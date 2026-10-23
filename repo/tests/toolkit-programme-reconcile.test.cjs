@@ -163,6 +163,22 @@ test('the pass reports comment-trace gaps and unmarked superseded records withou
   assert.equal(github.mutations(), before, 'trace gaps are reported, never written by the pass');
 });
 
+test('an open PR that references an untracked outcome is reported for the controller, never recorded', () => {
+  const { github, store, reconciler } = setup();
+  reconciler().run({ apply: true });
+  github.addPr(601, { head: SHA_A, body: 'Work for the shared contract.\n\nRefs #421, #423 and #467' });
+  github.addPr(602, { head: SHA_B, state: 'MERGED', merged: true, body: 'Closes #423' });
+  github.addPr(603, { head: SHA_B, isDraft: true, state: 'DRAFT', body: 'Completes: #459' });
+  const commits = github.commits;
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.findings.filter(finding => finding.code === 'PR_UNTRACKED').map(finding => `#${finding.issue}: ${finding.detail}`), [
+    '#423: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
+    '#467: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
+  ], 'merged PRs and finished outcomes are left out');
+  assert.equal(github.commits, commits, 'nothing is recorded');
+  assert.equal(store.read('child', 423).doc.pr.number, null);
+});
+
 test('reclassifying an outcome keeps its identity, document and native link', () => {
   const { github, store, reconciler } = setup();
   reconciler().run({ apply: true });
