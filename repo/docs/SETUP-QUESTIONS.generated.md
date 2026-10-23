@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 6 questions across 2 sections
+Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: SYCY-J6KR-MC2Q-YWFF
+Bank reference: 6WJD-DB4J-A8E6-M4Z4
 
 Quick index
 
@@ -15,6 +15,7 @@ Quick index
 1.4 Report retention - Recommended: C - Keep current
 1.5 Raise Codex's instruction limit - Recommended: A - Raise it
 2.1 Codex Toolkit maintenance - Recommended: A - Turn on
+3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -178,10 +179,38 @@ Quick index
 
 ---
 
+
+## 3. Other coding apps
+
+### 3.1 Copy Toolkit's skills into Antigravity?
+
+**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+
+**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+
+**Verification:** state-derived
+
+**Recommended:** B - Keep current
+
+**Recommended outcome:** Leave Antigravity unchanged.
+
+**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+
+**Choices:**
+
+- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+
+**After applying:** Start a new Antigravity session to load changed skills.
+
+**Selected:** B - Keep current
+
+---
+
 Reply with the displayed bank reference and either:
 
-- `SYCY-J6KR-MC2Q-YWFF: all recommended`
-- only your changes, for example: `SYCY-J6KR-MC2Q-YWFF: 1.2=B, 1.3=B`
+- `6WJD-DB4J-A8E6-M4Z4: all recommended`
+- only your changes, for example: `6WJD-DB4J-A8E6-M4Z4: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -192,9 +221,9 @@ Existing canonical textual values, complete line-by-line answers, explicit setup
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 8 questions across 3 sections
+Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: ZE14-K0EP-KZNP-ZTVH
+Bank reference: 874A-WVBY-AJ1W-T5R6
 
 Quick index
 
@@ -206,6 +235,7 @@ Quick index
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
+3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -421,5 +451,30 @@ Quick index
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
 **Selected:** A - Turn on
+
+---
+
+### 3.3 Copy Toolkit's skills into Antigravity?
+
+**What this controls:** Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+
+**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+
+**Verification:** state-derived
+
+**Recommended:** B - Keep current
+
+**Recommended outcome:** Leave Antigravity unchanged.
+
+**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+
+**Choices:**
+
+- **A. Copy and keep current** - Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+
+**After applying:** Start a new Antigravity session to load changed skills.
+
+**Selected:** B - Keep current
 
 ---

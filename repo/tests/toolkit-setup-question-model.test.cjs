@@ -15,6 +15,7 @@ const expectedCodexRows = [
   ['report-retention', 'Report retention'],
   ['codex-instruction-limit', "Raise Codex's instruction limit"],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
+  ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
 ];
 
 function assertGeneratedDocumentationEqual(actual, expected) {
@@ -332,7 +333,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -427,7 +428,7 @@ test('bank reference covers host, order, recommendations and approval-visible se
   const payload = core.questionBankApprovalPayload(rows);
   assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
   assert.equal(payload.host, 'codex');
-  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance']);
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
 

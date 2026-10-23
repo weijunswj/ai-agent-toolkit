@@ -2,7 +2,9 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { ManagedSkillCopies, copySummary } = require('./toolkit-skill-copies.cjs');
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PORTABLE_SKILLS_RELATIVE_PATH = path.join('.agents', 'skills');
@@ -193,6 +195,29 @@ class PortableSkillCopyOperation {
 
   run() { return this.#write ? this.apply() : this.summary(); }
 }
+// Toolkit's portable skills in Antigravity's global skills folder (~/.gemini/config/skills), copied and
+// kept current by setup when the user chooses it. Toolkit records its copies in
+// ~/.ai-agent-toolkit/antigravity-toolkit-skills.json and only updates or removes those.
+class AntigravityGlobalSkills extends ManagedSkillCopies {
+  #homeDir;
+  constructor({ toolkitRoot, homeDir = os.homedir(), controlRoot } = {}) {
+    const sourceRoot = path.join(toolkitRoot, 'skills');
+    super({
+      sourceRoot,
+      ledgerPath: path.join(controlRoot || path.join(homeDir, '.ai-agent-toolkit'), 'antigravity-toolkit-skills.json'),
+      ledgerSchema: 'ai-agent-toolkit.antigravity-toolkit-skills.v1',
+      targets: () => [path.join(homeDir, '.gemini', 'config', 'skills')],
+      include: (name) => SKILL_NAME_PATTERN.test(name) && !INTERNAL_SKILLS.includes(name) && fs.existsSync(path.join(sourceRoot, name, 'SKILL.md')),
+    });
+    this.#homeDir = homeDir;
+  }
+
+  // Antigravity is installed when its ~/.gemini folder exists.
+  installed() { return fs.existsSync(path.join(this.#homeDir, '.gemini')); }
+}
+
+function globalCopySummary(result) { return copySummary(result).join('; ') || 'nothing to copy'; }
+
 function copyPortableSkills({ projectRoot, sourceSkillsRoot, write = false }) {return new PortableSkillCopyOperation({projectRoot,sourceSkillsRoot,write}).run();}
 
 function printHelp() {
@@ -227,4 +252,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { INTERNAL_SKILLS, copyPortableSkills, parseArgs, run };
+module.exports = { AntigravityGlobalSkills, INTERNAL_SKILLS, copyPortableSkills, globalCopySummary, parseArgs, run };

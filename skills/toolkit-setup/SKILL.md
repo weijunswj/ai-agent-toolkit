@@ -106,7 +106,7 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 
 ## Safety Rules
 
-- Antigravity receives explicit portable skills copies; native AG2 install/update/sync is unsupported. Do not infer native qualification from metadata, copied files, a log marker or synthetic tests.
+- Antigravity receives explicit portable skills copies: setup's opt-in question copies them into `~/.gemini/config/skills` and keeps Toolkit's copies current, or the bridge copies them into one workspace; native AG2 install/update/sync is unsupported. Do not infer native qualification from metadata, copied files, a log marker or synthetic tests.
 - Detection is allowed; autosetup is forbidden.
 - The bridge writes into no other app; it records hub state and update reports only.
 - Repo auto-update must validate the configured Toolkit repo and expected remote, refuse dirty worktrees without stashing or switching, auto-switch only the managed clean checkout back to the configured branch, fast-forward update, and run hook-light validation before enabled-target sync.

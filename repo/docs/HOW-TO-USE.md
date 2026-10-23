@@ -133,7 +133,11 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity 2
 
-Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin, bridge sync target or automatic update.
+Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target.
+
+When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills into Antigravity's global skills folder (`~/.gemini/config/skills`) and keeps Toolkit's copies current on each setup; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed.
+
+For one workspace only, use the copy below instead.
 
 Preview the copy into one workspace first:
 

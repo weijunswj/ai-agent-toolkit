@@ -14,6 +14,7 @@ const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('.
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
 const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
+const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
@@ -116,7 +117,8 @@ function emptySetupChoices() {
     codexHelperCapacity: '',
     claudeTopology: '',
     claudePluginBehavior: '',
-    claudeSettings: ''
+    claudeSettings: '',
+    antigravitySkills: ''
   };
 }
 
@@ -290,6 +292,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       const choice = (arg === '--claude-settings' ? next() : arg.slice('--claude-settings='.length)).toLowerCase();
       if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-settings choice: ${choice}`);
       args.setupChoices.claudeSettings = choice;
+    } else if (arg === '--antigravity-skills' || arg.startsWith('--antigravity-skills=')) {
+      const choice = (arg === '--antigravity-skills' ? next() : arg.slice('--antigravity-skills='.length)).toLowerCase();
+      if (!['copy', 'remove', 'keep'].includes(choice)) throw new Error(`Unsupported --antigravity-skills choice: ${choice}`);
+      args.setupChoices.antigravitySkills = choice;
     } else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -555,6 +561,7 @@ function printHelp() {
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --claude-settings enable|disable|keep',
+    '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
@@ -1294,6 +1301,7 @@ async function collectCurrentState(args) {
     delegationMigrationPreview,
     agentProfile,
     ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
+    antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
       : inspectCodexNativePluginState(args)
@@ -1342,6 +1350,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'claudeSettings') return 'enable';
+  if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
 
@@ -1644,6 +1653,9 @@ function claudeSettingsOutcome(entries) {
 
 const N8N_SKILLS_PLUGIN = 'n8n-skills@n8n-io';
 
+// A file-system error names its code only, so no private path reaches the summary.
+const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error.message);
+
 // Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
 // The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
 // plugin is turned off; Codex has no supported switch, so the summary says how.
@@ -1651,10 +1663,55 @@ function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitR
   disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
   let summary;
   try { summary = n8nSkillsSummary(owner.install()); }
-  catch (error) { return `not copied (${error.message}).`; }
+  catch (error) { return `not copied (${copyFailure(error)}).`; }
   if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
   try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
   catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
+}
+
+// Whether Antigravity is installed and whether Toolkit's copies of its skills are already there.
+function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
+  try { return { installed: owner.installed(), copies: owner.hasCopies() }; }
+  catch { return { installed: false, copies: false }; }
+}
+
+function antigravitySkillsOutcome(state) {
+  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder and setup keeps them current.";
+  return "Toolkit's skills are not in Antigravity's global skills folder.";
+}
+
+function antigravitySkillsQuestion(args, current) {
+  const outcome = antigravitySkillsOutcome(current.antigravity);
+  return resolvedQuestion({
+    id: 'antigravity-skills',
+    key: 'antigravitySkills',
+    section: 'Other coding apps',
+    title: "Copy Toolkit's skills into Antigravity?",
+    prompt: 'Antigravity skills choice',
+    whatThisControls: "Whether setup copies Toolkit's portable skills into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
+    choices: [
+      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
+      wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
+    ],
+    recommendation: current.antigravity?.copies
+      ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
+      : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
+    selected: args.setupChoices.antigravitySkills,
+    current: outcome,
+    currentVerification: 'state-derived',
+    afterApplying: 'Start a new Antigravity session to load changed skills.',
+  });
+}
+
+// Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
+function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
+  const choice = args.setupChoices.antigravitySkills || 'keep';
+  try {
+    if (choice === 'copy') return `${globalCopySummary(owner.install())}.`;
+    if (choice === 'remove') return `removed ${owner.remove().length} Toolkit skill folders.`;
+  } catch (error) { return `not changed (${copyFailure(error)}).`; }
+  return '';
 }
 
 // Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
@@ -1930,6 +1987,7 @@ function setupQuestionSpecs(args, current) {
       afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
   }
+  if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
 
   return withPresentationMetadata(specs.map((spec) => ({
     ...spec,
@@ -2296,6 +2354,7 @@ function documentationFixtureState() {
       codex_plugin_auto_refresh_enabled: true,
     },
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
+    antigravity: { installed: true, copies: false },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
     nativePlugin: { status: 'fresh' },
   };
@@ -2379,6 +2438,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'claudeSettings') args.setupChoices.claudeSettings = choice;
+  else if (key === 'antigravitySkills') args.setupChoices.antigravitySkills = choice;
 }
 
 function choiceForKey(args, key) {
@@ -2392,6 +2452,7 @@ function choiceForKey(args, key) {
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'claudeSettings') return args.setupChoices.claudeSettings;
+  if (key === 'antigravitySkills') return args.setupChoices.antigravitySkills;
   return '';
 }
 
@@ -3567,7 +3628,7 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
-function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3653,6 +3714,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log('');
   }
   if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
+  if (antigravitySkills) console.log(`Toolkit skills in Antigravity: ${antigravitySkills}\n`);
   if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
@@ -3701,7 +3763,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');
   console.log('## Antigravity portable skills');
-  console.log('No native/plugin lifecycle is managed. The opt-in project copy targets <project>/.agents/skills only.');
+  console.log('Setup question "Copy Toolkit\'s skills into Antigravity?" manages the global copy in ~/.gemini/config/skills. For one project only, copy into <project>/.agents/skills:');
   console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
   console.log('');
   console.log('## Validation');
@@ -3808,8 +3870,9 @@ class ToolkitSetupExecution {
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     const n8nSkills = installOfficialN8nSkills(args);
+    const antigravitySkills = applyAntigravitySkills(args);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
-    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, audit,
+    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -3883,6 +3946,8 @@ if (require.main === module) {
 module.exports = {
   assertSupportedComputer,
   installOfficialN8nSkills,
+  applyAntigravitySkills,
+  antigravityState,
   fastForwardLocalClone,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
@@ -3905,6 +3970,7 @@ module.exports = {
   applyClaudeSubagentDepth,
   parseArgs,
   setupQuestionSpecs,
+  documentationFixtureState,
   withPresentationMetadata,
   buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
