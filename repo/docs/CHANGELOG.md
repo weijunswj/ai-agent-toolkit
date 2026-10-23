@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased (decision history before planning)
+
+- **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
+- **G0 reads the history first:** before planning a programme child, G0 runs the read-only `decision-history.cjs`. It reads the parent's and the child's comment traces separately, takes the latest comment per tag as live, and marks earlier ones as replaced (by an explicit `SUPERSEDES=`, by inference, or confirmed by the owner). It lists the untagged comments to read and prints a short live-scope summary with exact counts. It writes nothing: only the appointed controller writes programme state.
+- **The owner confirms before it is the spec:** the summary becomes the child's spec only after the owner confirms it. The controller records that as a `SCOPE-CONFIRMED` comment on the child, and each correction is its own tagged comment.
+- **Enablement backfill:** when governance is first enabled, the first reconcile pass writes every trace, and `decision-history.cjs --programme` reports each issue's coverage for the owner. An existing crawl can be read with `--ledger`.
+- **Rules:** the governed Decision traces rule, a new portable decision-trace playbook routed from both playbook indexes, one Projects skill brief line and one `CONTROLLER.md` clause.
+
 ## Unreleased (executor checkpoints and host contract)
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.
@@ -28,6 +36,9 @@
 - **Trace audit and repair.** The decision-trace audit fails on a superseded record left unmarked; reconcile reports `TRACE_STALE`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; `--repair` writes lines in the same shape, plus topic tags from a decision ledger with `--ledger`.
 - **Untracked PRs are flagged.** `PR_UNTRACKED` (report only) names an open PR that says `Refs #n` (or Completes, Closes, Fixes, Resolves) for an open task whose state records no PR or branch.
 - **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first #421 apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
+## Unreleased (setup self-update)
+
+- **Fix: setup no longer runs old code after updating itself.** When setup fast-forwards the Toolkit copy it is running from and the update changes setup's own scripts, it now stops right there, before any plugin, settings or config step, says so under `## Setup updated itself`, and asks for one more run (exit code 24). Before, the rest of the run kept using the scripts it had loaded before the update, so a just-shipped setup message could still read "diagnostics withheld". The setup skill reruns the same command straight away.
 
 ## Unreleased (personal-data guard)
 
