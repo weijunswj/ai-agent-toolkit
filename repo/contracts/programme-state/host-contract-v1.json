@@ -1,0 +1,62 @@
+{
+  "schema": "toolkit.host-contract.v1",
+  "description": "Machine-readable twin of repo/docs/HOST-CONTRACT.md: what the programme custody model needs from each supported host. Tests read this file against the shipped plugin hooks. It records needs and current mechanisms; it does not claim native qualification, which the host issues own.",
+  "turn_end_hook": {
+    "event": "Stop",
+    "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",
+    "timeout_seconds": 30,
+    "internal_deadline_seconds": 20,
+    "per_call_timeout_seconds": 8,
+    "exit_code": 0,
+    "stdout": "empty",
+    "input_fields": ["session_id", "last_assistant_message"],
+    "return_block": "toolkit-return",
+    "unbound_session": "returns before any git, gh or network call"
+  },
+  "hosts": {
+    "claude-code": {
+      "hooks_file": ".claude-plugin/hooks/hooks.json",
+      "plugin_root_variable": "CLAUDE_PLUGIN_ROOT",
+      "windows_command": "same command",
+      "session_identity": {
+        "hook_input": "session_id",
+        "executor_source": "CLAUDE_CODE_SESSION_ID",
+        "status": "observed; not in the host's environment-variable reference"
+      },
+      "route_read_back": "session metadata",
+      "completion_mode": {
+        "local": "native",
+        "cloud_and_projects_threads": "toolkit_assisted"
+      },
+      "qualification_issue": 470
+    },
+    "codex": {
+      "hooks_file": ".codex-plugin/hooks/hooks.json",
+      "plugin_root_variable": "PLUGIN_ROOT",
+      "windows_command": "commandWindows: full powershell.exe path, -File repo/scripts/toolkit-programme-checkpoint-hook.ps1 (setup adds it to the installed copy only)",
+      "hook_trust": "review and trust in /hooks; Codex skips an untrusted hook",
+      "session_identity": {
+        "hook_input": "session_id",
+        "executor_source": null,
+        "status": "unverified: no documented way for the session to read its own ID"
+      },
+      "route_read_back": "session log, read by the lead",
+      "completion_mode": {
+        "local": "toolkit_assisted",
+        "cloud_and_projects_threads": "toolkit_assisted"
+      },
+      "qualification_issue": 469
+    }
+  },
+  "completion_modes": {
+    "native": "The executor binds its session; its turn-end hook journals checkpoints and returns, and the controller's reconcile folds them in.",
+    "toolkit_assisted": "The executor reports in its thread or chat; the controller records the return with return --record.",
+    "unsupported": "No custody path; the controller does not launch gate work on this host."
+  },
+  "launch": {
+    "duplicate_check": "show --issue <n> before launching a gate; a live assignment holds the launch",
+    "live_gate_states": ["ASSIGNED", "ACTIVE", "SUBMITTED", "WAITING_OWNER"]
+  },
+  "handover": ["stop or fence the old writer", "settle in-flight effects", "assign the successor with --supersede --reason", "journals of the old assignment are stale and never replayed"],
+  "limits": ["The fence orders cooperating Toolkit writers under one account; it authenticates nobody.", "The tool cannot see whether another host session has stopped; a takeover record must carry that evidence."]
+}

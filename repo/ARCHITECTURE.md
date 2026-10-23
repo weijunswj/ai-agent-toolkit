@@ -37,6 +37,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
+| Executor checkpoint journals and turn-end hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 
 ## Sources of truth
 
@@ -50,6 +51,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json` |
 | Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
+| Host needs for programme custody | `repo/docs/HOST-CONTRACT.md`, `repo/contracts/programme-state/host-contract-v1.json` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership
