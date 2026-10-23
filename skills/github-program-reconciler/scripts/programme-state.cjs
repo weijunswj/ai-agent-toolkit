@@ -587,7 +587,7 @@ function reopenGate(doc, { reason, assignment = null }) {
     const pending = gate.returns.filter(entry => !entry.consumed).at(-1);
     if (pending) { pending.consumed = true; pending.verdict = 'REOPEN'; }
     gate.state = 'ACTIVE';
-    next.next_action = `Executor: continue ${gate.role}; the next return needs a new return id`;
+    next.next_action = `Executor: continue ${gate.role}; the next return needs a new return ID`;
     return next;
   }
   if (gate.state === 'WAITING_OWNER') {
@@ -615,7 +615,7 @@ function interruptGate(doc, { reason }) {
 // The controller records an executor's return from its report, for a session without the turn-end
 // hook (cloud and Projects threads): completion mode toolkit_assisted. Returns are kept by return ID.
 function recordReturn(doc, { returnId, assignment, atHead = null, mode = 'toolkit_assisted' }) {
-  if (!RETURN_ID.test(String(returnId || ''))) throw new ProgrammeError('USAGE', 'A return needs --return-id <id> (letters, digits, dot, dash or underscore).');
+  if (!RETURN_ID.test(String(returnId || ''))) throw new ProgrammeError('USAGE', 'return --record needs a return ID (letters, digits, dot, dash or underscore; up to 80).');
   if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'return --record needs --assignment <id>.');
   if (!optional(atHead, isSha)) throw new ProgrammeError('USAGE', '--at-head must be a full 40-character SHA.');
   const next = clone(doc);

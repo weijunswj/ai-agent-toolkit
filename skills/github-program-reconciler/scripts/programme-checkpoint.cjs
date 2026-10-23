@@ -145,6 +145,9 @@ function newJournal({ repository, issue, assignment, hash, route, facts = null }
 // The next journal, or null when nothing but time would change. A return ID is kept once; the same
 // ID with different content is refused (RETURN_ID_REUSED) and the earlier one stays.
 function nextJournal(previous, { facts, entry = null, lastError = null, route = undefined }) {
+  // Stored journals have sorted keys; compare canonical text so key order never counts as a change.
+  const { canonical } = require('./programme-state.cjs');
+  const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
   const next = JSON.parse(JSON.stringify(previous));
   delete next.volatile;
   let error = null;
@@ -153,11 +156,11 @@ function nextJournal(previous, { facts, entry = null, lastError = null, route = 
   if (entry) {
     const existing = next.returns.find(item => item.return_id === entry.return_id);
     if (!existing) next.returns = [...next.returns, entry].slice(-20);
-    else if (JSON.stringify(existing) !== JSON.stringify(entry)) error = 'RETURN_ID_REUSED';
+    else if (!same(existing, entry)) error = 'RETURN_ID_REUSED';
   }
   if (lastError) next.last_error = lastError;
-  const strip = doc => { const copy = { ...doc }; delete copy.volatile; delete copy.seq; return JSON.stringify(copy); };
-  if (strip(next) === strip(previous)) return { doc: null, error };
+  const strip = doc => { const copy = { ...doc }; delete copy.volatile; delete copy.seq; return copy; };
+  if (same(strip(next), strip(previous))) return { doc: null, error };
   next.seq = previous.seq + 1;
   return { doc: next, error };
 }
