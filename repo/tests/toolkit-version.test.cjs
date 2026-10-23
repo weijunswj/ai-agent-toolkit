@@ -68,10 +68,11 @@ test('bump-version changes the version everywhere it appears and nothing else', 
   for (const rel of [VERSION_REL_PATH, ...MANIFEST_REL_PATHS, 'repo/docs/published-surface-audit-baseline.json', 'AGENTS.md', 'README.md']) {
     assert.ok(changed.includes(rel), `${rel} should carry the new version`);
   }
-  // Every changed file differs from the original only by the version number.
+  // Every changed file differs from the original only by the version number. The syncs write LF;
+  // a Windows checkout holds CRLF, which git stores as the same LF content, so compare as LF.
+  const lf = (rel, root) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
   for (const rel of changed) {
-    const text = fs.readFileSync(path.join(copy, rel), 'utf8');
-    assert.equal(text.split('9.9.9').join(TOOLKIT_VERSION), fs.readFileSync(path.join(repoRoot, rel), 'utf8'), `${rel} changed beyond the version`);
+    assert.equal(lf(rel, copy).split('9.9.9').join(TOOLKIT_VERSION), lf(rel, repoRoot), `${rel} changed beyond the version`);
   }
 
   const runtime = spawnSync(process.execPath, ['-e', [
