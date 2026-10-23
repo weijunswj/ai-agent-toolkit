@@ -131,6 +131,7 @@ test('enable and decline: confirmed, written, read back; repeats write nothing',
   assert.match(again.stdout, /Already declined/);
   assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
   const reopen = await run(ctx, repo, ['reopen']);
+  assert.match(reopen.stdout, /^Nothing changed\. /);
   assert.match(reopen.stdout, /run `toolkit governance enable`/);
   assert.deepEqual(fs.readFileSync(ctx.registryPath), before, 'reopen writes nothing');
 

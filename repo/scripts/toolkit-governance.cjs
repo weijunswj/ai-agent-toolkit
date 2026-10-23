@@ -8,7 +8,7 @@
 //   status      the repository's governance state and which rules apply
 //   enable      record that you want Toolkit governance here (asks you to confirm)
 //   decline     record that you do not (asks you to confirm); Toolkit stops asking
-//   reopen      show a declined decision again and how to change it (writes nothing)
+//   reopen      changes nothing: says what was decided and which command changes it
 //   check       read-only conformance report; exit 0 conformant, 1 drift or pending, 2 error
 //   catalogue   the skills offered in this repository's state
 //
@@ -128,8 +128,10 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
     const lines = state.state === 'DECLINED'
-      ? ['You declined Toolkit governance for this repository, so Toolkit does not ask about it.', 'To turn it on, run `toolkit governance enable`. To keep it off, do nothing.']
-      : [`This repository is ${label(state)}; there is no declined decision to reopen.`];
+      ? ['Nothing changed. You declined Toolkit governance for this repository, so Toolkit does not ask about it.', 'To turn it on, run `toolkit governance enable`. To keep it off, do nothing.']
+      : [`Nothing changed. This repository is ${label(state)}, so there is no declined decision to reopen.`, state.state === 'ENABLED'
+        ? 'To turn governance off, run `toolkit governance decline`.'
+        : 'To decide, run `toolkit governance enable` or `toolkit governance decline`.'];
     this.#print(json, { state: state.state, writes: 0 }, lines);
     return 0;
   }
