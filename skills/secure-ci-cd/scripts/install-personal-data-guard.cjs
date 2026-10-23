@@ -83,7 +83,7 @@ function hookText(name) {
     lines.push('if [ -f "$chained" ]; then exec "$chained" "$@"; fi');
   } else {
     lines.push('input=$(cat)');
-    lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push --repo "$root" || exit $?');
+    lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
     lines.push('if [ -f "$chained" ]; then printf \'%s\\n\' "$input" | "$chained" "$@"; exit $?; fi');
   }
   lines.push('exit 0', '');

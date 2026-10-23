@@ -12,7 +12,8 @@
 // Modes:
 //   staged                       staged changes (pre-commit hook)
 //   message <file>               a commit message file (commit-msg hook)
-//   pre-push <remote> [<url>]    refs on stdin as git gives them to the pre-push hook
+//   pre-push <remote> [<url>]    refs on stdin as git gives them to the pre-push hook; commits
+//                                already on that remote's tracking refs are not checked again
 //   range <base>..<head>         every commit in the range (a reviewer's check of a PR)
 //   range <head> --not <ref>     every commit reachable from head and not from ref
 //   ci                           the GitHub Actions event in GITHUB_EVENT_PATH (pull_request, push)
@@ -40,7 +41,7 @@ const RULES = Object.freeze({
   'PDG-EMAIL': { class: 'email', text: 'an email address' },
   'PDG-PHONE-E164': { class: 'phone', text: 'a phone number with a + country code' },
   'PDG-PHONE-SG': { class: 'phone', text: 'a Singapore number written as 65 and eight digits' },
-  'PDG-WHATSAPP': { class: 'whatsapp-link', text: 'a wa.me or api.whatsapp.com/send link to a number' },
+  'PDG-WHATSAPP': { class: 'whatsapp-link', text: 'a wa.me, api.whatsapp.com/send, web.whatsapp.com/send or whatsapp://send link to a number' },
   'PDG-UNSCANNABLE': { class: 'unscannable', text: 'content this guard cannot read, not listed in not_scanned' },
   'PDG-ALLOW-NO-REASON': { class: 'allow-marker', text: 'an allow marker without a reason' },
 });
@@ -51,6 +52,7 @@ const FIXED_GAPS = Object.freeze([
   'Git LFS content (only the pointer is in git) and submodule contents',
   'images, legacy Office binaries (.doc, .xls, .ppt), archives and other binary files: reported as unscannable',
   'lines that were already present before the change (only introduced content is checked, except in tree mode)',
+  'encoded content such as base64, and a value split across two lines',
 ]);
 
 const ROLE_LOCAL_PARTS = new Set(['abuse', 'admin', 'billing', 'contact', 'enquiries', 'feedback', 'hello', 'help', 'hostmaster', 'info', 'legal', 'marketing', 'no-reply', 'noreply', 'notifications', 'postmaster', 'press', 'privacy', 'sales', 'security', 'support', 'team', 'webmaster']);
@@ -69,24 +71,52 @@ class GuardError extends Error {
 
 const SPACES = new Set([0x00A0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x202F, 0x205F, 0x3000]);
 const DASHES = new Set([0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xFE58, 0xFE63]);
-const INVISIBLE = new Set([0x00AD, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF]);
+// Soft hyphen, zero-width characters, byte order mark and bidirectional marks.
+const INVISIBLE = new Set([0x00AD, 0x061C, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF]);
+// Percent-encoded and HTML-entity forms of the characters that make up an address or a number.
+const PERCENT = Object.freeze({ '20': ' ', '28': '(', '29': ')', '2B': '+', '2D': '-', '2E': '.', '40': '@' });
+const NAMED_ENTITIES = Object.freeze({ commat: '@', dash: '-', hyphen: '-', lpar: '(', nbsp: ' ', period: '.', plus: '+', rpar: ')' });
+const ENTITY = /^&(?:#x([0-9a-f]{1,6})|#(\d{1,7})|([a-z]{2,8}));/i;
+const NEEDS_FOLDING = /[^\x00-\x7F]|%[0-9a-f]{2}|&#?\w+;/i;
+
+function foldChar(char) {
+  const code = char.codePointAt(0);
+  if (INVISIBLE.has(code)) return '';
+  if (SPACES.has(code)) return ' ';
+  if (DASHES.has(code)) return '-';
+  if (code >= 0xFF01 && code <= 0xFF5E) return String.fromCharCode(code - 0xFEE0);
+  return char;
+}
 
 function normalise(line) {
-  if (!/[^\x00-\x7F]/.test(line)) return { text: line, map: null };
+  if (!NEEDS_FOLDING.test(line)) return { text: line, map: null };
   let text = '';
   const map = [];
-  let column = 0;
-  for (const char of line) {
-    const code = char.codePointAt(0);
-    let folded = char;
-    if (INVISIBLE.has(code)) folded = '';
-    else if (SPACES.has(code)) folded = ' ';
-    else if (DASHES.has(code)) folded = '-';
-    else if (code >= 0xFF01 && code <= 0xFF5E) folded = String.fromCharCode(code - 0xFEE0);
-    for (let index = 0; index < folded.length; index += 1) { text += folded[index]; map.push(column); }
-    column += char.length;
+  let index = 0;
+  while (index < line.length) {
+    let folded;
+    let width = 0;
+    const char = line[index];
+    if (char === '%') {
+      const replacement = PERCENT[line.slice(index + 1, index + 3).toUpperCase()];
+      if (replacement !== undefined) { folded = replacement; width = 3; }
+    } else if (char === '&') {
+      const entity = ENTITY.exec(line.slice(index, index + 12));
+      if (entity) {
+        const code = entity[1] ? parseInt(entity[1], 16) : entity[2] ? parseInt(entity[2], 10) : null;
+        if (code !== null && code <= 0x10FFFF) { folded = foldChar(String.fromCodePoint(code)); width = entity[0].length; }
+        else if (entity[3] && NAMED_ENTITIES[entity[3].toLowerCase()] !== undefined) { folded = NAMED_ENTITIES[entity[3].toLowerCase()]; width = entity[0].length; }
+      }
+    }
+    if (folded === undefined) {
+      const whole = String.fromCodePoint(line.codePointAt(index));
+      folded = foldChar(whole);
+      width = whole.length;
+    }
+    for (let at = 0; at < folded.length; at += 1) { text += folded[at]; map.push(index); }
+    index += width;
   }
-  map.push(column);
+  map.push(line.length);
   return { text, map };
 }
 
@@ -95,10 +125,11 @@ function normalise(line) {
 // handled here, by pattern, never by skipping a file or an extension.
 
 const EMAIL = /(?<![\p{L}\p{N}._%+-])([\p{L}\p{N}._%+-]+)@((?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,63}|xn--[a-z0-9-]{1,59}))(?![\p{L}\p{N}-])/giu;
-const E164 = /(?<![\p{L}\p{N}_.+])\+[1-9](?:[ ().-]{0,2}\d){7,14}(?![\p{N}])/gu;
-const SG = /(?<![\p{L}\p{N}_.+-])65[ -]?[3689]\d{3}[ -]?\d{4}(?![\p{L}\p{N}_])/gu;
-const WHATSAPP = /\b(?:wa\.me\/\+?\d{6,}|api\.whatsapp\.com\/send\/?\?(?:[^\s"'<>]*&)?phone=\+?\d{6,})/giu;
-const URL_USERINFO = /[a-z][a-z0-9+.-]*:\/\/[^\s/@]*$/i;
+const E164 = /(?<![\p{N}_.+])\+[1-9](?:[ ().-]{0,2}\d){7,14}(?!\p{N})/gu;
+const SG = /(?<![A-Za-z\p{N}_.+-])(?:(?:\+|00)?65|\(\+?65\))[ .-]{0,2}[3689]\d{3}[ .-]{0,2}\d{4}(?![A-Za-z\p{N}_])/gu;
+const WHATSAPP = /\b(?:wa\.me\/\+?\d{6,}|(?:(?:api|web)\.whatsapp\.com\/send\/?|whatsapp:\/\/send\/?)\?(?:[^\s"'<>&]*&){0,20}phone=\+?\d{6,})/giu;
+const URL_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/@]*$/i;
+const LOOKBACK = 2048;
 
 function reservedDomain(domain) {
   const lower = domain.toLowerCase();
@@ -116,18 +147,33 @@ function emailNotAddress(text, match) {
   if (start > 0 && text[start - 1] === '\\') local = local.slice(1);
   if (!local) return 'escape';
   if (reservedDomain(domain)) return 'reserved-domain';
-  // scp-style git remotes: git@host:owner/repo.
-  if (/^:[\w~./'"`-]/.test(text.slice(end, end + 2))) return 'ssh-remote';
-  // user@host inside a URL authority.
-  if (URL_USERINFO.test(text.slice(0, start))) return 'url-userinfo';
+  // scp-style remotes: git@host:owner/repo, deploy@host:/srv/app.
+  const after = text.slice(end, end + 256);
+  if (after.startsWith(':') && (local === 'git' || /^:[\w~.-]*\//.test(after))) return 'ssh-remote';
+  // user@host straight after the // of a URL.
+  const token = text.slice(Math.max(0, start - LOOKBACK), start).split(/[\s"'<>(]/).pop();
+  if (URL_USERINFO.test(token)) return 'url-userinfo';
+  // SQL LIKE patterns such as '%@host'.
+  if (/^[%_]+$/.test(local)) return 'pattern';
   const labels = domain.split('.');
   const top = labels[labels.length - 1];
-  // Code tokens: a camelCase "top-level domain" (options.instructionFiles) or a receiver such as
-  // self.weights after a matrix-multiply @.
+  // Code tokens: a camelCase "top-level domain" (options.instructionFiles), a receiver such as
+  // self.weights after a matrix-multiply @, or a method call (key.transpose(...)).
   if (/^\p{Ll}+\p{Lu}/u.test(top)) return 'code-token';
   if (labels.length === 2 && /^(?:self|this|cls|super)$/.test(labels[0])) return 'code-token';
+  if (after.startsWith('(')) return 'code-token';
+  // Retina asset names (logo@2x.png) and version specs (pkg@1.0.0-rc.beta).
+  if (/^\d+(?:\.\d+)?x$/i.test(labels[0])) return 'asset-name';
+  if (/^\d+$/.test(labels[0]) && labels.length >= 3 && /^\d/.test(labels[1])) return 'version';
   // Single-letter placeholders such as a@b.com.
   if (local.length === 1 && labels.length === 2 && labels[0].length === 1) return 'placeholder';
+  return null;
+}
+
+// Why a +digits match is not a phone number, or null when it is one.
+function e164NotPhone(value) {
+  if (/^\+\d{4}-\d{2}-\d{2}/.test(value)) return 'date';
+  if (/^\+\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) return 'ip-address';
   return null;
 }
 
@@ -138,16 +184,28 @@ function detect(text) {
     if (emailNotAddress(text, match)) continue;
     spans.push({ rule: 'PDG-EMAIL', start: match.index, end: match.index + match[0].length, value: match[0] });
   }
-  for (const match of text.matchAll(E164)) spans.push({ rule: 'PDG-PHONE-E164', start: match.index, end: match.index + match[0].length });
+  for (const match of text.matchAll(E164)) {
+    if (e164NotPhone(match[0])) continue;
+    spans.push({ rule: 'PDG-PHONE-E164', start: match.index, end: match.index + match[0].length });
+  }
   for (const match of text.matchAll(SG)) spans.push({ rule: 'PDG-PHONE-SG', start: match.index, end: match.index + match[0].length });
   // One finding per place: a number inside a WhatsApp link or an E.164 match is not reported again.
   spans.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
   const kept = [];
+  let reach = -1;
   for (const span of spans) {
-    if (kept.some((other) => span.start < other.end && other.start < span.end)) continue;
+    if (span.start < reach) continue;
     kept.push(span);
+    reach = span.end;
   }
   return kept;
+}
+
+// A piece of outside text (a config string, an argument, a path) as it may be shown: withheld
+// when it carries anything the guard would report.
+function shown(value) {
+  const text = String(value);
+  return detect(normalise(text).text).length ? '(withheld: it contains personal data)' : text;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -156,30 +214,38 @@ function detect(text) {
 function readConfig(file) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); }
-  catch { throw new GuardError(`the config file ${file} could not be read; run the installer or add it`); }
+  catch { throw new GuardError(`the config file ${shown(file)} could not be read; run the installer or add it`); }
+  return parseConfig(raw, shown(file));
+}
+
+function parseConfig(raw, name) {
   let config;
   // JSON.parse errors quote the input, so the message is never shown.
   try { config = JSON.parse(raw.replace(/^﻿/, '')); }
-  catch { throw new GuardError(`the config file ${file} is not valid JSON`); }
-  return validateConfig(config, file);
+  catch { throw new GuardError(`the config file ${name} is not valid JSON`); }
+  return validateConfig(config, name);
 }
 
 function validateConfig(config, file = 'config') {
   const problem = (text) => { throw new GuardError(`${file}: ${text}`); };
+  // Reasons and paths are printed in every report, so they must not carry personal data.
+  const printable = (value, what) => { if (detect(normalise(value).text).length) problem(`${what} contains personal data; reword it`); };
   if (!config || typeof config !== 'object' || Array.isArray(config)) problem('must be a JSON object');
   if (config.schema !== CONFIG_SCHEMA) problem(`schema must be ${CONFIG_SCHEMA}`);
   const scope = config.scope;
   const scopeKeys = ['file_content', 'paths', 'commit_messages', 'branch_names', 'pull_request_text'];
   if (!scope || typeof scope !== 'object') problem('scope is required');
   for (const key of scopeKeys) if (typeof scope[key] !== 'boolean') problem(`scope.${key} must be true or false`);
-  for (const key of Object.keys(scope)) if (!scopeKeys.includes(key)) problem(`scope.${key} is not a known scope`);
+  for (const key of Object.keys(scope)) if (!scopeKeys.includes(key)) problem(`scope.${shown(key)} is not a known scope`);
   if (!['excluded', 'included'].includes(config.identity)) problem('identity must be "excluded" or "included" (the owner\'s explicit choice for author and committer addresses)');
   if (config.identity === 'excluded' && !nonEmpty(config.identity_reason)) problem('identity_reason is required when identity is "excluded"');
+  if (typeof config.identity_reason === 'string') printable(config.identity_reason, 'identity_reason');
   const allow = config.allow === undefined ? [] : config.allow;
   if (!Array.isArray(allow)) problem('allow must be a list');
   const allowed = new Set();
   for (const entry of allow) {
     if (!entry || typeof entry.value !== 'string' || !nonEmpty(entry.reason)) problem('each allow entry needs a value and a reason');
+    printable(entry.reason, 'an allow reason');
     const value = entry.value.trim().toLowerCase();
     const match = /^([^@\s]+)@([^@\s]+\.[^@\s]+)$/.exec(value);
     if (!match || !ROLE_LOCAL_PARTS.has(match[1])) problem('allow entries must be plain public role addresses (for example security@ or noreply@); use an inline allow marker with a reason for anything else');
@@ -189,6 +255,8 @@ function validateConfig(config, file = 'config') {
   if (!Array.isArray(notScanned)) problem('not_scanned must be a list');
   for (const entry of notScanned) {
     if (!entry || typeof entry.path !== 'string' || !entry.path.trim() || !nonEmpty(entry.reason)) problem('each not_scanned entry needs a path and a reason');
+    printable(entry.path, 'a not_scanned path');
+    printable(entry.reason, 'a not_scanned reason');
   }
   if (!['validate', 'personal-data', 'none'].includes(config.required_check)) problem('required_check must be "validate", "personal-data" or "none" (record the decision)');
   return Object.freeze({
@@ -202,6 +270,42 @@ function validateConfig(config, file = 'config') {
 }
 
 function nonEmpty(value) { return typeof value === 'string' && value.trim().length >= 3; }
+
+// The config as committed at a base commit, or null when that commit has none.
+function configAt(git, commit, relative) {
+  const bytes = git.run(['cat-file', 'blob', `${commit}:${relative}`], { allowFailure: true });
+  return bytes === null ? null : parseConfig(bytes.toString('utf8'), "the base commit's config");
+}
+
+// A change can carry its own config. What the change switches off does not apply to its own
+// check: the base commit's scope and identity choice stay in force until the change is merged.
+// Allow and not_scanned entries the change adds do apply, and every run names them.
+function withBaseConfig(head, base, note) {
+  if (!base) {
+    note('the base commit has no guard config (first adoption), so the config in the change was used');
+    return head;
+  }
+  const scope = {};
+  const kept = [];
+  for (const [key, on] of Object.entries(head.scope)) {
+    scope[key] = on || base.scope[key];
+    if (!on && base.scope[key]) kept.push(key.replace(/_/g, ' '));
+  }
+  let { identity, identityReason } = head;
+  if (base.identity === 'included' && identity !== 'included') {
+    identity = 'included';
+    identityReason = '';
+    kept.push('author and committer addresses');
+  }
+  if (kept.length) note(`the change switches off ${kept.join(', ')}; the base commit's setting was used for this check`);
+  const added = [...head.allowed].filter((value) => !base.allowed.has(value)).length;
+  if (added) note(`the change adds ${added} allowed role address(es) to the config`);
+  for (const entry of head.notScanned) {
+    if (!base.notScanned.some((old) => old.path === entry.path)) note(`the change adds ${entry.path} to not_scanned: ${entry.reason}`);
+  }
+  if (head.requiredCheck !== base.requiredCheck) note(`the change sets required_check to ${head.requiredCheck} (was ${base.requiredCheck})`);
+  return Object.freeze({ ...head, scope: Object.freeze(scope), identity, identityReason });
+}
 
 // not_scanned paths: exact paths, * within one folder, ** across folders.
 function globPattern(glob) {
@@ -238,21 +342,28 @@ function decodeContent(filePath, bytes) {
   return { parts: [{ label: null, text }], unscannable: [] };
 }
 
+// Control characters other than tab, line breaks and form feed, or replacement characters, in
+// decoded UTF-16: the bytes only started like a byte order mark.
+const NOT_TEXT = /[\u0000-\u0008\u000E-\u001F\uFFFD]/;
+
 function decodeText(bytes) {
-  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return bytes.subarray(2).toString('utf16le');
+  let utf16 = null;
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) utf16 = bytes.subarray(2, bytes.length - (bytes.length % 2)).toString('utf16le');
   if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
-    const body = bytes.subarray(2, bytes.length - ((bytes.length - 2) % 2));
-    return Buffer.from(body).swap16().toString('utf16le');
+    utf16 = Buffer.from(bytes.subarray(2, bytes.length - (bytes.length % 2))).swap16().toString('utf16le');
   }
+  if (utf16 !== null) return NOT_TEXT.test(utf16) ? null : utf16;
   const head = bytes.subarray(0, 8000);
   if (head.includes(0)) return null;
   return bytes.toString('utf8').replace(/^﻿/, '');
 }
 
 function readZip(bytes) {
+  // The end record is the one whose comment runs exactly to the end of the file; a signature
+  // inside the comment is not it.
   let eocd = -1;
   for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 65557); at -= 1) {
-    if (bytes.readUInt32LE(at) === 0x06054b50) { eocd = at; break; }
+    if (bytes.readUInt32LE(at) === 0x06054b50 && at + 22 + bytes.readUInt16LE(at + 20) === bytes.length) { eocd = at; break; }
   }
   if (eocd < 0) throw new GuardError('zip end record missing');
   const count = bytes.readUInt16LE(eocd + 10);
@@ -297,12 +408,44 @@ function xmlEntities(text) {
   });
 }
 
-// Text runs are joined with nothing between them, so a value split across runs is matched whole;
-// paragraph-like ends become line breaks. Attribute values (hyperlink targets) are a second part.
+// Splits XML into its text and its markup. Text runs are joined with nothing between them, so a
+// value split across runs is matched whole, and paragraph-like ends become line breaks. CDATA is
+// text. Tags (with their attribute values, such as hyperlink targets), comments and processing
+// instructions are the markup, one per line. The result is only scanned, never rendered.
 function xmlText(xml) {
-  const body = xmlEntities(xml.replace(XML_BREAK, '\n').replace(/<[^>]*>/g, ''));
-  const attributes = [...xml.matchAll(/\s[\w:.-]+="([^"]*)"/g)].map((match) => xmlEntities(match[1])).join('\n');
-  return { body, attributes };
+  const source = xml.replace(XML_BREAK, '\n');
+  let body = '';
+  const markup = [];
+  let index = 0;
+  while (index < source.length) {
+    const open = source.indexOf('<', index);
+    if (open < 0) { body += source.slice(index); break; }
+    body += source.slice(index, open);
+    let close;
+    if (source.startsWith('<![CDATA[', open)) {
+      close = source.indexOf(']]>', open);
+      body += source.slice(open + 9, close < 0 ? source.length : close);
+      index = close < 0 ? source.length : close + 3;
+      continue;
+    }
+    if (source.startsWith('<!--', open)) {
+      close = source.indexOf('-->', open);
+      markup.push(source.slice(open + 4, close < 0 ? source.length : close));
+      index = close < 0 ? source.length : close + 3;
+      continue;
+    }
+    // A tag ends at the first > outside a quoted attribute value.
+    let quote = null;
+    close = open + 1;
+    while (close < source.length && (quote || source[close] !== '>')) {
+      if (quote && source[close] === quote) quote = null;
+      else if (!quote && (source[close] === '"' || source[close] === "'")) quote = source[close];
+      close += 1;
+    }
+    markup.push(source.slice(open + 1, close));
+    index = close + 1;
+  }
+  return { body: xmlEntities(body), markup: xmlEntities(markup.join('\n')) };
 }
 
 function decodeOoxml(bytes) {
@@ -311,14 +454,20 @@ function decodeOoxml(bytes) {
   catch (error) { return { parts: [], unscannable: [error instanceof GuardError ? error.message : 'zip could not be read'] }; }
   const parts = [];
   const unscannable = [];
+  // Entries are read by what they hold, not by their names: XML parts as text and markup, other
+  // text (an embedded .txt, .csv or .htm) as is, and anything else (images, thumbnails, embedded
+  // objects) is unscannable.
   entries.forEach((entry, index) => {
     const label = detect(normalise(entry.name).text).length ? `entry #${index + 1}` : entry.name;
-    if (/\.(?:xml|rels|vml)$/i.test(entry.name)) {
-      const { body, attributes } = xmlText(entry.data.toString('utf8'));
-      parts.push({ label, text: body });
-      parts.push({ label: `${label} attributes`, text: attributes });
-    } else if (/\.(?:bin|ole)$/i.test(entry.name) || entry.name.includes('/embeddings/') || entry.name.includes('/media/')) {
+    const text = decodeText(entry.data);
+    if (text === null || NOT_TEXT.test(text.slice(0, 8000))) {
       unscannable.push(`embedded binary ${label}`);
+    } else if (/^\s*<(?:\?xml|[\w:]+[\s>/])/.test(text) && !/\.(?:html?|mht|txt|csv)$/i.test(entry.name)) {
+      const { body, markup } = xmlText(text);
+      parts.push({ label, text: body });
+      parts.push({ label: `${label} markup`, text: markup });
+    } else {
+      parts.push({ label, text });
     }
   });
   return { parts, unscannable };
@@ -327,6 +476,15 @@ function decodeOoxml(bytes) {
 const PDF_IMAGE_FILTERS = new Set(['DCTDecode', 'JPXDecode', 'JBIG2Decode', 'CCITTFaxDecode']);
 
 const TEXT_LINE_OPERATORS = new Set(['Td', 'TD', 'T*', 'Tm', 'BT', 'ET', "'", '"']);
+
+// A PDF string's bytes as text: UTF-16BE when it starts with a byte order mark, else Latin-1.
+function pdfString(bytes) {
+  if (bytes.length >= 2 && bytes.charCodeAt(0) === 0xFE && bytes.charCodeAt(1) === 0xFF) {
+    const body = Buffer.from(bytes.slice(2, bytes.length - (bytes.length % 2)), 'latin1');
+    return body.swap16().toString('utf16le');
+  }
+  return bytes;
+}
 
 function pdfStrings(content) {
   // Literal strings ( ... ) with escapes, and hex strings < ... >, in drawing order. Pieces of
@@ -351,12 +509,12 @@ function pdfStrings(content) {
         if (c === ')') { depth -= 1; if (depth === 0) { index += 1; break; } }
         text += c; index += 1;
       }
-      pieces.push(text);
+      pieces.push(pdfString(text));
     } else if (char === '<' && content[index + 1] !== '<') {
       const end = content.indexOf('>', index);
       if (end < 0) break;
       const hex = content.slice(index + 1, end).replace(/\s+/g, '');
-      if (/^[0-9a-f]*$/i.test(hex)) pieces.push(Buffer.from(hex.length % 2 ? `${hex}0` : hex, 'hex').toString('latin1'));
+      if (/^[0-9a-f]*$/i.test(hex)) pieces.push(pdfString(Buffer.from(hex.length % 2 ? `${hex}0` : hex, 'hex').toString('latin1')));
       index = end + 1;
     } else if (/[A-Za-z'"*]/.test(char)) {
       // Operators that move to a new line or end a text object end the current line of text.
@@ -370,6 +528,52 @@ function pdfStrings(content) {
   return pieces.join('');
 }
 
+// The dictionary written straight before a stream keyword, found by balancing << and >>.
+function dictionaryBefore(latin, at) {
+  let end = at;
+  while (end > 0 && /\s/.test(latin[end - 1])) end -= 1;
+  if (latin.slice(end - 2, end) !== '>>') return '';
+  let depth = 0;
+  for (let index = end - 2; index >= 1; index -= 1) {
+    if (latin[index] === '>' && latin[index + 1] === '>') { depth += 1; index -= 1; }
+    else if (latin[index - 1] === '<' && latin[index] === '<') {
+      depth -= 1;
+      if (depth === 0) return latin.slice(index - 1, end);
+      index -= 1;
+    }
+  }
+  return '';
+}
+
+// Glyph IDs in fonts with an Identity encoding cannot be read back as text without the font's
+// own mapping, which this guard does not apply.
+const PDF_IDENTITY_FONT = /\/Encoding\s*\/Identity-[HV]\b/;
+
+function pdfFilters(dict) {
+  const filter = /\/Filter\s*(\[[^\]]*\]|\/[\w.]+)/.exec(dict);
+  return filter ? [...filter[1].matchAll(/\/([\w.]+)/g)].map((item) => item[1]) : [];
+}
+
+function pdfDecode(raw, filters) {
+  let data = raw;
+  for (const name of filters) {
+    if (name === 'ASCIIHexDecode' || name === 'AHx') {
+      const hex = data.toString('latin1').split('>')[0].replace(/\s+/g, '');
+      if (!/^[0-9a-f]*$/i.test(hex)) return null;
+      data = Buffer.from(hex.length % 2 ? `${hex}0` : hex, 'hex');
+    } else if (name === 'FlateDecode' || name === 'Fl') {
+      try { data = zlib.inflateSync(data, { maxOutputLength: MAX_INFLATED_BYTES }); }
+      catch {
+        try { data = zlib.inflateSync(data.subarray(0, data.length - 1), { maxOutputLength: MAX_INFLATED_BYTES }); }
+        catch { return null; }
+      }
+    } else {
+      return null;
+    }
+  }
+  return data;
+}
+
 function decodePdf(bytes) {
   const latin = bytes.toString('latin1');
   if (/\/Encrypt\b/.test(latin)) return { parts: [], unscannable: ['encrypted PDF'] };
@@ -377,41 +581,38 @@ function decodePdf(bytes) {
   const unscannable = [];
   let imageStreams = 0;
   let streams = 0;
+  let identityFonts = false;
   const outside = [];
   let last = 0;
   const STREAM = /stream\r?\n/g;
   let match;
   while ((match = STREAM.exec(latin))) {
-    const dictStart = latin.lastIndexOf('<<', match.index);
-    const dict = dictStart >= 0 ? latin.slice(dictStart, match.index) : '';
+    // Balanced first; when that fails (a hex string right before >>), everything since the obj keyword.
+    const objectStart = latin.lastIndexOf(' obj', match.index);
+    const dict = dictionaryBefore(latin, match.index) || (objectStart >= 0 ? latin.slice(objectStart, match.index) : '');
     const dataStart = match.index + match[0].length;
     const end = latin.indexOf('endstream', dataStart);
     if (end < 0) { unscannable.push('PDF stream without an end'); break; }
     outside.push(latin.slice(last, match.index));
     last = end + 'endstream'.length;
     STREAM.lastIndex = last;
-    const filters = [...dict.matchAll(/\/(\w+Decode)\b/g)].map((item) => item[1]);
-    const raw = bytes.subarray(dataStart, end);
-    if (filters.some((name) => PDF_IMAGE_FILTERS.has(name))) { imageStreams += 1; continue; }
-    if (filters.some((name) => name !== 'FlateDecode')) { unscannable.push(`PDF stream with ${filters.join('+')}`); continue; }
-    let data = raw;
-    if (filters.includes('FlateDecode')) {
-      try { data = zlib.inflateSync(raw, { maxOutputLength: MAX_INFLATED_BYTES }); }
-      catch {
-        try { data = zlib.inflateSync(raw.subarray(0, raw.length - 1), { maxOutputLength: MAX_INFLATED_BYTES }); }
-        catch { unscannable.push('PDF stream that could not be inflated'); continue; }
-      }
-    }
-    if (/\/Subtype\s*\/Image\b/.test(dict)) { imageStreams += 1; continue; }
+    if (!dict) { unscannable.push('PDF stream whose dictionary could not be read'); continue; }
+    const filters = pdfFilters(dict);
+    if (filters.some((name) => PDF_IMAGE_FILTERS.has(name)) || /\/Subtype\s*\/Image\b/.test(dict)) { imageStreams += 1; continue; }
+    const data = pdfDecode(bytes.subarray(dataStart, end), filters);
+    if (data === null) { unscannable.push(`PDF stream with ${filters.join('+')} that could not be decoded`); continue; }
     const content = data.toString('latin1');
+    if (PDF_IDENTITY_FONT.test(content)) identityFonts = true;
     streams += 1;
     // A page content stream is read as its drawn text; any other stream (metadata, form data) as is.
     parts.push({ label: `stream ${streams}`, text: /\bBT\b/.test(content) ? pdfStrings(content) : content });
   }
   outside.push(latin.slice(last));
   const objects = outside.join('\n');
+  if (PDF_IDENTITY_FONT.test(objects)) identityFonts = true;
   parts.push({ label: 'objects', text: `${pdfStrings(objects)}\n${objects}` });
   if (imageStreams) unscannable.push(`${imageStreams} PDF image stream(s)`);
+  if (identityFonts) unscannable.push('PDF text in fonts with an Identity encoding (glyph IDs, not readable text)');
   return { parts, unscannable };
 }
 
@@ -545,18 +746,22 @@ function parseRaw(buffer) {
   return changes;
 }
 
-// The message part of a commit or tag object, and its identity lines.
+// The message part of a commit or tag object, its identity lines (name, address and date), and
+// for a tag the object it points to.
 function splitObject(buffer) {
   const text = buffer.toString('utf8');
   const blank = text.indexOf('\n\n');
   const headers = blank < 0 ? text : text.slice(0, blank);
   const message = blank < 0 ? '' : text.slice(blank + 2);
   const identities = [];
+  let target = null;
   for (const line of headers.split('\n')) {
-    const match = /^(author|committer|tagger) .*<([^>]*)>/.exec(line);
-    if (match) identities.push({ field: match[1], address: match[2] });
+    const match = /^(author|committer|tagger) (.*)$/.exec(line);
+    if (match) identities.push({ field: match[1], line: match[2] });
+    const object = /^object ([0-9a-f]+)$/.exec(line);
+    if (object) target = object[1];
   }
-  return { message, identities };
+  return { message, identities, target };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -634,10 +839,10 @@ class PersonalDataGuard {
   scanIdentities(place, identities) {
     if (this.#config.identity !== 'included') return;
     for (const identity of identities) {
-      const { text } = normalise(identity.address);
+      const { text } = normalise(identity.line);
       for (const span of detect(text)) {
-        if (span.rule === 'PDG-EMAIL' && this.#config.allowed.has(identity.address.toLowerCase())) continue;
-        this.#add(`${place} ${identity.field} address`, 1, 1, span.rule);
+        if (span.rule === 'PDG-EMAIL' && this.#config.allowed.has(span.value.toLowerCase())) continue;
+        this.#add(`${place} ${identity.field}`, 1, 1, span.rule);
       }
     }
   }
@@ -752,11 +957,25 @@ class PersonalDataGuard {
     for (let index = 0; index < changes.length; index += batch) this.scanChanges(changes.slice(index, index + batch), (shas) => git.blobs(shas), '');
   }
 
-  scanTagObject(sha, label) {
-    const { message, identities } = splitObject(this.#git.catFile('tag', sha));
-    this.scanMessage(`${label} message`, message);
-    this.scanIdentities(label, identities);
+  // Scans an annotated tag (and any tag it points to) and returns the commit it ends at. A tag of
+  // a tree or a blob cannot be checked as a change, so it stops the scan.
+  peelTag(sha) {
+    let current = sha;
+    for (let depth = 0; depth < 10; depth += 1) {
+      const type = this.#git.objectType(current);
+      if (type === 'commit') return current;
+      if (type !== 'tag') throw new GuardError('a pushed tag points to something other than a commit, which this guard cannot check');
+      const label = `tag ${current.slice(0, 12)}`;
+      const { message, identities, target } = splitObject(this.#git.catFile('tag', current));
+      this.scanMessage(`${label} message`, message);
+      this.scanIdentities(label, identities);
+      if (!target) throw new GuardError('a pushed tag could not be read');
+      current = target;
+    }
+    throw new GuardError('a pushed tag points through too many other tags');
   }
+
+  useBaseConfig(base) { this.#config = withBaseConfig(this.#config, base, (text) => this.note(text)); }
 
   scanPullRequest(title, body) {
     if (!this.#config.scope.pull_request_text) return;
@@ -837,7 +1056,7 @@ function parseArgs(argv) {
       options[arg.slice(2)] = value;
       index += 1;
     } else if (arg.startsWith('--')) {
-      throw new GuardError(`unknown option ${arg}`);
+      throw new GuardError(`unknown option ${shown(arg)}`);
     } else {
       options.positional.push(arg);
     }
@@ -845,13 +1064,16 @@ function parseArgs(argv) {
   return options;
 }
 
-// What git keeps of a message file: it drops comment lines and everything from the scissors line
-// that `git commit -v` adds above the diff.
+// The message file as written. Comment lines are checked too: the comment character is
+// configurable and --cleanup=verbatim keeps them. Below the scissors line that `git commit -v`
+// adds, removed and unchanged diff lines are skipped, because they are not new content.
 function commitMessageText(message) {
   const kept = [];
+  let diff = false;
   for (const line of message.split(/\r?\n/)) {
-    if (/^# -+ >8 -+$/.test(line)) break;
-    if (!line.startsWith('#')) kept.push(line);
+    if (/^. -+ >8 -+$/.test(line)) { diff = true; continue; }
+    if (diff && (line.startsWith('-') || line.startsWith(' '))) { kept.push(''); continue; }
+    kept.push(line);
   }
   return kept.join('\n');
 }
@@ -863,9 +1085,13 @@ function commitArg(git, value, what) {
   return sha;
 }
 
-function prePushCommits(git, input, guard) {
+// Commits the push sends. Commits already on this remote's tracking refs are not sent again;
+// another remote's refs prove nothing about this one, and a push to a URL has no tracking refs.
+function prePushCommits(git, input, guard, remote) {
+  if (typeof remote !== 'string' || !remote) throw new GuardError('pre-push needs the remote name or URL (git passes it as the first argument)');
   const commits = [];
-  const remotes = git.text(['for-each-ref', '--format=%(objectname)', 'refs/remotes/']).split('\n').filter(Boolean);
+  const named = git.text(['config', '--get', `remote.${remote}.url`], { allowFailure: true }) !== null;
+  const remotes = named ? git.text(['for-each-ref', '--format=%(objectname)', `refs/remotes/${remote}/`]).split('\n').filter(Boolean) : [];
   for (const line of input.split('\n')) {
     if (!line.trim()) continue;
     const parts = line.trim().split(/\s+/);
@@ -874,13 +1100,9 @@ function prePushCommits(git, input, guard) {
     if (ZERO_SHA.test(localSha)) { guard.note('a ref deletion has no content to check'); continue; }
     guard.scanRefName(remoteRef.replace(/^refs\/(?:heads|tags)\//, ''), 'pushed ref name');
     let tip = localSha;
-    if (git.objectType(localSha) === 'tag') {
-      guard.scanTagObject(localSha, `tag ${localSha.slice(0, 12)}`);
-      tip = git.resolve(localSha);
-      if (!tip) continue;
-    } else if (git.objectType(localSha) !== 'commit') {
-      throw new GuardError(`the pushed object for ${localRef.startsWith('refs/tags/') ? 'a tag' : 'a branch'} is not a commit`);
-    }
+    const type = git.objectType(localSha);
+    if (type === 'tag') tip = guard.peelTag(localSha);
+    else if (type !== 'commit') throw new GuardError(`the pushed object for ${localRef.startsWith('refs/tags/') ? 'a tag' : 'a branch'} is not a commit`);
     const exclude = remotes.map((sha) => `^${sha}`);
     if (!ZERO_SHA.test(remoteSha) && git.commitExists(remoteSha)) exclude.push(`^${remoteSha}`);
     commits.push(...git.revList([tip, ...exclude]));
@@ -888,7 +1110,9 @@ function prePushCommits(git, input, guard) {
   return commits;
 }
 
-function ciEvent(git, guard, env) {
+// useBase(commit): compare the config with the one committed at the change's base (see
+// withBaseConfig), before anything is scanned.
+function ciEvent(git, guard, env, useBase) {
   const name = env.GITHUB_EVENT_NAME;
   let event;
   try { event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH || '', 'utf8')); }
@@ -897,6 +1121,7 @@ function ciEvent(git, guard, env) {
     const pr = event.pull_request || {};
     const base = commitArg(git, pr.base && pr.base.sha, 'the pull request base commit');
     const head = commitArg(git, pr.head && pr.head.sha, 'the pull request head commit');
+    useBase(base);
     guard.scanRefName(pr.head && pr.head.ref, 'pull request branch name');
     guard.scanPullRequest(pr.title, pr.body === null ? '' : pr.body);
     guard.scanCommits(git.revList([head, `^${base}`]));
@@ -908,45 +1133,45 @@ function ciEvent(git, guard, env) {
     const before = String(event.before || '');
     if (!SHA.test(after) || !SHA.test(before)) throw new GuardError('the push event has no before and after commits');
     if (ZERO_SHA.test(after) || event.deleted) { guard.note('a deleted ref has no content to check'); return; }
-    guard.scanRefName(ref.replace(/^refs\/(?:heads|tags)\//, ''), 'pushed ref name');
     const defaultBranch = event.repository && event.repository.default_branch;
     if (!defaultBranch) throw new GuardError('the push event does not name the default branch');
-    let tip = after;
-    if (ref.startsWith('refs/tags/') && git.objectType(after) === 'tag') {
-      guard.scanTagObject(after, `tag ${after.slice(0, 12)}`);
-      tip = git.resolve(after);
-    }
-    const head = commitArg(git, tip, 'the pushed commit');
     const isDefault = ref === `refs/heads/${defaultBranch}`;
-    if (!ZERO_SHA.test(before) && git.commitExists(before)) {
-      guard.scanCommits(git.revList([head, `^${before}`]));
-      return;
-    }
-    if (isDefault) {
-      if (!ZERO_SHA.test(before)) throw new GuardError('the previous default-branch commit is not in this clone');
+    // The base: the commit before the push when this clone has it, else the default branch.
+    let base = null;
+    if (!ZERO_SHA.test(before) && git.commitExists(before)) base = before;
+    else if (isDefault && !ZERO_SHA.test(before)) throw new GuardError('the previous default-branch commit is not in this clone');
+    else if (!isDefault) base = commitArg(git, `refs/remotes/origin/${defaultBranch}`, 'the default branch');
+    useBase(base);
+    guard.scanRefName(ref.replace(/^refs\/(?:heads|tags)\//, ''), 'pushed ref name');
+    const tip = git.objectType(after) === 'tag' ? guard.peelTag(after) : after;
+    const head = commitArg(git, tip, 'the pushed commit');
+    if (base === null) {
       guard.note('first push of the default branch: every commit was checked');
       guard.scanCommits(git.revList([head]));
       return;
     }
-    const defaultTip = commitArg(git, `refs/remotes/origin/${defaultBranch}`, 'the default branch');
-    if (!ZERO_SHA.test(before)) guard.note('the commit before this push is not in this clone (history was replaced); every commit not on the default branch was checked');
-    guard.scanCommits(git.revList([head, `^${defaultTip}`]));
+    if (base !== before && !ZERO_SHA.test(before)) guard.note('the commit before this push is not in this clone (history was replaced); every commit not on the default branch was checked');
+    guard.scanCommits(git.revList([head, `^${base}`]));
     return;
   }
-  throw new GuardError(`the ${name || 'unknown'} event is not supported (pull_request and push are)`);
+  throw new GuardError(`the ${shown(name || 'unknown')} event is not supported (pull_request and push are)`);
 }
 
 function explain(config) {
   const lines = [`personal-data-guard v${GUARD_VERSION}: what it checks`, 'Rules:'];
   for (const [id, rule] of Object.entries(RULES)) lines.push(`  ${id}  ${rule.class}: ${rule.text}`);
-  lines.push('Before matching, Unicode spaces become spaces, Unicode dashes become hyphens, zero-width characters are');
-  lines.push('removed and full-width characters become their ASCII forms.');
+  lines.push('Before matching, Unicode spaces become spaces, Unicode dashes become hyphens, zero-width and direction');
+  lines.push('marks are removed, full-width characters become their ASCII forms, and percent-encoded or HTML-entity');
+  lines.push('forms of @ + - . ( ) and space are decoded.');
   lines.push('Not reported: reserved fake domains (example.com, .net, .org and .example, .test, .invalid, .localhost,');
   lines.push('.local, .internal), git@host:path remotes, user@host in URLs, @scope/package names, decorators, code');
-  lines.push('tokens (self.x, camelCase names) and single-letter placeholders such as a@b.com; numbers inside longer');
-  lines.push('digit or hex runs, version strings and timestamps.');
-  lines.push('Word, Excel and PowerPoint files (.docx, .xlsx, .pptx) and PDF text streams are read; other binary content');
-  lines.push('is unscannable and blocks unless the config lists its path with a reason.');
+  lines.push('tokens (self.x, camelCase names), asset names (logo@2x.png), version specs, SQL patterns and');
+  lines.push('single-letter placeholders such as a@b.com; numbers inside longer digit or hex runs, dates, IP addresses');
+  lines.push('and timestamps.');
+  lines.push('Word, Excel and PowerPoint files (.docx, .xlsx, .pptx) and PDF text are read; other binary content (images,');
+  lines.push('thumbnails, embedded objects) is unscannable and blocks unless the config lists its path with a reason.');
+  lines.push('In ci and range modes, a change cannot switch off scope or identity checks for itself: the base commit\'s');
+  lines.push('settings apply until it is merged, and allow or not_scanned entries it adds are named in the report.');
   if (config) {
     lines.push(`Config: identity ${config.identity}; ${config.allowed.size} allowed role address(es); ${config.notScanned.length} not_scanned entr(ies); required check: ${config.requiredCheck}.`);
   }
@@ -974,6 +1199,19 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       throw new GuardError('this is not a git repository');
     }
     const guard = new PersonalDataGuard({ config, git });
+    const relativeConfig = path.relative(repo, configPath).split(path.sep).join('/');
+    const useBase = (commit) => {
+      if (relativeConfig.startsWith('../') || path.isAbsolute(relativeConfig)) {
+        guard.note('the config is outside the repository, so it was not compared with the base commit\'s config');
+        return;
+      }
+      let base = null;
+      if (commit) {
+        try { base = configAt(git, commit, relativeConfig); }
+        catch { guard.note('the base commit\'s config could not be read, so the config in the change was used'); return; }
+      }
+      guard.useBaseConfig(base);
+    };
     let where = 'local';
     if (mode === 'staged') {
       guard.scanStaged();
@@ -984,26 +1222,29 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       catch { throw new GuardError('the commit message file could not be read'); }
       guard.scanMessage('commit message', commitMessageText(message));
     } else if (mode === 'pre-push') {
-      guard.scanCommits(prePushCommits(git, stdin(), guard));
+      guard.scanCommits(prePushCommits(git, stdin(), guard, rest[0]));
     } else if (mode === 'range') {
       where = 'remote';
       const spec = rest[0];
       if (!spec) throw new GuardError('range needs <base>..<head> or <head> --not <ref>');
       if (spec.includes('..')) {
         if (options.not) throw new GuardError('use either <base>..<head> or <head> --not <ref>');
-        const [baseRev, headRev] = spec.split('..');
-        const base = commitArg(git, baseRev, 'the range base');
-        const head = commitArg(git, headRev, 'the range head');
+        const pieces = spec.split('..');
+        if (pieces.length !== 2 || spec.includes('...')) throw new GuardError('range needs exactly <base>..<head> (two dots, both ends named)');
+        const base = commitArg(git, pieces[0], 'the range base');
+        const head = commitArg(git, pieces[1], 'the range head');
+        useBase(base);
         guard.scanCommits(git.revList([head, `^${base}`]));
       } else {
         if (!options.not) throw new GuardError('range <head> needs --not <ref>');
         const head = commitArg(git, spec, 'the range head');
         const not = commitArg(git, options.not, 'the --not ref');
+        useBase(not);
         guard.scanCommits(git.revList([head, `^${not}`]));
       }
     } else if (mode === 'ci') {
       where = 'remote';
-      ciEvent(git, guard, env);
+      ciEvent(git, guard, env, useBase);
     } else if (mode === 'pr') {
       where = 'remote';
       guard.scanPullRequest(env.PDG_PR_TITLE, env.PDG_PR_BODY);
@@ -1011,7 +1252,7 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       where = 'tree';
       guard.scanTree(rest[0] || 'HEAD');
     } else {
-      throw new GuardError(`unknown mode ${mode}`);
+      throw new GuardError(`unknown mode ${shown(mode)}`);
     }
     const report = guard.report({ mode, where });
     (guard.findings.length ? err : out).write(report);

@@ -35,6 +35,7 @@ The `secure-ci-cd` skill ships a zero-dependency guard (`skills/secure-ci-cd/scr
 
 - Install it only on the owner's opt-in: `node <toolkit>/skills/secure-ci-cd/scripts/install-personal-data-guard.cjs --repo <repo> --identity <excluded|included> [--identity-reason <text>] --workflow`. It copies the guard to `.github/scripts/`, writes `.github/personal-data-guard.json`, and installs `pre-commit`, `commit-msg` and `pre-push` hooks in the folder git really uses (`core.hooksPath` included), keeping any existing hook. `--check` reports drift.
 - Local hooks can be skipped with `--no-verify`. The CI job is the backstop; make it part of a required check.
+- In CI and in a reviewer's range check, a change cannot switch off scope or identity checks for itself: the base commit's config applies until the change is merged, and allow or `not_scanned` entries the change adds are named in the report. Review those notes like any other finding.
 - Allow a public role address (`security@`, `noreply@` and similar) in the config `allow` list. Anything else needs a line-level `personal-data-guard: allow <reason>` marker, which every run counts. Content the guard cannot read (images, legacy Office files, archives) blocks unless the config lists its path with a reason, and every run prints that list.
 
 ## Review

@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 
 const guard = require('../../skills/secure-ci-cd/scripts/personal-data-guard.cjs');
 const {
@@ -49,6 +50,15 @@ test('B: every detector variant matches, and its near-miss does not', () => {
     ['SG with zero-width space', `phone ${pii.sgBare(' ').replace(' ', ' ​')}`, 'PDG-PHONE-SG', '2026-10-23T15:02:38+08:00'],
     ['wa.me link', pii.waMe(), 'PDG-WHATSAPP', 'https://wa.me/message/ABCDEF'],
     ['api.whatsapp.com link', pii.waApi(), 'PDG-WHATSAPP', 'https://api.whatsapp.com/send?text=hi'],
+    ['web.whatsapp.com link', pii.waApi().replace('api.', 'web.'), 'PDG-WHATSAPP', 'https://web.whatsapp.com/'],
+    ['whatsapp app link', pii.waApi().replace('https://api.whatsapp.com/send', 'whatsapp://send'), 'PDG-WHATSAPP', 'whatsapp://send?text=hi'],
+    ['percent-encoded email', `mailto:${pii.email().replace(pii.at, '%40')}`, 'PDG-EMAIL', 'progress 50%40 done'],
+    ['entity-encoded email', `<p>${pii.email().replace(pii.at, '&#64;')}</p>`, 'PDG-EMAIL', '<p>&#64;</p>'],
+    ['bidi mark in a number', pii.sgPlus(' ').replace(' ', ' \u200E'), 'PDG-PHONE-E164', `at ${pii.plus}2026-10-23 and ${pii.plus}192.168.100.200`],
+    ['SG with dots', `phone ${pii.sgBare('.')}`, 'PDG-PHONE-SG', 'v65.9123.4567'],
+    ['email in a URL query', `https://mailbox.sg/u?to=${pii.email()}`, 'PDG-EMAIL', `{"remote":"https://deploy${pii.at}git.mailbox.sg/repo"}`],
+    ['email before a colon', `${pii.email()}: thanks`, 'PDG-EMAIL', `deploy${pii.at}mailbox.sg:/srv/app`],
+    ['asset, version and SQL shapes', pii.email(), 'PDG-EMAIL', `logo${pii.at}2x.png lib${pii.at}2.0.0-beta.rc LIKE '%${pii.at}mailbox.sg'`],
   ];
   for (const [label, positive, rule, nearMiss] of rows) {
     assert.ok(rules(positive).includes(rule), `${label}: ${rule} expected`);
@@ -74,6 +84,52 @@ test('B: containers are read: a value split across .docx runs and a deflated PDF
   assert.match(guard.decodeContent('big.bin', Buffer.from('version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n')).unscannable[0], /LFS/);
   const utf16 = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(`note ${value}`, 'utf16le')]);
   assert.ok(rules(guard.decodeContent('notes.txt', utf16).parts[0].text).includes('PDG-EMAIL'), 'UTF-16 text');
+});
+
+function pdf(objects) {
+  const body = objects.map((object, index) => `${index + 1} 0 obj\n${object}\nendobj\n`).join('');
+  return Buffer.from(`%PDF-1.4\n${body}trailer\n<< /Root 1 0 R >>\n%%EOF\n`, 'latin1');
+}
+
+test('B: Office entries are read by content: comments, CDATA, embedded text and thumbnails', () => {
+  const value = pii.email();
+  const document = `<?xml version="1.0"?><w:document><!-- ${value} --><w:t><![CDATA[${value}]]></w:t></w:document>`;
+  const docx = guard.decodeContent('a.docx', zip([['word/document.xml', document], ['word/embeddings/notes.txt', `call ${pii.sgPlus()}`], ['docProps/thumbnail.jpeg', PNG.toString('latin1')]]));
+  const labelled = (label) => docx.parts.filter((part) => part.label === label).flatMap((part) => rules(part.text));
+  assert.deepEqual(labelled('word/document.xml'), ['PDG-EMAIL'], 'CDATA is text');
+  assert.deepEqual(labelled('word/document.xml markup'), ['PDG-EMAIL'], 'a comment is markup');
+  assert.deepEqual(labelled('word/embeddings/notes.txt'), ['PDG-PHONE-E164']);
+  assert.deepEqual(docx.unscannable, ['embedded binary docProps/thumbnail.jpeg']);
+
+  // A zip comment that holds a fake end record does not hide the real directory.
+  const real = zip([['word/document.xml', `<w:t>${value}</w:t>`]]);
+  const comment = Buffer.concat([Buffer.from([0x50, 0x4B, 0x05, 0x06]), Buffer.alloc(18, 0xFF)]);
+  const commented = Buffer.concat([real, comment]);
+  commented.writeUInt16LE(comment.length, real.length - 2);
+  assert.ok(guard.decodeContent('b.docx', commented).parts.some((part) => rules(part.text).includes('PDG-EMAIL')), 'zip with a comment');
+
+  // UTF-16 that is not text is binary.
+  assert.deepEqual(guard.decodeContent('x.dat', Buffer.from([0xFF, 0xFE, 0x01, 0x00, 0x02, 0x00])).unscannable, ['binary file']);
+});
+
+test('B: PDF strings in UTF-16, ASCIIHex streams, nested dictionaries and Identity fonts', () => {
+  const value = pii.email();
+  const utf16 = Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from(value, 'utf16le').swap16()]).toString('hex');
+  const hexStream = Buffer.from(`BT <${utf16}> Tj ET`, 'latin1').toString('hex');
+  let decoded = guard.decodeContent('a.pdf', pdf([`<< /Length ${hexStream.length + 1} /Filter /ASCIIHexDecode >>\nstream\n${hexStream}>\nendstream`]));
+  assert.deepEqual(decoded.unscannable, []);
+  assert.ok(decoded.parts.some((part) => rules(part.text).includes('PDG-EMAIL')), 'UTF-16 string in an ASCIIHex stream');
+
+  const flate = zlib.deflateSync(Buffer.from(`BT (${value}) Tj ET`, 'latin1'));
+  decoded = guard.decodeContent('b.pdf', Buffer.concat([
+    Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Filter /FlateDecode /DecodeParms << /Columns 1 >> /Length ${flate.length} >>\nstream\n`, 'latin1'),
+    flate,
+    Buffer.from('\nendstream\nendobj\n%%EOF\n', 'latin1'),
+  ]));
+  assert.ok(decoded.parts.some((part) => part.label === 'stream 1' && rules(part.text).includes('PDG-EMAIL')), 'dictionary with a nested dictionary');
+
+  decoded = guard.decodeContent('c.pdf', pdf(['<< /Type /Font /Subtype /Type0 /Encoding /Identity-H >>']));
+  assert.match(decoded.unscannable.join(';'), /Identity encoding/);
 });
 
 test('B: only introduced lines are checked, and a merge does not re-report its other parent', () => {
@@ -193,7 +249,7 @@ test('A pre-commit: allow markers need a reason and are counted; role addresses 
 // ---------------------------------------------------------------------------------------------
 // A. Commit messages (commit-msg).
 
-test('A commit-msg: a hit in the subject, body or trailer blocks; comments and the scissors diff do not', (t) => {
+test('A commit-msg: a hit in the subject, body, trailer or a comment line blocks; removed and context diff lines do not', (t) => {
   const repo = new TestRepo(t);
   const value = markerEmail();
   const cases = [
@@ -201,8 +257,10 @@ test('A commit-msg: a hit in the subject, body or trailer blocks; comments and t
     ['Fix parser\n\nReported by a user.\nReach them at ' + value + '\n', 1],
     [`Fix parser\n\nReported-by: Jane <${value}>\n`, 1],
     [`Fix parser\n\nCall ${pii.sgPlus()}\n`, 1],
-    [`Fix parser\n# ${value} in a comment line is dropped by git\n`, 0],
-    [`Fix parser\n# ------------------------ >8 ------------------------\n+${value}\n`, 0],
+    // The comment character is configurable and --cleanup=verbatim keeps comment lines.
+    [`Fix parser\n# ${value} in a comment line\n`, 1],
+    [`Fix parser\n# ------------------------ >8 ------------------------\n+${value}\n`, 1],
+    [`Fix parser\n; ------------------------ >8 ------------------------\n-${value}\n ${value}\n`, 0],
   ];
   for (const [message, status] of cases) {
     const file = repo.write('.git/COMMIT_EDITMSG', message);
@@ -233,7 +291,7 @@ test('A pre-push: new branch, fast-forward, force-push, delete, annotated tag an
   repo.git(['checkout', '-q', '-b', 'feature']);
   repo.commit('add contact', { 'c.txt': `${value}\n` });
   const clean = repo.commit('remove contact', { 'c.txt': 'removed\n' });
-  let result = repo.guard(['pre-push'], { input: `refs/heads/feature ${clean} refs/heads/feature ${ZERO}\n` });
+  let result = repo.guard(['pre-push', 'origin'], { input: `refs/heads/feature ${clean} refs/heads/feature ${ZERO}\n` });
   assert.equal(result.status, 1, 'new branch with a hit in a middle commit');
   assert.match(result.all, /Checked: 2 commit\(s\)/);
   assertNoEcho(assert, result.all, value, 'pre-push new branch');
@@ -241,19 +299,19 @@ test('A pre-push: new branch, fast-forward, force-push, delete, annotated tag an
   // Fast-forward: a hit already on the remote is not re-reported; only the new commits are checked.
   repo.git(['push', '-q', '--no-verify', 'origin', 'feature']);
   const next = repo.commit('more', { 'd.txt': 'clean\n' });
-  result = repo.guard(['pre-push'], { input: `refs/heads/feature ${next} refs/heads/feature ${clean}\n` });
+  result = repo.guard(['pre-push', 'origin'], { input: `refs/heads/feature ${next} refs/heads/feature ${clean}\n` });
   assert.equal(result.status, 0, result.all);
   assert.match(result.all, /Checked: 1 commit\(s\)/);
 
   // Force-push: the remote commit is not an ancestor; the replacement history is checked.
   repo.git(['checkout', '-q', '-B', 'feature', base]);
   const forced = repo.commit('rewrite', { 'e.txt': `${pii.sgBare()}\n` });
-  result = repo.guard(['pre-push'], { input: `refs/heads/feature ${forced} refs/heads/feature ${clean}\n` });
+  result = repo.guard(['pre-push', 'origin'], { input: `refs/heads/feature ${forced} refs/heads/feature ${clean}\n` });
   assert.equal(result.status, 1);
   assert.match(result.all, /e\.txt:1:1 {2}phone {2}PDG-PHONE-SG/);
 
   // Branch delete: nothing to check.
-  result = repo.guard(['pre-push'], { input: `(delete) ${ZERO} refs/heads/feature ${next}\n` });
+  result = repo.guard(['pre-push', 'origin'], { input: `(delete) ${ZERO} refs/heads/feature ${next}\n` });
   assert.equal(result.status, 0);
   assert.match(result.all, /a ref deletion has no content to check/);
 
@@ -261,7 +319,7 @@ test('A pre-push: new branch, fast-forward, force-push, delete, annotated tag an
   repo.git(['checkout', '-q', 'main']);
   repo.git(['tag', '-a', 'v1', '-m', `release for ${value}`]);
   const tag = repo.git(['rev-parse', 'v1']);
-  result = repo.guard(['pre-push'], { input: `refs/tags/v1 ${tag} refs/tags/v1 ${ZERO}\n` });
+  result = repo.guard(['pre-push', 'origin'], { input: `refs/tags/v1 ${tag} refs/tags/v1 ${ZERO}\n` });
   assert.equal(result.status, 1);
   assert.match(result.all, /tag [0-9a-f]{12} message:1:\d+ {2}email/);
   assertNoEcho(assert, result.all, value, 'tag message');
@@ -269,12 +327,48 @@ test('A pre-push: new branch, fast-forward, force-push, delete, annotated tag an
   // Several refs in one push: each one is checked.
   repo.git(['checkout', '-q', '-b', 'second', base]);
   const second = repo.commit('second', { 'f.txt': 'clean\n' });
-  result = repo.guard(['pre-push'], { input: `refs/heads/second ${second} refs/heads/second ${ZERO}\nrefs/heads/feature ${forced} refs/heads/feature ${clean}\n` });
+  result = repo.guard(['pre-push', 'origin'], { input: `refs/heads/second ${second} refs/heads/second ${ZERO}\nrefs/heads/feature ${forced} refs/heads/feature ${clean}\n` });
   assert.equal(result.status, 1);
   assert.match(result.all, /Checked: 2 commit\(s\)/);
 
-  // Malformed input fails closed.
-  assert.equal(repo.guard(['pre-push'], { input: 'not a ref line\n' }).status, 2);
+  // Malformed input and a missing remote argument fail closed.
+  assert.equal(repo.guard(['pre-push', 'origin'], { input: 'not a ref line\n' }).status, 2);
+  assert.equal(repo.guard(['pre-push'], { input: `refs/heads/second ${second} refs/heads/second ${ZERO}\n` }).status, 2);
+});
+
+test('A pre-push: only the pushed-to remote\'s tracking refs are trusted; a URL remote has none', (t) => {
+  const { repo, base } = pushRepo(t);
+  const mirror = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'mirror', mirror.root]);
+  const value = markerEmail();
+  repo.git(['checkout', '-q', '-b', 'private', base]);
+  const hit = repo.commit('private notes', { 'p.txt': `${value}\n` });
+  repo.git(['push', '-q', '--no-verify', 'mirror', 'private']);
+  const line = `refs/heads/private ${hit} refs/heads/private ${ZERO}\n`;
+  let result = repo.guard(['pre-push', 'origin'], { input: line });
+  assert.equal(result.status, 1, 'a commit on another remote is still new to origin');
+  assertNoEcho(assert, result.all, value, 'pre-push other remote');
+  assert.equal(repo.guard(['pre-push', 'mirror'], { input: line }).status, 0, 'already on the mirror');
+  result = repo.guard(['pre-push', mirror.root], { input: line });
+  assert.equal(result.status, 1, 'a push to a URL trusts no tracking ref');
+});
+
+test('A pre-push: nested annotated tags are all read; a tag of a blob fails closed', (t) => {
+  const { repo } = pushRepo(t);
+  const value = markerEmail();
+  repo.git(['tag', '-a', 'inner', '-m', `inner note ${value}`]);
+  repo.git(['tag', '-a', 'outer', '-m', 'outer note', 'inner']);
+  const outer = repo.git(['rev-parse', 'outer']);
+  let result = repo.guard(['pre-push', 'origin'], { input: `refs/tags/outer ${outer} refs/tags/outer ${ZERO}\n` });
+  assert.equal(result.status, 1);
+  assert.match(result.all, /tag [0-9a-f]{12} message:1:\d+ {2}email/);
+  assertNoEcho(assert, result.all, value, 'nested tag');
+  const blob = repo.git(['hash-object', '-w', '--stdin'], { input: 'data\n' });
+  repo.git(['tag', '-a', 'blobtag', '-m', 'a blob', blob]);
+  const blobTag = repo.git(['rev-parse', 'blobtag']);
+  result = repo.guard(['pre-push', 'origin'], { input: `refs/tags/blobtag ${blobTag} refs/tags/blobtag ${ZERO}\n` });
+  assert.equal(result.status, 2);
+  assert.match(result.all, /points to something other than a commit/);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -380,6 +474,41 @@ test('A CI push: a replaced history falls back to every commit not on the defaul
   assert.match(result.all, /history was replaced/);
 });
 
+test('A CI pull_request: a change cannot switch off checks for itself; added entries are named', (t) => {
+  const repo = new TestRepo(t);
+  const configFile = '.github/personal-data-guard.json';
+  const base = repo.commit('base', { [configFile]: `${JSON.stringify(BASE_CONFIG, null, 2)}\n`, 'README.md': 'base\n' });
+  repo.git(['checkout', '-q', '-b', 'feature']);
+  const weaker = { ...BASE_CONFIG, scope: { ...BASE_CONFIG.scope, file_content: false }, not_scanned: [{ path: 'art/*.png', reason: 'icon artwork' }] };
+  const head = repo.commit('quiet the guard', { [configFile]: `${JSON.stringify(weaker, null, 2)}\n`, 'a.txt': `${pii.email()}\n` });
+  const event = { pull_request: { title: 'Tidy', body: '', base: { sha: base }, head: { sha: head, ref: 'feature' } } };
+  let result = ciRun(repo, 'pull_request', event);
+  assert.equal(result.status, 1, result.all);
+  assert.match(result.all, /the change switches off file content; the base commit's setting was used/);
+  assert.match(result.all, /the change adds art\/\*\.png to not_scanned: icon artwork/);
+  result = repo.guard(['range', `${base}..${head}`]);
+  assert.equal(result.status, 1, 'a reviewer range check keeps the base setting too');
+});
+
+test('A range: the spec needs exactly two dots and two ends', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  for (const spec of ['HEAD...HEAD', 'HEAD..HEAD..HEAD', '..HEAD', 'HEAD..']) {
+    assert.equal(repo.guard(['range', spec]).status, 2, spec);
+  }
+});
+
+test('A identity included: the whole author line is read, name included', (t) => {
+  const repo = new TestRepo(t, { config: { ...BASE_CONFIG, identity: 'included', identity_reason: undefined } });
+  const base = repo.commit('base', { 'README.md': 'base\n' });
+  repo.write('b.txt', 'clean\n');
+  repo.git(['add', 'b.txt']);
+  repo.git(['commit', '-q', '--no-verify', '-m', 'clean', `--author=Jane ${pii.sgPlus()} <author${pii.at}example.invalid>`]);
+  const result = repo.guard(['range', `${base}..HEAD`]);
+  assert.equal(result.status, 1, result.all);
+  assert.match(result.all, /commit [0-9a-f]{12} author:1:1 {2}phone/);
+});
+
 test('A tree: whole content at a revision, with the listed gaps printed', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n', 'docs/a.md': `${pii.email()}\n` });
@@ -435,6 +564,27 @@ test('C: success, hit, config error, git error, unreadable file, container error
 
   for (const [label, result, status] of paths) {
     assert.equal(result.status, status, `${label}: ${result.all}`);
+    assertNoEcho(assert, result.all, value, label);
+  }
+});
+
+test('C: arguments, event names, config paths and config text never echo', (t) => {
+  const value = markerEmail();
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  const reason = repo.write('../reason-config.json', JSON.stringify({ ...BASE_CONFIG, identity_reason: `ask ${value}` }));
+  const listed = repo.write('../listed-config.json', JSON.stringify({ ...BASE_CONFIG, not_scanned: [{ path: `${value}.png`, reason: 'artwork' }] }));
+  const event = repo.write('../event.json', '{}');
+  const paths = [
+    ['unknown option', repo.guard(['staged', `--${value}`])],
+    ['unknown mode', repo.guard([value])],
+    ['missing config path', repo.guard(['staged', '--config', path.join(repo.dir, `${value}.json`)])],
+    ['config reason', repo.guard(['staged', '--config', reason])],
+    ['config path entry', repo.guard(['staged', '--config', listed])],
+    ['event name', repo.guard(['ci'], { env: { GITHUB_EVENT_NAME: value, GITHUB_EVENT_PATH: event } })],
+  ];
+  for (const [label, result] of paths) {
+    assert.equal(result.status, 2, `${label}: ${result.all}`);
     assertNoEcho(assert, result.all, value, label);
   }
 });
