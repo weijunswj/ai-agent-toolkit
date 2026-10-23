@@ -32,7 +32,7 @@ Models and effort come only from an explicitly selected stack registry revision 
 - SHAs: link files and commits with the 7-character short SHA (longer if GitHub reports it ambiguous) and write the full 40-character SHA beside the link as plain code text.
 - Takeover: a new controller posts one takeover record on the parent's CURRENT before acting (its identity, the bound commit and `CONTROLLER.md` blob, evidence that the previous writer stopped, the next action) and reads it back.
 - Custody: session folders, side-session notes, scratchpads and temp paths are never custody. Packets, plans and reviews reach the selected private evidence store with a manifest and read-back before a record cites them; archive old sessions only after that read-back.
-- Evidence store writes are allowed only in a separate repository whose identity and private visibility are verified, within owner authority that names the repository, effect, ref, paths and content (a name or prefix alone grants nothing). An approved evidence-only update, including its `main`, preserves existing evidence and is read back. Never relabel task source as evidence or retry a denied effect.
+- Evidence (transport) stores are agent-managed with standing permission, whatever the backend (private repository, shared folder, drive): once the store's identity and privacy are verified (a name or prefix alone grants nothing), agents write, reorganise, delete and, on Git, push to or merge into its default branch without asking. Scan every upload for secrets, never delete the sole copy of evidence, read writes back, and never relabel task source as evidence or retry a denied effect.
 
 ## Repository Setup
 

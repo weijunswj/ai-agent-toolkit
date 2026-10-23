@@ -11,7 +11,7 @@ Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
 | Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand; never in a plugin |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Scripts | `repo/scripts/` | Setup, bridge, hooks, synchronizers, audits and validators |

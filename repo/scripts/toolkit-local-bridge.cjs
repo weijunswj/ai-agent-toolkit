@@ -1230,10 +1230,18 @@ function compareExactAgentRuleFile(targetPath, templatePath, spec) {
   }
   const text = normalizeManagedBlockText(fs.readFileSync(targetPath, 'utf8'));
   const parsed = parseManagedMarkerBlocks(text);
-  if (parsed.errors.length || [...parsed.blocks.values()].some((block) => block.label === 'CLAUDE.SHIM')) {
+  if (parsed.errors.length) {
+    return parsed.errors.map((error) => ({ file: spec.target, kind: 'broken-marker', detail: error }));
+  }
+  if ([...parsed.blocks.values()].some((block) => block.label === 'CLAUDE.SHIM')) {
     return [{ file: spec.target, kind: 'stale-block', block: 'CLAUDE.SHIM', detail: `the Toolkit shim is now the single line ${expected}` }];
   }
-  if (text.split('\n').some((line) => line.trim() === expected)) return [];
+  // Claude Code ignores imports inside fenced code blocks, so only a line outside a fence counts.
+  let fenced = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced && line.trim() === expected) return [];
+  }
   return [{ file: spec.target, kind: 'unmanaged', detail: `no ${expected} import line found` }];
 }
 

@@ -22,7 +22,7 @@ When this skill is selected for an n8n task, automatically check the current tar
 
 - `AGENTS.md`
 
-Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims owned by `repository-agent-rules`; do not append the n8n adapter to those shim files.
+Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md` (the one-line `@AGENTS.md` shim) and `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims owned by `repository-agent-rules`; do not append the n8n adapter to those shim files, or to a `GEMINI.md`, which belongs to the repository.
 
 If `AGENTS.md` exists and the adapter is missing or stale, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) in `--dry-run` mode with `--target auto` or `--target agents`. Show the dry-run result to the user. Ask for explicit current-turn approval naming `AGENTS.md` before running `--write`. If approved, run the installer with `--write`.
 

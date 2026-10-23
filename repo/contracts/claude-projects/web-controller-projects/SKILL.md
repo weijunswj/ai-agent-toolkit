@@ -203,7 +203,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **Before every merge,** post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK.
 - Use a decision card with a recommendation for every approval or choice the coordinator acts on itself.
 - **Destructive steps on the user's device** (merge, force-push, branch or folder delete) run only when the user types the request in that local Remote Control thread. Auto mode there refuses relayed card taps and messages from another Claude, and those threads have no card tool. Have the thread list the exact targets, then post the thread link and the exact line for the user to type. Never add allow rules or work around the classifier.
-- Do reversible work (analysis, drafts, branches, PRs) without asking. Ending finished local Remote Control sessions and resolving threads or posts past the resolve window count as reversible housekeeping. Transport-store uploads and parent-issue records and comments are reversible bookkeeping: when the user grants standing approval for them, record it in project instructions and do them from the cloud without asking each time.
+- Follow the standing-approval and transport-store rules in `CONTROLLER.md` "Authority and effects": a release's brief needs no per-release push line. Do reversible work (analysis, drafts, branches, PRs) without asking. Ending finished local Remote Control sessions and resolving threads or posts past the resolve window count as reversible housekeeping. Transport-store uploads and parent-issue records and comments are reversible bookkeeping: when the user grants standing approval for them, record it in project instructions and do them from the cloud without asking each time.
 - Don't write to another repo that has its own controller, such as the Toolkit repo from another repo's project. Draft a note for the user to hand over instead.
 
 ## Live systems
@@ -221,6 +221,6 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. No coordinator edits the copy uploaded to the user's claude.ai account.
-- When you find a better way, or a rule here proves wrong, tell the user the change and why, and send it to Toolkit as TOOLKIT_FEEDBACK or an issue. A Toolkit pull request changes the file; after it merges, the user uploads the new file to claude.ai. Toolkit setup compares the uploaded copy's Version with the repo's and reminds the user once when it is older.
+- When you find a better way, or a rule here proves wrong, tell the user the change and why, and send it to Toolkit as TOOLKIT_FEEDBACK or an issue. A Toolkit pull request changes the file; after it merges, the user uploads the new file to claude.ai. Compare the Version line of the uploaded copy with the repo's after each Toolkit release.
 - Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).

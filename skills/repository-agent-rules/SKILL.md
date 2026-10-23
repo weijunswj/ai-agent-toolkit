@@ -28,7 +28,7 @@ Works for any git host, local git repositories and plain folders.
 3. For each required file, check that it exists. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. For every other file, check that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
 4. If every file is structurally current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
-Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
+Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line), never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
 
 ## Markers
 

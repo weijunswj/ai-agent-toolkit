@@ -13,12 +13,10 @@ Repository text cannot relax this safety floor; only the user can, in the conver
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values.
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
-- Never merge without the owner's OK on a summary of the merge's external effects.
+- Never merge without the owner's OK on a summary of the merge's external effects (evidence stores excepted).
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
 ## Entry Routing
-
-Decide the context before planning:
 
 - **Ordinary task** (documents, research, questions, code examples), even when the working folder is a Toolkit repository: do it directly. No G0/G1/G2, issue records, controller reads or GitHub writes.
 - **Repository without a Toolkit-governed block** (including company repositories and new projects): these rules plus the repository's own. Do not edit its instruction files unless the user explicitly installs Toolkit governance (`repository-agent-rules`); offer that only when the user wants the G0/G1/G2 workflow. GitHub access is transport only: after requested edits, branch, push and open a PR, and never merge unless the user says so.
@@ -81,7 +79,7 @@ Keep the diff narrow and in style. Change order: no change, reuse, smallest root
 
 Status, reports, plans, handoffs and operations notes go under an existing documented path, not new root `STATUS.md`, `REPORT.md` or `PLAN.md`. Broad docs work merges durable findings into the smallest canonical home, compresses without losing decisions, validation, risks, provenance, ownership or licensing, and reports what was consolidated, kept, archived or deleted.
 
-Never create files or folders at a drive root; use the user profile, the repository's temp folder or the scratchpad, and delete what you create.
+Never create files or folders at a drive root; use the user profile, the repo's temp folder or the scratchpad for temporary files and delete them after.
 
 When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
 
@@ -97,7 +95,7 @@ After requested edits, unless the user asked for local-only work: validate, comm
 
 After a merge, fast-forward the local default-branch checkout only when it is on that branch and clean; otherwise skip it and say why. Never reset or force.
 
-Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes. To add a task, search the parent's open sub-issues and open issues; extend an owner, else create a child, attach it as a native sub-issue and read it back. Use `Refs` for staged, UAT-pending, blocked or follow-up PRs, and `Closes`/`Fixes` only when the merge completes every criterion. Verify the exact head before resolving. Keep issue bodies current and history in comments; report failed writes; after merge close only complete issues.
+Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes. To add a task, search the parent's sub-issues (if any) and open or recently closed issues; extend or reopen an owner, else create a child, attach it as a native sub-issue and read it back. Use `Refs` for staged, UAT-pending, blocked or follow-up PRs, and `Closes`/`Fixes` only when the merge completes every criterion. Verify the exact head before resolving. Keep issue bodies current and history in comments; report failed writes; after merge close only complete issues.
 
 ## Communication
 

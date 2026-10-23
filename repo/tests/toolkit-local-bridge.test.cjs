@@ -3009,7 +3009,9 @@ test('agent-rules preflight checks Claude shim content in Claude hook mode', () 
     ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
     [oldMarkedShim, ['CLAUDE.md:stale-block']],
     ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
-    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']]
+    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']],
+    ['# Notes\n\n```text\n@AGENTS.md\n```\n', ['CLAUDE.md:unmanaged']],
+    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['CLAUDE.md:broken-marker']]
   ];
   for (const [claudeText, expected] of cases) {
     const root = tmpRoot();
