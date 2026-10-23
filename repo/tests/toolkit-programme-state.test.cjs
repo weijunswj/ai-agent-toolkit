@@ -15,6 +15,8 @@ const SHA_B = 'b'.repeat(40);
 const schema = name => JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'programme-state', name), 'utf8'));
 const writer = { session: 'session-one', prefix: 'INT-TK421-' };
 const other = { session: 'session-two', prefix: 'INT-TK421-' };
+const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
+const heldParent = () => state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ issue: 423, class: 'CORE', parent: 421, order: 1, lane: 'integration' }] }), controller, {});
 const outcome = { issue: 423, class: 'CORE', parent: 421, order: 1, lane: 'integration' };
 
 function child(overrides = {}) {
@@ -75,16 +77,19 @@ test('reopen, resubmit and accept work in one session; return IDs are idempotent
   doc = state.submitReturn(doc, { returnId: 'r1', writer });
   assert.equal(doc.gate.state, 'SUBMITTED');
   assert.equal(state.submitReturn(doc, { returnId: 'r1', writer }), null, 'resubmitting the same return is a no-op');
-  doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN' });
+  const decide = { writer: controller, parentDoc: heldParent() };
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: decide.parentDoc }), { code: 'ROLE_REFUSED' }, 'the builder cannot accept its own return');
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT' }), { code: 'ROLE_REFUSED' });
+  doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', ...decide });
   assert.equal(doc.gate.state, 'ACTIVE');
   assert.equal(doc.gate.session_id, writer.session, 'REOPEN keeps the session');
   assert.throws(() => state.submitReturn(doc, { returnId: 'r1', writer }), { code: 'RETURN_CONFLICT' });
   doc = state.submitReturn(doc, { returnId: 'r2', writer });
-  doc = state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT' });
+  doc = state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide });
   assert.equal(doc.gate.state, 'RETIRED');
-  assert.equal(state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT' }), null, 'consuming the same return twice is idempotent');
-  assert.throws(() => state.consumeReturn(doc, { returnId: 'r2', verdict: 'REOPEN' }), { code: 'RETURN_CONFLICT' });
-  assert.throws(() => state.consumeReturn(doc, { returnId: 'r9', verdict: 'ACCEPT' }), { code: 'RETURN_UNKNOWN' });
+  assert.equal(state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide }), null, 'consuming the same return twice is idempotent');
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r2', verdict: 'REOPEN', ...decide }), { code: 'RETURN_CONFLICT' });
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r9', verdict: 'ACCEPT', ...decide }), { code: 'RETURN_UNKNOWN' });
   assert.deepEqual(state.validateChild(doc), []);
 
   // A return submitted before a takeover is stale.
@@ -92,7 +97,7 @@ test('reopen, resubmit and accept work in one session; return IDs are idempotent
   fenced = state.submitReturn(fenced, { returnId: 'old', writer });
   fenced = state.claimDocument(fenced, other, { takeover: true });
   assert.equal(fenced.fence.epoch, 2);
-  assert.throws(() => state.consumeReturn(fenced, { returnId: 'old', verdict: 'ACCEPT' }), { code: 'STALE_RETURN' });
+  assert.throws(() => state.consumeReturn(fenced, { returnId: 'old', verdict: 'ACCEPT', ...decide }), { code: 'STALE_RETURN' });
 });
 
 test('claims and takeovers move the fence; stale writers are refused', () => {
@@ -110,11 +115,20 @@ test('claims and takeovers move the fence; stale writers are refused', () => {
   assert.throws(() => state.authoriseWrite('parent', parent, null, null), { code: 'WRITER_UNKNOWN' });
 });
 
-test('patches touch only the holder fields', () => {
-  const doc = child();
-  const next = state.applyPatch('child', doc, { next_action: 'Run G2', uat: { state: 'PENDING', at_head: SHA_A }, blockers: ['owner UAT'] });
-  assert.equal(next.next_action, 'Run G2');
-  assert.deepEqual(next.uat, { state: 'PENDING', at_head: SHA_A });
+test('patches touch only the holder fields, and only the controller records acceptance', () => {
+  const doc = state.claimDocument(child(), writer, { role: 'G1' });
+  const parentDoc = heldParent();
+  const own = state.applyPatch('child', doc, { next_action: 'Run G2', blockers: ['owner UAT'], candidate: { branch: 'b', head: SHA_A }, lifecycle: 'WAITING_OWNER' }, { writer, parentDoc });
+  assert.equal(own.next_action, 'Run G2');
+  // An executor cannot record its own UAT, review or a terminal lifecycle (G2 probe P13).
+  for (const patch of [{ uat: { state: 'PASSED', at_head: SHA_A } }, { review: { state: 'PASSED', verdicts: [{ reviewer: 'self', head: SHA_A, verdict: 'PASSED' }] } }, { lifecycle: 'DONE' }, { lifecycle: 'RETIRED' }]) {
+    assert.throws(() => state.applyPatch('child', doc, patch, { writer, parentDoc }), { code: 'ROLE_REFUSED' }, JSON.stringify(patch));
+    assert.throws(() => state.applyPatch('child', doc, patch), { code: 'ROLE_REFUSED' }, 'no writer means no controller');
+  }
+  assert.throws(() => state.applyPatch('child', { ...doc, lifecycle: 'DONE' }, { lifecycle: 'ACTIVE' }, { writer, parentDoc }), { code: 'ROLE_REFUSED' }, 'nor reopen a finished outcome');
+  const next = state.applyPatch('child', doc, { uat: { state: 'PASSED', at_head: SHA_A }, lifecycle: 'DONE' }, { writer: controller, parentDoc });
+  assert.deepEqual(next.uat, { state: 'PASSED', at_head: SHA_A });
+  assert.equal(next.lifecycle, 'DONE');
   assert.throws(() => state.applyPatch('child', doc, { pr: { number: 1 } }), { code: 'PATCH_REFUSED' });
   assert.throws(() => state.applyPatch('child', doc, { fence: { epoch: 9 } }), { code: 'PATCH_REFUSED' });
   assert.throws(() => state.applyPatch('parent', state.newParent({ repository: 'acme/app', parentIssue: 1 }), { parent_issue: 2 }), { code: 'PATCH_REFUSED' });

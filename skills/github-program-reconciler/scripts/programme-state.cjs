@@ -48,8 +48,14 @@ const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, and pending effects (an intent write must not make the rendered state stale).
 const UNHASHED = ['revision', 'volatile', 'pending_effects'];
-// Child fields the holder (or the parent's holder) may change through `update`.
+// Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
+// acceptance records: only the parent's holder (the controller) writes them.
 const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
+const CONTROLLER_CHILD_FIELDS = ['uat', 'review'];
+const TERMINAL_LIFECYCLES = ['DONE', 'RETIRED'];
+// UAT states that speak for one head, and review states that need verdicts at a head.
+const HEAD_BOUND_UAT = ['PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED'];
+const DECIDED_REVIEW = ['PASSED', 'NOT_PASSED'];
 const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
@@ -93,6 +99,55 @@ function sameState(previous, next) {
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
+
+// Fields each object may and must hold, as the schemas' additionalProperties: false and required.
+const SHAPES = {
+  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
+  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
+  fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
+  effect: { all: ['intent_id', 'kind', 'target', 'state'] },
+  outcome: { all: ['issue', 'label', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'lane', 'owner_prefix'] },
+  release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
+  gate: { all: ['role', 'state', 'session_id', 'route', 'returns'] },
+  route: { all: ['model', 'effort', 'read_back'], optional: ['model', 'effort', 'read_back'] },
+  return: { all: ['return_id', 'verdict', 'consumed', 'epoch'] },
+  candidate: { all: ['branch', 'head', 'tree', 'base'] },
+  pr: { all: ['number', 'state', 'head', 'checks'] },
+  checks: { all: ['state', 'required_total', 'required_passed', 'at_head'] },
+  uat: { all: ['state', 'at_head'] },
+  review: { all: ['state', 'verdicts'] },
+  verdict: { all: ['reviewer', 'head', 'verdict'] },
+};
+
+function checkShape(errors, value, shape, at) {
+  if (!isObject(value)) return;
+  const { all, optional: notRequired = [] } = SHAPES[shape];
+  const unknown = Object.keys(value).filter(key => !all.includes(key));
+  if (unknown.length) errors.push(`${at} has unknown field(s): ${unknown.join(', ')}`);
+  const missing = all.filter(key => !notRequired.includes(key) && !Object.hasOwn(value, key));
+  if (missing.length) errors.push(`${at} is missing ${missing.join(', ')}`);
+}
+
+// Secret-shaped values are refused anywhere in a state document or binding: `private` lives in git
+// history in the store, and public fields render into issue bodies. The message never repeats a value.
+const SECRET_SHAPES = [
+  ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/],
+  ['API key', /\b(?:sk|rk)-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{20,}/],
+  ['AWS access key', /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
+  ['Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
+  ['Google API key', /\bAIza[0-9A-Za-z_-]{35}/],
+  ['private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ['JSON web token', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
+  ['bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{20,}/i],
+];
+
+function screenSecrets(errors, value, at) {
+  if (typeof value === 'string') {
+    const found = SECRET_SHAPES.find(([, pattern]) => pattern.test(value));
+    if (found) errors.push(`${at} looks like a ${found[0]}; state documents and bindings never hold secrets`);
+  } else if (Array.isArray(value)) value.forEach((entry, index) => screenSecrets(errors, entry, `${at}[${index}]`));
+  else if (isObject(value)) for (const [key, entry] of Object.entries(value)) { screenSecrets(errors, key, `${at} key`); screenSecrets(errors, entry, `${at}.${key}`); }
+}
 const optional = (value, test) => value === null || value === undefined || test(value);
 const isInt = (value, min = 0) => Number.isInteger(value) && value >= min;
 const isText = value => typeof value === 'string' && value.length > 0;
@@ -101,6 +156,7 @@ const isSha = value => typeof value === 'string' && SHA40.test(value);
 function validateFence(errors, fence) {
   check(errors, isObject(fence), 'fence must be an object');
   if (!isObject(fence)) return;
+  checkShape(errors, fence, 'fence', 'fence');
   check(errors, isInt(fence.epoch), 'fence.epoch must be a whole number');
   check(errors, optional(fence.holder_prefix, value => PREFIX.test(value)), 'fence.holder_prefix must be a record prefix or null');
   check(errors, optional(fence.holder_session, isText), 'fence.holder_session must be text or null');
@@ -110,6 +166,7 @@ function validateEffects(errors, effects) {
   check(errors, Array.isArray(effects), 'pending_effects must be a list');
   for (const [index, effect] of (Array.isArray(effects) ? effects : []).entries()) {
     check(errors, isObject(effect) && isText(effect.intent_id), `pending_effects[${index}].intent_id is required`);
+    checkShape(errors, effect, 'effect', `pending_effects[${index}]`);
     check(errors, EFFECT_KINDS.includes(effect?.kind), `pending_effects[${index}].kind is not a known effect`);
     check(errors, isObject(effect?.target), `pending_effects[${index}].target must be an object`);
     check(errors, EFFECT_STATES.includes(effect?.state), `pending_effects[${index}].state must be IN_FLIGHT, DONE or UNKNOWN`);
@@ -119,6 +176,8 @@ function validateEffects(errors, effects) {
 function validateCommon(errors, doc, schema) {
   check(errors, isObject(doc), 'document must be an object');
   if (!isObject(doc)) return false;
+  checkShape(errors, doc, schema === SCHEMA.parent ? 'parent' : 'child', 'document');
+  screenSecrets(errors, doc, 'document');
   check(errors, doc.schema === schema, `schema must be ${schema}`);
   check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
   check(errors, isInt(doc.revision), 'revision must be a whole number');
@@ -135,12 +194,14 @@ function validateParent(doc) {
     check(errors, isInt(doc.parent_issue, 1), 'parent_issue must be an issue number');
     check(errors, optional(doc.release_plan, value => isObject(value)
       && optional(value.record, isText) && optional(value.comment_id, v => isInt(v, 1))), 'release_plan must hold record and comment_id');
+    checkShape(errors, doc.release_plan, 'release_plan', 'release_plan');
     check(errors, Array.isArray(doc.outcomes), 'outcomes must be a list');
     const seen = new Set();
     for (const [index, outcome] of (Array.isArray(doc.outcomes) ? doc.outcomes : []).entries()) {
       const at = `outcomes[${index}]`;
       check(errors, isObject(outcome) && isInt(outcome.issue, 1), `${at}.issue must be an issue number`);
       if (!isObject(outcome)) continue;
+      checkShape(errors, outcome, 'outcome', at);
       check(errors, !seen.has(outcome.issue), `${at}.issue ${outcome.issue} is listed twice`);
       seen.add(outcome.issue);
       check(errors, outcome.issue !== doc.parent_issue, `${at}.issue cannot be the parent itself`);
@@ -176,6 +237,8 @@ function validateChild(doc) {
     const gate = doc.gate;
     check(errors, isObject(gate), 'gate must be an object');
     if (isObject(gate)) {
+      checkShape(errors, gate, 'gate', 'gate');
+      checkShape(errors, gate.route, 'route', 'gate.route');
       check(errors, optional(gate.role, value => GATE_ROLES.includes(value)), 'gate.role must be G0, G1, G2 or null');
       check(errors, optional(gate.state, value => GATE_STATES.includes(value)), `gate.state must be one of ${GATE_STATES.join(', ')} or null`);
       check(errors, optional(gate.session_id, isText), 'gate.session_id must be text or null');
@@ -185,6 +248,7 @@ function validateChild(doc) {
       const ids = new Set();
       for (const [index, entry] of (Array.isArray(gate.returns) ? gate.returns : []).entries()) {
         check(errors, isObject(entry) && isText(entry.return_id), `gate.returns[${index}].return_id is required`);
+        checkShape(errors, entry, 'return', `gate.returns[${index}]`);
         check(errors, !ids.has(entry?.return_id), `gate.returns[${index}].return_id is repeated`);
         ids.add(entry?.return_id);
         check(errors, optional(entry?.verdict, value => VERDICTS.includes(value)), `gate.returns[${index}].verdict must be ACCEPT, REOPEN or null`);
@@ -195,12 +259,15 @@ function validateChild(doc) {
     const candidate = doc.candidate;
     check(errors, isObject(candidate), 'candidate must be an object');
     if (isObject(candidate)) {
+      checkShape(errors, candidate, 'candidate', 'candidate');
       check(errors, optional(candidate.branch, isText), 'candidate.branch must be text or null');
       for (const field of ['head', 'tree', 'base']) check(errors, optional(candidate[field], isSha), `candidate.${field} must be a full 40-character SHA or null`);
     }
     const pr = doc.pr;
     check(errors, isObject(pr), 'pr must be an object');
     if (isObject(pr)) {
+      checkShape(errors, pr, 'pr', 'pr');
+      checkShape(errors, pr.checks, 'checks', 'pr.checks');
       check(errors, optional(pr.number, value => isInt(value, 1)), 'pr.number must be a PR number or null');
       check(errors, optional(pr.state, value => PR_STATES.includes(value)), 'pr.state must be OPEN, DRAFT, MERGED, CLOSED or null');
       check(errors, optional(pr.head, isSha), 'pr.head must be a full 40-character SHA or null');
@@ -213,9 +280,14 @@ function validateChild(doc) {
       }
     }
     check(errors, isObject(doc.uat) && optional(doc.uat.state, value => UAT_STATES.includes(value)) && optional(doc.uat.at_head, isSha), `uat must hold state (${UAT_STATES.join(', ')} or null) and at_head`);
+    checkShape(errors, doc.uat, 'uat', 'uat');
+    check(errors, !isObject(doc.uat) || !HEAD_BOUND_UAT.includes(doc.uat.state) || isSha(doc.uat.at_head), `uat.state ${doc.uat?.state} needs at_head, the full head SHA it applies to`);
     const review = doc.review;
     check(errors, isObject(review) && optional(review.state, value => REVIEW_STATES.includes(value)) && Array.isArray(review.verdicts), 'review must hold state and verdicts');
+    checkShape(errors, review, 'review', 'review');
+    check(errors, !isObject(review) || !DECIDED_REVIEW.includes(review.state) || (Array.isArray(review.verdicts) && review.verdicts.length > 0), `review.state ${review?.state} needs at least one verdict with its head`);
     for (const [index, verdict] of (Array.isArray(review?.verdicts) ? review.verdicts : []).entries()) {
+      checkShape(errors, verdict, 'verdict', `review.verdicts[${index}]`);
       check(errors, isObject(verdict) && isText(verdict.reviewer) && isSha(verdict.head) && REVIEW_VERDICTS.includes(verdict.verdict), `review.verdicts[${index}] needs reviewer, full head SHA and PASSED or NOT_PASSED`);
     }
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
@@ -246,6 +318,7 @@ function validateBinding(binding) {
     check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
     check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
     check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    screenSecrets(errors, binding, 'binding');
   }
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
   return binding;
@@ -360,8 +433,10 @@ function submitReturn(doc, { returnId, writer }) {
   return next;
 }
 
-function consumeReturn(doc, { returnId, verdict }) {
+// Only the parent's holder (the controller) consumes a return; an executor cannot accept its own.
+function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null }) {
   if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT or REOPEN');
+  if (!isHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
   const next = clone(doc);
   const entry = next.gate.returns.find(item => item.return_id === returnId);
   if (!entry) throw new ProgrammeError('RETURN_UNKNOWN', `No return ${returnId} on issue ${next.issue}.`);
@@ -389,11 +464,19 @@ function mergePatch(target, patch) {
   return result;
 }
 
-function applyPatch(kind, doc, patch) {
+// `writer` and `parentDoc` decide whether a child patch may touch the acceptance records.
+function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) {
   if (!isObject(patch)) throw new ProgrammeError('USAGE', 'The patch must be a JSON object.');
   const allowed = kind === 'parent' ? PATCHABLE_PARENT_FIELDS : PATCHABLE_CHILD_FIELDS;
   const refused = Object.keys(patch).filter(key => !allowed.includes(key));
   if (refused.length) throw new ProgrammeError('PATCH_REFUSED', `These fields cannot be patched: ${refused.join(', ')}. Allowed: ${allowed.join(', ')}.`);
+  if (kind === 'child' && !isHolder(parentDoc, writer)) {
+    const records = Object.keys(patch).filter(key => CONTROLLER_CHILD_FIELDS.includes(key));
+    const terminal = Object.hasOwn(patch, 'lifecycle') && (TERMINAL_LIFECYCLES.includes(patch.lifecycle) || TERMINAL_LIFECYCLES.includes(doc.lifecycle));
+    if (records.length || terminal) {
+      throw new ProgrammeError('ROLE_REFUSED', `Only the holder of the parent document (the controller) records ${[...records, ...(terminal ? ['a DONE or RETIRED lifecycle'] : [])].join(', ')}.`);
+    }
+  }
   const next = clone(doc);
   for (const [key, value] of Object.entries(patch)) {
     // Lists and plain values are replaced whole; objects are merge-patched.
@@ -480,13 +563,18 @@ function checksText(child) {
 // records the UAT decision.
 function uatText(child) {
   const state = child.uat.state || '-';
-  if (child.uat.at_head && child.pr.head && child.uat.at_head !== child.pr.head) return `${state} (STALE_HEAD, was ${shortSha(child.uat.at_head)})`;
+  if (!HEAD_BOUND_UAT.includes(child.uat.state)) return state;
+  if (!child.uat.at_head) return `${state} (STALE_HEAD, head not recorded)`;
+  if (child.pr.head && child.uat.at_head !== child.pr.head) return `${state} (STALE_HEAD, was ${shortSha(child.uat.at_head)})`;
   return state;
 }
 
+// A decided review is current only when a verdict was given at the live PR head.
 function reviewText(child) {
   const state = child.review.state || '-';
-  const stale = child.pr.head && child.review.verdicts.some(verdict => verdict.head !== child.pr.head);
+  if (!DECIDED_REVIEW.includes(child.review.state)) return state;
+  if (!child.review.verdicts.length) return `${state} (STALE_HEAD, no verdict recorded)`;
+  const stale = child.pr.head && !child.review.verdicts.some(verdict => verdict.head === child.pr.head);
   return stale ? `${state} (STALE_HEAD)` : state;
 }
 
@@ -974,6 +1062,13 @@ const EFFECT_TEXT = {
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
 
+// What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
+function holdScope(kind) {
+  if (kind === 'replace_block') return 'body';
+  if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
+  return 'all';
+}
+
 // One reconcile pass: bind, observe, recover, diff, plan and (with apply) run each effect.
 class Reconciler {
   constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD }) {
@@ -1113,7 +1208,7 @@ class Reconciler {
       findings.push({ code: 'PROJECTION_STALE', issue: number, detail: block ? (block.tampered ? 'the block was edited by hand' : 'the block differs from the state documents') : 'no state block yet' });
       const length = upsertStateBlock(issue.body, renderBlock(body, this.toolkitVersion || '0.0.0')).body.length;
       if (length >= this.threshold) {
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `the body would reach ${length} characters (threshold ${this.threshold}); shorten it first` });
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `the body would reach ${length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body' });
         continue;
       }
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body) }, insert: !block, body, updated_at: issue.updated_at });
@@ -1139,7 +1234,7 @@ class Reconciler {
           const found = issue ? findStateBlock(issue.body).block : undefined;
           done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered) : null;
         }
-        if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held` });
+        if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held`, scope: holdScope(effect.kind) });
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE' });
       }
     }
@@ -1194,54 +1289,77 @@ class Reconciler {
     const results = [];
     const holds = [...plan.holds];
     const parentNumber = plan.parent.parent_issue;
-    let parentDoc = this.store.read('parent', parentNumber).doc;
-    authoriseWrite('parent', parentDoc, null, writer);
+    let parentDoc = null;
+    // The parent fence is read again immediately before every state write and every GitHub change,
+    // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
+    // is settled by readback in the successor's next pass, never replayed.
+    const guard = () => {
+      const fresh = this.store.read('parent', parentNumber).doc;
+      authoriseWrite('parent', fresh, null, writer);
+      parentDoc = fresh;
+    };
+    guard();
+    const mutateDoc = (kind, number, options) => {
+      guard();
+      const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
+      if (kind === 'parent') parentDoc = result.doc;
+      return result;
+    };
     const docOwner = number => (number === parentNumber ? 'parent' : 'child');
-    const heldTargets = new Set(holds.map(hold => hold.target));
+    // A hold stops later effects of the same scope on that issue: a body hold never blocks its links.
+    const held = new Map();
+    const markHeld = (target, scope) => { if (!held.has(target)) held.set(target, new Set()); held.get(target).add(scope); };
+    const isHeld = (target, scope) => Boolean(held.get(target) && (held.get(target).has('all') || held.get(target).has(scope)));
+    for (const entry of holds) markHeld(entry.target, entry.scope || 'all');
     const outcomes = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const record = (effect, outcome, detail = null) => { results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) }); };
-    const hold = (effect, code, detail) => { holds.push({ code, target: `#${effect.target.issue}`, detail }); heldTargets.add(`#${effect.target.issue}`); };
+    const hold = (effect, code, detail) => {
+      const scope = holdScope(effect.kind);
+      holds.push({ code, target: `#${effect.target.issue}`, detail, scope });
+      markHeld(`#${effect.target.issue}`, scope);
+    };
 
     // Resolve recovered effects first: DONE and NOT_DONE leave the document; UNKNOWN stays.
     for (const resolution of plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN')) {
-      const mutate = this.store.mutate(resolution.kind, resolution.number, {
-        writer, parentDoc, change: doc => {
+      mutateDoc(resolution.kind, resolution.number, {
+        change: doc => {
           const kept = doc.pending_effects.filter(effect => effect.intent_id !== resolution.intent_id);
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
           return doc;
         },
       });
-      if (resolution.kind === 'parent') parentDoc = mutate.doc;
     }
 
+    // `run` calls `guard` right before its GitHub change and returns the readback outcome.
     const withIntent = (effect, ownerKind, ownerNumber, run) => {
       const intent = { intent_id: intentId(effect.kind, effect.target), kind: effect.kind, target: effect.target, state: 'IN_FLIGHT' };
       const addIntent = doc => (doc.pending_effects.some(entry => entry.intent_id === intent.intent_id) ? null : (doc.pending_effects.push(intent), doc));
-      const written = this.store.mutate(ownerKind, ownerNumber, { writer, parentDoc, change: addIntent });
-      if (ownerKind === 'parent') parentDoc = written.doc;
+      mutateDoc(ownerKind, ownerNumber, { change: addIntent });
       let outcome;
       let detail = null;
       let code = null;
       try { ({ outcome, detail = null, code = null } = run()); }
-      catch (error) { outcome = 'UNKNOWN'; detail = error.message; }
+      catch (error) {
+        if (error.code === 'STALE_WRITER') throw error;
+        outcome = 'UNKNOWN';
+        detail = error.message;
+      }
       if (outcome === 'UNKNOWN') {
-        const marked = this.store.mutate(ownerKind, ownerNumber, { writer, parentDoc, change: doc => {
+        mutateDoc(ownerKind, ownerNumber, { change: doc => {
           const entry = doc.pending_effects.find(item => item.intent_id === intent.intent_id);
           if (!entry || entry.state === 'UNKNOWN') return null;
           entry.state = 'UNKNOWN';
           return doc;
         } });
-        if (ownerKind === 'parent') parentDoc = marked.doc;
         hold(effect, 'EFFECT_UNKNOWN', detail || 'the readback did not settle the outcome');
       } else {
-        const cleared = this.store.mutate(ownerKind, ownerNumber, { writer, parentDoc, change: doc => {
+        mutateDoc(ownerKind, ownerNumber, { change: doc => {
           const kept = doc.pending_effects.filter(item => item.intent_id !== intent.intent_id);
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
           return doc;
         } });
-        if (ownerKind === 'parent') parentDoc = cleared.doc;
         if (outcome === 'NOT_DONE') hold(effect, code || 'EFFECT_NOT_DONE', detail || 'GitHub did not make the change');
       }
       record(effect, outcome, detail);
@@ -1252,8 +1370,8 @@ class Reconciler {
       try {
         const desired = effect.doc;
         const fields = effect.kind === 'create_state' ? null : effect.fields;
-        const result = this.store.mutate('child', effect.target.issue, {
-          writer, parentDoc, create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
+        const result = mutateDoc('child', effect.target.issue, {
+          create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
             if (!fields) return { ...desired, revision: doc.revision, fence: doc.fence, pending_effects: doc.pending_effects, private: doc.private };
             for (const key of fields) doc[key] = clone(desired[key]);
@@ -1262,6 +1380,7 @@ class Reconciler {
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
       } catch (error) {
+        if (error.code === 'STALE_WRITER') throw error;
         record(effect, 'HELD', error.message);
         hold(effect, error.code || 'STATE_WRITE_FAILED', error.message);
       }
@@ -1269,8 +1388,9 @@ class Reconciler {
 
     // 2. Native parent links, read back on both sides.
     for (const effect of plan.effects.filter(entry => entry.kind === 'attach' || entry.kind === 'reparent')) {
-      if (heldTargets.has(`#${effect.target.issue}`)) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+      if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
       withIntent(effect, 'child', effect.target.issue, () => {
+        guard();
         const response = this.mutator.attach(effect.target.parent, effect.childId, effect.kind === 'reparent');
         const issue = this.reader.issue(effect.target.issue);
         const listed = this.reader.subIssues(effect.target.parent).some(sub => sub.number === effect.target.issue);
@@ -1296,6 +1416,7 @@ class Reconciler {
         }
         withIntent(effect, owner, parentIssue, () => {
           const anchor = move.before !== undefined ? { before_id: ids.get(move.before) } : { after_id: ids.get(move.after) };
+          guard();
           const response = this.mutator.reorder(parentIssue, ids.get(move.issue), anchor);
           if (moveDone(this.reader.subIssues(parentIssue), move)) return { outcome: 'DONE' };
           return { outcome: okStatus(response.status) ? 'UNKNOWN' : 'NOT_DONE', detail: `GitHub answered ${response.status}` };
@@ -1306,7 +1427,7 @@ class Reconciler {
     // 4. Bodies, re-rendered from freshly read documents so the blocks show the final revisions.
     const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
     if (blockEffects.length) {
-      parentDoc = this.store.read('parent', parentNumber).doc;
+      guard();
       const docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
       const blocks = this.renderAll(parentDoc, docs);
       const version = this.toolkitVersion;
@@ -1315,7 +1436,7 @@ class Reconciler {
         const number = planned.target.issue;
         const body = blocks.get(number);
         const effect = { ...planned, target: { issue: number, digest: blockDigest(body) } };
-        if (heldTargets.has(`#${number}`)) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
         if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
@@ -1337,6 +1458,7 @@ class Reconciler {
           if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
             return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
           }
+          guard();
           const response = this.mutator.writeBody(number, next.body);
           const after = this.reader.issue(number);
           if (after && after.body === next.body) return { outcome: 'DONE' };

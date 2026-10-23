@@ -175,17 +175,20 @@ const commands = {
   update(args, context) {
     if (!args.issue || !args.patch) throw new ProgrammeError('USAGE', 'update needs --issue <n> and --patch <file>.');
     const patch = readJsonFile(args.patch, 'patch');
-    const result = context.store.mutate('child', args.issue, { writer: requireWriter(context), parentDoc: readParent(context), change: doc => state.applyPatch('child', doc, patch) });
+    const writer = requireWriter(context);
+    const parentDoc = readParent(context);
+    const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.applyPatch('child', doc, patch, { writer, parentDoc }) });
     return writeResult('child', args.issue, result);
   },
 
   return(args, context) {
     if (!args.issue || (!args.submit && !args.consume)) throw new ProgrammeError('USAGE', 'return needs --issue <n> and --submit <id> or --consume <id> --verdict ACCEPT|REOPEN.');
     const writer = requireWriter(context);
+    const parentDoc = readParent(context);
     const change = args.submit
       ? doc => state.submitReturn(doc, { returnId: args.submit, writer })
-      : doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict });
-    const result = context.store.mutate('child', args.issue, { writer, parentDoc: readParent(context), change });
+      : doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc });
+    const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
     return writeResult('child', args.issue, result);
   },
 };

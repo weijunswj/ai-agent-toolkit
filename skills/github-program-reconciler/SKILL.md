@@ -45,9 +45,13 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 - Writes use Contents API compare-and-swap on the blob sha with readback. Unchanged state is never written (GitHub would still make an empty commit). The revision moves only when content changes; timestamps and pending effects do not count.
 - On a 409 the change is re-applied only when the other writer touched different top-level fields and the fence did not move; otherwise `STATE_CONFLICT` or `STALE_WRITER`.
 
-**Fence.** A document is held by one session and record prefix. A child may be written by its holder or by the parent's holder. `claim --takeover` increments the epoch in one compare-and-swap; the old session's writes are then refused. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
+**Fence.** A document is held by one session and record prefix. A child may be written by its holder or by the parent's holder. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
+
+**Who records what.** The child's holder (for example the G1 builder) may set release, candidate, blockers, next action, `private`, a non-final lifecycle, and submit a return. Only the parent's holder (the controller) consumes a return, records UAT and review, or sets `DONE` or `RETIRED` (`ROLE_REFUSED` otherwise), so no executor records its own acceptance.
 
 **Returns (LIFE-1).** A gate return is consumed by its return ID, never by session. `REOPEN` puts the gate back to `ACTIVE` in the same session, a new submission takes a new ID, and `ACCEPT` retires the gate. Consuming the same ID again with the same verdict does nothing; a different verdict is `RETURN_CONFLICT`; a return from before a takeover is `STALE_RETURN`.
+
+**Evidence at a head.** UAT `PASSED`, `UAT_RETAINED` and `UAT_PARTIAL_REQUIRED` must carry `at_head` (the full SHA), and a decided review must carry at least one verdict with its head; otherwise the write is refused. Evidence at an older head than the live PR head renders as `STALE_HEAD`.
 
 ## Commands
 
@@ -59,8 +63,8 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 | `init-parent --catalogue <file> [--apply]` | Creates the parent document, held by this session |
 | `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch) |
 | `claim (--parent \| --issue <n>) [--role G0\|G1\|G2] [--model <m> --effort <e> [--route-read-back]] [--takeover]` | The fence and gate |
-| `update --issue <n> --patch <file>` | Lifecycle, release, candidate, UAT, review, blockers, next action or `private` |
-| `return --issue <n> (--submit <id> \| --consume <id> --verdict ACCEPT\|REOPEN)` | Gate returns |
+| `update --issue <n> --patch <file>` | Release, candidate, blockers, next action, `private` or a non-final lifecycle; UAT, review and `DONE`/`RETIRED` only from the controller |
+| `return --issue <n> (--submit <id> \| --consume <id> --verdict ACCEPT\|REOPEN)` | Gate returns; consuming is the controller's |
 
 Writes need `--session <id>` (or `TOOLKIT_PROGRAMME_SESSION`); the record prefix defaults to the binding's writer prefix. `--json` prints machine-readable output. `reconcile --parent-file <file>` dry-runs a proposed catalogue before `init-parent`. The PR for a child is found from `candidate.branch` and then kept by number.
 
@@ -105,5 +109,5 @@ Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n
 - Dry runs and `show` write nothing. `--apply` and the other writing commands change only the bound repository's issue links and managed blocks and the bound store path.
 - The reconciler may report a stale PR or issue but never closes, deletes, merges, detaches or removes branches; those stay controller steps with the owner's approval. Removing a sub-issue link by hand is the rollback for a wrong attach.
 - No labels, Projects boards, milestones or assignees are changed.
-- Never put secrets, tokens or private paths in public fields; keep local paths and session details in `private`.
+- Never put secrets or tokens anywhere in a state document, `private` included (it lives in the store's git history); secret-shaped values are refused. Keep local paths and session details in `private`, never in public fields.
 - Return a compact report: binding, store revision, findings, effects and outcomes, holds and exactly one next action.

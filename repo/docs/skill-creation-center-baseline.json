@@ -142,6 +142,7 @@
         "node --test repo/tests/skill-routing.test.cjs",
         "node --test repo/tests/toolkit-programme-state.test.cjs",
         "node --test repo/tests/toolkit-programme-reconcile.test.cjs",
+        "node --test repo/tests/toolkit-programme-authority.test.cjs",
         "node --test repo/tests/decision-trace-audit.test.cjs"
       ]
     },

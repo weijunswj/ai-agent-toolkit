@@ -89,7 +89,9 @@
       "properties": {
         "state": { "enum": ["NOT_REQUIRED", "PENDING", "PASSED", "UAT_RETAINED", "UAT_PARTIAL_REQUIRED", "UAT_FULL_REQUIRED", null] },
         "at_head": { "$ref": "#/$defs/optionalSha" }
-      }
+      },
+      "if": { "properties": { "state": { "enum": ["PASSED", "UAT_RETAINED", "UAT_PARTIAL_REQUIRED"] } } },
+      "then": { "properties": { "at_head": { "$ref": "#/$defs/sha" } }, "description": "A UAT result that speaks for one head records that head." }
     },
     "review": {
       "type": "object",
@@ -110,12 +112,14 @@
             }
           }
         }
-      }
+      },
+      "if": { "properties": { "state": { "enum": ["PASSED", "NOT_PASSED"] } } },
+      "then": { "properties": { "verdicts": { "minItems": 1 } }, "description": "A decided review records at least one verdict with its head." }
     },
     "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "next_action": { "type": "string", "minLength": 1, "description": "Exactly one next action." },
     "pending_effects": { "$ref": "#/$defs/pendingEffects" },
-    "private": { "type": "object", "description": "Local paths, session IDs and anything not public-safe. Never rendered." },
+    "private": { "type": "object", "description": "Local paths, session IDs and anything not public-safe. Never rendered. Secret-shaped values are refused here as everywhere in the document." },
     "volatile": { "type": "object", "description": "Write timestamps and the writing Toolkit version; outside the digest." }
   },
   "$defs": {
