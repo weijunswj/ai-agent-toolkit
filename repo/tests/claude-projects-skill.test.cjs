@@ -63,7 +63,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*Remove lines the block fully duplicates/);
   // Partial repeats are trimmed, not kept whole: the repeated part goes and the project-specific rest stays.
   assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*Trim lines that partly repeat it \(for example an approvals line restating the block's merge and force-push rules[^\n]*cut only the repeated part and keep the rest/);
-  assert.match(text, /Keep project-specific lines and any line that differs in substance[^\n]*Never change other lines outside the markers/);
+  assert.match(text, /Keep project-specific text and anything that differs in substance[^\n]*Never change other lines outside the markers/);
   assert.match(text, /\*\*Briefs name sibling PRs\.\*\*[^\n]*Every G1 brief carries that list and requires a re-check/);
   assert.match(text, /Every scheduled task runs as a fresh session per run, with no bound thread/);
   assert.match(text, /Fresh-session routines cannot be created from a device-linked/);
