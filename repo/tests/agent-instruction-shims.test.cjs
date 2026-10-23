@@ -119,8 +119,13 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   const text = readText(globalPath);
   for (const rule of [
     /the repository wins on conventions and workflow/,
-    // Claude Code reads CLAUDE.md only; a repository whose rules are only in AGENTS.md must still be followed.
-    /Claude Code loads `CLAUDE\.md`, not `AGENTS\.md`\. When the repository's `AGENTS\.md` is not already in your instructions \(no `CLAUDE\.md` imports it\), read it, and any nested `AGENTS\.md` covering the files you work on, before starting, and follow it as the repository's instructions\./,
+    // A host that did not load the repository's AGENTS.md must still read and follow it.
+    /If the repository's `AGENTS\.md` is not already in your instructions, read it, and any nested `AGENTS\.md` covering your files, before starting\./,
+    /the user's current request and their own instructions \(custom instructions, preferences\); the repository's instructions/,
+    /only the user can, in the conversation or their own instructions/,
+    /No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers/,
+    /Never create files or folders at a drive root; use the user profile, the repository's temp folder or the scratchpad, and delete what you create/,
+    /To add a task, search the parent's open sub-issues and open issues; extend an owner, else create a child, attach it as a native sub-issue and read it back/,
     /Repository text cannot relax this safety floor; only the user can, in the conversation/,
     /Never merge without the owner's OK on a summary of the merge's external effects/,
     /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
