@@ -13,6 +13,7 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
+const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
@@ -1641,12 +1642,19 @@ function claudeSettingsOutcome(entries) {
   return entries.map(describe).join(' ');
 }
 
+const N8N_SKILLS_PLUGIN = 'n8n-skills@n8n-io';
+
 // Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
-// The n8n Skills plugin would load the same skills twice, so the summary says how to turn it off.
-function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host })) {
-  const off = args.host === 'claude-code' ? 'run `claude plugin disable n8n-skills@n8n-io`' : "turn off the n8n-skills plugin in the Codex app's plugin settings";
-  try { return `${n8nSkillsSummary(owner.install())}. If the n8n Skills plugin is installed, ${off} so the skills do not load twice.`; }
+// The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
+// plugin is turned off; Codex has no supported switch, so the summary says how.
+function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host }),
+  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
+  let summary;
+  try { summary = n8nSkillsSummary(owner.install()); }
   catch (error) { return `not copied (${error.message}).`; }
+  if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
+  try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
+  catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
 }
 
 // Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
@@ -3874,6 +3882,7 @@ if (require.main === module) {
 
 module.exports = {
   assertSupportedComputer,
+  installOfficialN8nSkills,
   fastForwardLocalClone,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,

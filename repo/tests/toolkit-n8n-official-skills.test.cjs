@@ -70,3 +70,39 @@ test('removal deletes only the folders Toolkit recorded', (t) => {
   assert.equal(fs.existsSync(path.join(target, 'n8n-loops-official')), false);
   assert.equal(fs.existsSync(path.join(dir, '.ai-agent-toolkit', 'n8n-official-skills.json')), false);
 });
+
+test('after a good copy, setup turns off the n8n Skills plugin in Claude Code and only says how in Codex', () => {
+  const { installOfficialN8nSkills } = require('../scripts/setup-toolkit-core.cjs');
+  const owner = { install: () => ({ copied: [], current: [{ app: 'Claude Code', folder: 'x', skills: 15 }], handCopies: [] }) };
+  const asked = [];
+  const off = (result) => (id) => { asked.push(id); if (result instanceof Error) throw result; return result; };
+  assert.match(installOfficialN8nSkills({ host: 'claude-code' }, owner, off(true)), /Turned off the n8n Skills plugin so the skills do not load twice\.$/);
+  assert.deepEqual(asked, ['n8n-skills@n8n-io']);
+  assert.doesNotMatch(installOfficialN8nSkills({ host: 'claude-code' }, owner, off(false)), /n8n Skills plugin/);
+  assert.match(installOfficialN8nSkills({ host: 'claude-code' }, owner, off(new Error('boom'))), /Could not turn off the n8n Skills plugin \(boom\); run `claude plugin disable n8n-skills@n8n-io`/);
+  asked.length = 0;
+  assert.match(installOfficialN8nSkills({ host: 'codex' }, owner, off(true)), /turn it off in the Codex app's plugin settings/);
+  const failed = { install: () => { throw new Error('copy failed'); } };
+  assert.equal(installOfficialN8nSkills({ host: 'claude-code' }, failed, off(true)), 'not copied (copy failed).');
+  assert.deepEqual(asked, [], 'no copy, or Codex: the plugin is not touched');
+});
+
+test('the Claude Code switch-off acts on the user scope only and reads the list back', (t) => {
+  const { disableUserPlugin } = require('../scripts/setup-claude-toolkit-plugin.cjs');
+  const dir = home(t);
+  const state = path.join(dir, 'plugins.json');
+  const fake = path.join(dir, 'fake-claude.cjs');
+  fs.writeFileSync(fake, `const fs = require('fs'); const state = ${JSON.stringify(state)}; const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.300 (Claude Code)'); process.exit(0); }
+const list = JSON.parse(fs.readFileSync(state, 'utf8'));
+if (a[0] === 'plugin' && a[1] === 'list') { console.log(JSON.stringify(list)); process.exit(0); }
+if (a[0] === 'plugin' && a[1] === 'disable') { for (const e of list) if (e.id === a[2] && e.scope === a[4]) e.enabled = false; fs.writeFileSync(state, JSON.stringify(list)); process.exit(0); }
+process.exit(2);`);
+  const write = (list) => fs.writeFileSync(state, JSON.stringify(list));
+  write([{ id: 'n8n-skills@n8n-io', scope: 'user', enabled: true }, { id: 'n8n-skills@n8n-io', scope: 'project', enabled: true }]);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(state, 'utf8')).map((e) => e.enabled), [false, true]);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), false);
+  write([]);
+  assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), false);
+});
