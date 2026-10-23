@@ -281,12 +281,17 @@ test('every approval surface carries the evidence-store exception and none still
   assert.match(governed, /nothing here relaxes the global safety floor except the evidence-store line, which the floor names/);
   assert.match(governed, /Evidence \(transport\) stores are agent-managed with standing permission[^\n]*write, reorganise, delete and, on Git, push to or merge into its default branch without asking/);
   assert.match(governed, /never delete the sole copy of evidence/);
-  assert.match(controller, /only merges, deletions \(transport stores: below\)/);
+  assert.match(governed, /once the user-selected store, separate from the task repository/);
+  assert.match(controller, /only merges and deletions \(transport stores: below\)/);
+  assert.match(controller, /Before each merge outside a transport store, post a summary of its external effects/);
   assert.match(controller, /\*\*Transport stores:\*\* an evidence \(transport\) store is agent-managed with full standing permission/);
   assert.match(skill, /Transport stores are the exception: agents manage them fully, merges and deletions included/);
   assert.match(skill, /\*\*Before every merge\*\* outside a transport store/);
   assert.match(skill, /Transport-store work needs no further grant/);
   assert.match(playbook, /Evidence custody follows the managed `AGENTS\.md` evidence-store line/);
+  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
+    assert.match(readText(file), /The evidence-store line in the managed `AGENTS\.md` is the standing approval for that store/, file);
+  }
   for (const text of [governed, playbook]) assert.doesNotMatch(text, /within owner authority that names the repository|exact owner authority/);
   assert.doesNotMatch(skill, /Transport-store uploads[^\n]*when the user grants standing approval/);
 });

@@ -21,4 +21,4 @@ When `repository-agent-rules` installs or repairs instructions in a consumer rep
 
 ## Approval surfaces
 
-Approval rules live on six surfaces: the global floor and Safety Gates, the governed block, `repo/CONTROLLER.md`, the Projects skill and the portable playbooks. Change them together: `repo/tests/agent-instruction-shims.test.cjs` checks the evidence-store exception on each.
+Approval rules live on six surfaces: the global floor and Safety Gates, the governed block, `repo/CONTROLLER.md`, the Projects skill and the playbooks. Change them together. `repo/tests/agent-instruction-shims.test.cjs` checks the evidence-store exception on the floor, the governed block, `repo/CONTROLLER.md`, the Projects skill, `git-completion.md` and both `safety-gates.md` copies. The global Safety Gates carry no pointer: they rank below the governed line, which the floor names.
