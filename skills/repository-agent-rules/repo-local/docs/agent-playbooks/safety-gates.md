@@ -23,6 +23,11 @@ Bind each approval to the exact owner, action, target, resources, effects, recip
 - Agents never rewrite history or force-push to "fix" it. Remove the value in a new commit, record the affected commit SHAs and where the value appeared (place and class, never the value), and tell the owner at once. Rotate anything credential-like first.
 - Offer the owner the GitHub removal route: GitHub's sensitive-data procedure, then a GitHub Support request to purge cached views and pull request references. That route is the owner's decision and action, and it never reaches forks or other people's clones.
 
+## History Rewrites
+
+- In a Toolkit-governed or personal-data-guarded repository, and when pushing to an evidence store (a `TRANSPORT-*` repository), the Toolkit agent hooks refuse force pushes: `--force`, `-f`, `--force-with-lease`, `--mirror` and `+refspec`. Push a new commit or a merge commit instead. Branch rules on GitHub stay the real protection.
+- Before concluding that history was rewritten, run `git rev-parse --is-shallow-repository`. A shallow clone shows its oldest fetched commit as a root and `git fetch` can print `(forced update)` for a plain fast-forward. Fetch full history first (`git fetch --unshallow`), or ask GitHub to compare the two commits, and only then check ancestry.
+
 ## Reporting
 
 If approval is required, state the action, target, risk, and exact confirmation needed. If approval is not available, stop before the risky action and report the safe work completed.
