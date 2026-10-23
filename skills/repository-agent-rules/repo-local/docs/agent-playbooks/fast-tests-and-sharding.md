@@ -5,7 +5,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 ## Measure First
 
 - Time each test file on every supported system, the whole suite as CI runs it, and the slowest single tests. Put before and after numbers (files, tests, skipped, time) in the PR; any drop in tests blocks.
-- Declare a per-file time budget once measured, and report files over it (for example `check-test-durations`). Raise one file's budget only with a recorded reason.
+- Declare a per-file time budget once measured, and use a small check that reads the per-file times of a run and fails any file over its budget. Raise one file's budget only with a recorded reason.
 - Prefer caching or path filters only when the measurement shows they save real time and the same checks still run.
 
 ## Make Slow Files Fast
@@ -24,5 +24,5 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 
 ## Windows
 
-- Give each run its own long-form temp folder inside the user profile (never at a drive root, never an 8.3 short name), set as `TEMP` and `TMP` for every child, and remove it afterwards, also on failure.
+- Give each run its own long-form temp folder inside the user profile for local runs, or under the CI runner's temp folder in CI (never at a drive root, never an 8.3 short name), set as `TEMP` and `TMP` for every child, and remove it afterwards, also on failure.
 - A Windows-only failure has a cause; fix the product or the test, never skip it.
