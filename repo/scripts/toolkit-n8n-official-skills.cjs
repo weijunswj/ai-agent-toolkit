@@ -20,6 +20,8 @@ const HOST_TARGETS = Object.freeze({
   codex: ['.agents', 'skills']
 });
 const ANTIGRAVITY_TARGET = ['.gemini', 'config', 'skills'];
+// Antigravity's IDE also reads this older global folder; Toolkit never writes there.
+const ANTIGRAVITY_OLDER = ['.gemini', 'antigravity', 'skills'];
 
 const normalized = (buffer) => buffer.toString('utf8').replace(/\r\n/g, '\n');
 
@@ -102,7 +104,7 @@ class OfficialN8nSkills {
   // Copies missing and stale Toolkit-owned folders; hand copies stay as they are.
   install() {
     const ledger = this.#readLedger();
-    const result = { copied: [], current: [], handCopies: [] };
+    const result = { copied: [], current: [], handCopies: [], loadTwice: [] };
     for (const row of this.inspect()) {
       if (row.state === 'hand-copy') { result.handCopies.push(row); continue; }
       if (row.state === 'current') { result.current.push(row); continue; }
@@ -118,7 +120,26 @@ class OfficialN8nSkills {
       }
       result.copied.push(row);
     }
+    result.loadTwice = this.#loadTwice();
     return result;
+  }
+
+  // The user's own copies that load next to Toolkit's: an older release's name (without "-official")
+  // in a folder Toolkit copies to, and either name in Antigravity's older global folder. Never touched.
+  #loadTwice() {
+    const folders = [...this.targets()];
+    const antigravity = path.join(this.#homeDir, ...ANTIGRAVITY_TARGET);
+    const older = path.join(this.#homeDir, ...ANTIGRAVITY_OLDER);
+    if (folders.includes(antigravity)) folders.push(older);
+    const found = new Set();
+    for (const folder of folders) {
+      for (const skill of this.skillNames()) {
+        const oldName = skill.replace(/-official$/, '');
+        const names = folder === older ? [skill, oldName] : [oldName].filter((name) => name !== skill);
+        for (const name of names) if (fs.existsSync(path.join(folder, name))) found.add(path.join(folder, name));
+      }
+    }
+    return [...found].map((dir) => `${path.basename(dir)} in ${path.relative(this.#homeDir, path.dirname(dir)).replace(/\\/g, '/')}`);
   }
 
   // Removes only the folders Toolkit recorded.
@@ -144,6 +165,15 @@ function installSummary(result) {
   if (result.handCopies.length) {
     const names = [...new Set(result.handCopies.map((row) => row.skill))].join(', ');
     parts.push(`kept your own copies of ${names} (Toolkit never changes them; delete them yourself to let Toolkit manage them)`);
+  }
+  if (result.loadTwice?.length) {
+    const byFolder = new Map();
+    for (const entry of result.loadTwice) {
+      const [name, folder] = entry.split(' in ');
+      byFolder.set(folder, [...(byFolder.get(folder) || []), name]);
+    }
+    const listed = [...byFolder].map(([folder, names]) => `${names.join(', ')} in ~/${folder}`).join('; ');
+    parts.push(`your own older copies also load (${listed}); delete them yourself so the skills do not load twice`);
   }
   return parts.join('; ') || 'nothing to copy';
 }

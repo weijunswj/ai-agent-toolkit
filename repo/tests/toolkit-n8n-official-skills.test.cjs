@@ -106,3 +106,22 @@ process.exit(2);`);
   write([]);
   assert.equal(disableUserPlugin('n8n-skills@n8n-io', { claudeCli: fake }), false);
 });
+
+test('older-name copies in Antigravity older skills folder are reported as loading twice and never touched', (t) => {
+  const dir = home(t);
+  const older = path.join(dir, '.gemini', 'antigravity', 'skills', 'n8n-expressions');
+  fs.mkdirSync(older, { recursive: true });
+  fs.writeFileSync(path.join(older, 'SKILL.md'), 'mine\n');
+  const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir }).install();
+  assert.deepEqual(result.loadTwice, ['n8n-expressions in .gemini/antigravity/skills']);
+  assert.match(installSummary(result), /your own older copies also load \(n8n-expressions in ~\/\.gemini\/antigravity\/skills\); delete them yourself/);
+  assert.equal(fs.readFileSync(path.join(older, 'SKILL.md'), 'utf8'), 'mine\n');
+});
+
+test('an older release copy in the app skills folder is reported too', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(path.join(dir, '.claude', 'skills', 'using-n8n-skills'), { recursive: true });
+  const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'claude-code', homeDir: dir }).install();
+  assert.deepEqual(result.loadTwice, ['using-n8n-skills in .claude/skills']);
+  assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'using-n8n-skills')));
+});
