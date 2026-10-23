@@ -13,6 +13,7 @@
     "revision": { "type": "integer", "minimum": 0, "description": "Increases only when content outside revision, volatile, pending_effects and journals_seen changes." },
     "fence": { "$ref": "#/$defs/fence" },
     "lifecycle": { "enum": ["PLANNED", "ACTIVE", "WAITING_OWNER", "HOLD", "DONE", "RETIRED"] },
+    "completed_at": { "type": ["string", "null"], "format": "date-time", "description": "When the outcome finished: the time the controller set it done, or the issue close time filled once by the reconciler. Orders the COMPLETED rows." },
     "release": { "type": ["string", "null"], "minLength": 1 },
     "gate": {
       "type": "object",

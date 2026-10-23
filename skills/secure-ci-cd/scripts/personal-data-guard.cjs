@@ -35,6 +35,7 @@ const DEFAULT_CONFIG = path.join('.github', 'personal-data-guard.json');
 const MAX_BLOB_BYTES = 25 * 1024 * 1024;
 const MAX_INFLATED_BYTES = 50 * 1024 * 1024;
 const ZERO_SHA = /^0+$/;
+const SHALLOW = 'this clone is shallow, so new commits cannot be told from old ones; fetch full history first (actions/checkout with fetch-depth: 0, or git fetch --unshallow)';
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 const RULES = Object.freeze({
@@ -677,6 +678,10 @@ class GitReader {
     return out === null ? null : out.toString('utf8');
   }
 
+  // A shallow clone cuts history at a depth, so a commit past the cut looks missing and the oldest
+  // fetched commit looks like a root: neither may be read as a rewrite.
+  isShallow() { return this.text(['rev-parse', '--is-shallow-repository']).trim() === 'true'; }
+
   commitExists(rev) { return this.run(['cat-file', '-e', `${rev}^{commit}`], { allowFailure: true }) !== null; }
 
   resolve(rev) {
@@ -1225,6 +1230,7 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       guard.scanCommits(prePushCommits(git, stdin(), guard, rest[0]));
     } else if (mode === 'range') {
       where = 'remote';
+      if (git.isShallow()) throw new GuardError(SHALLOW);
       const spec = rest[0];
       if (!spec) throw new GuardError('range needs <base>..<head> or <head> --not <ref>');
       if (spec.includes('..')) {
@@ -1244,6 +1250,7 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       }
     } else if (mode === 'ci') {
       where = 'remote';
+      if (git.isShallow()) throw new GuardError(SHALLOW);
       ciEvent(git, guard, env, useBase);
     } else if (mode === 'pr') {
       where = 'remote';

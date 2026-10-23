@@ -248,7 +248,7 @@ function realManagedFixture() {
 // delegating parent passes that result through instead of calling it a protocol failure.
 function assertCompletedWithoutClaudePlugin(status, result) {
   assert.equal(status, core.SETUP_ACTION_REQUIRED, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: action required\nClaude Code plugin: Toolkit \S+ is not installed and current in Claude Code\./);
+  assert.match(result.stdout, /## Install check\nInstall check: action required\nClaude Code plugin: Toolkit \S+ is not installed, enabled and current in Claude Code, so its hooks are not enforced\./);
   assert.doesNotMatch(result.stderr, /Managed setup failed/);
 }
 

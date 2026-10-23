@@ -6,7 +6,9 @@
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
 // over an existing file, and a new commit even for an identical Contents PUT. A Contents GET on a
 // folder lists its files, `commits?path=` gives a file's last commit date, and comments carry their
-// issue URL, author and creation time.
+// issue URL, author and creation time. With `branchLag` on,
+// a Contents read of the branch serves the files as of the commit before the latest one, as the
+// real API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
 
 const crypto = require('node:crypto');
 
@@ -26,6 +28,8 @@ class FakeGitHub {
     this.files = new Map();
     this.prs = new Map();
     this.commits = 0;
+    this.snapshots = new Map();
+    this.branchLag = false;
     this.clock = Date.UTC(2026, 9, 23, 0, 0, 0);
     this.calls = [];
     this.hooks = [];
@@ -39,6 +43,7 @@ class FakeGitHub {
 
   addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [] } = {}) {
     const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, updated_at: this.tick() };
+    if (state === 'closed') issue.closed_at = this.tick();
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
     return issue;
@@ -53,15 +58,21 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '' } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch, body });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
-  addComment(issue, { body, login = this.login, createdAt = this.tick() } = {}) {
+  addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User' } = {}) {
     const id = 7000000000 + this.comments.size + 1;
-    this.comments.set(id, { id, issue, body, login, created_at: createdAt });
+    this.comments.set(id, { id, issue, body, login, type, created_at: createdAt });
     return id;
+  }
+
+  // An issue's comments as the REST list shows them, oldest first.
+  commentsOf(issue) {
+    return [...this.comments.values()].filter(comment => comment.issue === issue)
+      .map(comment => ({ id: comment.id, user: { login: comment.login, type: comment.type || 'User' }, body: comment.body, created_at: comment.created_at }));
   }
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
@@ -72,7 +83,7 @@ class FakeGitHub {
 
   issueJson(issue) {
     return {
-      number: issue.number, id: issue.id, title: issue.title, body: issue.body, state: issue.state, state_reason: null,
+      number: issue.number, id: issue.id, title: issue.title, body: issue.body, state: issue.state, state_reason: null, closed_at: issue.closed_at || null,
       updated_at: issue.updated_at,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
@@ -124,9 +135,26 @@ class FakeGitHub {
     }
     if ((match = /^issues\/(\d+)$/.exec(rest))) {
       const issue = this.issues.get(Number(match[1]));
+      const pr = !issue && this.prs.get(Number(match[1]));
+      if (pr) {
+        // A pull request read or edited through the issues API, as GitHub allows.
+        if (method === 'PATCH') { pr.body = body.body; pr.updated_at = this.tick(); }
+        return ok(200, { number: pr.number, id: pr.number, title: `PR ${pr.number}`, body: pr.body, state: pr.state === 'OPEN' || pr.state === 'DRAFT' ? 'open' : 'closed',
+          state_reason: null, closed_at: null, updated_at: pr.updated_at || null, pull_request: { url: '' }, parent_issue_url: null, issue_dependencies_summary: { total_blocked_by: 0 } });
+      }
       if (!issue) return ok(404, { message: 'Not Found' });
       if (method === 'PATCH') { issue.body = body.body; issue.updated_at = this.tick(); }
       return ok(200, this.issueJson(issue));
+    }
+    if ((match = /^issues\/(\d+)\/comments$/.exec(rest))) {
+      const issue = this.issues.get(Number(match[1]));
+      if (!issue) return ok(404, { message: 'Not Found' });
+      if (method === 'POST') {
+        const id = this.addComment(issue.number, { body: body.body });
+        return ok(201, this.commentsOf(issue.number).find(comment => comment.id === id));
+      }
+      const page = Number(params.get('page') || 1);
+      return ok(200, this.commentsOf(issue.number).slice((page - 1) * 100, page * 100));
     }
     if ((match = /^issues\/(\d+)\/sub_issues$/.exec(rest))) {
       const parent = this.issues.get(Number(match[1]));
@@ -163,6 +191,11 @@ class FakeGitHub {
       const issue = this.issues.get(Number(match[1]));
       return ok(200, issue.blockedBy.map(n => this.issueJson(this.issues.get(n))));
     }
+    if (rest === 'pulls' && !params.get('head')) {
+      const page = Number(params.get('page') || 1);
+      const open = [...this.prs.values()].filter(pr => pr.state === 'OPEN' || pr.state === 'DRAFT');
+      return ok(200, open.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft })));
+    }
     if (rest === 'pulls') {
       const branch = (params.get('head') || '').split(':')[1];
       return ok(200, [...this.prs.values()].filter(pr => pr.branch === branch).map(pr => ({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed' })));
@@ -173,14 +206,19 @@ class FakeGitHub {
   contents(method, filePath, body, params) {
     const file = this.files.get(filePath);
     if (method === 'GET') {
-      if (params.get('ref') && params.get('ref') !== this.branch) return ok(404, { message: 'No commit found for the ref' });
-      if (!file) {
+      const ref = params.get('ref') || this.branch;
+      const files = ref === this.branch
+        ? (this.branchLag && this.commits > 0 ? this.snapshots.get(`c${this.commits - 1}`) || new Map() : this.files)
+        : this.snapshots.get(ref);
+      if (!files) return ok(404, { message: 'No commit found for the ref' });
+      const found = files.get(filePath);
+      if (!found) {
         const prefix = `${filePath.replace(/\/$/, '')}/`;
-        const entries = [...this.files].filter(([name]) => name.startsWith(prefix) && !name.slice(prefix.length).includes('/'))
+        const entries = [...files].filter(([name]) => name.startsWith(prefix) && !name.slice(prefix.length).includes('/'))
           .map(([name, entry]) => ({ type: 'file', name: name.slice(prefix.length), path: name, sha: entry.sha }));
         return entries.length ? ok(200, entries) : ok(404, { message: 'Not Found' });
       }
-      return ok(200, { sha: file.sha, encoding: 'base64', content: Buffer.from(file.text, 'utf8').toString('base64') });
+      return ok(200, { sha: found.sha, encoding: 'base64', content: Buffer.from(found.text, 'utf8').toString('base64') });
     }
     if (method === 'PUT') {
       if (body.branch !== this.branch) return ok(404, { message: `Branch ${body.branch} not found` });
@@ -190,7 +228,7 @@ class FakeGitHub {
       const text = Buffer.from(body.content, 'base64').toString('utf8');
       this.files.set(filePath, { text, sha: blobSha(text) });
       this.fileDates.set(filePath, this.tick());
-      this.commits += 1;
+      this.commit();
       return ok(file ? 200 : 201, { content: { sha: blobSha(text) }, commit: { sha: `c${this.commits}` } });
     }
     return ok(405, { message: 'Method not allowed' });
@@ -201,7 +239,12 @@ class FakeGitHub {
     const text = `${JSON.stringify(doc, null, 2)}\n`;
     this.files.set(filePath, { text, sha: blobSha(text) });
     this.fileDates.set(filePath, this.tick());
+    this.commit();
+  }
+
+  commit() {
     this.commits += 1;
+    this.snapshots.set(`c${this.commits}`, new Map(this.files));
   }
 
   readFile(filePath) {
